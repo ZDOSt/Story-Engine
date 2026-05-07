@@ -125,6 +125,7 @@ function buildReadableDeterministicDebug(handoff) {
     const chaos = handoff?.chaosHandoff?.CHAOS ?? {};
     const proactivity = handoff?.proactivityResults ?? {};
     const aggression = handoff?.aggressionResults ?? {};
+    const name = handoff?.nameGeneration ?? {};
 
     return [
         'resolutionPacket.GOAL=' + valueOrNone(resolution.GOAL),
@@ -168,6 +169,7 @@ function buildReadableDeterministicDebug(handoff) {
         }),
         'proactivityResults=' + inline(formatProactivityForNarration(proactivity)),
         'aggressionResults=' + inline(aggression),
+        'nameGeneration=' + inline(name),
         'trackerUpdate=' + inline(handoff?.sceneTrackerUpdate ?? {}),
     ];
 }
@@ -202,6 +204,7 @@ export function formatNarratorPromptContext(report) {
         'Proactivity: ' + summary.proactive,
         'Aggression: ' + summary.aggression,
         'Aggression Guide: ' + summary.aggressionGuide,
+        'Generated Name: ' + summary.generatedName,
         'GUIDE=' + summary.guide,
     ];
 
@@ -242,6 +245,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}) {
     const aggressionGuide = aggressionText === 'none'
         ? buildNoAggressionGuide(resolution, handoff)
         : buildAggressionGuide(handoff.aggressionResults);
+    const generatedName = nameGenerationSummary(handoff.nameGeneration);
 
     const result = naturalOutcomeSummary(resolution);
     const guide = buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, chaosText, aggressionText });
@@ -259,8 +263,17 @@ function buildNarratorSummary(handoff, resolution, ledger = {}) {
         proactive: proactiveText,
         aggression: aggressionText,
         aggressionGuide,
+        generatedName,
         guide,
     };
+}
+
+function nameGenerationSummary(nameGeneration) {
+    if (!nameGeneration || nameGeneration.nameRequired !== 'Y' || isNoneText(nameGeneration.generatedName)) {
+        return 'none';
+    }
+    const mode = nameGeneration.detectMode || 'PERSON';
+    return `${nameGeneration.generatedName} (${mode}; exact required name if introducing the unnamed ${mode === 'LOCATION' ? 'location' : 'person/entity'})`;
 }
 
 function readableActionDescription(semanticResolution, resolution) {
@@ -314,43 +327,50 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const boundaryNote = resolution.classifyPhysicalBoundaryPressure === 'Y'
         ? ' Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance without inventing a landed attack.'
         : '';
+    const nameInstruction = nameGenerationGuide(handoff.nameGeneration);
 
     if (intimacyDenied) {
         if (goal === 'IntimacyAdvancePhysical') {
-            return `The user action is ${userAction}; resolve it as ${outcome}. IntimacyGate=DENY: any successful physical attempt may land or create contact/positioning, but ${npcName} does not cooperate, reciprocate, or become willing; narrate rejection, recoil, pushing away, rebuke, resistance, flight, or escalation according to ${state}.${aggressionNote}${proactiveNote}${chaosNote}`;
+            return `The user action is ${userAction}; resolve it as ${outcome}. IntimacyGate=DENY: any successful physical attempt may land or create contact/positioning, but ${npcName} does not cooperate, reciprocate, or become willing; narrate rejection, recoil, pushing away, rebuke, resistance, flight, or escalation according to ${state}.${aggressionNote}${proactiveNote}${chaosNote}${nameInstruction}`;
         }
-        return `The user action is ${userAction}; resolve it as ${outcome}. IntimacyGate=DENY: any successful verbal attempt may affect ${npcName}, but the request is refused; narrate a boundary, rebuke, annoyance, anger, fear, or refusal according to ${state}, never compliance with the intimacy request.${aggressionNote}${proactiveNote}${chaosNote}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}. IntimacyGate=DENY: any successful verbal attempt may affect ${npcName}, but the request is refused; narrate a boundary, rebuke, annoyance, anger, fear, or refusal according to ${state}, never compliance with the intimacy request.${aggressionNote}${proactiveNote}${chaosNote}${nameInstruction}`;
     }
 
     if (aggressionText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}, then narrate the listed NPC attack result. Stop at the aggression guide boundary and do not invent any user follow-up.`;
+        return `The user action is ${userAction}; resolve it as ${outcome}, then narrate the listed NPC attack result. Stop at the aggression guide boundary and do not invent any user follow-up.${nameInstruction}`;
     }
 
     if (proactiveText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${boundaryNote}${naturalProactiveNote}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${boundaryNote}${naturalProactiveNote}${nameInstruction}`;
     }
 
     if (isIntimacyAdvance) {
         const gateText = intimacyAllowed
             ? `${npcName} may receive it according to the current gate and relationship state`
             : `${npcName} refuses or sets a boundary because the intimacy gate is not allowing it`;
-        return `The user action is ${userAction}; resolve it as ${outcome}. ${gateText}.${chaosNote}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}. ${gateText}.${chaosNote}${nameInstruction}`;
     }
 
     if (resolution.STAKES === 'N') {
         const chaosNote = chaosText !== 'none' ? ' and include the listed chaos beat as a brief scene event' : '';
-        return `The user action is ${userAction}; no roll is needed. Keep ${npcName}'s response consistent with ${state}, with no invented hostility or extra mechanics${chaosNote}.`;
+        return `The user action is ${userAction}; no roll is needed. Keep ${npcName}'s response consistent with ${state}, with no invented hostility or extra mechanics${chaosNote}.${nameInstruction}`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}. Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance according to ${state}, without inventing a landed attack.${chaosNote}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}. Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance according to ${state}, without inventing a landed attack.${chaosNote}${nameInstruction}`;
     }
 
     if (chaosText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${boundaryNote} Include the listed chaos beat while keeping NPC state anchored to ${state}.`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${boundaryNote} Include the listed chaos beat while keeping NPC state anchored to ${state}.${nameInstruction}`;
     }
 
-    return `The user action is ${userAction}; resolve it as ${outcome}.${boundaryNote} Narrate the NPC response according to ${state} and the listed targets.`;
+    return `The user action is ${userAction}; resolve it as ${outcome}.${boundaryNote} Narrate the NPC response according to ${state} and the listed targets.${nameInstruction}`;
+}
+
+function nameGenerationGuide(nameGeneration) {
+    if (!nameGeneration || nameGeneration.nameRequired !== 'Y' || isNoneText(nameGeneration.generatedName)) return '';
+    const noun = nameGeneration.detectMode === 'LOCATION' ? 'location' : 'person/entity';
+    return ` If the narration introduces the unnamed ${noun}, use exactly "${nameGeneration.generatedName}" as its proper name. Do not invent, alter, translate, or replace this name.`;
 }
 
 function naturalOutcomeSummary(resolution) {

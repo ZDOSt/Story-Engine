@@ -69,6 +69,54 @@ import {
 } from './engines.js';
 
 const NONE = '(none)';
+const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
+
+const CURATED_NAME_SEEDS = [
+    'Aka', 'Aki', 'Aro', 'Ena', 'Iru', 'Omi', 'Uma', 'Sen', 'Tor', 'Mir', 'Vey', 'Kha',
+    'Ral', 'Zai', 'Niv', 'Sol', 'Dar', 'Lio', 'Tav', 'Yul', 'Kao', 'Mav', 'Ren', 'Vos',
+    'Sae', 'Kio', 'Nai', 'Ruo', 'Tao', 'Vel', 'Mar', 'Zun', 'Oru', 'Ira', 'Kav', 'Sov',
+];
+
+const PHONOTACTIC_ONSETS = ['', 'b', 'd', 'g', 'h', 'k', 'l', 'm', 'n', 'r', 's', 't', 'v', 'y', 'z', 'kh', 'sh'];
+const PHONOTACTIC_VOWELS = ['a', 'e', 'i', 'o', 'u', 'ai', 'ei', 'ao'];
+const PHONOTACTIC_CODAS = ['', 'n', 'r', 'l', 'm', 's', 'v', 'k'];
+
+const NAME_PARTS = {
+    PERSON: {
+        HARD: {
+            middle: ['ka', 'tor', 'vek', 'dar', 'zan', 'kor', 'ruk', 'var', 'tek', 'sul', 'mar', 'dur'],
+            ending: ['vek', 'dan', 'tor', 'kar', 'un', 'ar', 'ro', 'kan', 'vek', 'sul', 'dan', 'rik'],
+        },
+        SOFT: {
+            middle: ['la', 'mi', 'sai', 'naya', 'lira', 'emi', 'valo', 'sora', 'tali', 'rima', 'ayo', 'leni'],
+            ending: ['a', 'ia', 'aya', 'emi', 'sai', 'lira', 'naya', 'ani', 'ora', 'ei', 'ira', 'una'],
+        },
+        BALANCED: {
+            middle: ['ra', 'ka', 'ven', 'sai', 'mori', 'taro', 'len', 'vaji', 'naro', 'suri', 'lian', 'kemi'],
+            ending: ['rin', 'vo', 'sai', 'len', 'mira', 'taro', 'ka', 'ren', 'vani', 'o', 'in', 'ari'],
+        },
+    },
+    LOCATION: {
+        HARD: {
+            middle: ['kar', 'dor', 'morn', 'kesh', 'rath', 'tavar', 'dur', 'koru', 'zan', 'thar'],
+            ending: ['kesh', 'rath', 'daru', 'kor', 'mora', 'tavar', 'dorn', 'kora', 'sath', 'rak'],
+        },
+        SOFT: {
+            middle: ['moru', 'sai', 'nara', 'luma', 'kavai', 'tala', 'sura', 'vara', 'leni', 'mara'],
+            ending: ['nara', 'tala', 'moru', 'sai', 'luma', 'vara', 'kora', 'dara', 'mara', 'vani'],
+        },
+        BALANCED: {
+            middle: ['moru', 'dara', 'kora', 'vani', 'sura', 'tala', 'rath', 'kesh', 'nara', 'mora', 'val', 'daru'],
+            ending: ['moru', 'kesh', 'dara', 'nara', 'rath', 'mora', 'tala', 'sai', 'ven', 'kora', 'daru', 'sura'],
+        },
+    },
+};
+
+const GENDER_ENDINGS = {
+    FEMALE: ['a', 'ia', 'aya', 'emi', 'sai', 'lira', 'naya', 'ani', 'ora', 'ei', 'ira', 'una'],
+    MALE: ['o', 'en', 'ar', 'un', 'iro', 'vek', 'dan', 'taro', 'kor', 'rik', 'an', 'ul'],
+    NEUTRAL: ['i', 'e', 'ai', 'in', 'ra', 'ka', 'ren', 'sul', 'ari', 'vo', 'len', 'sa'],
+};
 
 export function buildTrackerSnapshot(context) {
     const source = context?.chatMetadata?.structuredPreflightTracker?.npcs || {};
@@ -110,7 +158,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
     const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext);
     const relationships = runRelationships(ledger, trackerSnapshot, resolution.packet, audit, refereeContext);
     const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
-    const name = runNameGeneration(ledger, audit);
+    const name = runNameGeneration(ledger, audit, context, type);
     const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit);
     const aggression = runAggression(ledger, trackerSnapshot, relationships.trackerUpdate, proactivity.results, resolution.packet, dice, audit);
 
@@ -577,22 +625,308 @@ function runChaos(ledger, handoffs, resolutionPacket, dice, audit) {
     return { handoff };
 }
 
-function runNameGeneration(ledger, audit) {
+function runNameGeneration(ledger, audit, context, type) {
     const sem = ledger.nameSemantic || {};
+    const contextText = buildNameContext(ledger, context);
+    const cue = detectNameCue(contextText);
+    const nameRequired = resolveNameRequired(sem, contextText, cue);
+    const explicitNameKnown = bool(sem.explicitNameKnown);
+    const isLocation = bool(sem.isLocation) || cue.mode === 'LOCATION';
+    const normalizedSeed = normalizeNameSeed(firstNameSeedHint(cue.seedHint, sem.seed, sem.normalizeSeed, contextText));
+    const mode = detectNameMode(contextText, isLocation, cue.mode || sem.detectMode);
+    const profile = profileFromNameContext(contextText);
+    const gender = detectNameGender(contextText);
+    const registry = getNameRegistry(context);
+    const generatedName = nameRequired
+        ? buildDeterministicName({
+            mode,
+            profile,
+            gender,
+            seed: normalizedSeed,
+            registry,
+            contextText,
+        })
+        : NONE;
+
+    if (nameRequired && generatedName !== NONE) {
+        registerGeneratedName(context, generatedName, {
+            mode,
+            profile,
+            gender,
+            seed: normalizedSeed,
+        });
+    }
+
     const result = {
-        nameRequired: yn(sem.nameRequired),
-        explicitNameKnown: yn(sem.explicitNameKnown),
-        isLocation: yn(sem.isLocation),
+        nameRequired: yn(nameRequired),
+        explicitNameKnown: yn(explicitNameKnown),
+        isLocation: yn(isLocation),
         seed: sem.seed || NONE,
-        normalizeSeed: sem.normalizeSeed || NONE,
-        detectMode: sem.detectMode || 'none',
-        generatedName: bool(sem.nameRequired) ? (sem.generatedName || NONE) : NONE,
+        normalizeSeed: normalizedSeed,
+        detectMode: nameRequired ? mode : 'none',
+        profile,
+        gender: mode === 'PERSON' ? gender : 'NEUTRAL',
+        modelGeneratedName: sem.generatedName || NONE,
+        deterministicCue: cue.required ? cue.reason : 'none',
+        generatedName,
     };
     audit.push('STEP 5: EXECUTE NameGenerationEngine');
     audit.push(`5.1 nameRequired=${result.nameRequired}`);
+    audit.push(`5.1a explicitNameKnown=${result.explicitNameKnown}`);
+    audit.push(`5.1b isLocation=${result.isLocation}`);
+    audit.push(`5.1c seed=${result.seed}`);
+    audit.push(`5.1d normalizeSeed=${result.normalizeSeed}`);
+    audit.push(`5.1e detectMode=${result.detectMode}`);
+    audit.push(`5.1f profile=${result.profile}`);
+    audit.push(`5.1g gender=${result.gender}`);
     audit.push(`5.1h generatedName=${result.generatedName}`);
+    if (cue.required) {
+        audit.push(`5.1h.1 deterministicNameCue=${compact(cue)}`);
+    }
+    if (sem.generatedName && sem.generatedName !== NONE) {
+        audit.push(`5.1i ignoredModelGeneratedName=${sem.generatedName}`);
+    }
     audit.push('---');
     return result;
+}
+
+function buildNameContext(ledger, context) {
+    const sem = ledger.nameSemantic || {};
+    const resolution = ledger.resolutionEngine || {};
+    return [
+        sem.context,
+        sem.seed,
+        sem.normalizeSeed,
+        sem.detectMode,
+        getLatestUserTextFromContext(context),
+        ledger.chaosSemantic?.sceneSummary,
+        resolution.identifyGoal,
+        resolution.identifyChallenge,
+        resolution.explicitMeans,
+        ...(ledger.relationshipEngine || []).map(item => item?.NPC).filter(Boolean),
+    ].filter(Boolean).join(' ').trim();
+}
+
+function resolveNameRequired(sem, contextText, cue = { required: false }) {
+    if (cue.required) return true;
+    if (bool(sem.explicitNameKnown)) return false;
+    if (bool(sem.nameRequired)) return true;
+    if (bool(sem.isLocation)) return true;
+    return /\b(?:will be mentioned|about to be mentioned|introduced|present|enters|arrives|appears|queen|king|prince|princess|lord|lady|captain|guard|priest|priestess|innkeeper|messenger|hunter|ruler|mage|witch|healer|merchant|bandit|assassin|knight|soldier|scout|stranger|witness|place|town|city|ruin|mountain|river|forest|temple|keep|village|fort|harbor|port|island|lake|swamp|marsh|cavern|valley|peak|district|kingdom|province|outpost|bridge|gate)\b/i.test(contextText);
+}
+
+function detectNameCue(contextText) {
+    const text = String(contextText || '').replace(/\s+/g, ' ').trim();
+    const personCue = /\b(?:his|her|their|the|that|this)?\s*(?:name|proper name)\s+(?:is|was|will be|would be|should be)\s*(?:[.:;,-]*)?\s*$/i
+        .test(text)
+        || /\b(?:named|called|known as|goes by|they call (?:him|her|them)|people call (?:him|her|them))\s*(?:[.:;,-]*)?\s*$/i.test(text);
+    const locationCue = /\b(?:the|this|that)?\s*(?:place|town|city|village|ruin|temple|keep|fort|harbor|port|island|forest|river|mountain|cavern|district|kingdom|outpost|bridge|gate)\s+(?:is|was|will be|would be)?\s*(?:called|named|known as)\s*(?:[.:;,-]*)?\s*$/i
+        .test(text)
+        || /\b(?:called|named|known as)\s*(?:[.:;,-]*)?\s*$/i.test(text)
+            && /\b(?:place|town|city|village|ruin|temple|keep|fort|harbor|port|island|forest|river|mountain|cavern|district|kingdom|outpost|bridge|gate)\b/i.test(text);
+    if (locationCue) {
+        return {
+            required: true,
+            mode: 'LOCATION',
+            seedHint: locationSeedHint(text),
+            reason: 'explicit location naming cue',
+        };
+    }
+    if (personCue) {
+        return {
+            required: true,
+            mode: 'PERSON',
+            seedHint: personSeedHint(text),
+            reason: 'explicit person/entity naming cue',
+        };
+    }
+    return { required: false, mode: null, seedHint: '', reason: 'none' };
+}
+
+function personSeedHint(text) {
+    const roleMatch = /\b(?:butcher|guard|priestess|priest|merchant|hunter|ruler|mage|witch|healer|bandit|assassin|knight|soldier|scout|stranger|witness|captain|lord|lady|queen|king|prince|princess|innkeeper|messenger)\b/i.exec(text);
+    return roleMatch?.[0] || text;
+}
+
+function locationSeedHint(text) {
+    const placeMatch = /\b(?:place|town|city|village|ruin|temple|keep|fort|harbor|port|island|forest|river|mountain|cavern|district|kingdom|outpost|bridge|gate)\b/i.exec(text);
+    return placeMatch?.[0] || text;
+}
+
+function getLatestUserTextFromContext(context) {
+    const chat = context?.chat;
+    if (!Array.isArray(chat)) return '';
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        const message = chat[index];
+        if (!message?.is_user && message?.role !== 'user') continue;
+        if (typeof message.mes === 'string') return message.mes;
+        if (typeof message.content === 'string') return message.content;
+        if (Array.isArray(message.content)) {
+            return message.content.map(part => typeof part === 'string' ? part : part?.text).filter(Boolean).join('\n');
+        }
+    }
+    return '';
+}
+
+function normalizeNameSeed(seed) {
+    const source = String(seed ?? '').replace(/\(none\)/gi, '').replace(/[^a-z]/gi, '').slice(0, 24);
+    if (source.length >= 3) return titleSeed(source.slice(0, 3));
+    if (source.length > 0) return titleSeed((source + 'aka').slice(0, 3));
+    return 'Aka';
+}
+
+function firstNameSeedHint(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (!text || text === NONE || /^\(?none\)?$/i.test(text)) continue;
+        return text;
+    }
+    return 'Aka';
+}
+
+function titleSeed(seed) {
+    const lower = String(seed || 'Aka').slice(0, 3).toLowerCase();
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+function detectNameMode(contextText, isLocation, semanticMode) {
+    if (isLocation || semanticMode === 'LOCATION') return 'LOCATION';
+    if (semanticMode === 'PERSON') return 'PERSON';
+    if (/\b(?:place|town|city|ruin|mountain|river|forest|temple|keep|village|fort|harbor|port|island|lake|swamp|marsh|cavern|valley|peak|district|kingdom|province|outpost|bridge|gate|road|pass|tower|watchtower|camp|hideout)\b/i.test(contextText)) {
+        return 'LOCATION';
+    }
+    return 'PERSON';
+}
+
+function profileFromNameContext(contextText) {
+    if (/\b(?:harsh|hard|stone|iron|ash|cold|desert|steppe|war|border|fortress|raid|scar|volcanic|blade|blood|black|storm|frost)\b/i.test(contextText)) return 'HARD';
+    if (/\b(?:soft|coast|island|harbor|reef|jungle|garden|ritual|temple|court|silk|trade|festival|rain|moon|river|flower|song)\b/i.test(contextText)) return 'SOFT';
+    return 'BALANCED';
+}
+
+function detectNameGender(contextText) {
+    if (/\b(?:woman|girl|female|queen|princess|lady|priestess|waitress|mother|sister|daughter|wife|widow|matron|maid|actress)\b/i.test(contextText)) return 'FEMALE';
+    if (/\b(?:man|boy|male|king|prince|lord|priest|waiter|father|brother|son|husband|widower|patriarch|actor)\b/i.test(contextText)) return 'MALE';
+    return 'NEUTRAL';
+}
+
+function buildDeterministicName({ mode, profile, gender, seed, registry, contextText }) {
+    const used = new Set([
+        ...Array.from(registry.used || []),
+        ...extractExistingProperNames(contextText),
+    ].map(normalizeNameKey).filter(Boolean));
+    const baseSeed = normalizeNameSeed(seed);
+    const rng = createNamePrng(`${baseSeed}|${mode}|${profile}|${gender}|${contextText}|${used.size}`);
+
+    for (let attempt = 0; attempt < 96; attempt += 1) {
+        const candidateSeed = attempt > 0 && attempt % 8 === 0
+            ? pickSeed(rng, baseSeed)
+            : baseSeed;
+        const candidate = buildNameCandidate({ mode, profile, gender, seed: candidateSeed, rng, attempt });
+        if (rejectName(candidate, mode, candidateSeed, used)) continue;
+        return candidate;
+    }
+
+    for (let attempt = 0; attempt < 96; attempt += 1) {
+        const candidateSeed = pickSeed(rng, baseSeed);
+        const candidate = buildNameCandidate({ mode, profile, gender, seed: candidateSeed, rng, attempt });
+        if (rejectName(candidate, mode, candidateSeed, used)) continue;
+        return candidate;
+    }
+
+    return mode === 'LOCATION' ? `${baseSeed}mora` : `${baseSeed}rin`;
+}
+
+function buildNameCandidate({ mode, profile, gender, seed, rng, attempt }) {
+    const pools = NAME_PARTS[mode]?.[profile] || NAME_PARTS[mode].BALANCED;
+    const middle = pickWeighted(rng, pools.middle);
+    const endingPool = mode === 'PERSON' && gender !== 'NEUTRAL'
+        ? [...GENDER_ENDINGS[gender], ...pools.ending]
+        : pools.ending;
+    const ending = pickWeighted(rng, endingPool);
+    const useMiddle = mode === 'LOCATION' || attempt % 3 !== 0;
+    const phoneticExtra = attempt % 7 === 0 ? phonotacticSyllable(rng) : '';
+    return titleName(`${seed}${useMiddle ? middle : ''}${phoneticExtra}${ending}`);
+}
+
+function pickSeed(rng, baseSeed) {
+    if (rng() < 0.8) return pickWeighted(rng, CURATED_NAME_SEEDS);
+    const generated = `${phonotacticSyllable(rng)}${phonotacticSyllable(rng)}`.replace(/[^a-z]/gi, '').slice(0, 3);
+    return normalizeNameSeed(generated || baseSeed);
+}
+
+function phonotacticSyllable(rng) {
+    return `${pickWeighted(rng, PHONOTACTIC_ONSETS)}${pickWeighted(rng, PHONOTACTIC_VOWELS)}${pickWeighted(rng, PHONOTACTIC_CODAS)}`;
+}
+
+function pickWeighted(rng, list) {
+    const values = Array.isArray(list) && list.length ? list : ['rin'];
+    return values[Math.floor(rng() * values.length) % values.length];
+}
+
+function rejectName(name, mode, seed, used) {
+    const text = String(name || '').trim();
+    const lower = text.toLowerCase();
+    if (!text.toLowerCase().startsWith(String(seed || '').toLowerCase())) return true;
+    if (mode === 'PERSON' && (text.length < 5 || text.length > 10)) return true;
+    if (mode === 'LOCATION' && (text.length < 7 || text.length > 14)) return true;
+    if (/[aeiou]{3,}/i.test(text)) return true;
+    if (/[^aeiou\s-]{3,}/i.test(text)) return true;
+    if (/(.)\1\1/i.test(text)) return true;
+    if (used.has(normalizeNameKey(text))) return true;
+    if (/\b(?:aragorn|legolas|gandalf|frodo|sauron|elden|hyrule|zelda|cloud|sephiroth|john|michael|david|james|mary|sarah|anna|london|paris|tokyo|rome)\b/i.test(lower)) return true;
+    if (/(?:mirror|river|stone|storm|shadow|silver|golden|crystal|dragon|demon|angel|dark|light|black|white|red|blue|green|wolf|rose|luna|nova)/i.test(lower)) return true;
+    if (mode === 'LOCATION' && /\b(?:rin|len|taro|mira|naya|emi|dan|vek|iro)$/i.test(text)) return true;
+    return false;
+}
+
+function titleName(value) {
+    const compactName = String(value || '').replace(/[^a-z]/gi, '').toLowerCase();
+    return compactName ? compactName.charAt(0).toUpperCase() + compactName.slice(1) : 'Akarin';
+}
+
+function extractExistingProperNames(text) {
+    return Array.from(String(text || '').matchAll(/\b[A-Z][a-z]{2,}\b/g)).map(match => match[0]);
+}
+
+function createNamePrng(seedText) {
+    let seed = 2166136261;
+    for (const char of String(seedText || 'Aka')) {
+        seed ^= char.charCodeAt(0);
+        seed = Math.imul(seed, 16777619);
+    }
+    return () => {
+        seed += 0x6D2B79F5;
+        let t = seed;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function getNameRegistry(context) {
+    const root = context?.chatMetadata?.[NAME_REGISTRY_KEY] || {};
+    const used = new Set(Array.isArray(root.used) ? root.used : []);
+    const trackerNames = Object.keys(context?.chatMetadata?.structuredPreflightTracker?.npcs || {});
+    for (const name of trackerNames) {
+        if (isReal(name)) used.add(name);
+    }
+    return { used };
+}
+
+function registerGeneratedName(context, name, meta) {
+    if (!context?.chatMetadata || !isReal(name)) return;
+    const root = context.chatMetadata[NAME_REGISTRY_KEY] || { used: [], entries: {} };
+    root.used = Array.isArray(root.used) ? root.used : [];
+    root.entries = root.entries || {};
+    if (!root.used.some(item => sameName(item, name))) root.used.push(name);
+    root.entries[name] = {
+        ...(root.entries[name] || {}),
+        ...meta,
+        savedAt: Date.now(),
+    };
+    context.chatMetadata[NAME_REGISTRY_KEY] = root;
+    if (typeof context.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
 }
 
 function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, audit) {
@@ -1017,15 +1351,6 @@ function addLivingName(set, name) {
     const normalized = normalizeNameKey(name);
     if (normalized) set.add(normalized);
 }
-
-
-
-
-
-
-
-
-
 
 
 

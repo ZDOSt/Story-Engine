@@ -497,6 +497,90 @@ function CHAOS_INTERRUPT(resolutionPacket, npcHandoffList, sceneSummary, diceLis
     return {CHAOS:{triggered:true, band:band, magnitude:magnitude, anchor:anchor, vector:vector, personVector:personVector, fullText:null}}
 }
 ----------------
+function NameGenerationEngine(context, seed, explicitNameKnown, isLocation=false) {
+  const DEF = Object.freeze({
+    EO:
+'EXPLICIT-ONLY. Use context, seed, explicitNameKnown, and isLocation as truth. Uncertain=N.',
+    FYW:
+'FIRST-YES-WINS. In ordered rule ladders, the first matching rule becomes final.',
+    UNIVERSAL:
+'SINGLE-PASS. OUTPUT EXACTLY ONE CLEAN NAME STRING ONLY OR (none). NO COMMENTARY. NO SOURCES. NO EXPLANATIONS. INVISIBLE SYSTEM.',
+    PURPOSE:
+'Use for any distinct NPC/entity or location that is newly introduced, present, mentioned, or about to be mentioned in the response. If no explicit proper name already exists, generate one immediately before output. Distinct unnamed entities must not remain generic if they are introduced as specific individuals or places.',
+    SEED:
+'Seed is sacred. Name MUST start with this exact 3-letter seed. Never modify, reorder, or remove it. If seed is invalid, repair to nearest valid 3-letter form when possible; otherwise use fallback Aka.',
+    STYLE:
+'Invent creative, pronounceable, real-but-unplaceable names. Use curated seed plus randomized phonotactic middle/ending syllables. Mix phonetic influence freely from East Asian, Polynesian, Caucasian, African, Mesoamerican, Turkic, Dravidian, and Uralic sound habits. Ban pure Western-European fantasy drift, Tolkien-esque elvish, stock fantasy/JRPG naming, and overly ordinary modern-Western names.',
+    SHAPE:
+'Append only pronounceable syllables. NO 3+ consecutive vowels. NO 3+ consecutive consonants. PERSON total length 5-10. LOCATION total length 7-14. LOCATION must feel geographic / compound / place-like and must not read like a person name.'
+  });
+
+  nameRequired(context, explicitNameKnown, isLocation):
+    policy: EO, FYW
+    if context contains an unfinished explicit naming cue such as [his name is..., her name is..., their name is..., named..., called..., known as..., they call him/her/them..., the place is called...] -> Y
+    if explicitNameKnown=Y -> N
+    if isLocation=true -> Y
+    if context shows a distinct unnamed NPC/entity or location is present, introduced, mentioned, or about to be mentioned in the upcoming response -> Y
+    else -> N
+
+  normalizeSeed(seed):
+    if seed is exact 3 letters -> keep
+    else -> repair to nearest valid 3-letter form without changing order when possible
+    if still invalid -> Aka
+
+  detectMode(context, isLocation):
+    policy: FYW
+    if isLocation=true -> LOCATION
+    if context contains any [place,town,city,ruin,mountain,river,forest,temple,keep,village,fort,harbor,port,island,lake,swamp,marsh,cavern,valley,peak,district,kingdom,province,outpost,bridge,gate] -> LOCATION
+    else -> PERSON
+
+  profileFromContext(context):
+    policy: FYW
+    if context contains any [harsh,hard,stone,iron,ash,cold,desert,steppe,war,border,fortress,raid,scar,volcanic] -> HARD
+    if context contains any [soft,coast,island,harbor,reef,jungle,garden,ritual,temple,court,silk,trade,festival,rain] -> SOFT
+    else -> BALANCED
+
+  genderFromContext(context):
+    policy: FYW
+    if context explicitly indicates female/woman/girl/queen/princess/lady/priestess/mother/sister/daughter -> FEMALE
+    if context explicitly indicates male/man/boy/king/prince/lord/priest/father/brother/son -> MALE
+    else -> NEUTRAL
+
+  buildName(mode, profile, gender, context, seed):
+    if mode=PERSON:
+      generate exactly one person/entity name starting with exact seed
+      use compact call-name shape; gender affects weighting only, never hard stereotype
+    else:
+      generate exactly one location name starting with exact seed
+      use geographic / compound / place-like syllable shape
+
+  reject(name, mode, seed):
+    policy: FYW
+    if name does not start with exact seed -> Y
+    if mode=PERSON and (length(name)<5 || length(name)>10) -> Y
+    if mode=LOCATION and (length(name)<7 || length(name)>14) -> Y
+    if name has 3+ consecutive vowels -> Y
+    if name has 3+ consecutive consonants -> Y
+    if name reads as stock fantasy / elvish / Tolkien-like / JRPG-generic -> Y
+    if name reads as too ordinary / modern-Western / overly familiar -> Y
+    if name strongly resembles a famous fictional or real-world place/person name -> Y
+    if mode=LOCATION and name reads more like a person name than a place -> Y
+    if name already exists in current chat name registry or tracker -> Y
+    else -> N
+
+  execution:
+    needName = nameRequired(context, explicitNameKnown, isLocation)
+    if needName=N -> return (none)
+    S = normalizeSeed(seed)
+    M = detectMode(context, isLocation)
+    P = profileFromContext(context)
+    G = genderFromContext(context)
+    candidate = buildName(M, P, G, context, S)
+    if reject(candidate, M, S)=Y -> regenerate immediately until first valid candidate
+    save candidate to current chat name registry
+    return candidate
+}
+----------------
 function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, diceBudget) {
   const DEF = Object.freeze({
     EO:
