@@ -7,15 +7,11 @@ import { setPersonaDescription, user_avatar } from '../../../../scripts/personas
 import { getPresetManager } from '../../../../scripts/preset-manager.js';
 import { rotateSecret, SECRET_KEYS, secret_state } from '../../../../scripts/secrets.js';
 import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
-import {
-    formatDebugMessagePrefix,
-    formatNarratorPromptContext,
-    formatPreFlightDebug,
-} from './pre-flight.js';
+import { formatNarratorPromptContext } from './pre-flight.js';
 import { extractPostReplyTrackerDelta, extractSemanticLedger, POST_REPLY_TRACKER_STOP_SENTINEL, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildTrackerSnapshot, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 
-const EXTENSION_NAME = 'Structured Preflight Engines';
+const EXTENSION_NAME = 'Story Engine';
 const SETTINGS_KEY = 'structuredPreflightEngines';
 const SETTINGS_CONTAINER_ID = 'structured_preflight_settings_container';
 const ENGINE_PROMPT_KEY = 'structured_preflight_engines';
@@ -24,6 +20,9 @@ const PROFILE_NONE = '<None>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 const TRACKER_DISPLAY_VERSION = 1;
+const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
+const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
+const NARRATOR_HANDOFF_VERSION = 1;
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
 const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
@@ -84,6 +83,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
     semanticPreset: '',
+    disableSemanticThinking: true,
 });
 const CHAT_COMPLETION_SECRET_KEYS = Object.freeze({
     ai21: SECRET_KEYS.AI21,
@@ -131,8 +131,8 @@ const state = {
     runningSemanticPass: false,
     bypassPromptReady: false,
     activeRunId: null,
-    lastDebugPrefix: '',
-    lastDebugKey: null,
+    lastNarratorHandoff: '',
+    lastNarratorHandoffKey: null,
     pendingRun: null,
     chatSignature: [],
     subscribed: false,
@@ -307,9 +307,12 @@ async function withSemanticGenerationSettings(callback) {
     const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
     const semanticProfile = String(settings.semanticConnectionProfile || '').trim();
     const semanticPreset = String(settings.semanticPreset || '').trim();
+    const semanticOptions = {
+        disableSemanticThinking: settings.disableSemanticThinking !== false,
+    };
 
     if (!useSeparateSettings || (!semanticProfile && !semanticPreset)) {
-        return await callback();
+        return await callback(semanticOptions);
     }
 
     if (semanticProfile) {
@@ -324,6 +327,7 @@ async function withSemanticGenerationSettings(callback) {
         }
 
         return await withConnectionProfileSecret(profile, () => callback({
+            ...semanticOptions,
             semanticProfileId: profile.id,
             semanticProfileName: profile.name,
             semanticPreset,
@@ -339,7 +343,7 @@ async function withSemanticGenerationSettings(callback) {
             applyPresetName(semanticPreset);
             switched = true;
         }
-        return await callback();
+        return await callback(semanticOptions);
     } finally {
         if (switched) {
             try {
@@ -394,8 +398,10 @@ function refreshSettingsControls() {
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const presetSelect = document.getElementById('structured_preflight_semantic_preset');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
+    const disableThinkingCheckbox = document.getElementById('structured_preflight_disable_semantic_thinking');
 
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
+    if (disableThinkingCheckbox) disableThinkingCheckbox.checked = settings.disableSemanticThinking !== false;
     setSelectOptions(
         profileSelect,
         getConnectionProfileNames(),
@@ -467,6 +473,11 @@ function renderSettingsPanel() {
                     <small class="flex1">Leave preset blank to use the selected profile's preset. Settings are restored after the semantic pass.</small>
                     <button id="structured_preflight_refresh_semantic_settings" class="menu_button">Refresh</button>
                 </div>
+                <label class="checkbox_label flexNoGap">
+                    <input id="structured_preflight_disable_semantic_thinking" type="checkbox">
+                    <span>Disable thinking for semantic requests</span>
+                </label>
+                <small>Applies only to Story Engine semantic, tracker, and player setup calls. Main narration keeps its own profile settings.</small>
                 <hr>
                 <div class="flex-container alignitemscenter">
                     <small id="structured_preflight_player_setup_status" class="flex1"></small>
@@ -490,6 +501,10 @@ function renderSettingsPanel() {
     });
     document.getElementById('structured_preflight_semantic_preset')?.addEventListener('change', event => {
         settings.semanticPreset = String(event.target?.value || '');
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_disable_semantic_thinking')?.addEventListener('change', event => {
+        settings.disableSemanticThinking = Boolean(event.target?.checked);
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_refresh_semantic_settings')?.addEventListener('click', refreshSettingsControls);
@@ -1337,6 +1352,36 @@ function setMessageTrackerDisplaySnapshot(message, snapshot) {
     }
 }
 
+function setMessageNarratorHandoff(message, handoffText) {
+    if (!message || message.is_user || !handoffText) return;
+    const swipeId = getMessageSwipeId(message);
+    const payload = {
+        version: NARRATOR_HANDOFF_VERSION,
+        savedAt: Date.now(),
+        text: String(handoffText),
+    };
+    message.extra = message.extra || {};
+    message.extra[NARRATOR_HANDOFF_EXTRA_KEY] = message.extra[NARRATOR_HANDOFF_EXTRA_KEY] || {};
+    message.extra[NARRATOR_HANDOFF_EXTRA_KEY][swipeId] = payload;
+
+    const swipeInfo = ensureSwipeInfoEntry(message, swipeId);
+    if (swipeInfo) {
+        swipeInfo.extra[NARRATOR_HANDOFF_EXTRA_KEY] = swipeInfo.extra[NARRATOR_HANDOFF_EXTRA_KEY] || {};
+        swipeInfo.extra[NARRATOR_HANDOFF_EXTRA_KEY][swipeId] = clone(payload);
+    }
+}
+
+function getMessageNarratorHandoff(message) {
+    if (!message || message.is_user) return null;
+    const swipeId = getMessageSwipeId(message);
+    const payload = message.extra?.[NARRATOR_HANDOFF_EXTRA_KEY]?.[swipeId]
+        || message.swipe_info?.[swipeId]?.extra?.[NARRATOR_HANDOFF_EXTRA_KEY]?.[swipeId]
+        || null;
+    if (!payload) return null;
+    if (typeof payload === 'string') return { version: 0, text: payload };
+    return payload?.text ? payload : null;
+}
+
 function getMessageTrackerDisplaySnapshot(message) {
     if (!message || message.is_user) return null;
     const swipeId = getMessageSwipeId(message);
@@ -1472,6 +1517,16 @@ function buildTrackerDisplayHtml(snapshot) {
         </details>`;
 }
 
+function buildNarratorHandoffHtml(payload) {
+    const text = String(payload?.text ?? '').trim();
+    if (!text) return '';
+    return `
+        <details class="${NARRATOR_HANDOFF_BLOCK_CLASS}">
+            <summary>Narration Handoff</summary>
+            <pre>${escapeHtml(text)}</pre>
+        </details>`;
+}
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -1522,8 +1577,52 @@ function ensureTrackerDisplayStyles() {
         .structured-preflight-tracker-empty {
             opacity: 0.78;
         }
+        .${NARRATOR_HANDOFF_BLOCK_CLASS} {
+            margin-top: 0.75rem;
+            padding: 0.45rem 0.65rem;
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 30%, transparent);
+            font-size: 0.86rem;
+        }
+        .${NARRATOR_HANDOFF_BLOCK_CLASS} > summary {
+            cursor: pointer;
+            font-weight: 600;
+            user-select: none;
+        }
+        .${NARRATOR_HANDOFF_BLOCK_CLASS} pre {
+            margin: 0.55rem 0 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            max-height: 24rem;
+            overflow: auto;
+            line-height: 1.38;
+        }
     `;
     document.head.append(style);
+}
+
+function renderNarratorHandoffBlockForMessage(messageId, payload = null, context = getContext()) {
+    const message = context?.chat?.[messageId];
+    const handoff = payload || getMessageNarratorHandoff(message);
+    if (typeof document === 'undefined') return;
+
+    const messageElement = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
+    if (!messageElement) return;
+
+    messageElement.querySelector(`.${NARRATOR_HANDOFF_BLOCK_CLASS}`)?.remove();
+    if (!handoff?.text) return;
+
+    ensureTrackerDisplayStyles();
+    const textElement = messageElement.querySelector('.mes_text');
+    if (!textElement) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = buildNarratorHandoffHtml(handoff).trim();
+    const block = wrapper.firstElementChild;
+    if (!block) return;
+
+    textElement.before(block);
 }
 
 function renderTrackerDisplayBlockForMessage(messageId, snapshot = null, context = getContext()) {
@@ -1558,6 +1657,7 @@ function renderAllTrackerDisplayBlocks(context = getContext()) {
     if (!Array.isArray(context?.chat)) return;
     context.chat.forEach((message, index) => {
         if (!message?.is_user) {
+            renderNarratorHandoffBlockForMessage(index, null, context);
             renderTrackerDisplayBlockForMessage(index, null, context);
         }
     });
@@ -1987,7 +2087,7 @@ function buildPersonaStatsSheet(creator) {
         `CHA: ${stats.CHA}`,
         '',
         '# NOTES',
-        'Stats were generated by Structured Preflight Engines from the existing persona.',
+        'Stats were generated by Story Engine from the existing persona.',
         `Highest-stat reading: ${analysis.PrimaryStat || 'PHY'}.`,
         analysis.Evidence ? `Evidence: ${analysis.Evidence}` : '',
     ].filter(line => line !== '').join('\n');
@@ -2238,16 +2338,57 @@ function stripComputedDebugPrefix(text) {
     return stripStructuredArtifacts(text).trimStart();
 }
 
+function extractLegacyNarratorHandoff(text) {
+    const source = String(text ?? '');
+    const match = source.match(/<narrator_prompt_context_echo>\s*([\s\S]*?)\s*<\/narrator_prompt_context_echo>/i)
+        || source.match(/&lt;narrator_prompt_context_echo&gt;\s*([\s\S]*?)\s*&lt;\/narrator_prompt_context_echo&gt;/i);
+    return match?.[1]?.trim() || '';
+}
+
 function stripStructuredArtifacts(text) {
     return String(text ?? '')
         .replace(/````text\s*\n?&lt;pre_flight&gt;[\s\S]*?&lt;\/pre_flight&gt;\s*````\s*/gi, '')
         .replace(/````text\s*\n?<pre_flight>[\s\S]*?<\/pre_flight>\s*````\s*/gi, '')
         .replace(/````text\s*\n?<narrator_prompt_context_echo>[\s\S]*?<\/narrator_prompt_context_echo>\s*````\s*/gi, '')
+        .replace(/\[STORY_ENGINE_NARRATOR_HANDOFF[\s\S]*?==BINDING_NARRATION_DIRECTIVE==[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
         .replace(/&lt;pre_flight&gt;[\s\S]*?&lt;\/pre_flight&gt;\s*/gi, '')
         .replace(/<pre_flight>[\s\S]*?<\/pre_flight>\s*/gi, '')
         .replace(/<narrator_prompt_context_echo>[\s\S]*?<\/narrator_prompt_context_echo>\s*/gi, '')
         .replace(/BEGIN_FINAL_NARRATION\s*/gi, '')
         .replace(/\s*END_FINAL_NARRATION/gi, '');
+}
+
+function migrateVisibleHandoffDisplays(context = getContext()) {
+    if (!Array.isArray(context?.chat)) return false;
+    let changed = false;
+
+    context.chat.forEach(message => {
+        if (!message || message.is_user) return;
+        message.extra = message.extra || {};
+        const displayText = typeof message.extra.display_text === 'string' ? message.extra.display_text : '';
+        const visibleText = displayText || String(message.mes ?? '');
+        const legacyHandoff = extractLegacyNarratorHandoff(visibleText);
+        if (legacyHandoff && !getMessageNarratorHandoff(message)) {
+            setMessageNarratorHandoff(message, legacyHandoff);
+            changed = true;
+        }
+        const cleanedDisplay = stripComputedDebugPrefix(displayText);
+        if (displayText && cleanedDisplay !== displayText) {
+            message.extra.display_text = cleanedDisplay;
+            changed = true;
+        }
+        const cleanedMessage = stripComputedDebugPrefix(message.mes);
+        if (typeof message.mes === 'string' && cleanedMessage !== message.mes) {
+            message.mes = cleanedMessage;
+            changed = true;
+        }
+    });
+
+    if (changed) {
+        persistMetadata(context);
+        if (typeof context.saveChat === 'function') context.saveChat();
+    }
+    return changed;
 }
 
 function sanitizeAssistantNarration(text) {
@@ -2286,18 +2427,23 @@ function stripNarratorMetaPrefix(text) {
     const source = String(text ?? '').trim();
     if (!source) return source;
 
-    const lengthTarget = source.match(/(?:^|\n)\s*Length target:\s*[^\n]*\n+/i);
-    if (lengthTarget && lengthTarget.index < 2500) {
+    const bindingDirective = source.match(/(?:^|\n)\s*==BINDING_NARRATION_DIRECTIVE==\s*\n+/i);
+    if (bindingDirective && bindingDirective.index < 4000) {
+        return source.slice(bindingDirective.index + bindingDirective[0].length).trim();
+    }
+
+    const lengthTarget = source.match(/(?:^|\n)\s*(?:Length target|Hard maximum):\s*[^\n]*\n+/i);
+    if (lengthTarget && lengthTarget.index < 4000) {
         return source.slice(lengthTarget.index + lengthTarget[0].length).trim();
     }
 
-    const finalWritingCue = source.match(/(?:^|\n)\s*Let me write this[^\n]*\n+/i);
-    if (finalWritingCue && finalWritingCue.index < 2500) {
+    const finalWritingCue = source.match(/(?:^|\n)\s*(?:Let me write this|BEGIN_FINAL_NARRATION)[^\n]*\n*/i);
+    if (finalWritingCue && finalWritingCue.index < 4000) {
         return source.slice(finalWritingCue.index + finalWritingCue[0].length).trim();
     }
 
     const prefix = source.slice(0, 2500);
-    if (!/\b(preflight|mechanics|NPC State|Proactivity|Chaos|GUIDE|narrator prompt|formatting rules)\b/i.test(prefix)) {
+    if (!/\b(preflight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules)\b/i.test(prefix)) {
         return source;
     }
 
@@ -2308,8 +2454,8 @@ function stripNarratorMetaPrefix(text) {
         if (
             !line
             || /^[-*]\s+/.test(line)
-            || /^(The user|User Actions|Result|Action Count|Stakes|Intimacy Consent|Targets|Counter Potential|NPC State|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE)\b/i.test(line)
-            || /\b(preflight|mechanics|formatting rules|Length target|should be|Let me)\b/i.test(line)
+            || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Intimacy Consent|Consent Gate|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|PRIVATE_MECHANICS_AUDIT)\b/i.test(line)
+            || /\b(preflight|mechanics|formatting rules|Length target|Hard maximum|PRIVATE HANDOFF|should be|Let me)\b/i.test(line)
         ) {
             cut = index + 1;
             continue;
@@ -2379,8 +2525,8 @@ function restoreTrackerForRegeneration(type) {
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot before ${type} of message ${targetMessageId}`);
     }
 
-    state.lastDebugKey = null;
-    state.lastDebugPrefix = '';
+    state.lastNarratorHandoffKey = null;
+    state.lastNarratorHandoff = '';
 }
 
 async function persistMetadata(context = getContext()) {
@@ -2395,7 +2541,7 @@ async function prependComputedDebug(messageId, type) {
     const context = getContext();
     const messageKey = getMessageKey(messageId, context);
 
-    if (!state.lastDebugPrefix || state.lastDebugKey === messageKey || type === 'impersonate') {
+    if (!state.lastNarratorHandoff || state.lastNarratorHandoffKey === messageKey || type === 'impersonate') {
         clearRuntimePrompts();
         return;
     }
@@ -2416,7 +2562,7 @@ async function prependComputedDebug(messageId, type) {
         const displayText = message.extra.display_text == null ? null : String(message.extra.display_text);
         const visibleText = stripComputedDebugPrefix(displayText ?? currentText);
         const narrationText = sanitizeAssistantNarration(visibleText);
-        const debugPrefix = state.lastDebugPrefix;
+        const narratorHandoff = state.lastNarratorHandoff;
         const pendingRun = state.pendingRun;
         let postReplyTrackerWarning = null;
 
@@ -2440,6 +2586,7 @@ async function prependComputedDebug(messageId, type) {
                             narrationText,
                             trackerDisplaySnapshot,
                             {
+                                disableSemanticThinking: settings?.disableSemanticThinking !== false,
                                 semanticProfileId: settings?.semanticProfileId,
                                 semanticProfileName: settings?.semanticProfileName,
                                 semanticPreset: settings?.semanticPreset,
@@ -2484,13 +2631,16 @@ async function prependComputedDebug(messageId, type) {
         }
 
         message.mes = narrationText;
-        message.extra.display_text = `${debugPrefix}\n\n${narrationText}`;
-        state.lastDebugKey = messageKey;
-        state.lastDebugPrefix = '';
+        message.extra.display_text = narrationText;
+        setMessageNarratorHandoff(message, narratorHandoff);
+        await persistMetadata(context);
+        state.lastNarratorHandoffKey = messageKey;
+        state.lastNarratorHandoff = '';
 
         if (typeof context.updateMessageBlock === 'function') {
             context.updateMessageBlock(messageId, message);
         }
+        renderNarratorHandoffBlockForMessage(messageId, null, context);
         renderTrackerDisplayBlockForMessage(messageId, null, context);
 
         if (typeof context.saveChat === 'function') {
@@ -2529,8 +2679,8 @@ async function handleMessageDeleted(newLength) {
         }
     }
 
-    state.lastDebugPrefix = '';
-    state.lastDebugKey = null;
+    state.lastNarratorHandoff = '';
+    state.lastNarratorHandoffKey = null;
     state.chatSignature = currentSignature;
     clearRuntimePrompts();
 
@@ -2554,7 +2704,7 @@ async function handleMessageSwiped(messageId) {
     } else if (restoreTrackerFromLatestDisplaySnapshot(context)) {
         await persistMetadata(context);
     }
-    state.lastDebugKey = null;
+    state.lastNarratorHandoffKey = null;
     state.chatSignature = captureChatSignature();
     clearRuntimePrompts();
     setTimeout(() => renderAllTrackerDisplayBlocks(context), 0);
@@ -2566,8 +2716,9 @@ function handleChatChanged() {
     const context = getContext();
     getPlayerRoot(context);
     restoreTrackerFromLatestDisplaySnapshot(context);
-    state.lastDebugKey = null;
-    state.lastDebugPrefix = '';
+    migrateVisibleHandoffDisplays(context);
+    state.lastNarratorHandoffKey = null;
+    state.lastNarratorHandoff = '';
     state.pendingRun = null;
     state.chatSignature = captureChatSignature();
     clearRuntimePrompts();
@@ -2588,8 +2739,8 @@ function handleGenerationLifecycleEnd() {
             if (state.processingPostReplyTracker) return;
             if (!state.pendingRun) return;
             state.pendingRun = null;
-            state.lastDebugPrefix = '';
-            state.lastDebugKey = null;
+            state.lastNarratorHandoff = '';
+            state.lastNarratorHandoffKey = null;
             console.warn(`[${EXTENSION_NAME}] cleared pending pre-flight handoff because no assistant message was received after generation ended.`);
         }, 5000);
     }
@@ -2682,7 +2833,6 @@ async function handleChatCompletionPromptReady(eventData) {
         applyPlayerCoreStatsOverride(semanticLedger, context);
         const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, state.pendingGeneration.type);
 
-        const audit = formatPreFlightDebug(report);
         const narratorContext = formatNarratorPromptContext(report);
         state.pendingRun = {
             type: state.pendingGeneration.type || 'normal',
@@ -2696,14 +2846,14 @@ async function handleChatCompletionPromptReady(eventData) {
             latestUserText: getLatestUserText(eventData.chat),
             report,
         };
-        state.lastDebugPrefix = formatDebugMessagePrefix(audit, narratorContext);
+        state.lastNarratorHandoff = narratorContext;
 
         sanitizeFinalPromptHistory(eventData.chat);
         appendEngineSentinelToPrompt(eventData.chat);
         appendNarratorContextToPrompt(eventData.chat, narratorContext);
         clearAllProgress();
     } catch (error) {
-        state.lastDebugPrefix = '';
+        state.lastNarratorHandoff = '';
         state.pendingRun = null;
         clearAllProgress();
         clearRuntimePrompts();
@@ -2724,6 +2874,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
         return await withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
             playerTrackerSnapshot: state.pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+            disableSemanticThinking: settings?.disableSemanticThinking !== false,
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             semanticPreset: settings?.semanticPreset,
@@ -2807,6 +2958,7 @@ if (typeof jQuery === 'function') {
         setTimeout(() => {
             getPlayerRoot();
             restoreTrackerFromLatestDisplaySnapshot();
+            migrateVisibleHandoffDisplays();
             renderAllTrackerDisplayBlocks();
             renderPlayerSetupCard();
         }, 0);
@@ -2816,6 +2968,7 @@ if (typeof jQuery === 'function') {
     setTimeout(() => {
         getPlayerRoot();
         restoreTrackerFromLatestDisplaySnapshot();
+        migrateVisibleHandoffDisplays();
         renderAllTrackerDisplayBlocks();
         renderPlayerSetupCard();
     }, 0);

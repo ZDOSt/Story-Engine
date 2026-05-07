@@ -185,34 +185,53 @@ export function formatNarratorPromptContext(report) {
     const summary = buildNarratorSummary(handoff, resolution, report?.semanticLedger ?? {});
 
     const lines = [
-        '[STRUCTURED_PREFLIGHT_NARRATOR_CONTEXT v0.6 - MINIMAL AUTHORITATIVE]',
-        'Private mechanics handoff. Do not quote, summarize, mention, label, list, or explain this handoff.',
-        'Write only the final in-character narration. No analysis, bullet points, preamble, audit, or mechanics text.',
-        'Wrap the answer with BEGIN_FINAL_NARRATION and END_FINAL_NARRATION. Inside those tags, start directly with scene prose.',
-        'The GUIDE is mandatory and authoritative; follow it exactly when interpreting success, denial, proactivity, and aggression.',
-        'Outcome names and mechanics labels are private. Never print private result categories, impact categories, roll data, action counts, dice math, margins, handoff field names, or system labels.',
-        'Do not start with a mechanics heading, italicized result label, bracketed result label, or any visible success/failure category. Start directly with the scene prose.',
-        'For intimacy, IntimacyGate=DENY means no cooperation, reciprocation, or compliance even when the roll succeeds.',
-        'Never narrate voluntary {{user}} actions, counterattacks, thoughts, feelings, decisions, or dialogue beyond the explicit user input.',
-        'Involuntary reflexive physical reactions caused directly by computed external impact/restraint are allowed; keep them immediate/passive and do not turn them into choices, tactics, counters, or dialogue.',
-        'Length target: 80-180 words for simple scenes; up to 300 words for intricate, multi-beat, combat, intimacy-boundary, proactivity, aggression, or chaos scenes.',
+        '[STORY_ENGINE_NARRATOR_HANDOFF v0.7 - PRIVATE AUTHORITATIVE]',
         '',
-        'User Actions: ' + summary.userAction,
-        'Result: ' + summary.result,
-        'Action Count: ' + summary.actions,
+        'PRIVATE HANDOFF. Never quote, summarize, mention, label, list, or explain this block.',
+        'Write only the final in-character narration.',
+        'No analysis, bullet points, preamble, audit text, mechanics text, or result labels.',
+        'Wrap the answer with BEGIN_FINAL_NARRATION and END_FINAL_NARRATION.',
+        'Inside those tags, begin directly with scene prose.',
+        '',
+        'The BINDING_NARRATION_DIRECTIVE is mandatory and overrides ordinary narrative preference.',
+        'Use it as the final authority for success, failure, denial, proactivity, aggression, consent, impairment, and limits.',
+        '',
+        'Outcome names and mechanics labels are private.',
+        'Never print result categories, impact categories, roll data, action counts, dice math, margins, gates, handoff field names, or system labels.',
+        '',
+        'For intimacy: IntimacyGate=DENY means no cooperation, reciprocation, consent, compliance, softening, or romantic ambiguity, even if the user roll succeeds.',
+        '',
+        'Never narrate voluntary {{user}} actions, counterattacks, thoughts, feelings, decisions, or dialogue beyond the explicit user input.',
+        'Only immediate involuntary physical reactions caused by computed external impact/restraint are allowed.',
+        '',
+        'Length target: 200-300 words.',
+        'Hard maximum: 600 words.',
+        'Use the maximum only for complex combat, multi-character scenes, intimacy-boundary scenes, proactivity, aggression, chaos, or major consequences.',
+        '',
+        '==PRIVATE_MECHANICS_AUDIT==',
+        'User Action: ' + summary.userAction,
+        'Decisive Action: ' + summary.decisiveAction,
         'Stakes: ' + summary.stakes,
-        'Intimacy Consent: ' + summary.consent,
-        'Targets: ' + summary.targets,
+        'Roll Used: ' + summary.rollUsed,
+        'Outcome: ' + summary.outcome,
+        'Margin: ' + summary.margin,
+        'Outcome Meaning: ' + summary.result,
+        'Landed Actions: ' + summary.landedActions,
+        'Consent Gate: ' + summary.consentGate,
         'Counter Potential: ' + summary.counter,
+        'Targets: ' + summary.targets,
         'User Impairment: ' + summary.userImpairment,
         'NPC Impairment: ' + summary.npcImpairment,
         'NPC State: ' + summary.npc,
+        'Relationship Result: ' + summary.relationshipResult,
         'Chaos: ' + summary.chaos,
         'Proactivity: ' + summary.proactive,
         'Aggression: ' + summary.aggression,
         'Aggression Guide: ' + summary.aggressionGuide,
         'Generated Name: ' + summary.generatedName,
-        'GUIDE=' + summary.guide,
+        '',
+        '==BINDING_NARRATION_DIRECTIVE==',
+        summary.bindingDirective,
     ];
 
     return lines.join('\n');
@@ -257,11 +276,19 @@ function buildNarratorSummary(handoff, resolution, ledger = {}) {
     const npcImpairment = npcImpairmentSummary(resolution.NPCImpairment);
 
     const result = naturalOutcomeSummary(resolution);
-    const guide = buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, chaosText, aggressionText, userImpairment, npcImpairment });
+    const rollAudit = rollAuditFromResultLine(handoff.resultLine, resolution);
+    const bindingDirective = buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, chaosText, aggressionText, userImpairment, npcImpairment });
 
     return {
         userAction,
+        decisiveAction: userAction,
         result,
+        rollUsed: rollAudit.rollUsed,
+        outcome: outcomeAuditLabel(resolution),
+        margin: rollAudit.margin,
+        landedActions: resolution.LandedActions ?? '(none)',
+        consentGate: consentGateSummary(handoff, resolution),
+        relationshipResult: relationshipResultSummary(handoff, resolution),
         actions: list(resolution.actions),
         stakes: resolution.STAKES ?? 'N',
         consent: intimacyConsentSummary(resolution),
@@ -275,8 +302,48 @@ function buildNarratorSummary(handoff, resolution, ledger = {}) {
         aggression: aggressionText,
         aggressionGuide,
         generatedName,
-        guide,
+        bindingDirective,
     };
+}
+
+function rollAuditFromResultLine(resultLine, resolution) {
+    if (resolution?.STAKES === 'N') return { rollUsed: 'none', margin: 'none' };
+    const text = String(resultLine ?? '').trim();
+    const marginMatch = text.match(/=\s*(-?\d+)\s*vs\s*1d20\(\d+\)(?:\s*\+\s*[A-Z]+\(\d+\))?(?:\s*\+\s*impairment\(-?\d+\))?\s*=\s*(-?\d+)/i);
+    const statMatch = text.match(/\+\s*(PHY|MND|CHA)\(\d+\).*?vs\s*1d20\(\d+\)(?:\s*\+\s*(PHY|MND|CHA)\(\d+\))?/i);
+    const left = marginMatch ? Number(marginMatch[1]) : null;
+    const right = marginMatch ? Number(marginMatch[2]) : null;
+    const margin = Number.isFinite(left) && Number.isFinite(right) ? String(left - right) : 'unknown';
+    const userStat = statMatch?.[1] || 'USER';
+    const oppStat = statMatch?.[2] || (text.includes('vs 1d20') ? 'ENV' : 'OPP');
+    return {
+        rollUsed: `${userStat} vs ${oppStat}`,
+        margin,
+    };
+}
+
+function outcomeAuditLabel(resolution) {
+    if (resolution?.STAKES === 'N' || resolution?.Outcome === 'no_roll') return 'No Roll';
+    const tier = String(resolution?.OutcomeTier ?? '').replace(/_/g, ' ').trim();
+    const outcome = String(resolution?.Outcome ?? '').replace(/_/g, ' ').trim();
+    return tier || outcome || 'Computed Outcome';
+}
+
+function consentGateSummary(handoff, resolution) {
+    if (resolution.GOAL !== 'IntimacyAdvancePhysical' && resolution.GOAL !== 'IntimacyAdvanceVerbal') return 'not applicable';
+    return strongestIntimacyGate(handoff, resolution);
+}
+
+function relationshipResultSummary(handoff, resolution) {
+    const npcs = Array.isArray(handoff?.npcHandoffs) ? handoff.npcHandoffs : [];
+    if (!npcs.length) return 'none';
+    return npcs.map(npc => [
+        npc.NPC || '(unknown)',
+        `target:${npc.Target ?? 'No Change'}`,
+        `gate:${npc.IntimacyGate ?? 'SKIP'}`,
+        `boundary:${npc.BoundaryPressure ?? 'N'}`,
+        `pressure:${npc.HostilePressure ?? 0}/${npc.HostileLandedPressure ?? 0}`,
+    ].join('/')).join('; ');
 }
 
 function userImpairmentSummary(impairment) {
@@ -557,26 +624,6 @@ function buildNoAggressionGuide(resolution, handoff) {
     }
 
     return 'No aggression result was produced; do not invent a resolved NPC hit.';
-}
-
-export function formatDebugMessagePrefix(preFlightAudit, narratorPromptContext) {
-    return [
-        '````text',
-        escapeReasoningTagsForDisplay(preFlightAudit),
-        '````',
-        '',
-        '````text',
-        '<narrator_prompt_context_echo>',
-        narratorPromptContext,
-        '</narrator_prompt_context_echo>',
-        '````',
-    ].join('\n');
-}
-
-function escapeReasoningTagsForDisplay(value) {
-    return String(value)
-        .replaceAll('<pre_flight>', '&lt;pre_flight&gt;')
-        .replaceAll('</pre_flight>', '&lt;/pre_flight&gt;');
 }
 
 function inline(value) {

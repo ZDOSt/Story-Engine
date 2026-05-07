@@ -14,6 +14,7 @@ const SEMANTIC_BACKEND_ENDPOINT = '/api/backends/chat-completions/generate';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
+const DISABLE_THINKING_INCLUDE_BODY = 'thinking:\n  type: disabled';
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -35,7 +36,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
         try {
             const toolResult = options?.semanticProfileId
                 ? await generateSemanticToolCallWithProfile(context, prompt, responseLength, options)
-                : await generateSemanticToolCall(context, prompt, responseLength);
+                : await generateSemanticToolCall(context, prompt, responseLength, options);
             raw = toolResult.raw;
             ledger = parseSemanticLedger(toolResult.ledger, trackerSnapshot);
             validateRawLedgerContract(ledger, raw);
@@ -146,7 +147,6 @@ export async function extractPostReplyTrackerDelta(context, assistantText, track
         stop: [POST_REPLY_TRACKER_STOP_SENTINEL],
         stopping_strings: [POST_REPLY_TRACKER_STOP_SENTINEL],
         stop_sequence: [POST_REPLY_TRACKER_STOP_SENTINEL],
-        include_reasoning: false,
         enable_web_search: false,
     };
 
@@ -211,7 +211,7 @@ function isSemanticToolTransportError(error) {
     return error instanceof SemanticToolTransportError || error?.name === 'SemanticToolTransportError';
 }
 
-async function generateSemanticToolCall(context, prompt, responseLength) {
+async function generateSemanticToolCall(context, prompt, responseLength, options = {}) {
     let generateData;
     const toolPrompt = buildSemanticToolPrompt(prompt);
     try {
@@ -229,7 +229,7 @@ async function generateSemanticToolCall(context, prompt, responseLength) {
     generateData.n = undefined;
     generateData.tools = [semanticTool];
     generateData.tool_choice = buildSemanticToolChoice(chatCompletionSource);
-    generateData.include_reasoning = false;
+    applySemanticThinkingPayload(generateData, options);
     generateData.enable_web_search = false;
     delete generateData.request_images;
     delete generateData.request_image_resolution;
@@ -297,7 +297,6 @@ async function generateSemanticToolCallWithProfile(context, prompt, responseLeng
         messages: toolPrompt,
         tools: [semanticTool],
         tool_choice: buildSemanticToolChoice(chatCompletionSource),
-        include_reasoning: false,
         enable_web_search: false,
         request_images: undefined,
         request_image_resolution: undefined,
@@ -333,6 +332,52 @@ export async function sendSemanticProfileTextRequest(prompt, responseLength, opt
     return result?.content ?? String(result ?? '');
 }
 
+function applySemanticThinkingPayload(payload, options = {}) {
+    if (options?.disableSemanticThinking === false) {
+        return payload;
+    }
+    const source = String(payload.chat_completion_source || '').toLowerCase();
+    payload.include_reasoning = false;
+    payload.custom_include_body = mergeYamlObjectString(removeTopLevelYamlKey(payload.custom_include_body, 'thinking'), DISABLE_THINKING_INCLUDE_BODY);
+    if (['openai', 'azure_openai', 'makersuite', 'vertexai', 'nanogpt'].includes(source)) {
+        payload.reasoning_effort = 'min';
+    } else {
+        delete payload.reasoning_effort;
+    }
+    return payload;
+}
+
+function removeTopLevelYamlKey(value, keyName) {
+    const lines = String(value || '').split(/\r?\n/);
+    const target = String(keyName || '').toLowerCase();
+    const kept = [];
+    let skipping = false;
+
+    for (const line of lines) {
+        const topLevelKey = line.match(/^([A-Za-z0-9_-]+)\s*:/);
+        if (topLevelKey) {
+            skipping = topLevelKey[1].toLowerCase() === target;
+        }
+        if (!skipping) kept.push(line);
+    }
+
+    return kept.join('\n').trim();
+}
+
+function mergeYamlObjectString(...parts) {
+    const merged = [];
+    const seen = new Set();
+    for (const part of parts) {
+        const text = String(part || '').trim();
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(text);
+    }
+    return merged.join('\n');
+}
+
 async function sendChatCompletionProfileRequest(prompt, responseLength, options = {}, overridePayload = {}, extractData = true) {
     if (!options?.semanticProfileId) {
         throw new SemanticToolTransportError('Semantic connection profile id is missing.');
@@ -351,8 +396,7 @@ async function sendChatCompletionProfileRequest(prompt, responseLength, options 
         ? prompt
         : [{ role: 'user', content: String(prompt || '') }];
 
-    return await context.ChatCompletionService.processRequest(
-        {
+    const requestPayload = applySemanticThinkingPayload({
             stream: false,
             messages,
             max_tokens: responseLength,
@@ -367,6 +411,11 @@ async function sendChatCompletionProfileRequest(prompt, responseLength, options 
             custom_prompt_post_processing: profile['prompt-post-processing'],
             ...overridePayload,
         },
+        options,
+    );
+
+    return await context.ChatCompletionService.processRequest(
+        requestPayload,
         {
             presetName: options.semanticPreset || profile.preset || undefined,
         },
