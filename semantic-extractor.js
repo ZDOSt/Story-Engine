@@ -6,18 +6,22 @@ export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
 
 const SEMANTIC_RESPONSE_LENGTH_MIN = 2048;
 const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
-const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 256;
+const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 320;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const SEMANTIC_BACKEND_ENDPOINT = '/api/backends/chat-completions/generate';
+const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead']);
+const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
+const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
         throw new Error('SillyTavern generateRawData API is unavailable.');
     }
 
+    const playerTrackerSnapshot = options?.playerTrackerSnapshot || {};
     const prompt = options?.assembledPrompt
-        ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot)
-        : buildSemanticPrompt(context, promptContext, type, trackerSnapshot);
+        ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot)
+        : buildSemanticPrompt(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot);
     const responseLength = Number.isFinite(options?.responseLength) && options.responseLength > 0
         ? options.responseLength
         : estimateSemanticResponseLength(trackerSnapshot);
@@ -444,6 +448,41 @@ function buildSemanticPreflightSchema() {
         type: 'array',
         items: { type: 'string' },
     };
+    const trackerNpcDeltaSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['NPC', 'condition', ...TRACKER_NPC_DELTA_FIELDS],
+        properties: {
+            NPC: { type: 'string' },
+            condition: { type: 'string', enum: TRACKER_CONDITIONS },
+            woundsAdd: stringListSchema,
+            woundsRemove: stringListSchema,
+            statusAdd: stringListSchema,
+            statusRemove: stringListSchema,
+            gearAdd: stringListSchema,
+            gearRemove: stringListSchema,
+        },
+    };
+    const trackerUserDeltaSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['condition', ...TRACKER_USER_DELTA_FIELDS],
+        properties: {
+            condition: { type: 'string', enum: TRACKER_CONDITIONS },
+            woundsAdd: stringListSchema,
+            woundsRemove: stringListSchema,
+            statusAdd: stringListSchema,
+            statusRemove: stringListSchema,
+            gearAdd: stringListSchema,
+            gearRemove: stringListSchema,
+            inventoryAdd: stringListSchema,
+            inventoryRemove: stringListSchema,
+            tasksAdd: stringListSchema,
+            tasksRemove: stringListSchema,
+            commitmentsAdd: stringListSchema,
+            commitmentsRemove: stringListSchema,
+        },
+    };
     const stakeChangeSchema = {
         type: 'object',
         additionalProperties: false,
@@ -454,7 +493,7 @@ function buildSemanticPreflightSchema() {
     return {
         type: 'object',
         additionalProperties: false,
-        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'chaosSemantic', 'nameSemantic', 'proactivitySemantic'],
+        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic', 'proactivitySemantic'],
         properties: {
             engineContext: {
                 type: 'object',
@@ -581,6 +620,18 @@ function buildSemanticPreflightSchema() {
                             },
                         },
                         genStats: coreStatsSchema,
+                    },
+                },
+            },
+            trackerUpdateEngine: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['user', 'npcs'],
+                properties: {
+                    user: trackerUserDeltaSchema,
+                    npcs: {
+                        type: 'array',
+                        items: trackerNpcDeltaSchema,
                     },
                 },
             },
@@ -713,6 +764,10 @@ const COMPACT_LEDGER_CONTRACT = [
     '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each relevant living NPC.',
     '- If no living NPC is relevant, output RelationshipEngine.count=0 and no RelationshipEngine[index] lines.',
     '- All genStats groups must include Rank, MainStat, PHY, MND, CHA.',
+    '- TrackerUpdateEngine is explicit-only visual state tracking. Output deltas only from the latest user input and immediate visible context. Use condition=unchanged and (none) lists unless a change is explicitly stated.',
+    '- TrackerUpdateEngine must never rewrite full inventories, gear, wounds, status, tasks, or commitments from silence. Add only explicit new items/effects/tasks. Remove only explicit dropped/spent/used-up/lost/healed/cured/completed/canceled/failed/abandoned entries.',
+    '- TrackerUpdateEngine must not treat a pending attempted action as an established wound/status/condition change. "I stab him" is not woundsAdd by itself; "his arm is already bleeding" or "I am poisoned" is.',
+    '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, or visible gear changes in this turn. NPC inventory is not tracked. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
     '- Do not output primaryOppTarget or primaryOpposition. The only opposing living target list is identifyTargets.OppTargets.NPC.',
     '- If you cannot find explicit evidence, use the engine default for that line; never invent missing facts.',
 ].join('\n');
@@ -775,6 +830,20 @@ RelationshipEngine[0].genStats.MainStat=none
 RelationshipEngine[0].genStats.PHY=1
 RelationshipEngine[0].genStats.MND=1
 RelationshipEngine[0].genStats.CHA=1
+TrackerUpdateEngine.User.condition=unchanged
+TrackerUpdateEngine.User.woundsAdd=(none)
+TrackerUpdateEngine.User.woundsRemove=(none)
+TrackerUpdateEngine.User.statusAdd=(none)
+TrackerUpdateEngine.User.statusRemove=(none)
+TrackerUpdateEngine.User.gearAdd=(none)
+TrackerUpdateEngine.User.gearRemove=(none)
+TrackerUpdateEngine.User.inventoryAdd=(none)
+TrackerUpdateEngine.User.inventoryRemove=(none)
+TrackerUpdateEngine.User.tasksAdd=(none)
+TrackerUpdateEngine.User.tasksRemove=(none)
+TrackerUpdateEngine.User.commitmentsAdd=(none)
+TrackerUpdateEngine.User.commitmentsRemove=(none)
+TrackerUpdateEngine.NPC.count=0
 CHAOS_INTERRUPT.sceneSummary=short scene summary
 NameGenerationEngine.nameRequired=N
 NameGenerationEngine.explicitNameKnown=Y
@@ -787,7 +856,7 @@ NPCProactivityEngine.cap=1
 END_SEMANTIC_PREFLIGHT
 ${SEMANTIC_PREFLIGHT_STOP_SENTINEL}`;
 
-function buildSemanticPrompt(context, coreChat, type, trackerSnapshot) {
+function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTrackerSnapshot = {}) {
     const chatContext = formatChatContext(coreChat);
     const userName = context.name1 || 'User';
     const charName = context.name2 || 'Assistant';
@@ -814,7 +883,7 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot) {
         {
             role: 'system',
             content:
-                buildSemanticContractText(userName, charName, type, trackerSnapshot),
+                buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot),
         },
         {
             role: 'user',
@@ -825,7 +894,7 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot) {
     ];
 }
 
-function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trackerSnapshot) {
+function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trackerSnapshot, playerTrackerSnapshot = {}) {
     const userName = context.name1 || 'User';
     const charName = context.name2 || 'Assistant';
     const assembledMessages = normalizeAssembledPromptMessages(assembledChat);
@@ -845,7 +914,7 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
         ...assembledMessages,
         {
             role: 'system',
-            content: buildSemanticContractText(userName, charName, type, trackerSnapshot),
+            content: buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot),
         },
         {
             role: 'user',
@@ -856,8 +925,8 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
     ];
 }
 
-function buildSemanticContractText(userName, charName, type, trackerSnapshot) {
-    return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nTracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\n\n` +
+function buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot = {}) {
+    return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
         'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
@@ -877,7 +946,12 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot) {
         'Do NOT execute ResolutionEngine.resolveOutcome, dice, margins, landed actions, or counter potential; deterministic code handles those after your ledger. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each relevant living NPC: relevant/current state context, initPreset flags, newEncounterExplicit, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, genStats. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary, NameGenerationEngine semantic lines, and NPCProactivityEngine.cap from their engine/contextual requirements. ' +
-        'For NameGenerationEngine, classify only whether a distinct unnamed person/entity or location needs a proper name in the upcoming response, whether a proper name is already explicit, whether it is a location, and a short 3-letter seed hint if explicit context suggests one. The deterministic code generates the final name. Always return NameGenerationEngine.generatedName=(none); do not invent names in the semantic ledger. ' +
+        'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
+        'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, and visible gear. NPC inventory is not tracked. ' +
+        'Use condition=unchanged unless the latest user input or immediate visible context explicitly changes health state to healthy, bruised, wounded, badly_wounded, critical, or dead. ' +
+        'Use Add only for explicit gains/new injuries/new effects/new obligations. Use Remove only for explicit healing, curing, dropping, spending, losing, completing, canceling, failing, or abandoning. Never infer unchanged lists from silence and never output a full replacement list. ' +
+        'Do not mark wounds/status/condition from a pending attempted action before deterministic resolution; only track state already explicit in context. ' +
+        'For NameGenerationEngine, classify only whether a distinct unnamed person/entity or location needs a proper name in the upcoming response, whether a proper name is already explicit, whether it is a location, and a short 3-letter seed hint if explicit context suggests one. The seed is hidden entropy only and will not be forced into the visible name. The deterministic code generates the final name. Always return NameGenerationEngine.generatedName=(none); do not invent names in the semantic ledger. ' +
         'For unfinished naming cues such as "his name is...", "her name is...", "they call him...", "called...", "known as...", or "the place is called...", set NameGenerationEngine.nameRequired=Y even if the semantic context otherwise seems complete; provide a seed from the role/place word when available. ' +
         'Tie rule override: exact roll ties are cinematic stalemates/struggles, not defender wins; include stakeChangeByOutcome.struggle accordingly. ' +
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
@@ -1091,7 +1165,7 @@ function previewRaw(raw) {
 }
 
 function hasLedgerShape(value) {
-    return Boolean(value?.resolutionEngine && value?.relationshipEngine && value?.chaosSemantic && value?.nameSemantic && value?.proactivitySemantic);
+    return Boolean(value?.resolutionEngine && value?.relationshipEngine && value?.trackerUpdateEngine && value?.chaosSemantic && value?.nameSemantic && value?.proactivitySemantic);
 }
 
 function validateRawLedgerContract(ledger, raw) {
@@ -1119,6 +1193,9 @@ function validateRawLedgerContract(ledger, raw) {
     if (Object.prototype.hasOwnProperty.call(ledger?.resolutionEngine || {}, 'primaryOppTarget')) missing.push('forbidden extra field resolutionEngine.primaryOppTarget');
     if (Object.prototype.hasOwnProperty.call(ledger?.resolutionEngine || {}, 'primaryOpposition')) missing.push('forbidden extra field resolutionEngine.primaryOpposition');
     if (!Array.isArray(ledger?.relationshipEngine)) missing.push('relationshipEngine');
+    if (!ledger?.trackerUpdateEngine) missing.push('trackerUpdateEngine');
+    if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
+    if (!Array.isArray(ledger?.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
     if (!ledger?.chaosSemantic) missing.push('chaosSemantic');
     if (!ledger?.nameSemantic) missing.push('nameSemantic');
     if (!ledger?.proactivitySemantic) missing.push('proactivitySemantic');
@@ -1202,8 +1279,43 @@ function parseCompactLedger(text, trackerSnapshot) {
         'NameGenerationEngine.detectMode',
         'NameGenerationEngine.generatedName',
         'NPCProactivityEngine.cap',
+        'TrackerUpdateEngine.User.condition',
+        'TrackerUpdateEngine.User.woundsAdd',
+        'TrackerUpdateEngine.User.woundsRemove',
+        'TrackerUpdateEngine.User.statusAdd',
+        'TrackerUpdateEngine.User.statusRemove',
+        'TrackerUpdateEngine.User.gearAdd',
+        'TrackerUpdateEngine.User.gearRemove',
+        'TrackerUpdateEngine.User.inventoryAdd',
+        'TrackerUpdateEngine.User.inventoryRemove',
+        'TrackerUpdateEngine.User.tasksAdd',
+        'TrackerUpdateEngine.User.tasksRemove',
+        'TrackerUpdateEngine.User.commitmentsAdd',
+        'TrackerUpdateEngine.User.commitmentsRemove',
+        'TrackerUpdateEngine.NPC.count',
     ];
     const missing = required.filter(key => !fields.has(key));
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const trackerNpcCount = clampNumber(readNumber(fields, 'TrackerUpdateEngine.NPC.count', 0), 0, 20);
+    for (let index = 0; index < trackerNpcCount; index += 1) {
+        const prefix = `TrackerUpdateEngine.NPC[${index}]`;
+        const trackerRequired = [
+            `${prefix}.NPC`,
+            `${prefix}.condition`,
+            `${prefix}.woundsAdd`,
+            `${prefix}.woundsRemove`,
+            `${prefix}.statusAdd`,
+            `${prefix}.statusRemove`,
+            `${prefix}.gearAdd`,
+            `${prefix}.gearRemove`,
+        ];
+        for (const key of trackerRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
     if (missing.length) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
@@ -1306,6 +1418,40 @@ function parseCompactLedger(text, trackerSnapshot) {
     };
     validateRelationshipCoverage(resolutionEngine, relationshipEngine);
 
+    const trackerUpdateEngine = {
+        user: {
+            condition: normalizeTrackerDeltaCondition(fields.get('TrackerUpdateEngine.User.condition')),
+            woundsAdd: readList(fields, 'TrackerUpdateEngine.User.woundsAdd'),
+            woundsRemove: readList(fields, 'TrackerUpdateEngine.User.woundsRemove'),
+            statusAdd: readList(fields, 'TrackerUpdateEngine.User.statusAdd'),
+            statusRemove: readList(fields, 'TrackerUpdateEngine.User.statusRemove'),
+            gearAdd: readList(fields, 'TrackerUpdateEngine.User.gearAdd'),
+            gearRemove: readList(fields, 'TrackerUpdateEngine.User.gearRemove'),
+            inventoryAdd: readList(fields, 'TrackerUpdateEngine.User.inventoryAdd'),
+            inventoryRemove: readList(fields, 'TrackerUpdateEngine.User.inventoryRemove'),
+            tasksAdd: readList(fields, 'TrackerUpdateEngine.User.tasksAdd'),
+            tasksRemove: readList(fields, 'TrackerUpdateEngine.User.tasksRemove'),
+            commitmentsAdd: readList(fields, 'TrackerUpdateEngine.User.commitmentsAdd'),
+            commitmentsRemove: readList(fields, 'TrackerUpdateEngine.User.commitmentsRemove'),
+        },
+        npcs: [],
+    };
+    for (let index = 0; index < trackerNpcCount; index += 1) {
+        const prefix = `TrackerUpdateEngine.NPC[${index}]`;
+        const npc = cleanScalar(fields.get(`${prefix}.NPC`));
+        if (!npc || isNoneValue(npc)) continue;
+        trackerUpdateEngine.npcs.push({
+            NPC: npc,
+            condition: normalizeTrackerDeltaCondition(fields.get(`${prefix}.condition`)),
+            woundsAdd: readList(fields, `${prefix}.woundsAdd`),
+            woundsRemove: readList(fields, `${prefix}.woundsRemove`),
+            statusAdd: readList(fields, `${prefix}.statusAdd`),
+            statusRemove: readList(fields, `${prefix}.statusRemove`),
+            gearAdd: readList(fields, `${prefix}.gearAdd`),
+            gearRemove: readList(fields, `${prefix}.gearRemove`),
+        });
+    }
+
     return {
         engineContext: {
             userCoreStats: readCoreGroup(fields, 'engineContext.getUserCoreStats'),
@@ -1316,6 +1462,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         chaosSemantic: {
             sceneSummary: cleanScalar(fields.get('CHAOS_INTERRUPT.sceneSummary')) || '',
         },
+        trackerUpdateEngine,
         nameSemantic: {
             nameRequired: readBoolean(fields, 'NameGenerationEngine.nameRequired', false),
             explicitNameKnown: readBoolean(fields, 'NameGenerationEngine.explicitNameKnown', true),
@@ -1344,6 +1491,10 @@ function trackerSnapshotToLedgerEntries(trackerSnapshot) {
         currentCoreStats: entry?.currentCoreStats
             ? readCoreObject(entry.currentCoreStats)
             : { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 },
+        condition: normalizeTrackerStateCondition(entry?.condition),
+        wounds: readPlainArray(entry?.wounds),
+        statusEffects: readPlainArray(entry?.statusEffects),
+        gear: readPlainArray(entry?.gear),
     }));
 }
 
@@ -1454,6 +1605,35 @@ function normalizeDetectMode(value) {
     return 'none';
 }
 
+function normalizeTrackerDeltaCondition(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return TRACKER_CONDITIONS.includes(text) ? text : 'unchanged';
+}
+
+function normalizeTrackerStateCondition(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return TRACKER_CONDITIONS.includes(text) && text !== 'unchanged' ? text : 'healthy';
+}
+
+function normalizeTrackerDeltaList(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map(cleanScalar).filter(item => item && !isNoneValue(item) && item.toLowerCase() !== 'unchanged').slice(0, 20);
+}
+
+function normalizeTrackerDelta(value, fields) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        condition: normalizeTrackerDeltaCondition(source.condition),
+        ...Object.fromEntries(fields.map(field => [field, normalizeTrackerDeltaList(source[field])])),
+    };
+}
+
+function readPlainArray(value) {
+    return Array.isArray(value)
+        ? value.map(cleanScalar).filter(item => item && !isNoneValue(item)).slice(0, 40)
+        : [];
+}
+
 function normalizeNameKey(name) {
     return cleanScalar(name).toLowerCase();
 }
@@ -1491,6 +1671,18 @@ function normalizeLedger(ledger) {
         item.overrideFlags = item.overrideFlags || {};
         item.genStats = normalizeCore(item.genStats);
     });
+    ledger.trackerUpdateEngine = ledger.trackerUpdateEngine || {};
+    ledger.trackerUpdateEngine.user = normalizeTrackerDelta(ledger.trackerUpdateEngine.user, TRACKER_USER_DELTA_FIELDS);
+    ledger.trackerUpdateEngine.npcs = Array.isArray(ledger.trackerUpdateEngine.npcs)
+        ? ledger.trackerUpdateEngine.npcs.map(item => {
+            const npc = cleanScalar(item?.NPC);
+            if (!npc || isNoneValue(npc)) return null;
+            return {
+                NPC: npc,
+                ...normalizeTrackerDelta(item, TRACKER_NPC_DELTA_FIELDS),
+            };
+        }).filter(Boolean)
+        : [];
     ledger.chaosSemantic = ledger.chaosSemantic || { sceneSummary: '' };
     ledger.nameSemantic = ledger.nameSemantic || {};
     ledger.proactivitySemantic = ledger.proactivitySemantic || {};
@@ -1555,6 +1747,9 @@ function validateNormalizedLedger(ledger, raw) {
     if (Object.prototype.hasOwnProperty.call(ledger.resolutionEngine || {}, 'primaryOppTarget')) missing.push('forbidden extra field resolutionEngine.primaryOppTarget');
     if (Object.prototype.hasOwnProperty.call(ledger.resolutionEngine || {}, 'primaryOpposition')) missing.push('forbidden extra field resolutionEngine.primaryOpposition');
     if (!Array.isArray(ledger.relationshipEngine)) missing.push('relationshipEngine');
+    if (!ledger.trackerUpdateEngine) missing.push('trackerUpdateEngine');
+    if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
+    if (!Array.isArray(ledger.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
     if (!ledger.chaosSemantic) missing.push('chaosSemantic');
     if (!ledger.nameSemantic) missing.push('nameSemantic');
     if (!ledger.proactivitySemantic) missing.push('proactivitySemantic');

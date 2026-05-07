@@ -39,6 +39,8 @@ import {
     buildPersistencePolicy,
     trackerSummary,
     normalizeTrackerEntry,
+    normalizeTrackerUserState,
+    normalizeTrackerCondition,
     normalizeTargets,
     sanitizeTargets,
     sameTargets,
@@ -71,12 +73,6 @@ import {
 const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 
-const CURATED_NAME_SEEDS = [
-    'Aka', 'Aki', 'Aro', 'Ena', 'Iru', 'Omi', 'Uma', 'Sen', 'Tor', 'Mir', 'Vey', 'Kha',
-    'Ral', 'Zai', 'Niv', 'Sol', 'Dar', 'Lio', 'Tav', 'Yul', 'Kao', 'Mav', 'Ren', 'Vos',
-    'Sae', 'Kio', 'Nai', 'Ruo', 'Tao', 'Vel', 'Mar', 'Zun', 'Oru', 'Ira', 'Kav', 'Sov',
-];
-
 const PHONOTACTIC_ONSETS = ['', 'b', 'd', 'g', 'h', 'k', 'l', 'm', 'n', 'r', 's', 't', 'v', 'y', 'z', 'kh', 'sh'];
 const PHONOTACTIC_VOWELS = ['a', 'e', 'i', 'o', 'u', 'ai', 'ei', 'ao'];
 const PHONOTACTIC_CODAS = ['', 'n', 'r', 'l', 'm', 's', 'v', 'k'];
@@ -84,39 +80,50 @@ const PHONOTACTIC_CODAS = ['', 'n', 'r', 'l', 'm', 's', 'v', 'k'];
 const NAME_PARTS = {
     PERSON: {
         HARD: {
-            middle: ['ka', 'tor', 'vek', 'dar', 'zan', 'kor', 'ruk', 'var', 'tek', 'sul', 'mar', 'dur'],
-            ending: ['vek', 'dan', 'tor', 'kar', 'un', 'ar', 'ro', 'kan', 'vek', 'sul', 'dan', 'rik'],
+            start: ['Az', 'Dar', 'Esh', 'Kav', 'Khaz', 'Ruk', 'Sark', 'Taz', 'Vark', 'Zor'],
+            middle: ['', '', 'a', 'e', 'i', 'ka', 'ra', 'un', 'or', 'ul', 'ir'],
+            ending: ['an', 'ar', 'ek', 'en', 'ir', 'ok', 'or', 'un', 'ash', 'ul'],
         },
         SOFT: {
-            middle: ['la', 'mi', 'sai', 'naya', 'lira', 'emi', 'valo', 'sora', 'tali', 'rima', 'ayo', 'leni'],
-            ending: ['a', 'ia', 'aya', 'emi', 'sai', 'lira', 'naya', 'ani', 'ora', 'ei', 'ira', 'una'],
+            start: ['Ama', 'Eli', 'Ira', 'Lio', 'Mira', 'Naya', 'Omi', 'Sae', 'Tali', 'Vela', 'Yuna', 'Zira'],
+            middle: ['', '', 'la', 'mi', 'na', 'ra', 'si', 'va', 'ri'],
+            ending: ['a', 'e', 'ia', 'in', 'ri', 'sa', 'shi', 'ya'],
         },
         BALANCED: {
-            middle: ['ra', 'ka', 'ven', 'sai', 'mori', 'taro', 'len', 'vaji', 'naro', 'suri', 'lian', 'kemi'],
-            ending: ['rin', 'vo', 'sai', 'len', 'mira', 'taro', 'ka', 'ren', 'vani', 'o', 'in', 'ari'],
+            start: ['Aru', 'Dara', 'Ivo', 'Kano', 'Luma', 'Mavi', 'Niro', 'Ruva', 'Sena', 'Tavo', 'Vira', 'Zani'],
+            middle: ['', '', 'ka', 'li', 'mo', 'ra', 'ta', 've', 'yu'],
+            ending: ['an', 'ar', 'en', 'i', 'is', 'o', 'ra', 'ren', 'shi', 'un'],
         },
     },
     LOCATION: {
         HARD: {
-            middle: ['kar', 'dor', 'morn', 'kesh', 'rath', 'tavar', 'dur', 'koru', 'zan', 'thar'],
-            ending: ['kesh', 'rath', 'daru', 'kor', 'mora', 'tavar', 'dorn', 'kora', 'sath', 'rak'],
+            start: ['Akra', 'Darak', 'Eshkar', 'Kaz', 'Khor', 'Marak', 'Rath', 'Tark', 'Vark', 'Zhad'],
+            middle: ['', 'dur', 'kar', 'mor', 'nar', 'tav', 'ul', 'zan'],
+            ending: ['ak', 'an', 'esh', 'or', 'un', 'var', 'zar', 'gate', 'hold'],
         },
         SOFT: {
-            middle: ['moru', 'sai', 'nara', 'luma', 'kavai', 'tala', 'sura', 'vara', 'leni', 'mara'],
-            ending: ['nara', 'tala', 'moru', 'sai', 'luma', 'vara', 'kora', 'dara', 'mara', 'vani'],
+            start: ['Amai', 'Ivara', 'Luma', 'Mirai', 'Nara', 'Oshai', 'Sava', 'Tala', 'Velai', 'Yura'],
+            middle: ['', 'dara', 'luma', 'mori', 'nara', 'sai', 'tala'],
+            ending: ['na', 'ra', 'ri', 'sa', 'ya', 'mere', 'vale', 'hara'],
         },
         BALANCED: {
-            middle: ['moru', 'dara', 'kora', 'vani', 'sura', 'tala', 'rath', 'kesh', 'nara', 'mora', 'val', 'daru'],
-            ending: ['moru', 'kesh', 'dara', 'nara', 'rath', 'mora', 'tala', 'sai', 'ven', 'kora', 'daru', 'sura'],
+            start: ['Aru', 'Dava', 'Ish', 'Kora', 'Mora', 'Nava', 'Sura', 'Tava', 'Vora', 'Zana'],
+            middle: ['', 'dara', 'kesh', 'mora', 'nara', 'sai', 'tala'],
+            ending: ['an', 'esh', 'or', 'ra', 'un', 'reach', 'hollow', 'watch'],
         },
     },
 };
 
 const GENDER_ENDINGS = {
-    FEMALE: ['a', 'ia', 'aya', 'emi', 'sai', 'lira', 'naya', 'ani', 'ora', 'ei', 'ira', 'una'],
-    MALE: ['o', 'en', 'ar', 'un', 'iro', 'vek', 'dan', 'taro', 'kor', 'rik', 'an', 'ul'],
-    NEUTRAL: ['i', 'e', 'ai', 'in', 'ra', 'ka', 'ren', 'sul', 'ari', 'vo', 'len', 'sa'],
+    FEMALE: ['a', 'e', 'ia', 'ira', 'ri', 'sa', 'ya'],
+    MALE: ['an', 'ar', 'en', 'ir', 'o', 'ok', 'un'],
+    NEUTRAL: ['a', 'an', 'e', 'i', 'in', 'o', 'ra', 'un'],
 };
+
+const ROLE_NAME_PREFIXES = Object.freeze([
+    'ass', 'ban', 'but', 'cap', 'cou', 'doc', 'gat', 'gua', 'hea', 'inn', 'kin', 'kni',
+    'lad', 'lor', 'mag', 'mer', 'mes', 'pri', 'que', 'rai', 'sol', 'str', 'wit',
+]);
 
 export function buildTrackerSnapshot(context) {
     const source = context?.chatMetadata?.structuredPreflightTracker?.npcs || {};
@@ -129,16 +136,28 @@ export function buildTrackerSnapshot(context) {
     return snapshot;
 }
 
+export function buildPlayerTrackerSnapshot(context) {
+    const trackerUser = context?.chatMetadata?.structuredPreflightTracker?.user || {};
+    return normalizeTrackerUserState(trackerUser);
+}
+
 export async function saveTrackerUpdate(context, trackerUpdate) {
-    if (!context?.chatMetadata || !trackerUpdate?.npcs) return;
+    if (!context?.chatMetadata || !trackerUpdate) return;
 
-    const root = context.chatMetadata.structuredPreflightTracker || { npcs: {} };
+    const root = context.chatMetadata.structuredPreflightTracker || { npcs: {}, user: {} };
     root.npcs = root.npcs || {};
+    root.user = normalizeTrackerUserState(root.user || {});
 
-    for (const [name, value] of Object.entries(trackerUpdate.npcs)) {
+    for (const [name, value] of Object.entries(trackerUpdate.npcs || {})) {
         root.npcs[name] = normalizeTrackerEntry({
             ...(root.npcs[name] || {}),
             ...(value || {}),
+        });
+    }
+    if (trackerUpdate.user) {
+        root.user = normalizeTrackerUserState({
+            ...root.user,
+            ...trackerUpdate.user,
         });
     }
 
@@ -161,8 +180,12 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
     const name = runNameGeneration(ledger, audit, context, type);
     const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit);
     const aggression = runAggression(ledger, trackerSnapshot, relationships.trackerUpdate, proactivity.results, resolution.packet, dice, audit);
+    const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, relationships.trackerUpdate, context, audit);
 
-    const trackerUpdate = { npcs: relationships.trackerUpdate };
+    const trackerUpdate = {
+        npcs: trackerDeltas.npcs,
+        user: trackerDeltas.user,
+    };
     const finalNarrativeHandoff = {
         generationType: type || 'normal',
         resolutionPacket: resolution.packet,
@@ -174,6 +197,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
         persistencePolicy: buildPersistencePolicy(),
         resultLine: resolution.resultLine,
         narrationGuidance: buildNarrationGuidance(resolution.packet, relationships.handoffs, chaos.handoff, proactivity.results, aggression.results),
+        sceneTrackerUpdate: trackerUpdate,
     };
 
     audit.push(`TRACKER_UPDATE_SAVED=${trackerSummary(trackerUpdate)}`);
@@ -819,40 +843,46 @@ function buildDeterministicName({ mode, profile, gender, seed, registry, context
     const rng = createNamePrng(`${baseSeed}|${mode}|${profile}|${gender}|${contextText}|${used.size}`);
 
     for (let attempt = 0; attempt < 96; attempt += 1) {
-        const candidateSeed = attempt > 0 && attempt % 8 === 0
-            ? pickSeed(rng, baseSeed)
-            : baseSeed;
-        const candidate = buildNameCandidate({ mode, profile, gender, seed: candidateSeed, rng, attempt });
-        if (rejectName(candidate, mode, candidateSeed, used)) continue;
+        const candidate = buildNameCandidate({ mode, profile, gender, rng, attempt });
+        if (rejectName(candidate, mode, used)) continue;
         return candidate;
     }
 
     for (let attempt = 0; attempt < 96; attempt += 1) {
-        const candidateSeed = pickSeed(rng, baseSeed);
-        const candidate = buildNameCandidate({ mode, profile, gender, seed: candidateSeed, rng, attempt });
-        if (rejectName(candidate, mode, candidateSeed, used)) continue;
+        const fallbackProfile = ['BALANCED', 'SOFT', 'HARD'][attempt % 3];
+        const candidate = buildNameCandidate({ mode, profile: fallbackProfile, gender, rng, attempt });
+        if (rejectName(candidate, mode, used)) continue;
         return candidate;
     }
 
-    return mode === 'LOCATION' ? `${baseSeed}mora` : `${baseSeed}rin`;
+    return mode === 'LOCATION' ? 'Morakora' : 'Ruvan';
 }
 
-function buildNameCandidate({ mode, profile, gender, seed, rng, attempt }) {
+function buildNameCandidate({ mode, profile, gender, rng, attempt }) {
     const pools = NAME_PARTS[mode]?.[profile] || NAME_PARTS[mode].BALANCED;
+    const start = pickWeighted(rng, pools.start);
     const middle = pickWeighted(rng, pools.middle);
     const endingPool = mode === 'PERSON' && gender !== 'NEUTRAL'
         ? [...GENDER_ENDINGS[gender], ...pools.ending]
         : pools.ending;
     const ending = pickWeighted(rng, endingPool);
-    const useMiddle = mode === 'LOCATION' || attempt % 3 !== 0;
-    const phoneticExtra = attempt % 7 === 0 ? phonotacticSyllable(rng) : '';
-    return titleName(`${seed}${useMiddle ? middle : ''}${phoneticExtra}${ending}`);
+    const useMiddle = Boolean(middle) && (mode === 'LOCATION' || rng() < 0.45);
+    const phoneticExtra = attempt > 0 && attempt % 11 === 0 ? phonotacticSyllable(rng) : '';
+    const raw = `${start}${useMiddle ? middle : ''}${phoneticExtra}${ending}`;
+    return titleName(smoothName(raw, mode));
 }
 
-function pickSeed(rng, baseSeed) {
-    if (rng() < 0.8) return pickWeighted(rng, CURATED_NAME_SEEDS);
-    const generated = `${phonotacticSyllable(rng)}${phonotacticSyllable(rng)}`.replace(/[^a-z]/gi, '').slice(0, 3);
-    return normalizeNameSeed(generated || baseSeed);
+function smoothName(value, mode) {
+    let text = String(value || '').toLowerCase();
+    text = text
+        .replace(/([aeiou])\1+/g, '$1')
+        .replace(/([bcdfghjklmnpqrstvwxyz])\1+/g, '$1')
+        .replace(/([aeiou])([aeiou])([aeiou]+)/g, '$1$2')
+        .replace(/([bcdfghjklmnpqrstvwxyz])([bcdfghjklmnpqrstvwxyz])([bcdfghjklmnpqrstvwxyz]+)/g, '$1$2');
+    if (mode === 'PERSON' && text.length > 9) {
+        text = text.replace(/(?:shi|esh|ira|ren|un|an|ar|en|ir|ok|ul)$/i, match => match.slice(0, 1));
+    }
+    return text;
 }
 
 function phonotacticSyllable(rng) {
@@ -864,17 +894,17 @@ function pickWeighted(rng, list) {
     return values[Math.floor(rng() * values.length) % values.length];
 }
 
-function rejectName(name, mode, seed, used) {
+function rejectName(name, mode, used) {
     const text = String(name || '').trim();
     const lower = text.toLowerCase();
-    if (!text.toLowerCase().startsWith(String(seed || '').toLowerCase())) return true;
-    if (mode === 'PERSON' && (text.length < 5 || text.length > 10)) return true;
+    if (mode === 'PERSON' && (text.length < 4 || text.length > 9)) return true;
     if (mode === 'LOCATION' && (text.length < 7 || text.length > 14)) return true;
     if (/[aeiou]{3,}/i.test(text)) return true;
     if (/[^aeiou\s-]{3,}/i.test(text)) return true;
     if (/(.)\1\1/i.test(text)) return true;
     if (used.has(normalizeNameKey(text))) return true;
-    if (/\b(?:aragorn|legolas|gandalf|frodo|sauron|elden|hyrule|zelda|cloud|sephiroth|john|michael|david|james|mary|sarah|anna|london|paris|tokyo|rome)\b/i.test(lower)) return true;
+    if (mode === 'PERSON' && ROLE_NAME_PREFIXES.some(prefix => lower.startsWith(prefix))) return true;
+    if (/\b(?:aragorn|legolas|gandalf|frodo|sauron|elden|hyrule|zelda|cloud|sephiroth|john|michael|david|james|mary|sarah|anna|london|paris|tokyo|rome|arthur|edward|william|robert|albert|alice|elizabeth|eleanor|aldric|borin|eldarion)\b/i.test(lower)) return true;
     if (/(?:mirror|river|stone|storm|shadow|silver|golden|crystal|dragon|demon|angel|dark|light|black|white|red|blue|green|wolf|rose|luna|nova)/i.test(lower)) return true;
     if (mode === 'LOCATION' && /\b(?:rin|len|taro|mira|naya|emi|dan|vek|iro)$/i.test(text)) return true;
     return false;
@@ -927,6 +957,110 @@ function registerGeneratedName(context, name, meta) {
     };
     context.chatMetadata[NAME_REGISTRY_KEY] = root;
     if (typeof context.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
+}
+
+function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, context, audit) {
+    const semantic = ledger.trackerUpdateEngine || {};
+    const userBefore = buildPlayerTrackerSnapshot(context);
+    const user = applyTrackerDeltaToState(userBefore, semantic.user, true);
+    const npcs = {};
+
+    for (const [name, value] of Object.entries({
+        ...(trackerSnapshot || {}),
+        ...(relationshipTrackerUpdate || {}),
+    })) {
+        npcs[name] = normalizeTrackerEntry(value);
+    }
+
+    for (const delta of semantic.npcs || []) {
+        const name = delta?.NPC;
+        if (!isReal(name)) continue;
+        const before = normalizeTrackerEntry(npcs[name] || trackerSnapshot?.[name] || {});
+        npcs[name] = normalizeTrackerEntry({
+            ...before,
+            ...applyTrackerDeltaToState(before, delta, false),
+        });
+    }
+
+    audit.push('STEP 6.5: EXECUTE TrackerUpdateEngine EXPLICIT DELTAS');
+    audit.push(`6.5a user=${compact(user)}`);
+    audit.push(`6.5b npcDeltas=${compact((semantic.npcs || []).map(delta => delta.NPC || NONE))}`);
+    audit.push('---');
+
+    return { user, npcs };
+}
+
+function applyTrackerDeltaToState(before, delta, includePlayerFields) {
+    const source = includePlayerFields
+        ? normalizeTrackerUserState(before)
+        : normalizeTrackerEntry(before);
+    const result = {
+        condition: source.condition,
+        wounds: [...source.wounds],
+        statusEffects: [...source.statusEffects],
+        gear: [...source.gear],
+    };
+    if (includePlayerFields) {
+        result.inventory = [...source.inventory];
+        result.tasks = [...source.tasks];
+        result.commitments = [...source.commitments];
+    }
+
+    const condition = normalizeTrackerDeltaCondition(delta?.condition);
+    if (condition !== 'unchanged') {
+        result.condition = normalizeTrackerCondition(condition);
+    }
+
+    result.wounds = applyListDelta(result.wounds, delta?.woundsAdd, delta?.woundsRemove);
+    result.statusEffects = applyListDelta(result.statusEffects, delta?.statusAdd, delta?.statusRemove);
+    result.gear = applyListDelta(result.gear, delta?.gearAdd, delta?.gearRemove);
+    if (includePlayerFields) {
+        result.inventory = applyListDelta(result.inventory, delta?.inventoryAdd, delta?.inventoryRemove);
+        result.tasks = applyListDelta(result.tasks, delta?.tasksAdd, delta?.tasksRemove);
+        result.commitments = applyListDelta(result.commitments, delta?.commitmentsAdd, delta?.commitmentsRemove);
+    }
+
+    return includePlayerFields ? normalizeTrackerUserState(result) : result;
+}
+
+function normalizeTrackerDeltaCondition(value) {
+    const text = String(value ?? 'unchanged').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return ['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead'].includes(text) ? text : 'unchanged';
+}
+
+function applyListDelta(current, add, remove) {
+    const result = [];
+    const seen = new Set();
+    const push = item => {
+        const text = cleanTrackerText(item);
+        if (!text) return;
+        const key = text.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(text);
+    };
+    for (const item of current || []) push(item);
+    const removeKeys = new Set((Array.isArray(remove) ? remove : [])
+        .map(cleanTrackerText)
+        .filter(Boolean)
+        .map(text => text.toLowerCase()));
+    const filtered = result.filter(item => !removeKeys.has(item.toLowerCase()));
+    const filteredSeen = new Set(filtered.map(item => item.toLowerCase()));
+    for (const item of add || []) {
+        const text = cleanTrackerText(item);
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (filteredSeen.has(key)) continue;
+        filteredSeen.add(key);
+        filtered.push(text);
+    }
+    return filtered.slice(0, 40);
+}
+
+function cleanTrackerText(value) {
+    const text = String(value ?? '').trim().replace(/^\[/, '').replace(/\]$/, '').replace(/^["']|["']$/g, '').trim();
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unchanged'].includes(text.toLowerCase())) return '';
+    return text.slice(0, 140);
 }
 
 function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, audit) {
@@ -1351,9 +1485,3 @@ function addLivingName(set, name) {
     const normalized = normalizeNameKey(name);
     if (normalized) set.add(normalized);
 }
-
-
-
-
-
-

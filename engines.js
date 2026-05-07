@@ -1488,16 +1488,18 @@ export function buildNarrationGuidance(resolution, handoffs, chaos, proactivity,
 export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
-        persistentRuleMutated: ['currentDisposition', 'currentRapport', 'rapportEncounterLock', 'intimacyGate', 'intimacyGateSource', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'presence', 'lifecycle', 'persistenceTier', 'lastSeenMessageKey', 'absentSinceMessageKey'],
+        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'rapportEncounterLock', 'intimacyGate', 'intimacyGateSource', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'presence', 'lifecycle', 'persistenceTier', 'lastSeenMessageKey', 'absentSinceMessageKey', 'condition', 'wounds', 'statusEffects', 'gear'],
+        playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
         perTurn: ['GOAL', 'ActionTargets', 'OppTargets', 'STAKES', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
 }
 
 export function trackerSummary(trackerUpdate) {
     const npcs = Object.entries(trackerUpdate?.npcs || {});
-    if (!npcs.length) return 'N';
+    const user = trackerUpdate?.user ? normalizeTrackerUserState(trackerUpdate.user) : null;
+    if (!npcs.length && !user) return 'N';
 
-    return npcs.map(([name, value]) => {
+    const npcSummary = npcs.map(([name, value]) => {
         const disposition = value?.currentDisposition ? formatDisposition(value.currentDisposition) : 'UNINITIALIZED';
         const stats = value?.currentCoreStats
             ? `stats:${value.currentCoreStats.PHY}/${value.currentCoreStats.MND}/${value.currentCoreStats.CHA}`
@@ -1511,10 +1513,20 @@ export function trackerSummary(trackerUpdate) {
             `rapport:${value?.currentRapport ?? 0}`,
             `gate:${value?.intimacyGate ?? 'SKIP'}`,
             stats,
+            `cond:${value?.condition ?? 'healthy'}`,
+            `wounds:${(value?.wounds || []).length}`,
+            `status:${(value?.statusEffects || []).length}`,
+            `gear:${(value?.gear || []).length}`,
             `pressure:${value?.hostilePressure ?? 0}/${value?.hostileLandedPressure ?? 0}/${value?.dominantLock ?? 'None'}/${value?.pressureMode ?? 'none'}`,
         ].join('/');
     }).join(';');
+    const userSummary = user
+        ? `USER/cond:${user.condition}/wounds:${user.wounds.length}/status:${user.statusEffects.length}/gear:${user.gear.length}/inv:${user.inventory.length}/tasks:${user.tasks.length}/commitments:${user.commitments.length}`
+        : '';
+    return [npcSummary, userSummary].filter(Boolean).join(';');
 }
+
+const TRACKER_CONDITIONS = Object.freeze(['healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead']);
 
 export function normalizeTrackerEntry(value) {
     return {
@@ -1534,7 +1546,53 @@ export function normalizeTrackerEntry(value) {
         lastSeenMessageKey: typeof value?.lastSeenMessageKey === 'string' ? value.lastSeenMessageKey : '',
         absentSinceMessageKey: typeof value?.absentSinceMessageKey === 'string' ? value.absentSinceMessageKey : '',
         retiredSinceMessageKey: typeof value?.retiredSinceMessageKey === 'string' ? value.retiredSinceMessageKey : '',
+        condition: normalizeTrackerCondition(value?.condition),
+        wounds: normalizeTrackerStringList(value?.wounds),
+        statusEffects: normalizeTrackerStringList(value?.statusEffects),
+        gear: normalizeTrackerStringList(value?.gear),
     };
+}
+
+export function normalizeTrackerUserState(value) {
+    return {
+        condition: normalizeTrackerCondition(value?.condition),
+        wounds: normalizeTrackerStringList(value?.wounds),
+        statusEffects: normalizeTrackerStringList(value?.statusEffects),
+        gear: normalizeTrackerStringList(value?.gear),
+        inventory: normalizeTrackerStringList(value?.inventory),
+        tasks: normalizeTrackerStringList(value?.tasks),
+        commitments: normalizeTrackerStringList(value?.commitments),
+    };
+}
+
+export function normalizeTrackerCondition(value) {
+    const text = String(value ?? 'healthy').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return TRACKER_CONDITIONS.includes(text) ? text : 'healthy';
+}
+
+export function normalizeTrackerStringList(value) {
+    const source = Array.isArray(value)
+        ? value
+        : String(value ?? '')
+            .split(/[;\n]/)
+            .flatMap(part => part.split(/,(?=\s*[^,]{1,80}$)/));
+    const result = [];
+    const seen = new Set();
+    for (const item of source) {
+        const text = String(item ?? '')
+            .trim()
+            .replace(/^\[/, '')
+            .replace(/\]$/, '')
+            .replace(/^["']|["']$/g, '')
+            .trim();
+        if (!text || ['(none)', 'none', 'null', 'n/a', 'unchanged'].includes(text.toLowerCase())) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(text.slice(0, 140));
+        if (result.length >= 40) break;
+    }
+    return result;
 }
 
 export function normalizePresence(value) {

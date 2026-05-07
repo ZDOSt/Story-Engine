@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry } from './engines.js';
+import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 import { extension_settings } from '../../../../scripts/extensions.js';
 import { addEphemeralStoppingString, flushEphemeralStoppingStrings } from '../../../../scripts/power-user.js';
@@ -13,7 +13,7 @@ import {
     formatPreFlightDebug,
 } from './pre-flight.js';
 import { extractSemanticLedger, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildTrackerSnapshot, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildPlayerTrackerSnapshot, buildTrackerSnapshot, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 
 const EXTENSION_NAME = 'Structured Preflight Engines';
 const SETTINGS_KEY = 'structuredPreflightEngines';
@@ -651,9 +651,10 @@ function getMessageKey(messageId, context = getContext()) {
 
 function getTrackerRoot(context = getContext()) {
     if (!context?.chatMetadata) return null;
-    context.chatMetadata.structuredPreflightTracker = context.chatMetadata.structuredPreflightTracker || { npcs: {}, snapshots: {} };
+    context.chatMetadata.structuredPreflightTracker = context.chatMetadata.structuredPreflightTracker || { npcs: {}, user: {}, snapshots: {} };
     const root = context.chatMetadata.structuredPreflightTracker;
     root.npcs = root.npcs || {};
+    root.user = normalizeTrackerUserState(root.user || {});
     root.snapshots = root.snapshots || {};
     return root;
 }
@@ -920,6 +921,12 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report }) {
         ...(pendingRun?.trackerBefore || {}),
         ...(pendingRun?.trackerAfter || {}),
     });
+    const runtimeUser = report?.trackerUpdate?.user || {};
+    const user = normalizeTrackerUserState({
+        ...(pendingRun?.userBefore || {}),
+        ...(pendingRun?.userAfter || {}),
+        ...runtimeUser,
+    });
     const rawPresentNpcNames = uniqueNames([
         ...(pendingRun?.presentNpcNames || []),
         ...currentResolutionNpcNames(pendingRun?.resolutionPacket || resolutionPacket),
@@ -940,6 +947,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report }) {
         savedAt: Date.now(),
         presentNpcNames,
         userCoreStats: pendingRun?.userCoreStats || report?.semanticLedger?.engineContext?.userCoreStats || null,
+        user,
         npcs: displayNpcs,
     };
 }
@@ -1049,6 +1057,7 @@ function titleCaseName(value) {
 function buildTrackerUpdateForPersistence(displaySnapshot) {
     return {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
+        user: normalizeTrackerUserState(displaySnapshot?.user || {}),
     };
 }
 
@@ -1233,6 +1242,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     const snapshot = getLatestTrackerDisplaySnapshot(context);
     if (!root || !snapshot?.npcs) return false;
     root.npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
+    root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
     return true;
 }
 
@@ -1242,6 +1252,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     const snapshot = getMessageTrackerDisplaySnapshot(message);
     if (!root || !snapshot?.npcs) return false;
     root.npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
+    root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
     return true;
 }
 
@@ -1255,11 +1266,44 @@ function formatDisposition(disposition) {
     return `B${disposition.B}/F${disposition.F}/H${disposition.H}`;
 }
 
+function formatTrackerCondition(value) {
+    return String(value || 'healthy')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function formatTrackerList(items) {
+    const list = Array.isArray(items) ? items.filter(Boolean) : [];
+    return list.length ? list.join('; ') : 'None';
+}
+
+function trackerListLine(label, items) {
+    const list = Array.isArray(items) ? items.filter(Boolean) : [];
+    return list.length ? `<div>${escapeHtml(label)} <code>${escapeHtml(formatTrackerList(list))}</code></div>` : '';
+}
+
+function relationshipTowardUser(disposition, classified) {
+    if (!disposition) return 'Uninitialized';
+    if (classified?.lock === 'TERROR') return 'Terrified of user';
+    if (classified?.lock === 'HATRED') return 'Hates user';
+    if (classified?.lock === 'FREEZE') {
+        if (disposition.H >= 3) return 'Hostile and guarded';
+        if (disposition.F >= 3) return 'Fearful and guarded';
+    }
+    if (disposition.B >= 4 && disposition.H <= 2 && disposition.F <= 2) return 'Close or trusting';
+    if (disposition.B >= 3 && disposition.H <= 2) return 'Friendly or comfortable';
+    if (disposition.H >= 3) return 'Hostile or obstructive';
+    if (disposition.F >= 3) return 'Afraid or submissive';
+    if (disposition.B <= 1) return 'Avoidant or distant';
+    return 'Neutral or transactional';
+}
+
 function buildTrackerDisplayHtml(snapshot) {
     const npcs = normalizeDisplayTrackerNpcs(snapshot?.npcs);
     const names = Object.keys(npcs).sort((a, b) => a.localeCompare(b));
     const present = names.filter(name => npcs[name]?.presence !== 'Absent' && npcs[name]?.lifecycle === 'Active');
     const userCore = snapshot?.userCoreStats;
+    const user = normalizeTrackerUserState(snapshot?.user || {});
 
     const renderNpc = name => {
         const entry = npcs[name];
@@ -1273,9 +1317,14 @@ function buildTrackerDisplayHtml(snapshot) {
         return `
             <div class="structured-preflight-tracker-npc">
                 <div class="structured-preflight-tracker-name">${escapeHtml(name)}</div>
+                <div>Toward User <code>${escapeHtml(relationshipTowardUser(disposition, classified))}</code></div>
+                <div>Condition <code>${escapeHtml(formatTrackerCondition(entry.condition))}</code></div>
                 <div><code>${escapeHtml(formatDisposition(disposition))}</code> | Lock <code>${escapeHtml(classified.lock)}</code> | Behavior <code>${escapeHtml(classified.behavior)}</code></div>
                 <div>Rapport <code>${escapeHtml(entry.currentRapport)}/5</code> | Encounter Lock <code>${escapeHtml(entry.rapportEncounterLock)}</code> | Gate <code>${escapeHtml(entry.intimacyGate)}</code></div>
                 <div>Stats <code>${escapeHtml(formatCoreStats(entry.currentCoreStats))}</code></div>
+                ${trackerListLine('Wounds', entry.wounds)}
+                ${trackerListLine('Status', entry.statusEffects)}
+                ${trackerListLine('Gear', entry.gear)}
                 ${pressureLine}
             </div>`;
     };
@@ -1294,6 +1343,13 @@ function buildTrackerDisplayHtml(snapshot) {
                 ${renderSection('Present', present)}
                 <div class="structured-preflight-tracker-title">Player</div>
                 <div>Stats <code>${escapeHtml(formatCoreStats(userCore))}</code></div>
+                <div>Condition <code>${escapeHtml(formatTrackerCondition(user.condition))}</code></div>
+                ${trackerListLine('Wounds', user.wounds)}
+                ${trackerListLine('Status', user.statusEffects)}
+                ${trackerListLine('Gear', user.gear)}
+                ${trackerListLine('Inventory', user.inventory)}
+                ${trackerListLine('Tasks', user.tasks)}
+                ${trackerListLine('Commitments', user.commitments)}
             </div>
         </details>`;
 }
@@ -2200,6 +2256,7 @@ function restoreTrackerForRegeneration(type) {
     const snapshot = targetMessageId == null ? null : root.snapshots?.[getMessageKey(targetMessageId, context)]?.before;
     if (snapshot) {
         root.npcs = normalizeDisplayTrackerNpcs(snapshot);
+        root.user = normalizeTrackerUserState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUser || root.user || {});
         root.snapshots[getMessageKey(targetMessageId, context)].restoredForRegeneration = Date.now();
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot before ${type} of message ${targetMessageId}`);
     }
@@ -2245,11 +2302,14 @@ async function prependComputedDebug(messageId, type) {
         const trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
             messageKey,
             pendingRun: state.pendingRun,
+            report: state.pendingRun.report,
         });
         await saveTrackerUpdate(context, buildTrackerUpdateForPersistence(trackerDisplaySnapshot));
         root.snapshots[messageKey] = {
             before: clone(state.pendingRun.trackerBefore),
+            beforeUser: clone(state.pendingRun.userBefore),
             after: clone(trackerDisplaySnapshot.npcs),
+            afterUser: clone(trackerDisplaySnapshot.user),
             display: clone(trackerDisplaySnapshot),
             type: state.pendingRun.type,
             savedAt: Date.now(),
@@ -2296,7 +2356,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser };
             }
             delete root.snapshots[key];
         }
@@ -2309,6 +2369,7 @@ async function handleMessageDeleted(newLength) {
 
     if (restoreCandidate) {
         root.npcs = normalizeDisplayTrackerNpcs(restoreCandidate.before);
+        root.user = normalizeTrackerUserState(restoreCandidate.beforeUser || root.user || {});
         await persistMetadata(context);
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${Math.min(chatLength, firstAffectedIndex)}`);
     } else if (restoreTrackerFromLatestDisplaySnapshot(context)) {
@@ -2423,6 +2484,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
     state.pendingGeneration = {
         type: type || 'normal',
         trackerSnapshot: buildTrackerSnapshot(context),
+        playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
         contextSize,
         createdAt: Date.now(),
     };
@@ -2458,10 +2520,13 @@ async function handleChatCompletionPromptReady(eventData) {
             type: state.pendingGeneration.type || 'normal',
             trackerBefore: trackerSnapshot,
             trackerAfter: report.trackerUpdate?.npcs || {},
+            userBefore: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+            userAfter: report.trackerUpdate?.user || {},
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             presentNpcNames: getLatestReportPresentNpcNames(report),
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             latestUserText: getLatestUserText(eventData.chat),
+            report,
         };
         state.lastDebugPrefix = formatDebugMessagePrefix(audit, narratorContext);
 
@@ -2490,6 +2555,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
         addEphemeralStoppingString(SEMANTIC_PREFLIGHT_STOP_SENTINEL);
         return await withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
+            playerTrackerSnapshot: state.pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             semanticPreset: settings?.semanticPreset,

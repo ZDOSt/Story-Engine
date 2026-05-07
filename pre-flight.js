@@ -61,6 +61,7 @@ function buildReadableSemanticDebug(ledger) {
     const chaos = ledger?.chaosSemantic ?? {};
     const name = ledger?.nameSemantic ?? {};
     const proactivity = ledger?.proactivitySemantic ?? {};
+    const tracker = ledger?.trackerUpdateEngine ?? {};
     const userCore = ledger?.engineContext?.userCoreStats ?? {};
     const trackerNpcs = Array.isArray(ledger?.engineContext?.trackerRelevantNPCs)
         ? ledger.engineContext.trackerRelevantNPCs
@@ -77,6 +78,7 @@ function buildReadableSemanticDebug(ledger) {
             npc.currentDisposition ?? 'null',
             `rapport:${npc.currentRapport ?? 0}`,
             `gate:${npc.intimacyGate ?? 'SKIP'}`,
+            `cond:${npc.condition ?? 'healthy'}`,
         ].join('/')).join('; ') || 'none'),
         '',
         'ResolutionEngine:',
@@ -112,6 +114,7 @@ function buildReadableSemanticDebug(ledger) {
         ]),
         '',
         'chaosSemantic.sceneSummary=' + valueOrNone(chaos.sceneSummary),
+        'trackerUpdateEngine=' + inline(tracker),
         'nameSemantic=' + inline(name),
         'proactivitySemantic=' + inline(proactivity),
     ];
