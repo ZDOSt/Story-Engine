@@ -258,7 +258,15 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const preliminaryInitFlags = applyInitFlagReferee(semanticRelationship.initFlags || {}, refereeContext, audit, `2.3 checkIntimacyGate.initPreset(${intimacyTarget || NONE})`);
     const preliminaryDisposition = targetState?.currentDisposition || initPreset(preliminaryInitFlags).disposition;
     const preliminaryThreshold = checkThreshold(preliminaryDisposition, semanticRelationship.overrideFlags || {});
-    const intimacyAllowance = currentIntimacyGateAllows(targetState, preliminaryDisposition, preliminaryThreshold);
+    const preliminaryState = targetState
+        ? {
+            ...targetState,
+            establishedRelationship: targetState.establishedRelationship === 'Y' || (preliminaryDisposition.B === 4 && semanticRelationship.establishedRelationship === true) ? 'Y' : 'N',
+        }
+        : {
+            establishedRelationship: preliminaryDisposition.B === 4 && semanticRelationship.establishedRelationship === true ? 'Y' : 'N',
+        };
+    const intimacyAllowance = currentIntimacyGateAllows(preliminaryState, preliminaryDisposition, preliminaryThreshold);
     const intimacyConsent = ['IntimacyAdvancePhysical', 'IntimacyAdvanceVerbal'].includes(goal)
         && intimacyAllowance.allows
         ? 'Y'
@@ -504,7 +512,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             audit.push(`3.3d initPreset.activeEnemy=${yn(effectiveInitFlags.activeEnemy)}`);
             audit.push(`3.3e initPreset.romanticOpen=${yn(effectiveInitFlags.romanticOpen)}`);
             audit.push(`3.3f initPreset.userBadRep=${yn(effectiveInitFlags.userBadRep)}`);
-            audit.push(`3.3g initPreset.userGoodRep=${yn(effectiveInitFlags.userGoodRep)}`);
+            audit.push(`3.3g initPreset.priorUserGoodRep=${yn(effectiveInitFlags.priorUserGoodRep)}`);
             audit.push(`3.3h initPreset.userNonHuman=${yn(effectiveInitFlags.userNonHuman)} fearImmunity=${yn(effectiveInitFlags.fearImmunity)}`);
             audit.push(`3.3i initPreset=${init.label}`);
             audit.push(`3.3j currentDisposition=${formatDisposition(currentDisposition)}`);
@@ -590,7 +598,9 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
 
         const classified = classifyDisposition(currentDisposition);
         const threshold = checkThreshold(currentDisposition, sem.overrideFlags || {});
-        const resolvedGate = resolveIntimacyGate(state, threshold, currentDisposition, isAllowed, resolutionPacket.GOAL);
+        const establishedRelationship = state.establishedRelationship === 'Y' || (currentDisposition.B === 4 && sem.establishedRelationship === true) ? 'Y' : 'N';
+        const relationshipStateForGate = { ...state, establishedRelationship };
+        const resolvedGate = resolveIntimacyGate(relationshipStateForGate, threshold, currentDisposition, isAllowed, resolutionPacket.GOAL);
         const intimacyGate = resolvedGate.IntimacyGate;
         const intimacyGateSource = resolvedGate.IntimacyGateSource;
         const persistedGate = intimacyGate !== 'SKIP' && intimacyGateSource !== 'CURRENT_DENIED'
@@ -600,6 +610,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
 
         audit.push(`3.6 classifyDisposition=${compact(classified)}`);
         audit.push(`3.6a checkThreshold=${compact(threshold)}`);
+        audit.push(`3.6a.1 establishedRelationship=${establishedRelationship}`);
         audit.push(`3.6b IntimacyGate=${intimacyGate}`);
         audit.push(`3.6c IntimacyGateSource=${intimacyGateSource}`);
         audit.push(`3.6d persistedIntimacyGate=${persistedGate}`);
@@ -613,6 +624,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             Target: target,
             NPC_STAKES: npcStakes,
             Override: threshold.Override,
+            EstablishedRelationship: establishedRelationship,
             Landed: landedBool(resolutionPacket.LandedActions) ? 'Y' : 'N',
             OutcomeTier: resolutionPacket.OutcomeTier || 'NONE',
             NarrationBand: resolutionPacket.Outcome || 'standard',
@@ -637,6 +649,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             currentDisposition,
             currentRapport,
             rapportEncounterLock,
+            establishedRelationship,
             intimacyGate: persistedGate,
             intimacyGateSource: persistedGateSource,
             currentCoreStats: coreStats,

@@ -62,8 +62,7 @@ function ResolutionEngine(input) {
   checkIntimacyGate(finalGoal, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: if finalGoal=IntimacyAdvancePhysical or finalGoal=IntimacyAdvanceVerbal, read exact target NPC entry in latest sceneTracker
-    rule: return Y if B>=4 under currentDisposition OR IntimacyGate=ALLOW
-    rule: return Y if current explicit RelationshipEngine checkThreshold would produce OverrideActive=Y and no F/H lock blocks it
+    rule: return Y only if current explicit RelationshipEngine checkThreshold would produce OverrideActive=Y and no F/H lock blocks it, or the NPC already has an active established intimacy gate from prior explicit acceptance
     else -> N
 
   hasStakes(input, finalGoal, challenge, targets, IntimacyConsent, context):
@@ -208,22 +207,24 @@ function RelationshipEngine(npc, resolutionPacket) {
     rule: currentRapport = valid 0-5 ? exact value : 0
     rule: rapportEncounterLock = valid Y/N ? exact value : N
     rule: intimacyGate = valid ALLOW/DENY ? exact value : SKIP
+    rule: establishedRelationship = valid Y/N ? exact value : N
     rule: hostilePressure = valid number ? exact value : 0
     rule: hostileLandedPressure = valid number ? exact value : 0
     rule: dominantLock = valid FEAR/HOSTILITY/None ? exact value : None
     rule: pressureMode = valid none/cornered/dominated ? exact value : none
-    return {currentDisposition, currentRapport, rapportEncounterLock, intimacyGate, hostilePressure, hostileLandedPressure, dominantLock, pressureMode}
+    return {currentDisposition, currentRapport, rapportEncounterLock, intimacyGate, establishedRelationship, hostilePressure, hostileLandedPressure, dominantLock, pressureMode}
 
   initPreset():
     policy: EO, FYW
     rule: use only if currentDisposition is missing
-    rule: NPC has explicit fear immunity only if same or superior kind/nature, superior being, or explicit natural fear/mental immunity
+    rule: NPC has explicit fear immunity only if same or superior kind/nature, superior being, explicit natural fear/mental immunity, or the card/lore/scenario explicitly shows the NPC is an ancient, powerful, non-ordinary being who has faced horrors, monsters, curses, eldritch forces, or other supernatural threats and is portrayed as not meaningfully fearing them
     rule: title, rank, bravado, posturing, composure, masking fear, saving face, acting brave, or pretending to be fearless do NOT count as fear immunity
     if NPC is explicitly an active enemy of {{user}}, actively hostile, attacking, ambushing, robbing, hunting, threatening, capturing, fighting, or intentionally obstructing {{user}} with hostile intent -> {Label:activeEnemy,B:1,F:2,H:4}
     rule: archetype or label alone is not activeEnemy. "bandit", "enemy soldier", "criminal", "orc", "monster", or similar only counts if the scene/card/lore explicitly shows active hostile intent toward {{user}} now.
     if NPC is already romantically/intimately involved with {{user}}, willing/open toward {{user}}, or in love -> {Label:romanticOpen,B:4,F:1,H:1}
     if {{user}} is hated, distrusted, wanted, or bad-reputation -> {Label:userBadRep,B:1,F:2,H:3}
-    if {{user}} is admired, trusted, praised, good-reputation, or already known favorably -> {Label:userGoodRep,B:3,F:1,H:2}
+    rule: first encounter kindness, opening-scene rescue, courtesy, friendliness, praise, or a warm first impression do NOT count as prior favorable reputation
+    if {{user}} is explicitly shown by prior lore, card, scenario, or tracked history to have an established favorable reputation with this NPC that predates the current scene -> {Label:priorUserGoodRep,B:3,F:1,H:2}
     if {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like AND NPC lacks explicit fear immunity -> {Label:userNonHuman,B:1,F:3,H:2}
     else -> {Label:neutralDefault,B:2,F:2,H:2}
 
@@ -417,13 +418,19 @@ function RelationshipEngine(npc, resolutionPacket) {
   checkThreshold(currentDisposition):
     LockActive = (currentDisposition.F>=3 || currentDisposition.H>=3) ? Y : N
     Override = NONE
-    if currentDisposition.B<4:
-      if NPC explicitly naive, trapped, dependent, coerced, powerless, or exploitable by {{user}} -> Override = Exploitation
-      else if NPC explicitly sexually open, pleasure-seeking, casual, or promiscuous -> Override = Hedonist
-      else if NPC explicitly willing to exchange intimacy for money, goods, favors, protection, status, or services -> Override = Transactional
-      else if NPC explicitly already intimate with {{user}} or specifically receptive toward {{user}} -> Override = Established
+    if NPC explicitly naive, trapped, dependent, coerced, powerless, or exploitable by {{user}} -> Override = Exploitation
+    else if NPC explicitly sexually open, pleasure-seeking, casual, or promiscuous -> Override = Hedonist
+    else if NPC explicitly willing to exchange intimacy for money, goods, favors, protection, status, or services -> Override = Transactional
+    else if NPC explicitly already intimate with {{user}} or specifically receptive toward {{user}} -> Override = Established
     OverrideActive = Override!=NONE ? Y : N
     return {LockActive, OverrideActive, Override}
+
+  checkEstablishedRelationship(currentDisposition, context):
+    policy: LOCKED, EXPLICIT-ONLY
+    rule: return Y only if currentDisposition.B=4 AND the latest sceneTracker already has establishedRelationship=Y, or the current explicit scene shows a direct romantic/love/relationship declaration or request from {{user}} to this NPC accepted by the NPC, or from this NPC to {{user}} accepted by {{user}}
+    rule: declaration/request must establish an actual romantic relationship, partnership, lovers status, dating/courting bond, or equivalent committed romantic connection
+    rule: flirting, attraction, arousal, sex, prior intimacy, affection, kindness, trust, loyalty, closeness, friendship, gratitude, protectiveness, or B4 alone does NOT count
+    else -> N
 
   execution:
     if npc not in resolutionPacket.NPCInScene -> return uninitialized handoff
@@ -436,7 +443,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     update disposition and apply rapport reset if present
     if hostilePressureResult.dominatedFearBreak=Y and currentDisposition.F>=4 and currentDisposition.H>=3 -> lower currentDisposition.H by 1
     save currentRapport, rapportEncounterLock, hostilePressure, hostileLandedPressure, dominantLock, and pressureMode to sceneTracker
-    classify disposition, resolve threshold/override, and determine intimacy gate
+    classify disposition, resolve threshold/override, check establishedRelationship, and determine intimacy gate
     save intimacy gate when ALLOW or DENY
     RelationToUserAction = {isDirect, isOpp, isBenefited, isHarmed}
     return NPC handoff including HostilePressure, HostileLandedPressure, DominantLock, PressureMode, and RelationToUserAction
@@ -900,7 +907,7 @@ export function initPreset(flags) {
     if (bool(flags.activeEnemy)) return { label: 'activeEnemy', disposition: { B: 1, F: 2, H: 4 } };
     if (bool(flags.romanticOpen)) return { label: 'romanticOpen', disposition: { B: 4, F: 1, H: 1 } };
     if (bool(flags.userBadRep)) return { label: 'userBadRep', disposition: { B: 1, F: 2, H: 3 } };
-    if (bool(flags.userGoodRep)) return { label: 'userGoodRep', disposition: { B: 3, F: 1, H: 2 } };
+    if (bool(flags.priorUserGoodRep)) return { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 2 } };
     if (bool(flags.userNonHuman) && !bool(flags.fearImmunity)) return { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
     return { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } };
 }
@@ -1234,12 +1241,10 @@ export function classifyDisposition(disposition) {
 export function checkThreshold(disposition, flags) {
     const LockActive = disposition.F >= 3 || disposition.H >= 3 ? 'Y' : 'N';
     let Override = 'NONE';
-    if (disposition.B < 4) {
-        if (bool(flags.Exploitation)) Override = 'Exploitation';
-        else if (bool(flags.Hedonist)) Override = 'Hedonist';
-        else if (bool(flags.Transactional)) Override = 'Transactional';
-        else if (bool(flags.Established)) Override = 'Established';
-    }
+    if (bool(flags.Exploitation)) Override = 'Exploitation';
+    else if (bool(flags.Hedonist)) Override = 'Hedonist';
+    else if (bool(flags.Transactional)) Override = 'Transactional';
+    else if (bool(flags.Established)) Override = 'Established';
     return { LockActive, OverrideActive: Override !== 'NONE' ? 'Y' : 'N', Override };
 }
 
@@ -1248,19 +1253,21 @@ export function currentIntimacyGateAllows(state, disposition = state?.currentDis
         return { allows: false, source: 'LOCK', evidence: { currentDisposition: disposition ? formatDisposition(disposition) : null } };
     }
 
+    if (disposition?.B === 4 && state?.establishedRelationship === 'Y') {
+        return { allows: true, source: 'ESTABLISHED_RELATIONSHIP', evidence: { establishedRelationship: 'Y', currentDisposition: formatDisposition(disposition) } };
+    }
+
     if (state?.intimacyGate === 'ALLOW') {
-        if (state?.intimacyGateSource === 'B4' && disposition?.B < 4) {
-            return { allows: false, source: 'B4_EXPIRED', evidence: { currentDisposition: disposition ? formatDisposition(disposition) : null } };
+        if (state?.intimacyGateSource === 'B4') {
+            return { allows: false, source: 'B4_DISABLED', evidence: { currentDisposition: disposition ? formatDisposition(disposition) : null } };
         }
-        return { allows: true, source: state?.intimacyGateSource || 'PRIOR_ALLOW', evidence: { priorIntimacyGate: state?.intimacyGate || 'ALLOW' } };
+        if (String(state?.intimacyGateSource || '').startsWith('OVERRIDE:')) {
+            return { allows: true, source: state.intimacyGateSource, evidence: { priorIntimacyGate: state.intimacyGate, priorIntimacyGateSource: state.intimacyGateSource } };
+        }
     }
 
     if (threshold?.OverrideActive === 'Y') {
         return { allows: true, source: `OVERRIDE:${threshold.Override}`, evidence: threshold };
-    }
-
-    if (disposition?.B >= 4) {
-        return { allows: true, source: 'B4', evidence: { currentDisposition: formatDisposition(disposition) } };
     }
 
     return { allows: false, source: 'NONE', evidence: { currentDisposition: disposition ? formatDisposition(disposition) : null } };
@@ -1312,12 +1319,16 @@ export function resolveIntimacyGate(previousState, threshold, disposition, isAll
         return { IntimacyGate: 'DENY', IntimacyGateSource: 'LOCK' };
     }
 
+    if (disposition?.B === 4 && previousState?.establishedRelationship === 'Y') {
+        return { IntimacyGate: 'ALLOW', IntimacyGateSource: 'ESTABLISHED_RELATIONSHIP' };
+    }
+
     if (isAllowed === 'Y') {
+        if (previousState?.establishedRelationship === 'Y') {
+            return { IntimacyGate: 'ALLOW', IntimacyGateSource: 'ESTABLISHED_RELATIONSHIP' };
+        }
         if (threshold.OverrideActive === 'Y') {
             return { IntimacyGate: 'ALLOW', IntimacyGateSource: `OVERRIDE:${threshold.Override}` };
-        }
-        if (disposition.B >= 4) {
-            return { IntimacyGate: 'ALLOW', IntimacyGateSource: 'B4' };
         }
         return { IntimacyGate: 'ALLOW', IntimacyGateSource: previousState.intimacyGateSource || 'PRIOR_ALLOW' };
     }
@@ -1326,15 +1337,15 @@ export function resolveIntimacyGate(previousState, threshold, disposition, isAll
         return { IntimacyGate: 'ALLOW', IntimacyGateSource: `OVERRIDE:${threshold.Override}` };
     }
 
-    if (disposition.B >= 4) {
-        return { IntimacyGate: 'ALLOW', IntimacyGateSource: 'B4' };
-    }
-
     if (previousState.intimacyGate === 'ALLOW') {
-        if (previousState.intimacyGateSource === 'B4' && disposition.B < 4) {
-            return { IntimacyGate: 'SKIP', IntimacyGateSource: 'NONE' };
+        if (previousState.intimacyGateSource === 'B4') {
+            return isIntimacyAdvance
+                ? { IntimacyGate: 'DENY', IntimacyGateSource: 'CURRENT_DENIED' }
+                : { IntimacyGate: 'SKIP', IntimacyGateSource: 'NONE' };
         }
-        return { IntimacyGate: 'ALLOW', IntimacyGateSource: previousState.intimacyGateSource || 'PRIOR_ALLOW' };
+        if (String(previousState.intimacyGateSource || '').startsWith('OVERRIDE:')) {
+            return { IntimacyGate: 'ALLOW', IntimacyGateSource: previousState.intimacyGateSource };
+        }
     }
 
     if (previousState.intimacyGate === 'DENY') {
@@ -1545,6 +1556,7 @@ export function normalizeTrackerEntry(value) {
         rapportEncounterLock: value?.rapportEncounterLock === 'Y' ? 'Y' : 'N',
         intimacyGate: ['ALLOW', 'DENY', 'SKIP'].includes(value?.intimacyGate) ? value.intimacyGate : 'SKIP',
         intimacyGateSource: normalizeIntimacyGateSource(value?.intimacyGateSource),
+        establishedRelationship: value?.establishedRelationship === 'Y' ? 'Y' : 'N',
         currentCoreStats: value?.currentCoreStats ? normalizeCore(value.currentCoreStats, { PHY: 1, MND: 1, CHA: 1 }) : null,
         hostilePressure: clamp(Number(value?.hostilePressure ?? 0), 0, 20),
         hostileLandedPressure: clamp(Number(value?.hostileLandedPressure ?? 0), 0, 20),
@@ -1620,7 +1632,7 @@ export function normalizePersistenceTier(value) {
 
 export function normalizeIntimacyGateSource(value) {
     const text = String(value ?? 'NONE');
-    if (text === 'B4' || text === 'LOCK' || text === 'NONE' || text === 'PRIOR_ALLOW' || text === 'PRIOR_DENY' || text === 'CURRENT_DENIED') return text;
+    if (text === 'B4' || text === 'LOCK' || text === 'NONE' || text === 'PRIOR_ALLOW' || text === 'PRIOR_DENY' || text === 'CURRENT_DENIED' || text === 'ESTABLISHED_RELATIONSHIP') return text;
     if (text.startsWith('OVERRIDE:')) return text;
     return 'NONE';
 }
