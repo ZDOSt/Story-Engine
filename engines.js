@@ -358,8 +358,15 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   newEncounterExplicit():
     policy: EO, FYW
-    rule: return Y if this specific NPC is being encountered for the first time, OR if a significant period of time elapsed since the last encounter with this NPC: overnight sleep, significant downtime, a new day, or extended separation
-    rule: return N if this same NPC is being revisited during the same day/outing, if they were only left briefly and then re-approached, or if the text only describes future intent, plans, or a brief interruption
+    rule: this is per specific NPC, not global
+    rule: return Y if ANY of the following apply:
+      - This specific NPC is being encountered for the first time.
+      - The current scene takes place on a later day than the last interaction with this NPC.
+      - At least one night has passed since the last interaction with this NPC, including "next day", "next morning", "after another night passes", overnight sleep/rest, or similar.
+      - {{user}} and this NPC are living, traveling, resting, camping, or adventuring together, and a new day/overnight rest has occurred before the current interaction.
+      - {{user}} and this NPC were separated, and they interact again on a new day or after significant downtime.
+    rule: OOC/proxy scene framing like ((The next day, I help her...)) counts as current scene fact if it states elapsed time
+    rule: return N if this same NPC is being revisited during the same day/outing, if they were only left briefly and then re-approached, if the scene is continuous, or if the text only describes future intent, plans, promises, or a brief interruption
     else -> N
 
   updateRapport(currentRapport, target, rapportEncounterLock):
