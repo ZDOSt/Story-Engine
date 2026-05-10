@@ -290,7 +290,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}) {
                 aggressionAudit,
             ].filter(Boolean).join('/');
         }).join(';') || 'none';
-    const proactivityGuide = buildProactivityGuide(handoff.proactivityResults ?? {});
+    const proactivityGuide = buildProactivityGuide(handoff.proactivityResults ?? {}, handoff.aggressionResults ?? {});
 
     const aggressionText = Object.entries(handoff.aggressionResults ?? {}).map(([name, value]) =>
         `${name}/${value.AttackType ?? 'Attack'}/${value.ReactionOutcome}/target:${value.ProactivityTarget ?? '{{user}}'}/bonus:${value.CounterBonus ?? 0}/margin:${value.Margin}/npcImpair:${npcImpairmentSummary(value.NPCImpairment)}/targetDefenseImpair:${userImpairmentSummary(value.TargetImpairment || value.UserImpairment)}`,
@@ -309,7 +309,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}) {
 
     const result = naturalOutcomeSummary(resolution);
     const rollAudit = rollAuditFromResultLine(handoff.resultLine, resolution);
-    const bindingDirective = buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury });
+    const bindingDirective = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }));
 
     return {
         userAction,
@@ -406,6 +406,15 @@ function relationshipNarrationGuide(npc) {
     return `${behavior} ${target}${boundary}`.trim();
 }
 
+function cleanNarratorDirective(text) {
+    return String(text ?? '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s+\./g, '.')
+        .replace(/\.{2,}/g, '.')
+        .replace(/\s+,/g, ',')
+        .trim();
+}
+
 function behaviorNarrationGuide(behavior) {
     switch (behavior) {
         case 'TERROR':
@@ -452,7 +461,7 @@ function buildChaosGuide(chaos) {
     const magnitude = chaosMagnitudeGuide(chaos.magnitude);
     const anchor = chaosAnchorGuide(chaos.anchor);
     const vector = chaosVectorGuide(chaos.vector);
-    return `Brief chaos beat: ${band} ${magnitude} Anchor it to ${anchor}; source/vector: ${vector}. Choose the concrete implementation freely in scene prose, but do not override the main outcome, gates, aggression, injuries, or relationship results, and do not invent extra mechanics.`;
+    return `Add a brief unexpected scene beat: ${band} ${magnitude} Anchor it to ${anchor}. Its source should be ${vector}. Choose the concrete implementation freely in scene prose, but do not override the main outcome, consent limits, attacks, injuries, or relationship results, and do not invent extra mechanics.`;
 }
 
 function chaosBandGuide(band) {
@@ -633,15 +642,15 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const intimacyAllowed = isIntimacyAdvance
         && !intimacyDenied
         && (resolution.IntimacyConsent === 'Y' || resolution.STAKES === 'N' || gate === 'ALLOW');
-    const chaosNote = chaosText !== 'none' ? ` Include the Chaos Guide as a brief scene beat without changing that gate result: ${chaosGuide}` : '';
+    const chaosNote = chaosText !== 'none' ? ` ${chaosGuide}` : '';
     const aggressionNote = aggressionText !== 'none'
-        ? ` Then narrate this NPC aggression result exactly: ${aggressionGuide}`
+        ? ` ${aggressionGuide}`
         : '';
     const proactiveNote = aggressionText === 'none' && proactiveText !== 'none'
-        ? ' Then let the listed proactive NPC action happen only as denial, boundary, refusal, retreat, resistance, or escalation consistent with the gate.'
+        ? ' Let the NPC initiative appear only as denial, boundary, refusal, retreat, resistance, or escalation consistent with the consent limit.'
         : '';
     const naturalProactiveNote = proactiveText !== 'none'
-        ? ` Then include the Proactivity Guide as a present scene beat: ${proactivityGuide}. Render it naturally through the NPC's personality, body language, speech, and setting. If no Aggression result is listed, do not invent a resolved NPC hit.`
+        ? ` In the same beat, include this NPC initiative: ${proactivityGuide} Render it naturally through personality, body language, speech, and setting. If no attack result is listed, do not invent a resolved NPC hit.`
         : '';
     const boundaryNote = resolution.classifyPhysicalBoundaryPressure === 'Y'
         ? ' Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance without inventing a landed attack.'
@@ -656,13 +665,13 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
 
     if (intimacyDenied) {
         if (goal === 'IntimacyAdvancePhysical') {
-            return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} IntimacyGate=DENY: any successful physical attempt may land or create contact/positioning, but ${npcName} does not cooperate, reciprocate, or become willing; narrate rejection, recoil, pushing away, rebuke, resistance, flight, or escalation according to this NPC guidance: ${npcGuide}${aggressionNote}${proactiveNote}${chaosNote}${nameInstruction}`;
+            return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Consent is denied: any successful physical attempt may land or create contact or positioning, but ${npcName} does not cooperate, reciprocate, or become willing. Narrate rejection, recoil, pushing away, rebuke, resistance, flight, or escalation with this behavior: ${npcGuide}${aggressionNote}${proactiveNote}${chaosNote}${nameInstruction}`;
         }
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} IntimacyGate=DENY: any successful verbal attempt may affect ${npcName}, but the request is refused; narrate a boundary, rebuke, annoyance, anger, fear, or refusal according to this NPC guidance: ${npcGuide} Never narrate compliance with the intimacy request.${aggressionNote}${proactiveNote}${chaosNote}${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Consent is denied: any successful verbal attempt may affect ${npcName}, but the request is refused. Narrate a boundary, rebuke, annoyance, anger, fear, or refusal with this behavior: ${npcGuide} Never narrate compliance with the intimacy request.${aggressionNote}${proactiveNote}${chaosNote}${nameInstruction}`;
     }
 
     if (aggressionText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Then narrate this NPC aggression result exactly: ${aggressionGuide} Do not invent any user follow-up.${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} ${aggressionGuide} Do not invent any user follow-up.${nameInstruction}`;
     }
 
     if (proactiveText !== 'none') {
@@ -671,25 +680,25 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
 
     if (isIntimacyAdvance) {
         const gateText = intimacyAllowed
-            ? `${npcName} may receive it according to the current gate and this NPC guidance: ${npcGuide}`
-            : `${npcName} refuses or sets a boundary because the intimacy gate is not allowing it`;
+            ? `${npcName} may receive it according to the current consent state and this behavior: ${npcGuide}`
+            : `${npcName} refuses or sets a boundary because consent is not allowing it`;
         return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} ${gateText}.${chaosNote}${nameInstruction}`;
     }
 
     if (resolution.STAKES === 'N') {
-        const chaosNote = chaosText !== 'none' ? ` and include the Chaos Guide as a brief scene event: ${chaosGuide}` : '';
-        return `The user action is ${userAction}; no roll is needed.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Keep ${npcName}'s response aligned with this NPC guidance: ${npcGuide} Do not invent hostility or extra mechanics${chaosNote}.${nameInstruction}`;
+        const chaosNote = chaosText !== 'none' ? ` ${chaosGuide}` : '';
+        return `The user action is ${userAction}; no roll is needed.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility or extra mechanics${chaosNote}.${nameInstruction}`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance according to this NPC guidance: ${npcGuide} Do not invent a landed attack.${chaosNote}${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance with this behavior: ${npcGuide} Do not invent a landed attack.${chaosNote}${nameInstruction}`;
     }
 
     if (chaosText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Include the Chaos Guide while keeping NPC state anchored to this NPC guidance: ${npcGuide}. ${chaosGuide}${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}${nameInstruction}`;
     }
 
-    return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Narrate the NPC response according to this NPC guidance: ${npcGuide} Use the listed targets.${nameInstruction}`;
+    return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Narrate the NPC response with this behavior: ${npcGuide} Keep targets limited to the named scene targets.${nameInstruction}`;
 }
 
 function nameGenerationGuide(nameGeneration) {
@@ -845,7 +854,7 @@ function isAggressionRollApplicableProactivity(value) {
     return ['ESCALATE_VIOLENCE', 'BOUNDARY_PHYSICAL', 'THREAT_OR_POSTURE'].includes(value.Intent);
 }
 
-function buildProactivityGuide(proactivity) {
+function buildProactivityGuide(proactivity, aggressionResults = {}) {
     const active = Object.entries(proactivity ?? {}).filter(([, value]) => value?.Proactive === 'Y');
     if (!active.length) return 'none';
 
@@ -858,21 +867,30 @@ function buildProactivityGuide(proactivity) {
         const target = value?.ProactivityTarget && value.ProactivityTarget !== '(none)'
             ? value.ProactivityTarget
             : '{{user}}';
-        const description = proactivityIntentDescription(intent, target);
+        const description = personalizeNpcInstruction(name, proactivityIntentDescription(intent, target));
         const noAttack = isAggressiveProactivityIntent(intent)
-            ? ' This may lead into Aggression only if an Aggression result is listed.'
+            ? (aggressionResults?.[name]
+                ? ' Use the listed attack result for any resolved hit.'
+                : ' Show only intent, pressure, motion, preparation, or interruption; no resolved hit occurs.')
             : ' This is not a resolved attack.';
         const relationshipLimit = isRomanceInitiativeIntent(intent)
             ? ' Do not establish a relationship unless acceptance happens in-scene; do not force intimacy.'
             : '';
         const partnerLimit = isPartnerInitiativeIntent(intent)
-            ? ` This is established-relationship behavior; keep it consistent with privacy, danger, urgency, mood, and the listed partner context (${value?.PartnerInitiativeContext ?? 'unknown'}).`
+            ? ' Keep it consistent with the established relationship, privacy, danger, urgency, and mood.'
             : '';
         const crisisAttackLimit = intent === 'Companion_Attack'
             ? ' This must target only the listed hostile target, never {{user}} or a bystander.'
             : '';
-        return `${name}/${intent}: ${description}${noAttack}${relationshipLimit}${partnerLimit}${crisisAttackLimit}`;
+        return `${description}${noAttack}${relationshipLimit}${partnerLimit}${crisisAttackLimit}`;
     }).join(' ');
+}
+
+function personalizeNpcInstruction(name, text) {
+    const npc = valueOrNone(name);
+    const prose = String(text ?? '').trim();
+    if (!prose) return `${npc} takes a proactive scene beat.`;
+    return prose.replace(/^NPC\b/, npc);
 }
 
 function proactivityIntentDescription(intent, target = '{{user}}') {
