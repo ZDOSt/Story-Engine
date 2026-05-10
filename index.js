@@ -16,8 +16,10 @@ const SETTINGS_KEY = 'structuredPreflightEngines';
 const SETTINGS_CONTAINER_ID = 'structured_preflight_settings_container';
 const ENGINE_PROMPT_KEY = 'structured_preflight_engines';
 const NARRATOR_PROMPT_KEY = 'structured_preflight_narrator_context';
-const WRITING_STYLE_PROMPT_KEY = 'structured_preflight_writing_style';
-const PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
+const WRITING_STYLE_PROMPT_KEY = 'structured_preflight_10_writing_style';
+const PROSE_RULES_PROMPT_KEY = 'structured_preflight_20_prose_rules';
+const LEGACY_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_writing_style';
+const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
@@ -872,7 +874,7 @@ function renderSettingsPanel() {
                         <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Prose Rules</button>
                         <button id="structured_preflight_reset_prose_rules" class="menu_button" type="button">Reset</button>
                     </summary>
-                    <small>Injected as SYSTEM context in the regular SillyTavern prompt stack after Main Prompt and Writing Style.</small>
+                    <small>Injected as SYSTEM context immediately after Writing Style in the regular SillyTavern prompt stack.</small>
                     <textarea id="structured_preflight_prose_rules_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
                 </details>
                 <details id="structured_preflight_final_reminder_drawer" data-structured-preflight-prompt-drawer>
@@ -1060,6 +1062,7 @@ function injectWritingStylePrompt() {
     if (!context?.setExtensionPrompt) {
         return;
     }
+    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
 
     const settings = getSettings();
     if (settings.writingStyleEnabled === false) {
@@ -1083,6 +1086,7 @@ function injectProseRulesPrompt() {
     if (!context?.setExtensionPrompt) {
         return;
     }
+    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
 
     const settings = getSettings();
     if (settings.proseRulesEnabled === false) {
@@ -3551,6 +3555,8 @@ export function onDisable() {
         delete context.extensionPrompts[NARRATOR_PROMPT_KEY];
         delete context.extensionPrompts[WRITING_STYLE_PROMPT_KEY];
         delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
+        delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
+        delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
     }
     if (state.subscribed && context?.eventSource && context?.eventTypes?.MESSAGE_RECEIVED) {
         removeEventHandler(context, context.eventTypes.MESSAGE_RECEIVED, prependComputedDebug);
