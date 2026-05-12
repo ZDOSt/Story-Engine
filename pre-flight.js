@@ -59,6 +59,7 @@ function buildReadableSemanticDebug(ledger) {
     const oppTargets = targets.OppTargets ?? {};
     const relationships = Array.isArray(ledger?.relationshipEngine) ? ledger.relationshipEngine : [];
     const chaos = ledger?.chaosSemantic ?? {};
+    const nameSemantic = ledger?.nameSemantic ?? {};
     const tracker = ledger?.trackerUpdateEngine ?? {};
     const userCore = ledger?.engineContext?.userCoreStats ?? {};
     const trackerNpcs = Array.isArray(ledger?.engineContext?.trackerRelevantNPCs)
@@ -111,7 +112,10 @@ function buildReadableSemanticDebug(ledger) {
         '',
         'chaosSemantic.sceneSummary=' + valueOrNone(chaos.sceneSummary),
         'trackerUpdateEngine=' + inline(tracker),
-        'nameSemantic=deterministic name pool',
+        'nameSemantic.selectedStyle=' + valueOrNone(nameSemantic.selectedStyle),
+        'nameSemantic.maleCandidates=' + list(nameSemantic.maleCandidates),
+        'nameSemantic.femaleCandidates=' + list(nameSemantic.femaleCandidates),
+        'nameSemantic.locationCandidates=' + list(nameSemantic.locationCandidates),
         'proactivitySemantic=deterministic cap 3',
     ];
 
@@ -352,11 +356,14 @@ function buildNarratorSummary(handoff, resolution, ledger = {}) {
 function rollAuditFromResultLine(resultLine, resolution) {
     if (resolution?.STAKES === 'N') return { rollUsed: 'none', rollFull: 'none', margin: 'none' };
     const text = String(resultLine ?? '').trim();
-    const marginMatch = text.match(/=\s*(-?\d+)\s*vs\s*1d20\(\d+\)(?:\s*\+\s*[A-Z]+\(\d+\))?(?:\s*\+\s*impairment\(-?\d+\))?\s*=\s*(-?\d+)/i);
-    const statMatch = text.match(/\+\s*(PHY|MND|CHA)\(\d+\).*?vs\s*1d20\(\d+\)(?:\s*\+\s*(PHY|MND|CHA)\(\d+\))?/i);
+    const marginMatch = text.match(/\((-?\d+)\s*-\s*[^)]+\)\s*$/)
+        || text.match(/=\s*(-?\d+)\s*vs\s*1d20\(\d+\)(?:\s*\+\s*(?:PHY|MND|CHA|ENV)\(\d+\))?(?:\s*\+\s*impairment\(-?\d+\))?\s*=\s*(-?\d+)/i);
+    const statMatch = text.match(/\+\s*(PHY|MND|CHA)\(\d+\).*?vs\s*1d20\(\d+\)(?:\s*\+\s*(PHY|MND|CHA|ENV)\(\d+\))?/i);
     const left = marginMatch ? Number(marginMatch[1]) : null;
-    const right = marginMatch ? Number(marginMatch[2]) : null;
-    const margin = Number.isFinite(left) && Number.isFinite(right) ? String(left - right) : 'unknown';
+    const right = marginMatch?.[2] !== undefined ? Number(marginMatch[2]) : null;
+    const margin = marginMatch?.[2] === undefined
+        ? (Number.isFinite(left) ? String(left) : 'unknown')
+        : (Number.isFinite(left) && Number.isFinite(right) ? String(left - right) : 'unknown');
     const userStat = statMatch?.[1] || 'USER';
     const oppStat = statMatch?.[2] || (text.includes('vs 1d20') ? 'ENV' : 'OPP');
     return {
@@ -614,7 +621,19 @@ function nameGenerationSummary(nameGeneration) {
     if (!nameGeneration?.namePool) {
         return 'none';
     }
-    return namePoolText(nameGeneration.namePool);
+    const style = valueOrNone(nameGeneration.style);
+    const candidates = nameGeneration.semanticCandidates
+        ? `; semanticCandidates: ${namePoolText(nameGeneration.semanticCandidates)}`
+        : '';
+    const replacements = Array.isArray(nameGeneration.replacements) && nameGeneration.replacements.length
+        ? `; replacements: ${nameGeneration.replacements.map(item => `${valueOrNone(item.bucket)}:${valueOrNone(item.name)}`).join(',')}`
+        : '; replacements: none';
+    const rejected = Array.isArray(nameGeneration.semanticRejected) && nameGeneration.semanticRejected.length
+        ? `; rejected: ${nameGeneration.semanticRejected.map(item => `${valueOrNone(item.bucket)}:${valueOrNone(item.name)}(${valueOrNone(item.reason)})`).join(',')}`
+        : '; rejected: none';
+    return style !== '(none)'
+        ? `style: ${style}${candidates}${rejected}${replacements}; final: ${namePoolText(nameGeneration.namePool)}`
+        : `${namePoolText(nameGeneration.namePool)}${candidates}${rejected}${replacements}`;
 }
 
 function readableActionDescription(semanticResolution, resolution) {
@@ -644,6 +663,7 @@ function targetSummary(resolution) {
 
 function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, userImpairment, npcImpairment }) {
     const outcome = naturalOutcomeSummary(resolution);
+    const partialActionInstruction = partialActionGuide(resolution);
     const primaryNpc = primaryNarrationNpc(handoff, resolution);
     const npcName = primaryNpc?.NPC || list(resolution.ActionTargets) || 'the NPC';
     const npcGuide = primaryNpc ? relationshipNarrationGuide(primaryNpc) : `Use the listed NPC state naturally: ${npcText}.`;
@@ -668,7 +688,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const injuryInstruction = `${inflictedNpcInstruction}${inflictedUserInstruction}${inflictedAggressionNpcInstruction}`;
 
     if (aggressionText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} ${aggressionGuide}${naturalProactiveNote} Do not invent any user follow-up.${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} ${aggressionGuide}${naturalProactiveNote} Do not invent any user follow-up.${nameInstruction}`;
     }
 
     if (intimacyBoundaryGuide.mode === 'DENY' && resolution.boundaryViolationExplicit !== 'Y') {
@@ -676,7 +696,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (proactiveText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${intimacyBoundaryGuide.text ? ` ${intimacyBoundaryGuide.text}` : ''}${naturalProactiveNote}${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${intimacyBoundaryGuide.text ? ` ${intimacyBoundaryGuide.text}` : ''}${naturalProactiveNote}${nameInstruction}`;
     }
 
     if (resolution.STAKES === 'N') {
@@ -688,18 +708,26 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (resolution.boundaryViolationExplicit === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} This is an explicit boundary violation or pressure past refusal; narrate refusal, guardedness, resistance, withdrawal, anger, fear, call for help, or escalation as fits this behavior: ${npcGuide}${aggressionNote}${chaosNote}${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} This is an explicit boundary violation or pressure past refusal; narrate refusal, guardedness, resistance, withdrawal, anger, fear, call for help, or escalation as fits this behavior: ${npcGuide}${aggressionNote}${chaosNote}${nameInstruction}`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance with this behavior: ${npcGuide} Do not invent a landed attack.${chaosNote}${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance with this behavior: ${npcGuide} Do not invent a landed attack.${chaosNote}${nameInstruction}`;
     }
 
     if (chaosText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}${nameInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}${nameInstruction}`;
     }
 
-    return `The user action is ${userAction}; resolve it as ${outcome}.${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Narrate the NPC response with this behavior: ${npcGuide} Keep targets limited to the named scene targets.${nameInstruction}`;
+    return `The user action is ${userAction}; resolve it as ${outcome}.${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Narrate the NPC response with this behavior: ${npcGuide} Keep targets limited to the named scene targets.${nameInstruction}`;
+}
+
+function partialActionGuide(resolution) {
+    const landed = Number(resolution?.LandedActions ?? 0);
+    const actionCount = Array.isArray(resolution?.actions) ? resolution.actions.length : 0;
+    if (!Number.isFinite(landed) || !actionCount || landed >= actionCount) return '';
+    if (landed <= 0) return ` None of the attempted actions land; do not narrate any user hit, injury, or successful contact unless another mechanic explicitly says so.`;
+    return ` Only ${landed} of ${actionCount} attempted action${actionCount === 1 ? '' : 's'} lands; narrate only the listed persistent injury/result as concrete impact, and have the remaining attempted actions miss, get checked, glance off, fail to connect, or be otherwise limited by the outcome.`;
 }
 
 function primaryNarrationNpc(handoff, resolution) {
@@ -774,7 +802,7 @@ function intimacyRefusalGuide(npc) {
 
 function nameGenerationGuide(nameGeneration) {
     if (!nameGeneration?.namePool) return '';
-    return ` If the narration introduces new unnamed people, entities, travelers, guards, villagers, enemies, merchants, witnesses, or bystanders, assign unused names from this deterministic person pool: male: ${list(nameGeneration.namePool.male)}; female: ${list(nameGeneration.namePool.female)}. If the narration introduces a new unnamed location, use an unused name from this deterministic location pool: ${list(nameGeneration.namePool.location)}. Do not rename existing named characters or places, and do not force a new introduction.`;
+    return ` If the narration introduces new unnamed people, entities, travelers, guards, villagers, enemies, merchants, witnesses, or bystanders, assign unused names from this approved person name pool: male: ${list(nameGeneration.namePool.male)}; female: ${list(nameGeneration.namePool.female)}. If the narration introduces a new unnamed location, use an unused name from this approved location name pool: ${list(nameGeneration.namePool.location)}. Do not rename existing named characters or places, and do not force a new introduction.`;
 }
 
 function namePoolText(pool = {}) {

@@ -103,6 +103,8 @@ function ResolutionEngine(input) {
     rule: if explicit means is positive social interaction such as persuasion, negotiation, diplomacy, bargaining, reconciliation, reassurance, or good-faith appeal against a living opposing target, USER=CHA and OPP=CHA
     rule: if explicit means is negative social interaction such as bluff, deception, intimidation, coercion, threat, blackmail, manipulation, interrogation, humiliation, or forced submission against a living opposing target, USER=CHA and OPP=MND
     rule: if OppTargets.NPC contains an opposing entity, determine opposing stat by applying DEF.STATS to that first OppTargets.NPC entity's resistance to {{user}}'s explicit means or finalGoal
+    rule: OPP=ENV is valid only for NON-LIVING opposition in OppTargets.ENV
+    rule: if a living ActionTarget is the stakes-bearing resisting/contested target, include that target in OppTargets.NPC and use a living opposing stat, never ENV
     rule: if OppTargets.NPC=[(none)] and OppTargets.ENV contains an obstacle, OPP=ENV
     return {USER, OPP}
 
@@ -532,17 +534,17 @@ function CHAOS_INTERRUPT(resolutionPacket, npcHandoffList, sceneSummary, diceLis
 function NameGenerationEngine(context) {
   const DEF = Object.freeze({
     EO:
-'DETERMINISTIC. Use context and the current chat name registry as truth.',
+'HYBRID. The semantic pass proposes names by selected style; deterministic validation uses context and the current chat name registry as truth.',
     FYW:
 'FIRST-YES-WINS. In ordered rule ladders, the first matching rule becomes final.',
     UNIVERSAL:
-'SINGLE-PASS. Generate a hidden deterministic pool of proper names. The narrator may use them only if it introduces a new unnamed person/entity/location.',
+'SINGLE-PASS. Produce a hidden approved pool of proper names: 3 male person/entity names, 3 female person/entity names, and 3 location names. The narrator may use them only if it introduces a new unnamed person/entity/location.',
     PURPOSE:
-'Prevent improvised model names from drifting by supplying a deterministic name pool. Do not force a new person or location into the scene.',
+'Prevent improvised model names from drifting by supplying a style-aware approved name pool. Do not force a new person or location into the scene.',
     SEED:
-'Seed is hidden deterministic entropy derived from fixed pool slots and context. It does NOT have to appear at the start of the final name.',
+'Seed is hidden deterministic fallback entropy derived from fixed pool slots and context. It does NOT have to appear at the start of a fallback name.',
     STYLE:
-'Invent creative, pronounceable, real-but-unplaceable names. Use deterministic curated syllable pools plus seed-driven phonotactic variation. Mix phonetic influence freely from East Asian, Polynesian, Caucasian, African, Mesoamerican, Turkic, Dravidian, and Uralic sound habits. Ban pure Western-European fantasy drift, Tolkien-esque elvish, stock fantasy/JRPG naming, and overly ordinary modern-Western names.',
+'Invent creative, pronounceable, real-but-unplaceable names matching the selected style. Avoid pure Western-European stock fantasy drift, Tolkien-esque elvish unless that style is selected, JRPG-generic naming, famous names, joke names, and overly ordinary modern-Western names.',
     SHAPE:
 'Append only pronounceable syllables. NO 3+ consecutive vowels. NO 3+ consecutive consonants. PERSON total length 5-10. LOCATION total length 7-14. LOCATION must feel geographic / compound / place-like and must not read like a person name.'
   });
@@ -553,12 +555,17 @@ function NameGenerationEngine(context) {
     if context contains any [soft,coast,island,harbor,reef,jungle,garden,ritual,temple,court,silk,trade,festival,rain] -> SOFT
     else -> BALANCED
 
-  buildName(mode, profile, gender, context, slotSeed):
+  generateSemanticCandidates(selectedStyle):
+    produce exactly 3 male person/entity names, 3 female person/entity names, and 3 location names
+    use selectedStyle as taste/style guidance
+    do not output fixed stock examples or famous names
+
+  buildFallbackName(mode, profile, gender, context, slotSeed):
     if mode=PERSON:
-      generate one person/entity name from deterministic syllable pools using slotSeed as hidden entropy
+      generate one fallback person/entity name from deterministic syllable pools using slotSeed as hidden entropy
       use compact call-name shape; gender affects weighting only, never hard stereotype
     else:
-      generate one location name from deterministic syllable pools using slotSeed as hidden entropy
+      generate one fallback location name from deterministic syllable pools using slotSeed as hidden entropy
       use geographic / compound / place-like syllable shape
 
   reject(name, mode):
@@ -576,10 +583,10 @@ function NameGenerationEngine(context) {
 
   execution:
     P = profileFromContext(context)
-    male = [buildName(PERSON, P, MALE, context, male-one), buildName(PERSON, P, MALE, context, male-two)]
-    female = [buildName(PERSON, P, FEMALE, context, female-one), buildName(PERSON, P, FEMALE, context, female-two)]
-    location = [buildName(LOCATION, P, NEUTRAL, context, location-one), buildName(LOCATION, P, NEUTRAL, context, location-two)]
-    reject/regenerate each candidate until valid and unused within the current chat registry, tracker names, and this pool
+    semanticCandidates = generateSemanticCandidates(selectedStyle)
+    accept semanticCandidates that pass reject(name, mode)
+    replace rejected/missing candidates with buildFallbackName(...)
+    reject/regenerate each final candidate until valid and unused within the current chat registry, tracker names, and this pool
     return {male, female, location}
 }
 ----------------
@@ -752,8 +759,9 @@ function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, di
     policy: LOCKED, DETERMINISTIC
     rule: applies only to companion crisis initiative during crisis remaps
     rule: never target {{user}}
-    rule: do not use ActionTargets or HarmedObservers as friendly attack targets
+    rule: do not use friendly/neutral ActionTargets, BenefitedObservers, or HarmedObservers as friendly attack targets
     if OppTargets.NPC has a valid hostile target not equal to acting NPC -> that NPC
+    else if ActionTargets has a valid hostile target not equal to acting NPC and that target's tracker/handoff state is hostile (H>=3, HATRED, or HOSTILITY lock) -> that NPC
     else -> (none), downgrade to support/protect/teamwork without attack roll
 
   proactivityTarget(handoff, resolutionPacket, intent):
@@ -822,8 +830,17 @@ function NPCAggressionResolution(proactivityResults, resolutionPacket, trackerSn
     if first resolutionPacket.OppTargets.NPC exists -> first resolutionPacket.OppTargets.NPC
     else -> first resolutionPacket.ActionTargets
 
+  reactiveCounterRecipient(counterTarget, proactivityResults):
+    if a companion/proactive NPC attacked counterTarget this turn -> target that attacking NPC
+    else -> {{user}}
+
+  companionCounterLimit:
+    if Companion_Attack targets an NPC and fails badly enough -> that target may make one immediate counterattack against the companion
+    do not create further chained counters from that counterattack
+
   isImmediateAttackIntent(intent):
     if current AttackType=ProactiveAttack -> Y only when intent=ESCALATE_VIOLENCE
+    if current AttackType=CompanionAttack -> Y only when intent=ESCALATE_VIOLENCE
     if current AttackType in [CounterAttack, Retaliation] -> Y when intent in [ESCALATE_VIOLENCE, BOUNDARY_PHYSICAL, THREAT_OR_POSTURE]
     else -> N
 
@@ -842,17 +859,18 @@ function NPCAggressionResolution(proactivityResults, resolutionPacket, trackerSn
     aggressive = NPCs with Proactive=Y, ProactivityTarget not (none), and isImmediateAttackIntent(Intent)=Y
     if attackType=CounterAttack and resolutionPacket.OutcomeTier!=Critical_Success:
       counterTarget = immediateCounterTarget(resolutionPacket)
-      if counterTarget exists and not already aggressive -> force counterTarget as {Proactive:Y,Intent:BOUNDARY_PHYSICAL,Impulse:ANGER,ProactivityTarget:{{user}},TargetsUser:Y,ProactivityTier:FORCED,ProactivityDie:20,Threshold:AUTO}
+      counterRecipient = reactiveCounterRecipient(counterTarget, proactivityResults)
+      if counterTarget exists and not already aggressive -> force counterTarget as {Proactive:Y,Intent:BOUNDARY_PHYSICAL,Impulse:ANGER,ProactivityTarget:counterRecipient,TargetsUser:Y only if counterRecipient={{user}},ProactivityTier:FORCED,ProactivityDie:20,Threshold:AUTO}
     FOR EACH aggressive NPC:
       npcCore = getCurrentCoreStats(NPC) from trackerUpdate or trackerSnapshot
-      userCore = getUserCoreStats()
+      targetCore = getUserCoreStats() if target={{user}} else target NPC currentCoreStats
       npcDie = 1d20
-      userDie = 1d20
+      targetDie = 1d20
       npcTotal = npcDie + npcCore.PHY + counterBonus
-      userTotal = userDie + userCore.PHY
-      margin = npcTotal - userTotal
+      targetTotal = targetDie + targetCore.PHY
+      margin = npcTotal - targetTotal
       ReactionOutcome = aggressionReactionOutcome(margin)
-      return AGGRESSION_RESULT {AttackType, AttackIntent, CounterPotential, CounterBonus, ReactionOutcome, Margin}
+      return AGGRESSION_RESULT {AttackType, AttackIntent, ProactivityTarget, CounterPotential, CounterBonus, ReactionOutcome, Margin}
 }`;
 
 // Executable engine rules are the deterministic source of truth used by deterministic-runner.js.
@@ -1900,9 +1918,10 @@ export function applyMapStatsHardRules(semantic, goal, targets, mapStats, audit,
     }
 
     const hasLivingOpposition = toRealArray(targets.OppTargets?.NPC).length > 0;
-    if (!hasLivingOpposition && oppStat !== 'ENV') {
+    const hasEnvironmentalOpposition = toRealArray(targets.OppTargets?.ENV).length > 0;
+    if (!hasLivingOpposition && hasEnvironmentalOpposition && oppStat !== 'ENV') {
         evidence.push({
-            hardRule: 'ResolutionEngine.mapStats: no living opposing target means OPP=ENV',
+            hardRule: 'ResolutionEngine.mapStats: non-living environmental opposition means OPP=ENV only when no living opposing target exists',
             from: { USER: userStat, OPP: oppStat },
             to: { USER: userStat, OPP: 'ENV' },
         });

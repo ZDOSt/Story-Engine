@@ -15,6 +15,7 @@ const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wo
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
 const DISABLE_THINKING_INCLUDE_BODY = 'thinking:\n  type: disabled';
+const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -23,8 +24,8 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
 
     const playerTrackerSnapshot = options?.playerTrackerSnapshot || {};
     const prompt = options?.assembledPrompt
-        ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot)
-        : buildSemanticPrompt(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot);
+        ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, options)
+        : buildSemanticPrompt(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, options);
     const responseLength = Number.isFinite(options?.responseLength) && options.responseLength > 0
         ? options.responseLength
         : estimateSemanticResponseLength(trackerSnapshot);
@@ -442,7 +443,7 @@ function buildSemanticToolPrompt(prompt) {
         `MANDATORY OUTPUT CONTRACT: Call the function tool ${SEMANTIC_TOOL_NAME} exactly once.`,
         'Do not output narration, prose, markdown, visible JSON, or a compact text ledger.',
         'Fill every required tool argument from the semantic/contextual engine outputs.',
-        'The tool argument paths mirror the engine function names: resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.mapStats = ResolutionEngine.mapStats, relationshipEngine[index] = RelationshipEngine(npc), and chaosSemantic = CHAOS_INTERRUPT.',
+        'The tool argument paths mirror the engine function names: resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.mapStats = ResolutionEngine.mapStats, relationshipEngine[index] = RelationshipEngine(npc), chaosSemantic = CHAOS_INTERRUPT, and nameSemantic = NameGenerationEngine candidates.',
         'Use empty arrays for no targets/obstacles/observers. Use "none" string values only for enum/string fields that require none.',
         'engineContext.trackerRelevantNPCs may be an empty array; the extension already has the canonical tracker snapshot locally.',
         'The compact ledger wording elsewhere in the prompt is the fallback representation of the same fields; for this request, the forced tool call is the only valid output.',
@@ -585,7 +586,7 @@ function buildSemanticPreflightSchema() {
     return {
         type: 'object',
         additionalProperties: false,
-        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'trackerUpdateEngine', 'chaosSemantic'],
+        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic'],
         properties: {
             engineContext: {
                 type: 'object',
@@ -751,6 +752,17 @@ function buildSemanticPreflightSchema() {
                     sceneSummary: { type: 'string' },
                 },
             },
+            nameSemantic: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['selectedStyle', 'maleCandidates', 'femaleCandidates', 'locationCandidates'],
+                properties: {
+                    selectedStyle: { type: 'string' },
+                    maleCandidates: { type: 'array', items: { type: 'string' } },
+                    femaleCandidates: { type: 'array', items: { type: 'string' } },
+                    locationCandidates: { type: 'array', items: { type: 'string' } },
+                },
+            },
         },
     };
 }
@@ -865,6 +877,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- TrackerUpdateEngine NPC personalitySummary is optional stable personality memory. Use a concise 8-20 word phrase only when the scene clearly reveals enduring traits or interaction style for that NPC. Do not write mood, temporary emotion, injuries, relationship state, attraction, fear/hostility level, or what happened this turn. If no stable trait is clear, use unchanged.',
     '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory is not tracked. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
+    '- NameGenerationEngine semantic lines are candidate generation only. Generate exactly 3 male person/entity names, 3 female person/entity names, and 3 location names matching the selected style line. Make them creative, readable, pronounceable, and real-but-unplaceable. Avoid Western stock fantasy, Tolkien/JRPG drift, ordinary modern names, famous names, joke names, and letter soup. These are candidates only; deterministic validation may reject, repair, or replace them before narration.',
     '- Do not output primaryOppTarget or primaryOpposition. The only opposing living target list is identifyTargets.OppTargets.NPC.',
     '- If you cannot find explicit evidence, use the engine default for that line; never invent missing facts.',
 ].join('\n');
@@ -914,6 +927,10 @@ TrackerUpdateEngine.User.commitmentsAdd=(none)
 TrackerUpdateEngine.User.commitmentsRemove=(none)
 TrackerUpdateEngine.NPC.count=0
 CHAOS_INTERRUPT.sceneSummary=short scene summary
+NameGenerationEngine.selectedStyle=Balanced Fantasy
+NameGenerationEngine.maleCandidates=(none)
+NameGenerationEngine.femaleCandidates=(none)
+NameGenerationEngine.locationCandidates=(none)
 END_SEMANTIC_PREFLIGHT
 ${SEMANTIC_PREFLIGHT_STOP_SENTINEL}`;
 
@@ -1046,11 +1063,12 @@ function compactTrackerForPostReply(snapshot = {}) {
     };
 }
 
-function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTrackerSnapshot = {}) {
+function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTrackerSnapshot = {}, options = {}) {
     const chatContext = formatChatContext(coreChat);
     const userName = context.name1 || 'User';
     const charName = context.name2 || 'Assistant';
     const cardContext = formatCardContext(context);
+    const compactTemplate = semanticCompactTemplateForOptions(options);
 
     return [
         {
@@ -1073,21 +1091,22 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTra
         {
             role: 'system',
             content:
-                buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot),
+                buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot, options),
         },
         {
             role: 'user',
             content:
                 `MANDATORY OUTPUT CONTRACT: Return one compact ledger block with these exact field names, then ${SEMANTIC_PREFLIGHT_STOP_SENTINEL} on its own final line. Do not output anything before BEGIN_SEMANTIC_PREFLIGHT or after ${SEMANTIC_PREFLIGHT_STOP_SENTINEL}. Your first visible output token must be BEGIN_SEMANTIC_PREFLIGHT.\n` +
-                COMPACT_LEDGER_TEMPLATE,
+                compactTemplate,
         },
     ];
 }
 
-function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trackerSnapshot, playerTrackerSnapshot = {}) {
+function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trackerSnapshot, playerTrackerSnapshot = {}, options = {}) {
     const userName = context.name1 || 'User';
     const charName = context.name2 || 'Assistant';
     const assembledMessages = normalizeAssembledPromptMessages(assembledChat);
+    const compactTemplate = semanticCompactTemplateForOptions(options);
 
     return [
         {
@@ -1104,19 +1123,25 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
         ...assembledMessages,
         {
             role: 'system',
-            content: buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot),
+            content: buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot, options),
         },
         {
             role: 'user',
             content:
                 `MANDATORY OUTPUT CONTRACT: Return one compact ledger block with these exact field names, then ${SEMANTIC_PREFLIGHT_STOP_SENTINEL} on its own final line. Do not output anything before BEGIN_SEMANTIC_PREFLIGHT or after ${SEMANTIC_PREFLIGHT_STOP_SENTINEL}. Your first visible output token must be BEGIN_SEMANTIC_PREFLIGHT.\n` +
-                COMPACT_LEDGER_TEMPLATE,
+                compactTemplate,
         },
     ];
 }
 
-function buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot = {}) {
-    return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
+function semanticCompactTemplateForOptions(options = {}) {
+    const nameStyle = normalizeNameStyleOption(options?.nameStyle || DEFAULT_NAME_STYLE);
+    return COMPACT_LEDGER_TEMPLATE.replace('NameGenerationEngine.selectedStyle=Balanced Fantasy', `NameGenerationEngine.selectedStyle=${nameStyle}`);
+}
+
+function buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot = {}, options = {}) {
+    const nameStyle = normalizeNameStyleOption(options?.nameStyle || DEFAULT_NAME_STYLE);
+    return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nSelected name style=${nameStyle}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
         'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
@@ -1137,6 +1162,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. Do not output initPreset flags; initial disposition is deterministic from tracker metadata/current hostile targets/persona race. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. ' +
+        `Execute NameGenerationEngine as semantic candidate generation only: selectedStyle must be "${nameStyle}", maleCandidates must contain exactly 3 male person/entity names, femaleCandidates exactly 3 female person/entity names, and locationCandidates exactly 3 location names. Follow the selected style and naming rules in the engine reference. Do not use fixed stock names, ordinary modern-Western names, famous names, jokes, or letter soup. Deterministic code will validate and expose only the approved final pool. ` +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
         'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
         'Use condition=unchanged unless the latest user input or immediate visible context explicitly establishes a completed/current health state as healthy, bruised, wounded, badly_wounded, critical, or dead. Do not set condition from a desired/requested future injury or from an attempted action before narration confirms the result. ' +
@@ -1144,7 +1170,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Do not mark wounds/status/condition from requested, intended, commanded, allowed, promised, predicted, or pending attempted actions before deterministic resolution; only track state already explicit as current/completed in context. ' +
         'Do not track momentary pain, impact, knockdown, stagger, breath loss, winded reaction, or temporary shock as wounds/status/condition unless an ongoing injury or continuing status is explicitly stated. ' +
         'For NPC personalitySummary, write only a short stable trait summary when explicit card/context or the scene clearly reveals enduring temperament or interaction style; otherwise leave unchanged. Do not summarize mood, attraction, relationship score, fear/hostility, injuries, or temporary reactions. ' +
-        'Name generation and NPC proactivity cap are deterministic; do not output semantic lines for them. ' +
+        'NPC proactivity cap is deterministic; do not output semantic lines for it. ' +
         'Tie rule override: exact roll ties are cinematic stalemates/struggles, not defender wins; include stakeChangeByOutcome.struggle accordingly. ' +
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
         'Important classification reminders: Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/contact is not a special roll category and does not create stakes by itself. intimacyAdvanceExplicit is strict permission/boundary classification for actual intimate escalation only: mark it true for explicit kissing, sexual touch, undressing toward intimacy, asking to sleep together/have sex, or accepting a prior explicit NPC intimacy invitation; keep it false for flirting, teasing, vague innuendo, compliments, declarations of love, dates, hand-holding, ordinary affection, or "what did you have in mind" style banter. Asking permission, teasing, flirting, declarations of love, reciprocating NPC-initiated flirtation/intimacy, kissing, embracing, or making an intimate proposal should be ordinary no-roll scene behavior unless ordinary DEF.STAKES applies for another reason. boundaryViolationExplicit is the romance/boundary trigger for mechanics: mark it true only for clear coercion, threats, force, unwanted contact/restraint after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no; do not mark it true for uncertainty or ordinary romantic/sexual ambiguity. identifyChallenge is the explicit stakes-bearing action/challenge; ignore incidental gestures, setup, delivery method, movement, or flavor unless that act itself carries stakes. classifyHostilePhysicalIntent is true only for direct bodily aggression/control against a living entity: attack, assault, strike, shove, tackle, choke, cut, stab, injure, twist/hurt/crush a grabbed body part, violent restraint, pin, immobilization, dragging/forced movement, physical domination, blocking escape with bodily force, or preventing casting/action with bodily force. A grab/catch/hold is hostilePhysicalIntent only when it explicitly includes harm, attack, violent restraint, pinning, dragging, forced movement, twisting/crushing, choking, domination, or preventing bodily action by force. classifyHostilePhysicalIntent is false for grabbing/catching/holding an NPC wrist, arm, shoulder, sleeve, cloak, or clothing only to stop/delay/get attention/block departure/contest immediate movement unless explicit harm, attack, violent restraint, pinning, dragging, forced movement, twisting/crushing, choking, domination, or bodily injury is also stated. It is false for taking/grabbing/pulling/snatching/opening/moving/contesting an object, possession, access point, path, or space unless {{user}} also attacks, harms, violently restrains, pins, shoves, drags, or controls the NPC body. activeHostileThreat is true only for immediate hostile danger from an NPC/entity: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster/hostile creature engagement, armed standoff, capture attempt, or imminent physical/supernatural harm. It is false for negotiation, refusal, bargaining, argument, social resistance, authority denial, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger. classifyPhysicalBoundaryPressure is true for stakes-bearing forceful object/possession/space/access/departure/body-adjacent boundary contests against a resisting NPC when classifyHostilePhysicalIntent is false; catching or holding an NPC wrist/arm/sleeve only to stop them leaving or force attention is boundary pressure, not combat. Boundary pressure does not create multi-action combat impact, CounterPotential, or H4 by itself. Initial disposition is deterministic; do not output or infer initPreset fields. ActionTargets and observers must be living entities only; non-living obstacles/objects/hazards/effects go only in OppTargets.ENV. OppTargets.NPC requires stakes-bearing living opposition; no-stakes social attention, casual banter, compliments, or flavor actions should keep the NPC as ActionTarget only. BenefitedObservers and HarmedObservers must exclude direct ActionTargets and OppTargets.NPC; a complimented NPC is an ActionTarget, not a BenefitedObserver. A protected/rescued NPC is a BenefitedObserver unless {{user}} directly acts on that NPC. For hasStakes, apply DEF.STAKES directly and contextually: if success/failure of the final goal or explicit challenge materially affects safety, harm, danger, detection, material gain/loss, significant status/authority/trust, autonomy/physical freedom, hostile restraint/immobilization/confinement, obstacle resolution, or explicit goal advancement/failure for {{user}} or a living entity, return true; if success/failure would not materially change outcome, return false. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. For mapStats, map the stat from the final goal or explicit challenge that carries stakes, not incidental gestures, flavor, delivery method, or setup. Positive social opposition such as persuasion, negotiation, diplomacy, bargaining, reassurance, reconciliation, or good-faith appeal against a living opposing target is USER=CHA and OPP=CHA; negative social opposition such as bluff, deception, intimidation, coercion, threat, blackmail, manipulation, interrogation, humiliation, or forced submission against a living opposing target is USER=CHA and OPP=MND. Body-affecting magic against a living target (paralysis, poison, blindness, forced sleep, pain, muscle lock, disease, transmutation, bodily binding) is USER=MND and OPP=PHY; non-living hazards/effects remain OppTargets.ENV and OPP=ENV unless a living target explicitly resists. For each living NPC, mark stakeChangeByOutcome for each possible outcome strictly by DEF.STAKES: benefit only if that outcome significantly and concretely improves their stakes; harm if it materially worsens their stakes; otherwise none. Do not mark benefit for compliments, flirting, mood improvement, politeness, ordinary conversation, user self-advancement, successful negotiation for the user, choosing not to harm the NPC, failing to harm the NPC, de-escalation without a concrete NPC gain, or the NPC merely surviving/remaining safe.\n\n' +
@@ -1391,6 +1417,10 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger?.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
     if (!ledger?.chaosSemantic) missing.push('chaosSemantic');
+    if (!ledger?.nameSemantic) missing.push('nameSemantic');
+    if (!Array.isArray(ledger?.nameSemantic?.maleCandidates)) missing.push('nameSemantic.maleCandidates');
+    if (!Array.isArray(ledger?.nameSemantic?.femaleCandidates)) missing.push('nameSemantic.femaleCandidates');
+    if (!Array.isArray(ledger?.nameSemantic?.locationCandidates)) missing.push('nameSemantic.locationCandidates');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
     }
@@ -1478,6 +1508,10 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.User.commitmentsAdd',
         'TrackerUpdateEngine.User.commitmentsRemove',
         'TrackerUpdateEngine.NPC.count',
+        'NameGenerationEngine.selectedStyle',
+        'NameGenerationEngine.maleCandidates',
+        'NameGenerationEngine.femaleCandidates',
+        'NameGenerationEngine.locationCandidates',
     ];
     const missing = required.filter(key => !fields.has(key));
     if (missing.length) {
@@ -1696,7 +1730,12 @@ function parseCompactLedger(text, trackerSnapshot) {
             sceneSummary: cleanScalar(fields.get('CHAOS_INTERRUPT.sceneSummary')) || '',
         },
         trackerUpdateEngine,
-        nameSemantic: {},
+        nameSemantic: {
+            selectedStyle: cleanScalar(fields.get('NameGenerationEngine.selectedStyle')) || DEFAULT_NAME_STYLE,
+            maleCandidates: readList(fields, 'NameGenerationEngine.maleCandidates'),
+            femaleCandidates: readList(fields, 'NameGenerationEngine.femaleCandidates'),
+            locationCandidates: readList(fields, 'NameGenerationEngine.locationCandidates'),
+        },
         proactivitySemantic: {},
     };
 }
@@ -2190,6 +2229,27 @@ function normalizePersonalitySummary(value) {
     return text.slice(0, 160);
 }
 
+function normalizeNameStyleOption(value) {
+    const text = cleanScalar(value);
+    return text || DEFAULT_NAME_STYLE;
+}
+
+function normalizeNameCandidateList(value) {
+    const raw = Array.isArray(value) ? value : [];
+    const result = [];
+    const seen = new Set();
+    for (const item of raw) {
+        const text = cleanScalar(item).replace(/\s+/g, ' ');
+        if (!text || isNoneValue(text)) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(text.slice(0, 40));
+        if (result.length >= 3) break;
+    }
+    return result;
+}
+
 function normalizeTrackerDelta(value, fields) {
     const source = value && typeof value === 'object' ? value : {};
     return {
@@ -2283,7 +2343,12 @@ function normalizeLedger(ledger) {
         }).filter(Boolean)
         : [];
     ledger.chaosSemantic = ledger.chaosSemantic || { sceneSummary: '' };
-    ledger.nameSemantic = {};
+    ledger.nameSemantic = {
+        selectedStyle: normalizeNameStyleOption(ledger.nameSemantic?.selectedStyle),
+        maleCandidates: normalizeNameCandidateList(ledger.nameSemantic?.maleCandidates),
+        femaleCandidates: normalizeNameCandidateList(ledger.nameSemantic?.femaleCandidates),
+        locationCandidates: normalizeNameCandidateList(ledger.nameSemantic?.locationCandidates),
+    };
     ledger.proactivitySemantic = {};
     return ledger;
 }
@@ -2352,6 +2417,10 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
     if (!ledger.chaosSemantic) missing.push('chaosSemantic');
+    if (!ledger.nameSemantic) missing.push('nameSemantic');
+    if (!Array.isArray(ledger.nameSemantic?.maleCandidates)) missing.push('nameSemantic.maleCandidates');
+    if (!Array.isArray(ledger.nameSemantic?.femaleCandidates)) missing.push('nameSemantic.femaleCandidates');
+    if (!Array.isArray(ledger.nameSemantic?.locationCandidates)) missing.push('nameSemantic.locationCandidates');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
     }

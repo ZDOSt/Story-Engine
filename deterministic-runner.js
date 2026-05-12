@@ -80,53 +80,155 @@ const USER_PROACTIVITY_TARGET = '{{user}}';
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
 const RAPPORT_COOLDOWN_MS = 90 * 60 * 1000;
 const NPC_PROACTIVITY_CAP = 3;
+const NAME_POOL_SIZE = 3;
+const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 
-const PHONOTACTIC_ONSETS = ['', 'b', 'd', 'g', 'h', 'k', 'l', 'm', 'n', 'r', 's', 't', 'v', 'y', 'z', 'kh', 'sh'];
-const PHONOTACTIC_VOWELS = ['a', 'e', 'i', 'o', 'u', 'ai', 'ei', 'ao'];
-const PHONOTACTIC_CODAS = ['', 'n', 'r', 'l', 'm', 's', 'v', 'k'];
-
-const NAME_PARTS = {
-    PERSON: {
-        HARD: {
-            start: ['Az', 'Dar', 'Esh', 'Kav', 'Khaz', 'Ruk', 'Sark', 'Taz', 'Vark', 'Zor'],
-            middle: ['', '', 'a', 'e', 'i', 'ka', 'ra', 'un', 'or', 'ul', 'ir'],
-            ending: ['an', 'ar', 'ek', 'en', 'ir', 'ok', 'or', 'un', 'ash', 'ul'],
+const NAME_STYLE_PROFILES = Object.freeze({
+    'Balanced Fantasy': {
+        key: 'balanced',
+        label: 'Balanced Fantasy',
+        sounds: {
+            onsets: ['', 'd', 'h', 'l', 'm', 'n', 'r', 's', 't', 'v', 'y', 'z'],
+            clusters: ['sh', 'th'],
+            vowels: ['a', 'e', 'i', 'o', 'u'],
+            codas: ['', '', '', 'n', 'r', 'l', 's'],
         },
-        SOFT: {
-            start: ['Ama', 'Eli', 'Ira', 'Lio', 'Mira', 'Naya', 'Omi', 'Sae', 'Tali', 'Vela', 'Yuna', 'Zira'],
-            middle: ['', '', 'la', 'mi', 'na', 'ra', 'si', 'va', 'ri'],
-            ending: ['a', 'e', 'ia', 'in', 'ri', 'sa', 'shi', 'ya'],
-        },
-        BALANCED: {
-            start: ['Aru', 'Dara', 'Ivo', 'Kano', 'Luma', 'Mavi', 'Niro', 'Ruva', 'Sena', 'Tavo', 'Vira', 'Zani'],
-            middle: ['', '', 'ka', 'li', 'mo', 'ra', 'ta', 've', 'yu'],
-            ending: ['an', 'ar', 'en', 'i', 'is', 'o', 'ra', 'ren', 'shi', 'un'],
+        rules: {
+            person: { min: 2, max: 2, maxLength: 8, clusterChance: 0.06, codaChance: 0.12, endingChance: 0.38 },
+            location: { min: 2, max: 3, maxLength: 12, clusterChance: 0.08, codaChance: 0.18, suffixChance: 0.38 },
+            maleEndings: ['an', 'ar', 'en', 'ir', 'on'],
+            femaleEndings: ['a', 'ia', 'ara', 'ira', 'e'],
+            neutralEndings: ['a', 'an', 'en', 'ira', 'ra'],
+            locationSuffixes: ['ara', 'ora', 'ira', 'en', 'al', 'um'],
         },
     },
-    LOCATION: {
-        HARD: {
-            start: ['Akra', 'Darak', 'Eshkar', 'Kaz', 'Khor', 'Marak', 'Rath', 'Tark', 'Vark', 'Zhad'],
-            middle: ['', 'dur', 'kar', 'mor', 'nar', 'tav', 'ul', 'zan'],
-            ending: ['ak', 'an', 'esh', 'or', 'un', 'var', 'zar', 'gate', 'hold'],
+    'Tolkienic / Lyrical': {
+        key: 'lyrical',
+        label: 'Tolkienic / Lyrical',
+        sounds: {
+            onsets: ['', 'l', 'm', 'n', 'r', 's', 'th', 'v'],
+            clusters: ['el', 'al', 'la', 'th', 'nd', 'rn', 'll'],
+            vowels: ['a', 'e', 'i', 'ia', 'ae', 'ei'],
+            codas: ['', 'l', 'n', 'r', 'nd', 'th'],
         },
-        SOFT: {
-            start: ['Amai', 'Ivara', 'Luma', 'Mirai', 'Nara', 'Oshai', 'Sava', 'Tala', 'Velai', 'Yura'],
-            middle: ['', 'dara', 'luma', 'mori', 'nara', 'sai', 'tala'],
-            ending: ['na', 'ra', 'ri', 'sa', 'ya', 'mere', 'vale', 'hara'],
-        },
-        BALANCED: {
-            start: ['Aru', 'Dava', 'Ish', 'Kora', 'Mora', 'Nava', 'Sura', 'Tava', 'Vora', 'Zana'],
-            middle: ['', 'dara', 'kesh', 'mora', 'nara', 'sai', 'tala'],
-            ending: ['an', 'esh', 'or', 'ra', 'un', 'reach', 'hollow', 'watch'],
+        rules: {
+            person: { min: 2, max: 3, maxLength: 10, clusterChance: 0.14, codaChance: 0.28, endingChance: 0.70 },
+            location: { min: 2, max: 4, maxLength: 14, clusterChance: 0.16, codaChance: 0.38, suffixChance: 0.38 },
+            maleEndings: ['el', 'ion', 'or', 'dir', 'las', 'ren'],
+            femaleEndings: ['iel', 'ien', 'ia', 'wen', 'elle', 'ael'],
+            neutralEndings: ['el', 'ien', 'or', 'ael', 'ion'],
+            locationSuffixes: ['lond', 'riel', 'mere', 'dell', 'vale', 'dor'],
         },
     },
-};
-
-const GENDER_ENDINGS = {
-    FEMALE: ['a', 'e', 'ia', 'ira', 'ri', 'sa', 'ya'],
-    MALE: ['an', 'ar', 'en', 'ir', 'o', 'ok', 'un'],
-    NEUTRAL: ['a', 'an', 'e', 'i', 'in', 'o', 'ra', 'un'],
-};
+    'Celtic-Inspired Fantasy': {
+        key: 'celtic',
+        label: 'Celtic-Inspired Fantasy',
+        sounds: {
+            onsets: ['', 'b', 'c', 'd', 'f', 'g', 'l', 'm', 'n', 'r', 's', 't'],
+            clusters: ['br', 'gw', 'll', 'rh', 'dr', 'cr', 'wyn'],
+            vowels: ['a', 'e', 'i', 'o', 'u', 'ae', 'ei'],
+            codas: ['', 'n', 'r', 'l', 'th', 'dd', 's'],
+        },
+        rules: {
+            person: { min: 2, max: 3, maxLength: 9, clusterChance: 0.24, codaChance: 0.36, endingChance: 0.62 },
+            location: { min: 2, max: 3, maxLength: 14, clusterChance: 0.28, codaChance: 0.48, suffixChance: 0.48 },
+            maleEndings: ['an', 'wyn', 'oc', 'ren', 'eth', 'or'],
+            femaleEndings: ['wen', 'a', 'elle', 'wyn', 'eth', 'ia'],
+            neutralEndings: ['an', 'wyn', 'eth', 'el', 'a'],
+            locationSuffixes: ['mere', 'wyn', 'dun', 'ford', 'glen', 'bryn'],
+        },
+    },
+    'Norse / Old Germanic Fantasy': {
+        key: 'norse',
+        label: 'Norse / Old Germanic Fantasy',
+        sounds: {
+            onsets: ['', 'b', 'd', 'g', 'h', 'k', 'r', 's', 't', 'v'],
+            clusters: ['bj', 'sk', 'st', 'gr', 'kn', 'th', 'vr'],
+            vowels: ['a', 'e', 'i', 'o', 'u', 'y'],
+            codas: ['', 'n', 'r', 'k', 'th', 'ld', 'ng', 'rn'],
+        },
+        rules: {
+            person: { min: 1, max: 2, maxLength: 9, clusterChance: 0.36, codaChance: 0.70, endingChance: 0.58 },
+            location: { min: 2, max: 3, maxLength: 14, clusterChance: 0.34, codaChance: 0.76, suffixChance: 0.62 },
+            maleEndings: ['ar', 'rik', 'ulf', 'vald', 'sten', 'orn'],
+            femaleEndings: ['a', 'hild', 'run', 'dis', 'frid', 'yn'],
+            neutralEndings: ['ar', 'en', 'ulf', 'rik', 'a'],
+            locationSuffixes: ['heim', 'gard', 'vik', 'hold', 'fjord', 'mark'],
+        },
+    },
+    'Persian / Byzantine Fantasy': {
+        key: 'persian-byzantine',
+        label: 'Persian / Byzantine Fantasy',
+        sounds: {
+            onsets: ['', 'd', 'm', 'n', 'r', 's', 'v', 'z', 'sh', 'kh'],
+            clusters: ['az', 'dar', 'mir', 'nav', 'ros', 'shar'],
+            vowels: ['a', 'i', 'o', 'u', 'aa', 'ei'],
+            codas: ['', 'n', 'r', 'sh', 'z', 'kh', 'm'],
+        },
+        rules: {
+            person: { min: 2, max: 3, maxLength: 10, clusterChance: 0.20, codaChance: 0.44, endingChance: 0.66 },
+            location: { min: 2, max: 3, maxLength: 14, clusterChance: 0.24, codaChance: 0.50, suffixChance: 0.64 },
+            maleEndings: ['an', 'ir', 'os', 'ad', 'esh', 'ius'],
+            femaleEndings: ['a', 'ara', 'ira', 'in', 'esh', 'ia'],
+            neutralEndings: ['an', 'ir', 'esh', 'a', 'os'],
+            locationSuffixes: ['abad', 'shahr', 'dara', 'kesh', 'polis', 'sara'],
+        },
+    },
+    'Slavic-Inspired Fantasy': {
+        key: 'slavic',
+        label: 'Slavic-Inspired Fantasy',
+        sounds: {
+            onsets: ['', 'b', 'd', 'k', 'm', 'n', 'p', 'r', 's', 't', 'v', 'z'],
+            clusters: ['br', 'dr', 'kr', 'sl', 'sv', 'vl', 'zm', 'tr'],
+            vowels: ['a', 'e', 'i', 'o', 'u'],
+            codas: ['', 'k', 'v', 'n', 'r', 'sk', 'mir'],
+        },
+        rules: {
+            person: { min: 2, max: 3, maxLength: 10, clusterChance: 0.32, codaChance: 0.58, endingChance: 0.62 },
+            location: { min: 2, max: 3, maxLength: 14, clusterChance: 0.34, codaChance: 0.66, suffixChance: 0.58 },
+            maleEndings: ['ov', 'ak', 'ir', 'en', 'mir', 'ek'],
+            femaleEndings: ['a', 'ova', 'ina', 'ena', 'ira', 'ka'],
+            neutralEndings: ['ov', 'ak', 'in', 'a', 'mir'],
+            locationSuffixes: ['grad', 'sk', 'mir', 'gorod', 'ovka', 'drev'],
+        },
+    },
+    'Classical / Romance Fantasy': {
+        key: 'classical-romance',
+        label: 'Classical / Romance Fantasy',
+        sounds: {
+            onsets: ['', 'c', 'd', 'f', 'l', 'm', 'n', 'r', 's', 't', 'v'],
+            clusters: ['cl', 'fl', 'pr', 'tr', 'val', 'mar'],
+            vowels: ['a', 'e', 'i', 'o', 'u', 'ia', 'io'],
+            codas: ['', 'n', 'r', 's', 'l'],
+        },
+        rules: {
+            person: { min: 2, max: 3, maxLength: 10, clusterChance: 0.18, codaChance: 0.36, endingChance: 0.72 },
+            location: { min: 2, max: 3, maxLength: 14, clusterChance: 0.20, codaChance: 0.44, suffixChance: 0.56 },
+            maleEndings: ['us', 'ian', 'or', 'ius', 'en', 'io'],
+            femaleEndings: ['a', 'ia', 'ina', 'ella', 'ara', 'ora'],
+            neutralEndings: ['us', 'ia', 'or', 'um', 'a'],
+            locationSuffixes: ['polis', 'ara', 'ium', 'ona', 'vale', 'port'],
+        },
+    },
+    'Dark Low Fantasy': {
+        key: 'dark-low',
+        label: 'Dark Low Fantasy',
+        sounds: {
+            onsets: ['', 'b', 'd', 'g', 'k', 'm', 'r', 's', 't', 'v', 'z'],
+            clusters: ['gr', 'kr', 'dr', 'sk', 'vr', 'th', 'br'],
+            vowels: ['a', 'e', 'o', 'u'],
+            codas: ['', 'k', 'g', 'rn', 'rd', 'sk', 'th', 'm'],
+        },
+        rules: {
+            person: { min: 1, max: 2, maxLength: 9, clusterChance: 0.38, codaChance: 0.74, endingChance: 0.48 },
+            location: { min: 2, max: 3, maxLength: 14, clusterChance: 0.40, codaChance: 0.78, suffixChance: 0.64 },
+            maleEndings: ['ar', 'ek', 'orn', 'ath', 'un', 'osk'],
+            femaleEndings: ['a', 'eth', 'ra', 'un', 'ska', 'en'],
+            neutralEndings: ['ar', 'ek', 'ath', 'un', 'ra'],
+            locationSuffixes: ['fen', 'mire', 'barrow', 'hold', 'scar', 'watch'],
+        },
+    },
+});
 
 const ROLE_NAME_PREFIXES = Object.freeze([
     'ass', 'ban', 'but', 'cap', 'cou', 'doc', 'gat', 'gua', 'hea', 'inn', 'kin', 'kni',
@@ -195,9 +297,9 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
     const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
     const name = runNameGeneration(ledger, audit, context, type);
     const injuryTrackerUpdate = applyInflictedNpcInjuriesToTrackerUpdate(resolution.packet, relationships.trackerUpdate, trackerSnapshot, audit);
-    const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit);
+    const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit, refereeContext, context);
     applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit);
-    const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context);
+    const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext);
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas);
 
     const trackerUpdate = {
@@ -264,8 +366,9 @@ function advanceRapportClock(context, audit) {
 
 function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext) {
     const semantic = ledger.resolutionEngine || {};
-    const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context);
+    const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, refereeContext);
     const rawTargets = normalizeTargets(semantic.identifyTargets);
+    const identityTargets = removeUserReferencesFromTargets(rawTargets, refereeContext);
     const goal = String(semantic.identifyGoal || 'Normal_Interaction');
     const semanticHasStakes = bool(semantic.hasStakes) ? 'Y' : 'N';
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
@@ -290,10 +393,17 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     audit.push(`2.1 identifyGoal=${goal}`);
     audit.push(`2.1a identifyChallenge=${semantic.identifyChallenge || semantic.explicitMeans || goal}`);
     audit.push(`2.2 identifyTargets.semantic=${formatTargets(rawTargets)}`);
+    if (!sameTargets(rawTargets, identityTargets)) {
+        audit.push(`2.2a deterministicUserTargetNormalization=${compact({
+            hardRule: 'Active persona names and {{user}} aliases are the player, not NPC targets; remove them from living NPC target/observer lists',
+            from: targetSummary(rawTargets),
+            to: targetSummary(identityTargets),
+        })}`);
+    }
 
     audit.push(`2.3 intimacyAdvanceExplicit=${intimacyAdvanceExplicit}`);
     audit.push(`2.3a boundaryViolationExplicit=${boundaryViolationExplicit}`);
-    const pureLoveDeclarationEvidence = getPureLoveDeclarationNoRollEvidence(semantic, goal);
+    const pureLoveDeclarationEvidence = getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext);
     const stakesOverrideEvidence = pureLoveDeclarationEvidence
         || getRomanceNoRollOverrideEvidence(semantic, semanticHasStakes, boundaryViolationExplicit, intimacyAdvanceExplicit);
     const hasStakes = stakesOverrideEvidence?.hasStakes || semanticHasStakes;
@@ -305,7 +415,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     }
     audit.push(`2.4 hasStakes=${hasStakes}`);
 
-    const targets = sanitizeTargets(rawTargets, targetClassifier, { hasStakes, goal, boundaryViolationExplicit });
+    const sanitizedTargets = sanitizeTargets(identityTargets, targetClassifier, { hasStakes, goal, boundaryViolationExplicit });
+    const targets = repairLivingOppositionTargets(sanitizedTargets, targetClassifier, { hasStakes, semantic, goal, boundaryViolationExplicit }, audit);
     audit.push(`2.4d identifyTargets.final=${formatTargets(targets)}`);
     if (!sameTargets(rawTargets, targets)) {
         audit.push(`2.4e deterministicTargetSanitizer=${compact({
@@ -356,11 +467,30 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         let { userStat, oppStat } = applyMapStatsHardRules(semantic, goal, targets, semanticMapStats, audit, { boundaryViolationExplicit });
         const userCore = getUserCoreStats(ledger);
         let targetCore = null;
-        const oppTargetsNpcFirst = firstReal(targets.OppTargets.NPC);
-        const currentTargetCore = oppTargetsNpcFirst ? trackerSnapshot[oppTargetsNpcFirst]?.currentCoreStats : null;
-        if (oppStat !== 'ENV' && !oppTargetsNpcFirst) {
-            oppStat = 'ENV';
+        let oppTargetsNpcFirst = firstReal(targets.OppTargets.NPC);
+        if (oppStat === 'ENV' && oppTargetsNpcFirst) {
+            const repairedOppStat = defaultLivingOppStatForChallenge(semantic, goal);
+            audit.push(`2.7c.2 deterministicLivingOppStatRepair=${compact({
+                hardRule: 'OPP=ENV is only valid for non-living opposition; living OppTargets.NPC require a living stat',
+                from: { OPP: oppStat, OppTargetsNPC: oppTargetsNpcFirst },
+                to: { OPP: repairedOppStat },
+            })}`);
+            oppStat = repairedOppStat;
         }
+        if (oppStat !== 'ENV' && !oppTargetsNpcFirst) {
+            const livingActionTarget = firstReal(toRealArray(targets.ActionTargets).filter(name => targetClassifier.isLiving(name)));
+            if (livingActionTarget) {
+                targets.OppTargets.NPC = unique([...toRealArray(targets.OppTargets.NPC), livingActionTarget]);
+                audit.push(`2.7c.3 deterministicLivingOppTargetFallback=${compact({
+                    hardRule: 'stakes-bearing living ActionTarget supplies opposing NPC when semantic omitted OppTargets.NPC',
+                    target: livingActionTarget,
+                })}`);
+            } else {
+                oppStat = 'ENV';
+            }
+        }
+        oppTargetsNpcFirst = firstReal(targets.OppTargets.NPC);
+        const currentTargetCore = oppTargetsNpcFirst ? trackerSnapshot[oppTargetsNpcFirst]?.currentCoreStats : null;
 
         audit.push('2.7 hasStakes=Y');
         audit.push(`2.7a actionCount=[${actions.join(',')}]`);
@@ -432,7 +562,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         audit.push(`2.7o resolveOutcome=atkDie:${atkDie}, atkTot:${atkTot}, defDie:${defDie}, defTot:${defTot}, margin:${margin}, classifyHostilePhysicalIntent:${hostilePhysical ? 'Y' : 'N'}, classifyCombatActionSequence:${combatActionSequence ? 'Y' : 'N'} -> ${compact(outcome)}`);
         const impairmentText = impairmentPenalty ? ` + impairment(${impairmentPenalty})` : '';
         const npcImpairmentText = npcImpairmentPenalty ? ` + impairment(${npcImpairmentPenalty})` : '';
-        resultLine = `1d20(${atkDie}) + ${userStat}(${userStatValue})${impairmentText} = ${atkTot} vs 1d20(${defDie})${oppStat === 'ENV' ? '' : ` + ${oppStat}(${statValue(targetCore, oppStat)})${npcImpairmentText}`} = ${defTot} -> ${outcome.OutcomeTier}`;
+        const oppStatText = oppStat === 'ENV' ? ' + ENV(0)' : ` + ${oppStat}(${statValue(targetCore, oppStat)})${npcImpairmentText}`;
+        resultLine = `1d20(${atkDie}) + ${userStat}(${userStatValue})${impairmentText} = ${atkTot} vs 1d20(${defDie})${oppStatText} = ${defTot} (${margin} - ${outcome.OutcomeTier})`;
     }
 
     const boundaryReferee = applyPhysicalBoundaryPressureHardRules(semantic, targets, {
@@ -669,6 +800,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             sem,
             npc,
             context,
+            refereeContext,
             audit,
             `3.6a.1 establishedRelationship(${npc})`,
             resolutionPacket.ActionTargets,
@@ -684,6 +816,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             establishedRelationship,
             resolutionPacket,
             context,
+            refereeContext,
             state,
         });
         audit.push(`3.6b intimacyBoundary=${compact(intimacyBoundary)}`);
@@ -911,20 +1044,20 @@ function proactivityOfferRefused(tag, source) {
     return false;
 }
 
-function resolveEstablishedRelationshipState(state, currentDisposition, sem, npc, context, audit, label, actionTargets = []) {
+function resolveEstablishedRelationshipState(state, currentDisposition, sem, npc, context, refereeContext, audit, label, actionTargets = []) {
     if (state?.establishedRelationship === 'Y') return 'Y';
     if (currentDisposition?.B !== 4) return 'N';
     if (sem?.establishedRelationship === true) return 'Y';
     if (!toRealArray(actionTargets).some(name => sameName(name, npc))) return 'N';
 
-    const evidence = detectCurrentRelationshipAcceptance(npc, context, toRealArray(actionTargets).filter(isReal).length === 1);
+    const evidence = detectCurrentRelationshipAcceptance(npc, context, refereeContext, toRealArray(actionTargets).filter(isReal).length === 1);
     if (!evidence.accepted) return 'N';
 
     audit?.push(`${label}.deterministicAcceptance=Y source=${evidence.source}`);
     return 'Y';
 }
 
-function detectCurrentRelationshipAcceptance(npc, context, assumeSingleTarget = false) {
+function detectCurrentRelationshipAcceptance(npc, context, refereeContext = null, assumeSingleTarget = false) {
     const exchange = getLatestRelationshipExchange(context);
     const userText = relationshipText(exchange.user);
     const assistantText = relationshipText(exchange.assistant);
@@ -934,10 +1067,10 @@ function detectCurrentRelationshipAcceptance(npc, context, assumeSingleTarget = 
         return { accepted: false, source: 'npc_not_in_previous_assistant_message' };
     }
 
-    if (hasRelationshipDeclarationOrRequest(assistantText) && hasRelationshipAcceptance(userText, { allowPhysical: true })) {
+    if (hasRelationshipDeclarationOrRequest(assistantText, refereeContext) && hasRelationshipAcceptance(userText, { allowPhysical: true, refereeContext })) {
         return { accepted: true, source: 'npcDeclarationAcceptedByUser' };
     }
-    if (hasRelationshipDeclarationOrRequest(previousUserText) && hasRelationshipAcceptance(assistantText, { allowPhysical: false })) {
+    if (hasRelationshipDeclarationOrRequest(previousUserText, refereeContext) && hasRelationshipAcceptance(assistantText, { allowPhysical: false, refereeContext })) {
         return { accepted: true, source: 'userDeclarationAcceptedByNpc' };
     }
     return { accepted: false, source: 'no_explicit_acceptance_pair' };
@@ -998,13 +1131,14 @@ function assistantMentionsNpc(npc, text) {
     return lowerText.includes(lowerName) || (firstName.length >= 3 && lowerText.includes(firstName));
 }
 
-function hasRelationshipDeclarationOrRequest(text) {
+function hasRelationshipDeclarationOrRequest(text, refereeContext = null) {
     const source = relationshipText(text);
-    return /\bi\s+love\s+you\b/i.test(source)
-        || /\bi['’]m\s+in\s+love\s+with\s+you\b/i.test(source)
+    const userRef = userReferencePattern(refereeContext);
+    return new RegExp(`\\bi\\s+love\\s+${userRef}(?:\\s+too)?`, 'i').test(source)
+        || new RegExp(`\\bi['\\u2019]m\\s+in\\s+love\\s+with\\s+${userRef}`, 'i').test(source)
         || /\b(be|become)\s+(?:my|mine)\b/i.test(source)
-        || /\b(?:will|would)\s+you\s+(?:be|become)\s+(?:my|mine)\b/i.test(source)
-        || /\b(?:will|would)\s+you\s+(?:date|court|marry)\s+me\b/i.test(source)
+        || new RegExp(`\\b(?:will|would)\\s+${userRef}\\s+(?:be|become)\\s+(?:my|mine)\\b`, 'i').test(source)
+        || new RegExp(`\\b(?:will|would)\\s+${userRef}\\s+(?:date|court|marry)\\s+me\\b`, 'i').test(source)
         || /\b(?:be|become)\s+(?:lovers|partners|a couple)\b/i.test(source)
         || /\b(?:my|your)\s+(?:lover|beloved|partner|girlfriend|boyfriend|wife|husband)\b/i.test(source)
         || /\b(?:start|begin|have)\s+(?:a\s+)?(?:relationship|romance)\b/i.test(source);
@@ -1012,19 +1146,22 @@ function hasRelationshipDeclarationOrRequest(text) {
 
 function hasRelationshipAcceptance(text, options = {}) {
     const source = relationshipText(text);
-    if (hasRelationshipRefusal(source)) return false;
+    const refereeContext = options.refereeContext || null;
+    const userRef = userReferencePattern(refereeContext);
+    if (hasRelationshipRefusal(source, refereeContext)) return false;
     return /\b(?:yes|okay|ok|alright)\b/i.test(source)
-        || /\bi\s+(?:accept|agree|want\s+that|want\s+this|choose\s+you)\b/i.test(source)
+        || new RegExp(`\\bi\\s+(?:accept|agree|want\\s+that|want\\s+this|choose\\s+${userRef})`, 'i').test(source)
         || /\bi\s+love\s+you\s+too\b/i.test(source)
         || /\bi\s+love\s+you\b/i.test(source)
         || /\bi\s+feel\s+(?:it|the\s+same|that\s+too|the\s+same\s+way)\b/i.test(source)
-        || /\bi\s+want\s+(?:you|this|us)\b/i.test(source)
-        || /\b(?:kiss(?:es|ed|ing)?\s+(?:you|him|her|them)|(?:wrap|put)\s+my\s+arms\s+around|pull\s+(?:you|him|her|them)\s+(?:close|against)|hold\s+(?:you|him|her|them)\s+close|press\s+my\s+lips)\b/i.test(source) && options.allowPhysical === true;
+        || new RegExp(`\\bi\\s+want\\s+(?:${userRef}|this|us)`, 'i').test(source)
+        || new RegExp(`\\b(?:kiss(?:es|ed|ing)?\\s+(?:${userRef}|him|her|them)|(?:wrap|put)\\s+my\\s+arms\\s+around|pull\\s+(?:${userRef}|him|her|them)\\s+(?:close|against)|hold\\s+(?:${userRef}|him|her|them)\\s+close|press\\s+my\\s+lips)`, 'i').test(source) && options.allowPhysical === true;
 }
 
-function hasRelationshipRefusal(text) {
-    return /\b(?:no|not|never|can['’]t|cannot|won['’]t|do\s+not|don['’]t)\b[^.!?]{0,80}\b(?:love|want|accept|relationship|date|court|marry|lover|partner)\b/i.test(text)
-        || /\b(?:pull\s+away|step\s+back|push\s+(?:you|him|her|them)\s+away|refuse|reject|deny)\b/i.test(text);
+function hasRelationshipRefusal(text, refereeContext = null) {
+    const userRef = userReferencePattern(refereeContext);
+    return /\b(?:no|not|never|can['\u2019]t|cannot|won['\u2019]t|do\s+not|don['\u2019]t)\b[^.!?]{0,80}\b(?:love|want|accept|relationship|date|court|marry|lover|partner)\b/i.test(text)
+        || new RegExp(`\\b(?:pull\\s+away|step\\s+back|push\\s+(?:${userRef}|him|her|them)\\s+away|refuse|reject|deny)\\b`, 'i').test(text);
 }
 
 function consumesRapportCooldown(target, mode = 'normal') {
@@ -1032,7 +1169,7 @@ function consumesRapportCooldown(target, mode = 'normal') {
     return ['Bond', 'No Change'].includes(target);
 }
 
-function resolveIntimacyBoundary({ npc, currentDisposition, threshold, establishedRelationship, resolutionPacket, context, state }) {
+function resolveIntimacyBoundary({ npc, currentDisposition, threshold, establishedRelationship, resolutionPacket, context, refereeContext, state }) {
     if (resolutionPacket?.intimacyAdvanceExplicit !== 'Y') {
         return { boundary: 'SKIP', source: 'NONE', refusalStyle: 'NONE' };
     }
@@ -1047,7 +1184,7 @@ function resolveIntimacyBoundary({ npc, currentDisposition, threshold, establish
     if (threshold?.Override && threshold.Override !== 'NONE') {
         return { boundary: 'ALLOW', source: `OVERRIDE:${threshold.Override}`, refusalStyle: 'NONE' };
     }
-    const initiated = detectNpcInitiatedIntimacy(npc, context, toRealArray(resolutionPacket.ActionTargets).filter(isReal).length === 1);
+    const initiated = detectNpcInitiatedIntimacy(npc, context, refereeContext, toRealArray(resolutionPacket.ActionTargets).filter(isReal).length === 1);
     if (initiated.accepted) {
         return { boundary: 'ALLOW', source: 'NPC_INITIATED', refusalStyle: 'NONE' };
     }
@@ -1068,32 +1205,34 @@ function intimacyRefusalStyle(disposition, state = {}) {
     return 'CLEAR';
 }
 
-function detectNpcInitiatedIntimacy(npc, context, assumeSingleTarget = false) {
+function detectNpcInitiatedIntimacy(npc, context, refereeContext = null, assumeSingleTarget = false) {
     const exchange = getLatestRelationshipExchange(context);
     const userText = relationshipText(exchange.user);
     const assistantText = relationshipText(exchange.assistant);
     if (!userText || !assistantText) return { accepted: false, source: 'none' };
     if (!assumeSingleTarget && !assistantMentionsNpc(npc, assistantText)) return { accepted: false, source: 'npc_not_in_previous_assistant_message' };
-    if (!hasNpcIntimacyInitiation(assistantText)) return { accepted: false, source: 'no_npc_intimacy_initiation' };
-    if (!hasUserIntimacyAcceptance(userText)) return { accepted: false, source: 'no_user_acceptance' };
+    if (!hasNpcIntimacyInitiation(assistantText, refereeContext)) return { accepted: false, source: 'no_npc_intimacy_initiation' };
+    if (!hasUserIntimacyAcceptance(userText, refereeContext)) return { accepted: false, source: 'no_user_acceptance' };
     return { accepted: true, source: 'previous_npc_initiation_accepted' };
 }
 
-function hasNpcIntimacyInitiation(text) {
+function hasNpcIntimacyInitiation(text, refereeContext = null) {
     const source = relationshipText(text).toLowerCase();
-    if (hasRelationshipRefusal(source)) return false;
-    return /\b(?:i\s+want\s+to\s+kiss\s+you|kiss\s+me|let\s+me\s+kiss\s+you|do\s+you\s+want\s+(?:me\s+)?to\s+kiss\s+you|can\s+i\s+kiss\s+you|may\s+i\s+kiss\s+you)\b/.test(source)
-        || /\b(?:i\s+want\s+you|take\s+me|come\s+to\s+bed|sleep\s+with\s+me|make\s+love|have\s+sex|touch\s+me|let\s+me\s+touch\s+you)\b/.test(source)
-        || /\b(?:pulls?|leans?)\s+(?:you\s+)?(?:closer|in)\b.{0,80}\b(?:kiss|mouth|lips|bed|desire|want)\b/.test(source)
+    const userRef = userReferencePattern(refereeContext);
+    if (hasRelationshipRefusal(source, refereeContext)) return false;
+    return new RegExp(`\\b(?:i\\s+want\\s+to\\s+kiss\\s+${userRef}|kiss\\s+me|let\\s+me\\s+kiss\\s+${userRef}|do\\s+${userRef}\\s+want\\s+(?:me\\s+)?to\\s+kiss\\s+${userRef}|can\\s+i\\s+kiss\\s+${userRef}|may\\s+i\\s+kiss\\s+${userRef})`, 'i').test(source)
+        || new RegExp(`\\b(?:i\\s+want\\s+${userRef}|take\\s+me|come\\s+to\\s+bed|sleep\\s+with\\s+me|make\\s+love|have\\s+sex|touch\\s+me|let\\s+me\\s+touch\\s+${userRef})`, 'i').test(source)
+        || new RegExp(`\\b(?:pulls?|leans?)\\s+(?:${userRef}\\s+)?(?:closer|in)\\b.{0,80}\\b(?:kiss|mouth|lips|bed|desire|want)\\b`, 'i').test(source)
         || /\b(?:kisses|kissed|presses?\s+(?:her|his|their)?\s*lips|mouth\s+meets)\b/.test(source)
-        || /\b(?:undresses?|removes?\s+(?:her|his|their)\s+clothes|lets?\s+(?:her|his|their)\s+clothes\s+(?:fall|slip))\b.{0,120}\b(?:you|bed|closer|kiss|desire|want)\b/.test(source);
+        || new RegExp(`\\b(?:undresses?|removes?\\s+(?:her|his|their)\\s+clothes|lets?\\s+(?:her|his|their)\\s+clothes\\s+(?:fall|slip))\\b.{0,120}(?:${userRef}|\\b(?:bed|closer|kiss|desire|want)\\b)`, 'i').test(source);
 }
 
-function hasUserIntimacyAcceptance(text) {
+function hasUserIntimacyAcceptance(text, refereeContext = null) {
     const source = relationshipText(text).toLowerCase();
-    if (hasRelationshipRefusal(source)) return false;
-    return /\b(?:yes|okay|ok|alright|please|i\s+want\s+that|i\s+want\s+this|i\s+want\s+you|i\s+let\s+you|i\s+accept|i\s+nod)\b/.test(source)
-        || /\b(?:kiss(?:es|ed|ing)?\s+(?:you|him|her|them)|kiss\s+back|return\s+(?:the\s+)?kiss|press\s+my\s+lips|pull\s+(?:you|him|her|them)\s+(?:close|against)|hold\s+(?:you|him|her|them)\s+close|wrap\s+my\s+arms|touch\s+(?:you|him|her|them)|take\s+(?:you|him|her|them)\s+to\s+bed)\b/.test(source);
+    const userRef = userReferencePattern(refereeContext);
+    if (hasRelationshipRefusal(source, refereeContext)) return false;
+    return new RegExp(`\\b(?:yes|okay|ok|alright|please|i\\s+want\\s+that|i\\s+want\\s+this|i\\s+want\\s+${userRef}|i\\s+let\\s+${userRef}|i\\s+accept|i\\s+nod)`, 'i').test(source)
+        || new RegExp(`\\b(?:kiss(?:es|ed|ing)?\\s+(?:${userRef}|him|her|them)|kiss\\s+back|return\\s+(?:the\\s+)?kiss|press\\s+my\\s+lips|pull\\s+(?:${userRef}|him|her|them)\\s+(?:close|against)|hold\\s+(?:${userRef}|him|her|them)\\s+close|wrap\\s+my\\s+arms|touch\\s+(?:${userRef}|him|her|them)|take\\s+(?:${userRef}|him|her|them)\\s+to\\s+bed)`, 'i').test(source);
 }
 
 function runChaos(ledger, handoffs, resolutionPacket, dice, audit) {
@@ -1140,8 +1279,13 @@ function runChaos(ledger, handoffs, resolutionPacket, dice, audit) {
 function runNameGeneration(ledger, audit, context, type) {
     const contextText = buildNameContext(ledger, context);
     const profile = profileFromNameContext(contextText);
+    const style = resolveNameStyle(context);
+    const styleProfile = NAME_STYLE_PROFILES[style] || NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE];
     const registry = getNameRegistry(context);
-    const pool = buildNamePool({ profile, registry, contextText });
+    const semanticCandidates = normalizeSemanticNameCandidates(ledger.nameSemantic);
+    const poolResult = buildNamePool({ profile, registry, contextText, style, styleProfile, semanticCandidates });
+    const pool = poolResult.pool;
+    registerGeneratedNamePool(context, pool, { profile, style, styleKey: styleProfile.key, source: 'validatedNamePool' });
 
     const result = {
         nameRequired: 'POOL',
@@ -1150,23 +1294,39 @@ function runNameGeneration(ledger, audit, context, type) {
         normalizeSeed: 'pool',
         detectMode: 'POOL',
         profile,
+        style,
+        styleKey: styleProfile.key,
         gender: 'POOL',
-        deterministicCue: 'deterministic name pool',
+        deterministicCue: 'semantic candidates with deterministic validation',
         generatedName: NONE,
+        semanticCandidates: poolResult.semanticCandidates,
+        semanticAccepted: poolResult.semanticAccepted,
+        semanticRejected: poolResult.semanticRejected,
+        replacements: poolResult.replacements,
         namePool: pool,
     };
     audit.push('STEP 5: EXECUTE NameGenerationEngine');
     audit.push('5.1 nameRequired=POOL');
-    audit.push('5.1a namePoolMode=deterministic');
+    audit.push('5.1a namePoolMode=semanticCandidates+deterministicValidation');
     audit.push('5.1b isLocation=N/A');
     audit.push('5.1c seed=pool');
     audit.push('5.1d normalizeSeed=pool');
     audit.push('5.1e detectMode=POOL');
     audit.push(`5.1f profile=${result.profile}`);
     audit.push('5.1g gender=POOL');
-    audit.push(`5.1h namePool=${compact(pool)}`);
+    audit.push(`5.1h style=${style}`);
+    audit.push(`5.1i semanticCandidates=${compact(result.semanticCandidates)}`);
+    audit.push(`5.1j semanticAccepted=${compact(result.semanticAccepted)}`);
+    audit.push(`5.1k semanticRejected=${compact(result.semanticRejected)}`);
+    audit.push(`5.1l replacements=${compact(result.replacements)}`);
+    audit.push(`5.1m namePool=${compact(pool)}`);
     audit.push('---');
     return result;
+}
+
+function resolveNameStyle(context) {
+    const value = String(context?.extensionSettings?.nameStyle || context?.structuredPreflightSettings?.nameStyle || '').trim();
+    return NAME_STYLE_PROFILES[value] ? value : DEFAULT_NAME_STYLE;
 }
 
 function buildNameContext(ledger, context) {
@@ -1239,54 +1399,114 @@ function detectNameGender(contextText) {
     return 'NEUTRAL';
 }
 
-function buildNamePool({ profile, registry, contextText }) {
+function normalizeSemanticNameCandidates(nameSemantic) {
+    return {
+        male: normalizeSemanticNameCandidateList(nameSemantic?.maleCandidates),
+        female: normalizeSemanticNameCandidateList(nameSemantic?.femaleCandidates),
+        location: normalizeSemanticNameCandidateList(nameSemantic?.locationCandidates),
+        selectedStyle: isReal(nameSemantic?.selectedStyle) ? String(nameSemantic.selectedStyle).trim() : DEFAULT_NAME_STYLE,
+    };
+}
+
+function normalizeSemanticNameCandidateList(value) {
+    const raw = Array.isArray(value) ? value : [];
+    const result = [];
+    const seen = new Set();
+    for (const item of raw) {
+        const rawText = String(item ?? '').trim();
+        if (!rawText || /^\(?none\)?$/i.test(rawText)) continue;
+        const title = titleName(item);
+        if (!isReal(title)) continue;
+        const key = normalizeNameKey(title);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(title);
+        if (result.length >= NAME_POOL_SIZE) break;
+    }
+    return result;
+}
+
+function buildNamePool({ profile, registry, contextText, style, styleProfile, semanticCandidates }) {
     const used = new Set([
         ...Array.from(registry.used || []),
         ...extractExistingProperNames(contextText),
     ].map(normalizeNameKey).filter(Boolean));
-    const entries = [
-        ['male', 'PERSON', 'MALE', 'male-one'],
-        ['male', 'PERSON', 'MALE', 'male-two'],
-        ['female', 'PERSON', 'FEMALE', 'female-one'],
-        ['female', 'PERSON', 'FEMALE', 'female-two'],
-        ['location', 'LOCATION', 'NEUTRAL', 'location-one'],
-        ['location', 'LOCATION', 'NEUTRAL', 'location-two'],
-    ];
     const pool = { male: [], female: [], location: [] };
-    for (const [bucket, mode, gender, seed] of entries) {
-        const name = buildDeterministicName({
-            mode,
-            profile,
-            gender,
-            seed,
-            registry: { used },
-            contextText,
-        });
-        if (name !== NONE) {
+    const semanticAccepted = { male: [], female: [], location: [] };
+    const semanticRejected = [];
+    const replacements = [];
+    const specs = [
+        ['male', 'PERSON', 'MALE'],
+        ['female', 'PERSON', 'FEMALE'],
+        ['location', 'LOCATION', 'NEUTRAL'],
+    ];
+
+    for (const [bucket, mode] of specs) {
+        for (const name of semanticCandidates?.[bucket] || []) {
+            if (pool[bucket].length >= NAME_POOL_SIZE) break;
+            const reason = nameRejectionReason(name, mode, used);
+            if (reason) {
+                semanticRejected.push({ bucket, name, reason });
+                continue;
+            }
             pool[bucket].push(name);
+            semanticAccepted[bucket].push(name);
             used.add(normalizeNameKey(name));
         }
     }
-    return pool;
+
+    for (const [bucket, mode, gender] of specs) {
+        while (pool[bucket].length < NAME_POOL_SIZE) {
+            const slot = pool[bucket].length + 1;
+            const seed = `${bucket}-${slot}`;
+            const name = buildDeterministicName({
+                mode,
+                profile,
+                gender,
+                seed,
+                registry: { used },
+                contextText,
+                style,
+                styleProfile,
+            });
+            if (name === NONE) break;
+            pool[bucket].push(name);
+            used.add(normalizeNameKey(name));
+            replacements.push({ bucket, name, slot });
+        }
+    }
+
+    return {
+        pool,
+        semanticCandidates: {
+            male: semanticCandidates?.male || [],
+            female: semanticCandidates?.female || [],
+            location: semanticCandidates?.location || [],
+            selectedStyle: semanticCandidates?.selectedStyle || DEFAULT_NAME_STYLE,
+        },
+        semanticAccepted,
+        semanticRejected,
+        replacements,
+    };
 }
 
-function buildDeterministicName({ mode, profile, gender, seed, registry, contextText }) {
+function buildDeterministicName({ mode, profile, gender, seed, registry, contextText, style = DEFAULT_NAME_STYLE, styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE] }) {
     const used = new Set([
         ...Array.from(registry.used || []),
         ...extractExistingProperNames(contextText),
     ].map(normalizeNameKey).filter(Boolean));
     const baseSeed = normalizeNameSeed(seed);
-    const rng = createNamePrng(`${baseSeed}|${mode}|${profile}|${gender}|${contextText}|${used.size}`);
+    const rng = createNamePrng(`${baseSeed}|${style}|${mode}|${profile}|${gender}|${contextText}|${used.size}`);
 
     for (let attempt = 0; attempt < 96; attempt += 1) {
-        const candidate = buildNameCandidate({ mode, profile, gender, rng, attempt });
+        const candidate = buildNameCandidate({ mode, profile, gender, rng, attempt, styleProfile });
         if (rejectName(candidate, mode, used)) continue;
         return candidate;
     }
 
     for (let attempt = 0; attempt < 96; attempt += 1) {
         const fallbackProfile = ['BALANCED', 'SOFT', 'HARD'][attempt % 3];
-        const candidate = buildNameCandidate({ mode, profile: fallbackProfile, gender, rng, attempt });
+        const candidate = buildNameCandidate({ mode, profile: fallbackProfile, gender, rng, attempt, styleProfile });
         if (rejectName(candidate, mode, used)) continue;
         return candidate;
     }
@@ -1294,18 +1514,52 @@ function buildDeterministicName({ mode, profile, gender, seed, registry, context
     return buildUniqueFallbackName(mode, used);
 }
 
-function buildNameCandidate({ mode, profile, gender, rng, attempt }) {
-    const pools = NAME_PARTS[mode]?.[profile] || NAME_PARTS[mode].BALANCED;
-    const start = pickWeighted(rng, pools.start);
-    const middle = pickWeighted(rng, pools.middle);
-    const endingPool = mode === 'PERSON' && gender !== 'NEUTRAL'
-        ? [...GENDER_ENDINGS[gender], ...pools.ending]
-        : pools.ending;
-    const ending = pickWeighted(rng, endingPool);
-    const useMiddle = Boolean(middle) && (mode === 'LOCATION' || rng() < 0.45);
-    const phoneticExtra = attempt > 0 && attempt % 11 === 0 ? phonotacticSyllable(rng) : '';
-    const raw = `${start}${useMiddle ? middle : ''}${phoneticExtra}${ending}`;
+function buildNameCandidate({ mode, profile, gender, rng, attempt, styleProfile }) {
+    const safeStyle = styleProfile || NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE];
+    const rule = mode === 'LOCATION' ? safeStyle.rules.location : safeStyle.rules.person;
+    const syllableCount = randomInt(rng, rule.min, rule.max);
+    const syllables = [];
+    for (let index = 0; index < syllableCount; index += 1) {
+        syllables.push(styledSyllable(rng, safeStyle, rule, index, syllableCount));
+    }
+    const ending = pickStyledEnding(rng, safeStyle, mode, gender, rule);
+    const raw = `${syllables.join('')}${ending}`;
     return titleName(smoothName(raw, mode));
+}
+
+function styledSyllable(rng, styleProfile, rule, index, count) {
+    const sounds = styleProfile.sounds || NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE].sounds;
+    const useCluster = index === 0 && rng() < Number(rule.clusterChance || 0);
+    let onsetPool = useCluster ? sounds.clusters : sounds.onsets;
+    if (index > 0) {
+        onsetPool = onsetPool.filter(Boolean);
+    }
+    const onset = pickWeighted(rng, onsetPool);
+    const vowel = pickWeighted(rng, sounds.vowels);
+    const internalCodaChance = Number(rule.internalCodaChance || 0);
+    const canUseCoda = index === count - 1
+        ? rng() < Number(rule.codaChance || 0)
+        : rng() < internalCodaChance;
+    const coda = canUseCoda ? pickWeighted(rng, sounds.codas) : '';
+    return `${onset}${vowel}${coda}`;
+}
+
+function pickStyledEnding(rng, styleProfile, mode, gender, rule) {
+    if (mode === 'LOCATION' && rng() < Number(rule.suffixChance || 0)) {
+        return pickWeighted(rng, styleProfile.rules.locationSuffixes);
+    }
+    if (mode === 'PERSON' && rng() < Number(rule.endingChance || 0)) {
+        if (gender === 'MALE') return pickWeighted(rng, styleProfile.rules.maleEndings);
+        if (gender === 'FEMALE') return pickWeighted(rng, styleProfile.rules.femaleEndings);
+        return pickWeighted(rng, styleProfile.rules.neutralEndings);
+    }
+    return '';
+}
+
+function randomInt(rng, min, max) {
+    const low = Math.max(1, Number(min || 1));
+    const high = Math.max(low, Number(max || low));
+    return low + Math.floor(rng() * (high - low + 1));
 }
 
 function smoothName(value, mode) {
@@ -1314,15 +1568,12 @@ function smoothName(value, mode) {
         .replace(/([aeiou])\1+/g, '$1')
         .replace(/([bcdfghjklmnpqrstvwxyz])\1+/g, '$1')
         .replace(/([aeiou])([aeiou])([aeiou]+)/g, '$1$2')
-        .replace(/([bcdfghjklmnpqrstvwxyz])([bcdfghjklmnpqrstvwxyz])([bcdfghjklmnpqrstvwxyz]+)/g, '$1$2');
+        .replace(/([bcdfghjklmnpqrstvwxyz])([bcdfghjklmnpqrstvwxyz])([bcdfghjklmnpqrstvwxyz]+)/g, '$1$2')
+        .replace(/([a-z]{2,})\1+/g, '$1');
     if (mode === 'PERSON' && text.length > 9) {
         text = text.replace(/(?:shi|esh|ira|ren|un|an|ar|en|ir|ok|ul)$/i, match => match.slice(0, 1));
     }
     return text;
-}
-
-function phonotacticSyllable(rng) {
-    return `${pickWeighted(rng, PHONOTACTIC_ONSETS)}${pickWeighted(rng, PHONOTACTIC_VOWELS)}${pickWeighted(rng, PHONOTACTIC_CODAS)}`;
 }
 
 function pickWeighted(rng, list) {
@@ -1331,18 +1582,56 @@ function pickWeighted(rng, list) {
 }
 
 function rejectName(name, mode, used) {
+    return Boolean(nameRejectionReason(name, mode, used));
+}
+
+function nameRejectionReason(name, mode, used) {
     const text = String(name || '').trim();
     const lower = text.toLowerCase();
-    if (mode === 'PERSON' && (text.length < 4 || text.length > 9)) return true;
-    if (mode === 'LOCATION' && (text.length < 7 || text.length > 14)) return true;
-    if (/[aeiou]{3,}/i.test(text)) return true;
-    if (/[^aeiou\s-]{3,}/i.test(text)) return true;
-    if (/(.)\1\1/i.test(text)) return true;
-    if (used.has(normalizeNameKey(text))) return true;
-    if (mode === 'PERSON' && ROLE_NAME_PREFIXES.some(prefix => lower.startsWith(prefix))) return true;
-    if (/\b(?:aragorn|legolas|gandalf|frodo|sauron|elden|hyrule|zelda|cloud|sephiroth|john|michael|david|james|mary|sarah|anna|london|paris|tokyo|rome|arthur|edward|william|robert|albert|alice|elizabeth|eleanor|aldric|borin|eldarion)\b/i.test(lower)) return true;
-    if (/(?:mirror|river|stone|storm|shadow|silver|golden|crystal|dragon|demon|angel|dark|light|black|white|red|blue|green|wolf|rose|luna|nova)/i.test(lower)) return true;
-    if (mode === 'LOCATION' && /\b(?:rin|len|taro|mira|naya|emi|dan|vek|iro)$/i.test(text)) return true;
+    const vowels = (lower.match(/[aeiou]/g) || []).length;
+    const consonants = (lower.match(/[bcdfghjklmnpqrstvwxyz]/g) || []).length;
+    if (!text) return 'empty';
+    if (mode === 'PERSON' && (text.length < 5 || text.length > 9)) return 'person_length';
+    if (mode === 'LOCATION' && (text.length < 7 || text.length > 14)) return 'location_length';
+    if (/[aeiou]{3,}/i.test(text)) return 'too_many_vowels_in_row';
+    if (/[^aeiou\s-]{3,}/i.test(text)) return 'too_many_consonants_in_row';
+    if (/(.)\1\1/i.test(text)) return 'triple_repeated_letter';
+    if (vowels < 2) return 'too_few_vowels';
+    if (consonants > vowels + 4) return 'consonant_heavy';
+    if (hasBadVowelTexture(lower, mode)) return 'bad_vowel_texture';
+    if (hasAwkwardNameTexture(lower, mode)) return 'awkward_texture';
+    if (used.has(normalizeNameKey(text))) return 'duplicate_or_reserved';
+    if (mode === 'PERSON' && ROLE_NAME_PREFIXES.some(prefix => lower.startsWith(prefix))) return 'role_prefix';
+    if (/\b(?:aragorn|legolas|gandalf|frodo|sauron|elden|hyrule|zelda|cloud|sephiroth|john|michael|david|james|mary|sarah|anna|london|paris|tokyo|rome|arthur|edward|william|robert|albert|alice|elizabeth|eleanor|aldric|borin|eldarion)\b/i.test(lower)) return 'famous_or_stock_name';
+    if (/(?:mirror|river|stone|storm|shadow|silver|golden|crystal|dragon|demon|angel|dark|light|black|white|red|blue|green|wolf|rose|luna|nova)/i.test(lower)) return 'stock_word';
+    if (mode === 'LOCATION' && /\b(?:rin|len|taro|mira|naya|emi|dan|vek|iro)$/i.test(text)) return 'location_reads_like_person';
+    return '';
+}
+
+function hasBadVowelTexture(lower, mode) {
+    const pairs = Array.from(lower.matchAll(/[aeiou]{2}/g)).map(match => match[0]);
+    if (!pairs.length) return false;
+    const allowed = mode === 'LOCATION' ? new Set(['ai', 'ia', 'ei']) : new Set(['ia']);
+    if (pairs.length > 1) return true;
+    if (!allowed.has(pairs[0])) return true;
+    if (/y[aeiou]{2}/.test(lower)) return true;
+    return false;
+}
+
+function hasAwkwardNameTexture(lower, mode) {
+    if (/(?:stai|biv|bom|sailn|lnok|ivun|aistu|rsob|vr|kk|kg|gk|dt|td|bp|pb|sz|zs|zx|xz|q)/.test(lower)) return true;
+    if (/(?:sros|rler|lrer|nrer|mrer|rl|lr|sr|rsr|srs|rnr|nln|mnm|dmd|bmb)/.test(lower)) return true;
+    if (/(?:ua|uo|oi|iu|ui|ao|ea|eo|oe|ou).*(?:ua|uo|oi|iu|ui|ao|ea|eo|oe|ou)/.test(lower)) return true;
+    if (mode === 'PERSON' && /(?:uar|uara|oira|oire|eira|aira|zuar|loira|tunen)$/.test(lower)) return true;
+    if (mode === 'PERSON' && /^(?:soto|titu|yuye|tuhi|yome|tuya|hovi|sezo|taze|shihu|modo|suzi|thisa)$/i.test(lower)) return true;
+    if (mode === 'PERSON' && /^(?:this|that|then|than|them|there|when|what|with)/.test(lower)) return true;
+    if (mode === 'PERSON' && /^(?:[bcdfghjklmnpqrstvwxyz][aeiou]){2}$/i.test(lower)) return true;
+    if (mode === 'LOCATION' && /(?:tunen|zuar|loira|oira|uara)$/.test(lower)) return true;
+    if (/(?:[aeiou][^aeiou]){3,}[aeiou]?$/i.test(lower) && mode === 'PERSON') return true;
+    if (/(?:[bcdfghjklmnpqrstvwxyz][rlmn]){3,}/.test(lower)) return true;
+    if (/(?:[aeiou][bcdfghjklmnpqrstvwxyz]){4,}$/.test(lower) && mode === 'PERSON') return true;
+    if (mode === 'PERSON' && /(?:hold|watch|gate|ford|mere|vale|reach|hollow|heim|gard|grad|polis|barrow|scar)$/.test(lower)) return true;
+    if (mode === 'LOCATION' && /(?:bom|vun|stu|tavo|mira|sena|vire|nira)$/.test(lower)) return true;
     return false;
 }
 
@@ -1399,6 +1688,15 @@ function getNameRegistry(context) {
     return { used };
 }
 
+function registerGeneratedNamePool(context, pool, meta) {
+    if (!context?.chatMetadata || !pool) return;
+    for (const [bucket, names] of Object.entries(pool)) {
+        for (const name of Array.isArray(names) ? names : []) {
+            registerGeneratedName(context, name, { ...meta, bucket });
+        }
+    }
+}
+
 function registerGeneratedName(context, name, meta) {
     if (!context?.chatMetadata || !isReal(name)) return;
     const root = context.chatMetadata[NAME_REGISTRY_KEY] || { used: [], entries: {} };
@@ -1418,8 +1716,10 @@ function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, hasS
     if (hasStakes !== 'Y') return [];
     if (!effectOutcomeLanded(outcome)) return [];
 
+    const landedCount = Number(outcome?.LandedActions ?? 0);
     const injuries = normalizeInjuryEffectCandidates(injuryEffectEngine)
         .filter(effect => injuryEffectTargetAllowed(effect, targets))
+        .slice(0, Math.max(0, landedCount))
         .map(effect => buildInflictedInjuryFromSemanticEffect(effect, outcome))
         .filter(Boolean);
     return mergeInflictedInjuries(injuries);
@@ -1442,6 +1742,45 @@ function classifyCombatActionSequence({ semantic, goal, targets, actions, hostil
     if (hasSemanticInjuryEffect && userStat !== 'CHA') return true;
     if (userStat === 'PHY' && oppStat !== 'ENV' && hasCombatActionLanguage(semanticSourceText(semantic))) return true;
     return false;
+}
+
+function repairLivingOppositionTargets(targets, classifier, options = {}, audit) {
+    const repaired = {
+        ActionTargets: toRealArray(targets.ActionTargets),
+        OppTargets: {
+            NPC: toRealArray(targets.OppTargets?.NPC),
+            ENV: toRealArray(targets.OppTargets?.ENV),
+        },
+        BenefitedObservers: toRealArray(targets.BenefitedObservers),
+        HarmedObservers: toRealArray(targets.HarmedObservers),
+    };
+    if (options.hasStakes !== 'Y') return repaired;
+    if (firstReal(repaired.OppTargets.NPC)) return repaired;
+    if (firstReal(repaired.OppTargets.ENV)) return repaired;
+
+    const livingActionTarget = firstReal(repaired.ActionTargets.filter(name => classifier.isLiving(name)));
+    if (!livingActionTarget) return repaired;
+
+    repaired.OppTargets.NPC = unique([...repaired.OppTargets.NPC, livingActionTarget]);
+    audit?.push(`2.4f deterministicLivingOppositionRepair=${compact({
+        hardRule: 'stakes-bearing living ActionTarget cannot resolve against ENV; use that target as OppTargets.NPC when semantic omitted living opposition',
+        target: livingActionTarget,
+    })}`);
+    return repaired;
+}
+
+function defaultLivingOppStatForChallenge(semantic, goal) {
+    const source = semanticSourceText({ ...semantic, identifyGoal: goal }).toLowerCase();
+    if (/\b(bluff(?:s|ed|ing)?|lie|lying|lied|deceiv\w*|deception|trick(?:s|ed|ing)?|mislead\w*|intimidat\w*|coerc\w*|threat\w*|blackmail\w*|manipulat\w*|interrogat\w*|humiliat\w*|terroriz\w*|menac\w*|force(?:d)? submission|forced submission)\b/.test(source)) {
+        return 'MND';
+    }
+    if (/\b(persuad\w*|persuasion|negotiat\w*|negotiation|diplomac\w*|diplomacy|bargain\w*|reassur\w*|reconciliation|reconcile\w*|good-faith|appeal\w*|convinc\w*|reason with|mediat\w*|ask\w*|request\w*)\b/.test(source)) {
+        return 'CHA';
+    }
+    if (isBodyAffectingMagic(semantic, goal, { ActionTargets: [], OppTargets: { NPC: ['living target'], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] })) {
+        return 'PHY';
+    }
+    return 'CHA';
 }
 
 function hasCombatActionLanguage(source) {
@@ -1885,7 +2224,7 @@ function applyUserResultInjuryDeltaToState(before, delta) {
     return normalizeTrackerUserState(result);
 }
 
-function deriveInflictedTargetInjuryFromAggression({ npc, target, proactivityResult, attackType, reactionOutcome, margin, resolutionPacket }) {
+function deriveInflictedTargetInjuryFromAggression({ npc, target, proactivityResult, attackType, reactionOutcome, margin, resolutionPacket, refereeContext }) {
     if (!['npc_overpowers', 'npc_succeeds'].includes(reactionOutcome)) return null;
     const source = [
         attackType,
@@ -1900,8 +2239,8 @@ function deriveInflictedTargetInjuryFromAggression({ npc, target, proactivityRes
     const injuryKind = aggressionInjuryKind(source);
     const wound = `${severity} ${bodyPart} ${injuryKind}`.replace(/\s+/g, ' ').trim();
     const status = statusFromInflictedInjury(source, bodyPart, severity);
-    const targetName = normalizeProactivityTarget(target);
-    const targetIsUser = isUserProactivityTarget({ ProactivityTarget: targetName });
+    const targetName = normalizeProactivityTarget(target, refereeContext);
+    const targetIsUser = isUserProactivityTarget({ ProactivityTarget: targetName }, refereeContext);
 
     return {
         sourceNpc: npc,
@@ -2467,13 +2806,14 @@ function cleanPersonalitySummary(value) {
     return text.slice(0, 160);
 }
 
-function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, audit) {
+function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, audit, refereeContext, context = {}) {
     const kind = classifyAction(resolutionPacket);
     const chaosBand = chaosHandoff.CHAOS?.triggered ? chaosHandoff.CHAOS.band : 'None';
     const counterPotential = resolutionPacket.CounterPotential || 'none';
     const cap = NPC_PROACTIVITY_CAP;
     const candidates = [];
     const results = {};
+    const latestUserText = relationshipText(getLatestUserTextFromContext(context));
 
     audit.push('STEP 6: EXECUTE NPCProactivityEngine');
     audit.push(`6.2 classifyAction=${kind}`);
@@ -2489,7 +2829,7 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
         let tier = proactivityGuard
             ? 'DORMANT'
             : classifyProactivityTier(handoff, chaosBand, counterPotential, lock, fin);
-        tier = adjustCompanionProactivityTier(tier, handoff, fin, { kind, resolutionPacket, chaosBand, counterPotential });
+        tier = adjustCompanionProactivityTier(tier, handoff, fin, { kind, resolutionPacket, chaosBand, counterPotential, handoffs });
 
         results[handoff.NPC] = {
             Proactive: 'N',
@@ -2509,11 +2849,34 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
             audit.push(`6.4g.1 proactivityRefereeGuard=${proactivityGuard}`);
         }
 
+        const directedCompanionAttackTarget = detectDirectedCompanionAttackTarget(handoff, resolutionPacket, latestUserText, handoffs);
+        if (directedCompanionAttackTarget && isDirectedCompanionAttackEligible(handoff, fin)) {
+            const commandDie = typeof dice.d100 === 'function' ? dice.d100() : Math.floor(Math.random() * 100) + 1;
+            candidates.push({
+                NPC: handoff.NPC,
+                die: 1000 + commandDie,
+                tier: 'FORCED',
+                intent: 'ESCALATE_VIOLENCE',
+                impulse: 'BOND',
+                ProactivityTarget: directedCompanionAttackTarget,
+                TargetsUser: 'N',
+                Threshold: 'AUTO',
+                passes: 'Y',
+                CompanionInitiative: 'Y',
+                CompanionInitiativeTag: 'Companion_Attack',
+                CompanionInitiativeDie: commandDie,
+                CompanionInitiativeContext: 'crisis',
+                CompanionCrisisDire: isDireCompanionCrisis({ resolutionPacket }) ? 'Y' : 'N',
+            });
+            audit.push(`6.4h directedCompanionAttack=${compact({ NPC: handoff.NPC, target: directedCompanionAttackTarget, CompanionInitiativeDie: commandDie })}`);
+            continue;
+        }
+
         if (tier === 'FORCED') {
             const intent = selectIntent(impulse, kind, fin, handoff.Override, handoff.PressureMode);
             const proactivityTarget = proactivityGuard ? NONE : deriveProactivityTarget(handoff, resolutionPacket, intent);
-            const targetsUser = isUserProactivityTarget({ ProactivityTarget: proactivityTarget }) ? 'Y' : 'N';
-            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die: 20, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: 'AUTO', passes: 'Y' }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential }));
+            const targetsUser = isUserProactivityTarget({ ProactivityTarget: proactivityTarget }, refereeContext) ? 'Y' : 'N';
+            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die: 20, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: 'AUTO', passes: 'Y' }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs }));
             audit.push('6.4i FORCED candidate');
             continue;
         }
@@ -2531,8 +2894,8 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
         if (passes === 'Y') {
             const intent = selectIntent(impulse, kind, fin, handoff.Override, handoff.PressureMode);
             const proactivityTarget = proactivityGuard ? NONE : deriveProactivityTarget(handoff, resolutionPacket, intent);
-            const targetsUser = isUserProactivityTarget({ ProactivityTarget: proactivityTarget }) ? 'Y' : 'N';
-            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: threshold, passes }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential }));
+            const targetsUser = isUserProactivityTarget({ ProactivityTarget: proactivityTarget }, refereeContext) ? 'Y' : 'N';
+            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: threshold, passes }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs }));
             audit.push(`6.5c selectIntent=${intent}`);
             audit.push(`6.5e ProactivityTarget=${proactivityTarget}; TargetsUser=${targetsUser}`);
         } else {
@@ -2585,6 +2948,37 @@ function applyInitiativeOverridesIfEligible(candidate, handoff, fin, dice, audit
     const partnerCandidate = applyPartnerInitiativeIfEligible(candidate, handoff, fin, dice, audit, context);
     if (partnerCandidate !== candidate) return partnerCandidate;
     return applyRomanceInitiativeIfEligible(candidate, handoff, fin, dice, audit, context);
+}
+
+function isDirectedCompanionAttackEligible(handoff, fin) {
+    const relation = handoff?.RelationToUserAction || {};
+    return fin.B >= 2
+        && fin.F <= 2
+        && fin.H <= 2
+        && (handoff?.Lock || 'None') === 'None'
+        && !relation.isOpp
+        && !relation.isHarmed;
+}
+
+function detectDirectedCompanionAttackTarget(handoff, resolutionPacket, latestUserText, handoffs = []) {
+    const source = relationshipText(latestUserText);
+    if (!source) return null;
+    if (!assistantMentionsNpc(handoff?.NPC, source)) return null;
+    if (!isDirectedCompanionAttackCommandText(source)) return null;
+    return resolveFriendlyCrisisAttackTarget(handoff, { resolutionPacket, handoffs });
+}
+
+function isDirectedCompanionAttackCommandText(text) {
+    const source = String(text || '').toLowerCase();
+    if (!source) return false;
+    const attackVerb = /\b(?:attack|attacks|attacked|attacking|hit|hits|hitting|strike|strikes|struck|striking|smash|smashes|smashed|smashing|slam|slams|slammed|slamming|stab|stabs|stabbed|stabbing|slash|slashes|slashed|slashing|punch|punches|punched|punching|kick|kicks|kicked|kicking|maul|mauls|mauled|mauling|flank|flanks|flanked|flanking|charge|charges|charged|charging|rush|rushes|rushed|rushing|cut|cuts|cutting|chop|chops|chopped|chopping|smite|smites|smited|smoting|shoot|shoots|shot|shooting|fire|fires|fired|firing|clobber|clobbers|clobbered|clobbering|bash|bashes|bashed|bashing|clamp|clamps|clamped|clamping|drive|drives|drove|driving)\b/;
+    if (/\b(?:don't|do not|never|stop)\b.{0,40}\b(?:attack|hit|strike|smash|slam|stab|slash|punch|kick|maul|flank|charge|rush|cut|chop|smite|shoot|fire|clobber|bash|drive)\b/.test(source)) {
+        return false;
+    }
+    return attackVerb.test(source)
+        || /\bhit\b.{0,40}\b(?:the|him|her|them|it|flank|side|back|leg|arm|head|body|enemy|target|ogre|bear|orc|guard|monster|flank|rear|weak\s+point|open(?:ing)?|vital(?:s)?|wing|tail|knees?)\b/.test(source)
+        || /\bdrive\b.{0,40}\b(?:knee|elbow|shoulder|blade|weapon|sword|staff|spear|axe|club)\b/.test(source)
+        || /\b(?:keep|hold|stop|pin|drive|force)\b.{0,40}\b(?:it|him|her|them|the\s+ogre|the\s+orc|the\s+guard|the\s+enemy|the\s+monster)\b.{0,40}\b(?:off|back|down|away|from\s+me|from\s+us)\b/.test(source);
 }
 
 function applyCompanionCrisisInitiativeIfEligible(candidate, handoff, fin, dice, audit, context = {}) {
@@ -2925,12 +3319,30 @@ function remapPartnerInitiativeForContext(tag, context, die, handoff, engineCont
 function resolveFriendlyCrisisAttackTarget(handoff, context = {}) {
     const packet = context.resolutionPacket || {};
     const actingNpc = handoff?.NPC;
-    return toRealArray(packet.OppTargets?.NPC)
+    const opposedTarget = toRealArray(packet.OppTargets?.NPC)
         .find(name => isValidFriendlyAttackTarget(name, actingNpc));
+    if (opposedTarget) return opposedTarget;
+    return toRealArray(packet.ActionTargets)
+        .find(name => isValidHostileFriendlyAttackFallback(name, actingNpc, context));
 }
 
 function isValidFriendlyAttackTarget(name, actingNpc) {
     return isReal(name) && !sameName(name, actingNpc) && name !== USER_PROACTIVITY_TARGET;
+}
+
+function isValidHostileFriendlyAttackFallback(name, actingNpc, context = {}) {
+    if (!isValidFriendlyAttackTarget(name, actingNpc)) return false;
+    return isHostileHandoffTarget(name, context.handoffs);
+}
+
+function isHostileHandoffTarget(name, handoffs = []) {
+    const handoff = (handoffs || []).find(item => sameName(item?.NPC, name));
+    if (!handoff) return false;
+    const fin = parseFinalState(handoff.FinalState);
+    return fin.H >= 3
+        || handoff.Lock === 'HATRED'
+        || handoff.Behavior === 'HATRED'
+        || handoff.DominantLock === 'HOSTILITY';
 }
 
 function normalizeRomanceStyle(value) {
@@ -2938,27 +3350,25 @@ function normalizeRomanceStyle(value) {
     return ['nervous', 'flirt', 'auto'].includes(text) ? text : 'auto';
 }
 
-function normalizeProactivityTarget(value) {
+function normalizeProactivityTarget(value, refereeContext = null) {
     const text = String(value || '').trim();
     if (!text || ['none', '(none)', 'null', 'n/a'].includes(text.toLowerCase())) return NONE;
-    if (text === USER_PROACTIVITY_TARGET) return USER_PROACTIVITY_TARGET;
-    if (/^\{\{\s*user\s*\}\}$/i.test(text)) return USER_PROACTIVITY_TARGET;
-    if (/^(?:user|player|protagonist|you|yourself)$/i.test(text)) return USER_PROACTIVITY_TARGET;
+    if (isUserReference(text, refereeContext)) return USER_PROACTIVITY_TARGET;
     return text;
 }
 
-function isUserProactivityTarget(result) {
-    return normalizeProactivityTarget(result?.ProactivityTarget) === USER_PROACTIVITY_TARGET
+function isUserProactivityTarget(result, refereeContext = null) {
+    return normalizeProactivityTarget(result?.ProactivityTarget, refereeContext) === USER_PROACTIVITY_TARGET
         || result?.TargetsUser === 'Y';
 }
 
-function isNpcProactivityTarget(result) {
-    const target = normalizeProactivityTarget(result?.ProactivityTarget);
+function isNpcProactivityTarget(result, refereeContext = null) {
+    const target = normalizeProactivityTarget(result?.ProactivityTarget, refereeContext);
     return isReal(target) && target !== USER_PROACTIVITY_TARGET;
 }
 
-function hasAggressionProactivityTarget(result) {
-    return isUserProactivityTarget(result) || isNpcProactivityTarget(result);
+function hasAggressionProactivityTarget(result, refereeContext = null) {
+    return isUserProactivityTarget(result, refereeContext) || isNpcProactivityTarget(result, refereeContext);
 }
 
 function deriveProactivityTarget(handoff, resolutionPacket, intent) {
@@ -2967,10 +3377,12 @@ function deriveProactivityTarget(handoff, resolutionPacket, intent) {
     if (relation?.isOpp || relation?.isDirect || relation?.isHarmed) return USER_PROACTIVITY_TARGET;
     const harmed = firstReal(resolutionPacket?.HarmedObservers);
     if (isReal(harmed) && !sameName(harmed, handoff?.NPC)) return harmed;
+    const hostileNpc = firstReal(resolutionPacket?.OppTargets?.NPC);
+    if (isReal(hostileNpc) && !sameName(hostileNpc, handoff?.NPC)) return hostileNpc;
     return USER_PROACTIVITY_TARGET;
 }
 
-function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResults, resolutionPacket, dice, audit, context) {
+function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResults, resolutionPacket, dice, audit, context, refereeContext) {
     const userCore = getUserCoreStats(ledger);
     const counterPotential = resolutionPacket?.CounterPotential || 'none';
     const counterAllowed = ['light', 'medium', 'severe'].includes(counterPotential);
@@ -2983,12 +3395,12 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
         || result?.CompanionInitiativeTag === 'Companion_Attack';
     const companionAggressive = proactivityEntries.filter(([, result]) =>
         result?.Proactive === 'Y'
-        && hasAggressionProactivityTarget(result)
+        && hasAggressionProactivityTarget(result, refereeContext)
         && result?.Intent === 'ESCALATE_VIOLENCE'
         && isCompanionAttack(result));
     const proactiveAttackAllowed = proactivityEntries.some(([, result]) =>
         result?.Proactive === 'Y'
-        && hasAggressionProactivityTarget(result)
+        && hasAggressionProactivityTarget(result, refereeContext)
         && result?.Intent === 'ESCALATE_VIOLENCE'
         && !isCompanionAttack(result));
     const companionAttackPresent = companionAggressive.length > 0;
@@ -3004,18 +3416,19 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
     const proactiveAggressive = proactivityEntries.filter(([, result]) =>
         baseAttackType !== 'None'
         && result.Proactive === 'Y'
-        && hasAggressionProactivityTarget(result)
+        && hasAggressionProactivityTarget(result, refereeContext)
         && !isCompanionAttack(result)
         && isImmediateAttackIntentForType(result.Intent, baseAttackType));
-    const counterTarget = counterAllowed ? firstReal(resolutionPacket?.OppTargets?.NPC) || firstReal(resolutionPacket?.ActionTargets) : null;
-    const aggressive = counterAllowed && !criticalSuccess && counterTarget
+    const reactiveCounterTarget = counterAllowed ? firstReal(resolutionPacket?.OppTargets?.NPC) || firstReal(resolutionPacket?.ActionTargets) : null;
+    const counterRecipient = resolveReactiveAggressionRecipient(reactiveCounterTarget, resolutionPacket, proactivityEntries, refereeContext);
+    const aggressive = counterAllowed && !criticalSuccess && reactiveCounterTarget
         ? uniqueAggressionEntries([
-            proactiveAggressive.find(([npc]) => sameName(npc, counterTarget)) || [counterTarget, {
+            proactiveAggressive.find(([npc]) => sameName(npc, reactiveCounterTarget)) || [reactiveCounterTarget, {
                 Proactive: 'Y',
                 Intent: 'BOUNDARY_PHYSICAL',
                 Impulse: 'ANGER',
-                ProactivityTarget: USER_PROACTIVITY_TARGET,
-                TargetsUser: 'Y',
+                ProactivityTarget: counterRecipient,
+                TargetsUser: isUserProactivityTarget({ ProactivityTarget: counterRecipient }, refereeContext) ? 'Y' : 'N',
                 ProactivityTier: 'FORCED',
                 ProactivityDie: 20,
                 Threshold: 'AUTO',
@@ -3034,7 +3447,8 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
     audit.push(`7.1 counterPotential=${counterPotential}`);
     audit.push(`7.1a counterBonus=${counterBonus}`);
     audit.push(`7.1b immediateAttackType=${baseAttackType}`);
-    audit.push(`7.1c counterTarget=${counterTarget || NONE}`);
+    audit.push(`7.1c counterTarget=${reactiveCounterTarget || NONE}`);
+    audit.push(`7.1c.1 counterRecipient=${counterRecipient || NONE}`);
     audit.push(`7.1d companionAttackPresent=${companionAttackPresent ? 'Y' : 'N'}`);
     audit.push(`7.2 AggressionPresent=${aggressive.length ? 'Y' : 'N'}`);
 
@@ -3052,7 +3466,7 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
     audit.push(`7.3 getUserCoreStats=${compact(userCore)}`);
 
     for (const [npc, proactivityResult] of aggressive) {
-        const target = normalizeProactivityTarget(proactivityResult?.ProactivityTarget || USER_PROACTIVITY_TARGET);
+        const target = normalizeProactivityTarget(proactivityResult?.ProactivityTarget || USER_PROACTIVITY_TARGET, refereeContext);
         const targetIsUser = target === USER_PROACTIVITY_TARGET;
         const resultAttackType = isCompanionAttack(proactivityResult)
             ? 'CompanionAttack'
@@ -3081,6 +3495,7 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
             reactionOutcome: ReactionOutcome,
             margin,
             resolutionPacket,
+            refereeContext,
         });
         const inflictedUserInjury = inflictedTargetInjury?.targetType === 'user' ? inflictedTargetInjury : null;
         const inflictedNpcInjury = inflictedTargetInjury?.targetType === 'npc' && isReal(target)
@@ -3102,11 +3517,93 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
         audit.push(`7.5i ${npc}.InflictedTargetInjury=${compact(inflictedTargetInjury || {})}`);
         audit.push(`7.5j ${npc}.ProactivityTarget=${target}`);
         audit.push(`7.6 AGGRESSION_RESULT=${compact(results[npc])}`);
+
+        const companionCounterPotential = resultAttackType === 'CompanionAttack' && !targetIsUser
+            ? counterPotentialFromCompanionAttackMargin(margin)
+            : 'none';
+        if (companionCounterPotential !== 'none' && isReal(target) && !sameName(target, npc) && !results[target]) {
+            const counterProactivity = {
+                Proactive: 'Y',
+                Intent: 'BOUNDARY_PHYSICAL',
+                Impulse: 'ANGER',
+                ProactivityTarget: npc,
+                TargetsUser: 'N',
+                ProactivityTier: 'FORCED',
+                ProactivityDie: 20,
+                Threshold: 'AUTO',
+            };
+            const counterBonus = counterBonusFromPotential(companionCounterPotential);
+            const counterNpcCore = normalizeCore(trackerUpdate[target]?.currentCoreStats || trackerSnapshot[target]?.currentCoreStats, { PHY: 1, MND: 1, CHA: 1 });
+            const counterNpcImpairment = evaluateNpcAggressionImpairment(target, trackerUpdate, trackerSnapshot, counterProactivity);
+            const counterNpcImpairmentPenalty = Number(counterNpcImpairment?.AppliedToRoll === 'Y' ? counterNpcImpairment.RollPenalty : 0);
+            const counterTargetImpairment = evaluateNpcDefenseImpairment(npc, trackerUpdate, trackerSnapshot, counterProactivity);
+            const counterTargetImpairmentPenalty = Number(counterTargetImpairment?.AppliedToRoll === 'Y' ? counterTargetImpairment.RollPenalty : 0);
+            const counterDefenderCore = normalizeCore(trackerUpdate[npc]?.currentCoreStats || trackerSnapshot[npc]?.currentCoreStats, { PHY: 1, MND: 1, CHA: 1 });
+            const counterNpcDie = dice.d20();
+            const counterDefenderDie = dice.d20();
+            const counterNpcTotal = counterNpcDie + counterNpcCore.PHY + counterBonus + counterNpcImpairmentPenalty;
+            const counterDefenderTotal = counterDefenderDie + statValue(counterDefenderCore, 'PHY') + counterTargetImpairmentPenalty;
+            const counterMargin = counterNpcTotal - counterDefenderTotal;
+            const counterReactionOutcome = aggressionReactionOutcome(counterMargin);
+            const counterPacket = { ...resolutionPacket, CounterPotential: companionCounterPotential };
+            const counterInflictedTargetInjury = deriveInflictedTargetInjuryFromAggression({
+                npc: target,
+                target: npc,
+                proactivityResult: counterProactivity,
+                attackType: 'CounterAttack',
+                reactionOutcome: counterReactionOutcome,
+                margin: counterMargin,
+                resolutionPacket: counterPacket,
+                refereeContext,
+            });
+            if (counterInflictedTargetInjury?.targetType === 'npc') {
+                npcTrackerDeltas.push({ NPC: npc, injury: counterInflictedTargetInjury });
+            }
+            results[target] = {
+                AttackType: 'CounterAttack',
+                AttackIntent: counterProactivity.Intent,
+                ProactivityTarget: npc,
+                CounterPotential: companionCounterPotential,
+                CounterBonus: counterBonus,
+                ReactionOutcome: counterReactionOutcome,
+                Margin: counterMargin,
+                NPCImpairment: counterNpcImpairment,
+                UserImpairment: null,
+                TargetImpairment: counterTargetImpairment,
+                InflictedUserInjury: null,
+                InflictedTargetInjury: counterInflictedTargetInjury || null,
+            };
+            audit.push(`7.6a companionCounterPotential=${companionCounterPotential}`);
+            audit.push(`7.6b ${target}.counterNpcCore=${compact(counterNpcCore)}`);
+            audit.push(`7.6c ${target}.CounterTargetDefenseImpairmentEngine=${compact(counterTargetImpairment)}`);
+            audit.push(`7.6d ${target}.counterTotal=${counterNpcDie}+${counterNpcCore.PHY}+${counterBonus}${counterNpcImpairmentPenalty ? `+impairment(${counterNpcImpairmentPenalty})` : ''}=${counterNpcTotal}`);
+            audit.push(`7.6e ${npc}.counterDefenseTotal=${counterDefenderDie}+${statValue(counterDefenderCore, 'PHY')}${counterTargetImpairmentPenalty ? `+impairment(${counterTargetImpairmentPenalty})` : ''}=${counterDefenderTotal}`);
+            audit.push(`7.6f COMPANION_COUNTER_RESULT=${compact(results[target])}`);
+        }
     }
 
     audit.push(`7.7 AGGRESSION_RESULTS=${compact(results)}`);
     audit.push('---');
     return { results, userTrackerDelta, npcTrackerDeltas };
+}
+
+function counterPotentialFromCompanionAttackMargin(margin) {
+    if (margin >= 0) return 'none';
+    if (margin >= -3) return 'light';
+    if (margin >= -7) return 'medium';
+    return 'severe';
+}
+
+function resolveReactiveAggressionRecipient(reactiveNpc, resolutionPacket, proactivityEntries, refereeContext = null) {
+    if (!isReal(reactiveNpc)) return USER_PROACTIVITY_TARGET;
+    const companionAttacker = (proactivityEntries || []).find(([npc, result]) =>
+        !sameName(npc, reactiveNpc)
+        && result?.Proactive === 'Y'
+        && result?.Intent === 'ESCALATE_VIOLENCE'
+        && normalizeProactivityTarget(result?.ProactivityTarget, refereeContext) !== USER_PROACTIVITY_TARGET
+        && sameName(normalizeProactivityTarget(result?.ProactivityTarget, refereeContext), reactiveNpc));
+    if (companionAttacker?.[0]) return companionAttacker[0];
+    return USER_PROACTIVITY_TARGET;
 }
 
 function uniqueAggressionEntries(entries) {
@@ -3149,6 +3646,8 @@ function buildRefereeContext(context) {
     const userText = String(fields.persona ?? '');
     const userNonHuman = classifyUserNonHuman(userText);
     const cardText = characterCardInitText(fields);
+    const userNames = buildUserReferenceNames(context, fields);
+    const userReferencePattern = buildUserReferencePattern(userNames);
 
     return {
         userNonHuman,
@@ -3156,7 +3655,9 @@ function buildRefereeContext(context) {
             ? 'typical'
             : classifyRaceCategory(userNonHuman?.evidence || userText),
         activeCharacterName: cleanInitScalar(fields.name || fields.ch_name || context?.name2),
-        cardUserHistory: parseCardUserHistory(cardText),
+        userReferenceNames: userNames,
+        userReferencePattern,
+        cardUserHistory: parseCardUserHistory(cardText, userNames),
         cardRaceProfile: parseCardRaceProfile(cardText),
     };
 }
@@ -3240,40 +3741,108 @@ function characterCardInitText(fields = {}) {
     ].map(value => String(value || '').trim()).filter(Boolean).join('\n').slice(0, 12000);
 }
 
-function parseCardUserHistory(text) {
+function buildUserReferenceNames(context, fields = {}) {
+    return unique([
+        context?.name1,
+        context?.user,
+        context?.userName,
+        context?.personaName,
+        fields.user,
+        fields.userName,
+        fields.personaName,
+        parsePersonaName(fields.persona),
+    ].map(cleanInitScalar).filter(isReal));
+}
+
+function defaultUserReferenceNames() {
+    return ['{{user}}', 'user', 'the user', 'player', 'the player', 'protagonist', 'the protagonist', 'you', 'yourself'];
+}
+
+function buildUserReferencePattern(userNames = []) {
+    const refs = unique([
+        ...defaultUserReferenceNames(),
+        ...userNames,
+    ].map(cleanInitScalar).filter(isReal));
+    const body = refs
+        .sort((a, b) => b.length - a.length)
+        .map(escapeRegExp)
+        .join('|');
+    return `(?<![A-Za-z0-9_])(?:${body})(?![A-Za-z0-9_])`;
+}
+
+function userReferencePattern(refereeContext = null) {
+    return refereeContext?.userReferencePattern || buildUserReferencePattern(refereeContext?.userReferenceNames || []);
+}
+
+function isUserReference(value, refereeContext = null) {
+    const text = cleanInitScalar(value);
+    if (!text) return false;
+    if (/^\{\{\s*user\s*\}\}$/i.test(text)) return true;
+    if (/^(?:user|the user|player|the player|protagonist|the protagonist|you|yourself)$/i.test(text)) return true;
+    return toRealArray(refereeContext?.userReferenceNames)
+        .some(name => sameName(name, text));
+}
+
+function removeUserReferencesFromTargets(targets, refereeContext = null) {
+    const withoutUser = values => toRealArray(values).filter(name => !isUserReference(name, refereeContext));
+    return {
+        ActionTargets: withoutUser(targets?.ActionTargets),
+        OppTargets: {
+            NPC: withoutUser(targets?.OppTargets?.NPC),
+            ENV: toRealArray(targets?.OppTargets?.ENV),
+        },
+        BenefitedObservers: withoutUser(targets?.BenefitedObservers),
+        HarmedObservers: withoutUser(targets?.HarmedObservers),
+    };
+}
+
+function parsePersonaName(text) {
     const source = String(text || '');
-    const knows = parseStructuredKnowsUser(source);
-    const standing = parseStructuredUserStanding(source) || parseExplicitUserStanding(source);
+    const match = source.match(/^\s*(?:[-*#]\s*)?(?:Name|Player\s*Name|Character\s*Name)\s*[:=]\s*([^\n\r]+)/im);
+    if (!match) return '';
+    return match[1].replace(/[`*_~]/g, '').trim();
+}
+
+function parseCardUserHistory(text, userNames = []) {
+    const source = String(text || '');
+    const knows = parseStructuredKnowsUser(source, userNames);
+    const standing = parseStructuredUserStanding(source, userNames) || parseExplicitUserStanding(source, userNames);
     if (knows === 'N') return { knowsUser: 'N', standing: 'neutral' };
     if (standing === 'positive' || standing === 'negative') return { knowsUser: 'Y', standing };
     if (knows === 'Y') return { knowsUser: 'Y', standing: 'neutral' };
     return { knowsUser: 'N', standing: 'neutral' };
 }
 
-function parseStructuredKnowsUser(source) {
-    const match = source.match(/^\s*(?:[-*]\s*)?(?:Knows\s*(?:User|\{\{user\}\})|Known\s*To\s*(?:User|\{\{user\}\}))\s*[:=]\s*(yes|y|true|no|n|false)\b/im);
+function parseStructuredKnowsUser(source, userNames = []) {
+    const userRef = buildUserReferencePattern(userNames);
+    const match = source.match(new RegExp(`^\\s*(?:[-*]\\s*)?(?:Knows\\s*${userRef}|Known\\s*To\\s*${userRef})\\s*[:=]\\s*(yes|y|true|no|n|false)\\b`, 'im'));
     if (!match) return null;
     return /^(yes|y|true)$/i.test(match[1]) ? 'Y' : 'N';
 }
 
-function parseStructuredUserStanding(source) {
-    const match = source.match(/^\s*(?:[-*]\s*)?(?:User\s*Standing|Standing\s*With\s*(?:User|\{\{user\}\})|Relationship\s*To\s*(?:User|\{\{user\}\})|User\s*Relationship|Prior\s*Relationship)\s*[:=]\s*([^\n\r]+)/im);
+function parseStructuredUserStanding(source, userNames = []) {
+    const userRef = buildUserReferencePattern(userNames);
+    const match = source.match(new RegExp(`^\\s*(?:[-*]\\s*)?(?:User\\s*Standing|Standing\\s*With\\s*${userRef}|Relationship\\s*To\\s*${userRef}|User\\s*Relationship|Prior\\s*Relationship)\\s*[:=]\\s*([^\\n\\r]+)`, 'im'));
     if (!match) return null;
     return normalizeStandingWord(match[1]);
 }
 
-function parseExplicitUserStanding(source) {
-    const userRef = '(?:\\{\\{user\\}\\}|the user|user|you)';
-    const negativeBefore = new RegExp(`\\b(?:hates|despises|detests|loathes|distrusts|resents|is hostile to|is an enemy of|sworn enemy of|wants revenge on)\\b.{0,80}\\b${userRef}\\b`, 'i');
-    const negativeAfter = new RegExp(`\\b${userRef}\\b.{0,80}\\b(?:is hated|is despised|is distrusted|is resented|is an enemy|is a sworn enemy)\\b`, 'i');
+function parseExplicitUserStanding(source, userNames = []) {
+    const userRef = buildUserReferencePattern(userNames);
+    const negativeBefore = new RegExp(`\\b(?:hates|despises|detests|loathes|distrusts|resents|is hostile to|is an enemy of|sworn enemy of|wants revenge on)\\b.{0,80}${userRef}`, 'i');
+    const negativeAfter = new RegExp(`${userRef}.{0,80}\\b(?:is hated|is despised|is distrusted|is resented|is an enemy|is a sworn enemy)\\b`, 'i');
     if (negativeBefore.test(source) || negativeAfter.test(source)) return 'negative';
 
-    const positiveBefore = new RegExp(`\\b(?:trusts|likes|respects|is friends with|is an ally of|is loyal to|cares for)\\b.{0,80}\\b${userRef}\\b`, 'i');
-    const positiveAfter = new RegExp(`\\b${userRef}\\b.{0,80}\\b(?:is trusted|is liked|is respected|is a friend|is an ally)\\b`, 'i');
+    const positiveBefore = new RegExp(`\\b(?:trusts|likes|respects|is friends with|is an ally of|is loyal to|cares for)\\b.{0,80}${userRef}`, 'i');
+    const positiveAfter = new RegExp(`${userRef}.{0,80}\\b(?:is trusted|is liked|is respected|is a friend|is an ally)\\b`, 'i');
     if (positiveBefore.test(source) || positiveAfter.test(source)) return 'positive';
 
-    if (new RegExp(`\\b(?:does not know|doesn't know|never met|has never met|is a stranger to)\\b.{0,80}\\b${userRef}\\b`, 'i').test(source)) return 'neutral';
+    if (new RegExp(`\\b(?:does not know|doesn't know|never met|has never met|is a stranger to)\\b.{0,80}${userRef}`, 'i').test(source)) return 'neutral';
     return null;
+}
+
+function escapeRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeStandingWord(value) {
@@ -3387,9 +3956,9 @@ function applyPhysicalBoundaryPressureHardRules(semantic, targets, options, audi
     return { value };
 }
 
-function getPureLoveDeclarationNoRollEvidence(semantic, goal) {
+function getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext = null) {
     const source = semanticSourceText(semantic);
-    if (!isPureLoveDeclarationOrReciprocation(source)) return null;
+    if (!isPureLoveDeclarationOrReciprocation(source, refereeContext)) return null;
     return {
         hasStakes: 'N',
         rule: 'hard_override_pure_love_declaration_no_roll',
@@ -3405,6 +3974,7 @@ function getPureLoveDeclarationNoRollEvidence(semantic, goal) {
 function getRomanceNoRollOverrideEvidence(semantic, semanticHasStakes, boundaryViolationExplicit, intimacyAdvanceExplicit = 'N') {
     if (boundaryViolationExplicit === 'Y' || semanticHasStakes !== 'Y') return null;
     const source = semanticSourceText(semantic);
+    if (isDirectedCompanionAttackCommandText(source) || hasCombatActionLanguage(source) || bool(semantic?.activeHostileThreat)) return null;
     if (!isRomanticOrIntimateConversation(source)) return null;
     if (hasBoundaryViolationLanguage(source)) return null;
     return {
@@ -3439,9 +4009,10 @@ function hasBoundaryViolationLanguage(source) {
     return /\b(after|despite|even though|ignoring|ignore|ignored|keeps?|continue(?:s|d)?|press(?:es|ed|ing)?|push(?:es|ed|ing)?|insist(?:s|ed|ing)?|force(?:s|d|ing)?|coerc(?:e|es|ed|ing|ion)|threat(?:en|ens|ened|ening)?|blackmail|grab(?:s|bed|bing)?|restrain(?:s|ed|ing)?|pin(?:s|ned|ning)?|won['’]?t stop|refus(?:e|es|ed|al)|said no|told me no|told .* stop|pull(?:s|ed|ing)? away|withdraw(?:s|n|ing)?|unwanted|without consent)\b/.test(text);
 }
 
-function isPureLoveDeclarationOrReciprocation(source) {
+function isPureLoveDeclarationOrReciprocation(source, refereeContext = null) {
     const text = String(source || '').toLowerCase();
-    const hasLoveDeclaration = /\b(?:i\s+(?:think\s+|know\s+|realize\s+|realise\s+)?love\s+you(?:\s+too)?|i\s+love\s+you\s+too|love\s+you\s+too|i['’]m\s+in\s+love\s+with\s+you|i\s+have\s+feelings\s+for\s+you|i\s+feel\s+the\s+same(?:\s+way)?|i\s+feel\s+it\s+too)\b/.test(text);
+    const userRef = userReferencePattern(refereeContext);
+    const hasLoveDeclaration = new RegExp(`\\b(?:i\\s+(?:think\\s+|know\\s+|realize\\s+|realise\\s+)?love\\s+${userRef}(?:\\s+too)?|love\\s+${userRef}\\s+too|i['\\u2019]m\\s+in\\s+love\\s+with\\s+${userRef}|i\\s+have\\s+feelings\\s+for\\s+${userRef}|i\\s+feel\\s+the\\s+same(?:\\s+way)?|i\\s+feel\\s+it\\s+too)`, 'i').test(text);
     if (!hasLoveDeclaration) return false;
     if (hasBoundaryViolationLanguage(text)) return false;
     if (hasDirectBodilyAggression(text) || isObjectBoundaryContest(text) || isBodyBoundaryPressure(text)) return false;

@@ -82,6 +82,16 @@ const PLAYER_RACE_CHOICES = Object.freeze([
 ]);
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
+const NAME_STYLE_OPTIONS = Object.freeze([
+    'Balanced Fantasy',
+    'Tolkienic / Lyrical',
+    'Celtic-Inspired Fantasy',
+    'Norse / Old Germanic Fantasy',
+    'Persian / Byzantine Fantasy',
+    'Slavic-Inspired Fantasy',
+    'Classical / Romance Fantasy',
+    'Dark Low Fantasy',
+]);
 const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE** 
 
 **ARCHETYPE:** Cormac McCarthy physical prose x R.A. Salvatore action x Tessa Bailey explicit erotica x serious ecchi framing.
@@ -413,6 +423,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     proseRulesEnabled: true,
     proseRulesPrompt: DEFAULT_PROSE_RULES_PROMPT,
     finalReminderPrompt: DEFAULT_FINAL_REMINDER_PROMPT,
+    nameStyle: 'Balanced Fantasy',
 });
 const CHAT_COMPLETION_SECRET_KEYS = Object.freeze({
     ai21: SECRET_KEYS.AI21,
@@ -609,10 +620,13 @@ async function withSemanticGenerationSettings(callback) {
 function setSelectOptions(select, values, placeholder, selectedValue, missingLabel = 'Missing') {
     if (!select) return;
     select.innerHTML = '';
-    const empty = document.createElement('option');
-    empty.value = '';
-    empty.textContent = placeholder;
-    select.append(empty);
+    const includePlaceholder = !values.includes(placeholder);
+    if (includePlaceholder) {
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = placeholder;
+        select.append(empty);
+    }
 
     for (const value of values) {
         const option = document.createElement('option');
@@ -628,7 +642,7 @@ function setSelectOptions(select, values, placeholder, selectedValue, missingLab
         select.append(missing);
     }
 
-    select.value = selectedValue || '';
+    select.value = selectedValue || (includePlaceholder ? '' : placeholder);
 }
 
 function refreshSettingsControls() {
@@ -645,6 +659,7 @@ function refreshSettingsControls() {
     const finalReminderDrawer = document.getElementById('structured_preflight_final_reminder_drawer');
     const proseRulesPrompt = document.getElementById('structured_preflight_prose_rules_prompt');
     const finalReminderPrompt = document.getElementById('structured_preflight_final_reminder_prompt');
+    const nameStyleSelect = document.getElementById('structured_preflight_name_style');
 
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (disableThinkingCheckbox) disableThinkingCheckbox.checked = settings.disableSemanticThinking !== false;
@@ -659,6 +674,13 @@ function refreshSettingsControls() {
     if (finalReminderPrompt && finalReminderPrompt.value !== settings.finalReminderPrompt) {
         finalReminderPrompt.value = String(settings.finalReminderPrompt ?? DEFAULT_FINAL_REMINDER_PROMPT);
     }
+    setSelectOptions(
+        nameStyleSelect,
+        NAME_STYLE_OPTIONS,
+        'Balanced Fantasy',
+        NAME_STYLE_OPTIONS.includes(settings.nameStyle) ? settings.nameStyle : 'Balanced Fantasy',
+        'Unknown style',
+    );
     setSelectOptions(
         profileSelect,
         getConnectionProfileNames(),
@@ -746,6 +768,12 @@ function renderSettingsPanel() {
                 </label>
                 <small>Applies only to Story Engine semantic, tracker, and player setup calls. Main narration keeps its own profile settings.</small>
                 <hr>
+                <div class="flex-container alignItemsBaseline">
+                    <label for="structured_preflight_name_style">Name style</label>
+                    <select id="structured_preflight_name_style" class="text_pole flex1"></select>
+                </div>
+                <small>Controls deterministic generated name pools sent to the narrator prompt.</small>
+                <hr>
                 <label class="checkbox_label flexNoGap">
                     <input id="structured_preflight_writing_style_enabled" type="checkbox">
                     <span>Enable Writing Style</span>
@@ -815,6 +843,12 @@ function renderSettingsPanel() {
     });
     document.getElementById('structured_preflight_disable_semantic_thinking')?.addEventListener('change', event => {
         settings.disableSemanticThinking = Boolean(event.target?.checked);
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_name_style')?.addEventListener('change', event => {
+        const selected = String(event.target?.value || 'Balanced Fantasy');
+        settings.nameStyle = NAME_STYLE_OPTIONS.includes(selected) ? selected : 'Balanced Fantasy';
+        refreshSettingsControls();
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_writing_style_enabled')?.addEventListener('change', event => {
@@ -3365,6 +3399,7 @@ async function handleChatCompletionPromptReady(eventData) {
             trackerSnapshot,
         );
         applyPlayerCoreStatsOverride(semanticLedger, context);
+        context.structuredPreflightSettings = getSettings();
         const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, state.pendingGeneration.type);
 
         const narratorContext = formatNarratorPromptContext(report);
@@ -3412,6 +3447,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             disableSemanticThinking: settings?.disableSemanticThinking !== false,
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
+            nameStyle: getSettings().nameStyle,
         }));
     } finally {
         flushEphemeralStoppingStrings();
