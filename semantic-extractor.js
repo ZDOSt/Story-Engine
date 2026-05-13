@@ -6,9 +6,10 @@ import { createGenerationParameters, getChatCompletionModel, oai_settings, proxi
 export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
 export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START };
 
-const SEMANTIC_RESPONSE_LENGTH_MIN = 2048;
-const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
-const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 320;
+const SEMANTIC_RESPONSE_LENGTH_MIN = 4096;
+const SEMANTIC_RESPONSE_LENGTH_MAX = 16384;
+const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
+const SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const SEMANTIC_BACKEND_ENDPOINT = '/api/backends/chat-completions/generate';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead']);
@@ -28,7 +29,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
         : buildSemanticPrompt(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, options);
     const responseLength = Number.isFinite(options?.responseLength) && options.responseLength > 0
         ? options.responseLength
-        : estimateSemanticResponseLength(trackerSnapshot);
+        : estimateSemanticResponseLength(trackerSnapshot, promptContext, options);
 
     let raw;
     let ledger;
@@ -52,7 +53,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
             semanticProfile: options?.semanticProfileName || undefined,
         };
         } catch (error) {
-            if (!isSemanticToolTransportError(error)) {
+            if (!isRecoverableSemanticToolCallError(error)) {
                 const message = error instanceof Error ? error.message : String(error);
                 throw new Error(`Semantic tool-call pass returned no valid ledger. Generation aborted before narration. ${message}`);
             }
@@ -62,7 +63,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
                 throw new Error(`Semantic tool-call transport failed and generateRawData fallback is unavailable. Generation aborted before narration. ${message}`);
             }
 
-            console.warn('[Structured Preflight Engines] semantic tool-call transport failed; falling back to compact ledger.', error);
+            console.warn('[Structured Preflight Engines] semantic tool-call failed; falling back to compact ledger.', error);
             raw = options?.semanticProfileId
                 ? await generateSemanticRawWithProfile(prompt, responseLength, options)
                 : await generateSemanticRaw(context, prompt, responseLength);
@@ -136,12 +137,62 @@ export function parseNarratorTrackerDelta(text, narration = '') {
     return sanitizeNarratorTrackerDelta(parseNarratorTrackerDeltaText(text), narration);
 }
 
-function estimateSemanticResponseLength(trackerSnapshot) {
+function estimateSemanticResponseLength(trackerSnapshot, promptContext = null, options = {}) {
     const trackedNpcCount = trackerSnapshot && typeof trackerSnapshot === 'object'
         ? Object.keys(trackerSnapshot).length
         : 0;
-    const estimated = SEMANTIC_RESPONSE_LENGTH_MIN + (trackedNpcCount * SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC);
+    const inferredSceneNpcCount = estimateSceneNpcCount(promptContext, options);
+    const promptComplexity = estimatePromptComplexity(promptContext, options);
+    const estimated = SEMANTIC_RESPONSE_LENGTH_MIN
+        + (trackedNpcCount * SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC)
+        + (Math.max(0, inferredSceneNpcCount - trackedNpcCount) * SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC)
+        + promptComplexity;
     return Math.max(SEMANTIC_RESPONSE_LENGTH_MIN, Math.min(SEMANTIC_RESPONSE_LENGTH_MAX, estimated));
+}
+
+function estimateSceneNpcCount(promptContext, options = {}) {
+    const text = extractRecentPromptText(promptContext, options);
+    if (!text) return 0;
+
+    const commonWords = new Set([
+        'i', 'a', 'an', 'and', 'assistant', 'begin', 'but', 'end', 'engine', 'if', 'info', 'narrator',
+        'or', 'sillytavern', 'story', 'system', 'that', 'the', 'then', 'this', 'user', 'world', 'you',
+    ]);
+    const properNames = new Set();
+    for (const match of text.matchAll(/\b[A-Z][A-Za-z'_-]{1,38}\b/g)) {
+        const key = match[0].trim().toLowerCase();
+        if (commonWords.has(key)) continue;
+        properNames.add(key);
+    }
+
+    let roleMentions = 0;
+    const rolePattern = /\b(?:adventurer|ally|assassin|bandit|beast|captain|companion|cultist|demon|dragon|enemy|goblin|guard|knight|mage|merchant|monster|npc|ogre|orc|raider|soldier|skeleton|thug|undead|villager|wolf|zombie)s?\b/gi;
+    for (const match of text.matchAll(rolePattern)) {
+        const before = text.slice(Math.max(0, match.index - 16), match.index).toLowerCase();
+        roleMentions += /\b(two|three|four|five|six|seven|eight|nine|ten|2|3|4|5|6|7|8|9|10)\s+$/.test(before) ? 2 : 1;
+    }
+
+    return Math.min(16, properNames.size + roleMentions);
+}
+
+function estimatePromptComplexity(promptContext, options = {}) {
+    const text = extractRecentPromptText(promptContext, options);
+    if (!text) return 0;
+    return Math.min(2048, Math.floor(text.length / 3000) * 256);
+}
+
+function extractRecentPromptText(promptContext, options = {}) {
+    const rows = Array.isArray(promptContext) ? promptContext : [];
+    const texts = [];
+    for (let index = rows.length - 1; index >= 0 && texts.length < 8; index -= 1) {
+        const row = rows[index];
+        const role = String(row?.role || '').toLowerCase();
+        if (options?.assembledPrompt && role && !['user', 'assistant'].includes(role)) continue;
+        const content = String(row?.mes ?? row?.message ?? row?.content ?? '').trim();
+        if (!content) continue;
+        texts.push(clip(stripStructuredDebug(content), 2000));
+    }
+    return texts.reverse().join('\n');
 }
 
 async function generateSemanticRaw(context, prompt, responseLength) {
@@ -183,6 +234,16 @@ class SemanticToolTransportError extends Error {
 
 function isSemanticToolTransportError(error) {
     return error instanceof SemanticToolTransportError || error?.name === 'SemanticToolTransportError';
+}
+
+function isRecoverableSemanticToolCallError(error) {
+    if (isSemanticToolTransportError(error)) return true;
+    const message = error instanceof Error ? error.message : String(error || '');
+    return /\bJSON\b/i.test(message)
+        || /semantic tool-call (?:arguments|response)/i.test(message)
+        || /did not contain submit_semantic_preflight/i.test(message)
+        || /Mandatory semantic ledger contract failed/i.test(message)
+        || /Semantic pass did not return a valid mandatory compact ledger/i.test(message);
 }
 
 async function generateSemanticToolCall(context, prompt, responseLength, options = {}) {
@@ -669,23 +730,23 @@ function buildSemanticPreflightSchema() {
                             properties: {
                                 romanticOpen: {
                                     type: 'boolean',
-                                    description: 'Y only when prior context says this specific NPC is already romantically or intimately involved with {{user}} / the active persona, explicitly in love with them, or clearly already willing/open toward a romantic or intimate relationship with them before this first handled interaction. Do not mark Y for ordinary friendliness, attraction, flirting, teasing, politeness, a warm first impression, or the user merely wanting romance.',
+                                    description: 'Y only for explicit prior romantic/in-love/willing context with this NPC; not friendliness, flirting, attraction, or first impressions.',
                                 },
                                 userBadRep: {
                                     type: 'boolean',
-                                    description: 'Y only when prior context says this specific NPC already hates, distrusts, fears as an enemy, is hostile toward, is hunting/wanting, has been harmed/betrayed by, or has a bad prior reputation/opinion of {{user}} / the active persona before the current first handled interaction. Do not mark Y from current-scene conflict alone unless the prior context already establishes the bad relationship.',
+                                    description: 'Y only for explicit prior hate, distrust, enemy status, pursuit, betrayal, harm, or bad reputation with this NPC; not current-scene conflict alone.',
                                 },
                                 priorUserGoodRep: {
                                     type: 'boolean',
-                                    description: 'Y only when prior lore, character card, scenario, tracker, or chat history explicitly gives {{user}} / the active persona an established favorable reputation, trust, respect, gratitude, or positive history with this specific NPC before the current scene. Do not mark Y for first-encounter kindness, courtesy, rescue, praise, flirting, friendliness, or a good impression that happens only in the current interaction.',
+                                    description: 'Y only for explicit established favorable prior history/reputation/trust/gratitude with this NPC; not kindness or good impressions only in this interaction.',
                                 },
                                 userNonHuman: {
                                     type: 'boolean',
-                                    description: 'Y only when {{user}} / the active persona is explicitly visibly inhuman in a way a typical fantasy NPC would notice and plausibly fear: demonic, monstrous, undead, bestial, eldritch, construct-like, aberrant, obviously supernatural, or otherwise far outside ordinary human/elf/dwarf-style fantasy ancestry. Do not mark Y for normal fantasy peoples, ordinary appearance, hidden ancestry, titles, class, profession, magic use alone, or vague exotic wording.',
+                                    description: 'Y only for explicitly visible demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural user form; not normal fantasy peoples or hidden ancestry.',
                                 },
                                 fearImmunity: {
                                     type: 'boolean',
-                                    description: 'Y only when this NPC should not be meaningfully intimidated by the userNonHuman form because the NPC is the same race/kind/category, an equal or superior supernatural/monstrous being, an ancient/powerful magical entity, explicitly immune or resistant to fear/mental fear, or lore/card/scenario clearly says they are accustomed to fighting or dealing with supernatural, demonic, undead, eldritch, monstrous, or magical threats as a constant part of life. Do not mark Y for ordinary guards, soldiers, bandits, townsfolk, nobles, brave people, rank/title, bravado, composure, posturing, or normal combat experience without explicit supernatural/monstrous/fear-resistance grounding.',
+                                    description: 'Y only for same/superior supernatural kind, ancient/powerful/fear-resistant beings, or explicit constant experience with supernatural threats; not ordinary guards, soldiers, bravery, rank, or normal combat experience.',
                                 },
                             },
                         },
@@ -852,7 +913,107 @@ function parseToolArguments(args) {
     if (!text) {
         throw new Error('semantic tool-call arguments were empty');
     }
-    return JSON.parse(extractJsonObject(text));
+    return parseToolArgumentJson(text);
+}
+
+function parseToolArgumentJson(text) {
+    const jsonText = extractJsonObject(text);
+    try {
+        return JSON.parse(jsonText);
+    } catch (error) {
+        const repaired = repairToolArgumentJson(jsonText);
+        if (repaired && repaired !== jsonText) {
+            try {
+                const parsed = JSON.parse(repaired);
+                console.warn('[Structured Preflight Engines] repaired malformed semantic tool-call JSON locally before fallback.');
+                return parsed;
+            } catch {
+                // Throw the original parse error below; it points to the provider payload.
+            }
+        }
+        throw error;
+    }
+}
+
+function repairToolArgumentJson(text) {
+    let repaired = String(text || '');
+    repaired = repaired
+        .replace(/,\s*([}\]])/g, '$1')
+        .replace(/\bNaN\b/g, 'null')
+        .replace(/\bInfinity\b/g, 'null')
+        .replace(/\b-Infinity\b/g, 'null')
+        .replace(/([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/g, '$1"$2"$3')
+        .replace(/:\s*'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_match, value) => `: "${value.replace(/"/g, '\\"')}"`);
+    repaired = insertMissingCommasBetweenProperties(repaired);
+    repaired = balanceJsonDelimiters(repaired);
+    return repaired;
+}
+
+function insertMissingCommasBetweenProperties(text) {
+    let output = '';
+    let inString = false;
+    let escaped = false;
+    for (let index = 0; index < text.length; index += 1) {
+        const char = text[index];
+        output += char;
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\' && inString) {
+            escaped = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            if (!inString) {
+                const nextSlice = text.slice(index + 1);
+                const match = nextSlice.match(/^(\s*)"[^"]+"\s*:/);
+                if (match) {
+                    const previousNonSpace = previousNonWhitespace(output.slice(0, -1));
+                    if (previousNonSpace !== '{' && previousNonSpace !== '[' && previousNonSpace !== ',' && previousNonSpace !== ':') {
+                        output += ',';
+                    }
+                }
+            }
+        }
+    }
+    return output;
+}
+
+function previousNonWhitespace(text) {
+    const match = String(text || '').match(/\S(?=\s*$)/);
+    return match ? match[0] : '';
+}
+
+function balanceJsonDelimiters(text) {
+    const stack = [];
+    let inString = false;
+    let escaped = false;
+    for (const char of String(text || '')) {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\' && inString) {
+            escaped = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (char === '{' || char === '[') stack.push(char);
+        if (char === '}' && stack[stack.length - 1] === '{') stack.pop();
+        if (char === ']' && stack[stack.length - 1] === '[') stack.pop();
+    }
+    let balanced = text;
+    while (stack.length) {
+        const open = stack.pop();
+        balanced += open === '[' ? ']' : '}';
+    }
+    return balanced;
 }
 
 const COMPACT_LEDGER_CONTRACT = [
