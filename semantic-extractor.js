@@ -667,11 +667,26 @@ function buildSemanticPreflightSchema() {
                             additionalProperties: false,
                             required: ['romanticOpen', 'userBadRep', 'priorUserGoodRep', 'userNonHuman', 'fearImmunity'],
                             properties: {
-                                romanticOpen: { type: 'boolean' },
-                                userBadRep: { type: 'boolean' },
-                                priorUserGoodRep: { type: 'boolean' },
-                                userNonHuman: { type: 'boolean' },
-                                fearImmunity: { type: 'boolean' },
+                                romanticOpen: {
+                                    type: 'boolean',
+                                    description: 'Y only when prior context says this specific NPC is already romantically or intimately involved with {{user}} / the active persona, explicitly in love with them, or clearly already willing/open toward a romantic or intimate relationship with them before this first handled interaction. Do not mark Y for ordinary friendliness, attraction, flirting, teasing, politeness, a warm first impression, or the user merely wanting romance.',
+                                },
+                                userBadRep: {
+                                    type: 'boolean',
+                                    description: 'Y only when prior context says this specific NPC already hates, distrusts, fears as an enemy, is hostile toward, is hunting/wanting, has been harmed/betrayed by, or has a bad prior reputation/opinion of {{user}} / the active persona before the current first handled interaction. Do not mark Y from current-scene conflict alone unless the prior context already establishes the bad relationship.',
+                                },
+                                priorUserGoodRep: {
+                                    type: 'boolean',
+                                    description: 'Y only when prior lore, character card, scenario, tracker, or chat history explicitly gives {{user}} / the active persona an established favorable reputation, trust, respect, gratitude, or positive history with this specific NPC before the current scene. Do not mark Y for first-encounter kindness, courtesy, rescue, praise, flirting, friendliness, or a good impression that happens only in the current interaction.',
+                                },
+                                userNonHuman: {
+                                    type: 'boolean',
+                                    description: 'Y only when {{user}} / the active persona is explicitly visibly inhuman in a way a typical fantasy NPC would notice and plausibly fear: demonic, monstrous, undead, bestial, eldritch, construct-like, aberrant, obviously supernatural, or otherwise far outside ordinary human/elf/dwarf-style fantasy ancestry. Do not mark Y for normal fantasy peoples, ordinary appearance, hidden ancestry, titles, class, profession, magic use alone, or vague exotic wording.',
+                                },
+                                fearImmunity: {
+                                    type: 'boolean',
+                                    description: 'Y only when this NPC should not be meaningfully intimidated by the userNonHuman form because the NPC is the same race/kind/category, an equal or superior supernatural/monstrous being, an ancient/powerful magical entity, explicitly immune or resistant to fear/mental fear, or lore/card/scenario clearly says they are accustomed to fighting or dealing with supernatural, demonic, undead, eldritch, monstrous, or magical threats as a constant part of life. Do not mark Y for ordinary guards, soldiers, bandits, townsfolk, nobles, brave people, rank/title, bravado, composure, posturing, or normal combat experience without explicit supernatural/monstrous/fear-resistance grounding.',
+                                },
                             },
                         },
                         auditInteraction: { type: 'boolean' },
