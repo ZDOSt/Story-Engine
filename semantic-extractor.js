@@ -219,7 +219,7 @@ async function generateSemanticRawWithProfile(prompt, responseLength, options = 
         },
         true,
     );
-    return result?.content ?? String(result ?? '');
+    return extractGeneratedText(result);
 }
 
 class SemanticToolTransportError extends Error {
@@ -364,7 +364,12 @@ async function generateSemanticToolCallWithProfile(context, prompt, responseLeng
 
 export async function sendSemanticProfileTextRequest(prompt, responseLength, options = {}, overridePayload = {}) {
     const result = await sendChatCompletionProfileRequest(prompt, responseLength, options, overridePayload, true);
-    return result?.content ?? String(result ?? '');
+    return extractGeneratedText(result);
+}
+
+export function extractGeneratedText(raw) {
+    const candidates = extractTextCandidates(raw);
+    return candidates[0] || '';
 }
 
 function applySemanticThinkingPayload(payload, options = {}) {

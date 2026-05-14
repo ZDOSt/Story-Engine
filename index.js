@@ -7,7 +7,7 @@ import { setPersonaDescription, user_avatar } from '../../../../scripts/personas
 import { rotateSecret, SECRET_KEYS, secret_state } from '../../../../scripts/secrets.js';
 import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
-import { extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
+import { extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildTrackerSnapshot, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
 import {
@@ -2913,7 +2913,7 @@ async function analyzePersonaForPrimaryStat(context = getContext()) {
 }
 
 function parsePersonaAnalysis(raw) {
-    const text = String(raw || '');
+    const text = extractGeneratedText(raw);
     const fields = {};
     for (const line of text.split(/\r?\n/)) {
         const match = line.match(/^\s*([A-Za-z]+)\s*=\s*(.*?)\s*$/);
@@ -2921,7 +2921,7 @@ function parsePersonaAnalysis(raw) {
     }
     const primary = String(fields.PrimaryStat || '').trim().toUpperCase();
     if (!PLAYER_STATS.includes(primary)) {
-        throw new Error(`Persona analysis did not return a valid PrimaryStat. Raw response: ${text.slice(0, 240)}`);
+        throw new Error(`Persona analysis did not return a valid PrimaryStat. Raw response: ${previewPlayerSetupRaw(raw, text)}`);
     }
     return {
         PrimaryStat: primary,
@@ -3043,12 +3043,22 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 }
 
 function sanitizeGeneratedSheet(raw) {
-    const text = String(raw || '')
+    const text = extractGeneratedText(raw)
         .replace(/^```(?:markdown|md|text)?\s*/i, '')
         .replace(/```\s*$/i, '')
         .trim();
     if (!text) throw new Error('Character sheet generation returned empty text.');
     return text;
+}
+
+function previewPlayerSetupRaw(raw, extractedText = '') {
+    const text = String(extractedText || '').trim();
+    if (text) return text.slice(0, 240);
+    try {
+        return JSON.stringify(raw, (_key, value) => typeof value === 'string' ? value.slice(0, 600) : value).slice(0, 600);
+    } catch {
+        return String(raw ?? '').slice(0, 600);
+    }
 }
 
 async function requestPlayerSetupText(prompt, responseLength, overridePayload = {}) {
