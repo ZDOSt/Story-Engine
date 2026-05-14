@@ -253,9 +253,23 @@ export function formatNarratorModelPromptContext(report) {
 
 function narratorModelInstruction() {
     return [
-        'Mandatory, non-negotiable: follow the prompt below exactly to narrate the scene.',
-        'The prompt is the controlling instruction for outcome, boundaries, proactivity, aggression, injuries, impairment, limits, and stopping point.',
-        'If chat history, character tone, relationship vibes, or prior narration conflict with the prompt, obey the prompt.',
+        'STORY_ENGINE_NARRATOR_DIRECTIVE',
+        '',
+        'You are the final scene narrator.',
+        '',
+        'AUTHORITY:',
+        'The PROMPT below is the controlling instruction for this response.',
+        'It overrides chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.',
+        '',
+        'SOURCE OF TRUTH:',
+        'Use only the PROMPT to determine whether actions succeed or fail, who acts, who is injured, which NPC initiative happens, whether an attack/counterattack/retaliation/companion action is resolved, and where the narration stops.',
+        '',
+        'CONFLICT RULE:',
+        'If the latest user message asks, commands, implies, or attempts something that the PROMPT does not resolve, do not narrate it as successful or completed.',
+        'A command to an ally/companion is only spoken tactical input unless the PROMPT explicitly lists a resolved ally/companion action, proactivity result, or aggression result.',
+        'Do not upgrade requests, threats, intentions, setup, or attempted actions into completed outcomes.',
+        '',
+        'OUTPUT CONTRACT:',
         'Do not output mechanics, labels, analysis, bullets, preamble, or audit text.',
         'Do not narrate voluntary {{user}} actions, thoughts, feelings, decisions, counterattacks, or dialogue beyond the explicit user input.',
         'First output exactly one fenced tracker delta block using ```story_engine_tracker_delta, then return final in-character narration wrapped with BEGIN_FINAL_NARRATION and END_FINAL_NARRATION.',
@@ -691,6 +705,9 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const boundaryNote = resolution.classifyPhysicalBoundaryPressure === 'Y'
         ? ' Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance without inventing a landed attack.'
         : '';
+    const boundaryViolationNote = resolution.boundaryViolationExplicit === 'Y'
+        ? ` This is an explicit boundary violation or pressure past refusal; narrate refusal, guardedness, resistance, withdrawal, anger, fear, call for help, or escalation as fits this behavior: ${npcGuide}`
+        : '';
     const nameInstruction = nameGenerationGuide(handoff.nameGeneration);
     const impairmentInstruction = userImpairmentGuide(resolution.UserImpairment, userImpairment);
     const npcImpairmentInstruction = npcImpairmentGuide(resolution.NPCImpairment, npcImpairment);
@@ -702,8 +719,17 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const companionCommandInstruction = companionCommandGuide(resolution);
     const trackerInstruction = trackerDeltaInstruction();
 
+    const commonResultInstruction = `${companionCommandInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
+    const stackedPressureInstruction = [
+        boundaryViolationNote,
+        boundaryNote,
+        intimacyBoundaryGuide.text ? ` ${intimacyBoundaryGuide.text}` : '',
+        naturalProactiveNote,
+        chaosNote,
+    ].join('');
+
     if (aggressionText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${aggressionTargetLock} ${aggressionGuide}${naturalProactiveNote} Do not invent any user follow-up.${nameInstruction}${trackerInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${commonResultInstruction}${aggressionTargetLock} ${aggressionGuide}${stackedPressureInstruction} Do not invent any user follow-up.${nameInstruction}${trackerInstruction}`;
     }
 
     if (intimacyBoundaryGuide.mode === 'DENY' && resolution.boundaryViolationExplicit !== 'Y') {
@@ -711,7 +737,11 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (proactiveText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${intimacyBoundaryGuide.text ? ` ${intimacyBoundaryGuide.text}` : ''}${naturalProactiveNote}${nameInstruction}${trackerInstruction}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${commonResultInstruction}${stackedPressureInstruction}${nameInstruction}${trackerInstruction}`;
+    }
+
+    if (resolution.boundaryViolationExplicit === 'Y') {
+        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryViolationNote}${aggressionNote}${chaosNote}${nameInstruction}${trackerInstruction}`;
     }
 
     if (resolution.STAKES === 'N') {
@@ -720,10 +750,6 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
             return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${chaosNote}${nameInstruction}${trackerInstruction}`;
         }
         return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation should continue naturally according to context and personality; do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.${nameInstruction}${trackerInstruction}`;
-    }
-
-    if (resolution.boundaryViolationExplicit === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} This is an explicit boundary violation or pressure past refusal; narrate refusal, guardedness, resistance, withdrawal, anger, fear, call for help, or escalation as fits this behavior: ${npcGuide}${aggressionNote}${chaosNote}${nameInstruction}${trackerInstruction}`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
@@ -862,7 +888,7 @@ function npcImpairmentGuide(impairment, summaryText) {
 function inflictedNpcInjuryGuide(injuries) {
     if (!Array.isArray(injuries) || !injuries.length) return '';
     return ' ' + injuries.map(injury =>
-        `${valueOrNone(injury.NPC)} receives ${valueOrNone(injury.condition)} condition${injuryDetailPhrase(injury)}. This injury is mechanically persistent; narrate it as the concrete lasting result of the landed user attack, with severity limiting later offense, defense, movement, focus, or other affected actions.`,
+        `${valueOrNone(injury.NPC)} receives ${valueOrNone(injury.condition)} condition${injuryDetailPhrase(injury)}. This injury or status is mechanically persistent; narrate it as the concrete lasting result of the landed user action/effect, with severity limiting later offense, defense, movement, focus, or other affected actions. ${valueOrNone(injury.NarrationRule)}`,
     ).join(' ');
 }
 
@@ -1192,6 +1218,12 @@ function isCompanionInitiativeIntent(intent) {
 
 function buildAggressionGuide(aggressionResults) {
     const parts = Object.entries(aggressionResults ?? {}).map(([name, value]) => {
+        const target = value?.ProactivityTarget && value.ProactivityTarget !== '(none)'
+            ? value.ProactivityTarget
+            : '{{user}}';
+        const targetLimit = isUserReferenceText(target)
+            ? `Do not narrate {{user}}'s counterattack, actions, reactions, thoughts, feelings, or dialogue.`
+            : `Do not narrate ${valueOrNone(target)}'s counterattack, follow-up action, choices, thoughts, feelings, or dialogue unless another listed result resolves it.`;
         const attackType = value.AttackType === 'Retaliation'
             ? 'retaliation after the user action'
             : value.AttackType === 'CounterAttack'
@@ -1206,19 +1238,19 @@ function buildAggressionGuide(aggressionResults) {
         const statText = aggressionStatNarrationGuide(value);
         const impairmentText = `${statText}${npcImpairment}${userImpairment}`;
         if (value.ReactionOutcome === 'npc_overpowers') {
-            return `${name}: ${attackType} strongly succeeds/overpowers; narrate clear NPC advantage.${impairmentText} Do not narrate any follow-up action or dialogue by {{user}}.`;
+            return `${name}: ${attackType} strongly succeeds/overpowers against ${valueOrNone(target)}; narrate clear NPC advantage.${impairmentText} ${targetLimit}`;
         }
         if (value.ReactionOutcome === 'npc_succeeds') {
-            return `${name}: ${attackType} succeeds modestly; narrate proportional effect.${impairmentText} Do not narrate any follow-up action or dialogue by {{user}}.`;
+            return `${name}: ${attackType} succeeds modestly against ${valueOrNone(target)}; narrate proportional effect.${impairmentText} ${targetLimit}`;
         }
         if (value.ReactionOutcome === 'stalemate') {
-            return `${name}: ${attackType} meets equal resistance; narrate a cinematic stalemate, clash, bind, or struggle.${impairmentText} Stop in the deadlock. Do not narrate {{user}}'s counterattack, choices, thoughts, feelings, or dialogue.`;
+            return `${name}: ${attackType} against ${valueOrNone(target)} meets equal resistance; narrate a cinematic stalemate, clash, bind, or struggle.${impairmentText} Stop in the deadlock. ${targetLimit}`;
         }
         if (value.ReactionOutcome === 'user_resists') {
-            return `${name}: ${attackType} is partly resisted; stop at the moment of impact/contact/near-contact.${impairmentText} Do not narrate {{user}}'s counterattack, actions, reactions, thoughts, feelings, or dialogue.`;
+            return `${name}: ${attackType} against ${valueOrNone(target)} is partly resisted; stop at the moment of impact/contact/near-contact.${impairmentText} ${targetLimit}`;
         }
         if (value.ReactionOutcome === 'user_dominates') {
-            return `${name}: ${attackType} fails or is controlled/evaded; stop at the moment of failed impact/contact/near-contact.${impairmentText} Do not narrate {{user}}'s counterattack, actions, reactions, thoughts, feelings, or dialogue.`;
+            return `${name}: ${attackType} against ${valueOrNone(target)} fails or is controlled/evaded; stop at the moment of failed impact/contact/near-contact.${impairmentText} ${targetLimit}`;
         }
         return `${name}: use listed aggression result exactly.${impairmentText}`;
     });
@@ -1233,6 +1265,19 @@ function aggressionStatNarrationGuide(value) {
         return ` This aggression roll used MND vs ${defenseStat}; render ${valueOrNone(value?.AttackType)} as context-appropriate magic, mental force, supernatural pressure, will, focus, or other non-CHA power for this NPC.`;
     }
     return ` This aggression roll used PHY vs ${defenseStat}; render ${valueOrNone(value?.AttackType)} as physical force, weapon use, bodily action, claws, teeth, movement, or other concrete physical pressure.`;
+}
+
+function isUserReferenceText(value) {
+    const text = String(value ?? '').trim().toLowerCase();
+    return !text
+        || text === '{{user}}'
+        || text === 'user'
+        || text === 'the user'
+        || text === 'player'
+        || text === 'the player'
+        || text === 'protagonist'
+        || text === 'the protagonist'
+        || text === 'you';
 }
 
 function aggressionStyleFromStat(stat) {

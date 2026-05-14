@@ -4776,6 +4776,394 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina, undefined);
     },
   },
+  {
+    name: '40 narrator keeps chaos guidance when proactivity also fires',
+    run() {
+      const report = {
+        semanticLedger: {
+          resolutionEngine: {
+            explicitMeans: 'search the ruined shrine',
+          },
+        },
+        finalNarrativeHandoff: {
+          resultLine: '1d20(14) + MND(6) = 20 vs 1d20(8) + ENV(0) = 8 (12 - Success)',
+          resolutionPacket: {
+            GOAL: 'SearchShrine',
+            actions: ['a1'],
+            intimacyAdvanceExplicit: 'N',
+            boundaryViolationExplicit: 'N',
+            STAKES: 'Y',
+            LandedActions: 1,
+            OutcomeTier: 'Success',
+            Outcome: 'success',
+            CounterPotential: 'none',
+            classifyHostilePhysicalIntent: 'N',
+            classifyCombatActionSequence: 'N',
+            activeHostileThreat: 'N',
+            classifyPhysicalBoundaryPressure: 'N',
+            CompanionCommand: null,
+            hostilesInScene: { NPC: [] },
+            ActionTargets: ['Seraphina'],
+            OppTargets: { NPC: [], ENV: ['ruined shrine'] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+            NPCInScene: ['Seraphina'],
+            UserImpairment: { Relevant: 'N' },
+            NPCImpairment: { Relevant: 'N' },
+            InflictedInjuries: [],
+          },
+          npcHandoffs: [{
+            NPC: 'Seraphina',
+            FinalState: 'B3/F1/H1',
+            Behavior: 'FRIENDLY',
+            Target: 'Bond',
+            NPC_STAKES: 'N',
+            Landed: 'Y',
+            BoundaryPressure: 'N',
+          }],
+          chaosHandoff: {
+            CHAOS: {
+              triggered: true,
+              band: 'BENEFICIAL',
+              magnitude: 'MODERATE',
+              anchor: 'CLUE',
+              vector: 'ENVIRONMENT',
+            },
+          },
+          proactivityResults: {
+            Seraphina: {
+              Proactive: 'Y',
+              Intent: 'PLAN_OR_BANTER',
+              Impulse: 'BOND',
+              ProactivityTarget: '{{user}}',
+              TargetsUser: 'Y',
+            },
+          },
+          aggressionResults: {},
+          nameGeneration: {},
+          sceneTrackerUpdate: {},
+        },
+      };
+      const text = prompt(report);
+      assert.match(text, /include this NPC initiative/i);
+      assert.match(text, /brief unexpected scene beat/i);
+      assert.match(text, /creates a useful opening, information, or advantage/i);
+    },
+  },
+  {
+    name: '41 narrator keeps chaos guidance when aggression also fires',
+    run() {
+      const report = {
+        semanticLedger: {
+          resolutionEngine: {
+            explicitMeans: 'duck behind the broken pillar',
+          },
+        },
+        finalNarrativeHandoff: {
+          resultLine: '1d20(4) + PHY(6) = 10 vs 1d20(16) + PHY(5) = 21 (-11 - Critical_Failure)',
+          resolutionPacket: {
+            GOAL: 'TakeCover',
+            actions: ['a1'],
+            intimacyAdvanceExplicit: 'N',
+            boundaryViolationExplicit: 'N',
+            STAKES: 'Y',
+            LandedActions: 0,
+            OutcomeTier: 'Critical_Failure',
+            Outcome: 'avoided',
+            CounterPotential: 'severe',
+            classifyHostilePhysicalIntent: 'N',
+            classifyCombatActionSequence: 'Y',
+            activeHostileThreat: 'Y',
+            classifyPhysicalBoundaryPressure: 'N',
+            CompanionCommand: null,
+            hostilesInScene: { NPC: ['Ogre'] },
+            ActionTargets: [],
+            OppTargets: { NPC: ['Ogre'], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+            NPCInScene: ['Ogre'],
+            UserImpairment: { Relevant: 'N' },
+            NPCImpairment: { Relevant: 'N' },
+            InflictedInjuries: [],
+          },
+          npcHandoffs: [{
+            NPC: 'Ogre',
+            FinalState: 'B1/F2/H4',
+            Behavior: 'HATRED',
+            Target: 'Hostility',
+            NPC_STAKES: 'N',
+            Landed: 'N',
+            BoundaryPressure: 'N',
+          }],
+          chaosHandoff: {
+            CHAOS: {
+              triggered: true,
+              band: 'HOSTILE',
+              magnitude: 'MAJOR',
+              anchor: 'KNOWN_NPC',
+              vector: 'NPC',
+            },
+          },
+          proactivityResults: {
+            Ogre: {
+              Proactive: 'Y',
+              Intent: 'ESCALATE_VIOLENCE',
+              Impulse: 'ANGER',
+              ProactivityTarget: '{{user}}',
+              TargetsUser: 'Y',
+            },
+          },
+          aggressionResults: {
+            Ogre: {
+              AttackType: 'CounterAttack',
+              AttackIntent: 'ESCALATE_VIOLENCE',
+              ProactivityTarget: '{{user}}',
+              AttackStat: 'PHY',
+              DefenseStat: 'PHY',
+              CounterPotential: 'severe',
+              CounterBonus: 6,
+              ReactionOutcome: 'npc_succeeds',
+              Margin: 3,
+              NPCImpairment: { Relevant: 'N' },
+              UserImpairment: { Relevant: 'N' },
+              TargetImpairment: { Relevant: 'N' },
+              InflictedUserInjury: {
+                targetType: 'user',
+                condition: 'wounded',
+                severity: 'moderate',
+                woundsAdd: [],
+                statusAdd: [],
+                InjuryDetailMode: 'narrator_contextual',
+                InjurySeverityLimit: 'moderate',
+              },
+              InflictedTargetInjury: null,
+            },
+          },
+          nameGeneration: {},
+          sceneTrackerUpdate: {},
+        },
+      };
+      const text = prompt(report);
+      assert.match(text, /Ogre: counterattack exploiting the opening/i);
+      assert.match(text, /brief unexpected scene beat/i);
+      assert.match(text, /worsens danger or opposition/i);
+    },
+  },
+  {
+    name: '42 narrator uses target-aware NPC-vs-NPC aggression stop rule',
+    run() {
+      const report = {
+        semanticLedger: {
+          resolutionEngine: {
+            explicitMeans: 'Seraphina moves between Darai and the ogre',
+          },
+        },
+        finalNarrativeHandoff: {
+          resultLine: 'No roll',
+          resolutionPacket: {
+            GOAL: 'ProtectDarai',
+            actions: ['a1'],
+            intimacyAdvanceExplicit: 'N',
+            boundaryViolationExplicit: 'N',
+            STAKES: 'N',
+            LandedActions: '(none)',
+            OutcomeTier: 'NONE',
+            Outcome: 'no_roll',
+            CounterPotential: 'none',
+            classifyHostilePhysicalIntent: 'N',
+            classifyCombatActionSequence: 'N',
+            activeHostileThreat: 'Y',
+            classifyPhysicalBoundaryPressure: 'N',
+            CompanionCommand: null,
+            hostilesInScene: { NPC: ['Ogre'] },
+            ActionTargets: ['Seraphina'],
+            OppTargets: { NPC: [], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+            NPCInScene: ['Ogre', 'Seraphina'],
+            UserImpairment: { Relevant: 'N' },
+            NPCImpairment: { Relevant: 'N' },
+            InflictedInjuries: [],
+          },
+          npcHandoffs: [{
+            NPC: 'Ogre',
+            FinalState: 'B1/F2/H4',
+            Behavior: 'HATRED',
+            Target: 'Hostility',
+            NPC_STAKES: 'N',
+            Landed: 'N',
+            BoundaryPressure: 'N',
+          }],
+          chaosHandoff: { CHAOS: { triggered: false } },
+          proactivityResults: {
+            Ogre: {
+              Proactive: 'Y',
+              Intent: 'ESCALATE_VIOLENCE',
+              Impulse: 'ANGER',
+              ProactivityTarget: 'Seraphina',
+              TargetsUser: 'N',
+            },
+          },
+          aggressionResults: {
+            Ogre: {
+              AttackType: 'ProactiveAttack',
+              AttackIntent: 'ESCALATE_VIOLENCE',
+              ProactivityTarget: 'Seraphina',
+              AttackStat: 'PHY',
+              DefenseStat: 'PHY',
+              CounterPotential: 'none',
+              CounterBonus: 0,
+              ReactionOutcome: 'user_resists',
+              Margin: -2,
+              NPCImpairment: { Relevant: 'N' },
+              UserImpairment: null,
+              TargetImpairment: { Relevant: 'N' },
+              InflictedUserInjury: null,
+              InflictedTargetInjury: null,
+            },
+          },
+          nameGeneration: {},
+          sceneTrackerUpdate: {},
+        },
+      };
+      const text = prompt(report);
+      assert.match(text, /Ogre: proactive attack from current hostile state against Seraphina is partly resisted/i);
+      assert.match(text, /Do not narrate Seraphina's counterattack, follow-up action/i);
+      assert.doesNotMatch(text, /Do not narrate \{\{user\}\}'s counterattack/i);
+    },
+  },
+  {
+    name: '43 narrator describes non-physical user effects as landed action or effect',
+    run() {
+      const report = runCase({
+        userText: 'I channel a binding spell at the duelist to lock his limbs in place.',
+        dice: [18, 8, 1, 1, 1, 1],
+        tracker: {
+          Duelist: trackerEntry(),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'BindDuelist',
+            identifyChallenge: 'bind the duelist with magic',
+            explicitMeans: 'binding spell locks the duelist limbs',
+            identifyTargets: { ActionTargets: ['Duelist'], OppTargets: { NPC: ['Duelist'], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: true,
+            mapStats: { USER: 'MND', OPP: 'PHY' },
+            classifyHostilePhysicalIntent: true,
+            actionCount: ['binding spell'],
+          },
+          relationshipEngine: [relationship('Duelist')],
+          injuryEffectEngine: {
+            effects: [{
+              target: 'Duelist',
+              targetRole: 'OppTarget',
+              effectType: 'restraint',
+              bodyPart: 'body',
+              description: 'magical limb binding',
+              severityFloor: 'moderate',
+              persistence: 'lasting',
+              affectsAction: true,
+            }],
+          },
+        }),
+      });
+      const text = prompt(report);
+      assert.match(text, /landed user action\/effect/i);
+      assert.match(text, /lasting restraint from the landed user action/i);
+      assert.doesNotMatch(text, /landed user attack/i);
+    },
+  },
+  {
+    name: '44 narrator keeps boundary violation guidance when aggression also fires',
+    run() {
+      const report = {
+        semanticLedger: {
+          resolutionEngine: {
+            explicitMeans: 'push past Mira after she refuses',
+          },
+        },
+        finalNarrativeHandoff: {
+          resultLine: '1d20(6) + PHY(6) = 12 vs 1d20(16) + PHY(5) = 21 (-9 - Critical_Failure)',
+          resolutionPacket: {
+            GOAL: 'ForcePastRefusal',
+            actions: ['a1'],
+            intimacyAdvanceExplicit: 'N',
+            boundaryViolationExplicit: 'Y',
+            STAKES: 'Y',
+            LandedActions: 0,
+            OutcomeTier: 'Critical_Failure',
+            Outcome: 'avoided',
+            CounterPotential: 'severe',
+            classifyHostilePhysicalIntent: 'Y',
+            classifyCombatActionSequence: 'Y',
+            activeHostileThreat: 'N',
+            classifyPhysicalBoundaryPressure: 'N',
+            CompanionCommand: null,
+            hostilesInScene: { NPC: [] },
+            ActionTargets: ['Mira'],
+            OppTargets: { NPC: ['Mira'], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+            NPCInScene: ['Mira'],
+            UserImpairment: { Relevant: 'N' },
+            NPCImpairment: { Relevant: 'N' },
+            InflictedInjuries: [],
+          },
+          npcHandoffs: [{
+            NPC: 'Mira',
+            FinalState: 'B1/F3/H4',
+            Behavior: 'FEAR',
+            Target: 'Fear',
+            NPC_STAKES: 'Y',
+            Landed: 'N',
+            BoundaryPressure: 'Y',
+          }],
+          chaosHandoff: { CHAOS: { triggered: false } },
+          proactivityResults: {
+            Mira: {
+              Proactive: 'Y',
+              Intent: 'ESCALATE_VIOLENCE',
+              Impulse: 'FEAR',
+              ProactivityTarget: '{{user}}',
+              TargetsUser: 'Y',
+            },
+          },
+          aggressionResults: {
+            Mira: {
+              AttackType: 'CounterAttack',
+              AttackIntent: 'ESCALATE_VIOLENCE',
+              ProactivityTarget: '{{user}}',
+              AttackStat: 'PHY',
+              DefenseStat: 'PHY',
+              CounterPotential: 'severe',
+              CounterBonus: 6,
+              ReactionOutcome: 'npc_succeeds',
+              Margin: 2,
+              NPCImpairment: { Relevant: 'N' },
+              UserImpairment: { Relevant: 'N' },
+              TargetImpairment: { Relevant: 'N' },
+              InflictedUserInjury: {
+                targetType: 'user',
+                condition: 'wounded',
+                severity: 'moderate',
+                woundsAdd: [],
+                statusAdd: [],
+                InjuryDetailMode: 'narrator_contextual',
+                InjurySeverityLimit: 'moderate',
+              },
+              InflictedTargetInjury: null,
+            },
+          },
+          nameGeneration: {},
+          sceneTrackerUpdate: {},
+        },
+      };
+      const text = prompt(report);
+      assert.match(text, /explicit boundary violation or pressure past refusal/i);
+      assert.match(text, /Mira: counterattack exploiting the opening/i);
+      assert.match(text, /Respect active boundary pressure/i);
+    },
+  },
 ];
 
 const results = [];
