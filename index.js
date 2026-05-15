@@ -106,13 +106,15 @@ const NAME_STYLE_OPTIONS = Object.freeze([
 const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
 
 **STYLE TARGET:**
-Serious, grounded, body-focused narration for fantasy roleplay with clear action, physical tension, intimacy, erotic charge, and ecchi framing when the scene supports it.
+Serious, grounded, physically concrete narration for fantasy roleplay with clear action, visible behavior, physical tension, intimacy, erotic charge, and ecchi framing when the scene supports it.
 
 **BASE TEXTURE:**
 - Keep prose lean, direct, and tactile.
-- Prioritize bodies, objects, distance, pressure, weight, fabric, skin, steel, blood, heat, injury, grip, footing, and consequence.
+- Prioritize bodies in motion, objects, distance, pressure, weight, fabric, skin, steel, blood, heat, injury, grip, footing, and consequence.
 - Make space and motion easy to follow.
 - Let scenes feel heavy through contact, restraint, timing, stillness, interruption, and consequence.
+- Show emotion through visible choices, whole-body behavior, object handling, distance, contact, refusal, delay, and speech timing.
+- Avoid isolated body-part reactions as emotional code.
 
 **ACTION MODE:**
 Use for combat, struggle, chase, restraint, spell impact, or physical contest.
@@ -233,6 +235,7 @@ function groundedPhysicalProse() {
   mandate:
     - Use plain physical prose.
     - Let meaning come from bodies, objects, pressure, distance, timing, and consequence.
+    - Show emotion through visible choices and scene-changing behavior instead of coded body-part reactions.
     - Choose verbs that describe real motion, contact, resistance, interruption, or change.
     - Use adjectives for measurable qualities: wet, cracked, narrow, loose, hot, dim, heavy, sharp.
     - Describe inanimate things by what they physically do.
@@ -242,20 +245,45 @@ function groundedPhysicalProse() {
     - Prefer visible choices with consequence: stepping back, blocking a doorway, dropping an object, changing grip, missing a word, turning away, sitting down, standing too fast.
 
   examples:
-    - "She spoke quietly."
-    - "No one moved."
-    - "Leaves rustled against the shutters."
-    - "He stared at the cup. His thumb rubbed the handle."
-    - "She set the cup down without drinking."
-    - "His hand moved to the knife, then stopped on the table edge."
+    - "She lowered her voice and pushed the cup across the table. \"Drink. You look like you need it. Besides, we're not leaving until morning.\""
+    - "No one moved until the floorboard settled under the guard's boot."
+    - "Leaves rustled against the shutters while he worked the lockpick deeper into the brass plate."
+    - "He stared at the cup, rubbing his thumb along the handle without lifting it."
+    - "She set the cup down untouched and turned it so the cracked side faced him."
+    - "His hand moved to the knife, stopped on the table edge, then closed around the wood hard enough to shift it."
     - "The impact landed with a flat, wet thud."
-    - "Dust kicked up around her."
+    - "Dust kicked up around her boots as she recovered her footing and brought the blade back up."
 
   prohibition:
-    - Never use metaphor, simile, idiom, poetic framing, personification, emotional physics, decorative atmosphere, trope shorthand, blushing/flushing, eye-language mood shortcuts, "jaw tightened", "throat worked", "opened her mouth and closed it", "shadow fell over her eyes", "eyes darkened", "eyes softened", "expression flickered", "face softened", "heart skipped", "stomach twisted", or "not X, but Y" contrast phrasing.
+    - Never use somatic emotional shorthand, stock body-language shorthand, autonomic emotional tells, micro-expression shorthand, or body-part emotion metonymy.
+    - Never use isolated jaw, throat, mouth, eye, facial muscle, breath, pulse, heart, stomach, skin, cheek, or hand reactions as coded substitutes for emotion.
+    - Never use metaphor, simile, idiom, poetic framing, personification, emotional physics, decorative atmosphere, trope shorthand, blushing/flushing, eye-language mood shortcuts, "jaw tightened", "jaw worked", "muscle in her jaw", "muscle in his jaw", "throat worked", "throat bobbed", "opened her mouth and closed it", "opened his mouth and closed it", "shadow fell over her eyes", "shadow fell over his eyes", "eyes darkened", "eyes softened", "expression flickered", "face softened", "heart skipped", "pulse jumped", "stomach twisted", or "not X, but Y" contrast phrasing.
     - Never use sensory analogy phrasing to create an image instead of reporting the event: "sounded like", "felt like", "looked like", "as if", or "as though".
     - Never use decorative material verbs for particles, liquids, light, shadow, silence, or air: no blooming dust, breathing rooms, falling shadows, waiting silence, or similar ornamental motion.
-    - Never use breath as emotional shorthand: "breath caught", "breath catches", "breath hitched", "breath hitches", "breath stalled", "breath snagged", "forgot to breathe", or "could not breathe". Breath is allowed only as concrete exertion, injury, panic, sex, restraint, or recovery.
+    - Never use breath as emotional shorthand or romantic tension shorthand: "breath caught", "breath catches", "breath hitched", "breath hitches", "breath stalled", "breath snagged", "breathing caught", "breathing hitched", "forgot to breathe", or "could not breathe". Breath is allowed only as concrete exertion, injury, panic, sex, restraint, or recovery.
+}
+
+function proseFlow() {
+  domain: sentence rhythm, action continuity, readable physical prose
+
+  mandate:
+    - Write plain prose with natural sentence rhythm.
+    - Combine related physical actions into one sentence when they belong to the same beat.
+    - Vary sentence length: use short sentences for impact, longer sentences for sequence, pressure, or continuous movement.
+    - Let action flow through cause, contact, interruption, and consequence instead of listing isolated motions.
+    - Use clauses to connect posture, object handling, speech, and movement when they occur together.
+    - Keep paragraphs cohesive: one paragraph may carry a full physical beat from approach to response.
+    - Plain prose does not mean clipped prose.
+
+  examples:
+    - "She crossed to the table, pulled the chair out with one hand, and sat without taking her eyes off the door."
+    - "He picked up the cup, turned it once between his fingers, then set it down beside the unopened letter."
+    - "'No.' She kept her hand on the latch, but her weight shifted back from the door."
+    - "The guard glanced at the seal, folded the letter into his coat, and moved his shoulder between {{user}} and the stairs."
+    - "Steel scraped the wall as he recovered his footing, forcing the blade back up before the second swing could land."
+
+  prohibition:
+    - Never reduce narration to a robotic list of isolated actions, repetitive subject-verb sentences, or one-action-per-sentence camera logging.
 }
 
 function behavioralRendering() {
@@ -266,17 +294,42 @@ function behavioralRendering() {
     - Show what a person in the room could actually see or hear.
     - Prefer actions that alter the scene over micro-expressions.
     - Let restraint, avoidance, delay, interruption, and failed routine carry meaning.
-    - Use body mechanics only when they are concrete: weight transfer, foot placement, hand position, breath control, stance correction, contact with objects.
+    - Use body mechanics only when they are concrete and functional: weight transfer, foot placement, hand position, stance correction, contact with objects, or breathing that physically affects speech or action.
+    - Treat visible emotion as behavior with consequence: blocking a door, stepping back, refusing an object, moving closer, dropping a tool, missing a practiced motion, interrupting a routine, or changing who has access to something.
+    - If a feeling needs to show, make the character do something visible in the scene instead of describing a small body-part reaction.
 
   examples:
-    - "She retied her shoelaces. Twice."
-    - "He fumbled with the lighter. It fell."
-    - "He lowered his voice and moved the mug closer to her hand."
-    - "Her hand stayed on the latch."
-    - "'No.' The second word did not come."
+    - "She bent to retie her shoelaces, pulled the knot loose, then started over without looking up."
+    - "He fumbled with the lighter until it slipped from his fingers and struck the floor under the table."
+    - "He lowered his voice and moved the mug closer to her hand. \"Drink first. Then tell me what happened.\""
+    - "Her hand stayed on the latch while her boots remained planted inside the room."
+    - "'No.' She pressed the folded letter flat under her palm and did not give him the second word."
 
   prohibition:
-    - Never label internal states, use canned body-language shorthand, use blush/flush/heat-in-cheeks phrasing, or substitute stock gestures for specific action.
+    - Never label internal states, use canned body-language shorthand, somatic emotional shorthand, autonomic tells, micro-expression shorthand, blush/flush/heat-in-cheeks phrasing, or substitute stock gestures for specific action.
+}
+
+function actionIntegratedDialogue() {
+  domain: dialogue flow, action beats, physical scene prose, anti-pingpong structure
+
+  mandate:
+    - Write dialogue as part of a physical scene beat, not as isolated speech.
+    - Pair speech with meaningful action, posture, distance, object handling, contact, interruption, or movement when appropriate.
+    - Keep action and dialogue from the same speaker in the same paragraph when they belong to the same beat.
+    - Let physical action carry subtext: care, refusal, pressure, threat, attraction, hesitation, or control.
+    - Prefer one strong beat from a speaker over several small back-and-forth fragments.
+    - Let an NPC speak once, then stop when their line creates a response point for {{user}}.
+    - Use inter-NPC dialogue sparingly: at most one brief exchange between NPCs before returning pressure to {{user}}.
+
+  examples:
+    - "She lowered her voice and pushed the cup across the table. \"Drink. You look like you need it. Besides, we're not leaving until morning.\""
+    - "He folded the letter once, then again, keeping his thumb over the seal. \"You didn't get this from me.\""
+    - "The guard stepped into the doorway and hooked two fingers under his belt. \"Road's closed.\""
+    - "She picked the knife up by the handle and set it beside {{user}}'s plate. \"Eat first. Then we talk.\""
+    - "Mara looked from the broken latch to the mud on his boots. \"You came through the back.\" Devren shut the door with his heel. \"Had to.\""
+
+  prohibition:
+    - Never create pingpong structure where the same NPC speaks, narration interrupts, the same NPC speaks again, narration interrupts, and the same NPC speaks again before {{user}} can respond.
 }
 
 function dialogueDiscipline() {
@@ -349,11 +402,25 @@ call groundedPhysicalProse()
 - Use plain physical prose.
 - Make meaning come from bodies, objects, pressure, distance, timing, and consequence.
 - Use specific, filmable action instead of trope shorthand.
+- Show emotion through visible choices and scene-changing behavior, not coded body-part reactions.
 - Describe impact, sound, dust, smoke, light, blood, and debris directly; do not use sensory analogies or decorative material motion.
+- Reject somatic emotional shorthand, autonomic emotional tells, micro-expression shorthand, and body-part emotion metonymy.
+
+call proseFlow()
+- Use natural sentence rhythm.
+- Combine related actions into cohesive physical beats.
+- Vary sentence length; short sentences are for impact, not the default.
+- Plain prose must not become robotic camera logging.
 
 call behavioralRendering()
 - Show emotion through observable behavior: posture, distance, grip, object handling, speech timing, interruption, retreat, blocking, repeated motion, and use of space.
 - Prefer actions that alter the scene over micro-expressions.
+- Use body mechanics only for functional movement, exertion, injury, panic, sex, restraint, recovery, or speech-affecting breath.
+
+call actionIntegratedDialogue()
+- Write dialogue as part of a physical beat, not as isolated speech.
+- Pair speech with meaningful action, posture, object handling, or movement.
+- Keep one strong beat before returning pressure to {{user}}.
 
 call dialogueDiscipline()
 - Keep dialogue reactive, pressured, specific, and short.
@@ -368,7 +435,7 @@ call turnAndAgencyControl()
 - Keep {{user}} agency fully separate.
 
 FINAL HARD PROHIBITION:
-- Remove before output: {{user}} speech, thoughts, intentional actions, reactions, silence, or choices; recap or "as you" phrasing; opening recap transitions such as "the words left [name]'s mouth"; omniscience; premature names; exposition dumps; metaphor; simile; sensory analogy phrasing such as sounded like, felt like, looked like, as if, or as though; idiom; poetic framing; personification; emotional physics; decorative material motion such as blooming dust, breathing rooms, falling shadows, waiting silence, or similar ornamental motion; decorative ambience; ambient mood scent; taste-the-air phrasing; blushing/flushing/heat-in-cheeks; eye-language mood shortcuts; jaw tightened; throat worked; opened mouth then closed it; shadow fell over eyes; expression flickered; face softened; breath caught; breath catches; breath hitched; breath hitches; breath stalled; breath snagged; forgot to breathe; could not breathe; heart skipped; stomach twisted; "not X, but Y" contrast phrasing; ambient filler endings; explicit waiting; meta-questions.
+- Remove before output: {{user}} speech, thoughts, intentional actions, reactions, silence, or choices; recap or "as you" phrasing; opening recap transitions such as "the words left [name]'s mouth"; omniscience; premature names; exposition dumps; metaphor; simile; sensory analogy phrasing such as sounded like, felt like, looked like, as if, or as though; idiom; poetic framing; personification; emotional physics; decorative material motion such as blooming dust, breathing rooms, falling shadows, waiting silence, or similar ornamental motion; decorative ambience; ambient mood scent; taste-the-air phrasing; somatic emotional shorthand; stock body-language shorthand; autonomic emotional tells; micro-expression shorthand; body-part emotion metonymy; isolated jaw, throat, mouth, eye, facial muscle, breath, pulse, heart, stomach, skin, cheek, or hand reactions as coded emotion; blushing/flushing/heat-in-cheeks; eye-language mood shortcuts; jaw tightened; jaw worked; muscle in her jaw; muscle in his jaw; throat worked; throat bobbed; opened mouth then closed it; shadow fell over eyes; expression flickered; face softened; breath caught; breath catches; breath hitched; breath hitches; breath stalled; breath snagged; breathing caught; breathing hitched; forgot to breathe; could not breathe; heart skipped; pulse jumped; stomach twisted; "not X, but Y" contrast phrasing; ambient filler endings; explicit waiting; meta-questions; robotic one-action-per-sentence cadence; repetitive subject-verb action lists.
 
 FINAL CHECK:
 - Output only final narration.
@@ -1780,7 +1847,7 @@ function normalizeDisplayTrackerNpcs(npcs) {
     return normalized;
 }
 
-function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report }) {
+function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistantText = '' }) {
     const resolutionPacket = report?.finalNarrativeHandoff?.resolutionPacket || {};
     const trackerAfter = normalizeDisplayTrackerNpcs({
         ...(pendingRun?.trackerBefore || {}),
@@ -1789,7 +1856,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report }) {
     const user = normalizeTrackerUserState(pendingRun?.userBefore || {});
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
-        latestUserText: pendingRun?.latestUserText,
+        assistantText,
     });
     return {
         version: TRACKER_DISPLAY_VERSION,
@@ -1802,29 +1869,44 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report }) {
     };
 }
 
-function applyExplicitNamePromotions(npcs, { latestUserText } = {}) {
+function applyExplicitNamePromotions(npcs, { assistantText } = {}) {
     const normalized = normalizeDisplayTrackerNpcs(npcs);
-    const promotions = getExplicitNamePromotions(latestUserText, Object.keys(normalized));
+    const activeNames = Object.entries(normalized)
+        .filter(([, entry]) => entry?.lifecycle === 'Active')
+        .map(([name]) => name);
+    const promotions = getExplicitNamePromotions(assistantText, activeNames);
+    const promotedOldNames = new Set();
 
     for (const { oldName, newName } of promotions) {
+        if (promotedOldNames.has(oldName)) continue;
         const oldEntry = normalized[oldName];
         const newEntry = normalized[newName];
-        if (!oldEntry) continue;
+        if (!oldEntry || oldEntry.lifecycle !== 'Active') continue;
 
-        normalized[newName] = normalizeTrackerEntry({
-            ...oldEntry,
-            ...(newEntry || {}),
-            lifecycle: 'Active',
-        });
-        normalized[oldName] = normalizeTrackerEntry({
-            ...oldEntry,
-            lifecycle: 'Retired',
-        });
+        promoteTrackerEntry(normalized, oldName, newName);
+        promotedOldNames.add(oldName);
     }
 
     return {
         npcs: normalized,
     };
+}
+
+function promoteTrackerEntry(npcs, oldName, newName) {
+    const oldEntry = npcs?.[oldName];
+    const cleanNewName = cleanRevealedTrackerName(newName);
+    if (!oldEntry || !cleanNewName || cleanNewName.toLowerCase() === String(oldName || '').trim().toLowerCase()) return false;
+    const newEntry = npcs[cleanNewName];
+    npcs[cleanNewName] = normalizeTrackerEntry({
+        ...oldEntry,
+        ...(newEntry || {}),
+        lifecycle: 'Active',
+    });
+    npcs[oldName] = normalizeTrackerEntry({
+        ...oldEntry,
+        lifecycle: 'Retired',
+    });
+    return true;
 }
 
 function buildTrackerUpdateForPersistence(displaySnapshot) {
@@ -1848,8 +1930,12 @@ function mergeNarratorTrackerDelta(snapshot, delta, options = {}) {
             ...before,
             ...applyTrackerDeltaToNpcState(before, npcDelta),
         });
+        const revealedName = cleanRevealedTrackerName(npcDelta?.revealedName);
+        if (revealedName && isPromotableTrackerName(name)) {
+            promoteTrackerEntry(npcs, name, revealedName);
+        }
     }
-    merged.npcs = normalizeDisplayTrackerNpcs(npcs);
+    merged.npcs = applyExplicitNamePromotions(npcs, options).npcs;
     merged.narratorTrackerDelta = {
         updatedAt: Date.now(),
         userChanged: trackerDeltaHasChanges(delta.user, true),
@@ -1867,6 +1953,7 @@ function findExistingTrackerName(npcs, wantedName) {
 function trackerDeltaHasChanges(delta, includePlayerFields) {
     if (!delta || typeof delta !== 'object') return false;
     if (normalizeTrackerDeltaCondition(delta.condition) !== 'unchanged') return true;
+    if (!includePlayerFields && cleanRevealedTrackerName(delta.revealedName)) return true;
     if (!includePlayerFields && cleanPersonalitySummary(delta.personalitySummary)) return true;
     const fields = includePlayerFields
         ? ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']
@@ -1961,6 +2048,18 @@ function cleanPersonalitySummary(value) {
     const text = String(value ?? '').trim().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '').trim();
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
     return text.slice(0, 160);
+}
+
+function cleanRevealedTrackerName(value) {
+    const text = String(value ?? '').trim().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '').trim();
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
+    if (!/^[\p{L}][\p{L}' -]{1,40}$/u.test(text)) return '';
+    return text
+        .split(/[\s-]+/)
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ')
+        .slice(0, 60);
 }
 
 function currentResolutionNpcNames(packet = {}) {
@@ -2277,9 +2376,10 @@ function ensureTrackerDisplayStyles() {
             height: 28px;
         }
         #${TRACKER_WIDGET_PANEL_ID} {
+            position: fixed;
             width: min(420px, calc(100vw - 36px));
             max-height: min(620px, calc(100vh - 36px));
-            margin-top: 0.45rem;
+            margin: 0;
             padding: 0.7rem;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2));
             border-radius: 8px;
@@ -2491,7 +2591,9 @@ function renderTrackerWidget(context = getContext()) {
     widget.style.top = `${pos.y}px`;
 
     const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
-    if (panel) panel.hidden = settings.trackerWidgetCollapsed !== false;
+    if (panel) {
+        panel.hidden = settings.trackerWidgetCollapsed !== false;
+    }
 
     const body = widget.querySelector('[data-structured-preflight-tracker-widget-body]');
     if (!body) return;
@@ -2499,6 +2601,7 @@ function renderTrackerWidget(context = getContext()) {
     body.innerHTML = snapshot?.npcs
         ? buildTrackerDisplayHtml(snapshot)
         : '<div class="structured-preflight-tracker-empty">No tracker data yet.</div>';
+    if (panel && !panel.hidden) positionTrackerWidgetPanel(widget, panel);
 }
 
 function attachTrackerWidgetHandlers(widget) {
@@ -2527,6 +2630,8 @@ function attachTrackerWidgetHandlers(widget) {
         const pos = clampTrackerWidgetPosition(x, y);
         widget.style.left = `${pos.x}px`;
         widget.style.top = `${pos.y}px`;
+        const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
+        if (panel && !panel.hidden) positionTrackerWidgetPanel(widget, panel);
     });
     button?.addEventListener('pointerup', event => {
         if (!drag) return;
@@ -2564,6 +2669,35 @@ function clampTrackerWidgetPosition(x, y) {
         x: Math.max(8, Math.min(Number.isFinite(rawX) ? rawX : 24, maxX)),
         y: Math.max(8, Math.min(Number.isFinite(rawY) ? rawY : 120, maxY)),
     };
+}
+
+function positionTrackerWidgetPanel(widget, panel) {
+    if (!widget || !panel || panel.hidden) return;
+    const gap = 8;
+    const viewportWidth = globalThis.innerWidth || 1200;
+    const viewportHeight = globalThis.innerHeight || 800;
+    const button = widget.querySelector(`#${TRACKER_WIDGET_BUTTON_ID}`) || widget;
+    const buttonRect = button.getBoundingClientRect();
+
+    panel.style.left = '0px';
+    panel.style.top = '0px';
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+
+    const panelRect = panel.getBoundingClientRect();
+    const opensLeft = buttonRect.left + buttonRect.width / 2 > viewportWidth / 2;
+    const opensUp = buttonRect.top + buttonRect.height / 2 > viewportHeight / 2;
+    const panelWidth = Math.min(panelRect.width || 420, Math.max(180, viewportWidth - 16));
+    const panelHeight = Math.min(panelRect.height || 360, Math.max(160, viewportHeight - 16));
+    const left = opensLeft
+        ? buttonRect.right - panelWidth
+        : buttonRect.left;
+    const top = opensUp
+        ? buttonRect.top - panelHeight - gap
+        : buttonRect.bottom + gap;
+
+    panel.style.left = `${Math.round(Math.max(8, Math.min(left, viewportWidth - panelWidth - 8)))}px`;
+    panel.style.top = `${Math.round(Math.max(8, Math.min(top, viewportHeight - panelHeight - 8)))}px`;
 }
 
 function ensurePlayerSetupStyles() {
@@ -3517,6 +3651,7 @@ async function prependComputedDebug(messageId, type) {
                 messageKey,
                 pendingRun,
                 report: pendingRun.report,
+                assistantText: narrationText,
             });
             if (trackerDeltaText) {
                 try {

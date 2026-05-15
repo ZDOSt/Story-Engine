@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { runDeterministicEngines } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/deterministic-runner.js';
 import { deriveDirection, updateDisposition } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/engines.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/pre-flight.js';
@@ -169,11 +170,13 @@ function trackerEntry(overrides = {}) {
       pendingSince: 0,
       acceptedTags: [],
       refusedTags: [],
+      partnerMeaningfulCooldownUntilActiveMs: 0,
+      lastMeaningfulPartnerTag: 'NONE',
       cooldowns: {
         Thoughtful_Gift: 0,
         Ask_Date: 0,
+        Partner_Date: 0,
         Partner_Gift: 0,
-        Partner_Private_Time: 0,
         Partner_Conflict: 0,
       },
     },
@@ -380,6 +383,42 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'SKIP');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].FinalState, 'B3/F1/H1');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+    },
+  },
+  {
+    name: '02b B4 suggestive banter is capped below intimacy without allow path',
+    run() {
+      const tracker = { Seraphina: trackerEntry({ currentDisposition: { B: 4, F: 1, H: 1 } }) };
+      const report = runCaseWithRandoms({
+        userText: 'I keep my voice low and say, "I wonder how tight it is."',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'suggestive banter with Seraphina',
+            explicitMeans: 'suggestive innuendo',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: false,
+            boundaryViolationExplicit: false,
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', { romanceStyle: 'flirt' })],
+        }),
+      }, [
+        ...Array(11).fill(nthRandomForDie(10, 20)),
+        nthRandomForDie(1, 20),
+      ]);
+      const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
+      const modelPrompt = prompt(report);
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.intimacyAdvanceExplicit, 'N');
+      assert.equal(handoff.EstablishedRelationship, 'N');
+      assert.equal(handoff.IntimacyBoundary, 'SKIP');
+      assert.equal(report.finalNarrativeHandoff.proactivityResults.Seraphina.Proactive, 'N');
+      assert.match(modelPrompt, /conversation alone is not permission for intimate escalation/);
+      assert.match(modelPrompt, /Unless IntimacyBoundary explicitly permits it/);
+      assert.match(modelPrompt, /inn room, a private room/);
+      assert.match(modelPrompt, /secluded intimacy/);
     },
   },
   {
@@ -1411,6 +1450,44 @@ const tests = [
     },
   },
   {
+    name: '12h.0 B4 calm romance initiative requires 12+ proactivity',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 4, F: 1, H: 1 },
+          establishedRelationship: 'N',
+        }),
+      };
+      const report = runCaseWithRandoms({
+        userText: 'I sit with Seraphina near the fire and talk quietly about the road ahead.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'quiet conversation near the fire',
+            explicitMeans: 'quiet conversation near the fire',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', { romanceStyle: 'flirt' })],
+        }),
+      }, [
+        ...Array(11).fill(nthRandomForDie(10, 20)),
+        nthRandomForDie(11, 20),
+      ]);
+      const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
+      assert.equal(proactive.ProactivityTier, 'HIGH');
+      assert.equal(proactive.Threshold, 12);
+      assert.equal(proactive.ProactivityDie, 11);
+      assert.equal(proactive.Proactive, 'N');
+    },
+  },
+  {
     name: '12h.1 B4 thoughtful gift sets pending and 1d20 cooldown after firing',
     run() {
       const tracker = {
@@ -1732,6 +1809,49 @@ const tests = [
       assert.deepEqual(report.trackerUpdate.npcs.Seraphina.proactivityMemory.refusedTags, []);
       assert.equal(report.trackerUpdate.npcs.Mira.proactivityMemory.pendingTag, 'Thoughtful_Gift');
       assert.deepEqual(report.trackerUpdate.npcs.Mira.proactivityMemory.refusedTags, []);
+    },
+  },
+  {
+    name: '12h.7a ask date guidance stays non-intimate',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 4, F: 1, H: 1 },
+          establishedRelationship: 'N',
+        }),
+      };
+      const randoms = [
+        ...Array(11).fill(nthRandomForDie(10, 20)),
+        nthRandomForDie(18, 20),
+        nthRandomForDie(88, 100),
+        nthRandomForDie(7, 20),
+      ];
+      const report = runCaseWithRandoms({
+        userText: 'I sit with Seraphina near the fire and talk quietly about the road ahead.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'quiet conversation near the fire',
+            explicitMeans: 'quiet conversation near the fire',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', { romanceStyle: 'flirt' })],
+        }),
+      }, randoms);
+      const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
+      const modelPrompt = prompt(report);
+      assert.equal(proactive.RomanceInitiativeTag, 'Ask_Date');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].EstablishedRelationship, 'N');
+      assert.match(modelPrompt, /non-intimate romantic date/);
+      assert.match(modelPrompt, /public or ordinary plan/);
+      assert.match(modelPrompt, /Do not frame this as secluded sexual privacy/);
     },
   },
   {
@@ -2352,7 +2472,8 @@ const tests = [
       const randoms = [
         ...Array(11).fill(nthRandomForDie(10, 20)),
         nthRandomForDie(14, 20),
-        nthRandomForDie(135, 150),
+        nthRandomForDie(88, 100),
+        nthRandomForDie(2, 4),
       ];
       const report = runCaseWithRandoms({
         userText: 'I sit with Seraphina by the fire after sunset, alone and at peace.',
@@ -2379,13 +2500,52 @@ const tests = [
       assert.equal(proactive.PartnerInitiative, 'Y');
       assert.equal(proactive.Intent, 'Partner_Intimacy');
       assert.equal(proactive.PartnerInitiativeTag, 'Partner_Intimacy');
-      assert.equal(proactive.PartnerInitiativeDie, 135);
+      assert.equal(proactive.PartnerInitiativeDie, 88);
       assert.equal(proactive.PartnerInitiativeContext, 'calm');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.proactivityMemory.lastMeaningfulPartnerTag, 'Partner_Intimacy');
       assert.match(prompt(report), /romantic or sexual closeness/);
     },
   },
   {
-    name: '12c.1 established partner gift sets 1d20 cooldown after firing',
+    name: '12c.0 established partner calm initiative requires 12+ proactivity',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 4, F: 1, H: 1 },
+          establishedRelationship: 'Y',
+        }),
+      };
+      const report = runCaseWithRandoms({
+        userText: 'I sit with Seraphina by the fire after sunset, alone and at peace.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'quiet private rest by the fire',
+            explicitMeans: 'quiet private rest by the fire',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      }, [
+        ...Array(11).fill(nthRandomForDie(10, 20)),
+        nthRandomForDie(11, 20),
+      ]);
+      const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
+      assert.equal(proactive.ProactivityTier, 'HIGH');
+      assert.equal(proactive.Threshold, 12);
+      assert.equal(proactive.ProactivityDie, 11);
+      assert.equal(proactive.Proactive, 'N');
+    },
+  },
+  {
+    name: '12c.1 established partner gift sets shared 1d4h active-time cooldown',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -2396,8 +2556,8 @@ const tests = [
       const randoms = [
         ...Array(11).fill(nthRandomForDie(10, 20)),
         nthRandomForDie(14, 20),
-        nthRandomForDie(120, 150),
-        nthRandomForDie(6, 20),
+        nthRandomForDie(75, 100),
+        nthRandomForDie(2, 4),
       ];
       const report = runCaseWithRandoms({
         userText: 'I sit with Seraphina by the fire after sunset, alone and at peace.',
@@ -2422,12 +2582,13 @@ const tests = [
       const memory = report.trackerUpdate.npcs.Seraphina.proactivityMemory;
       assert.equal(proactive.PartnerInitiativeTag, 'Partner_Gift');
       assert.equal(memory.interchangeCount, 1);
-      assert.equal(memory.cooldowns.Partner_Gift, 8);
-      assert.equal(auditIncludes(report, 'Seraphina.Partner_Gift.cooldown=1d20(6)->8'), true);
+      assert.equal(memory.lastMeaningfulPartnerTag, 'Partner_Gift');
+      assert.equal(memory.partnerMeaningfulCooldownUntilActiveMs, 2 * 60 * 60 * 1000);
+      assert.equal(auditIncludes(report, 'Seraphina.Partner_Gift.meaningfulCooldown=1d4h(2)->7200000'), true);
     },
   },
   {
-    name: '12c.2 established partner gift cooldown remaps to lighter partner beat',
+    name: '12c.2 shared meaningful partner cooldown remaps to light partner beat',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -2435,17 +2596,19 @@ const tests = [
           establishedRelationship: 'Y',
           proactivityMemory: {
             interchangeCount: 3,
-            cooldowns: { Partner_Gift: 10 },
+            partnerMeaningfulCooldownUntilActiveMs: 10 * 60 * 60 * 1000,
+            lastMeaningfulPartnerTag: 'Partner_Date',
           },
         }),
       };
       const randoms = [
         ...Array(11).fill(nthRandomForDie(10, 20)),
         nthRandomForDie(14, 20),
-        nthRandomForDie(120, 150),
+        nthRandomForDie(75, 100),
       ];
       const report = runCaseWithRandoms({
         userText: 'I sit with Seraphina by the fire after sunset, alone and at peace.',
+        rapportClock: { activeMs: 2 * 60 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -2465,12 +2628,12 @@ const tests = [
       }, randoms);
       const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
       assert.equal(proactive.PartnerInitiativeRawTag, 'Partner_Gift');
-      assert.equal(proactive.PartnerInitiativeTag, 'Partner_Support');
-      assert.equal(proactive.PartnerInitiativeMemoryGate, 'Partner_Gift.cooldownUntil10');
+      assert.equal(proactive.PartnerInitiativeTag, 'Partner_Flirt');
+      assert.equal(proactive.PartnerInitiativeMemoryGate, 'meaningfulPartner.cooldownUntil36000000');
     },
   },
   {
-    name: '12c.3 established partner conflict sets 1d50 cooldown after firing',
+    name: '12c.3 established partner conflict sets shared 1d4h active-time cooldown',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -2481,8 +2644,8 @@ const tests = [
       const randoms = [
         ...Array(11).fill(nthRandomForDie(10, 20)),
         nthRandomForDie(14, 20),
-        nthRandomForDie(148, 150),
-        nthRandomForDie(37, 50),
+        nthRandomForDie(98, 100),
+        nthRandomForDie(3, 4),
       ];
       const report = runCaseWithRandoms({
         userText: 'I sit with Seraphina by the fire after sunset, alone and at peace.',
@@ -2506,8 +2669,95 @@ const tests = [
       const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
       const memory = report.trackerUpdate.npcs.Seraphina.proactivityMemory;
       assert.equal(proactive.PartnerInitiativeTag, 'Partner_Conflict');
-      assert.equal(memory.cooldowns.Partner_Conflict, 39);
-      assert.equal(auditIncludes(report, 'Seraphina.Partner_Conflict.cooldown=1d50(37)->39'), true);
+      assert.equal(memory.lastMeaningfulPartnerTag, 'Partner_Conflict');
+      assert.equal(memory.partnerMeaningfulCooldownUntilActiveMs, 3 * 60 * 60 * 1000);
+      assert.equal(auditIncludes(report, 'Seraphina.Partner_Conflict.meaningfulCooldown=1d4h(3)->10800000'), true);
+    },
+  },
+  {
+    name: '12c.4 established partner date cannot repeat as next meaningful event',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 4, F: 1, H: 1 },
+          establishedRelationship: 'Y',
+          proactivityMemory: {
+            lastMeaningfulPartnerTag: 'Partner_Date',
+          },
+        }),
+      };
+      const randoms = [
+        ...Array(11).fill(nthRandomForDie(10, 20)),
+        nthRandomForDie(14, 20),
+        nthRandomForDie(65, 100),
+        nthRandomForDie(1, 4),
+      ];
+      const report = runCaseWithRandoms({
+        userText: 'I sit with Seraphina by the fire after sunset, alone and at peace.',
+        rapportClock: { activeMs: 6 * 60 * 60 * 1000, lastActivityAt: Date.now() },
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'quiet private rest by the fire',
+            explicitMeans: 'quiet private rest by the fire',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      }, randoms);
+      const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
+      assert.equal(proactive.PartnerInitiativeRawTag, 'Partner_Date');
+      assert.equal(proactive.PartnerInitiativeTag, 'Partner_Gift');
+      assert.equal(proactive.PartnerInitiativeMemoryGate, 'Partner_Date.repeatBlocked');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.proactivityMemory.lastMeaningfulPartnerTag, 'Partner_Gift');
+    },
+  },
+  {
+    name: '12c.5 partner intimacy requires privacy or contextual suitability',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 4, F: 1, H: 1 },
+          establishedRelationship: 'Y',
+        }),
+      };
+      const randoms = [
+        ...Array(11).fill(nthRandomForDie(10, 20)),
+        nthRandomForDie(14, 20),
+        nthRandomForDie(88, 100),
+        nthRandomForDie(1, 4),
+      ];
+      const report = runCaseWithRandoms({
+        userText: 'I talk with Seraphina in the crowded market while guards stand nearby.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'crowded market conversation',
+            explicitMeans: 'talk in the crowded market near guards',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      }, randoms);
+      const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
+      assert.equal(proactive.PartnerInitiativeRawTag, 'Partner_Intimacy');
+      assert.equal(proactive.PartnerInitiativeTag, 'Partner_Conflict');
+      assert.equal(proactive.PartnerInitiativeMemoryGate, 'Partner_Intimacy.contextBlocked');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.proactivityMemory.lastMeaningfulPartnerTag, 'Partner_Conflict');
     },
   },
   {
@@ -4598,6 +4848,7 @@ const tests = [
     run() {
       assert.match(TRACKER_DELTA_TEMPLATE, /```story_engine_tracker_delta\s*BEGIN_TRACKER_DELTA/i);
       assert.match(TRACKER_DELTA_TEMPLATE, /END_TRACKER_DELTA\s*```/i);
+      assert.match(TRACKER_DELTA_TEMPLATE, /TrackerUpdateEngine\.NPC\[0\]\.revealedName=\(none\)/i);
       const prompt = formatNarratorModelPromptContext(runCase({
         userText: 'I take a key.',
         ledger: baseLedger({
@@ -4612,6 +4863,7 @@ const tests = [
       }));
       assert.match(prompt, /```story_engine_tracker_delta/i);
       assert.match(prompt, /BEGIN_TRACKER_DELTA/i);
+      assert.match(prompt, /revealedName/i);
       assert.match(prompt, /Before BEGIN_FINAL_NARRATION/i);
     },
   },
@@ -4655,6 +4907,27 @@ const tests = [
       assert.equal(isPromotableTrackerName('Unknown Woman'), true);
       const promotions = getExplicitNamePromotions('The Raider1 name is Mora.', ['Raider1']);
       assert.deepEqual(promotions, [{ oldName: 'Raider1', newName: 'Mora' }]);
+    },
+  },
+  {
+    name: '36a name promotion supports assistant-side terse introductions',
+    run() {
+      const text = 'The bystander looked at Aelemar properly for the first time. "Torvinash." He nodded once. "You traveling far?"';
+      const promotions = getExplicitNamePromotions(text, ['bystander']);
+      assert.deepEqual(promotions, [{ oldName: 'bystander', newName: 'Torvinash' }]);
+    },
+  },
+  {
+    name: '36b user-side name claims do not promote tracker names',
+    run() {
+      const userText = "The bystander's name is Torvinash.";
+      const assistantText = 'The bystander watched Aelemar without offering a name.';
+      const indexSource = fs.readFileSync('C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/index.js', 'utf8');
+      const promotionFunction = indexSource.match(/function applyExplicitNamePromotions[\s\S]*?\n}\n/)?.[0] || '';
+      assert.deepEqual(getExplicitNamePromotions(userText, ['bystander']), [{ oldName: 'bystander', newName: 'Torvinash' }]);
+      assert.deepEqual(getExplicitNamePromotions(assistantText, ['bystander']), []);
+      assert.equal(/getExplicitNamePromotions\s*\(\s*latestUserText\b/.test(promotionFunction), false);
+      assert.equal(/getExplicitNamePromotions\s*\(\s*assistantText\b/.test(promotionFunction), true);
     },
   },
   {

@@ -13,6 +13,8 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Do not infer hidden consequences. Do not add momentary pain, effort, hesitation, fear, impact, or flavor as wounds/status.',
     '- NPC personalitySummary is stable personality memory only: a concise 8-20 word phrase for enduring temperament, values, manner, or interaction style revealed by the narration.',
     '- Do not use personalitySummary for current mood, attraction, relationship state, fear/hostility, wounds, status, gear, temporary reactions, or this-turn events. Use unchanged unless a stable trait is clear.',
+    '- NPC revealedName is identity tracking only. If the final narration explicitly reveals that an already tracked generic NPC/person/role is actually named something, set NPC to the existing tracker label and revealedName to the revealed proper name. Example: tracked NPC "bystander" says "Torvinash." as an introduction -> NPC=bystander and revealedName=Torvinash.',
+    '- Use revealedName only when the narration semantically identifies which tracked generic NPC received the name. If there are multiple possible generic NPCs and identity is unclear, use (none).',
     '- Add wounds/status only when the prose establishes an actual ongoing injury, ailment, restraint, impairment, or continuing condition. This includes any body part, organ, sense, mental function, magic/poison/disease effect, or status that would continue to affect later action.',
     '- A hit, blow, impact, fall, shove, knockdown, stagger, flinch, gasp, pain spike, breath loss, being winded, or "the wind is knocked out" is not a tracked wound/status by itself.',
     '- Track rib/chest/torso effects only if the narration explicitly establishes a lasting injury or continuing status such as bruised ribs, cracked rib, broken rib, bleeding, ongoing breathing trouble, or unconsciousness.',
@@ -26,7 +28,7 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Never rewrite full tracker lists. Return deltas only.',
     '- Use condition=unchanged unless the narration explicitly changes overall condition.',
     '- NPC entries are only for named or currently tracked NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes. NPC inventory is not tracked.',
-    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
+    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- If uncertain, output (none).',
     '- Inside the fenced tracker block, output exactly the compact tracker lines. No prose. No JSON. No extra labels.',
 ].join('\n');
@@ -48,6 +50,7 @@ TrackerUpdateEngine.User.commitmentsAdd=(none)
 TrackerUpdateEngine.User.commitmentsRemove=(none)
 TrackerUpdateEngine.NPC.count=0
 TrackerUpdateEngine.NPC[0].NPC=(none)
+TrackerUpdateEngine.NPC[0].revealedName=(none)
 TrackerUpdateEngine.NPC[0].personalitySummary=unchanged
 TrackerUpdateEngine.NPC[0].condition=unchanged
 TrackerUpdateEngine.NPC[0].woundsAdd=(none)

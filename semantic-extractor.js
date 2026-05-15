@@ -570,9 +570,10 @@ function buildSemanticPreflightSchema() {
     const trackerNpcDeltaSchema = {
         type: 'object',
         additionalProperties: false,
-        required: ['NPC', 'personalitySummary', 'condition', ...TRACKER_NPC_DELTA_FIELDS],
+        required: ['NPC', 'revealedName', 'personalitySummary', 'condition', ...TRACKER_NPC_DELTA_FIELDS],
         properties: {
             NPC: { type: 'string' },
+            revealedName: { type: 'string' },
             personalitySummary: { type: 'string' },
             condition: { type: 'string', enum: TRACKER_CONDITIONS },
             woundsAdd: stringListSchema,
@@ -1055,8 +1056,9 @@ const COMPACT_LEDGER_CONTRACT = [
     '- TrackerUpdateEngine must never rewrite full inventories, gear, wounds, status, tasks, or commitments from silence. Add only explicit new items/effects/tasks. Remove only explicit dropped/spent/used-up/lost/completed/canceled/failed/abandoned entries. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing.',
     '- TrackerUpdateEngine must not treat a requested, intended, commanded, allowed, promised, predicted, or pending attempted action as an established wound/status/condition change. "I tell him to hit my arm hard enough to bruise it", "I stab him", or "I let the blow land" is not woundsAdd/statusAdd/condition by itself. "My arm is already bruised", "his arm is bleeding", or "I am poisoned" is.',
     '- TrackerUpdateEngine must track only current lasting injuries/status. Do not track momentary pain, impact, a hit landing, being knocked back/down, being winded, losing breath, flinching, staggering, or temporary shock unless the text explicitly establishes an ongoing bruise, cut, bleeding, sprain, break, fracture, poison, sickness, restraint, exhaustion, unconsciousness, or similar continuing state.',
+    '- TrackerUpdateEngine NPC revealedName is identity tracking only. If final narration explicitly reveals that an already tracked generic NPC/person/role is actually named something, set NPC to the existing tracker label and revealedName to the revealed proper name. Example: tracked NPC "bystander" says "Torvinash." as an introduction -> NPC=bystander and revealedName=Torvinash. Use revealedName only when the narration semantically identifies which tracked generic NPC received the name; if multiple possible generic NPCs exist and identity is unclear, use (none).',
     '- TrackerUpdateEngine NPC personalitySummary is optional stable personality memory. Use a concise 8-20 word phrase only when the scene clearly reveals enduring traits or interaction style for that NPC. Do not write mood, temporary emotion, injuries, relationship state, attraction, fear/hostility level, or what happened this turn. If no stable trait is clear, use unchanged.',
-    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
+    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory is not tracked. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
     '- NameGenerationEngine semantic lines are candidate generation only. Generate exactly 3 male person/entity names, 3 female person/entity names, and 3 location names matching the selected style line. Make them creative, readable, pronounceable, and real-but-unplaceable. Avoid Western stock fantasy, Tolkien/JRPG drift, ordinary modern names, famous names, joke names, and letter soup. These are candidates only; deterministic validation may reject, repair, or replace them before narration.',
     '- Companion/ally commands are tactical requests only. They can address the companion as an ActionTarget and can refer to an established hostile by name for later companion crisis targeting, but they must not be treated as {{user}} making the companion act, must not force a companion attack, and must not create a user-resolved success/failure roll for companion obedience. The named hostile must still be established through assistant narration/tracker/card/scenario/lore/initial test setup and belongs in hostilesInScene.NPC unless it directly opposes {{user}}\'s current action. If several hostiles exist and no specific one is named, do not guess a target.',
@@ -1109,6 +1111,16 @@ TrackerUpdateEngine.User.tasksRemove=(none)
 TrackerUpdateEngine.User.commitmentsAdd=(none)
 TrackerUpdateEngine.User.commitmentsRemove=(none)
 TrackerUpdateEngine.NPC.count=0
+TrackerUpdateEngine.NPC[0].NPC=(none)
+TrackerUpdateEngine.NPC[0].revealedName=(none)
+TrackerUpdateEngine.NPC[0].personalitySummary=unchanged
+TrackerUpdateEngine.NPC[0].condition=unchanged
+TrackerUpdateEngine.NPC[0].woundsAdd=(none)
+TrackerUpdateEngine.NPC[0].woundsRemove=(none)
+TrackerUpdateEngine.NPC[0].statusAdd=(none)
+TrackerUpdateEngine.NPC[0].statusRemove=(none)
+TrackerUpdateEngine.NPC[0].gearAdd=(none)
+TrackerUpdateEngine.NPC[0].gearRemove=(none)
 CHAOS_INTERRUPT.sceneSummary=short scene summary
 NameGenerationEngine.selectedStyle=Balanced Fantasy
 NameGenerationEngine.maleCandidates=(none)
@@ -1250,7 +1262,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Use Add only for explicit gains/new injuries/new effects/new obligations. Use Remove only for explicit dropping, spending, losing, completing, canceling, failing, or abandoning. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does not remove injuries unless the text also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing. Never infer unchanged lists from silence and never output a full replacement list. ' +
         'Do not mark wounds/status/condition from requested, intended, commanded, allowed, promised, predicted, or pending attempted actions before deterministic resolution; only track state already explicit as current/completed in context. ' +
         'Do not track momentary pain, impact, knockdown, stagger, breath loss, winded reaction, or temporary shock as wounds/status/condition unless an ongoing injury or continuing status is explicitly stated. ' +
-        'For NPC personalitySummary, write only a short stable trait summary when explicit card/context or the scene clearly reveals enduring temperament or interaction style; otherwise leave unchanged. Do not summarize mood, attraction, relationship score, fear/hostility, injuries, or temporary reactions. ' +
+        'For TrackerUpdateEngine NPC revealedName, use semantic identity resolution: when final narration reveals that an existing tracked generic NPC/person/role is named, keep NPC as the existing tracker label and write revealedName as the proper name. This is for renaming generic entries such as bystander, man, stranger, guard, raider, or Unknown Woman once their name is revealed. If several tracked generic NPCs could match and the narration does not clearly identify which one, use (none). For NPC personalitySummary, write only a short stable trait summary when explicit card/context or the scene clearly reveals enduring temperament or interaction style; otherwise leave unchanged. Do not summarize mood, attraction, relationship score, fear/hostility, injuries, or temporary reactions. ' +
         'NPC proactivity cap is deterministic; do not output semantic lines for it. ' +
         'Tie rule override: exact roll ties are cinematic stalemates/struggles, not defender wins; include stakeChangeByOutcome.struggle accordingly. ' +
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
@@ -1606,6 +1618,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         const prefix = `TrackerUpdateEngine.NPC[${index}]`;
         const trackerRequired = [
             `${prefix}.NPC`,
+            `${prefix}.revealedName`,
             `${prefix}.personalitySummary`,
             `${prefix}.condition`,
             `${prefix}.woundsAdd`,
@@ -1805,6 +1818,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         if (!npc || isNoneValue(npc)) continue;
         trackerUpdateEngine.npcs.push({
             NPC: npc,
+            revealedName: normalizeRevealedName(fields.get(`${prefix}.revealedName`)),
             personalitySummary: normalizePersonalitySummary(fields.get(`${prefix}.personalitySummary`)),
             condition: normalizeTrackerDeltaCondition(fields.get(`${prefix}.condition`)),
             woundsAdd: readList(fields, `${prefix}.woundsAdd`),
@@ -1897,6 +1911,7 @@ function parseNarratorTrackerDeltaText(text) {
         if (!npc || isNoneValue(npc)) continue;
         npcs.push({
             NPC: npc,
+            revealedName: normalizeRevealedName(fields.get(`${prefix}.revealedName`)),
             personalitySummary: normalizePersonalitySummary(fields.get(`${prefix}.personalitySummary`)),
             condition: normalizeTrackerDeltaCondition(fields.get(`${prefix}.condition`)),
             woundsAdd: readList(fields, `${prefix}.woundsAdd`),
@@ -1926,6 +1941,7 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
         item?.NPC
         && (
             normalizeTrackerDeltaCondition(item.condition) !== 'unchanged'
+            || normalizeRevealedName(item.revealedName)
             || TRACKER_NPC_DELTA_FIELDS.some(field => Array.isArray(item[field]) && item[field].length)
             || normalizePersonalitySummary(item.personalitySummary)
         ));
@@ -1944,6 +1960,7 @@ function sanitizeNarratorTrackerActorDelta(delta, narration, actorName = '') {
     const sanitizedCondition = sanitizeNarratorTrackerCondition(condition, narration, actorName, actorHasPersistentDelta, actorHasConditionEvidence);
     return {
         ...source,
+        revealedName: normalizeRevealedName(source.revealedName),
         personalitySummary: normalizePersonalitySummary(source.personalitySummary),
         condition: sanitizedCondition,
         woundsAdd: sanitizedWoundsAdd,
@@ -2293,6 +2310,18 @@ function normalizePersonalitySummary(value) {
     return text.slice(0, 160);
 }
 
+function normalizeRevealedName(value) {
+    const text = cleanScalar(value).replace(/\s+/g, ' ').trim();
+    if (!text || isNoneValue(text) || ['unknown', 'unchanged'].includes(text.toLowerCase())) return '';
+    if (!/^[\p{L}][\p{L}' -]{1,40}$/u.test(text)) return '';
+    return text
+        .split(/[\s-]+/)
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ')
+        .slice(0, 60);
+}
+
 function normalizeNameStyleOption(value) {
     const text = cleanScalar(value);
     return text || DEFAULT_NAME_STYLE;
@@ -2318,6 +2347,7 @@ function normalizeTrackerDelta(value, fields) {
     const source = value && typeof value === 'object' ? value : {};
     return {
         condition: normalizeTrackerDeltaCondition(source.condition),
+        revealedName: normalizeRevealedName(source.revealedName),
         personalitySummary: normalizePersonalitySummary(source.personalitySummary),
         ...Object.fromEntries(fields.map(field => [field, normalizeTrackerDeltaList(source[field])])),
     };

@@ -75,6 +75,7 @@ const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 const USER_PROACTIVITY_TARGET = '{{user}}';
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
 const RAPPORT_COOLDOWN_MS = 90 * 60 * 1000;
+const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
 const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
@@ -293,8 +294,8 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
     const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
     const name = runNameGeneration(ledger, audit, context, type);
     const injuryTrackerUpdate = applyInflictedNpcInjuriesToTrackerUpdate(resolution.packet, relationships.trackerUpdate, trackerSnapshot, audit);
-    const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit, refereeContext, context);
-    applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit);
+    const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit, refereeContext, context, rapportClock);
+    applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit, rapportClock);
     const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext);
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas);
 
@@ -2319,7 +2320,7 @@ function applyInflictedNpcInjuriesToTrackerUpdate(resolutionPacket, relationship
     return merged;
 }
 
-function applyProactivityMemoryResults(trackerUpdate, handoffs, proactivityResults, dice, audit) {
+function applyProactivityMemoryResults(trackerUpdate, handoffs, proactivityResults, dice, audit, rapportClock = normalizeRapportClock()) {
     const handoffMap = new Map((handoffs || []).map(handoff => [String(handoff?.NPC || '').toLowerCase(), handoff]));
     const updates = [];
     for (const [npc, result] of Object.entries(proactivityResults || {})) {
@@ -2347,14 +2348,14 @@ function applyProactivityMemoryResults(trackerUpdate, handoffs, proactivityResul
             updates.push(`${npc}.${tag}.pending`);
         }
         if (isPartnerCooldownTag(tag)) {
-            const sides = tag === 'Partner_Conflict' ? 50 : 20;
-            const cooldown = rollCooldown(dice, sides);
-            memory.cooldowns = {
-                ...memory.cooldowns,
-                [tag]: cooldownAvailableAt(memory, cooldown),
+            const cooldown = rollCooldown(dice, 4);
+            memory = {
+                ...memory,
+                partnerMeaningfulCooldownUntilActiveMs: cooldownAvailableAtActiveTime(rapportClock, cooldown),
+                lastMeaningfulPartnerTag: tag,
             };
             changed = true;
-            updates.push(`${npc}.${tag}.cooldown=1d${sides}(${cooldown})->${memory.cooldowns[tag]}`);
+            updates.push(`${npc}.${tag}.meaningfulCooldown=1d4h(${cooldown})->${memory.partnerMeaningfulCooldownUntilActiveMs}`);
         }
         if (changed && trackerUpdate?.[npc]) {
             trackerUpdate[npc] = normalizeTrackerEntry({
@@ -2383,6 +2384,11 @@ function rollCooldown(dice, sides) {
 
 function cooldownAvailableAt(memory, cooldown) {
     return clamp(Number(memory?.interchangeCount || 0) + Number(cooldown || 0) + 1, 0, 1000000);
+}
+
+function cooldownAvailableAtActiveTime(rapportClock, hours) {
+    const activeMs = Number(rapportClock?.activeMs || 0);
+    return clamp(activeMs + Number(hours || 0) * PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS, 0, 1000000000000);
 }
 
 function applyInflictedNpcInjuriesToNpcMap(npcs, trackerSnapshot, injuries) {
@@ -3023,7 +3029,7 @@ function cleanPersonalitySummary(value) {
     return text.slice(0, 160);
 }
 
-function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, audit, refereeContext, context = {}) {
+function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, audit, refereeContext, context = {}, rapportClock = normalizeRapportClock()) {
     const kind = classifyAction(resolutionPacket);
     const chaosBand = chaosHandoff.CHAOS?.triggered ? chaosHandoff.CHAOS.band : 'None';
     const counterPotential = resolutionPacket.CounterPotential || 'none';
@@ -3079,13 +3085,20 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
             const intent = selectIntent(impulse, kind, fin, handoff.Override, handoff.PressureMode);
             const proactivityTarget = proactivityGuard ? NONE : deriveProactivityTarget(handoff, resolutionPacket, intent);
             const targetsUser = isUserProactivityTarget({ ProactivityTarget: proactivityTarget }, refereeContext) ? 'Y' : 'N';
-            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die: 20, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: 'AUTO', passes: 'Y' }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText }));
+            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die: 20, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: 'AUTO', passes: 'Y' }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText, rapportClock }));
             audit.push('6.4i FORCED candidate');
             continue;
         }
 
         const die = dice.d20();
-        const threshold = thresholdFromTier(tier);
+        const threshold = proactivityThresholdForCandidate(tier, handoff, fin, {
+            kind,
+            resolutionPacket,
+            chaosBand,
+            counterPotential,
+            handoffs,
+            latestUserText,
+        });
         const passes = die >= threshold ? 'Y' : 'N';
         audit.push(`6.5 proactivityDie=${die}`);
         audit.push(`6.5a thresholdFromTier=${threshold}`);
@@ -3098,7 +3111,7 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
             const intent = selectIntent(impulse, kind, fin, handoff.Override, handoff.PressureMode);
             const proactivityTarget = proactivityGuard ? NONE : deriveProactivityTarget(handoff, resolutionPacket, intent);
             const targetsUser = isUserProactivityTarget({ ProactivityTarget: proactivityTarget }, refereeContext) ? 'Y' : 'N';
-            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: threshold, passes }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText }));
+            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: threshold, passes }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText, rapportClock }));
             audit.push(`6.5c selectIntent=${intent}`);
             audit.push(`6.5e ProactivityTarget=${proactivityTarget}; TargetsUser=${targetsUser}`);
         } else {
@@ -3382,11 +3395,11 @@ function applyPartnerInitiativeIfEligible(candidate, handoff, fin, dice, audit, 
     if (isBlockedPartnerBaseIntent(candidate.intent)) return candidate;
     if (classifyCompanionInitiativeContext(context) === 'crisis') return candidate;
 
-    const partnerDie = typeof dice.d150 === 'function' ? dice.d150() : Math.floor(Math.random() * 150) + 1;
+    const partnerDie = typeof dice.d100 === 'function' ? dice.d100() : Math.floor(Math.random() * 100) + 1;
     const rawTag = partnerInitiativeTagFromDie(partnerDie);
     const partnerContext = classifyCompanionInitiativeContext(context);
     const remap = remapPartnerInitiativeForContext(rawTag, partnerContext, partnerDie, handoff, context);
-    const gate = applyPartnerMemoryGate(remap.tag, partnerDie, handoff, partnerContext);
+    const gate = applyPartnerMemoryGate(remap.tag, partnerDie, handoff, partnerContext, context);
     const partnerTag = gate.tag;
     audit.push(`6.5h ${handoff.NPC}.PartnerInitiativeDie=${partnerDie}`);
     audit.push(`6.5i ${handoff.NPC}.PartnerInitiativeContext=${partnerContext}`);
@@ -3417,6 +3430,16 @@ function isPartnerInitiativeEligible(handoff, fin) {
         && handoff?.Lock === 'None';
 }
 
+function proactivityThresholdForCandidate(tier, handoff, fin, context = {}) {
+    const base = thresholdFromTier(tier);
+    if (base === 'AUTO') return base;
+    if ((isPartnerInitiativeEligible(handoff, fin) || isRomanceInitiativeEligible(handoff, fin))
+        && classifyCompanionInitiativeContext(context) === 'calm') {
+        return 12;
+    }
+    return base;
+}
+
 function adjustCompanionProactivityTier(tier, handoff, fin, context) {
     const companionContext = classifyCompanionInitiativeContext(context);
     if (isCompanionCrisisInitiativeEligible(handoff, fin, context)) {
@@ -3433,29 +3456,52 @@ function isBlockedPartnerBaseIntent(intent) {
 }
 
 function partnerInitiativeTagFromDie(die) {
-    if (die >= 146) return 'Partner_Conflict';
-    if (die >= 131) return 'Partner_Intimacy';
-    if (die >= 116) return 'Partner_Gift';
-    if (die >= 96) return 'Partner_Private_Time';
-    if (die >= 76) return 'Partner_Tease';
-    if (die >= 51) return 'Partner_Support';
-    if (die >= 26) return 'Partner_Affection';
-    return 'Partner_Check_In';
+    if (die >= 96) return 'Partner_Conflict';
+    if (die >= 81) return 'Partner_Intimacy';
+    if (die >= 71) return 'Partner_Gift';
+    if (die >= 61) return 'Partner_Date';
+    if (die >= 31) return 'Partner_Tease';
+    return 'Partner_Flirt';
 }
 
-function applyPartnerMemoryGate(tag, die, handoff, context) {
+function applyPartnerMemoryGate(tag, die, handoff, context, engineContext = {}) {
     const memory = normalizeProactivityMemory(handoff?.ProactivityMemory);
-    if (isPartnerCooldownTag(tag) && isOnMemoryCooldown(memory, tag)) {
+    if (!isPartnerCooldownTag(tag)) {
+        return { tag, intent: tag, target: USER_PROACTIVITY_TARGET, reason: 'none' };
+    }
+
+    const activeMs = Number(engineContext?.rapportClock?.activeMs || 0);
+    if (memory.partnerMeaningfulCooldownUntilActiveMs > activeMs) {
         const fallback = partnerFallbackTag(die);
-        return { tag: fallback, intent: fallback, target: USER_PROACTIVITY_TARGET, reason: `${tag}.cooldownUntil${memory.cooldowns[tag]}` };
+        return { tag: fallback, intent: fallback, target: USER_PROACTIVITY_TARGET, reason: `meaningfulPartner.cooldownUntil${memory.partnerMeaningfulCooldownUntilActiveMs}` };
+    }
+
+    const ordered = partnerMeaningfulTags();
+    let selected = tag;
+    const reasons = [];
+    if (selected === memory.lastMeaningfulPartnerTag) {
+        selected = nextPartnerMeaningfulTag(selected);
+        reasons.push(`${tag}.repeatBlocked`);
+    }
+    let guard = partnerMeaningfulContextBlocker(selected, engineContext);
+    while (guard) {
+        reasons.push(`${selected}.${guard}`);
+        selected = nextPartnerMeaningfulTag(selected);
+        if (selected === tag || reasons.length > ordered.length) {
+            const fallback = partnerFallbackTag(die);
+            return { tag: fallback, intent: fallback, target: USER_PROACTIVITY_TARGET, reason: reasons.join('|') || 'meaningfulPartner.blocked' };
+        }
+        guard = partnerMeaningfulContextBlocker(selected, engineContext);
+    }
+
+    if (selected !== tag) {
+        return { tag: selected, intent: selected, target: USER_PROACTIVITY_TARGET, reason: reasons.join('|') };
     }
     return { tag, intent: tag, target: USER_PROACTIVITY_TARGET, reason: 'none' };
 }
 
 function partnerFallbackTag(die) {
-    if (die % 3 === 0) return 'Partner_Support';
-    if (die % 2 === 0) return 'Partner_Affection';
-    return 'Partner_Check_In';
+    return die % 2 === 0 ? 'Partner_Tease' : 'Partner_Flirt';
 }
 
 function isOnMemoryCooldown(memory, tag) {
@@ -3467,7 +3513,37 @@ function isRomanceMajorTag(tag) {
 }
 
 function isPartnerCooldownTag(tag) {
-    return ['Partner_Gift', 'Partner_Private_Time', 'Partner_Conflict'].includes(tag);
+    return partnerMeaningfulTags().includes(tag);
+}
+
+function partnerMeaningfulTags() {
+    return ['Partner_Date', 'Partner_Gift', 'Partner_Intimacy', 'Partner_Conflict'];
+}
+
+function nextPartnerMeaningfulTag(tag) {
+    const ordered = partnerMeaningfulTags();
+    const index = ordered.indexOf(tag);
+    return ordered[(index + 1) % ordered.length] || ordered[0];
+}
+
+function partnerMeaningfulContextBlocker(tag, context = {}) {
+    if (tag === 'Partner_Intimacy' && !partnerIntimacyContextAllowed(context)) return 'contextBlocked';
+    if (tag === 'Partner_Conflict' && classifyCompanionInitiativeContext(context) !== 'calm') return 'contextBlocked';
+    return '';
+}
+
+function partnerIntimacyContextAllowed(context = {}) {
+    if (classifyCompanionInitiativeContext(context) !== 'calm') return false;
+    const packet = context.resolutionPacket || {};
+    const source = relationshipText([
+        context.latestUserText,
+        packet.GOAL,
+        packet.identifyGoal,
+        packet.identifyChallenge,
+        packet.explicitMeans,
+    ].filter(Boolean).join(' ')).toLowerCase();
+    return /\b(private|alone|bedroom|room|chamber|tent|campfire|cabin|home|house|bath|after\s+sunset|night|quiet|safe|peace|rest|intimate|kiss|touch|hold|embrace|cuddle|desire|arousal|sex|sexual)\b/.test(source)
+        && !/\b(public|crowd|market|street|tavern|battle|combat|danger|urgent|guard|witness|witnesses|children|audience|ceremony|court|council)\b/.test(source);
 }
 
 function companionCrisisTagFromDie(die, fin, establishedRelationship, dire, canRetreat, attackTarget) {
@@ -3578,8 +3654,10 @@ function remapCompanionInitiativeForContext(tag, context, die, handoff, engineCo
 function remapPartnerInitiativeForContext(tag, context, die, handoff, engineContext = {}) {
     if (context === 'calm') return { tag, intent: tag, target: USER_PROACTIVITY_TARGET };
     if (context === 'active') {
-        if (['Partner_Private_Time', 'Partner_Intimacy'].includes(tag)) return { tag: 'Partner_Check_In', intent: 'Partner_Check_In', target: USER_PROACTIVITY_TARGET };
-        if (tag === 'Partner_Conflict') return { tag: 'Partner_Check_In', intent: 'Partner_Check_In', target: USER_PROACTIVITY_TARGET };
+        if (isPartnerCooldownTag(tag)) {
+            const fallback = partnerFallbackTag(die);
+            return { tag: fallback, intent: fallback, target: USER_PROACTIVITY_TARGET };
+        }
         return { tag, intent: tag, target: USER_PROACTIVITY_TARGET };
     }
     return { tag: 'Companion_Cover', intent: 'SUPPORT_ACT', target: USER_PROACTIVITY_TARGET };

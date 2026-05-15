@@ -77,6 +77,8 @@ export function getExplicitNamePromotions(text, trackedNames) {
                 new RegExp(`\\b${escapedAlias}\\s+(?:is|was)\\s+(?:named|called)\\s+([a-z][a-z'-]{1,30})\\b`, 'i'),
                 new RegExp(`\\b(?:the|that|this|same)\\s+${escapedAlias}\\s*,?\\s+(?:named|called)\\s+([a-z][a-z'-]{1,30})\\b`, 'i'),
                 new RegExp(`\\b${escapedAlias}\\s*,?\\s+(?:named|called)\\s+([a-z][a-z'-]{1,30})\\b`, 'i'),
+                new RegExp(`\\b(?:the|that|this|same)\\s+${escapedAlias}\\b[\\s\\S]{0,220}["']([a-z][a-z'-]{1,30})[.!?,]?["']\\s*(?:he|she|they|the\\s+${escapedAlias}|${escapedAlias})?\\s*(?:said|says|answered|replied|muttered|grunted|nodded|offered)\\b`, 'i'),
+                new RegExp(`\\b${escapedAlias}\\b[\\s\\S]{0,220}["']([a-z][a-z'-]{1,30})[.!?,]?["']\\s*(?:he|she|they|the\\s+${escapedAlias}|${escapedAlias})?\\s*(?:said|says|answered|replied|muttered|grunted|nodded|offered)\\b`, 'i'),
             ];
             for (const pattern of patterns) {
                 const match = pattern.exec(source);

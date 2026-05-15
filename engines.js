@@ -713,6 +713,7 @@ function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, di
   romanceInitiative(candidate, handoff, fin, diceBudget):
     policy: LOCKED, DETERMINISTIC, CONTEXT-AWARE
     rule: apply only after an NPC passes proactivity or is FORCED
+    rule: in calm context, B4 romance/partner-eligible NPCs use threshold 12 instead of the base HIGH threshold 8
     rule: do not apply to ESCALATE_VIOLENCE, BOUNDARY_PHYSICAL, or THREAT_OR_POSTURE
     rule: apply only if fin.B>=4, fin.F<3, fin.H<3, handoff.Lock=None, and handoff.EstablishedRelationship!=Y
     rule: romanceStyle comes from RelationshipEngine[npc].romanceStyle: shy/reserved/guarded -> nervous; bold/outgoing/playful/direct -> flirt; unclear -> auto
@@ -733,22 +734,22 @@ function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, di
   partnerInitiative(candidate, handoff, fin, diceBudget):
     policy: LOCKED, DETERMINISTIC, CONTEXT-AWARE
     rule: apply only after an NPC passes proactivity or is FORCED
+    rule: in calm context, B4 romance/partner-eligible NPCs use threshold 12 instead of the base HIGH threshold 8
     rule: do not apply to ESCALATE_VIOLENCE, BOUNDARY_PHYSICAL, THREAT_OR_POSTURE, CALL_HELP_OR_AUTHORITY, or WITHDRAW_OR_BOUNDARY
     rule: apply only if fin.B>=4, fin.F<3, fin.H<3, handoff.Lock=None, and handoff.EstablishedRelationship=Y
-    rule: Partner_Gift and Partner_Private_Time each set a 1d20 NPC-interchange cooldown after they happen
-    rule: Partner_Conflict sets a 1d50 NPC-interchange cooldown after it happens
-    rule: Partner_Intimacy has no cooldown, but remains context-aware and does not run in crisis
-    rule: blocked partner cooldown tags remap to Partner_Check_In, Partner_Affection, or Partner_Support rather than producing no proactive beat
-    partnerDie = 1d150
-    if partnerDie>=146 -> Partner_Conflict
-    if partnerDie>=131 -> Partner_Intimacy
-    if partnerDie>=116 -> Partner_Gift
-    if partnerDie>=96 -> Partner_Private_Time
-    if partnerDie>=76 -> Partner_Tease
-    if partnerDie>=51 -> Partner_Support
-    if partnerDie>=26 -> Partner_Affection
-    else -> Partner_Check_In
-    if current context is active -> remap Partner_Intimacy, Partner_Private_Time, or Partner_Conflict to Partner_Check_In
+    rule: Partner_Date, Partner_Gift, Partner_Intimacy, and Partner_Conflict are meaningful partner events
+    rule: meaningful partner events share one per-NPC active-time cooldown of 1d4 hours after any one fires
+    rule: while the shared meaningful cooldown is active, meaningful partner events remap to Partner_Flirt or Partner_Tease
+    rule: after cooldown expires, the same meaningful event cannot repeat back-to-back; remap to the next meaningful event in order
+    rule: Partner_Intimacy requires privacy or clear contextual suitability; otherwise remap to the next meaningful event
+    partnerDie = 1d100
+    if partnerDie>=96 -> Partner_Conflict
+    if partnerDie>=81 -> Partner_Intimacy
+    if partnerDie>=71 -> Partner_Gift
+    if partnerDie>=61 -> Partner_Date
+    if partnerDie>=31 -> Partner_Tease
+    else -> Partner_Flirt
+    if current context is active -> remap Partner_Intimacy or Partner_Conflict to Partner_Flirt/Partner_Tease
     if current context is active combat, immediate hostile danger, hostile physical action, counterattack opening, urgent environmental threat, or crisis -> handled by companionCrisisInitiative instead
     set Intent to selected/remapped partner tag, Impulse=BOND, ProactivityTarget={{user}}, TargetsUser=Y
 
@@ -817,7 +818,7 @@ function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, di
       if passes=N -> keep Proactive:N, Intent:NONE, Impulse:NONE, ProactivityTarget:(none), TargetsUser:N
     sort candidates by die descending
     promote up to 3 candidates to proactive results
-    return {NPC:{Proactive:[Y/N],Intent:[ESCALATE_VIOLENCE|BOUNDARY_PHYSICAL|THREAT_OR_POSTURE|CALL_HELP_OR_AUTHORITY|WITHDRAW_OR_BOUNDARY|INTIMACY_OR_FLIRT|SUPPORT_ACT|PLAN_OR_BANTER|Romantic_Nervous|Romantic_Flirt|Romantic_Attention|Thoughtful_Gift|Ask_Date|Date_And_Confess|Partner_Check_In|Partner_Affection|Partner_Support|Partner_Tease|Partner_Private_Time|Partner_Gift|Partner_Intimacy|Partner_Conflict|Companion_Warn|Companion_Assist|Companion_Cover|Companion_Attack|Companion_Retreat|NONE],Impulse:[ANGER|FEAR|BOND],ProactivityTarget:[{{user}}|NPC name|(none)],TargetsUser:[Y/N],ProactivityTier:[DORMANT|LOW|MEDIUM|HIGH|FORCED]?,ProactivityDie:[1-20]?,Threshold:[AUTO|8|10|13|16]?,RomanceInitiative:[Y/N]?,RomanceInitiativeTag:[tag|(none)]?,RomanceInitiativeDie:[1-100]?,RomanceInitiativeContext:[calm|active|crisis]?,PartnerInitiative:[Y/N]?,PartnerInitiativeTag:[tag|(none)]?,PartnerInitiativeDie:[1-150]?,PartnerInitiativeContext:[calm|active|crisis]?,CompanionInitiative:[Y/N]?,CompanionInitiativeTag:[tag|(none)]?,CompanionInitiativeDie:[1-100]?,CompanionInitiativeContext:[crisis]?,CompanionCrisisDire:[Y/N]?}...}
+    return {NPC:{Proactive:[Y/N],Intent:[ESCALATE_VIOLENCE|BOUNDARY_PHYSICAL|THREAT_OR_POSTURE|CALL_HELP_OR_AUTHORITY|WITHDRAW_OR_BOUNDARY|INTIMACY_OR_FLIRT|SUPPORT_ACT|PLAN_OR_BANTER|Romantic_Nervous|Romantic_Flirt|Romantic_Attention|Thoughtful_Gift|Ask_Date|Date_And_Confess|Partner_Flirt|Partner_Tease|Partner_Date|Partner_Gift|Partner_Intimacy|Partner_Conflict|Companion_Warn|Companion_Assist|Companion_Cover|Companion_Attack|Companion_Retreat|NONE],Impulse:[ANGER|FEAR|BOND],ProactivityTarget:[{{user}}|NPC name|(none)],TargetsUser:[Y/N],ProactivityTier:[DORMANT|LOW|MEDIUM|HIGH|FORCED]?,ProactivityDie:[1-20]?,Threshold:[AUTO|8|10|12|13|16]?,RomanceInitiative:[Y/N]?,RomanceInitiativeTag:[tag|(none)]?,RomanceInitiativeDie:[1-100]?,RomanceInitiativeContext:[calm|active|crisis]?,PartnerInitiative:[Y/N]?,PartnerInitiativeTag:[tag|(none)]?,PartnerInitiativeDie:[1-100]?,PartnerInitiativeContext:[calm|active|crisis]?,CompanionInitiative:[Y/N]?,CompanionInitiativeTag:[tag|(none)]?,CompanionInitiativeDie:[1-100]?,CompanionInitiativeContext:[crisis]?,CompanionCrisisDire:[Y/N]?}...}
 }
 ----------------
 function NPCAggressionResolution(proactivityResults, resolutionPacket, trackerSnapshot, trackerUpdate, diceBudget) {
@@ -899,6 +900,9 @@ export function createDice() {
     return {
         d20() {
             return Math.floor(Math.random() * 20) + 1;
+        },
+        d4() {
+            return Math.floor(Math.random() * 4) + 1;
         },
         d50() {
             return Math.floor(Math.random() * 50) + 1;
@@ -1668,7 +1672,8 @@ function cleanTrackerScalar(value) {
 }
 
 const ROMANCE_MEMORY_TAGS = Object.freeze(['Thoughtful_Gift', 'Ask_Date', 'Date_And_Confess']);
-const PROACTIVITY_COOLDOWN_TAGS = Object.freeze(['Thoughtful_Gift', 'Ask_Date', 'Partner_Gift', 'Partner_Private_Time', 'Partner_Conflict']);
+const PARTNER_MEANINGFUL_TAGS = Object.freeze(['Partner_Date', 'Partner_Gift', 'Partner_Intimacy', 'Partner_Conflict']);
+const PROACTIVITY_COOLDOWN_TAGS = Object.freeze(['Thoughtful_Gift', 'Ask_Date', 'Partner_Date', 'Partner_Gift', 'Partner_Private_Time', 'Partner_Conflict']);
 
 export function normalizeProactivityMemory(value) {
     const source = value && typeof value === 'object' ? value : {};
@@ -1681,6 +1686,8 @@ export function normalizeProactivityMemory(value) {
         pendingSince: normalizeMemoryCount(source.pendingSince),
         acceptedTags: normalizeMemoryTagList(source.acceptedTags, ROMANCE_MEMORY_TAGS),
         refusedTags: normalizeMemoryTagList(source.refusedTags, ROMANCE_MEMORY_TAGS),
+        partnerMeaningfulCooldownUntilActiveMs: normalizeActiveMsCount(source.partnerMeaningfulCooldownUntilActiveMs),
+        lastMeaningfulPartnerTag: normalizePartnerMeaningfulTag(source.lastMeaningfulPartnerTag),
         cooldowns: Object.fromEntries(PROACTIVITY_COOLDOWN_TAGS.map(tag => [
             tag,
             normalizeMemoryCount(cooldowns[tag] ?? source[tag]),
@@ -1692,9 +1699,19 @@ function normalizeMemoryCount(value) {
     return clamp(Math.floor(Number(value ?? 0) || 0), 0, 1000000);
 }
 
+function normalizeActiveMsCount(value) {
+    return clamp(Math.floor(Number(value ?? 0) || 0), 0, 1000000000000);
+}
+
 function normalizeMemoryTag(value) {
     const text = String(value ?? '').trim();
     return ROMANCE_MEMORY_TAGS.includes(text) ? text : 'NONE';
+}
+
+function normalizePartnerMeaningfulTag(value) {
+    const text = String(value ?? '').trim();
+    if (text === 'Partner_Private_Time') return 'Partner_Date';
+    return PARTNER_MEANINGFUL_TAGS.includes(text) ? text : 'NONE';
 }
 
 function normalizeMemoryTagList(value, allowed) {

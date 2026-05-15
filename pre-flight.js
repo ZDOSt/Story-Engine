@@ -749,7 +749,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
         if (intimacyBoundaryGuide.mode === 'ALLOW') {
             return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${chaosNote}${nameInstruction}${trackerInstruction}`;
         }
-        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation should continue naturally according to context and personality; do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.${nameInstruction}${trackerInstruction}`;
+        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Romantic, flirtatious, affectionate, or suggestive conversation may continue naturally according to context and personality, but conversation alone is not permission for intimate escalation. Unless IntimacyBoundary explicitly permits it, do not have the NPC invite or maneuver toward kissing, sex, undressing, bed, an inn room, a private room, sexual touching, or secluded intimacy. Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.${nameInstruction}${trackerInstruction}`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
@@ -1089,7 +1089,7 @@ function deniedIntimacyCompatibleProactivityDescription(name, intent, target = '
         case 'Thoughtful_Gift':
             return `${npc} may still offer or prepare a small thoughtful gift for ${target}, chosen in a way that fits the NPC, setting, and current relationship.`;
         case 'Ask_Date':
-            return `${npc} may redirect toward a non-intimate romantic date or private time later, with a believable plan, while making clear that intimacy is not happening now.`;
+            return `${npc} may redirect toward a non-intimate romantic date later, with a believable public or ordinary plan, while making clear that intimacy is not happening now.`;
         case 'Date_And_Confess':
             return '';
         case 'Partner_Intimacy':
@@ -1166,19 +1166,15 @@ function proactivityIntentDescription(intent, target = '{{user}}') {
         case 'Thoughtful_Gift':
             return 'NPC offers or prepares a small thoughtful gift for {{user}}, chosen in a way that fits the NPC, setting, and current relationship.';
         case 'Ask_Date':
-            return 'NPC asks or maneuvers toward spending romantic private time with {{user}}. If {{user}} accepts, the NPC already has a believable plan for what they will do together, as if they have been thinking about this for some time.';
+            return 'NPC asks or maneuvers toward a non-intimate romantic date with {{user}}, using a believable public or ordinary plan. Do not frame this as secluded sexual privacy, an inn room, bed, undressing, or physical intimacy.';
         case 'Date_And_Confess':
             return 'NPC seeks to invite {{user}} to a very special date, where they may eventually be alone and the NPC can make a clear relationship-oriented confession or request.';
-        case 'Partner_Check_In':
-            return 'NPC checks on {{user}} with established-partner concern, noticing strain, danger, injury, mood, or unfinished personal matters as fits the scene.';
-        case 'Partner_Affection':
-            return 'NPC shows established-partner affection toward {{user}} through warmth, closeness, familiar touch, or private tenderness that fits the scene.';
-        case 'Partner_Support':
-            return 'NPC supports {{user}} as an established partner through practical help, protection, advice, care, positioning, supplies, or shared action.';
+        case 'Partner_Flirt':
+            return 'NPC flirts with {{user}} in a natural established-partner way, keeping it light, contextual, and scene-compatible.';
         case 'Partner_Tease':
             return 'NPC teases or flirts with {{user}} in a comfortable established-partner way without derailing urgent danger or serious stakes.';
-        case 'Partner_Private_Time':
-            return 'NPC seeks private time with {{user}}, suggesting or maneuvering toward being alone together when the scene is safe and plausible.';
+        case 'Partner_Date':
+            return 'NPC suggests or plans a specific partner date with {{user}}, a shared activity that fits the setting, current safety, and the relationship.';
         case 'Partner_Gift':
             return 'NPC offers, finds, prepares, or points out a small cute or thoughtful thing {{user}} might like, chosen to fit the NPC, setting, and relationship.';
         case 'Partner_Intimacy':
@@ -1209,7 +1205,7 @@ function isRomanceInitiativeIntent(intent) {
 }
 
 function isPartnerInitiativeIntent(intent) {
-    return ['Partner_Check_In', 'Partner_Affection', 'Partner_Support', 'Partner_Tease', 'Partner_Private_Time', 'Partner_Gift', 'Partner_Intimacy', 'Partner_Conflict'].includes(intent);
+    return ['Partner_Flirt', 'Partner_Tease', 'Partner_Date', 'Partner_Gift', 'Partner_Intimacy', 'Partner_Conflict'].includes(intent);
 }
 
 function isCompanionInitiativeIntent(intent) {
