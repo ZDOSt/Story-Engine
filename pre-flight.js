@@ -700,7 +700,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
         : '';
     const compatibleProactivityGuide = buildBoundaryCompatibleProactivityGuide(handoff.proactivityResults ?? {}, handoff.aggressionResults ?? {}, handoff);
     const naturalProactiveNote = compatibleProactivityGuide !== 'none'
-        ? ` In the same beat, include this NPC initiative: ${compatibleProactivityGuide} Render it naturally through personality, body language, speech, and setting. If no attack result is listed, do not invent a resolved NPC hit.`
+        ? ` In the same beat, include this NPC initiative: ${compatibleProactivityGuide} Render it naturally through personality, visible behavior, speech, and setting. If no attack result is listed, do not invent a resolved NPC hit.`
         : '';
     const boundaryNote = resolution.classifyPhysicalBoundaryPressure === 'Y'
         ? ' Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance without inventing a landed attack.'
@@ -1056,13 +1056,16 @@ function buildBoundaryCompatibleProactivityGuide(proactivity, aggressionResults 
         const companionLimit = isCompanionInitiativeIntent(intent)
             ? ' Keep it grounded in the immediate danger, the NPC\'s bond level, self-preservation, and the listed target.'
             : '';
+        const companionSupportLimit = isCompanionSupportIntent(intent)
+            ? ' In combat or immediate danger, this support must be tactically useful; do not use comfort-touch, leaning on {{user}}, hand-on-back reassurance, hugging, or sentimental encouragement unless it is physically necessary to drag, brace, shield, heal, or reposition {{user}}.'
+            : '';
         const crisisAttackLimit = intent === 'Companion_Attack'
             ? ' This must target only the listed hostile target, never {{user}} or a bystander.'
             : '';
         const denialLimit = deniedForNpc
             ? ' Keep this fully compatible with the intimacy denial; do not turn it into consent, arousal, relationship acceptance, or intimate escalation.'
             : '';
-        parts.push(`${description}${noAttack}${relationshipLimit}${partnerLimit}${companionLimit}${crisisAttackLimit}${denialLimit}`);
+        parts.push(`${description}${noAttack}${relationshipLimit}${partnerLimit}${companionLimit}${companionSupportLimit}${crisisAttackLimit}${denialLimit}`);
     }
     return parts.join(' ') || 'none';
 }
@@ -1081,7 +1084,7 @@ function deniedIntimacyCompatibleProactivityDescription(name, intent, target = '
     const npc = valueOrNone(name);
     switch (intent) {
         case 'Romantic_Nervous':
-            return `${npc} shows romantic nervousness as part of the refusal: hesitation, awkward warmth, flustered body language, or careful wording while keeping the boundary clear.`;
+            return `${npc} shows romantic nervousness as part of the refusal through hesitation, careful wording, changed distance, object handling, or an interrupted routine while keeping the boundary clear.`;
         case 'Romantic_Flirt':
             return `${npc} handles the refusal with playful or flirtatious deflection toward ${target}, keeping the tone warm if appropriate while still refusing intimacy.`;
         case 'Romantic_Attention':
@@ -1125,10 +1128,13 @@ function buildProactivityGuide(proactivity, aggressionResults = {}) {
         const companionLimit = isCompanionInitiativeIntent(intent)
             ? ' Keep it grounded in the immediate danger, the NPC\'s bond level, self-preservation, and the listed target.'
             : '';
+        const companionSupportLimit = isCompanionSupportIntent(intent)
+            ? ' In combat or immediate danger, this support must be tactically useful; do not use comfort-touch, leaning on {{user}}, hand-on-back reassurance, hugging, or sentimental encouragement unless it is physically necessary to drag, brace, shield, heal, or reposition {{user}}.'
+            : '';
         const crisisAttackLimit = intent === 'Companion_Attack'
             ? ' This must target only the listed hostile target, never {{user}} or a bystander.'
             : '';
-        return `${description}${noAttack}${relationshipLimit}${partnerLimit}${companionLimit}${crisisAttackLimit}`;
+        return `${description}${noAttack}${relationshipLimit}${partnerLimit}${companionLimit}${companionSupportLimit}${crisisAttackLimit}`;
     }).join(' ');
 }
 
@@ -1152,7 +1158,7 @@ function proactivityIntentDescription(intent, target = '{{user}}') {
         case 'WITHDRAW_OR_BOUNDARY':
             return 'NPC retreats, disengages, refuses, or sets a clear verbal or physical limit.';
         case 'SUPPORT_ACT':
-            return 'NPC helps, protects, steadies, advises, assists, or advances a shared practical aim according to the current scene.';
+            return 'NPC helps or advances a shared practical aim according to the current scene through concrete action, information, positioning, resources, timing, or access.';
         case 'PLAN_OR_BANTER':
             return 'NPC responds with planning, practical talk, comment, banter, or scene-advancing dialogue.';
         case 'INTIMACY_OR_FLIRT':
@@ -1184,7 +1190,7 @@ function proactivityIntentDescription(intent, target = '{{user}}') {
         case 'Companion_Warn':
             return 'NPC warns {{user}} about immediate danger, calls out a threat, gives urgent tactical advice, or alerts others without directly attacking.';
         case 'Companion_Assist':
-            return 'NPC helps {{user}} under pressure through practical aid, positioning, supplies, magic, guidance, steadying, or quick intervention without directly attacking.';
+            return 'NPC gives {{user}} tactical help under immediate pressure without directly attacking: call timing or openings, pass or kick useful gear into reach, create a distraction, disrupt terrain, reinforce a ward, clear space, shift cover, expose an escape line, or otherwise improve {{user}}\'s position.';
         case 'Companion_Cover':
             return 'NPC covers, shields, intercepts, blocks, pulls clear, buys time, or otherwise protects {{user}} from immediate danger without directly attacking.';
         case 'Companion_Attack':
@@ -1210,6 +1216,10 @@ function isPartnerInitiativeIntent(intent) {
 
 function isCompanionInitiativeIntent(intent) {
     return ['Companion_Warn', 'Companion_Assist', 'Companion_Cover', 'Companion_Attack', 'Companion_Retreat'].includes(intent);
+}
+
+function isCompanionSupportIntent(intent) {
+    return ['Companion_Warn', 'Companion_Assist', 'Companion_Cover'].includes(intent);
 }
 
 function buildAggressionGuide(aggressionResults) {

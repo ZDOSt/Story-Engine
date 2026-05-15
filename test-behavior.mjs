@@ -2952,7 +2952,8 @@ const tests = [
       assert.equal(proactive.CompanionInitiative, 'Y');
       assert.equal(proactive.CompanionInitiativeTag, 'Companion_Assist');
       assert.equal(proactive.Intent, 'SUPPORT_ACT');
-      assert.match(prompt(report), /helps .* under pressure/);
+      assert.match(prompt(report), /tactical help under immediate pressure/);
+      assert.match(prompt(report), /do not use comfort-touch/);
     },
   },
   {

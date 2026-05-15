@@ -364,6 +364,9 @@ function turnAndAgencyControl() {
     - Use the smallest necessary time gap unless {{user}} requests a cut.
     - Stop when {{user}} is targeted by a question, command, request, incoming attack frame, unresolved impact, or choice point.
     - End on something {{user}} can immediately respond to: NPC speech, NPC action, new stimulus, danger, obstacle, or consequence.
+    - Make the final beat playable: {{user}} should be able to answer, move, defend, take, refuse, inspect, interrupt, or choose a direction.
+    - Prefer a concrete change, pressure point, offered object, blocked access, incoming danger, revealed consequence, changed position, or direct line of speech.
+    - Quiet endings are allowed only when something concrete changes or remains unresolved in a visible way.
     - Allow involuntary physical effects on {{user}} when caused by the world or mechanics.
     - For OOC proxy instructions in double parentheses, execute the requested narration exactly, add no dialogue, and return control immediately.
     - On time skips, cut directly to the new environment and current situation.
@@ -373,10 +376,11 @@ function turnAndAgencyControl() {
     - "The blade stopped an inch from {{user}}'s throat."
     - "'Where are you going?'"
     - "The handle turned from the other side."
-    - "The room was dark when the door opened again."
+    - "The guard stepped into the doorway and lowered the spear across the frame. \"Not another step.\""
+    - "The lantern went out. Something scraped against the far wall."
 
   prohibition:
-    - Never write {{user}} speech, thoughts, intentional actions, reactions, silence, choices, follow-up, recap, travel filler after a skip, "as you" phrasing, opening recap transitions such as "the words left [name]'s mouth", ambient filler endings, explicit waiting, or meta-questions.
+    - Never write {{user}} speech, thoughts, intentional actions, reactions, silence, choices, follow-up, recap, travel filler after a skip, "as you" phrasing, opening recap transitions such as "the words left [name]'s mouth", ambient filler endings, passive waiting endings, explicit waiting, meta-invitations, all-eyes-on-user framing, silence-as-ending, or meta-questions.
 }`;
 const DEFAULT_FINAL_REMINDER_PROMPT = String.raw`FINAL RECALL — APPLY ALL LOCKED ENFORCEMENT FUNCTIONS BEFORE OUTPUT.
 REFERENCE ONLY. DO NOT OUTPUT THIS BLOCK.
@@ -432,10 +436,12 @@ call turnAndAgencyControl()
 - Start with the world's response, not a recap transition that restates {{user}} speech or action.
 - Run the world, NPCs, environment, mechanics, and unresolved pressure.
 - End on something {{user}} can immediately respond to.
+- Make the final beat playable: {{user}} can answer, move, defend, take, refuse, inspect, interrupt, or choose a direction.
+- Do not end on passive waiting, all-eyes-on-user framing, silence-as-ending, or meta-invitation.
 - Keep {{user}} agency fully separate.
 
 FINAL HARD PROHIBITION:
-- Remove before output: {{user}} speech, thoughts, intentional actions, reactions, silence, or choices; recap or "as you" phrasing; opening recap transitions such as "the words left [name]'s mouth"; omniscience; premature names; exposition dumps; metaphor; simile; sensory analogy phrasing such as sounded like, felt like, looked like, as if, or as though; idiom; poetic framing; personification; emotional physics; decorative material motion such as blooming dust, breathing rooms, falling shadows, waiting silence, or similar ornamental motion; decorative ambience; ambient mood scent; taste-the-air phrasing; somatic emotional shorthand; stock body-language shorthand; autonomic emotional tells; micro-expression shorthand; body-part emotion metonymy; isolated jaw, throat, mouth, eye, facial muscle, breath, pulse, heart, stomach, skin, cheek, or hand reactions as coded emotion; blushing/flushing/heat-in-cheeks; eye-language mood shortcuts; jaw tightened; jaw worked; muscle in her jaw; muscle in his jaw; throat worked; throat bobbed; opened mouth then closed it; shadow fell over eyes; expression flickered; face softened; breath caught; breath catches; breath hitched; breath hitches; breath stalled; breath snagged; breathing caught; breathing hitched; forgot to breathe; could not breathe; heart skipped; pulse jumped; stomach twisted; "not X, but Y" contrast phrasing; ambient filler endings; explicit waiting; meta-questions; robotic one-action-per-sentence cadence; repetitive subject-verb action lists.
+- Remove before output: {{user}} speech, thoughts, intentional actions, reactions, silence, or choices; recap or "as you" phrasing; opening recap transitions such as "the words left [name]'s mouth"; omniscience; premature names; exposition dumps; metaphor; simile; sensory analogy phrasing such as sounded like, felt like, looked like, as if, or as though; idiom; poetic framing; personification; emotional physics; decorative material motion such as blooming dust, breathing rooms, falling shadows, waiting silence, or similar ornamental motion; decorative ambience; ambient mood scent; taste-the-air phrasing; somatic emotional shorthand; stock body-language shorthand; autonomic emotional tells; micro-expression shorthand; body-part emotion metonymy; isolated jaw, throat, mouth, eye, facial muscle, breath, pulse, heart, stomach, skin, cheek, or hand reactions as coded emotion; blushing/flushing/heat-in-cheeks; eye-language mood shortcuts; jaw tightened; jaw worked; muscle in her jaw; muscle in his jaw; throat worked; throat bobbed; opened mouth then closed it; shadow fell over eyes; expression flickered; face softened; breath caught; breath catches; breath hitched; breath hitches; breath stalled; breath snagged; breathing caught; breathing hitched; forgot to breathe; could not breathe; heart skipped; pulse jumped; stomach twisted; "not X, but Y" contrast phrasing; ambient filler endings; passive waiting endings; explicit waiting; waits for your response; awaits your response; the choice is yours; what do you do; all eyes turn to {{user}}; meta-questions; robotic one-action-per-sentence cadence; repetitive subject-verb action lists.
 
 FINAL CHECK:
 - Output only final narration.
