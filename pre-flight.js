@@ -717,7 +717,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const injuryInstruction = `${inflictedNpcInstruction}${inflictedUserInstruction}${inflictedAggressionNpcInstruction}`;
     const aggressionTargetLock = aggressionTargetLockGuide(handoff.aggressionResults);
     const companionCommandInstruction = companionCommandGuide(resolution);
-    const trackerInstruction = trackerDeltaInstruction();
+    const trackerInstruction = `${universalIntimacyPermissionGuard(handoff)}${trackerDeltaInstruction()}`;
 
     const commonResultInstruction = `${companionCommandInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
     const stackedPressureInstruction = [
@@ -749,7 +749,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
         if (intimacyBoundaryGuide.mode === 'ALLOW') {
             return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${chaosNote}${nameInstruction}${trackerInstruction}`;
         }
-        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Romantic, flirtatious, affectionate, or suggestive conversation may continue naturally according to context and personality, but conversation alone is not permission for intimate escalation. Unless IntimacyBoundary explicitly permits it, do not have the NPC invite or maneuver toward kissing, sex, undressing, bed, an inn room, a private room, sexual touching, or secluded intimacy. Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.${nameInstruction}${trackerInstruction}`;
+        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.${nameInstruction}${trackerInstruction}`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
@@ -761,6 +761,28 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote} Narrate the NPC response with this behavior: ${npcGuide} Keep targets limited to the named scene targets.${nameInstruction}${trackerInstruction}`;
+}
+
+function universalIntimacyPermissionGuard(handoff = {}) {
+    const npcs = Array.isArray(handoff?.npcHandoffs) ? handoff.npcHandoffs : [];
+    const guarded = npcs.filter(npc => !isIntimacyAllowedForNarration(npc));
+    if (!guarded.length) return '';
+
+    const names = guarded.map(npc => valueOrNone(npc.NPC)).filter(name => !isNoneText(name)).join(', ') || 'any NPC without active permission';
+    const allowed = npcs.filter(isIntimacyAllowedForNarration)
+        .map(npc => `${valueOrNone(npc.NPC)} (${intimacyBoundarySourceText(npc.IntimacyBoundarySource)})`)
+        .filter(text => !isNoneText(text));
+    const allowedScope = allowed.length
+        ? ` Active intimacy permission applies only to ${allowed.join(', ')}; it does not transfer to ${names}.`
+        : '';
+
+    return ` Universal intimacy guard: no intimacy permission is active for ${names}.${allowedScope} Romantic, flirtatious, affectionate, or suggestive conversation may continue naturally according to context and personality, but conversation alone is not permission for intimate escalation. Unless IntimacyBoundary explicitly permits it for that exact NPC, do not have ${names} initiate, invite, imply, accept, or maneuver toward kissing, sex, undressing, bra or panties display, sexual exposure, offering or showing their body, bed, an inn room, a private room, sexual touching, secluded intimacy, arousal/compliance framing, consent-by-momentum, or relationship acceptance.`;
+}
+
+function isIntimacyAllowedForNarration(npc) {
+    const source = String(npc?.IntimacyBoundarySource ?? '');
+    return npc?.IntimacyBoundary === 'ALLOW'
+        && (['ESTABLISHED_RELATIONSHIP', 'NPC_INITIATED'].includes(source) || source.startsWith('OVERRIDE:'));
 }
 
 function companionCommandGuide(resolution) {

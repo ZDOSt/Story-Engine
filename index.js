@@ -31,6 +31,7 @@ const PROFILE_NONE = '<None>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 const TRACKER_DISPLAY_VERSION = 1;
+const TRACKER_VISIBLE_INACTIVE_LIMIT = 2;
 const TRACKER_WIDGET_ID = 'structured_preflight_tracker_widget';
 const TRACKER_WIDGET_BUTTON_ID = 'structured_preflight_tracker_toggle';
 const TRACKER_WIDGET_PANEL_ID = 'structured_preflight_tracker_panel';
@@ -147,57 +148,19 @@ Use only when physically justified by exposure, combat damage, clothing strain, 
 - Erotic Mode applies only when sexual or intimate content is present.
 - Ecchi Overlay can layer onto any mode only when the scene physically supports it.
 - Spatial clarity overrides intensity.`;
-const DEFAULT_PROSE_RULES_PROMPT = String.raw`function simulationGuidelines() {
-  domain: world simulation, NPC autonomy, social texture
-  policy: LOCKED
-
-  mandate:
-    - Run the world as an active place. NPCs pursue needs, fears, habits, duties, loyalties, grudges, appetites, and self-interest.
-    - Let trust, attraction, suspicion, fear, hostility, and loyalty emerge through repeated behavior and consequence.
-    - Let relationships change through pressure: shared danger, useful help, restraint, conflict, apology, betrayal, refusal, protection, sacrifice, and repair.
-    - Let history surface through practiced routines, avoided topics, recurring objects, old injuries, guarded reactions, and choices under stress.
-    - Seed future tension with concrete details that can matter later: a sealed letter, missing tool, broken latch, paid guard, torn sleeve, unpaid debt, hidden route, or repeated habit.
-
-  protocol:
-    - When motive matters, show what the NPC chooses, refuses, protects, delays, hides, gives, or takes.
-    - When history matters, attach it to an object, routine, place, name, scar, obligation, or repeated behavior.
-    - When social pressure changes, make the change visible through distance, access, tone, cooperation, refusal, risk, or consequence.
-    - Keep lore inside present action unless {{user}} directly seeks explanation.
-
-  examples:
-    - "He checked the door twice before sitting."
-    - "She touched the cracked ring on her thumb, then put her hand behind her back."
-    - "'That is not what I asked.' He kept his voice low and folded the letter into his coat."
-    - "The guard looked at the seal, then moved his shoulder between {{user}} and the stairs."
-
-  ban:
-    - Exposition dumps, motive summaries, trauma explanations, relationship labels, hidden-history lectures, and lore delivery when behavior can carry the same information.
-}
-
-function abilityIntegration() {
+const DEFAULT_PROSE_RULES_PROMPT = String.raw`function abilityIntegration() {
   domain: ability and magic rendering
   policy: LOCKED
 
   mandate:
-    - Treat abilities, magic, senses, and supernatural traits as embodied functions of the character.
-    - Render power as a habitual extension of anatomy, perception, instinct, training, presence, or touch.
-    - Show supernatural effects through physical reality: heat, pressure, resistance, distortion, contact, weight, sound, damage, movement, and environmental response.
-    - Let skilled or innate users act without ceremony; the effect appears inside motion, posture, speech, attention, or contact.
-    - Let observers perceive only the visible or sensory result unless they have a clear reason to understand the source.
+    Treat abilities, magic, spells, senses, and supernatural traits as extensions of body, instinct, perception, training, or presence. Show the effect, not the process. When power affects the scene, begin with the physical result: movement, pressure, heat, sound, distortion, weight, damage, changed light, broken material, altered distance, or environmental reaction. Keep the effect inside the action beat. If observers cannot know the source, show only what they can perceive.
 
-  protocol:
-    - Start with the effect entering the scene.
-    - Keep the ability inside the action beat.
-    - Use familiarity to reduce explanation.
-    - If the source is hidden, preserve uncertainty and show only the consequence.
-
-  examples:
+  pattern:
     - "The hilt settled into his palm, cold and heavy."
     - "Heat rolled across the stone floor. Candle wax softened along the shelf."
-    - "Beyond the wall, a heartbeat kept steady rhythm."
     - "Torchlight bent across the warped air above her hand."
 
-  ban:
+  ABSOLUTE BAN:
     - Ability announcements, spell callouts, activation language, focus rituals, power charging, system labels, ability names as narration, and explanatory cause-before-effect prose.
 }
 
@@ -206,25 +169,14 @@ function fogOfWar() {
   policy: LOCKED
 
   mandate:
-    - Use strict epistemology. Narration knows only what direct sensory evidence, speech, readable text, visible action, or established ability makes available.
-    - Present unknown people and places through observable traits until a name is spoken, read, recognized, introduced, or revealed in-scene.
-    - Ground sound in position, distance, obstruction, volume, rhythm, and direction when those facts matter.
-    - Let each NPC perceive only what their senses, tools, training, position, and established abilities plausibly allow.
-    - When an effect has no visible origin, show the effect first and leave the source uncertain.
+    Use strict epistemology. Narrate only what direct sensory evidence, speech, readable text, visible action, or established ability makes available. Names stay locked until discovered in-world through speech, readable text, recognition, introduction, or formal reveal; until then, describe unknown people and places by observable traits only. Each NPC perceives only what their senses, tools, position, training, and established abilities allow. If the source, identity, motive, or meaning is uncertain, preserve that uncertainty.
 
-  protocol:
-    - For unnamed people, use role, appearance, equipment, position, or behavior.
-    - For hidden sounds, give direction and obstruction before interpretation.
-    - For unknown magic or abilities, show the physical result before any explanation.
-    - Keep {{user}} cognition, intention, reaction, and interpretation outside narration.
-
-  examples:
+  pattern:
     - "A bark cut through from behind the wall, close and sharp."
     - "The woman with the linen-wrapped jaw shifted her knife to her left hand."
-    - "Bootsteps crossed the floor above them, slow and uneven."
     - "The sign over the door read: Marn's Repairs."
 
-  ban:
+  ABSOLUTE BAN:
     - God-view, meta-labeling, hidden names, unexplained motive knowledge, psychic empathy, detached ambience, ability omniscience, and narration of {{user}} cognition.
 }
 
@@ -233,25 +185,14 @@ function sensoryDiscipline() {
   policy: LOCKED
 
   mandate:
-    - Build the scene from sight, sound, and touch by default.
-    - Use smell or taste only when the source is close, visible, overpowering, physically unavoidable, or directly relevant to action.
-    - Choose sensory detail that changes attention, danger, access, movement, concealment, contact, footing, damage, or choice.
-    - Keep sensory description attached to the present action.
-    - Make sensory detail practical: location, texture, pressure, temperature, movement, sound, contact, footing, cover, visibility.
+    Build scenes from sight, sound, and touch by default. Use smell or taste only when the source is close, visible, overpowering, physically unavoidable, or directly relevant to action. Choose sensory facts that affect attention, danger, access, movement, concealment, contact, footing, damage, or choice. Keep sensory detail attached to present action and physical source.
 
-  protocol:
-    - Use one strong sensory fact instead of a decorative cluster.
-    - Let objects and bodies produce sensory information through action.
-    - If smell or taste appears, make the source and proximity clear.
-    - Prefer current physical evidence over mood atmosphere.
-
-  examples:
+  pattern:
     - "Mugs clattered. The fire popped."
     - "Mud caked his boots. Water dripped from his coat onto the floor."
-    - "The floorboard bent under her heel."
     - "Smoke pressed under the door in a thin gray line."
 
-  ban:
+  ABSOLUTE BAN:
     - Ambient mood scent, romanticized odor, taste-the-air phrasing, decorative sensory haze, floating atmosphere, and repeated smell/taste mentions unless physically unavoidable.
 }
 
@@ -260,31 +201,14 @@ function groundedPhysicalProse() {
   policy: LOCKED
 
   mandate:
-    - Write plain physical prose built from bodies, objects, pressure, distance, timing, contact, resistance, and consequence.
-    - Make emotion legible through visible choices and scene-changing behavior.
-    - Use verbs that describe real motion, contact, interruption, resistance, damage, recovery, or change.
-    - Use adjectives for measurable qualities: wet, cracked, narrow, loose, hot, dim, heavy, sharp, cold, slow, uneven.
-    - Describe inanimate things by what they physically do.
-    - Describe impact, sound, texture, light, dust, smoke, blood, and debris directly.
-    - Make descriptions specific enough to film without turning them into camera logging.
+    Write plain physical prose built from bodies, objects, pressure, distance, timing, contact, resistance, and consequence. Make emotion legible through visible choices and scene-changing behavior. Use direct verbs for motion, contact, interruption, damage, recovery, and change. Describe impact, sound, texture, light, dust, smoke, blood, debris, clothing, weapons, surfaces, and bodies as physical facts specific enough to film.
 
-  protocol:
-    - For emotion, choose an action with consequence: stepping back, blocking a doorway, dropping an object, refusing a cup, changing grip, missing a word, sitting down, standing too fast.
-    - For inanimate matter, use literal movement: rose, fell, scattered, lifted, spread, struck, scraped, cracked, dripped, pooled, slid.
-    - For breath, use it only when it physically affects exertion, speech, injury, panic, sex, restraint, or recovery.
-    - For body parts, describe function, injury, contact, position, or movement, not coded emotion.
-
-  examples:
+  pattern:
     - "She lowered her voice and pushed the cup across the table. \"Drink. You look like you need it. Besides, we're not leaving until morning.\""
-    - "No one moved until the floorboard settled under the guard's boot."
-    - "Leaves rustled against the shutters while he worked the lockpick deeper into the brass plate."
     - "He stared at the cup, rubbing his thumb along the handle without lifting it."
-    - "She set the cup down untouched and turned it so the cracked side faced him."
-    - "His hand moved to the knife, stopped on the table edge, then closed around the wood hard enough to shift it."
-    - "The impact landed with a flat, wet thud."
     - "Dust kicked up around her boots as she recovered her footing and brought the blade back up."
 
-  ban:
+  ABSOLUTE BAN:
     - Purple prose, metaphor, simile, idiom, poetic framing, personification, emotional physics, decorative atmosphere, sensory analogy, and "not X, but Y" contrast phrasing.
     - Somatic emotional shorthand, stock body-language shorthand, autonomic emotional tells, micro-expression shorthand, and body-part emotion metonymy.
     - Isolated jaw, throat, mouth, eye, facial muscle, breath, pulse, heart, stomach, skin, cheek, or hand reactions as coded substitutes for emotion.
@@ -296,27 +220,14 @@ function proseFlow() {
   policy: LOCKED
 
   mandate:
-    - Write plain prose with natural sentence rhythm.
-    - Combine related actions into cohesive physical beats.
-    - Use short sentences for impact, longer sentences for sequence, pressure, continuous movement, or dialogue integrated with action.
-    - Let action flow through cause, contact, interruption, recovery, and consequence.
-    - Keep paragraphs cohesive: one paragraph may carry a full beat from approach to response.
-    - Keep plain prose human and fluid rather than clipped.
+    Write plain prose with natural sentence rhythm. Combine related actions into cohesive physical beats instead of listing one motion at a time. Use short sentences for impact and longer sentences for sequence, pressure, continuous movement, or dialogue integrated with action. Let posture, object handling, speech, movement, and consequence share the same sentence or paragraph when they belong to one beat.
 
-  protocol:
-    - Link posture, object handling, speech, movement, and consequence when they happen together.
-    - Use sequence clauses when several small actions belong to one intention.
-    - Break the paragraph when the focus, speaker, target, or pressure changes.
-    - Let the final sentence of a beat change the situation or return pressure to {{user}}.
-
-  examples:
+  pattern:
     - "She crossed to the table, pulled the chair out with one hand, and sat without taking her eyes off the door."
     - "He picked up the cup, turned it once between his fingers, then set it down beside the unopened letter."
-    - "'No.' She kept her hand on the latch, but her weight shifted back from the door."
     - "The guard glanced at the seal, folded the letter into his coat, and moved his shoulder between {{user}} and the stairs."
-    - "Steel scraped the wall as he recovered his footing, forcing the blade back up before the second swing could land."
 
-  ban:
+  ABSOLUTE BAN:
     - Robotic action lists, repetitive subject-verb cadence, one-action-per-sentence camera logging, and clipped prose as the default rhythm.
 }
 
@@ -325,26 +236,14 @@ function behavioralRendering() {
   policy: LOCKED
 
   mandate:
-    - Render emotion through behavior a person in the room could see or hear.
-    - Show posture, distance, blocking, retreat, approach, object handling, speech timing, interruption, repeated motion, grip changes, and use of space.
-    - Prefer actions that alter the scene over small facial or body-part reactions.
-    - Let restraint, avoidance, delay, interruption, failed routine, and changed access carry meaning.
-    - Use body mechanics only when they are concrete and functional: weight transfer, foot placement, hand position, stance correction, contact with objects, injury, exertion, restraint, recovery, or breath that changes speech or action.
+    Render emotion through behavior a person in the room could see or hear. Show posture, distance, approach, retreat, blocking, object handling, speech timing, interruption, repeated motion, grip changes, missed routine, and use of space. Make the character do something visible that changes access, pressure, contact, distance, possession, timing, or risk.
 
-  protocol:
-    - If a feeling needs to show, make the character do something visible.
-    - If attraction needs to show, use distance, contact, attention, clothing, hesitation, or changed access.
-    - If fear needs to show, use positioning, escape routes, shielding, dropped objects, missed timing, or failed routine.
-    - If anger needs to show, use interruption, refusal, pressure, blocking, controlled movement, damaged objects, or changed tone.
-
-  examples:
+  pattern:
     - "She bent to retie her shoelaces, pulled the knot loose, then started over without looking up."
     - "He fumbled with the lighter until it slipped from his fingers and struck the floor under the table."
     - "He lowered his voice and moved the mug closer to her hand. \"Drink first. Then tell me what happened.\""
-    - "Her hand stayed on the latch while her boots remained planted inside the room."
-    - "'No.' She pressed the folded letter flat under her palm and did not give him the second word."
 
-  ban:
+  ABSOLUTE BAN:
     - Internal-state labels, canned body-language shorthand, somatic emotional shorthand, autonomic tells, micro-expression shorthand, blush/flush/heat-in-cheeks phrasing, and stock gestures used instead of specific action.
 }
 
@@ -353,27 +252,14 @@ function actionIntegratedDialogue() {
   policy: LOCKED
 
   mandate:
-    - Write dialogue as part of a physical scene beat.
-    - Pair speech with meaningful action, posture, distance, object handling, contact, interruption, or movement when those details affect the scene.
-    - Keep action and dialogue from the same speaker in the same paragraph when they belong to one beat.
-    - Let physical action carry subtext: care, refusal, pressure, threat, attraction, hesitation, control, fatigue, or divided attention.
-    - Prefer one strong beat from a speaker over several small back-and-forth fragments.
-    - Let an NPC speak once, then stop when the line creates a response point for {{user}}.
+    Write dialogue as part of a physical scene beat. Pair speech with meaningful action, posture, distance, object handling, contact, interruption, or movement when those details affect the scene. Keep action and dialogue from the same speaker in one paragraph when they belong to one beat. Prefer one strong NPC beat that creates a response point for {{user}} over several small fragments.
 
-  protocol:
-    - Put the physical beat before, inside, or after the line according to where the pressure changes.
-    - Use one inter-NPC exchange at most before returning pressure to {{user}}.
-    - End the beat on a line, action, object, blocked path, incoming threat, or changed position that {{user}} can answer.
-    - Keep dialogue specific to the present situation.
-
-  examples:
+  pattern:
     - "She lowered her voice and pushed the cup across the table. \"Drink. You look like you need it. Besides, we're not leaving until morning.\""
     - "He folded the letter once, then again, keeping his thumb over the seal. \"You didn't get this from me.\""
     - "The guard stepped into the doorway and hooked two fingers under his belt. \"Road's closed.\""
-    - "She picked the knife up by the handle and set it beside {{user}}'s plate. \"Eat first. Then we talk.\""
-    - "Mara looked from the broken latch to the mud on his boots. \"You came through the back.\" Devren shut the door with his heel. \"Had to.\""
 
-  ban:
+  ABSOLUTE BAN:
     - Pingpong structure, same-speaker fragmentation, isolated speech balloons, repeated narration/speech/narration/speech from the same NPC before {{user}} can respond.
 }
 
@@ -382,25 +268,14 @@ function dialogueDiscipline() {
   policy: LOCKED
 
   mandate:
-    - Keep dialogue reactive, pressured, specific, and short.
-    - Let NPCs dodge, interrupt, bargain, accuse, soften, stall, deflect, refuse, or stop themselves.
-    - Let speech reveal what the speaker wants right now.
-    - Put action and dialogue from the same speaker in the same paragraph when they belong together.
-    - Let speech create a clear response point for {{user}}.
+    Keep dialogue reactive, pressured, specific, and short. Let NPCs dodge, interrupt, bargain, accuse, soften, stall, deflect, refuse, or stop themselves according to the moment. Let speech reveal what the speaker wants right now. Stop when a question, command, request, threat, or offered choice gives {{user}} a clear response point.
 
-  protocol:
-    - Keep monologues brief unless {{user}} explicitly asks for explanation.
-    - Use interruption, unfinished thought, refusal, or object handling when a clean answer would feel false.
-    - Stop when a question, command, request, threat, or offered choice targets {{user}}.
-    - Keep inter-NPC dialogue brief and scene-functional.
-
-  examples:
+  pattern:
     - "'I told you not to come here.' She set the glass down. 'But you never listen.'"
     - "'The shipment is late.' He drummed his fingers on the table. 'Again.'"
-    - "'No.' He pushed the ledger back."
     - "'Put it down,' she said."
 
-  ban:
+  ABSOLUTE BAN:
     - Exposition dumps, lecture dialogue, same-speaker fragmentation, answering questions directed at {{user}}, and continuing past a direct prompt for {{user}} response.
 }
 
@@ -409,41 +284,18 @@ function turnAndAgencyControl() {
   policy: LOCKED
 
   mandate:
-    - Begin at the immediate consequence after {{user}} input.
-    - Start with the world's response, not a transition that restates the user's speech or action.
-    - Treat {{user}} input as already completed unless mechanics say it failed, stalled, or was interrupted.
-    - Run the world, NPCs, environment, consequences, mechanics, and unresolved pressure.
-    - Keep cause and effect linear.
-    - Use the smallest necessary time gap unless {{user}} requests a cut.
-    - Stop when {{user}} is targeted by a question, command, request, incoming attack frame, unresolved impact, or choice point.
-    - End on something {{user}} can immediately respond to: NPC speech, NPC action, new stimulus, danger, obstacle, object, changed position, revealed consequence, or blocked access.
-    - Make the final beat playable: {{user}} should be able to answer, move, defend, take, refuse, inspect, interrupt, or choose a direction.
-    - Allow involuntary physical effects on {{user}} when caused by the world or mechanics.
+    Begin at the immediate consequence after {{user}} input. Treat {{user}} input as already completed unless mechanics say it failed, stalled, or was interrupted. Run the world, NPCs, environment, mechanics, and unresolved pressure in strict cause-effect order. Stop when {{user}} is targeted by a question, command, request, incoming attack frame, unresolved impact, or choice point. End on a playable concrete beat: speech, action, danger, obstacle, object, changed position, revealed consequence, blocked access, or incoming pressure.
 
-  protocol:
-    - For failed or interrupted actions, narrate the interruption, missed contact, blocked motion, or changed position.
-    - For time skips, cut directly to the new environment and current situation.
-    - For OOC proxy instructions in double parentheses, execute the requested narration exactly, add no dialogue, and return control immediately.
-    - For quiet endings, leave a concrete unresolved change in view.
-
-  examples:
-    - "The water settled. He watched the ripples."
+  pattern:
     - "The blade stopped an inch from {{user}}'s throat."
     - "'Where are you going?'"
-    - "The handle turned from the other side."
     - "The guard stepped into the doorway and lowered the spear across the frame. \"Not another step.\""
-    - "The lantern went out. Something scraped against the far wall."
 
-  ban:
+  ABSOLUTE BAN:
     - Writing {{user}} speech, thoughts, intentional actions, reactions, silence, choices, follow-up, recap, travel filler after a skip, "as you" phrasing, opening recap transitions, ambient filler endings, passive waiting endings, explicit waiting, meta-invitations, all-eyes-on-user framing, silence-as-ending, and meta-questions.
 }`;
 const DEFAULT_FINAL_REMINDER_PROMPT = String.raw`FINAL RECALL — APPLY ALL LOCKED ENFORCEMENT FUNCTIONS BEFORE OUTPUT.
 REFERENCE ONLY. DO NOT OUTPUT THIS BLOCK.
-
-call simulationGuidelines()
-- Run NPCs as autonomous people with needs, habits, duties, fears, loyalties, grudges, appetites, and self-interest.
-- Let relationships move through visible pressure: help, refusal, shared danger, conflict, apology, betrayal, protection, and repair.
-- Show motive and history through present choices, objects, routines, access, risk, and consequence.
 
 call abilityIntegration()
 - Render abilities, magic, senses, and supernatural traits as embodied functions of anatomy, instinct, perception, training, or presence.
@@ -1912,8 +1764,119 @@ function normalizeDisplayTrackerNpcs(npcs) {
     return normalized;
 }
 
+function normalizeVisibleNpcState(value) {
+    const normalized = {};
+    if (!value || typeof value !== 'object') return normalized;
+    for (const [name, state] of Object.entries(value)) {
+        if (!isRealName(name)) continue;
+        normalized[name] = {
+            inactiveReplies: Math.max(0, Math.floor(Number(state?.inactiveReplies || 0))),
+        };
+    }
+    return normalized;
+}
+
+function mapExistingDisplayNpcName(npcs, rawName) {
+    const wanted = String(rawName || '').trim().toLowerCase();
+    if (!wanted) return '';
+    return Object.keys(npcs || {}).find(name => name.toLowerCase() === wanted) || '';
+}
+
+function addActiveDisplayNpcName(activeNames, npcs, rawName) {
+    if (!activeNames || !npcs || !isRealName(rawName)) return;
+    const name = mapExistingDisplayNpcName(npcs, rawName);
+    if (name) activeNames.add(name);
+}
+
+function addActiveDisplayNpcNames(activeNames, npcs, values) {
+    for (const value of toRealNameArray(values)) {
+        addActiveDisplayNpcName(activeNames, npcs, value);
+    }
+}
+
+function getActiveDisplayNpcNamesFromReport(npcs, report) {
+    const activeNames = new Set();
+    const handoff = report?.finalNarrativeHandoff || {};
+    const packet = handoff.resolutionPacket || {};
+    addActiveDisplayNpcNames(activeNames, npcs, packet.NPCInScene);
+    addActiveDisplayNpcNames(activeNames, npcs, packet.ActionTargets);
+    addActiveDisplayNpcNames(activeNames, npcs, packet.OppTargets?.NPC);
+    addActiveDisplayNpcNames(activeNames, npcs, packet.hostilesInScene?.NPC);
+    addActiveDisplayNpcNames(activeNames, npcs, packet.BenefitedObservers);
+    addActiveDisplayNpcNames(activeNames, npcs, packet.HarmedObservers);
+    for (const npcHandoff of handoff.npcHandoffs || []) {
+        addActiveDisplayNpcName(activeNames, npcs, npcHandoff?.NPC);
+    }
+    for (const [name, result] of Object.entries(handoff.proactivityResults || {})) {
+        if (result?.Proactive === 'Y') addActiveDisplayNpcName(activeNames, npcs, name);
+        addActiveDisplayNpcName(activeNames, npcs, result?.ProactivityTarget);
+    }
+    for (const [name, result] of Object.entries(handoff.aggressionResults || {})) {
+        addActiveDisplayNpcName(activeNames, npcs, name);
+        addActiveDisplayNpcName(activeNames, npcs, result?.Target || result?.ProactivityTarget || result?.CounterTarget);
+    }
+    return activeNames;
+}
+
+function npcNameAppearsInText(name, text) {
+    const cleanName = String(name || '').trim();
+    if (!cleanName || !text) return false;
+    const leadingBoundary = /^[\p{L}\p{N}_]/u.test(cleanName)
+        ? '(?:^|[^\\p{L}\\p{N}_])'
+        : '';
+    const trailingBoundary = /[\p{L}\p{N}_]$/u.test(cleanName) ? '(?![\\p{L}\\p{N}_])' : '';
+    return new RegExp(`${leadingBoundary}${escapeRegExp(cleanName)}${trailingBoundary}`, 'iu').test(String(text));
+}
+
+function getMentionedDisplayNpcNames(npcs, assistantText) {
+    const activeNames = new Set();
+    for (const name of Object.keys(npcs || {})) {
+        if (npcNameAppearsInText(name, assistantText)) activeNames.add(name);
+    }
+    return activeNames;
+}
+
+function applyVisibleTrackerState(snapshot, activeNames, previousSnapshot = null) {
+    if (!snapshot?.npcs) return snapshot;
+    const npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
+    const previousState = normalizeVisibleNpcState(previousSnapshot?.displayNpcState);
+    const nextState = {};
+    const visibleNpcNames = [];
+
+    for (const name of Object.keys(npcs)) {
+        const active = activeNames?.has(name);
+        const previousInactive = previousState[name]?.inactiveReplies || 0;
+        const inactiveReplies = active ? 0 : previousInactive + 1;
+        nextState[name] = { inactiveReplies };
+        if (active || inactiveReplies < TRACKER_VISIBLE_INACTIVE_LIMIT) {
+            visibleNpcNames.push(name);
+        }
+    }
+
+    snapshot.npcs = npcs;
+    snapshot.displayNpcState = nextState;
+    snapshot.visibleNpcNames = visibleNpcNames;
+    return snapshot;
+}
+
+function markVisibleTrackerActive(snapshot, activeNames) {
+    if (!snapshot?.npcs || !activeNames?.size) return snapshot;
+    const npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
+    const state = normalizeVisibleNpcState(snapshot.displayNpcState);
+    const visible = new Set(Array.isArray(snapshot.visibleNpcNames) ? snapshot.visibleNpcNames : []);
+    for (const rawName of activeNames) {
+        const name = mapExistingDisplayNpcName(npcs, rawName);
+        if (!name) continue;
+        state[name] = { inactiveReplies: 0 };
+        visible.add(name);
+    }
+    snapshot.npcs = npcs;
+    snapshot.displayNpcState = state;
+    snapshot.visibleNpcNames = [...visible].filter(name => Boolean(npcs[name]));
+    return snapshot;
+}
+
 function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistantText = '' }) {
-    const resolutionPacket = report?.finalNarrativeHandoff?.resolutionPacket || {};
     const trackerAfter = normalizeDisplayTrackerNpcs({
         ...(pendingRun?.trackerBefore || {}),
         ...(pendingRun?.trackerAfter || {}),
@@ -1923,7 +1886,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         messageKey,
         assistantText,
     });
-    return {
+    const snapshot = {
         version: TRACKER_DISPLAY_VERSION,
         messageKey,
         type: pendingRun?.type || 'normal',
@@ -1932,6 +1895,11 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         user,
         npcs: promotionResult.npcs,
     };
+    const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
+    for (const name of getMentionedDisplayNpcNames(snapshot.npcs, assistantText)) {
+        activeNames.add(name);
+    }
+    return applyVisibleTrackerState(snapshot, activeNames, getPreviousTrackerDisplaySnapshot(messageKey));
 }
 
 function applyExplicitNamePromotions(npcs, { assistantText } = {}) {
@@ -2001,6 +1969,15 @@ function mergeNarratorTrackerDelta(snapshot, delta, options = {}) {
         }
     }
     merged.npcs = applyExplicitNamePromotions(npcs, options).npcs;
+    const deltaActiveNames = new Set();
+    for (const npcDelta of delta.npcs || []) {
+        addActiveDisplayNpcName(deltaActiveNames, merged.npcs, npcDelta?.NPC);
+        addActiveDisplayNpcName(deltaActiveNames, merged.npcs, npcDelta?.revealedName);
+    }
+    for (const name of getMentionedDisplayNpcNames(merged.npcs, options.assistantText)) {
+        deltaActiveNames.add(name);
+    }
+    markVisibleTrackerActive(merged, deltaActiveNames);
     merged.narratorTrackerDelta = {
         updatedAt: Date.now(),
         userChanged: trackerDeltaHasChanges(delta.user, true),
@@ -2241,6 +2218,19 @@ function getLatestTrackerDisplaySnapshot(context = getContext()) {
     return null;
 }
 
+function getPreviousTrackerDisplaySnapshot(messageKey, context = getContext()) {
+    const chat = context?.chat;
+    if (!Array.isArray(chat)) return null;
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        if (getMessageKey(index, context) === messageKey) continue;
+        const snapshot = getMessageTrackerDisplaySnapshot(chat[index]);
+        if (!snapshot?.npcs) continue;
+        if (snapshot.messageKey && snapshot.messageKey === messageKey) continue;
+        return snapshot;
+    }
+    return null;
+}
+
 function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     const root = getTrackerRoot(context);
     const snapshot = getLatestTrackerDisplaySnapshot(context);
@@ -2319,7 +2309,12 @@ function relationshipTowardUser(disposition, classified) {
 
 function buildTrackerDisplayHtml(snapshot) {
     const npcs = normalizeDisplayTrackerNpcs(snapshot?.npcs);
-    const names = Object.keys(npcs).sort((a, b) => a.localeCompare(b));
+    const visibleNames = Array.isArray(snapshot?.visibleNpcNames)
+        ? new Set(snapshot.visibleNpcNames.map(name => String(name).toLowerCase()))
+        : null;
+    const names = Object.keys(npcs)
+        .filter(name => !visibleNames || visibleNames.has(name.toLowerCase()))
+        .sort((a, b) => a.localeCompare(b));
     const active = names.filter(name => npcs[name]?.lifecycle === 'Active');
     const inactive = names.filter(name => npcs[name]?.lifecycle !== 'Active');
     const userCore = snapshot?.userCoreStats;

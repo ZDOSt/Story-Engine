@@ -422,6 +422,78 @@ const tests = [
     },
   },
   {
+    name: '02c proactivity cannot bypass no-permission intimacy guard',
+    run() {
+      const report = {
+        semanticLedger: {
+          resolutionEngine: {
+            explicitMeans: 'ask Naomi what she wants to show',
+          },
+        },
+        finalNarrativeHandoff: {
+          resultLine: '',
+          resolutionPacket: {
+            GOAL: 'Normal_Interaction',
+            actions: ['a1'],
+            intimacyAdvanceExplicit: 'N',
+            boundaryViolationExplicit: 'N',
+            STAKES: 'N',
+            LandedActions: '(none)',
+            OutcomeTier: 'No_Roll',
+            Outcome: 'no_roll',
+            CounterPotential: 'none',
+            classifyHostilePhysicalIntent: 'N',
+            activeHostileThreat: 'N',
+            classifyPhysicalBoundaryPressure: 'N',
+            CompanionCommand: null,
+            hostilesInScene: { NPC: [] },
+            ActionTargets: ['Naomi'],
+            OppTargets: { NPC: [], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+            NPCInScene: ['Naomi'],
+            UserImpairment: { Relevant: 'N' },
+            NPCImpairment: { Relevant: 'N' },
+            InflictedInjuries: [],
+          },
+          npcHandoffs: [{
+            NPC: 'Naomi',
+            FinalState: 'B3/F1/H1',
+            Behavior: 'FRIENDLY',
+            Target: 'No Change',
+            NPC_STAKES: 'N',
+            Landed: 'N',
+            IntimacyBoundary: 'SKIP',
+            IntimacyBoundarySource: 'NONE',
+            IntimacyRefusalStyle: 'NONE',
+            BoundaryPressure: 'N',
+          }],
+          chaosHandoff: { CHAOS: { triggered: false } },
+          proactivityResults: {
+            Naomi: {
+              Proactive: 'Y',
+              Intent: 'PLAN_OR_BANTER',
+              Impulse: 'BOND',
+              ProactivityTarget: '{{user}}',
+              TargetsUser: 'Y',
+            },
+          },
+          aggressionResults: {},
+          nameGeneration: {},
+          sceneTrackerUpdate: {},
+        },
+      };
+      const modelPrompt = prompt(report);
+      assert.match(modelPrompt, /include this NPC initiative/i);
+      assert.match(modelPrompt, /Universal intimacy guard: no intimacy permission is active for Naomi/);
+      assert.match(modelPrompt, /conversation alone is not permission for intimate escalation/);
+      assert.match(modelPrompt, /bra or panties display/);
+      assert.match(modelPrompt, /offering or showing their body/);
+      assert.match(modelPrompt, /consent-by-momentum/);
+      assert.match(modelPrompt, /relationship acceptance/);
+    },
+  },
+  {
     name: '02a persona-name pure love declaration is hard-forced no-roll',
     run() {
       const tracker = { Valerie: trackerEntry({ currentDisposition: { B: 4, F: 1, H: 1 } }) };
@@ -764,6 +836,92 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'ALLOW');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundarySource, 'OVERRIDE:Hedonist');
       assert.match(prompt(report), /the NPC has the Hedonist override/);
+    },
+  },
+  {
+    name: '07a.3b exploitation override permits intimacy without established relationship',
+    run() {
+      const tracker = { Naomi: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 } }) };
+      const report = runCase({
+        userText: 'I ask Naomi if she wants to come to bed with me.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'ask Naomi to come to bed',
+            identifyChallenge: 'ask Naomi to come to bed',
+            explicitMeans: 'ask Naomi if she wants to come to bed with me',
+            identifyTargets: { ActionTargets: ['Naomi'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: true,
+            boundaryViolationExplicit: false,
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Naomi', {
+            overrideFlags: { Exploitation: true },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Override, 'Exploitation');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'ALLOW');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundarySource, 'OVERRIDE:Exploitation');
+      assert.match(prompt(report), /the NPC has the Exploitation override/);
+      assert.doesNotMatch(prompt(report), /no intimacy permission is active for Naomi/);
+    },
+  },
+  {
+    name: '07a.3c established override permits receptive prior intimacy without relationship',
+    run() {
+      const tracker = { Mira: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 }, establishedRelationship: 'N' }) };
+      const report = runCase({
+        userText: 'I ask Mira if she wants to come to bed with me again.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'ask Mira to come to bed again',
+            identifyChallenge: 'ask Mira to come to bed again',
+            explicitMeans: 'ask Mira if she wants to come to bed with me again',
+            identifyTargets: { ActionTargets: ['Mira'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: true,
+            boundaryViolationExplicit: false,
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Mira', {
+            overrideFlags: { Established: true },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Override, 'Established');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].EstablishedRelationship, 'N');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'ALLOW');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundarySource, 'OVERRIDE:Established');
+      assert.match(prompt(report), /the NPC has the Established override/);
+      assert.doesNotMatch(prompt(report), /no intimacy permission is active for Mira/);
+    },
+  },
+  {
+    name: '07a.3d prior intimacy without current receptivity remains denied',
+    run() {
+      const tracker = { Mira: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 }, establishedRelationship: 'N' }) };
+      const report = runCase({
+        userText: 'I ask Mira if she wants to come to bed with me again.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'ask Mira to come to bed again',
+            identifyChallenge: 'ask Mira to come to bed again',
+            explicitMeans: 'ask Mira if she wants to come to bed with me again',
+            identifyTargets: { ActionTargets: ['Mira'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: true,
+            boundaryViolationExplicit: false,
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Mira')],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Override, 'NONE');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].EstablishedRelationship, 'N');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
+      assert.match(prompt(report), /Intimacy is not permitted for Mira/);
+      assert.match(prompt(report), /no intimacy permission is active for Mira/);
     },
   },
   {
@@ -5122,6 +5280,64 @@ const tests = [
       assert.match(text, /include this NPC initiative/i);
       assert.match(text, /brief unexpected scene beat/i);
       assert.match(text, /creates a useful opening, information, or advantage/i);
+    },
+  },
+  {
+    name: '40a narrator default branch includes no-permission intimacy guard',
+    run() {
+      const report = {
+        semanticLedger: {
+          resolutionEngine: {
+            explicitMeans: 'talk with Naomi',
+          },
+        },
+        finalNarrativeHandoff: {
+          resultLine: '',
+          resolutionPacket: {
+            GOAL: 'Normal_Interaction',
+            actions: ['a1'],
+            intimacyAdvanceExplicit: 'N',
+            boundaryViolationExplicit: 'N',
+            STAKES: 'N',
+            LandedActions: '(none)',
+            OutcomeTier: 'No_Roll',
+            Outcome: 'no_roll',
+            CounterPotential: 'none',
+            classifyHostilePhysicalIntent: 'N',
+            activeHostileThreat: 'N',
+            classifyPhysicalBoundaryPressure: 'N',
+            CompanionCommand: null,
+            hostilesInScene: { NPC: [] },
+            ActionTargets: ['Naomi'],
+            OppTargets: { NPC: [], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+            NPCInScene: ['Naomi'],
+            UserImpairment: { Relevant: 'N' },
+            NPCImpairment: { Relevant: 'N' },
+            InflictedInjuries: [],
+          },
+          npcHandoffs: [{
+            NPC: 'Naomi',
+            FinalState: 'B3/F1/H1',
+            Behavior: 'FRIENDLY',
+            Target: 'No Change',
+            NPC_STAKES: 'N',
+            Landed: 'N',
+            IntimacyBoundary: 'SKIP',
+            IntimacyBoundarySource: 'NONE',
+            IntimacyRefusalStyle: 'NONE',
+            BoundaryPressure: 'N',
+          }],
+          chaosHandoff: { CHAOS: { triggered: false } },
+          proactivityResults: {},
+          aggressionResults: {},
+          nameGeneration: {},
+          sceneTrackerUpdate: {},
+        },
+      };
+      assert.match(prompt(report), /Universal intimacy guard: no intimacy permission is active for Naomi/);
+      assert.match(prompt(report), /Unless IntimacyBoundary explicitly permits it for that exact NPC/);
     },
   },
   {

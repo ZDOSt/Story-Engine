@@ -436,10 +436,10 @@ function RelationshipEngine(npc, resolutionPacket) {
   checkThreshold(currentDisposition):
     LockActive = (currentDisposition.F>=3 || currentDisposition.H>=3) ? Y : N
     Override = NONE
-    if NPC explicitly naive, trapped, dependent, coerced, powerless, or exploitable by {{user}} -> Override = Exploitation
+    if NPC explicitly naive, easily led/persuaded, follows {{user}}'s lead without question, sheltered to an unsafe degree, trapped, dependent, coerced, powerless, or otherwise exploitable by {{user}} or the current situation -> Override = Exploitation
     else if NPC explicitly sexually open, pleasure-seeking, casual, or promiscuous -> Override = Hedonist
     else if NPC explicitly willing to exchange intimacy for money, goods, favors, protection, status, or services -> Override = Transactional
-    else if NPC explicitly already intimate with {{user}} or specifically receptive toward {{user}} -> Override = Established
+    else if NPC explicitly has prior/current intimate access with current or recent receptivity toward {{user}} -> Override = Established
     OverrideActive = Override!=NONE ? Y : N
     return {LockActive, OverrideActive, Override}
 
