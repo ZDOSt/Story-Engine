@@ -436,7 +436,8 @@ function RelationshipEngine(npc, resolutionPacket) {
   checkThreshold(currentDisposition):
     LockActive = (currentDisposition.F>=3 || currentDisposition.H>=3) ? Y : N
     Override = NONE
-    if NPC explicitly naive, easily led/persuaded, follows {{user}}'s lead without question, sheltered to an unsafe degree, trapped, dependent, coerced, powerless, or otherwise exploitable by {{user}} or the current situation -> Override = Exploitation
+    if NPC has clearly and directly offered, requested, invited, strongly implied, or physically initiated sexual/intimate escalation with {{user}} in the current or immediately recent scene, and has not withdrawn, refused, panicked, or been interrupted by danger -> Override = CurrentInvitation
+    else if NPC explicitly naive, easily led/persuaded, follows {{user}}'s lead without question, sheltered to an unsafe degree, trapped, dependent, coerced, powerless, or otherwise exploitable by {{user}} or the current situation -> Override = Exploitation
     else if NPC explicitly sexually open, pleasure-seeking, casual, or promiscuous -> Override = Hedonist
     else if NPC explicitly willing to exchange intimacy for money, goods, favors, protection, status, or services -> Override = Transactional
     else if NPC explicitly has prior/current intimate access with current or recent receptivity toward {{user}} -> Override = Established
@@ -1361,7 +1362,8 @@ export function classifyDisposition(disposition) {
 export function checkThreshold(disposition, flags) {
     const LockActive = disposition.F >= 3 || disposition.H >= 3 ? 'Y' : 'N';
     let Override = 'NONE';
-    if (bool(flags.Exploitation)) Override = 'Exploitation';
+    if (bool(flags.CurrentInvitation)) Override = 'CurrentInvitation';
+    else if (bool(flags.Exploitation)) Override = 'Exploitation';
     else if (bool(flags.Hedonist)) Override = 'Hedonist';
     else if (bool(flags.Transactional)) Override = 'Transactional';
     else if (bool(flags.Established)) Override = 'Established';

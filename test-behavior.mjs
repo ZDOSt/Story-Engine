@@ -72,6 +72,7 @@ function relationship(NPC, extra = {}) {
     explicitIntimidationOrCoercion: false,
     stakeChangeByOutcome: emptyStakeMap('none'),
     overrideFlags: {
+      CurrentInvitation: false,
       Exploitation: false,
       Hedonist: false,
       Transactional: false,
@@ -839,6 +840,37 @@ const tests = [
     },
   },
   {
+    name: '07a.3a current invitation override permits explicit NPC offer follow-through',
+    run() {
+      const tracker = { Naomi: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 } }) };
+      const report = runCase({
+        userText: 'I say yes and move closer to Naomi.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'accept Naomi sexual invitation',
+            identifyChallenge: 'accept Naomi sexual invitation',
+            explicitMeans: 'say yes and move closer to Naomi',
+            identifyTargets: { ActionTargets: ['Naomi'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: true,
+            boundaryViolationExplicit: false,
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Naomi', {
+            overrideFlags: { CurrentInvitation: true },
+          })],
+        }),
+      });
+      const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
+      assert.equal(handoff.Override, 'CurrentInvitation');
+      assert.equal(handoff.IntimacyBoundary, 'ALLOW');
+      assert.equal(handoff.IntimacyBoundarySource, 'OVERRIDE:CurrentInvitation');
+      assert.match(prompt(report), /clearly offered, requested, invited, strongly implied, or physically initiated/);
+      assert.match(prompt(report), /Do not reverse, withdraw, panic, or stop at the moment of follow-through/);
+      assert.doesNotMatch(prompt(report), /no intimacy permission is active for Naomi/);
+    },
+  },
+  {
     name: '07a.3b exploitation override permits intimacy without established relationship',
     run() {
       const tracker = { Naomi: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 } }) };
@@ -865,6 +897,32 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundarySource, 'OVERRIDE:Exploitation');
       assert.match(prompt(report), /the NPC has the Exploitation override/);
       assert.doesNotMatch(prompt(report), /no intimacy permission is active for Naomi/);
+    },
+  },
+  {
+    name: '07a.3bb current invitation has priority over background override flags',
+    run() {
+      const tracker = { Mira: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 } }) };
+      const report = runCase({
+        userText: 'I accept Mira and pull her closer.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'accept Mira intimate invitation',
+            identifyChallenge: 'accept Mira intimate invitation',
+            explicitMeans: 'accept Mira and pull her closer',
+            identifyTargets: { ActionTargets: ['Mira'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: true,
+            boundaryViolationExplicit: false,
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Mira', {
+            overrideFlags: { CurrentInvitation: true, Hedonist: true, Established: true },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Override, 'CurrentInvitation');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundarySource, 'OVERRIDE:CurrentInvitation');
     },
   },
   {
@@ -922,6 +980,33 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
       assert.match(prompt(report), /Intimacy is not permitted for Mira/);
       assert.match(prompt(report), /no intimacy permission is active for Mira/);
+    },
+  },
+  {
+    name: '07a.3e withdrawn invitation remains denied without active override',
+    run() {
+      const tracker = { Naomi: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 }, establishedRelationship: 'N' }) };
+      const report = runCase({
+        userText: 'I move closer to Naomi anyway.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'move closer to Naomi after withdrawal',
+            identifyChallenge: 'move closer to Naomi after withdrawal',
+            explicitMeans: 'move closer to Naomi anyway',
+            identifyTargets: { ActionTargets: ['Naomi'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: true,
+            boundaryViolationExplicit: false,
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Naomi')],
+        }),
+      });
+      const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
+      assert.equal(handoff.Override, 'NONE');
+      assert.equal(handoff.IntimacyBoundary, 'DENY');
+      assert.match(prompt(report), /Intimacy is not permitted for Naomi/);
+      assert.match(prompt(report), /no intimacy permission is active for Naomi/);
     },
   },
   {

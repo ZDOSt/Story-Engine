@@ -866,7 +866,7 @@ function intimacyBoundaryText(target) {
     const npcName = valueOrNone(target.NPC);
     const npcGuide = relationshipNarrationGuide(target);
     if (target.IntimacyBoundary === 'ALLOW') {
-        return `Intimacy is permitted for ${npcName} because ${intimacyBoundarySourceText(target.IntimacyBoundarySource)}; narrate the NPC response naturally according to context, privacy, safety, mood, and personality. Do not force explicit intimacy if the scene makes it implausible. Keep ${npcName}'s behavior aligned with: ${npcGuide}`;
+        return `Intimacy is permitted for ${npcName} because ${intimacyBoundarySourceText(target.IntimacyBoundarySource)}; narrate the NPC response naturally according to context, privacy, safety, mood, and personality. Do not reverse, withdraw, panic, or stop at the moment of follow-through unless new danger, interruption, explicit withdrawal, or established characterization makes that reversal concrete in-scene. Do not force explicit intimacy if the scene makes it implausible. Keep ${npcName}'s behavior aligned with: ${npcGuide}`;
     }
     if (target.IntimacyBoundary === 'DENY') {
         return `Intimacy is not permitted for ${npcName} here. Narrate a refusal, deflection, pause, boundary, non-cooperation, or backing off; do not narrate reciprocation, compliance, arousal, escalating intimacy, or a successful intimate result. This denial alone is not a dice roll or relationship penalty. Tune the refusal as ${intimacyRefusalGuide(target)} Keep ${npcName}'s behavior aligned with: ${npcGuide}`;
@@ -878,6 +878,7 @@ function intimacyBoundarySourceText(source) {
     const text = String(source ?? 'NONE');
     if (text === 'ESTABLISHED_RELATIONSHIP') return 'an established relationship exists';
     if (text === 'NPC_INITIATED') return 'the NPC initiated or invited this intimacy and {{user}} is accepting';
+    if (text === 'OVERRIDE:CurrentInvitation') return 'the NPC clearly offered, requested, invited, strongly implied, or physically initiated this intimacy in the current or immediately recent scene';
     if (text.startsWith('OVERRIDE:')) return `the NPC has the ${text.slice('OVERRIDE:'.length)} override`;
     return 'the intimacy boundary allows it';
 }
