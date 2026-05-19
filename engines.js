@@ -551,9 +551,9 @@ function NameGenerationEngine(context) {
     FYW:
 'FIRST-YES-WINS. In ordered rule ladders, the first matching rule becomes final.',
     UNIVERSAL:
-'SINGLE-PASS. Produce a hidden approved pool of proper names: 3 male person/entity names, 3 female person/entity names, and 3 location names. The narrator may use them only if it introduces a new unnamed person/entity/location.',
+'SINGLE-PASS. Produce a hidden approved pool of proper names: 3 male person/entity names, 3 female person/entity names, and 3 location names. The narrator may use them only after fogOfWar already permits a specific name reveal for that person, entity, or place.',
     PURPOSE:
-'Prevent improvised model names from drifting by supplying a style-aware approved name pool. Do not force a new person or location into the scene.',
+'Prevent improvised model names from drifting by supplying a style-aware approved name pool. Use the pool only after fogOfWar already permits a specific name reveal. Do not force a new person or location into the scene.',
     SEED:
 'Seed is hidden deterministic fallback entropy derived from fixed pool slots and context. It does NOT have to appear at the start of a fallback name.',
     STYLE:

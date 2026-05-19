@@ -4585,7 +4585,7 @@ const tests = [
       for (const name of [...pool.male, ...pool.female, ...pool.location]) {
         assert.doesNotMatch(name, /(?:Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
       }
-      assert.match(prompt(report), /approved person name pool: male:/);
+      assert.match(prompt(report), /Name pool use must obey fogOfWar\(\)\./);
       assert.match(auditPrompt(report), /nameGeneration\.result: style: Balanced Fantasy; semanticCandidates:/);
       assert.match(auditPrompt(report), /rejected: .*Versobom/);
       assert.match(auditPrompt(report), /final: male:/);
@@ -4611,10 +4611,10 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /approved person name pool: male:/);
-      assert.match(text, /female:/);
-      assert.match(text, /approved location name pool:/);
-      assert.match(text, /travelers, guards, villagers, enemies, merchants, witnesses, or bystanders/);
+      assert.match(text, /Name pool use must obey fogOfWar\(\)\./);
+      assert.match(text, /approved person name pool/);
+      assert.match(text, /approved location name pool/);
+      assert.match(text, /Do not assign names to background, incidental, or unnamed figures/);
     },
   },
   {

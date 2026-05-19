@@ -902,7 +902,7 @@ function intimacyRefusalGuide(npc) {
 
 function nameGenerationGuide(nameGeneration) {
     if (!nameGeneration?.namePool) return '';
-    return ` If the narration introduces new unnamed people, entities, travelers, guards, villagers, enemies, merchants, witnesses, or bystanders, assign unused names from this approved person name pool: male: ${list(nameGeneration.namePool.male)}; female: ${list(nameGeneration.namePool.female)}. If the narration introduces a new unnamed location, use an unused name from this approved location name pool: ${list(nameGeneration.namePool.location)}. Do not rename existing named characters or places, and do not force a new introduction.`;
+    return ` Name pool use must obey fogOfWar(). A name may appear only after the scene has already explicitly revealed that specific person, entity, or place through speech, readable text, self-introduction, direct in-world reference, signage, documents, or clear recognition. Once revealed, use an unused name from the approved person name pool for that already-identified person/entity, or an unused name from the approved location name pool for that already-identified place. Do not assign names to background, incidental, or unnamed figures, and do not introduce a name as an appositive unless the scene has already revealed it first. If no such reveal occurred, keep the character or place unnamed.`;
 }
 
 function namePoolText(pool = {}) {
