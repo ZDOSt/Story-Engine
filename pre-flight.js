@@ -137,6 +137,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.GOAL=' + valueOrNone(resolution.GOAL),
         'resolutionPacket.intimacyAdvanceExplicit=' + valueOrNone(resolution.intimacyAdvanceExplicit),
         'resolutionPacket.boundaryViolationExplicit=' + valueOrNone(resolution.boundaryViolationExplicit),
+        'resolutionPacket.nonLethal=' + valueOrNone(resolution.nonLethal),
         'resolutionPacket.STAKES=' + valueOrNone(resolution.STAKES),
         'resolutionPacket.actions=' + list(resolution.actions),
         'resolutionPacket.OutcomeTier=' + valueOrNone(resolution.OutcomeTier),
@@ -182,7 +183,7 @@ function buildReadableDeterministicDebug(handoff) {
             vector: chaos.vector ?? 'None',
         }),
         'proactivityResults=' + inline(formatProactivityForNarration(proactivity)),
-        'aggressionResults=' + inline(aggression),
+        ...formatAggressionDebugLines(aggression),
         'nameGeneration=' + inline(name),
         'trackerUpdate=' + inline(handoff?.sceneTrackerUpdate ?? {}),
     ];
@@ -198,7 +199,7 @@ export function formatNarratorPromptContext(report, options = {}) {
         'This displayed handoff is for audit. The narrator model receives only MODEL_INSTRUCTION and PROMPT, not MECHANICS_RESULTS.',
         '',
         '==MECHANICS_RESULTS==',
-        ...formatMechanicsResultList(summary, resolution),
+        ...formatMechanicsResultList(summary, resolution, handoff),
         '',
         '==MODEL_INSTRUCTION==',
         narratorModelInstruction(options),
@@ -210,13 +211,15 @@ export function formatNarratorPromptContext(report, options = {}) {
     return lines.join('\n');
 }
 
-function formatMechanicsResultList(summary, resolution) {
+function formatMechanicsResultList(summary, resolution, handoff = {}) {
+    const aggressionEntries = formatAggressionMechanicsEntries(handoff?.aggressionResults ?? {});
     return [
         ['userAction', summary.userAction],
         ['resolution.GOAL', valueOrNone(resolution.GOAL)],
         ['resolution.STAKES', summary.stakes],
         ['resolution.actionCount', summary.actionCount],
         ['resolution.rollFull', summary.rollFull],
+        ['resolution.nonLethal', valueOrNone(resolution.nonLethal)],
         ['resolution.outcome', summary.outcome],
         ['resolution.outcomeMeaning', summary.result],
         ['resolution.landedActions', summary.landedActions],
@@ -235,7 +238,79 @@ function formatMechanicsResultList(summary, resolution) {
         ['proactivity.result', summary.proactive],
         ['aggression.result', summary.aggression],
         ['nameGeneration.result', summary.generatedName],
+        ...aggressionEntries,
     ].map(([key, value]) => `- ${key}: ${valueOrNone(value)}`);
+}
+
+function formatAggressionDebugLines(aggression = {}) {
+    const lines = ['aggressionResults=' + inline(aggression)];
+    for (const [name, value] of Object.entries(aggression || {})) {
+        if (!value || typeof value !== 'object') continue;
+        const attackStat = value.AttackStat ?? 'PHY';
+        const defenseStat = value.DefenseStat ?? attackStat;
+        const npcDie = value.NpcDie ?? value.NPCDie ?? value.AttackDie ?? value.AttackRollDie;
+        const defenderDie = value.DefenderDie ?? value.DefenseDie ?? value.TargetDie ?? value.ReactionDie;
+        const attackTotal = value.AttackTotal ?? value.NpcTotal ?? null;
+        const defenseTotal = value.DefenseTotal ?? value.TargetTotal ?? null;
+        const margin = value.Margin ?? 'unknown';
+        const attackRoll = buildAggressionRollLine({
+            npc: name,
+            attackType: value.AttackType,
+            attackStat,
+            defenseStat,
+            attackDie: npcDie,
+            defenseDie: defenderDie,
+            attackTotal,
+            defenseTotal,
+            margin,
+            outcome: value.ReactionOutcome,
+            counterBonus: value.CounterBonus ?? 0,
+            npcImpairment: value.NPCImpairment,
+            targetImpairment: value.TargetImpairment || value.UserImpairment,
+        });
+        lines.push(`aggression.roll.${name}=${attackRoll}`);
+        lines.push(`aggression.result.${name}=${inline(value)}`);
+    }
+    return lines;
+}
+
+function formatAggressionMechanicsEntries(aggression = {}) {
+    const entries = [];
+    for (const [name, value] of Object.entries(aggression || {})) {
+        if (!value || typeof value !== 'object') continue;
+        entries.push([`aggression.roll.${name}`, buildAggressionRollLine({
+            npc: name,
+            attackType: value.AttackType,
+            attackStat: value.AttackStat,
+            defenseStat: value.DefenseStat ?? value.AttackStat,
+            attackDie: value.NpcDie ?? value.NPCDie ?? value.AttackDie ?? value.AttackRollDie,
+            defenseDie: value.DefenderDie ?? value.DefenseDie ?? value.TargetDie ?? value.ReactionDie,
+            attackTotal: value.NpcTotal ?? value.AttackTotal,
+            defenseTotal: value.DefenderTotal ?? value.DefenseTotal,
+            margin: value.Margin,
+            outcome: value.ReactionOutcome,
+            counterBonus: value.CounterBonus ?? 0,
+            npcImpairment: value.NPCImpairment,
+            targetImpairment: value.TargetImpairment || value.UserImpairment,
+        })]);
+        entries.push([`aggression.result.${name}`, inline(value)]);
+    }
+    return entries;
+}
+
+function buildAggressionRollLine({ npc, attackType, attackStat, defenseStat, attackDie, defenseDie, attackTotal, defenseTotal, margin, outcome, counterBonus, npcImpairment, targetImpairment }) {
+    const attackDieText = Number.isFinite(Number(attackDie)) ? Number(attackDie) : '?';
+    const defenseDieText = Number.isFinite(Number(defenseDie)) ? Number(defenseDie) : '?';
+    const attackTotalText = Number.isFinite(Number(attackTotal)) ? Number(attackTotal) : '?';
+    const defenseTotalText = Number.isFinite(Number(defenseTotal)) ? Number(defenseTotal) : '?';
+    const attackImpairText = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
+    const targetImpairText = Number(targetImpairment?.AppliedToRoll === 'Y' ? targetImpairment.RollPenalty : 0);
+    const attackBonusText = Number(counterBonus || 0);
+    const attackImpairSuffix = attackImpairText ? `+impairment(${attackImpairText})` : '';
+    const defenseImpairSuffix = targetImpairText ? `+impairment(${targetImpairText})` : '';
+    const attackStatValue = valueOrNone(attackStat);
+    const defenseStatValue = valueOrNone(defenseStat);
+    return `${npc || '(unknown)'} ${valueOrNone(attackType)}: 1d20(${attackDieText}) + ${attackStatValue} + bonus(${attackBonusText})${attackImpairSuffix} = ${attackTotalText} vs 1d20(${defenseDieText}) + ${defenseStatValue}${defenseImpairSuffix} = ${defenseTotalText} (${valueOrNone(margin)} - ${valueOrNone(outcome)})`;
 }
 
 export function formatNarratorModelPromptContext(report, options = {}) {

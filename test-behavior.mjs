@@ -4318,6 +4318,8 @@ const tests = [
       assert.equal(aggro.DefenseStat, 'MND');
       assert.equal(aggro.UserImpairment.Relevant, 'Y');
       assert.match(auditPrompt(report), /Witch\/CounterAttack\/.*attackStat:MND\/defenseStat:MND\/style:magical\/mental\/supernatural/);
+      assert.match(auditPrompt(report), /- resolution\.nonLethal: N/);
+      assert.match(auditPrompt(report), /- aggression\.roll\.Witch:/);
       assert.match(prompt(report), /used MND vs MND/);
       assert.match(prompt(report), /magic, mental force, supernatural pressure/);
     },

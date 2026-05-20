@@ -4020,7 +4020,7 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
         if (inflictedNpcInjury) {
             npcTrackerDeltas.push({ NPC: target, injury: inflictedNpcInjury });
         }
-        results[npc] = { AttackType: resultAttackType, AttackIntent: proactivityResult.Intent, ProactivityTarget: target, AttackStat: attackStat, DefenseStat: defenseStat, AttackStyle: aggressionStatStyle(attackStat), CounterPotential: counterPotential, CounterBonus: counterBonus, ReactionOutcome, Margin: margin, NPCImpairment: npcImpairment, UserImpairment: targetIsUser ? targetImpairment : null, TargetImpairment: targetImpairment, InflictedUserInjury: inflictedUserInjury || null, InflictedTargetInjury: inflictedTargetInjury || null };
+        results[npc] = { AttackType: resultAttackType, AttackIntent: proactivityResult.Intent, ProactivityTarget: target, AttackStat: attackStat, AttackStatValue: npcStatValue, DefenseStat: defenseStat, DefenseStatValue: defenderStatValue, AttackStyle: aggressionStatStyle(attackStat), CounterPotential: counterPotential, CounterBonus: counterBonus, ReactionOutcome, Margin: margin, NpcDie: npcDie, DefenderDie: defenderDie, NpcTotal: npcTotal, DefenderTotal: defenderTotal, NPCImpairment: npcImpairment, UserImpairment: targetIsUser ? targetImpairment : null, TargetImpairment: targetImpairment, InflictedUserInjury: inflictedUserInjury || null, InflictedTargetInjury: inflictedTargetInjury || null };
         audit.push(`7.5 ${npc}.npcCore=${compact(npcCore)}`);
         audit.push(`7.5c ${npc}.AggressionStats=${compact({ AttackStat: attackStat, DefenseStat: defenseStat, AttackStyle: aggressionStatStyle(attackStat) })}`);
         audit.push(`7.5d ${npc}.NPCImpairmentEngine=${compact(npcImpairment)}`);
@@ -4082,12 +4082,18 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
                 AttackIntent: counterProactivity.Intent,
                 ProactivityTarget: npc,
                 AttackStat: counterAttackStat,
+                AttackStatValue: counterNpcStatValue,
                 DefenseStat: counterDefenseStat,
+                DefenseStatValue: counterDefenderStatValue,
                 AttackStyle: aggressionStatStyle(counterAttackStat),
                 CounterPotential: companionCounterPotential,
                 CounterBonus: counterBonus,
                 ReactionOutcome: counterReactionOutcome,
                 Margin: counterMargin,
+                NpcDie: counterNpcDie,
+                DefenderDie: counterDefenderDie,
+                NpcTotal: counterNpcTotal,
+                DefenderTotal: counterDefenderTotal,
                 NPCImpairment: counterNpcImpairment,
                 UserImpairment: null,
                 TargetImpairment: counterTargetImpairment,
