@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { runDeterministicEngines } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/deterministic-runner.js';
-import { deriveDirection, updateDisposition } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/engines.js';
+import { aggressionReactionOutcome, deriveDirection, updateDisposition } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/engines.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/pre-flight.js';
 import { TRACKER_DELTA_TEMPLATE } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/tracker-injury-caps.js';
@@ -5588,7 +5588,7 @@ const tests = [
               DefenseStat: 'PHY',
               CounterPotential: 'none',
               CounterBonus: 0,
-              ReactionOutcome: 'user_resists',
+              ReactionOutcome: 'npc_fails',
               Margin: -2,
               NPCImpairment: { Relevant: 'N' },
               UserImpairment: null,
@@ -5602,7 +5602,8 @@ const tests = [
         },
       };
       const text = prompt(report);
-      assert.match(text, /Ogre: proactive attack from current hostile state against Seraphina is partly resisted/i);
+      assert.match(text, /Ogre: proactive attack from current hostile state against Seraphina fails/i);
+      assert.match(text, /Do not narrate a successful NPC strike, shove, restraint, injury, or completed forceful effect/i);
       assert.match(text, /Do not narrate Seraphina's counterattack, follow-up action/i);
       assert.doesNotMatch(text, /Do not narrate \{\{user\}\}'s counterattack/i);
     },
@@ -5646,6 +5647,173 @@ const tests = [
       assert.match(text, /landed user action\/effect/i);
       assert.match(text, /lasting restraint from the landed user action/i);
       assert.doesNotMatch(text, /landed user attack/i);
+    },
+  },
+  {
+    name: '43a aggression roll margin zero stalemates and negative fails for NPCs',
+    run() {
+      assert.equal(aggressionReactionOutcome(0), 'stalemate');
+      assert.equal(aggressionReactionOutcome(-3), 'npc_fails');
+      const report = {
+        semanticLedger: {
+          resolutionEngine: {
+            explicitMeans: 'Valerie tries to headbutt and shove the user away',
+          },
+        },
+        finalNarrativeHandoff: {
+          resultLine: 'No roll',
+          resolutionPacket: {
+            GOAL: 'ResistValerie',
+            actions: ['a1'],
+            intimacyAdvanceExplicit: 'N',
+            boundaryViolationExplicit: 'N',
+            STAKES: 'Y',
+            LandedActions: 0,
+            OutcomeTier: 'Failure',
+            Outcome: 'failure',
+            CounterPotential: 'none',
+            classifyHostilePhysicalIntent: 'N',
+            classifyCombatActionSequence: 'N',
+            activeHostileThreat: 'Y',
+            classifyPhysicalBoundaryPressure: 'N',
+            CompanionCommand: null,
+            hostilesInScene: { NPC: ['Valerie'] },
+            ActionTargets: [],
+            OppTargets: { NPC: ['Valerie'], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+            NPCInScene: ['Valerie'],
+            UserImpairment: { Relevant: 'N' },
+            NPCImpairment: { Relevant: 'N' },
+            InflictedInjuries: [],
+          },
+          npcHandoffs: [{
+            NPC: 'Valerie',
+            FinalState: 'B1/F2/H4',
+            Behavior: 'HATRED',
+            Target: 'Hostility',
+            NPC_STAKES: 'Y',
+            Landed: 'N',
+            BoundaryPressure: 'N',
+          }],
+          chaosHandoff: { CHAOS: { triggered: false } },
+          proactivityResults: {
+            Valerie: {
+              Proactive: 'Y',
+              Intent: 'ESCALATE_VIOLENCE',
+              Impulse: 'ANGER',
+              ProactivityTarget: '{{user}}',
+              TargetsUser: 'Y',
+            },
+          },
+          aggressionResults: {
+            Valerie: {
+              AttackType: 'ProactiveAttack',
+              AttackIntent: 'ESCALATE_VIOLENCE',
+              ProactivityTarget: '{{user}}',
+              AttackStat: 'PHY',
+              DefenseStat: 'PHY',
+              CounterPotential: 'none',
+              CounterBonus: 0,
+              ReactionOutcome: 'npc_fails',
+              Margin: -3,
+              NPCImpairment: { Relevant: 'N' },
+              UserImpairment: { Relevant: 'N' },
+              TargetImpairment: { Relevant: 'N' },
+              InflictedUserInjury: null,
+              InflictedTargetInjury: null,
+            },
+          },
+          nameGeneration: {},
+          sceneTrackerUpdate: {},
+        },
+      };
+      const text = prompt(report);
+      assert.match(text, /Valerie: proactive attack from current hostile state against \{\{user\}\} fails/i);
+      assert.match(text, /Do not narrate a successful NPC strike, shove, restraint, injury, or completed forceful effect/i);
+    },
+  },
+  {
+    name: '43b aggression roll margin zero gives narrator stalemate handoff',
+    run() {
+      const report = {
+        semanticLedger: {
+          resolutionEngine: {
+            explicitMeans: 'Valerie tries to shove the user back',
+          },
+        },
+        finalNarrativeHandoff: {
+          resultLine: 'No roll',
+          resolutionPacket: {
+            GOAL: 'ResistValerie',
+            actions: ['a1'],
+            intimacyAdvanceExplicit: 'N',
+            boundaryViolationExplicit: 'N',
+            STAKES: 'Y',
+            LandedActions: 0,
+            OutcomeTier: 'Stalemate',
+            Outcome: 'struggle',
+            CounterPotential: 'none',
+            classifyHostilePhysicalIntent: 'N',
+            classifyCombatActionSequence: 'N',
+            activeHostileThreat: 'Y',
+            classifyPhysicalBoundaryPressure: 'N',
+            CompanionCommand: null,
+            hostilesInScene: { NPC: ['Valerie'] },
+            ActionTargets: [],
+            OppTargets: { NPC: ['Valerie'], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+            NPCInScene: ['Valerie'],
+            UserImpairment: { Relevant: 'N' },
+            NPCImpairment: { Relevant: 'N' },
+            InflictedInjuries: [],
+          },
+          npcHandoffs: [{
+            NPC: 'Valerie',
+            FinalState: 'B1/F2/H4',
+            Behavior: 'HATRED',
+            Target: 'Hostility',
+            NPC_STAKES: 'Y',
+            Landed: 'N',
+            BoundaryPressure: 'N',
+          }],
+          chaosHandoff: { CHAOS: { triggered: false } },
+          proactivityResults: {
+            Valerie: {
+              Proactive: 'Y',
+              Intent: 'ESCALATE_VIOLENCE',
+              Impulse: 'ANGER',
+              ProactivityTarget: '{{user}}',
+              TargetsUser: 'Y',
+            },
+          },
+          aggressionResults: {
+            Valerie: {
+              AttackType: 'ProactiveAttack',
+              AttackIntent: 'ESCALATE_VIOLENCE',
+              ProactivityTarget: '{{user}}',
+              AttackStat: 'PHY',
+              DefenseStat: 'PHY',
+              CounterPotential: 'none',
+              CounterBonus: 0,
+              ReactionOutcome: 'stalemate',
+              Margin: 0,
+              NPCImpairment: { Relevant: 'N' },
+              UserImpairment: { Relevant: 'N' },
+              TargetImpairment: { Relevant: 'N' },
+              InflictedUserInjury: null,
+              InflictedTargetInjury: null,
+            },
+          },
+          nameGeneration: {},
+          sceneTrackerUpdate: {},
+        },
+      };
+      const text = prompt(report);
+      assert.match(text, /Valerie: proactive attack from current hostile state against \{\{user\}\} meets equal resistance/i);
+      assert.match(text, /Stop in the deadlock/i);
+      assert.match(text, /no successful NPC strike, shove, restraint, injury, or completed forceful effect/i);
     },
   },
   {

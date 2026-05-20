@@ -867,8 +867,7 @@ function NPCAggressionResolution(proactivityResults, resolutionPacket, trackerSn
     if margin >= 5 -> npc_overpowers
     if margin >= 1 -> npc_succeeds
     if margin = 0 -> stalemate
-    if margin >= -3 -> user_resists
-    else -> user_dominates
+    else -> npc_fails
 
   execution:
     counterPotential = resolutionPacket.CounterPotential
@@ -949,8 +948,7 @@ export function aggressionReactionOutcome(margin) {
     if (margin >= 5) return 'npc_overpowers';
     if (margin >= 1) return 'npc_succeeds';
     if (margin === 0) return 'stalemate';
-    if (margin >= -3) return 'user_resists';
-    return 'user_dominates';
+    return 'npc_fails';
 }
 
 export function classifyRaceCategory(text) {

@@ -1290,13 +1290,10 @@ function buildAggressionGuide(aggressionResults) {
             return `${name}: ${attackType} succeeds modestly against ${valueOrNone(target)}; narrate proportional effect.${impairmentText} ${targetLimit}`;
         }
         if (value.ReactionOutcome === 'stalemate') {
-            return `${name}: ${attackType} against ${valueOrNone(target)} meets equal resistance; narrate a cinematic stalemate, clash, bind, or struggle.${impairmentText} Stop in the deadlock. ${targetLimit}`;
+            return `${name}: ${attackType} against ${valueOrNone(target)} meets equal resistance; narrate only a deadlock, clash, bind, struggle, blocked motion, or interrupted exchange with no successful NPC strike, shove, restraint, injury, or completed forceful effect.${impairmentText} Stop in the deadlock. ${targetLimit}`;
         }
-        if (value.ReactionOutcome === 'user_resists') {
-            return `${name}: ${attackType} against ${valueOrNone(target)} is partly resisted; stop at the moment of impact/contact/near-contact.${impairmentText} ${targetLimit}`;
-        }
-        if (value.ReactionOutcome === 'user_dominates') {
-            return `${name}: ${attackType} against ${valueOrNone(target)} fails or is controlled/evaded; stop at the moment of failed impact/contact/near-contact.${impairmentText} ${targetLimit}`;
+        if (['npc_fails', 'user_resists', 'user_dominates'].includes(value.ReactionOutcome)) {
+            return `${name}: ${attackType} against ${valueOrNone(target)} fails; narrate only the attempted attack, pressure, or opening being stopped, overpowered, avoided, controlled, or unable to land. Do not narrate a successful NPC strike, shove, restraint, injury, or completed forceful effect.${impairmentText} ${targetLimit}`;
         }
         return `${name}: use listed aggression result exactly.${impairmentText}`;
     });
