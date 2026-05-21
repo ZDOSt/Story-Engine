@@ -1132,7 +1132,7 @@ const tests = [
     },
   },
   {
-    name: '07a.6 denied intimacy preserves compatible B4 flirt proactivity',
+    name: '07a.6 denied intimacy does not force B4 flirt proactivity',
     run() {
       const tracker = {
         Mira: trackerEntry({ currentDisposition: { B: 4, F: 1, H: 1 } }),
@@ -1162,16 +1162,16 @@ const tests = [
       const proactive = report.finalNarrativeHandoff.proactivityResults.Mira;
       const modelPrompt = prompt(report);
       assert.equal(proactive.Proactive, 'Y');
-      assert.equal(proactive.RomanceInitiativeTag, 'Romantic_Flirt');
+      assert.equal(proactive.RomanceInitiative, 'N');
+      assert.equal(proactive.RomanceInitiativeTag, '(none)');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
       assert.match(modelPrompt, /Intimacy is not permitted for Mira/);
-      assert.match(modelPrompt, /playful or flirtatious deflection/);
       assert.match(modelPrompt, /Keep this fully compatible with the intimacy denial/);
       assert.doesNotMatch(modelPrompt, /Mira is flirtatious toward/);
     },
   },
   {
-    name: '07a.7 denied intimacy suppresses date-and-confess proactivity',
+    name: '07a.7 denied intimacy blocks date-and-confess proactivity',
     run() {
       const tracker = {
         Mira: trackerEntry({
@@ -1205,7 +1205,8 @@ const tests = [
       const proactive = report.finalNarrativeHandoff.proactivityResults.Mira;
       const modelPrompt = prompt(report);
       assert.equal(proactive.Proactive, 'Y');
-      assert.equal(proactive.RomanceInitiativeTag, 'Date_And_Confess');
+      assert.equal(proactive.RomanceInitiative, 'N');
+      assert.equal(proactive.RomanceInitiativeTag, '(none)');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
       assert.match(modelPrompt, /Intimacy is not permitted for Mira/);
       assert.doesNotMatch(modelPrompt, /special date|relationship-oriented confession|Date_And_Confess/);
@@ -1731,7 +1732,7 @@ const tests = [
     },
   },
   {
-    name: '12h.1 B4 thoughtful gift sets pending and 1d20 cooldown after firing',
+    name: '12h.1 B4 first ask date sets pending and 2h active-time cooldown',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -1742,8 +1743,7 @@ const tests = [
       const randoms = [
         ...Array(11).fill(nthRandomForDie(10, 20)),
         nthRandomForDie(18, 20),
-        nthRandomForDie(72, 100),
-        nthRandomForDie(7, 20),
+        nthRandomForDie(88, 100),
       ];
       const report = runCaseWithRandoms({
         userText: 'I sit with Seraphina near the fire and talk quietly about the road ahead.',
@@ -1767,16 +1767,17 @@ const tests = [
       assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.OppTargets.NPC, ['(none)']);
       const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
       const memory = report.trackerUpdate.npcs.Seraphina.proactivityMemory;
-      assert.equal(proactive.RomanceInitiativeTag, 'Thoughtful_Gift');
+      assert.equal(proactive.RomanceInitiativeTag, 'Ask_Date');
       assert.equal(memory.interchangeCount, 1);
-      assert.equal(memory.pendingTag, 'Thoughtful_Gift');
+      assert.equal(memory.pendingTag, 'Ask_Date');
       assert.equal(memory.pendingSince, 1);
-      assert.equal(memory.cooldowns.Thoughtful_Gift, 9);
-      assert.equal(auditIncludes(report, 'Seraphina.Thoughtful_Gift.cooldown=1d20(7)->9'), true);
+      assert.equal(memory.b4Courtship.askDateAttempts, 1);
+      assert.equal(memory.b4Courtship.askDateCooldownUntilActiveMs, 2 * 60 * 60 * 1000);
+      assert.equal(auditIncludes(report, 'Seraphina.Ask_Date.secondAttemptCooldown=2h->7200000'), true);
     },
   },
   {
-    name: '12h.2 B4 thoughtful gift refusal blocks future gift rolls',
+    name: '12h.2 B4 thoughtful gift refusal after one accepted ask date drops bond to B3',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -1786,7 +1787,13 @@ const tests = [
             interchangeCount: 1,
             pendingTag: 'Thoughtful_Gift',
             pendingSince: 1,
-            cooldowns: { Thoughtful_Gift: 0 },
+            acceptedTags: ['Ask_Date'],
+            b4Courtship: {
+              askDateAttempts: 2,
+              askDateAccepted: 1,
+              askDateRefused: 1,
+              thoughtfulGiftAttempts: 1,
+            },
           },
         }),
       };
@@ -1815,12 +1822,12 @@ const tests = [
         }),
       }, randoms);
       assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.OppTargets.NPC, ['(none)']);
-      const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
       const memory = report.trackerUpdate.npcs.Seraphina.proactivityMemory;
       assert.equal(memory.pendingTag, 'NONE');
       assert.deepEqual(memory.refusedTags, ['Thoughtful_Gift']);
-      assert.equal(proactive.RomanceInitiativeTag, 'Romantic_Flirt');
-      assert.equal(proactive.RomanceInitiativeMemoryGate, 'Thoughtful_Gift.refused');
+      assert.equal(memory.b4Courtship.blocked, 'Y');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 3);
+      assert.equal(auditIncludes(report, 'B4 courtship blocked/refused -> Bond lowered to B3/F1/H1'), true);
     },
   },
   {
@@ -1867,7 +1874,7 @@ const tests = [
     },
   },
   {
-    name: '12h.4 B4 date and confess can fire after gift and date accepted',
+    name: '12h.4 B4 date and confess can fire after one accepted ask date and accepted gift',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -1875,6 +1882,13 @@ const tests = [
           establishedRelationship: 'N',
           proactivityMemory: {
             acceptedTags: ['Thoughtful_Gift', 'Ask_Date'],
+            b4Courtship: {
+              askDateAttempts: 2,
+              askDateAccepted: 1,
+              askDateRefused: 1,
+              thoughtfulGiftAttempts: 1,
+              thoughtfulGiftAccepted: 'Y',
+            },
           },
         }),
       };
@@ -1922,6 +1936,13 @@ const tests = [
             pendingTag: 'Date_And_Confess',
             pendingSince: 2,
             acceptedTags: ['Thoughtful_Gift', 'Ask_Date'],
+            b4Courtship: {
+              askDateAttempts: 2,
+              askDateAccepted: 1,
+              askDateRefused: 1,
+              thoughtfulGiftAttempts: 1,
+              thoughtfulGiftAccepted: 'Y',
+            },
           },
         }),
       };
@@ -1956,11 +1977,11 @@ const tests = [
       assert.equal(state.proactivityMemory.romanceBlocked, 'Y');
       assert.deepEqual(state.proactivityMemory.refusedTags, ['Date_And_Confess']);
       assert.equal(proactive.RomanceInitiative, 'N');
-      assert.equal(auditIncludes(report, 'Date_And_Confess refused -> Bond lowered to B3/F1/H1'), true);
+      assert.equal(auditIncludes(report, 'B4 courtship blocked/refused -> Bond lowered to B3/F1/H1'), true);
     },
   },
   {
-    name: '12h.6 B4 ask date refusal blocks future ask date rolls',
+    name: '12h.6 B4 first ask date refusal allows second ask after cooldown',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -1970,6 +1991,10 @@ const tests = [
             interchangeCount: 1,
             pendingTag: 'Ask_Date',
             pendingSince: 1,
+            b4Courtship: {
+              askDateAttempts: 1,
+              askDateCooldownUntilActiveMs: 2 * 60 * 60 * 1000,
+            },
           },
         }),
       };
@@ -1980,6 +2005,7 @@ const tests = [
       ];
       const report = runCaseWithRandoms({
         userText: 'No, I do not want to go on a date with you.',
+        rapportClock: { activeMs: 3 * 60 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -1999,11 +2025,99 @@ const tests = [
       }, randoms);
       const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
       const memory = report.trackerUpdate.npcs.Seraphina.proactivityMemory;
-      assert.equal(memory.pendingTag, 'NONE');
+      assert.equal(memory.pendingTag, 'Ask_Date');
       assert.deepEqual(memory.refusedTags, ['Ask_Date']);
+      assert.equal(memory.b4Courtship.askDateAttempts, 2);
+      assert.equal(memory.b4Courtship.askDateRefused, 1);
       assert.equal(proactive.RomanceInitiativeRawTag, 'Ask_Date');
+      assert.equal(proactive.RomanceInitiativeTag, 'Ask_Date');
+    },
+  },
+  {
+    name: '12h.6a B4 thoughtful gift cannot fire before two ask dates and one acceptance',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 4, F: 1, H: 1 },
+          establishedRelationship: 'N',
+          proactivityMemory: {
+            b4Courtship: {
+              askDateAttempts: 1,
+              askDateAccepted: 1,
+            },
+          },
+        }),
+      };
+      const report = runCaseWithRandoms({
+        userText: 'I sit with Seraphina near the fire and talk quietly about the road ahead.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'quiet conversation near the fire',
+            explicitMeans: 'quiet conversation near the fire',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', { romanceStyle: 'flirt' })],
+        }),
+      }, [
+        ...Array(11).fill(nthRandomForDie(10, 20)),
+        nthRandomForDie(18, 20),
+        nthRandomForDie(72, 100),
+      ]);
+      const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
+      assert.equal(proactive.RomanceInitiativeRawTag, 'Thoughtful_Gift');
       assert.equal(proactive.RomanceInitiativeTag, 'Romantic_Flirt');
-      assert.equal(proactive.RomanceInitiativeMemoryGate, 'Ask_Date.refused');
+      assert.equal(proactive.RomanceInitiativeMemoryGate, 'Thoughtful_Gift.requiresTwoAskDatesAccepted');
+    },
+  },
+  {
+    name: '12h.6b B4 date and confess can fire after two accepted ask dates',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 4, F: 1, H: 1 },
+          establishedRelationship: 'N',
+          proactivityMemory: {
+            b4Courtship: {
+              askDateAttempts: 2,
+              askDateAccepted: 2,
+            },
+          },
+        }),
+      };
+      const report = runCaseWithRandoms({
+        userText: 'I sit with Seraphina near the fire and talk quietly about the road ahead.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'quiet conversation near the fire',
+            explicitMeans: 'quiet conversation near the fire',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      }, [
+        ...Array(11).fill(nthRandomForDie(10, 20)),
+        nthRandomForDie(18, 20),
+        nthRandomForDie(98, 100),
+      ]);
+      const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
+      assert.equal(proactive.RomanceInitiativeTag, 'Date_And_Confess');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.proactivityMemory.pendingTag, 'Date_And_Confess');
     },
   },
   {
@@ -2146,7 +2260,7 @@ const tests = [
     },
   },
   {
-    name: '12i B4 active remaps date escalation to romantic attention',
+    name: '12i B4 active scene blocks romance initiative',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -2180,13 +2294,10 @@ const tests = [
         }),
       }, randoms);
       const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
-      assert.equal(proactive.Proactive, 'Y');
-      assert.equal(proactive.RomanceInitiative, 'Y');
-      assert.equal(proactive.RomanceInitiativeContext, 'active');
-      assert.equal(proactive.Intent, 'Romantic_Attention');
-      assert.equal(proactive.RomanceInitiativeTag, 'Romantic_Attention');
-      assert.equal(proactive.RomanceInitiativeDie, 98);
-      assert.match(prompt(report), /focused romantic attention/);
+      assert.equal(proactive.Proactive, 'N');
+      assert.equal(proactive.RomanceInitiative, 'N');
+      assert.equal(proactive.RomanceInitiativeTag, '(none)');
+      assert.doesNotMatch(prompt(report), /focused romantic attention/);
       assert.doesNotMatch(prompt(report), /Romantic_Attention|Proactivity Guide/);
     },
   },
@@ -3640,10 +3751,10 @@ const tests = [
       }, randoms);
       const proactive = report.finalNarrativeHandoff.proactivityResults.Seraphina;
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.activeHostileThreat, 'N');
-      assert.equal(proactive.Proactive, 'Y');
-      assert.equal(proactive.CompanionInitiative, 'N');
-      assert.notEqual(proactive.CompanionInitiativeContext, 'crisis');
-      assert.notEqual(proactive.CompanionInitiativeTag, 'Companion_Attack');
+      assert.equal(proactive.Proactive, 'N');
+      assert.equal(proactive.CompanionInitiative ?? 'N', 'N');
+      assert.notEqual(proactive.CompanionInitiativeContext ?? 'none', 'crisis');
+      assert.notEqual(proactive.CompanionInitiativeTag ?? 'NONE', 'Companion_Attack');
       assert.deepEqual(report.finalNarrativeHandoff.aggressionResults, {});
     },
   },

@@ -1173,10 +1173,10 @@ function buildBoundaryCompatibleProactivityGuide(proactivity, aggressionResults 
                 : ' Show only intent, pressure, motion, preparation, or interruption; no resolved hit occurs.')
             : ' This is not a resolved attack.';
         const relationshipLimit = isRomanceInitiativeIntent(intent)
-            ? ' Do not establish a relationship unless acceptance happens in-scene; do not force intimacy.'
+            ? ' Use only if the current beat is calm and no other event is happening; never force gifts, dates, confessions, or romantic escalation into combat, crisis, mourning, active intimacy, public pressure, unresolved danger, boundary conflict, or any scene where the event would interrupt the actual moment. If context does not support it, soften it into ordinary flirtation, attention, or defer it. Do not establish a relationship unless acceptance happens in-scene; do not force intimacy.'
             : '';
         const partnerLimit = isPartnerInitiativeIntent(intent)
-            ? ' Keep it consistent with the established relationship, privacy, danger, urgency, and mood.'
+            ? ' Use only if the current beat is calm and no other event is happening; never force partner gifts, dates, conflict, or intimacy into combat, crisis, mourning, active intimacy, public pressure, unresolved danger, boundary conflict, or any scene where it would interrupt the actual moment. If context does not support it, soften it into ordinary partner flirtation/teasing or defer it. Keep it consistent with the established relationship, privacy, danger, urgency, and mood.'
             : '';
         const companionLimit = isCompanionInitiativeIntent(intent)
             ? ' Keep it grounded in the immediate danger, the NPC\'s bond level, self-preservation, and the listed target.'
@@ -1245,10 +1245,10 @@ function buildProactivityGuide(proactivity, aggressionResults = {}) {
                 : ' Show only intent, pressure, motion, preparation, or interruption; no resolved hit occurs.')
             : ' This is not a resolved attack.';
         const relationshipLimit = isRomanceInitiativeIntent(intent)
-            ? ' Do not establish a relationship unless acceptance happens in-scene; do not force intimacy.'
+            ? ' Use only if the current beat is calm and no other event is happening; never force gifts, dates, confessions, or romantic escalation into combat, crisis, mourning, active intimacy, public pressure, unresolved danger, boundary conflict, or any scene where the event would interrupt the actual moment. If context does not support it, soften it into ordinary flirtation, attention, or defer it. Do not establish a relationship unless acceptance happens in-scene; do not force intimacy.'
             : '';
         const partnerLimit = isPartnerInitiativeIntent(intent)
-            ? ' Keep it consistent with the established relationship, privacy, danger, urgency, and mood.'
+            ? ' Use only if the current beat is calm and no other event is happening; never force partner gifts, dates, conflict, or intimacy into combat, crisis, mourning, active intimacy, public pressure, unresolved danger, boundary conflict, or any scene where it would interrupt the actual moment. If context does not support it, soften it into ordinary partner flirtation/teasing or defer it. Keep it consistent with the established relationship, privacy, danger, urgency, and mood.'
             : '';
         const companionLimit = isCompanionInitiativeIntent(intent)
             ? ' Keep it grounded in the immediate danger, the NPC\'s bond level, self-preservation, and the listed target.'
@@ -1295,23 +1295,23 @@ function proactivityIntentDescription(intent, target = '{{user}}') {
         case 'Romantic_Attention':
             return 'NPC gives {{user}} focused romantic attention through closeness, careful notice, lingering presence, or a personal gesture without forcing a confession, date, or intimacy.';
         case 'Thoughtful_Gift':
-            return 'NPC offers or prepares a small thoughtful gift for {{user}}, chosen in a way that fits the NPC, setting, and current relationship.';
+            return 'NPC offers or prepares a small thoughtful gift for {{user}} only as its own calm beat, chosen in a way that fits the NPC, setting, and current relationship.';
         case 'Ask_Date':
-            return 'NPC asks or maneuvers toward a non-intimate romantic date with {{user}}, using a believable public or ordinary plan. Do not frame this as secluded sexual privacy, an inn room, bed, undressing, or physical intimacy.';
+            return 'NPC asks or maneuvers toward a non-intimate romantic date with {{user}} only as its own calm beat, using a believable public or ordinary plan. Do not frame this as secluded sexual privacy, an inn room, bed, undressing, or physical intimacy.';
         case 'Date_And_Confess':
-            return 'NPC seeks to invite {{user}} to a very special date, where they may eventually be alone and the NPC can make a clear relationship-oriented confession or request.';
+            return 'NPC seeks to invite {{user}} to a very special date/confession only as its own calm beat, making a clear relationship-oriented confession or request without forcing intimacy.';
         case 'Partner_Flirt':
             return 'NPC flirts with {{user}} in a natural established-partner way, keeping it light, contextual, and scene-compatible.';
         case 'Partner_Tease':
             return 'NPC teases or flirts with {{user}} in a comfortable established-partner way without derailing urgent danger or serious stakes.';
         case 'Partner_Date':
-            return 'NPC suggests or plans a specific partner date with {{user}}, a shared activity that fits the setting, current safety, and the relationship.';
+            return 'NPC suggests or plans a specific partner date with {{user}} only as its own calm beat, a shared activity that fits the setting, current safety, and the relationship.';
         case 'Partner_Gift':
-            return 'NPC offers, finds, prepares, or points out a small cute or thoughtful thing {{user}} might like, chosen to fit the NPC, setting, and relationship.';
+            return 'NPC offers, finds, prepares, or points out a small cute or thoughtful thing {{user}} might like only as its own calm beat, chosen to fit the NPC, setting, and relationship.';
         case 'Partner_Intimacy':
-            return 'NPC initiates romantic or sexual closeness with {{user}} in a way that fits current privacy, safety, mood, and relationship; do not force explicit intimacy in public, danger, crisis, combat, or implausible circumstances.';
+            return 'NPC initiates romantic or sexual closeness with {{user}} only when privacy, safety, mood, and relationship all support it; do not force explicit intimacy in public, danger, crisis, combat, or implausible circumstances.';
         case 'Partner_Conflict':
-            return 'NPC raises an established-partner worry, concern, jealousy, disagreement, or vulnerable tension when context supports a real relationship conversation.';
+            return 'NPC raises an established-partner worry, concern, jealousy, disagreement, or vulnerable tension only as its own calm beat when context supports a real relationship conversation.';
         case 'Companion_Warn':
             return 'NPC warns {{user}} about immediate danger, calls out a threat, gives urgent tactical advice, or alerts others without directly attacking.';
         case 'Companion_Assist':

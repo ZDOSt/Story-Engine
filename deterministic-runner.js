@@ -813,10 +813,18 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         proactivityMemory = memoryOutcome.memory;
         if (memoryOutcome.result !== 'NONE') {
             audit.push(`3.5k proactivityMemoryPending=${compact(memoryOutcome)}`);
-            if (memoryOutcome.tag === 'Date_And_Confess' && memoryOutcome.result === 'REFUSED' && currentDisposition.B >= 4) {
+            if (shouldRegressB4Courtship(memoryOutcome) && currentDisposition.B >= 4) {
                 currentDisposition = { ...currentDisposition, B: 3 };
                 currentRapport = 0;
-                audit.push(`3.5l Date_And_Confess refused -> Bond lowered to ${formatDisposition(currentDisposition)}`);
+                proactivityMemory = {
+                    ...normalizeProactivityMemory(proactivityMemory),
+                    romanceBlocked: 'Y',
+                    b4Courtship: {
+                        ...normalizeProactivityMemory(proactivityMemory).b4Courtship,
+                        blocked: 'Y',
+                    },
+                };
+                audit.push(`3.5l B4 courtship blocked/refused -> Bond lowered to ${formatDisposition(currentDisposition)}`);
             }
         }
 
@@ -961,6 +969,17 @@ function resetRomanceMemoryOnB4Reentry(memory, previousDisposition, currentDispo
         pendingSince: 0,
         acceptedTags: [],
         refusedTags: [],
+        b4Courtship: {
+            askDateAttempts: 0,
+            askDateAccepted: 0,
+            askDateRefused: 0,
+            askDateCooldownUntilActiveMs: 0,
+            thoughtfulGiftAttempts: 0,
+            thoughtfulGiftAccepted: 'N',
+            thoughtfulGiftRefused: 'N',
+            dateAndConfessRefused: 'N',
+            blocked: 'N',
+        },
     };
 }
 
@@ -986,6 +1005,7 @@ function resolveProactivityMemoryPending(memory, context, options = {}) {
                 pendingTag: 'NONE',
                 pendingSince: 0,
                 acceptedTags: addMemoryTag(normalized.acceptedTags, pendingTag),
+                b4Courtship: updateB4CourtshipOnAcceptance(normalized.b4Courtship, pendingTag),
             },
         };
     }
@@ -999,6 +1019,7 @@ function resolveProactivityMemoryPending(memory, context, options = {}) {
                 pendingTag: 'NONE',
                 pendingSince: 0,
                 refusedTags: addMemoryTag(normalized.refusedTags, pendingTag),
+                b4Courtship: updateB4CourtshipOnRefusal(normalized.b4Courtship, pendingTag),
             },
         };
     }
@@ -1012,6 +1033,7 @@ function resolveProactivityMemoryPending(memory, context, options = {}) {
                 ...normalized,
                 pendingTag: 'NONE',
                 pendingSince: 0,
+                b4Courtship: updateB4CourtshipOnExpiry(normalized.b4Courtship, pendingTag),
             },
         };
     }
@@ -1032,6 +1054,128 @@ function addMemoryTag(list, tag) {
     const result = Array.isArray(list) ? [...list] : [];
     if (!result.includes(tag)) result.push(tag);
     return result.slice(0, ROMANCE_MEMORY_TAGS.length);
+}
+
+function normalizeB4Courtship(courtship) {
+    const normalized = normalizeProactivityMemory({ b4Courtship: courtship }).b4Courtship;
+    return normalized || {
+        askDateAttempts: 0,
+        askDateAccepted: 0,
+        askDateRefused: 0,
+        askDateCooldownUntilActiveMs: 0,
+        thoughtfulGiftAttempts: 0,
+        thoughtfulGiftAccepted: 'N',
+        thoughtfulGiftRefused: 'N',
+        dateAndConfessRefused: 'N',
+        blocked: 'N',
+    };
+}
+
+function updateB4CourtshipOnAcceptance(courtship, tag) {
+    const normalized = normalizeB4Courtship(courtship);
+    if (tag === 'Ask_Date') {
+        return recomputeB4CourtshipState({
+            ...normalized,
+            askDateAccepted: clamp(normalized.askDateAccepted + 1, 0, 2),
+        });
+    }
+    if (tag === 'Thoughtful_Gift') {
+        return recomputeB4CourtshipState({
+            ...normalized,
+            thoughtfulGiftAccepted: 'Y',
+        });
+    }
+    if (tag === 'Date_And_Confess') {
+        return recomputeB4CourtshipState({
+            ...normalized,
+            dateAndConfessRefused: 'N',
+        });
+    }
+    return normalized;
+}
+
+function updateB4CourtshipOnRefusal(courtship, tag) {
+    const normalized = normalizeB4Courtship(courtship);
+    if (tag === 'Ask_Date') {
+        return recomputeB4CourtshipState({
+            ...normalized,
+            askDateRefused: clamp(normalized.askDateRefused + 1, 0, 2),
+        });
+    }
+    if (tag === 'Thoughtful_Gift') {
+        return recomputeB4CourtshipState({
+            ...normalized,
+            thoughtfulGiftRefused: 'Y',
+        });
+    }
+    if (tag === 'Date_And_Confess') {
+        return recomputeB4CourtshipState({
+            ...normalized,
+            dateAndConfessRefused: 'Y',
+        });
+    }
+    return normalized;
+}
+
+function updateB4CourtshipOnExpiry(courtship, tag) {
+    const normalized = normalizeB4Courtship(courtship);
+    if (tag === 'Ask_Date') {
+        return recomputeB4CourtshipState({
+            ...normalized,
+            askDateRefused: clamp(normalized.askDateRefused + 1, 0, 2),
+        });
+    }
+    if (tag === 'Thoughtful_Gift') {
+        return recomputeB4CourtshipState({
+            ...normalized,
+            thoughtfulGiftRefused: 'Y',
+        });
+    }
+    return normalized;
+}
+
+function shouldRegressB4Courtship(memoryOutcome) {
+    if (!memoryOutcome || !['ACCEPTED', 'REFUSED', 'EXPIRED'].includes(memoryOutcome.result)) return false;
+    const memory = normalizeProactivityMemory(memoryOutcome.memory);
+    if (memoryOutcome.tag === 'Date_And_Confess' && memoryOutcome.result !== 'ACCEPTED') return true;
+    return memory.b4Courtship?.blocked === 'Y';
+}
+
+function updateB4CourtshipOnAskDate(courtship, activeMs = 0) {
+    const normalized = normalizeB4Courtship(courtship);
+    const askDateAttempts = clamp(normalized.askDateAttempts + 1, 0, 2);
+    const updated = {
+        ...normalized,
+        askDateAttempts,
+        askDateCooldownUntilActiveMs: askDateAttempts === 1
+            ? clamp(Number(activeMs || 0) + (2 * PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS), 0, 1000000000000)
+            : normalized.askDateCooldownUntilActiveMs,
+    };
+    return recomputeB4CourtshipState(updated, 'Ask_Date');
+}
+
+function updateB4CourtshipOnThoughtfulGift(courtship) {
+    const normalized = normalizeB4Courtship(courtship);
+    return recomputeB4CourtshipState({
+        ...normalized,
+        thoughtfulGiftAttempts: 1,
+    }, 'Thoughtful_Gift');
+}
+
+function recomputeB4CourtshipState(courtship, pendingTag = 'NONE') {
+    const normalized = normalizeB4Courtship(courtship);
+    const askDateAttempts = Number(normalized.askDateAttempts || 0);
+    const askDateAccepted = Number(normalized.askDateAccepted || 0);
+    const thoughtfulGiftAttempts = Number(normalized.thoughtfulGiftAttempts || 0);
+    const thoughtfulGiftAccepted = normalized.thoughtfulGiftAccepted === 'Y';
+    const thoughtfulGiftRefused = normalized.thoughtfulGiftRefused === 'Y';
+    const permanentlyBlocked = normalized.dateAndConfessRefused === 'Y'
+        || (askDateAttempts >= 2 && askDateAccepted === 0 && pendingTag !== 'Ask_Date')
+        || (askDateAttempts >= 2 && askDateAccepted === 1 && thoughtfulGiftAttempts >= 1 && !thoughtfulGiftAccepted && thoughtfulGiftRefused && pendingTag !== 'Thoughtful_Gift');
+    return {
+        ...normalized,
+        blocked: permanentlyBlocked ? 'Y' : 'N',
+    };
 }
 
 function classifyProactivityOfferResponse(tag, text) {
@@ -2403,13 +2547,21 @@ function applyProactivityMemoryResults(trackerUpdate, handoffs, proactivityResul
                 pendingSince: memory.interchangeCount,
             };
             changed = true;
-            if (tag === 'Thoughtful_Gift' || tag === 'Ask_Date') {
-                const cooldown = rollCooldown(dice, 20);
-                memory.cooldowns = {
-                    ...memory.cooldowns,
-                    [tag]: cooldownAvailableAt(memory, cooldown),
+            if (tag === 'Ask_Date') {
+                memory = {
+                    ...memory,
+                    b4Courtship: updateB4CourtshipOnAskDate(memory.b4Courtship, rapportClock.activeMs),
                 };
-                updates.push(`${npc}.${tag}.cooldown=1d20(${cooldown})->${memory.cooldowns[tag]}`);
+                updates.push(`${npc}.${tag}.attempt=${memory.b4Courtship.askDateAttempts}/2`);
+                if (memory.b4Courtship.askDateAttempts === 1) {
+                    updates.push(`${npc}.${tag}.secondAttemptCooldown=2h->${memory.b4Courtship.askDateCooldownUntilActiveMs}`);
+                }
+            } else if (tag === 'Thoughtful_Gift') {
+                memory = {
+                    ...memory,
+                    b4Courtship: updateB4CourtshipOnThoughtfulGift(memory.b4Courtship),
+                };
+                updates.push(`${npc}.${tag}.attempt=1/1`);
             }
             updates.push(`${npc}.${tag}.pending`);
         }
@@ -3127,6 +3279,23 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
             ProactivityTarget: NONE,
             TargetsUser: 'N',
             ProactivityTier: tier,
+            RomanceInitiative: 'N',
+            RomanceInitiativeTag: NONE,
+            RomanceInitiativeDie: null,
+            RomanceInitiativeContext: NONE,
+            RomanceInitiativeRawTag: NONE,
+            RomanceInitiativeMemoryGate: 'none',
+            PartnerInitiative: 'N',
+            PartnerInitiativeTag: NONE,
+            PartnerInitiativeDie: null,
+            PartnerInitiativeContext: NONE,
+            PartnerInitiativeRawTag: NONE,
+            PartnerInitiativeMemoryGate: 'none',
+            CompanionInitiative: 'N',
+            CompanionInitiativeTag: NONE,
+            CompanionInitiativeDie: null,
+            CompanionInitiativeContext: NONE,
+            CompanionCrisisDire: 'N',
         };
 
         audit.push(`6.3 FOR ${handoff.NPC}`);
@@ -3145,6 +3314,11 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
                 hardRule: 'ally commands are tactical requests only; they do not force proactivity or resolve the companion action',
                 command: directedCompanionCommand,
             })}`);
+        }
+
+        if (shouldBlockRelationshipOnlyProactivityForScene(handoff, fin, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText, rapportClock })) {
+            audit.push('6.4h.1 relationshipInitiativeSceneGate=blocked:not calm or another active event is taking place');
+            continue;
         }
 
         if (tier === 'FORCED') {
@@ -3368,7 +3542,7 @@ function isCompanionCrisisInitiativeEligible(handoff, fin, context = {}) {
 }
 
 function applyRomanceInitiativeIfEligible(candidate, handoff, fin, dice, audit, context = {}) {
-    if (!isRomanceInitiativeEligible(handoff, fin)) return candidate;
+    if (!isRomanceInitiativeEligible(handoff, fin, context)) return candidate;
     if (candidate.intent === 'ESCALATE_VIOLENCE' || candidate.intent === 'BOUNDARY_PHYSICAL' || candidate.intent === 'THREAT_OR_POSTURE') return candidate;
     if (classifyCompanionInitiativeContext(context) === 'crisis') return candidate;
 
@@ -3376,7 +3550,7 @@ function applyRomanceInitiativeIfEligible(candidate, handoff, fin, dice, audit, 
     const rawTag = romanceInitiativeTagFromDie(romanceDie, handoff?.RomanceStyle);
     const romanceContext = classifyCompanionInitiativeContext(context);
     const remap = remapCompanionInitiativeForContext(rawTag, romanceContext, romanceDie, handoff, context);
-    const gate = applyRomanceMemoryGate(remap.tag, romanceDie, handoff, romanceContext);
+    const gate = applyRomanceMemoryGate(remap.tag, romanceDie, handoff, romanceContext, context);
     const romanceTag = gate.tag;
     audit.push(`6.5f ${handoff.NPC}.RomanceInitiativeDie=${romanceDie}`);
     audit.push(`6.5f.1 ${handoff.NPC}.RomanceInitiativeContext=${romanceContext}`);
@@ -3400,12 +3574,13 @@ function applyRomanceInitiativeIfEligible(candidate, handoff, fin, dice, audit, 
     };
 }
 
-function isRomanceInitiativeEligible(handoff, fin) {
+function isRomanceInitiativeEligible(handoff, fin, context = {}) {
     return fin.B >= 4
         && fin.F < 3
         && fin.H < 3
         && handoff?.EstablishedRelationship !== 'Y'
-        && handoff?.Lock === 'None';
+        && handoff?.Lock === 'None'
+        && isRomanceSceneSuitable(context);
 }
 
 function romanceInitiativeTagFromDie(die, romanceStyle = 'auto') {
@@ -3419,7 +3594,7 @@ function romanceInitiativeTagFromDie(die, romanceStyle = 'auto') {
     return die % 2 === 0 ? 'Romantic_Flirt' : 'Romantic_Nervous';
 }
 
-function applyRomanceMemoryGate(tag, die, handoff, context) {
+function applyRomanceMemoryGate(tag, die, handoff, context, engineContext = {}) {
     const memory = normalizeProactivityMemory(handoff?.ProactivityMemory);
     if (isRomanceMajorTag(tag) && isRomanceMemoryTag(memory.pendingTag)) {
         return romanceFallbackForBlockedTag(die, handoff, `${memory.pendingTag}.pending`);
@@ -3427,16 +3602,19 @@ function applyRomanceMemoryGate(tag, die, handoff, context) {
     if (memory.romanceBlocked === 'Y' && isRomanceMajorTag(tag)) {
         return romanceFallbackForBlockedTag(die, handoff, 'romanceBlocked');
     }
-    if (memory.refusedTags.includes(tag) && isRomanceMajorTag(tag)) {
+    if (tag === 'Date_And_Confess' && memory.refusedTags.includes(tag)) {
         return romanceFallbackForBlockedTag(die, handoff, `${tag}.refused`);
     }
-    if (['Thoughtful_Gift', 'Ask_Date'].includes(tag) && isOnMemoryCooldown(memory, tag)) {
-        return romanceFallbackForBlockedTag(die, handoff, `${tag}.cooldownUntil${memory.cooldowns[tag]}`);
+    if (tag === 'Ask_Date' && !isAskDateAttemptAllowed(memory, engineContext)) {
+        return romanceFallbackForBlockedTag(die, handoff, 'Ask_Date.secondAttemptCooldown');
+    }
+    if (tag === 'Thoughtful_Gift' && !isThoughtfulGiftAllowed(memory)) {
+        return romanceFallbackForBlockedTag(die, handoff, 'Thoughtful_Gift.requiresTwoAskDatesAccepted');
     }
     if (tag === 'Date_And_Confess') {
-        const giftAccepted = memory.acceptedTags.includes('Thoughtful_Gift');
-        const dateAccepted = memory.acceptedTags.includes('Ask_Date');
-        if (!giftAccepted || !dateAccepted) {
+        const courtship = memory.b4Courtship || {};
+        const gate = romanceDateAndConfessGate(courtship, memory);
+        if (!gate.allowed) {
             return romanceFallbackForBlockedTag(die, handoff, 'Date_And_Confess.requiresGiftAndDateAccepted');
         }
     }
@@ -3457,7 +3635,7 @@ function romanceFallbackTag(die, romanceStyle = 'auto') {
 }
 
 function applyPartnerInitiativeIfEligible(candidate, handoff, fin, dice, audit, context) {
-    if (!isPartnerInitiativeEligible(handoff, fin)) return candidate;
+    if (!isPartnerInitiativeEligible(handoff, fin, context)) return candidate;
     if (isBlockedPartnerBaseIntent(candidate.intent)) return candidate;
     if (classifyCompanionInitiativeContext(context) === 'crisis') return candidate;
 
@@ -3488,18 +3666,19 @@ function applyPartnerInitiativeIfEligible(candidate, handoff, fin, dice, audit, 
     };
 }
 
-function isPartnerInitiativeEligible(handoff, fin) {
+function isPartnerInitiativeEligible(handoff, fin, context = {}) {
     return fin.B >= 4
         && fin.F < 3
         && fin.H < 3
         && handoff?.EstablishedRelationship === 'Y'
-        && handoff?.Lock === 'None';
+        && handoff?.Lock === 'None'
+        && isPartnerSceneSuitable(context);
 }
 
 function proactivityThresholdForCandidate(tier, handoff, fin, context = {}) {
     const base = thresholdFromTier(tier);
     if (base === 'AUTO') return base;
-    if ((isPartnerInitiativeEligible(handoff, fin) || isRomanceInitiativeEligible(handoff, fin))
+    if ((isPartnerInitiativeEligible(handoff, fin, context) || isRomanceInitiativeEligible(handoff, fin, context))
         && classifyCompanionInitiativeContext(context) === 'calm') {
         return 12;
     }
@@ -3511,10 +3690,26 @@ function adjustCompanionProactivityTier(tier, handoff, fin, context) {
     if (isCompanionCrisisInitiativeEligible(handoff, fin, context)) {
         return tier === 'FORCED' ? 'FORCED' : 'LOW';
     }
-    if (!isPartnerInitiativeEligible(handoff, fin) && !isRomanceInitiativeEligible(handoff, fin)) return tier;
+    if (!isPartnerInitiativeEligible(handoff, fin, context) && !isRomanceInitiativeEligible(handoff, fin, context)) return tier;
     if (companionContext === 'calm') return 'HIGH';
     if (companionContext === 'active') return tier === 'DORMANT' ? 'MEDIUM' : tier;
     return tier === 'FORCED' ? 'FORCED' : 'LOW';
+}
+
+function shouldBlockRelationshipOnlyProactivityForScene(handoff, fin, context = {}) {
+    if (!hasRelationshipInitiativeProfile(handoff, fin)) return false;
+    if (isCompanionCrisisInitiativeEligible(handoff, fin, context)) return false;
+    if (bool(context?.resolutionPacket?.intimacyAdvanceExplicit)) return false;
+    return handoff?.EstablishedRelationship === 'Y'
+        ? !isPartnerSceneSuitable(context)
+        : !isRomanceSceneSuitable(context);
+}
+
+function hasRelationshipInitiativeProfile(handoff, fin) {
+    return fin.B >= 4
+        && fin.F < 3
+        && fin.H < 3
+        && handoff?.Lock === 'None';
 }
 
 function isBlockedPartnerBaseIntent(intent) {
@@ -3564,6 +3759,86 @@ function applyPartnerMemoryGate(tag, die, handoff, context, engineContext = {}) 
         return { tag: selected, intent: selected, target: USER_PROACTIVITY_TARGET, reason: reasons.join('|') };
     }
     return { tag, intent: tag, target: USER_PROACTIVITY_TARGET, reason: 'none' };
+}
+
+function isRomanceSceneSuitable(context = {}) {
+    return classifyCompanionInitiativeContext(context) === 'calm' && !sceneHasOtherActiveEvent(context);
+}
+
+function isPartnerSceneSuitable(context = {}) {
+    return classifyCompanionInitiativeContext(context) === 'calm' && !sceneHasOtherActiveEvent(context);
+}
+
+function sceneHasOtherActiveEvent(context = {}) {
+    const packet = context.resolutionPacket || {};
+    const source = [
+        context.latestUserText,
+        packet.GOAL,
+        packet.identifyGoal,
+        packet.identifyChallenge,
+        packet.explicitMeans,
+        packet.Outcome,
+        packet.OutcomeTier,
+        packet.classifyCombatActionSequence,
+        packet.classifyHostilePhysicalIntent,
+        packet.activeHostileThreat,
+        packet.classifyPhysicalBoundaryPressure,
+        packet.boundaryViolationExplicit,
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (!source) return false;
+    if (/\b(fight|combat|attack|strike|hit|slash|stab|shoot|charge|pursuit|chase|threat|danger|crisis|battle|duel|ambush|counterattack|retaliat\w*|boundary|refusal|pressure|force|grapple|restrain|pin|drag|hold down|intimacy|sexual|kiss|undress|exposed)\b/.test(source)) return true;
+    return Boolean(packet.classifyCombatActionSequence === 'Y'
+        || packet.classifyHostilePhysicalIntent === 'Y'
+        || packet.activeHostileThreat === 'Y'
+        || packet.classifyPhysicalBoundaryPressure === 'Y'
+        || packet.boundaryViolationExplicit === true
+        || (context.chaosBand && context.chaosBand !== 'None'));
+}
+
+function romanceDateAndConfessGate(courtship = {}, memory = {}) {
+    const askDateAttempts = Number(courtship.askDateAttempts || 0);
+    const askDateAccepted = Number(courtship.askDateAccepted || 0);
+    const thoughtfulGiftAttempts = Number(courtship.thoughtfulGiftAttempts || 0);
+    const thoughtfulGiftAccepted = courtship.thoughtfulGiftAccepted === 'Y' ? 1 : 0;
+    const thoughtfulGiftRefused = courtship.thoughtfulGiftRefused === 'Y';
+    const dateAndConfessRefused = courtship.dateAndConfessRefused === 'Y' || memory.romanceBlocked === 'Y';
+    const unlockedByTwoDates = askDateAccepted >= 2;
+    const unlockedByDateAndGift = askDateAccepted >= 1 && thoughtfulGiftAccepted >= 1;
+    const permanentlyBlocked = !dateAndConfessRefused && (
+        (askDateAttempts >= 2 && askDateAccepted < 1)
+        || (thoughtfulGiftAttempts >= 1 && thoughtfulGiftAccepted < 1 && thoughtfulGiftRefused && askDateAccepted < 2)
+    );
+    const allowed = !dateAndConfessRefused && (unlockedByTwoDates || unlockedByDateAndGift);
+    return {
+        allowed,
+        permanentlyBlocked,
+        unlockedByTwoDates,
+        unlockedByDateAndGift,
+        askDateAttempts,
+        askDateAccepted,
+        thoughtfulGiftAttempts,
+        thoughtfulGiftAccepted,
+        thoughtfulGiftRefused,
+        dateAndConfessRefused,
+    };
+}
+
+function isAskDateAttemptAllowed(memory = {}, context = {}) {
+    const courtship = memory.b4Courtship || {};
+    const attempts = Number(courtship.askDateAttempts || 0);
+    if (attempts <= 0) return true;
+    if (attempts >= 2) return false;
+    const activeMs = Number(context?.rapportClock?.activeMs || 0);
+    const availableAt = Number(courtship.askDateCooldownUntilActiveMs || 0);
+    return activeMs >= availableAt;
+}
+
+function isThoughtfulGiftAllowed(memory = {}) {
+    const courtship = memory.b4Courtship || {};
+    const askDateAttempts = Number(courtship.askDateAttempts || 0);
+    const askDateAccepted = Number(courtship.askDateAccepted || 0);
+    const thoughtfulGiftAttempts = Number(courtship.thoughtfulGiftAttempts || 0);
+    return askDateAttempts >= 2 && askDateAccepted >= 1 && thoughtfulGiftAttempts < 1;
 }
 
 function partnerFallbackTag(die) {

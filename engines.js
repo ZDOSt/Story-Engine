@@ -1695,6 +1695,7 @@ export function normalizeProactivityMemory(value) {
         pendingSince: normalizeMemoryCount(source.pendingSince),
         acceptedTags: normalizeMemoryTagList(source.acceptedTags, ROMANCE_MEMORY_TAGS),
         refusedTags: normalizeMemoryTagList(source.refusedTags, ROMANCE_MEMORY_TAGS),
+        b4Courtship: normalizeB4Courtship(source.b4Courtship),
         partnerMeaningfulCooldownUntilActiveMs: normalizeActiveMsCount(source.partnerMeaningfulCooldownUntilActiveMs),
         lastMeaningfulPartnerTag: normalizePartnerMeaningfulTag(source.lastMeaningfulPartnerTag),
         cooldowns: Object.fromEntries(PROACTIVITY_COOLDOWN_TAGS.map(tag => [
@@ -1710,6 +1711,21 @@ function normalizeMemoryCount(value) {
 
 function normalizeActiveMsCount(value) {
     return clamp(Math.floor(Number(value ?? 0) || 0), 0, 1000000000000);
+}
+
+function normalizeB4Courtship(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        askDateAttempts: clamp(Math.floor(Number(source.askDateAttempts ?? 0) || 0), 0, 2),
+        askDateAccepted: clamp(Math.floor(Number(source.askDateAccepted ?? 0) || 0), 0, 2),
+        askDateRefused: clamp(Math.floor(Number(source.askDateRefused ?? 0) || 0), 0, 2),
+        askDateCooldownUntilActiveMs: normalizeActiveMsCount(source.askDateCooldownUntilActiveMs),
+        thoughtfulGiftAttempts: clamp(Math.floor(Number(source.thoughtfulGiftAttempts ?? 0) || 0), 0, 1),
+        thoughtfulGiftAccepted: source.thoughtfulGiftAccepted === 'Y' ? 'Y' : 'N',
+        thoughtfulGiftRefused: source.thoughtfulGiftRefused === 'Y' ? 'Y' : 'N',
+        dateAndConfessRefused: source.dateAndConfessRefused === 'Y' ? 'Y' : 'N',
+        blocked: source.blocked === 'Y' ? 'Y' : 'N',
+    };
 }
 
 function normalizeMemoryTag(value) {
