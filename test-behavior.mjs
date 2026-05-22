@@ -5300,7 +5300,7 @@ const tests = [
       const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
       assert.equal(handoff.PersonalitySummary, 'Gentle, observant, and cautious with new trust.');
       assert.equal(report.trackerUpdate.npcs.Seraphina.personalitySummary, 'Gentle, observant, and cautious with new trust.');
-      assert.match(prompt(report), /stable personality note as soft guidance/);
+      assert.match(prompt(report), /stable personality note as expression guidance/);
       assert.match(prompt(report), /Gentle, observant, and cautious with new trust/);
     },
   },
@@ -5400,7 +5400,7 @@ const tests = [
     },
   },
   {
-    name: '33 same-run tracker delta uses fenced prefix block',
+    name: '33 post-narration tracker delta uses fenced prefix block and narrator omits it',
     run() {
       assert.match(TRACKER_DELTA_TEMPLATE, /```story_engine_tracker_delta\s*BEGIN_TRACKER_DELTA/i);
       assert.match(TRACKER_DELTA_TEMPLATE, /END_TRACKER_DELTA\s*```/i);
@@ -5417,10 +5417,9 @@ const tests = [
           },
         }),
       }));
-      assert.match(prompt, /```story_engine_tracker_delta/i);
-      assert.match(prompt, /BEGIN_TRACKER_DELTA/i);
-      assert.match(prompt, /revealedName/i);
-      assert.match(prompt, /Before BEGIN_FINAL_NARRATION/i);
+      assert.doesNotMatch(prompt, /```story_engine_tracker_delta/i);
+      assert.doesNotMatch(prompt, /BEGIN_TRACKER_DELTA/i);
+      assert.match(prompt, /Do not output tracker updates/i);
     },
   },
   {

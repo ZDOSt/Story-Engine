@@ -1,5 +1,3 @@
-﻿import { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
-
 export function formatPreFlightPending() {
     return String.raw`<pre_flight>
 [STRUCTURED_PREFLIGHT_RUNTIME v0.3 - AUDIT ONLY]
@@ -196,7 +194,7 @@ export function formatNarratorPromptContext(report, options = {}) {
 
     const lines = [
         '[STORY_ENGINE_NARRATOR_HANDOFF v0.8 - AUDIT DISPLAY]',
-        'This displayed handoff is for audit. The narrator model receives MODEL_INSTRUCTION plus PROMPT sections, not MECHANICS_RESULTS.',
+        'This displayed handoff is for audit. The narrator model receives MODEL_INSTRUCTION plus NARRATOR_HANDOFF sections, not MECHANICS_RESULTS.',
         '',
         '==MECHANICS_RESULTS==',
         ...formatMechanicsResultList(summary, resolution, handoff),
@@ -204,7 +202,7 @@ export function formatNarratorPromptContext(report, options = {}) {
         '==MODEL_INSTRUCTION==',
         narratorModelInstruction(options),
         '',
-        '==PROMPT==',
+        '==NARRATOR_HANDOFF==',
         formatNarratorPromptSections(summary),
     ];
 
@@ -321,39 +319,37 @@ export function formatNarratorModelPromptContext(report, options = {}) {
     return [
         narratorModelInstruction(options),
         '',
-        '==PROMPT==',
+        '==NARRATOR_HANDOFF==',
         formatNarratorPromptSections(summary),
     ].join('\n');
 }
 
 function narratorModelInstruction(options = {}) {
-    const proxyInstruction = proxyUserActionInstruction(options);
     return [
         'STORY_ENGINE_NARRATOR_DIRECTIVE',
         '',
         'You are the final scene narrator.',
         '',
         'AUTHORITY:',
-        'The PROMPT sections below are the controlling instruction for this response.',
-        'It overrides chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.',
+        'The NARRATOR_HANDOFF sections below are the controlling instruction for this response.',
+        'BINDING_NARRATOR_CONTRACT, ACTIVE_BRANCH_FACTS, and RESOLVED_SCENE_FACTS are mandatory, non-negotiable, and override chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.',
         '',
         'SOURCE OF TRUTH:',
-        'Use ACTIVE_BRANCH_FACTS and NARRATIVE_PROMPT to determine whether actions succeed or fail, who acts, who is injured, which NPC initiative happens, whether an attack/counterattack/retaliation/companion action is resolved, and where the narration stops.',
-        'RULE_REMINDERS are mandatory constraints and output requirements; do not blend them into the in-character prose.',
+        'Use ACTIVE_BRANCH_FACTS and RESOLVED_SCENE_FACTS to determine whether actions succeed or fail, who acts, who is injured, which NPC initiative happens, whether an attack/counterattack/retaliation/companion action is resolved, and where narration stops.',
+        'BINDING_NARRATOR_CONTRACT contains hard constraints and output requirements. Obey it exactly and do not blend contract text into the in-character prose.',
+        'ACTIVE_BRANCH_FACTS are literal, closed-world facts. If an action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, or relationship change is not listed there or in RESOLVED_SCENE_FACTS, it is not resolved and must not be narrated as completed.',
+        'If RESOLVED_SCENE_FACTS appears to conflict with ACTIVE_BRANCH_FACTS, ACTIVE_BRANCH_FACTS wins.',
+        '',
+        'BRANCH PRIORITY:',
+        'Exact engine facts outrank scene vibe and wording. LandedActions, Outcome, IntimacyBoundary, Proactivity, Aggression, Injuries, Death, nonLethal, and tracker constraints must be obeyed exactly.',
+        'If LandedActions=0, the user action did not land: do not narrate contact, completed grabs, holds, control, possession, damage, or successful effects from that user action.',
+        'If an Aggression result exists, narrate only that listed result for that NPC and target, capped by its outcome and injury limit. Do not add combo chains, extra hits, extra injuries, or a second initiative beat.',
+        'If an Aggression result is absent, do not narrate a resolved NPC hit, shove, restraint, injury, counterattack, or companion strike.',
         '',
         'CONFLICT RULE:',
-        'If the latest user message asks, commands, implies, or attempts something that ACTIVE_BRANCH_FACTS and NARRATIVE_PROMPT do not resolve, do not narrate it as successful or completed.',
-        'A command to an ally/companion is only spoken tactical input unless the PROMPT explicitly lists a resolved ally/companion action, proactivity result, or aggression result.',
+        'If the latest user message asks, commands, implies, or attempts something that ACTIVE_BRANCH_FACTS and RESOLVED_SCENE_FACTS do not resolve, do not narrate it as successful or completed.',
+        'A command to an ally/companion is only spoken tactical input unless RESOLVED_SCENE_FACTS explicitly lists a resolved ally/companion action, proactivity result, or aggression result.',
         'Do not upgrade requests, threats, intentions, setup, or attempted actions into completed outcomes.',
-        '',
-        proxyInstruction,
-        '',
-        'OUTPUT CONTRACT:',
-        'Do not output mechanics, labels, analysis, bullets, preamble, or audit text.',
-        'Do not narrate voluntary {{user}} actions, thoughts, feelings, decisions, counterattacks, or dialogue beyond the explicit user input.',
-        'First output exactly one fenced tracker delta block using ```story_engine_tracker_delta, then return final in-character narration wrapped with BEGIN_FINAL_NARRATION and END_FINAL_NARRATION.',
-        'The tracker delta must contain BEGIN_TRACKER_DELTA and END_TRACKER_DELTA inside that fenced block.',
-        'The user sees only the final narration; the extension hides and strips the fenced tracker block before saving display text.',
     ].filter(line => line !== null && line !== undefined).join('\n');
 }
 
@@ -426,8 +422,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
     const result = naturalOutcomeSummary(resolution);
     const rollAudit = rollAuditFromResultLine(handoff.resultLine, resolution);
     const intimacyBoundary = intimacyBoundarySummary(handoff);
-    const narrativePrompt = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
-    const ruleReminders = buildRuleReminders({ resolution, handoff, options });
+    const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
+    const bindingNarratorContract = buildBindingNarratorContract({ resolution, handoff, options });
     const activeBranchFacts = buildActiveBranchFacts({
         userAction,
         resolution,
@@ -446,7 +442,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         inflictedNpcInjury,
         inflictedUserInjury,
     });
-    const bindingDirective = formatNarratorPromptSections({ ruleReminders, activeBranchFacts, narrativePrompt });
+    const bindingDirective = formatNarratorPromptSections({ bindingNarratorContract, activeBranchFacts, resolvedSceneFacts });
 
     return {
         userAction,
@@ -477,37 +473,81 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         aggression: aggressionText,
         aggressionGuide,
         generatedName,
-        ruleReminders,
+        bindingNarratorContract,
         activeBranchFacts,
-        narrativePrompt,
+        resolvedSceneFacts,
         bindingDirective,
     };
 }
 
 function formatNarratorPromptSections(summary) {
     return [
-        '==RULE_REMINDERS==',
-        summary.ruleReminders || '(none)',
+        '==BINDING_NARRATOR_CONTRACT==',
+        summary.bindingNarratorContract || '(none)',
         '',
         '==ACTIVE_BRANCH_FACTS==',
         summary.activeBranchFacts || '- none',
         '',
-        '==NARRATIVE_PROMPT==',
-        summary.narrativePrompt || 'Narrate the current beat according to the active branch facts.',
+        '==RESOLVED_SCENE_FACTS==',
+        summary.resolvedSceneFacts || 'Render the current beat from ACTIVE_BRANCH_FACTS. Do not add unresolved outcomes.',
     ].join('\n');
 }
 
-function buildRuleReminders({ resolution, handoff, options = {} }) {
+function buildBindingNarratorContract({ resolution, handoff, options = {} }) {
     const proxyInstruction = options?.mode === 'proxy'
         ? `Proxy user action mode is active: narrate {{user}} attempting or completing only the specified triple-parentheses action as resolved by this prompt; do not invent extra {{user}} speech, thoughts, choices, reactions, or follow-up actions.`
         : '';
     return [
+        hardRenderContract(),
         universalIntimacyPermissionGuard(handoff),
         companionCommandGuide(resolution),
         nameGenerationGuide(handoff?.nameGeneration),
         proxyInstruction,
-        trackerDeltaInstruction(),
+        outputContract(),
+        validityContract(),
     ].map(part => String(part || '').trim()).filter(Boolean).join('\n\n') || '(none)';
+}
+
+function hardRenderContract() {
+    return String.raw`NON-NEGOTIABLE NARRATOR CONTRACT:
+These rules are mandatory. They are not style suggestions, tone guidance, or optional preferences. A response that violates any listed rule is invalid and must not be output.
+
+olfactoryGate:
+Smell and taste are banned unless {{user}} explicitly sniffs, smells, tastes, eats, or drinks, or a specific visible close-range source is physically overpowering and unavoidable. If allowed, use at most one specific smell/taste mention and never use smell or taste as atmospheric shorthand.
+
+abilityIntegration:
+Render abilities, magic, senses, and supernatural traits through directly perceivable effects only. Do not name, label, explain, activate, charge, focus, or attribute abilities in narration unless the name is spoken aloud in dialogue.
+
+epistemicRender:
+Write only from direct in-scene evidence available from {{user}}'s physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unintroduced identities. Names and roles remain locked until revealed in-world.
+
+behavioralRender:
+Emotion must appear through consequential visible behavior that changes action, timing, speech, posture, distance, object use, movement, access, pressure, contact, possession, or risk. Ban stock shorthand such as blush, flush, cheeks heating, ears reddening, heart pounding, breath hitching, stomach dropping, jaws working, jaws tightening, lips parting without consequence, mouths opening and closing, throats bobbing, fingers twitching, and similar coded emotional tells.
+
+literalStyleFilter:
+Use radical literalism and utilitarian prose. No metaphor, simile, hyperbole, idiom, ellipsis, personification, poetic framing, decorative sensual wording, vibe adjectives, emotional physics, or non-literal comparison. Adjectives must describe physical properties or materially relevant distinctions only.
+
+sceneBeatComposition:
+Prefer concrete, grounded, materially relevant physical detail. Combine related action, posture, object handling, dialogue, and consequence into cohesive scene beats. Each sentence should advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
+
+turnBoundaryControl:
+Never write, repeat, echo, paraphrase, or summarize {{user}} speech, thoughts, intentions, reactions, choices, or silence. Begin at T+1 from {{user}} input with external consequence, NPC response, environmental change, or new stimulus. If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return to normal agency separation. Stop immediately when {{user}} is directly addressed, directly acted upon in a response-demanding way, presented with a choice, or reached by an unresolved impact frame.`;
+}
+
+function outputContract() {
+    return String.raw`OUTPUT CONTRACT:
+Do not output mechanics, labels, analysis, bullets, preamble, or audit text.
+Do not narrate voluntary {{user}} actions, thoughts, feelings, decisions, counterattacks, or dialogue beyond the explicit user input.
+Return only final in-character narration wrapped with BEGIN_FINAL_NARRATION and END_FINAL_NARRATION.
+Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.`;
+}
+
+function validityContract() {
+    return String.raw`VALIDITY CONTRACT:
+Every contract rule and active branch fact is mandatory.
+A single violation invalidates the response.
+Invalid responses must not be output.
+Final narration may only be emitted after BINDING_NARRATOR_CONTRACT, ACTIVE_BRANCH_FACTS, and RESOLVED_SCENE_FACTS are all satisfied.`;
 }
 
 function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
@@ -520,7 +560,12 @@ function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollA
         if (!isNoneText(rollAudit?.rollFull)) facts.push(`Roll: ${rollAudit.rollFull}.`);
     }
     if (!isNoneText(resolution?.nonLethal)) facts.push(`Nonlethal flag: ${resolution.nonLethal}.`);
-    if (!isNoneText(resolution?.LandedActions)) facts.push(`Landed actions: ${resolution.LandedActions}.`);
+    if (!isNoneText(resolution?.LandedActions)) {
+        facts.push(`Landed actions: ${resolution.LandedActions}.`);
+        if (Number(resolution.LandedActions) <= 0) {
+            facts.push('Zero-land branch: the user action does not complete, connect, grab, hold, control, or create successful contact/effect. Do not narrate the attempted action as already landed.');
+        }
+    }
     if (resolution?.classifyPhysicalBoundaryPressure === 'Y') facts.push('Boundary branch: physical boundary pressure is active; render resistance, space, access, refusal, or guarded movement, not combat unless another branch resolves combat.');
     if (resolution?.boundaryViolationExplicit === 'Y') facts.push('Boundary violation branch: explicit pressure past refusal/boundary is active.');
     if (!isNoneText(intimacyBoundary)) {
@@ -617,7 +662,7 @@ function relationshipNarrationGuide(npc) {
     const behavior = behaviorNarrationGuide(npc?.Behavior);
     const target = relationshipTargetNarrationGuide(npc?.Target);
     const personality = npc?.PersonalitySummary && !isNoneText(npc.PersonalitySummary)
-        ? ` Use this stable personality note as soft guidance, not a hard script: ${npc.PersonalitySummary}.`
+        ? ` Use this stable personality note as expression guidance, not a hard script: ${npc.PersonalitySummary}. It may shape speech style, posture, refusal style, affection style, pressure, and initiative flavor, but it never overrides mechanics, rolls, intimacy boundaries, consent, injury, proactivity, hostility, or resolved outcomes.`
         : '';
     const boundary = npc?.BoundaryPressure === 'Y'
         ? ' Respect active boundary pressure through space, refusal, guarded movement, or physical protection.'
@@ -879,7 +924,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
         ? ` ${aggressionGuide}`
         : '';
     const compatibleProactivityGuide = buildBoundaryCompatibleProactivityGuide(handoff.proactivityResults ?? {}, handoff.aggressionResults ?? {}, handoff);
-    const naturalProactiveNote = compatibleProactivityGuide !== 'none'
+    const naturalProactiveNote = compatibleProactivityGuide !== 'none' && aggressionText === 'none'
         ? ` In the same beat, include this NPC initiative: ${compatibleProactivityGuide} Render it naturally through personality, visible behavior, speech, and setting. If no attack result is listed, do not invent a resolved NPC hit.`
         : '';
     const boundaryNote = resolution.classifyPhysicalBoundaryPressure === 'Y'
@@ -981,20 +1026,11 @@ function companionCommandGuide(resolution) {
     return ` Treat the addressed companion command as spoken tactical input only, not as a resolved companion action and not as obedience.${commands} ${npcs} may respond autonomously according to listed proactivity/aggression only. If no proactivity or aggression result lists a companion attack, do not narrate the companion striking, pinning, disabling, injuring, killing, or successfully controlling a target.`;
 }
 
-function trackerDeltaInstruction() {
-    return [
-        '\n\nBefore BEGIN_FINAL_NARRATION, output exactly one fenced tracker delta block using the exact fence shown below. Then output the final narration.',
-        TRACKER_DELTA_CONTRACT,
-        'Use this exact shape:',
-        TRACKER_DELTA_TEMPLATE,
-    ].join('\n');
-}
-
 function partialActionGuide(resolution) {
     const landed = Number(resolution?.LandedActions ?? 0);
     const actionCount = Array.isArray(resolution?.actions) ? resolution.actions.length : 0;
     if (!Number.isFinite(landed) || !actionCount || landed >= actionCount) return '';
-    if (landed <= 0) return ` None of the attempted actions land; do not narrate any user hit, injury, or successful contact unless another mechanic explicitly says so.`;
+    if (landed <= 0) return ` None of the attempted actions land; do not narrate any user hit, injury, successful contact, completed grab, hold, control, possession, squeeze, intimate touch, or completed effect unless another mechanic explicitly says so. If the attempt is a grab or touch, stop it before the user achieves contact or control.`;
     return ` Only ${landed} of ${actionCount} attempted action${actionCount === 1 ? '' : 's'} lands; narrate only the listed persistent injury/result as concrete impact, and have the remaining attempted actions miss, get checked, glance off, fail to connect, or be otherwise limited by the outcome.`;
 }
 
@@ -1098,7 +1134,7 @@ function inflictedNpcInjuryGuide(injuries) {
     if (!Array.isArray(injuries) || !injuries.length) return '';
     return ' ' + injuries.map(injury =>
         injury?.condition === 'dead'
-            ? `${valueOrNone(injury.NPC)} receives dead condition. This is a deterministic fatal outcome from the landed user attack. The target is dead; narrate explicit death in the final prose so the tracker delta can record dead. ${valueOrNone(injury.NarrationRule)}`
+            ? `${valueOrNone(injury.NPC)} receives dead condition. This is a deterministic fatal outcome from the landed user attack. The target is dead; narrate explicit death in the final prose so the post-narration tracker can record dead. ${valueOrNone(injury.NarrationRule)}`
             : `${valueOrNone(injury.NPC)} receives ${valueOrNone(injury.condition)} condition${injuryDetailPhrase(injury)}. This injury or status is mechanically persistent; narrate it as the concrete lasting result of the landed user action/effect, with severity limiting later offense, defense, movement, focus, or other affected actions. ${valueOrNone(injury.NarrationRule)}`,
     ).join(' ');
 }
@@ -1109,8 +1145,15 @@ function inflictedUserInjuryGuide(aggressionResults) {
         .filter(item => item.injury);
     if (!injuries.length) return '';
     return ' ' + injuries.map(({ name, injury }) =>
-        `The user receives ${valueOrNone(injury.condition)} condition from ${valueOrNone(name)}${injuryDetailPhrase(injury)}. This injury is mechanically persistent; choose the concrete wound and affected body area from the NPC attack context, but do not exceed ${valueOrNone(injury.severity)} severity. Let that narrated injury limit later offense, defense, movement, focus, or other affected actions according to severity.`,
+        `The user receives ${valueOrNone(injury.condition)} condition from ${valueOrNone(name)}${injuryDetailPhrase(injury)}. This injury is mechanically persistent; choose one concrete wound and affected body area from the NPC attack context, but do not exceed ${valueOrNone(injury.severity)} severity.${minorUserInjuryLimit(injury)} Describe the injury as an external physical fact; do not narrate {{user}}'s reaction, recovery, choices, thoughts, speech, staggering, gasping, folding, or follow-up movement.`,
     ).join(' ');
+}
+
+function minorUserInjuryLimit(injury) {
+    const condition = String(injury?.condition ?? '').toLowerCase();
+    const severity = String(injury?.severity ?? injury?.InjurySeverityLimit ?? '').toLowerCase();
+    if (condition !== 'bruised' && severity !== 'minor') return '';
+    return ' Minor/bruised means one proportional minor impact or bruise only: do not add bleeding, cuts, raked skin, broken bones, breath loss, being winded, incapacitation, restraint, or multiple landed strikes.';
 }
 
 function inflictedAggressionNpcInjuryGuide(aggressionResults) {
@@ -1462,11 +1505,12 @@ function buildAggressionGuide(aggressionResults) {
         const npcImpairment = npcImpairmentGuide(value.NPCImpairment, npcImpairmentSummary(value.NPCImpairment));
         const statText = aggressionStatNarrationGuide(value);
         const impairmentText = `${statText}${npcImpairment}${userImpairment}`;
+        const injuryLimit = aggressionInjuryLimitGuide(value);
         if (value.ReactionOutcome === 'npc_overpowers') {
-            return `${name}: ${attackType} strongly succeeds/overpowers against ${valueOrNone(target)}; narrate clear NPC advantage.${impairmentText} ${targetLimit}`;
+            return `${name}: ${attackType} strongly succeeds/overpowers against ${valueOrNone(target)}; narrate clear NPC advantage.${injuryLimit}${impairmentText} ${targetLimit}`;
         }
         if (value.ReactionOutcome === 'npc_succeeds') {
-            return `${name}: ${attackType} succeeds modestly against ${valueOrNone(target)}; narrate proportional effect.${impairmentText} ${targetLimit}`;
+            return `${name}: ${attackType} succeeds modestly against ${valueOrNone(target)}; narrate one proportional effect only, not a combo chain or multiple separate hits.${injuryLimit}${impairmentText} ${targetLimit}`;
         }
         if (value.ReactionOutcome === 'stalemate') {
             return `${name}: ${attackType} against ${valueOrNone(target)} meets equal resistance; narrate only a deadlock, clash, bind, struggle, blocked motion, or interrupted exchange with no successful NPC strike, shove, restraint, injury, or completed forceful effect.${impairmentText} Stop in the deadlock. ${targetLimit}`;
@@ -1478,6 +1522,17 @@ function buildAggressionGuide(aggressionResults) {
     });
 
     return parts.join(' ');
+}
+
+function aggressionInjuryLimitGuide(value) {
+    const injury = value?.InflictedUserInjury || value?.InflictedTargetInjury;
+    if (!injury) return '';
+    const condition = String(injury.condition ?? '').toLowerCase();
+    const severity = String(injury.severity ?? injury.InjurySeverityLimit ?? '').toLowerCase();
+    if (condition === 'bruised' || severity === 'minor') {
+        return ' The listed injury cap is minor/bruised: at most one minor impact or bruise may persist, with no bleeding, cuts, breath loss, incapacitation, restraint, or extra landed strikes.';
+    }
+    return ` Do not exceed the listed injury cap (${valueOrNone(injury.condition)} / ${valueOrNone(injury.severity || injury.InjurySeverityLimit)}).`;
 }
 
 function aggressionStatNarrationGuide(value) {

@@ -1,4 +1,4 @@
-﻿import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
+import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
 import { name1, saveSettingsDebounced } from '../../../../script.js';
 import { extension_settings } from '../../../../scripts/extensions.js';
 import { addEphemeralStoppingString, flushEphemeralStoppingStrings } from '../../../../scripts/power-user.js';
@@ -10,6 +10,7 @@ import { formatNarratorModelPromptContext, formatNarratorPromptContext } from '.
 import { extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildTrackerSnapshot, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
+import { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import {
     STREAMING_ARTIFACT_REGEX_SCRIPT_ID,
     STREAMING_ARTIFACT_REGEX_SCRIPT_NAME,
@@ -28,6 +29,7 @@ const FINAL_REMINDER_PROMPT_KEY = 'structured_preflight_30_final_reminder';
 const LEGACY_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_writing_style';
 const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
+const TRACKER_PROFILE_CURRENT = '<Current semantic profile>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 const TRACKER_DISPLAY_VERSION = 1;
@@ -274,50 +276,17 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
     return response
 }`;
-const RENDER_CONTROL_FINAL_REMINDER_PROMPT = String.raw`EXECUTE RenderControlEngine(response, input, context).
-REFERENCE ONLY. DO NOT OUTPUT THIS BLOCK.
-
-olfactoryGate:
-Smell and taste are banned unless {{user}} explicitly sniffs, smells, tastes, eats, or drinks, or a specific visible close-range source is physically overpowering and unavoidable. If allowed, use at most one specific smell/taste mention and never use smell or taste as atmospheric shorthand.
-
-abilityIntegration:
-Render abilities, magic, senses, and supernatural traits through directly perceivable effects only. Do not name, label, explain, activate, charge, focus, or attribute abilities in narration unless the name is spoken aloud in dialogue.
-
-epistemicRender:
-Write only from direct in-scene evidence available from {{user}}'s physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unintroduced identities. Names and roles remain locked until revealed in-world.
-
-behavioralRender:
-Emotion must appear through consequential visible behavior that changes action, timing, speech, posture, distance, object use, movement, access, pressure, contact, possession, or risk. Ban stock shorthand such as blush, flush, cheeks heating, ears reddening, heart pounding, breath hitching, stomach dropping, jaws working, jaws tightening, lips parting without consequence, mouths opening and closing, throats bobbing, fingers twitching, and similar coded emotional tells.
-
-literalStyleFilter:
-Use radical literalism and utilitarian prose. No metaphor, simile, hyperbole, idiom, ellipsis, personification, poetic framing, decorative sensual wording, vibe adjectives, emotional physics, or non-literal comparison. Adjectives must describe physical properties or materially relevant distinctions only.
-
-sceneBeatComposition:
-Prefer concrete, grounded, materially relevant physical detail. Combine related action, posture, object handling, dialogue, and consequence into cohesive scene beats. Each sentence should advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
-
-turnBoundaryControl:
-Never write, repeat, echo, paraphrase, or summarize {{user}} speech, thoughts, intentions, reactions, choices, or silence. Begin at T+1 from {{user}} input with external consequence, NPC response, environmental change, or new stimulus. If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return to normal agency separation. Stop immediately when {{user}} is directly addressed, directly acted upon in a response-demanding way, presented with a choice, or reached by an unresolved impact frame.
-
-VALIDITY CONTRACT:
-Every stage is mandatory. A single violation invalidates the response. Invalid responses must not be output. Final narration may only be emitted after all stages pass.`;
 const DEFAULT_SETTINGS = Object.freeze({
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
     disableSemanticThinking: true,
+    postNarrationTrackerEnabled: true,
+    trackerConnectionProfile: TRACKER_PROFILE_CURRENT,
     writingStyleEnabled: true,
     writingStylePrompt: DEFAULT_WRITING_STYLE_PROMPT,
     writingStylePlacement: 'before_prompt',
     writingStyleDepth: 0,
     writingStyleRole: 0,
-    proseRulesEnabled: true,
-    proseRulesPrompt: DEFAULT_PROSE_RULES_PROMPT,
-    proseRulesPlacement: 'in_prompt',
-    proseRulesDepth: 0,
-    proseRulesRole: 0,
-    finalReminderPrompt: RENDER_CONTROL_FINAL_REMINDER_PROMPT,
-    finalReminderPlacement: 'in_chat',
-    finalReminderDepth: 0,
-    finalReminderRole: 0,
     nameStyle: 'Balanced Fantasy',
     trackerWidgetCollapsed: true,
     trackerWidgetX: 24,
@@ -370,6 +339,8 @@ const state = {
     lastNarratorHandoff: '',
     lastNarratorHandoffKey: null,
     pendingRun: null,
+    trackerUpdating: false,
+    inputLockState: null,
     chatSignature: [],
     subscribed: false,
     pendingGeneration: null,
@@ -566,6 +537,24 @@ async function withSemanticGenerationSettings(callback) {
     }));
 }
 
+async function withTrackerGenerationSettings(callback) {
+    const settings = getSettings();
+    const trackerProfile = String(settings.trackerConnectionProfile || TRACKER_PROFILE_CURRENT).trim();
+    if (trackerProfile && trackerProfile !== TRACKER_PROFILE_CURRENT) {
+        const profile = getConnectionProfileByName(trackerProfile);
+        if (!profile) {
+            throw new Error(`Tracker connection profile "${trackerProfile}" was not found.`);
+        }
+        console.info(`[${EXTENSION_NAME}] using direct tracker connection profile request: ${profile.name}`);
+        return await withConnectionProfileSecret(profile, () => callback({
+            disableSemanticThinking: settings.disableSemanticThinking !== false,
+            semanticProfileId: profile.id,
+            semanticProfileName: profile.name,
+        }));
+    }
+    return await withSemanticGenerationSettings(callback);
+}
+
 function setSelectOptions(select, values, placeholder, selectedValue, missingLabel = 'Missing') {
     if (!select) return;
     select.innerHTML = '';
@@ -662,43 +651,36 @@ function injectMovablePrompt(key, promptText, placement, depth, role) {
 }
 
 function injectPromptOptionPrompts() {
+    clearFinalReminderPrompt();
     injectWritingStylePrompt();
     injectProseRulesPrompt();
-    injectFinalReminderPrompt();
+}
+
+function clearFinalReminderPrompt(context = getContext()) {
+    if (context?.extensionPrompts) delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
 }
 
 function refreshSettingsControls() {
     const settings = getSettings();
     const enabled = Boolean(settings.useSeparateSemanticSettings);
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
+    const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
+    const trackerProfileSelect = document.getElementById('structured_preflight_tracker_profile');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
     const disableThinkingCheckbox = document.getElementById('structured_preflight_disable_semantic_thinking');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
     const writingStyleDrawer = document.getElementById('structured_preflight_writing_style_drawer');
     const writingStylePrompt = document.getElementById('structured_preflight_writing_style_prompt');
-    const proseRulesEnabled = document.getElementById('structured_preflight_prose_rules_enabled');
-    const proseRulesDrawer = document.getElementById('structured_preflight_prose_rules_drawer');
-    const finalReminderDrawer = document.getElementById('structured_preflight_final_reminder_drawer');
-    const proseRulesPrompt = document.getElementById('structured_preflight_prose_rules_prompt');
-    const finalReminderPrompt = document.getElementById('structured_preflight_final_reminder_prompt');
     const nameStyleSelect = document.getElementById('structured_preflight_name_style');
 
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
+    if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (disableThinkingCheckbox) disableThinkingCheckbox.checked = settings.disableSemanticThinking !== false;
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
     if (writingStylePrompt && writingStylePrompt.value !== settings.writingStylePrompt) {
         writingStylePrompt.value = String(settings.writingStylePrompt ?? DEFAULT_WRITING_STYLE_PROMPT);
     }
-    if (proseRulesEnabled) proseRulesEnabled.checked = settings.proseRulesEnabled !== false;
-    if (proseRulesPrompt && proseRulesPrompt.value !== settings.proseRulesPrompt) {
-        proseRulesPrompt.value = String(settings.proseRulesPrompt ?? DEFAULT_PROSE_RULES_PROMPT);
-    }
-    if (finalReminderPrompt && finalReminderPrompt.value !== settings.finalReminderPrompt) {
-        finalReminderPrompt.value = String(settings.finalReminderPrompt ?? RENDER_CONTROL_FINAL_REMINDER_PROMPT);
-    }
     setPromptPlacementControls('writingStyle', settings, settings.writingStyleEnabled !== false);
-    setPromptPlacementControls('proseRules', settings, settings.proseRulesEnabled !== false);
-    setPromptPlacementControls('finalReminder', settings, settings.proseRulesEnabled !== false);
     setSelectOptions(
         nameStyleSelect,
         NAME_STYLE_OPTIONS,
@@ -713,25 +695,21 @@ function refreshSettingsControls() {
         settings.semanticConnectionProfile,
         'Profile not found',
     );
+    setSelectOptions(
+        trackerProfileSelect,
+        [TRACKER_PROFILE_CURRENT, ...getConnectionProfileNames()],
+        TRACKER_PROFILE_CURRENT,
+        settings.trackerConnectionProfile || TRACKER_PROFILE_CURRENT,
+        'Profile not found',
+    );
 
     if (profileSelect) profileSelect.disabled = !enabled;
+    if (trackerProfileSelect) trackerProfileSelect.disabled = settings.postNarrationTrackerEnabled === false;
     if (writingStylePrompt) writingStylePrompt.disabled = settings.writingStyleEnabled === false;
     if (writingStyleDrawer) {
         writingStyleDrawer.hidden = settings.writingStyleEnabled === false;
         if (writingStyleDrawer.hidden) writingStyleDrawer.open = false;
     }
-    const proseRulesHidden = settings.proseRulesEnabled === false;
-    if (proseRulesDrawer) {
-        proseRulesDrawer.hidden = proseRulesHidden;
-        if (proseRulesHidden) proseRulesDrawer.open = false;
-    }
-    if (finalReminderDrawer) {
-        finalReminderDrawer.hidden = proseRulesHidden;
-        if (proseRulesHidden) finalReminderDrawer.open = false;
-    }
-    if (proseRulesPrompt) proseRulesPrompt.disabled = settings.proseRulesEnabled === false;
-    if (finalReminderPrompt) finalReminderPrompt.disabled = settings.proseRulesEnabled === false;
-
     const playerStatus = document.getElementById('structured_preflight_player_setup_status');
     if (playerStatus) {
         const context = getContext();
@@ -792,6 +770,15 @@ function renderSettingsPanel() {
                     <span>Disable thinking for semantic requests</span>
                 </label>
                 <small>Applies only to Story Engine semantic, tracker, and player setup calls. Main narration keeps its own profile settings.</small>
+                <label class="checkbox_label flexNoGap">
+                    <input id="structured_preflight_post_tracker_enabled" type="checkbox">
+                    <span>Enable post-narration tracker update</span>
+                </label>
+                <div class="flex-container alignItemsBaseline">
+                    <label for="structured_preflight_tracker_profile">Tracker connection profile</label>
+                    <select id="structured_preflight_tracker_profile" class="text_pole flex1"></select>
+                </div>
+                <small>Runs after narration to update the visible tracker from final prose. Disable for compatibility with other tracker extensions.</small>
                 <hr>
                 <div class="flex-container alignItemsBaseline">
                     <label for="structured_preflight_name_style">Name style</label>
@@ -831,66 +818,6 @@ function renderSettingsPanel() {
                     <textarea id="structured_preflight_writing_style_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
                 </details>
                 <hr>
-                <label class="checkbox_label flexNoGap">
-                    <input id="structured_preflight_prose_rules_enabled" type="checkbox">
-                    <span>Enable Prose Rules</span>
-                </label>
-                <small>When disabled, both the persistent prose rules and final reminder are skipped.</small>
-                <details id="structured_preflight_prose_rules_drawer" data-structured-preflight-prompt-drawer>
-                    <summary class="flex-container alignitemscenter">
-                        <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Prose Rules</button>
-                        <button id="structured_preflight_reset_prose_rules" class="menu_button" type="button">Reset</button>
-                    </summary>
-                    <div class="flex-container alignItemsBaseline">
-                        <label for="structured_preflight_proseRules_placement">Placement</label>
-                        <select id="structured_preflight_proseRules_placement" class="text_pole flex1">
-                            <option value="before_prompt">â†‘Char</option>
-                            <option value="in_prompt">â†“Char</option>
-                            <option value="in_chat">In-Chat @Depth</option>
-                            <option value="none">Disabled</option>
-                        </select>
-                    </div>
-                    <div id="structured_preflight_proseRules_depth_row" class="flex-container alignItemsBaseline">
-                        <label for="structured_preflight_proseRules_depth">Depth</label>
-                        <input id="structured_preflight_proseRules_depth" class="text_pole widthNatural" type="number" min="0" max="10000" step="1">
-                        <label for="structured_preflight_proseRules_role">Role</label>
-                        <select id="structured_preflight_proseRules_role" class="text_pole flex1">
-                            <option value="0">System</option>
-                            <option value="1">User</option>
-                            <option value="2">Assistant</option>
-                        </select>
-                    </div>
-                    <small>Injected into the regular SillyTavern prompt stack.</small>
-                    <textarea id="structured_preflight_prose_rules_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
-                </details>
-                <details id="structured_preflight_final_reminder_drawer" data-structured-preflight-prompt-drawer>
-                    <summary class="flex-container alignitemscenter">
-                        <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Final Reminder</button>
-                        <button id="structured_preflight_reset_final_reminder" class="menu_button" type="button">Reset</button>
-                    </summary>
-                    <div class="flex-container alignItemsBaseline">
-                        <label for="structured_preflight_finalReminder_placement">Placement</label>
-                        <select id="structured_preflight_finalReminder_placement" class="text_pole flex1">
-                            <option value="before_prompt">â†‘Char</option>
-                            <option value="in_prompt">â†“Char</option>
-                            <option value="in_chat">In-Chat @Depth</option>
-                            <option value="none">Disabled</option>
-                        </select>
-                    </div>
-                    <div id="structured_preflight_finalReminder_depth_row" class="flex-container alignItemsBaseline">
-                        <label for="structured_preflight_finalReminder_depth">Depth</label>
-                        <input id="structured_preflight_finalReminder_depth" class="text_pole widthNatural" type="number" min="0" max="10000" step="1">
-                        <label for="structured_preflight_finalReminder_role">Role</label>
-                        <select id="structured_preflight_finalReminder_role" class="text_pole flex1">
-                            <option value="0">System</option>
-                            <option value="1">User</option>
-                            <option value="2">Assistant</option>
-                        </select>
-                    </div>
-                    <small>Default is In-Chat @Depth 0, which still lands before the Story Engine narrator prompt.</small>
-                    <textarea id="structured_preflight_final_reminder_prompt" class="text_pole textarea_compact" rows="12" spellcheck="false"></textarea>
-                </details>
-                <hr>
                 <div class="flex-container alignitemscenter">
                     <small id="structured_preflight_player_setup_status" class="flex1"></small>
                     <button id="structured_preflight_show_player_setup" class="menu_button">Show Player Setup</button>
@@ -927,6 +854,16 @@ function renderSettingsPanel() {
         settings.disableSemanticThinking = Boolean(event.target?.checked);
         saveExtensionSettings();
     });
+    document.getElementById('structured_preflight_post_tracker_enabled')?.addEventListener('change', event => {
+        settings.postNarrationTrackerEnabled = Boolean(event.target?.checked);
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_tracker_profile')?.addEventListener('change', event => {
+        const selected = String(event.target?.value || TRACKER_PROFILE_CURRENT);
+        settings.trackerConnectionProfile = selected || TRACKER_PROFILE_CURRENT;
+        saveExtensionSettings();
+    });
     document.getElementById('structured_preflight_name_style')?.addEventListener('change', event => {
         const selected = String(event.target?.value || 'Balanced Fantasy');
         settings.nameStyle = NAME_STYLE_OPTIONS.includes(selected) ? selected : 'Balanced Fantasy';
@@ -952,44 +889,8 @@ function renderSettingsPanel() {
         injectWritingStylePrompt();
         saveExtensionSettings();
     });
-    document.getElementById('structured_preflight_prose_rules_enabled')?.addEventListener('change', event => {
-        settings.proseRulesEnabled = Boolean(event.target?.checked);
-        refreshSettingsControls();
-        injectPromptOptionPrompts();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_prose_rules_prompt')?.addEventListener('input', event => {
-        settings.proseRulesPrompt = String(event.target?.value ?? '');
-        injectProseRulesPrompt();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_final_reminder_prompt')?.addEventListener('input', event => {
-        settings.finalReminderPrompt = String(event.target?.value ?? '');
-        injectFinalReminderPrompt();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_reset_prose_rules')?.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        settings.proseRulesPrompt = DEFAULT_PROSE_RULES_PROMPT;
-        refreshSettingsControls();
-        injectProseRulesPrompt();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_reset_final_reminder')?.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        settings.finalReminderPrompt = RENDER_CONTROL_FINAL_REMINDER_PROMPT;
-        refreshSettingsControls();
-        injectFinalReminderPrompt();
-        saveExtensionSettings();
-    });
-    for (const prefix of ['writingStyle', 'proseRules', 'finalReminder']) {
-        const inject = prefix === 'writingStyle'
-            ? injectWritingStylePrompt
-            : prefix === 'proseRules'
-                ? injectProseRulesPrompt
-                : injectFinalReminderPrompt;
+    for (const prefix of ['writingStyle']) {
+        const inject = injectWritingStylePrompt;
         document.getElementById(`structured_preflight_${prefix}_placement`)?.addEventListener('change', event => {
             const value = String(event.target?.value || 'in_prompt');
             settings[`${prefix}Placement`] = ['before_prompt', 'in_prompt', 'in_chat', 'none'].includes(value) ? value : 'in_prompt';
@@ -1101,48 +1002,68 @@ function injectProseRulesPrompt() {
         return;
     }
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
+    clearFinalReminderPrompt(context);
 
-    const settings = getSettings();
-    if (settings.proseRulesEnabled === false) {
-        if (context.extensionPrompts) delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
-        if (context.extensionPrompts) delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
-        return;
-    }
-
-    const promptText = String(settings.proseRulesPrompt ?? DEFAULT_PROSE_RULES_PROMPT);
     injectMovablePrompt(
         PROSE_RULES_PROMPT_KEY,
-        promptText,
-        settings.proseRulesPlacement,
-        settings.proseRulesDepth,
-        settings.proseRulesRole,
-    );
-}
-
-function injectFinalReminderPrompt() {
-    const context = getContext();
-    if (!context?.setExtensionPrompt) {
-        return;
-    }
-
-    const settings = getSettings();
-    if (settings.proseRulesEnabled === false) {
-        if (context.extensionPrompts) delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
-        return;
-    }
-
-    const reminder = String(settings.finalReminderPrompt ?? RENDER_CONTROL_FINAL_REMINDER_PROMPT).trim();
-    injectMovablePrompt(
-        FINAL_REMINDER_PROMPT_KEY,
-        reminder,
-        settings.finalReminderPlacement,
-        settings.finalReminderDepth,
-        settings.finalReminderRole,
+        DEFAULT_PROSE_RULES_PROMPT,
+        'in_prompt',
+        0,
+        EXTENSION_PROMPT_ROLES.SYSTEM,
     );
 }
 
 function buildFinalNarrationPrompt(narratorContext) {
     return narratorContext;
+}
+
+function setChatInputLocked(locked, reason = '') {
+    if (typeof document === 'undefined') return;
+    state.trackerUpdating = Boolean(locked);
+    const textarea = document.getElementById('send_textarea');
+    const sendButton = document.getElementById('send_but');
+    const form = document.getElementById('send_form');
+
+    if (locked) {
+        if (!state.inputLockState) {
+            state.inputLockState = {
+                textareaDisabled: textarea ? Boolean(textarea.disabled) : null,
+                sendDisabled: sendButton ? Boolean(sendButton.disabled) : null,
+                placeholder: textarea ? textarea.getAttribute('placeholder') : null,
+                title: sendButton ? sendButton.getAttribute('title') : null,
+            };
+        }
+        if (textarea) {
+            textarea.disabled = true;
+            textarea.setAttribute('data-spe-tracker-lock', 'true');
+            textarea.setAttribute('placeholder', reason || 'Updating tracker...');
+        }
+        if (sendButton) {
+            sendButton.disabled = true;
+            sendButton.setAttribute('aria-disabled', 'true');
+            sendButton.setAttribute('data-spe-tracker-lock', 'true');
+            sendButton.setAttribute('title', reason || 'Updating tracker...');
+        }
+        form?.classList?.add?.('spe-tracker-updating');
+        return;
+    }
+
+    const previous = state.inputLockState || {};
+    if (textarea?.getAttribute('data-spe-tracker-lock') === 'true') {
+        textarea.disabled = Boolean(previous.textareaDisabled);
+        if (previous.placeholder == null) textarea.removeAttribute('placeholder');
+        else textarea.setAttribute('placeholder', previous.placeholder);
+        textarea.removeAttribute('data-spe-tracker-lock');
+    }
+    if (sendButton?.getAttribute('data-spe-tracker-lock') === 'true') {
+        sendButton.disabled = Boolean(previous.sendDisabled);
+        if (previous.title == null) sendButton.removeAttribute('title');
+        else sendButton.setAttribute('title', previous.title);
+        sendButton.removeAttribute('aria-disabled');
+        sendButton.removeAttribute('data-spe-tracker-lock');
+    }
+    form?.classList?.remove?.('spe-tracker-updating');
+    state.inputLockState = null;
 }
 
 function clearRuntimePrompts() {
@@ -1823,7 +1744,10 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         ...(pendingRun?.trackerBefore || {}),
         ...(pendingRun?.trackerAfter || {}),
     });
-    const user = normalizeTrackerUserState(pendingRun?.userBefore || {});
+    const user = normalizeTrackerUserState({
+        ...(pendingRun?.userBefore || {}),
+        ...(pendingRun?.userAfter || {}),
+    });
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -1891,7 +1815,7 @@ function buildTrackerUpdateForPersistence(displaySnapshot) {
     };
 }
 
-function mergeNarratorTrackerDelta(snapshot, delta, options = {}) {
+function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     if (!snapshot || !delta) return snapshot;
     const merged = clone(snapshot);
     merged.user = applyTrackerDeltaToUserState(merged.user || {}, delta.user || {});
@@ -1920,7 +1844,7 @@ function mergeNarratorTrackerDelta(snapshot, delta, options = {}) {
         deltaActiveNames.add(name);
     }
     markVisibleTrackerActive(merged, deltaActiveNames);
-    merged.narratorTrackerDelta = {
+    merged.postNarrationTrackerDelta = {
         updatedAt: Date.now(),
         userChanged: trackerDeltaHasChanges(delta.user, true),
         npcChanged: (delta.npcs || []).some(item => trackerDeltaHasChanges(item, false)),
@@ -2528,12 +2452,32 @@ function renderNarratorHandoffBlockForMessage(messageId, payload = null, context
 }
 
 function renderTrackerDisplayBlockForMessage(messageId, snapshot = null, context = getContext()) {
+    const message = context?.chat?.[messageId];
+    const trackerSnapshot = snapshot || getMessageTrackerDisplaySnapshot(message);
     if (typeof document === 'undefined') return;
 
     const messageElement = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
     if (!messageElement) return;
 
     messageElement.querySelector(`.${TRACKER_DISPLAY_BLOCK_CLASS}`)?.remove();
+    if (getSettings().postNarrationTrackerEnabled === false) return;
+    if (!trackerSnapshot?.npcs) return;
+
+    ensureTrackerDisplayStyles();
+    const textElement = messageElement.querySelector('.mes_text');
+    if (!textElement) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = buildTrackerDisplayHtml(trackerSnapshot).trim();
+    const block = wrapper.firstElementChild;
+    if (!block) return;
+
+    const mediaWrapper = messageElement.querySelector('.mes_media_wrapper');
+    if (mediaWrapper) {
+        mediaWrapper.before(block);
+    } else {
+        textElement.after(block);
+    }
 }
 
 function renderAllTrackerDisplayBlocks(context = getContext()) {
@@ -2566,6 +2510,10 @@ function renderTrackerWidget(context = getContext()) {
     ensureTrackerDisplayStyles();
 
     const settings = getSettings();
+    if (settings.postNarrationTrackerEnabled === false) {
+        document.getElementById(TRACKER_WIDGET_ID)?.remove();
+        return;
+    }
     let widget = document.getElementById(TRACKER_WIDGET_ID);
     if (!widget) {
         widget = document.createElement('div');
@@ -3456,6 +3404,7 @@ function stripStructuredArtifacts(text) {
         .replace(/BEGIN_TRACKER_DELTA[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
         .replace(/\[STORY_ENGINE_NARRATOR_HANDOFF[\s\S]*?==BINDING_NARRATION_DIRECTIVE==[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
         .replace(/\[STORY_ENGINE_NARRATOR_DIRECTIVE[\s\S]*?==PROMPT==\s*/gi, '')
+        .replace(/\[STORY_ENGINE_NARRATOR_DIRECTIVE[\s\S]*?==NARRATOR_HANDOFF==\s*/gi, '')
         .replace(/&lt;pre_flight&gt;[\s\S]*?&lt;\/pre_flight&gt;\s*/gi, '')
         .replace(/<pre_flight>[\s\S]*?<\/pre_flight>\s*/gi, '')
         .replace(/<narrator_prompt_context_echo>[\s\S]*?<\/narrator_prompt_context_echo>\s*/gi, '')
@@ -3507,7 +3456,7 @@ function sanitizeAssistantNarration(text) {
     return cleaned || original;
 }
 
-function extractNarratorTrackerDeltaText(text) {
+function extractTrackerDeltaText(text) {
     const source = String(text ?? '');
     const fencedMatch = source.match(/```story_engine_tracker_delta\s*([\s\S]*?)```/i)
         || source.match(/```story_engine_tracker_delta\s*([\s\S]*?)(?=BEGIN_FINAL_NARRATION|$)/i);
@@ -3551,9 +3500,23 @@ function stripNarratorMetaPrefix(text) {
         return stripNarratorMetaPrefix(source.slice(promptDirective.index + promptDirective[0].length).trim());
     }
 
+    const handoffDirective = source.match(/(?:^|\n)\s*==NARRATOR_HANDOFF==\s*\n+/i);
+    if (handoffDirective && handoffDirective.index < 4000) {
+        return stripNarratorMetaPrefix(source.slice(handoffDirective.index + handoffDirective[0].length).trim());
+    }
+
     const bindingDirective = source.match(/(?:^|\n)\s*==BINDING_NARRATION_DIRECTIVE==\s*\n+/i);
     if (bindingDirective && bindingDirective.index < 4000) {
         return stripNarratorMetaPrefix(source.slice(bindingDirective.index + bindingDirective[0].length).trim());
+    }
+
+    const resolvedFactsDirective = source.match(/(?:^|\n)\s*==RESOLVED_SCENE_FACTS==\s*\n+/i);
+    if (resolvedFactsDirective && resolvedFactsDirective.index < 4000) {
+        const finalCue = source.slice(resolvedFactsDirective.index + resolvedFactsDirective[0].length).match(/(?:^|\n)\s*BEGIN_FINAL_NARRATION\s*/i);
+        if (finalCue) {
+            const offset = resolvedFactsDirective.index + resolvedFactsDirective[0].length + finalCue.index + finalCue[0].length;
+            return stripNarratorMetaPrefix(source.slice(offset).trim());
+        }
     }
 
     const lengthTarget = source.match(/(?:^|\n)\s*(?:Length target|Hard maximum):\s*[^\n]*\n+/i);
@@ -3567,7 +3530,7 @@ function stripNarratorMetaPrefix(text) {
     }
 
     const prefix = source.slice(0, 2500);
-    if (!/\b(preflight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules|The user action)\b/i.test(prefix)) {
+    if (!/\b(preflight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules|The user action)\b/i.test(prefix)) {
         return source;
     }
 
@@ -3578,7 +3541,7 @@ function stripNarratorMetaPrefix(text) {
         if (
             !line
             || /^[-*]\s+/.test(line)
-            || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT)\b/i.test(line)
+            || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT)\b/i.test(line)
             || /\b(preflight|mechanics|formatting rules|Length target|Hard maximum|PRIVATE HANDOFF|should be|Let me)\b/i.test(line)
         ) {
             cut = index + 1;
@@ -3663,6 +3626,106 @@ async function persistMetadata(context = getContext()) {
     }
 }
 
+function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+    const report = pendingRun?.report || {};
+    const handoff = report?.finalNarrativeHandoff || {};
+    const resolution = handoff.resolutionPacket || {};
+    const previous = {
+        user: pendingRun?.userBefore || {},
+        npcs: pendingRun?.trackerBefore || {},
+    };
+    const mechanicalAfter = {
+        user: pendingRun?.userAfter || {},
+        npcs: pendingRun?.trackerAfter || {},
+    };
+    const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
+    const authority = {
+        messageKey,
+        latestUserText: pendingRun?.latestUserText || '',
+        resolution: {
+            goal: resolution.GOAL,
+            outcome: resolution.Outcome,
+            outcomeTier: resolution.OutcomeTier,
+            landedActions: resolution.LandedActions,
+            nonLethal: resolution.nonLethal,
+            actionTargets: resolution.ActionTargets,
+            oppTargets: resolution.OppTargets,
+            npcInScene: resolution.NPCInScene,
+            inflictedInjuries: resolution.InflictedInjuries,
+        },
+        npcHandoffs: handoff.npcHandoffs || [],
+        proactivityResults: handoff.proactivityResults || {},
+        aggressionResults: handoff.aggressionResults || {},
+        contextualInjuryCaps: pendingRun?.contextualInjuryCaps || [],
+        nameGeneration: handoff.nameGeneration || {},
+        activeNpcNames,
+    };
+    const firstContactPersonalitySeeds = (handoff.npcHandoffs || [])
+        .filter(npc => {
+            const name = String(npc?.NPC || '').trim();
+            if (!name || !trackerDisplaySnapshot?.npcs?.[name]) return false;
+            return !cleanPersonalitySummary(previous.npcs?.[name]?.personalitySummary)
+                && cleanPersonalitySummary(trackerDisplaySnapshot.npcs[name]?.personalitySummary);
+        })
+        .map(npc => ({
+            NPC: npc.NPC,
+            currentPersonalitySummary: trackerDisplaySnapshot.npcs[npc.NPC]?.personalitySummary || '',
+            behavior: npc.Behavior || '',
+            relationState: npc.FinalState || '',
+        }));
+
+    return [
+        'STORY_ENGINE_POST_NARRATION_TRACKER_UPDATE',
+        '',
+        'You update tracker state only. Do not narrate, roleplay, explain, or add prose.',
+        'Return exactly one story_engine_tracker_delta fenced block and nothing else.',
+        '',
+        '==TRACKER_CONTRACT==',
+        TRACKER_DELTA_CONTRACT,
+        'Use this exact shape:',
+        TRACKER_DELTA_TEMPLATE,
+        '',
+        '==PREVIOUS_TRACKER_SNAPSHOT==',
+        JSON.stringify(previous),
+        '',
+        '==MECHANICAL_TRACKER_AFTER==',
+        JSON.stringify(mechanicalAfter),
+        '',
+        '==MECHANICAL_TRACKER_AUTHORITY==',
+        JSON.stringify(authority),
+        '',
+        '==FIRST_CONTACT_PERSONALITY_SEEDS==',
+        JSON.stringify(firstContactPersonalitySeeds),
+        '',
+        '==FINAL_NARRATION==',
+        narrationText || '(empty)',
+        '',
+        '==OUTPUT==',
+    ].join('\n');
+}
+
+async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+    const prompt = buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot });
+    const responseLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
+    state.bypassPromptReady = true;
+    try {
+        return await withTrackerGenerationSettings(async settings => {
+            if (settings?.semanticProfileId) {
+                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
+                    temperature: 0,
+                });
+            }
+            const context = getContext();
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for post-narration tracker update.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
+        });
+    } finally {
+        state.bypassPromptReady = false;
+    }
+}
+
 async function prependComputedDebug(messageId, type) {
     const context = getContext();
     const messageKey = getMessageKey(messageId, context);
@@ -3679,6 +3742,8 @@ async function prependComputedDebug(messageId, type) {
     }
 
     clearPendingRunCleanupTimer();
+    setChatInputLocked(true, 'Updating tracker...');
+    const trackerToast = showProgress('Updating tracker...');
 
     try {
         message.extra = message.extra || {};
@@ -3686,7 +3751,6 @@ async function prependComputedDebug(messageId, type) {
         const currentText = String(message.mes ?? '');
         const displayText = message.extra.display_text == null ? null : String(message.extra.display_text);
         const rawAssistantText = displayText ?? currentText;
-        const trackerDeltaText = extractNarratorTrackerDeltaText(currentText) || extractNarratorTrackerDeltaText(displayText);
         const visibleText = stripComputedDebugPrefix(rawAssistantText);
         const narrationText = sanitizeAssistantNarration(visibleText);
         const narratorHandoff = state.lastNarratorHandoff;
@@ -3701,23 +3765,31 @@ async function prependComputedDebug(messageId, type) {
                 report: pendingRun.report,
                 assistantText: narrationText,
             });
-            if (trackerDeltaText) {
+
+            if (getSettings().postNarrationTrackerEnabled !== false) {
                 try {
-                    const sameRunDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
-                    const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(sameRunDelta, pendingRun.contextualInjuryCaps);
-                    trackerDisplaySnapshot = mergeNarratorTrackerDelta(trackerDisplaySnapshot, clampedTrackerDelta, {
+                    const trackerRaw = await requestPostNarrationTrackerDelta({
+                        pendingRun,
+                        messageKey,
+                        narrationText,
+                        trackerDisplaySnapshot,
+                    });
+                    const trackerDeltaText = extractTrackerDeltaText(trackerRaw) || String(trackerRaw || '');
+                    const postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
+                    const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
+                    trackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, clampedTrackerDelta, {
                         messageKey,
                         latestUserText: pendingRun.latestUserText,
                         assistantText: narrationText,
                     });
                 } catch (error) {
                     trackerDeltaWarning = error instanceof Error ? error.message : String(error);
-                    console.warn(`[${EXTENSION_NAME}] same-run tracker delta parse failed; keeping pre-reply tracker snapshot.`, error);
+                    console.warn(`[${EXTENSION_NAME}] post-narration tracker update failed; keeping mechanical tracker snapshot.`, error);
                 }
             } else {
-                trackerDeltaWarning = 'Narrator response did not include BEGIN_TRACKER_DELTA block.';
-                console.warn(`[${EXTENSION_NAME}] ${trackerDeltaWarning}`);
+                trackerDeltaWarning = 'Post-narration tracker update disabled by settings.';
             }
+
             await saveTrackerUpdate(context, buildTrackerUpdateForPersistence(trackerDisplaySnapshot), { save: false });
             root.snapshots[messageKey] = {
                 before: clone(pendingRun.trackerBefore),
@@ -3754,7 +3826,10 @@ async function prependComputedDebug(messageId, type) {
 
         clearRuntimePrompts();
         state.chatSignature = captureChatSignature(context);
-    } finally {}
+    } finally {
+        clearProgress(trackerToast);
+        setChatInputLocked(false);
+    }
 }
 
 async function handleMessageDeleted(newLength) {
@@ -3816,6 +3891,7 @@ async function handleMessageSwiped(messageId) {
 function handleChatChanged() {
     clearPendingRunCleanupTimer();
     clearAllProgress();
+    setChatInputLocked(false);
     const context = getContext();
     injectPromptOptionPrompts();
     getPlayerRoot(context);
@@ -3833,17 +3909,22 @@ function handleChatChanged() {
 }
 
 function handleGenerationLifecycleEnd() {
+    if (state.trackerUpdating) return;
     clearAllProgress();
     state.pendingGeneration = null;
     clearRuntimePrompts();
 
     if (state.pendingRun && !state.pendingRunCleanupTimer) {
+        if (getSettings().postNarrationTrackerEnabled !== false) {
+            setChatInputLocked(true, 'Updating tracker...');
+        }
         state.pendingRunCleanupTimer = setTimeout(() => {
             state.pendingRunCleanupTimer = null;
             if (!state.pendingRun) return;
             state.pendingRun = null;
             state.lastNarratorHandoff = '';
             state.lastNarratorHandoffKey = null;
+            setChatInputLocked(false);
             console.warn(`[${EXTENSION_NAME}] cleared pending pre-flight handoff because no assistant message was received after generation ended.`);
         }, 5000);
     }
@@ -3869,6 +3950,16 @@ function subscribeMessageHandler() {
 
 globalThis.StructuredPreflightEngines_generationInterceptor = async function (coreChat, contextSize, abort, type) {
     subscribeMessageHandler();
+
+    if (state.trackerUpdating) {
+        try {
+            globalThis.toastr?.info?.('Story Engine is updating the tracker. Please wait a moment before sending another message.', EXTENSION_NAME, { timeOut: 4000 });
+        } catch {
+            // Toasts are optional.
+        }
+        if (typeof abort === 'function') abort(true);
+        return true;
+    }
 
     if (state.runningSemanticPass) {
         const error = new Error('Structured preflight is already running. Generation aborted to avoid sending a narration without a valid audit.');
@@ -4061,6 +4152,7 @@ function abortGenerationAfterPromptReady(context) {
 export function onDisable() {
     const context = getContext();
     clearAllProgress();
+    setChatInputLocked(false);
     removeStreamingArtifactRegex();
     if (context?.extensionPrompts) {
         delete context.extensionPrompts[NARRATOR_PROMPT_KEY];
