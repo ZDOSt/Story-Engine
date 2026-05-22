@@ -2452,32 +2452,12 @@ function renderNarratorHandoffBlockForMessage(messageId, payload = null, context
 }
 
 function renderTrackerDisplayBlockForMessage(messageId, snapshot = null, context = getContext()) {
-    const message = context?.chat?.[messageId];
-    const trackerSnapshot = snapshot || getMessageTrackerDisplaySnapshot(message);
     if (typeof document === 'undefined') return;
 
     const messageElement = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
     if (!messageElement) return;
 
     messageElement.querySelector(`.${TRACKER_DISPLAY_BLOCK_CLASS}`)?.remove();
-    if (getSettings().postNarrationTrackerEnabled === false) return;
-    if (!trackerSnapshot?.npcs) return;
-
-    ensureTrackerDisplayStyles();
-    const textElement = messageElement.querySelector('.mes_text');
-    if (!textElement) return;
-
-    const wrapper = document.createElement('div');
-    wrapper.innerHTML = buildTrackerDisplayHtml(trackerSnapshot).trim();
-    const block = wrapper.firstElementChild;
-    if (!block) return;
-
-    const mediaWrapper = messageElement.querySelector('.mes_media_wrapper');
-    if (mediaWrapper) {
-        mediaWrapper.before(block);
-    } else {
-        textElement.after(block);
-    }
 }
 
 function renderAllTrackerDisplayBlocks(context = getContext()) {
