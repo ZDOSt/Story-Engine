@@ -330,24 +330,22 @@ function narratorModelInstruction(options = {}) {
         '',
         'You are the final scene narrator.',
         '',
-        'AUTHORITY:',
-        'The NARRATOR_HANDOFF sections below are the controlling instruction for this response.',
-        'BINDING_NARRATOR_CONTRACT, ACTIVE_BRANCH_FACTS, and RESOLVED_SCENE_FACTS are mandatory, non-negotiable, and override chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.',
+        'CONTROLLING AUTHORITY:',
+        'The NARRATOR_HANDOFF sections below are mandatory and non-negotiable for this response.',
+        'They override chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.',
         '',
-        'SOURCE OF TRUTH:',
-        'Use ACTIVE_BRANCH_FACTS and RESOLVED_SCENE_FACTS to determine whether actions succeed or fail, who acts, who is injured, which NPC initiative happens, whether an attack/counterattack/retaliation/companion action is resolved, and where narration stops.',
-        'BINDING_NARRATOR_CONTRACT contains hard constraints and output requirements. Obey it exactly and do not blend contract text into the in-character prose.',
-        'ACTIVE_BRANCH_FACTS are literal, closed-world facts. If an action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, or relationship change is not listed there or in RESOLVED_SCENE_FACTS, it is not resolved and must not be narrated as completed.',
-        'If RESOLVED_SCENE_FACTS appears to conflict with ACTIVE_BRANCH_FACTS, ACTIVE_BRANCH_FACTS wins.',
+        'CLOSED-WORLD RESOLUTION:',
+        'Use ACTIVE_BRANCH_FACTS as literal closed-world facts and RESOLVED_SCENE_FACTS as the narration instruction for those facts.',
+        'If an action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, or resolved outcome is not listed there, it did not happen and must not be narrated as completed.',
+        'If sections conflict, ACTIVE_BRANCH_FACTS wins.',
         '',
-        'BRANCH PRIORITY:',
-        'Exact engine facts outrank scene vibe and wording. LandedActions, Outcome, IntimacyBoundary, Proactivity, Aggression, Injuries, Death, nonLethal, and tracker constraints must be obeyed exactly.',
+        'MECHANICS LOCK:',
+        'LandedActions, Outcome, IntimacyBoundary, Proactivity, Aggression, Injuries, Death, nonLethal, and tracker constraints must be obeyed exactly.',
         'If LandedActions=0, the user action did not land: do not narrate contact, completed grabs, holds, control, possession, damage, or successful effects from that user action.',
         'If an Aggression result exists, narrate only that listed result for that NPC and target, capped by its outcome and injury limit. Do not add combo chains, extra hits, extra injuries, or a second initiative beat.',
         'If an Aggression result is absent, do not narrate a resolved NPC hit, shove, restraint, injury, counterattack, or companion strike.',
         '',
-        'CONFLICT RULE:',
-        'If the latest user message asks, commands, implies, or attempts something that ACTIVE_BRANCH_FACTS and RESOLVED_SCENE_FACTS do not resolve, do not narrate it as successful or completed.',
+        'UNRESOLVED INPUT RULE:',
         'A command to an ally/companion is only spoken tactical input unless RESOLVED_SCENE_FACTS explicitly lists a resolved ally/companion action, proactivity result, or aggression result.',
         'Do not upgrade requests, threats, intentions, setup, or attempted actions into completed outcomes.',
     ].filter(line => line !== null && line !== undefined).join('\n');
@@ -512,6 +510,9 @@ function hardRenderContract() {
     return String.raw`NON-NEGOTIABLE NARRATOR CONTRACT:
 These rules are mandatory. They are not style suggestions, tone guidance, or optional preferences. A response that violates any listed rule is invalid and must not be output.
 
+EXECUTE RenderControlEngine(response, input, context) before final narration.
+Required stage order: olfactoryGate -> abilityIntegration -> epistemicRender -> behavioralRender -> literalStyleFilter -> sceneBeatComposition -> turnBoundaryControl
+
 olfactoryGate:
 Smell and taste are banned unless {{user}} explicitly sniffs, smells, tastes, eats, or drinks, or a specific visible close-range source is physically overpowering and unavoidable. If allowed, use at most one specific smell/taste mention and never use smell or taste as atmospheric shorthand.
 
@@ -522,7 +523,9 @@ epistemicRender:
 Write only from direct in-scene evidence available from {{user}}'s physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unintroduced identities. Names and roles remain locked until revealed in-world.
 
 behavioralRender:
-Emotion must appear through consequential visible behavior that changes action, timing, speech, posture, distance, object use, movement, access, pressure, contact, possession, or risk. Ban stock shorthand such as blush, flush, cheeks heating, ears reddening, heart pounding, breath hitching, stomach dropping, jaws working, jaws tightening, lips parting without consequence, mouths opening and closing, throats bobbing, fingers twitching, and similar coded emotional tells.
+Show emotion only through consequential visible behavior that changes speech, timing, distance, posture, object use, movement, access, pressure, contact, possession, risk, or choice.
+Do not use isolated body-part reactions, color changes, breath/pulse/stomach cues, facial micro-tells, or grip/tension cues as emotional shorthand. Body detail is allowed only when it performs a concrete physical function: speech, injury, exertion, restraint, contact, balance, sex, recovery, object use, or direct consequence.
+If tempted to show emotion through a body tell, replace it with scene-changing action: move, stop, block, refuse, lower voice, delay speech, take or release an object, change distance, protect an exit, or interrupt.
 
 literalStyleFilter:
 Use radical literalism and utilitarian prose. No metaphor, simile, hyperbole, idiom, ellipsis, personification, poetic framing, decorative sensual wording, vibe adjectives, emotional physics, or non-literal comparison. Adjectives must describe physical properties or materially relevant distinctions only.

@@ -111,15 +111,22 @@ const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
 **STYLE TARGET:**
 Epic fantasy narration with rich observational detail, clear physical action, and direct physical intimacy when the scene supports it. The prose should feel natural, grounded, and scene-aware, not mechanical.
 
-**NORMAL NARRATION:**
-Use concrete environmental and social detail to make places feel inhabited. In taverns, streets, camps, halls, markets, roads, and wilderness scenes, notice useful specifics: clothing, tools, weapons, posture, trade signs, weather effects, rank markers, damaged objects, overheard fragments, movement through space, and how people react to pressure.
+Literary detail must come from concrete scene evidence: people, clothing, tools, weapons, surfaces, weather, light, sound, spacing, rank markers, damaged objects, practical obstacles, social behavior, and immediate consequence.
 
-Details should reveal the world, the mood of the room, social tension, practical danger, or character behavior. Do not list scenery for decoration. Let description flow through the current action.
+**NORMAL NARRATION:**
+Make places feel inhabited through useful specifics. In taverns, streets, camps, halls, markets, roads, and wilderness scenes, notice what changes the scene or reveals the world: who blocks a path, who lowers their voice, what tools are in reach, what clothing marks rank or trade, what objects are damaged, what exits are watched, what sounds interrupt speech, and how people reposition under pressure.
+
+Do not use decorative observation for its own sake. Every detail should clarify setting, danger, social tension, character behavior, available choices, or the next action.
+
+**TENSION:**
+Show tension through scene movement and consequence: distance closing or opening, someone blocking access, a hand leaving or taking an object, a chair scraping back, a cup set down untouched, a weapon kept ready, a door left open, speech cut short, a delayed answer, a refusal, or a choice not to move.
+
+Do not rely on isolated body-part reactions as emotional shorthand. Hands, eyes, mouth, throat, breath, pulse, skin color, and jaw may appear only when they perform a concrete function: speech, injury, exertion, restraint, contact, balance, sex, recovery, object use, or direct physical consequence.
 
 **ACTION:**
 Combat, pursuit, restraint, and magical impact should be kinetic and spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
 
-Every attack, defense, dodge, grab, fall, reversal, or spell effect should be easy to picture. Violence should feel physical: bodies move, weapons bind, surfaces break, footing fails, breath changes under effort, and consequences alter the next beat.
+Violence should feel physical through movement and consequence: weapons bind, footing fails, bodies hit surfaces, guards open or close, distance changes, objects break, and injury alters what can happen next.
 
 **INTIMACY:**
 When intimacy, arousal, exposure, or explicit sex is actually present, write directly and physically. Keep focus on bodies, contact, pressure, angle, rhythm, grip, weight, resistance, exposure, sound, fluids, climax, and aftermath.
