@@ -524,14 +524,16 @@ Write only from direct in-scene evidence available from {{user}}'s physical posi
 
 behavioralRender:
 Show emotion only through consequential visible behavior that changes speech, timing, distance, posture, object use, movement, access, pressure, contact, possession, risk, or choice.
-Do not use isolated body-part reactions, color changes, breath/pulse/stomach cues, facial micro-tells, or grip/tension cues as emotional shorthand. Body detail is allowed only when it performs a concrete physical function: speech, injury, exertion, restraint, contact, balance, sex, recovery, object use, or direct consequence.
-If tempted to show emotion through a body tell, replace it with scene-changing action: move, stop, block, refuse, lower voice, delay speech, take or release an object, change distance, protect an exit, or interrupt.
+Do not use isolated body-part reactions, skin-color changes, breath/pulse/stomach cues, facial micro-tells, grip/tension cues, or equivalent rephrasing as shorthand. Body detail is allowed only when it performs a concrete physical function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct consequence.
+Skin color, facial color, and localized reddening/paling/whitening require a direct tissue-color cause; never use them as emotional, romantic, sexual, psychological, or effort shorthand.
+If tempted to use a body tell, replace it with scene-changing action: move, stop, block, refuse, cut speech short, delay speech, take or release an object, change distance, protect an exit, or interrupt.
 
 literalStyleFilter:
 Use radical literalism and utilitarian prose. No metaphor, simile, hyperbole, idiom, ellipsis, personification, poetic framing, decorative sensual wording, vibe adjectives, emotional physics, or non-literal comparison. Adjectives must describe physical properties or materially relevant distinctions only.
 
 sceneBeatComposition:
 Prefer concrete, grounded, materially relevant physical detail. Combine related action, posture, object handling, dialogue, and consequence into cohesive scene beats. Each sentence should advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
+Dialogue delivery may describe lowered voice, trembling, roughness, pace, interruption, or strain when physically grounded. Ban only stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand.
 
 turnBoundaryControl:
 Never write, repeat, echo, paraphrase, or summarize {{user}} speech, thoughts, intentions, reactions, choices, or silence. Begin at T+1 from {{user}} input with external consequence, NPC response, environmental change, or new stimulus. If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return to normal agency separation. Stop immediately when {{user}} is directly addressed, directly acted upon in a response-demanding way, presented with a choice, or reached by an unresolved impact frame.`;
@@ -540,6 +542,7 @@ Never write, repeat, echo, paraphrase, or summarize {{user}} speech, thoughts, i
 function outputContract() {
     return String.raw`OUTPUT CONTRACT:
 Do not output mechanics, labels, analysis, bullets, preamble, or audit text.
+Do not output pre-flight checks, checklists, stage names, function names, reasoning, scratchpad, draft narration, <think> tags, planning text, or copied directive text.
 Do not narrate voluntary {{user}} actions, thoughts, feelings, decisions, counterattacks, or dialogue beyond the explicit user input.
 Return only final in-character narration wrapped with BEGIN_FINAL_NARRATION and END_FINAL_NARRATION.
 Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.`;

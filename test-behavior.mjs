@@ -7,6 +7,7 @@ import { TRACKER_DELTA_TEMPLATE } from 'file:///C:/Users/User/Documents/SillyTav
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/tracker-injury-caps.js';
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/tracker-name-promotions.js';
+import { sanitizeAssistantNarration, stripComputedDebugPrefix } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/narration-sanitizer.js';
 
 const stakeKeys = [
   'no_roll',
@@ -5446,6 +5447,46 @@ const tests = [
     },
   },
   {
+    name: '34a sanitizer strips narrator directive and scratchpad leakage',
+    run() {
+      const directiveLeak = [
+        'STORY_ENGINE_NARRATOR_DIRECTIVE',
+        'You are the final scene narrator.',
+        'CONTROLLING AUTHORITY:',
+        'The NARRATOR_HANDOFF sections below are mandatory and non-negotiable for this response.',
+        '',
+        'BEGIN_FINAL_NARRATION',
+        'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+        'END_FINAL_NARRATION',
+      ].join('\n');
+      assert.equal(
+        sanitizeAssistantNarration(directiveLeak),
+        'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+      );
+
+      const scratchpadLeak = [
+        'PRE-FLIGHT CHECK:',
+        '',
+        '1. olfactoryGate: No explicit sniff/smell/taste from user. -> SMELL/TASTE BANNED.',
+        '2. abilityIntegration: No abilities activated.',
+        '3. epistemicRender: Direct observation available.',
+        'NO IntimacyBoundary permission active - Naomi is friendly but no sexual escalation permitted.',
+        'Name: Naomi already revealed through self-introduction in prior beat. Use Naomi.',
+        'Tense check: STRICT PRESENT TENSE.',
+        'Perspective check: STRICT SECOND PERSON for Aelemar.',
+        'Draft narration:',
+        '- Naomi reaction to compliment',
+        '- Her response to spin request',
+        '</think>Naomi looks down at her skirt, pinches the hem between thumb and forefinger, and steps back from the doorway.',
+        '"A ballerina? Like this?"',
+      ].join('\n');
+      assert.equal(
+        stripComputedDebugPrefix(scratchpadLeak),
+        'Naomi looks down at her skirt, pinches the hem between thumb and forefinger, and steps back from the doorway.\n"A ballerina? Like this?"',
+      );
+    },
+  },
+  {
     name: '35 name promotion does not retire established named NPCs',
     run() {
       const text = 'Seraphina and I enter a ruined roadside shrine at dusk. A wounded merchant named Darai is pinned behind a broken pillar.';
@@ -6216,6 +6257,40 @@ const tests = [
       assert.match(text, /explicit boundary violation or pressure past refusal/i);
       assert.match(text, /Mira: counterattack exploiting the opening/i);
       assert.match(text, /Respect active boundary pressure/i);
+    },
+  },
+  {
+    name: '45 writing style placement labels and depth wiring are correct',
+    run() {
+      const source = fs.readFileSync('C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/index.js', 'utf8');
+      assert.match(source, /<option value="before_prompt">↑ Char<\/option>/);
+      assert.match(source, /<option value="in_prompt">↓ Char<\/option>/);
+      assert.doesNotMatch(source, /â†|Ã¢/);
+      assert.match(source, /writingStylePlacement:\s*'before_prompt'/);
+      assert.match(source, /writingStyleDepth:\s*0/);
+      assert.match(source, /injectMovablePrompt\(\s*WRITING_STYLE_PROMPT_KEY,\s*promptText,\s*settings\.writingStylePlacement,\s*settings\.writingStyleDepth,\s*settings\.writingStyleRole,\s*\)/);
+      assert.match(source, /context\.setExtensionPrompt\(\s*key,\s*text,\s*position,\s*normalizePromptDepth\(depth\),\s*false,\s*normalizePromptRole\(role\),\s*\)/);
+      assert.match(source, /const showDepth = placement === 'in_chat';/);
+      assert.match(source, /if \(depthRow\) depthRow\.hidden = !showDepth;/);
+    },
+  },
+  {
+    name: '46 prose rules block body and vocal shorthand equivalents',
+    run() {
+      const indexSource = fs.readFileSync('C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/index.js', 'utf8');
+      const handoffSource = fs.readFileSync('C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/pre-flight.js', 'utf8');
+      assert.match(indexSource, /Equivalent phrasing is also banned/);
+      assert.match(indexSource, /localized reddening\/paling\/whitening/);
+      assert.match(indexSource, /Dialogue delivery is allowed when physically grounded/);
+      assert.match(indexSource, /barely above a whisper/);
+      assert.match(indexSource, /knuckles whitening/);
+      assert.match(indexSource, /lowered voice/);
+      assert.match(indexSource, /trembling/);
+      assert.match(handoffSource, /equivalent rephrasing as shorthand/);
+      assert.match(handoffSource, /localized reddening\/paling\/whitening/);
+      assert.match(handoffSource, /Dialogue delivery may describe lowered voice, trembling/);
+      assert.match(handoffSource, /barely above a whisper/);
+      assert.doesNotMatch(handoffSource, /trembling voice, breathy line, hiss, growl/);
     },
   },
 ];

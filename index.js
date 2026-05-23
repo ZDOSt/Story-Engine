@@ -18,6 +18,7 @@ import {
     buildStreamingArtifactRegexScript,
 } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
+import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
 
 const EXTENSION_NAME = 'Story Engine';
 const SETTINGS_KEY = 'structuredPreflightEngines';
@@ -114,14 +115,14 @@ Epic fantasy narration with rich observational detail, clear physical action, an
 Literary detail must come from concrete scene evidence: people, clothing, tools, weapons, surfaces, weather, light, sound, spacing, rank markers, damaged objects, practical obstacles, social behavior, and immediate consequence.
 
 **NORMAL NARRATION:**
-Make places feel inhabited through useful specifics. In taverns, streets, camps, halls, markets, roads, and wilderness scenes, notice what changes the scene or reveals the world: who blocks a path, who lowers their voice, what tools are in reach, what clothing marks rank or trade, what objects are damaged, what exits are watched, what sounds interrupt speech, and how people reposition under pressure.
+Make places feel inhabited through useful specifics. In taverns, streets, camps, halls, markets, roads, and wilderness scenes, notice what changes the scene or reveals the world: who blocks a path, who cuts speech short, what tools are in reach, what clothing marks rank or trade, what objects are damaged, what exits are watched, what sounds interrupt speech, and how people reposition under pressure.
 
 Do not use decorative observation for its own sake. Every detail should clarify setting, danger, social tension, character behavior, available choices, or the next action.
 
 **TENSION:**
 Show tension through scene movement and consequence: distance closing or opening, someone blocking access, a hand leaving or taking an object, a chair scraping back, a cup set down untouched, a weapon kept ready, a door left open, speech cut short, a delayed answer, a refusal, or a choice not to move.
 
-Do not rely on isolated body-part reactions as emotional shorthand. Hands, eyes, mouth, throat, breath, pulse, skin color, and jaw may appear only when they perform a concrete function: speech, injury, exertion, restraint, contact, balance, sex, recovery, object use, or direct physical consequence.
+Do not rely on isolated body-part, skin-color, grip, breath, pulse, throat, jaw, expression, or voice-delivery cues as shorthand. They may appear only when they perform a concrete function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct physical consequence.
 
 **ACTION:**
 Combat, pursuit, restraint, and magical impact should be kinetic and spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
@@ -201,15 +202,17 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Emotion may appear only through consequential visible behavior. A valid emotional cue must materially affect speech, posture, distance, objects, timing, movement, access, pressure, contact, possession, risk, or choice.
 
     rules:
-      - Use behavior that changes the scene: approach, retreat, block, interrupt, hesitate before answering, mishandle an object, miss a routine, alter stance, lower a voice, change distance, withhold an item, refuse contact, protect an exit, or choose not to move.
+      - Use behavior that changes the scene: approach, retreat, block, interrupt, hesitate before answering, mishandle an object, miss a routine, alter stance, cut speech short, change distance, withhold an item, refuse contact, protect an exit, or choose not to move.
       - Use physical action specific enough to be seen in person.
       - Make the character do something that changes access, pressure, contact, possession, timing, speech, or risk.
       - Let behavior emerge from the current situation. Do not substitute a stock emotional signal for actual scene behavior.
-      - Breath and body parts may appear only for function, exertion, injury, panic, restraint, sex, contact, position, recovery, or speech-affecting breath. They may not appear as coded emotion.
+      - Body, face, breath, pulse, throat, jaw, hand, grip, eye, expression, and skin-color cues may appear only for concrete physical function. They may not appear as shorthand for emotion, romance, sexuality, psychology, tension, determination, fear, consent, resistance, or effort without direct consequence.
+      - Skin color, facial color, and localized reddening/paling/whitening may appear only for direct tissue-color causes: injury, illness, blood loss, heat, cold, choking, poison, visible magic effect, makeup, lighting, species trait, existing complexion, bruising, or direct material pressure.
+      - Equivalent phrasing is also banned. Rewording the same shortcut with substitute language is still invalid.
 
     ABSOLUTE BAN:
       - Internal-state labels, canned body-language shorthand, somatic emotional shorthand, autonomic tells used as emotion labels, micro-expression shorthand, body-part emotion metonymy, and empty expressive gestures that do not affect action, speech, timing, objects, or space.
-      - Stock shorthand including blush, flush, cheeks heating, ears reddening, heart pounding, pulse jumping, breath catching, breath hitching, breath stalling, stomach dropping, stomach twisting, jaw working, jaw tightening, muscle in the jaw tightening or working, throat working, throat bobbing, lips parting without consequence, mouth opening and closing, fingers twitching, shadows falling over eyes, eyes darkening or softening, expression flickering, face softening, and similar coded emotional shortcuts.
+      - Stock shorthand or equivalents, including blush/flush color cues, cheeks or ears reddening, face paling, knuckles whitening, grip-color language, heart/pulse/breath/stomach cues, jaw setting/tightening/clenching, throat working/bobbing, lips parting without consequence, mouth opening and closing, fingers twitching, shadows over eyes, eyes darkening/softening, expression flickering, face softening, and similar coded shortcuts.
 
   literalStyleFilter(response):
     policy: LOCKED, EXPLICIT-ONLY
@@ -237,15 +240,16 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Keep same-speaker action and dialogue together when they belong to one beat.
       - Prefer one strong NPC beat that creates a response point for {{user}} over several small fragments from the same speaker.
       - Keep dialogue reactive, pressured, specific, and short enough to preserve turn flow.
+      - Dialogue delivery is allowed when physically grounded. Volume, pace, roughness, trembling, lowered voice, interruption, or vocal strain may be described when it changes audibility, privacy, speech control, injury, fatigue, fear, anger, restraint, intimacy, or scene pressure.
       - Each sentence must advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
 
     pattern:
-      - "She lowered her voice and pushed the cup across the table. \"Drink. You look like you need it. Besides, we're not leaving until morning.\""
+      - "She pushed the cup across the table and kept two fingers on the rim until he took it. \"Drink. You look like you need it. Besides, we're not leaving until morning.\""
       - "He glanced at the seal, folded the letter into his coat, and moved his shoulder between {{user}} and the stairs."
       - "The guard stepped into the doorway and hooked two fingers under his belt. \"Road's closed.\""
 
     ABSOLUTE BAN:
-      - Robotic one-action-per-sentence cadence, repetitive subject-verb action lists, pingpong structure, isolated speech balloons, same-speaker fragmentation, and narration/speech/narration/speech chains from the same NPC before {{user}} can respond.
+      - Robotic one-action-per-sentence cadence, repetitive subject-verb action lists, pingpong structure, isolated speech balloons, same-speaker fragmentation, narration/speech/narration/speech chains from the same NPC before {{user}} can respond, and stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand instead of physically grounded delivery.
 
   turnBoundaryControl(response, context):
     policy: LOCKED, EXPLICIT-ONLY
@@ -805,8 +809,8 @@ function renderSettingsPanel() {
                     <div class="flex-container alignItemsBaseline">
                         <label for="structured_preflight_writingStyle_placement">Placement</label>
                         <select id="structured_preflight_writingStyle_placement" class="text_pole flex1">
-                            <option value="before_prompt">â†‘Char</option>
-                            <option value="in_prompt">â†“Char</option>
+                            <option value="before_prompt">↑ Char</option>
+                            <option value="in_prompt">↓ Char</option>
                             <option value="in_chat">In-Chat @Depth</option>
                             <option value="none">Disabled</option>
                         </select>
@@ -3365,38 +3369,11 @@ function firstChangedIndex(before, after) {
     return max;
 }
 
-function stripComputedDebugPrefix(text) {
-    return stripNarratorMetaPrefix(stripStructuredArtifacts(text)).trimStart();
-}
-
 function extractLegacyNarratorHandoff(text) {
     const source = String(text ?? '');
     const match = source.match(/<narrator_prompt_context_echo>\s*([\s\S]*?)\s*<\/narrator_prompt_context_echo>/i)
         || source.match(/&lt;narrator_prompt_context_echo&gt;\s*([\s\S]*?)\s*&lt;\/narrator_prompt_context_echo&gt;/i);
     return match?.[1]?.trim() || '';
-}
-
-function stripStructuredArtifacts(text) {
-    return String(text ?? '')
-        .replace(/````text\s*\n?&lt;pre_flight&gt;[\s\S]*?&lt;\/pre_flight&gt;\s*````\s*/gi, '')
-        .replace(/````text\s*\n?<pre_flight>[\s\S]*?<\/pre_flight>\s*````\s*/gi, '')
-        .replace(/````text\s*\n?<narrator_prompt_context_echo>[\s\S]*?<\/narrator_prompt_context_echo>\s*````\s*/gi, '')
-        .replace(/```story_engine_tracker_delta\s*[\s\S]*?```\s*/gi, '')
-        .replace(/```story_engine_tracker_delta\s*[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
-        .replace(/<!--\s*STORY_ENGINE_TRACKER_DELTA[\s\S]*?STORY_ENGINE_TRACKER_DELTA_END\s*-->\s*/gi, '')
-        .replace(/&lt;!--\s*STORY_ENGINE_TRACKER_DELTA[\s\S]*?STORY_ENGINE_TRACKER_DELTA_END\s*--&gt;\s*/gi, '')
-        .replace(/<trackers>[\s\S]*?<\/trackers>\s*/gi, '')
-        .replace(/&lt;trackers&gt;[\s\S]*?&lt;\/trackers&gt;\s*/gi, '')
-        .replace(/BEGIN_TRACKER_DELTA[\s\S]*?END_TRACKER_DELTA\s*/gi, '')
-        .replace(/BEGIN_TRACKER_DELTA[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
-        .replace(/\[STORY_ENGINE_NARRATOR_HANDOFF[\s\S]*?==BINDING_NARRATION_DIRECTIVE==[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
-        .replace(/\[STORY_ENGINE_NARRATOR_DIRECTIVE[\s\S]*?==PROMPT==\s*/gi, '')
-        .replace(/\[STORY_ENGINE_NARRATOR_DIRECTIVE[\s\S]*?==NARRATOR_HANDOFF==\s*/gi, '')
-        .replace(/&lt;pre_flight&gt;[\s\S]*?&lt;\/pre_flight&gt;\s*/gi, '')
-        .replace(/<pre_flight>[\s\S]*?<\/pre_flight>\s*/gi, '')
-        .replace(/<narrator_prompt_context_echo>[\s\S]*?<\/narrator_prompt_context_echo>\s*/gi, '')
-        .replace(/BEGIN_FINAL_NARRATION\s*/gi, '')
-        .replace(/\s*END_FINAL_NARRATION/gi, '');
 }
 
 function migrateVisibleHandoffDisplays(context = getContext()) {
@@ -3432,17 +3409,6 @@ function migrateVisibleHandoffDisplays(context = getContext()) {
     return changed;
 }
 
-function sanitizeAssistantNarration(text) {
-    const original = String(text ?? '').trim();
-    if (!original) return original;
-
-    const withoutTracker = stripStructuredArtifacts(original).trim();
-    const tagged = withoutTracker.match(/BEGIN_FINAL_NARRATION\s*([\s\S]*?)\s*END_FINAL_NARRATION/i);
-    const source = tagged ? tagged[1].trim() : stripNarratorMetaPrefix(withoutTracker);
-    const cleaned = stripVisibleMechanicsLabels(stripStructuredArtifacts(source)).trim();
-    return cleaned || original;
-}
-
 function extractTrackerDeltaText(text) {
     const source = String(text ?? '');
     const fencedMatch = source.match(/```story_engine_tracker_delta\s*([\s\S]*?)```/i)
@@ -3454,90 +3420,6 @@ function extractTrackerDeltaText(text) {
         || source.match(/&lt;trackers&gt;([\s\S]*?)&lt;\/trackers&gt;/i);
     const match = (wrapperMatch?.[1] || source).match(/BEGIN_TRACKER_DELTA[\s\S]*?END_TRACKER_DELTA/i);
     return match?.[0] || '';
-}
-
-function stripVisibleMechanicsLabels(text) {
-    let cleaned = String(text ?? '').trimStart();
-    const label = '(?:Critical|Moderate|Minor)\\s+(?:Success|Failure)|Success|Failure|Stalemate|No\\s+Roll|Dominant\\s+Impact|Solid\\s+Impact|Light\\s+Impact|Checked|Deflected|Avoided|Struggle';
-    const patterns = [
-        new RegExp(`^\\s*(?:[*_~]{1,3})?\\s*(?:[\\[(])?\\s*${label}\\s*(?:[\\])])?\\s*(?:[*_~]{1,3})?\\s*(?:[-:\\u2013\\u2014]+)\\s*`, 'i'),
-        new RegExp(`^\\s*(?:Result|Outcome|OutcomeTier)\\s*[:=]\\s*(?:[*_~]{1,3})?\\s*(?:[\\[(])?\\s*${label}\\s*(?:[\\])])?\\s*(?:[*_~]{1,3})?\\s*(?:[-:\\u2013\\u2014]+)?\\s*`, 'i'),
-        new RegExp(`^\\s*(?:[*_~]{1,3})\\s*${label}\\s*(?:[-:\\u2013\\u2014]+)?\\s*(?:[*_~]{1,3})\\s*`, 'i'),
-    ];
-    let changed = true;
-    while (changed) {
-        changed = false;
-        for (const pattern of patterns) {
-            const next = cleaned.replace(pattern, '');
-            if (next !== cleaned) {
-                cleaned = next.trimStart();
-                changed = true;
-            }
-        }
-    }
-    return cleaned;
-}
-
-function stripNarratorMetaPrefix(text) {
-    const source = String(text ?? '').trim();
-    if (!source) return source;
-
-    const promptDirective = source.match(/(?:^|\n)\s*==PROMPT==\s*\n+/i);
-    if (promptDirective && promptDirective.index < 4000) {
-        return stripNarratorMetaPrefix(source.slice(promptDirective.index + promptDirective[0].length).trim());
-    }
-
-    const handoffDirective = source.match(/(?:^|\n)\s*==NARRATOR_HANDOFF==\s*\n+/i);
-    if (handoffDirective && handoffDirective.index < 4000) {
-        return stripNarratorMetaPrefix(source.slice(handoffDirective.index + handoffDirective[0].length).trim());
-    }
-
-    const bindingDirective = source.match(/(?:^|\n)\s*==BINDING_NARRATION_DIRECTIVE==\s*\n+/i);
-    if (bindingDirective && bindingDirective.index < 4000) {
-        return stripNarratorMetaPrefix(source.slice(bindingDirective.index + bindingDirective[0].length).trim());
-    }
-
-    const resolvedFactsDirective = source.match(/(?:^|\n)\s*==RESOLVED_SCENE_FACTS==\s*\n+/i);
-    if (resolvedFactsDirective && resolvedFactsDirective.index < 4000) {
-        const finalCue = source.slice(resolvedFactsDirective.index + resolvedFactsDirective[0].length).match(/(?:^|\n)\s*BEGIN_FINAL_NARRATION\s*/i);
-        if (finalCue) {
-            const offset = resolvedFactsDirective.index + resolvedFactsDirective[0].length + finalCue.index + finalCue[0].length;
-            return stripNarratorMetaPrefix(source.slice(offset).trim());
-        }
-    }
-
-    const lengthTarget = source.match(/(?:^|\n)\s*(?:Length target|Hard maximum):\s*[^\n]*\n+/i);
-    if (lengthTarget && lengthTarget.index < 4000) {
-        return source.slice(lengthTarget.index + lengthTarget[0].length).trim();
-    }
-
-    const finalWritingCue = source.match(/(?:^|\n)\s*(?:Let me write this|BEGIN_FINAL_NARRATION)[^\n]*\n*/i);
-    if (finalWritingCue && finalWritingCue.index < 4000) {
-        return source.slice(finalWritingCue.index + finalWritingCue[0].length).trim();
-    }
-
-    const prefix = source.slice(0, 2500);
-    if (!/\b(preflight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules|The user action)\b/i.test(prefix)) {
-        return source;
-    }
-
-    const lines = source.split(/\r?\n/);
-    let cut = 0;
-    for (let index = 0; index < Math.min(lines.length, 40); index += 1) {
-        const line = lines[index].trim();
-        if (
-            !line
-            || /^[-*]\s+/.test(line)
-            || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT)\b/i.test(line)
-            || /\b(preflight|mechanics|formatting rules|Length target|Hard maximum|PRIVATE HANDOFF|should be|Let me)\b/i.test(line)
-        ) {
-            cut = index + 1;
-            continue;
-        }
-        break;
-    }
-
-    return cut > 0 ? lines.slice(cut).join('\n').trim() : source;
 }
 
 function sanitizeFinalPromptHistory(chat) {
