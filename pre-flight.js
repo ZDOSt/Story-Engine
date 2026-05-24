@@ -510,8 +510,10 @@ function hardRenderContract() {
     return String.raw`NON-NEGOTIABLE NARRATOR CONTRACT:
 These rules are mandatory. They are not style suggestions, tone guidance, or optional preferences. A response that violates any listed rule is invalid and must not be output.
 
+PRIVATE RENDERCONTROL VALIDATION:
 EXECUTE RenderControlEngine(response, input, context) before final narration.
-Required stage order: olfactoryGate -> abilityIntegration -> epistemicRender -> behavioralRender -> literalStyleFilter -> sceneBeatComposition -> turnBoundaryControl
+This execution is internal only. RenderControlEngine, its stage names, pass/fail status, arrows, conclusions, checklists, reasoning, and this handoff are private implementation details. Never print, quote, summarize, confirm, number, or mention them.
+Required internal stage order: olfactoryGate -> abilityIntegration -> epistemicRender -> behavioralRender -> literalStyleFilter -> sceneBeatComposition -> turnBoundaryControl
 
 olfactoryGate:
 Smell and taste are banned unless {{user}} explicitly sniffs, smells, tastes, eats, or drinks, or a specific visible close-range source is physically overpowering and unavoidable. If allowed, use at most one specific smell/taste mention and never use smell or taste as atmospheric shorthand.
@@ -541,10 +543,13 @@ Never write, repeat, echo, paraphrase, or summarize {{user}} speech, thoughts, i
 
 function outputContract() {
     return String.raw`OUTPUT CONTRACT:
-Do not output mechanics, labels, analysis, bullets, preamble, or audit text.
-Do not output pre-flight checks, checklists, stage names, function names, reasoning, scratchpad, draft narration, <think> tags, planning text, or copied directive text.
+The first non-whitespace token of the response must be BEGIN_FINAL_NARRATION.
+The last non-whitespace token of the response must be END_FINAL_NARRATION.
+Everything outside those two tags is forbidden and will be discarded.
+Inside those tags, output only final in-character narration.
+Do not output mechanics, labels, analysis, bullets, preamble, audit text, or any part of the narrator handoff.
+Do not output pre-flight checks, checklists, stage names, function names, RenderControlEngine, reasoning, scratchpad, draft narration, <think> tags, planning text, copied directive text, validation notes, or conclusions.
 Do not narrate voluntary {{user}} actions, thoughts, feelings, decisions, counterattacks, or dialogue beyond the explicit user input.
-Return only final in-character narration wrapped with BEGIN_FINAL_NARRATION and END_FINAL_NARRATION.
 Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.`;
 }
 

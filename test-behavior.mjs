@@ -5484,6 +5484,51 @@ const tests = [
         stripComputedDebugPrefix(scratchpadLeak),
         'Naomi looks down at her skirt, pinches the hem between thumb and forefinger, and steps back from the doorway.\n"A ballerina? Like this?"',
       );
+
+      const renderControlLeak = [
+        '1. **olfactoryGate:** No explicit sniffing/tasting. No overpowering close-range source. -> LOCKED. No smell/taste.',
+        '',
+        '2. **abilityIntegration:** No active abilities or supernatural traits are being used.',
+        '',
+        '3. **epistemicRender:** Direct visual scene only.',
+        '',
+        '4. **behavioralRender:** No body-tell shorthand.',
+        '',
+        '5. **literalStyleFilter:** Keep narration literal.',
+        '',
+        '6. **sceneBeatComposition:** Advance the visible scene.',
+        '',
+        '7. **turnBoundaryControl:** Stop when the NPC response reaches the user.',
+        '',
+        'CONCLUSION: Valid to proceed with narration of Naomi entering and responding to the spin request.',
+        'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+      ].join('\n');
+      assert.equal(
+        sanitizeAssistantNarration(renderControlLeak),
+        'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+      );
+
+      const taggedWithLeak = [
+        '1. **olfactoryGate:** No smell/taste.',
+        'CONCLUSION: Valid to proceed.',
+        'BEGIN_FINAL_NARRATION',
+        'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+        'END_FINAL_NARRATION',
+        'post-generation note',
+      ].join('\n');
+      assert.equal(
+        sanitizeAssistantNarration(taggedWithLeak),
+        'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+      );
+
+      const partialTagLeak = [
+        'BEGIN_FINAL_NARRATION',
+        'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+      ].join('\n');
+      assert.equal(
+        sanitizeAssistantNarration(partialTagLeak),
+        'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+      );
     },
   },
   {

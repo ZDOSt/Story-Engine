@@ -1,3 +1,7 @@
+const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
+const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
+const RENDER_CONTROL_STAGE = '(?:olfactoryGate|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|turnBoundaryControl)';
+
 export function stripComputedDebugPrefix(text) {
     return stripNarratorMetaPrefix(stripStructuredArtifacts(text)).trimStart();
 }
@@ -6,11 +10,31 @@ export function sanitizeAssistantNarration(text) {
     const original = String(text ?? '').trim();
     if (!original) return original;
 
-    const withoutTracker = stripStructuredArtifacts(original).trim();
-    const tagged = withoutTracker.match(/BEGIN_FINAL_NARRATION\s*([\s\S]*?)\s*END_FINAL_NARRATION/i);
-    const source = tagged ? tagged[1].trim() : stripNarratorMetaPrefix(withoutTracker);
+    const tagged = extractFinalNarrationEnvelope(original);
+    const source = tagged
+        ? stripNarratorMetaPrefix(tagged)
+        : stripNarratorMetaPrefix(stripStructuredArtifacts(original).trim());
     const cleaned = stripVisibleMechanicsLabels(stripStructuredArtifacts(source)).trim();
     return cleaned || original;
+}
+
+function extractFinalNarrationEnvelope(text) {
+    const source = String(text ?? '');
+    const bothTags = source.match(new RegExp(`${FINAL_NARRATION_BEGIN}\\s*([\\s\\S]*?)\\s*${FINAL_NARRATION_END}`, 'i'));
+    if (bothTags) return bothTags[1].trim();
+
+    const beginTag = source.match(new RegExp(`${FINAL_NARRATION_BEGIN}\\s*`, 'i'));
+    if (beginTag) {
+        return source
+            .slice(beginTag.index + beginTag[0].length)
+            .replace(new RegExp(`\\s*${FINAL_NARRATION_END}[\\s\\S]*$`, 'i'), '')
+            .trim();
+    }
+
+    const endTag = source.match(new RegExp(`\\s*${FINAL_NARRATION_END}`, 'i'));
+    if (endTag) return source.slice(0, endTag.index).trim();
+
+    return '';
 }
 
 export function stripStructuredArtifacts(text) {
@@ -115,9 +139,9 @@ export function stripNarratorMetaPrefix(text) {
         if (
             !line
             || /^[-*]\s+/.test(line)
-            || /^\d+\.\s*(?:olfactoryGate|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|turnBoundaryControl)\b/i.test(line)
+            || new RegExp(`^\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\b`, 'i').test(line)
             || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary)\b/i.test(line)
-            || /\b(preflight|pre-flight|mechanics|formatting rules|Length target|Hard maximum|PRIVATE HANDOFF|should be|Let me|scratchpad|stage order)\b/i.test(line)
+            || /\b(preflight|pre-flight|mechanics|formatting rules|Length target|Hard maximum|PRIVATE HANDOFF|should be|Let me|scratchpad|stage order|RenderControlEngine)\b/i.test(line)
         ) {
             cut = index + 1;
             continue;
@@ -182,9 +206,12 @@ function isNarratorArtifactLine(line) {
     if (!text) return true;
     if (/^<\/?think\b/i.test(text)) return true;
     if (/^[-*]\s+/.test(text)) return true;
-    if (/^\d+\.\s*(?:olfactoryGate|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|turnBoundaryControl)\b/i.test(text)) return true;
+    if (new RegExp(`^\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\b`, 'i').test(text)) return true;
+    if (new RegExp(`^(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\s*(?:[*_~]{1,3})?\\s*:`, 'i').test(text)) return true;
+    if (/^(?:[*_~]{1,3})?\s*(?:CONCLUSION|VALIDATION CONCLUSION|FINAL CHECK|RENDER CHECK)\s*:/i.test(text)) return true;
+    if (/^(?:Valid to proceed|All checks pass|All good|Proceed with narration)\b/i.test(text)) return true;
     if (/^(?:STORY_ENGINE_NARRATOR_DIRECTIVE|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary|AUTHORITY|CONTROLLING AUTHORITY|CLOSED-WORLD RESOLUTION|MECHANICS LOCK|UNRESOLVED INPUT RULE|SOURCE OF TRUTH|BRANCH PRIORITY|CONFLICT RULE|OUTPUT CONTRACT|VALIDITY CONTRACT|BINDING_NARRATOR_CONTRACT|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|NARRATOR_HANDOFF|MODEL_INSTRUCTION|PROMPT)\b/i.test(text)) return true;
-    if (/^(?:You are the final scene narrator|The NARRATOR_HANDOFF sections|Use ACTIVE_BRANCH_FACTS|If an action, hit, injury|If sections conflict|LandedActions, Outcome|A command to an ally|Do not upgrade requests|Do not output|Return only final|Final narration may only|EXECUTE RenderControlEngine|Required stage order)\b/i.test(text)) return true;
+    if (/^(?:You are the final scene narrator|The NARRATOR_HANDOFF sections|Use ACTIVE_BRANCH_FACTS|If an action, hit, injury|If sections conflict|LandedActions, Outcome|A command to an ally|Do not upgrade requests|Do not output|Return only final|Final narration may only|EXECUTE RenderControlEngine|Required internal stage order|Required stage order)\b/i.test(text)) return true;
     return false;
 }
 
