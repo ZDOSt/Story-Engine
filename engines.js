@@ -390,9 +390,9 @@ function RelationshipEngine(npc, resolutionPacket) {
   updateRapport(currentRapport, target, rapportEligible):
     rule: positive encounter = target in [Bond,No Change]
     rule: negative encounter = target in [Hostility,Fear,FearHostility]
-    rule: rapportEligible = Y only for first tracked encounter or if this NPC's hidden active-time rapport cooldown has expired
+    rule: rapportEligible = Y only for first tracked encounter or if this NPC's hidden involved-time rapport cooldown has expired
     rule: cooldown expiry does not change rapport by itself; rapport changes only on the next qualifying interaction with this NPC
-    rule: when rapport is consumed by Bond or No Change, set this NPC's hidden cooldown to current active play time + 90 minutes
+    rule: when rapport is consumed by Bond or No Change, set this NPC's hidden cooldown to this NPC's current involved active time + 45 minutes
     if target in [Bond,No Change] and rapportEligible!=Y -> return {currentRapport:currentRapport}
     if target in [Bond,No Change] -> return {currentRapport:min(5,currentRapport+1)}
     if target in [Hostility,Fear,FearHostility] -> return {currentRapport:max(0,currentRapport-1)}
@@ -481,7 +481,7 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   execution:
     if npc not in resolutionPacket.NPCInScene -> return uninitialized handoff
-    read state, initialize disposition if missing, and check hidden active-time rapport cooldown
+    read state, initialize disposition if missing, and check hidden involved-time rapport cooldown
     read stakeChangeByOutcome for actual resolution outcome, set NPC_STAKES from benefit/harm vs none, audit benefit interaction, route disposition target
     hostilePressureResult = applyHostilePhysicalPressure(npc, resolutionPacket, state)
     if hostilePressureResult exists -> target = hostilePressureResult.target else target = routeDispositionTarget
@@ -489,7 +489,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     if hostilePressureResult exists -> deltas = hostilePressureResult.deltas else deltas = deriveDirection(target, audit, currentDisposition, rapport.currentRapport, resolutionPacket)
     update disposition and apply rapport reset if present
     if hostilePressureResult.dominatedFearBreak=Y and currentDisposition.F>=4 and currentDisposition.H>=3 -> lower currentDisposition.H by 1
-    save currentRapport, rapportCooldownUntilActiveMs, hostilePressure, hostileLandedPressure, dominantLock, and pressureMode to sceneTracker
+    save currentRapport, rapportActiveMs, rapportCooldownUntilActiveMs, hostilePressure, hostileLandedPressure, dominantLock, and pressureMode to sceneTracker
     classify disposition, update slowBondEvidence, check slowBondEligible, resolve threshold/override, and check establishedRelationship
     RelationToUserAction = {isDirect, isOpp, isBenefited, isHarmed}
     return NPC handoff including HostilePressure, HostileLandedPressure, DominantLock, PressureMode, and RelationToUserAction
@@ -1526,7 +1526,7 @@ export function buildNarrationGuidance(resolution, handoffs, chaos, proactivity,
 export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
-        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'rapportCooldownUntilActiveMs', 'userHistory', 'raceProfile', 'personalitySummary', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
+        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'rapportActiveMs', 'rapportCooldownUntilActiveMs', 'userHistory', 'raceProfile', 'personalitySummary', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'STAKES', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
@@ -1547,6 +1547,7 @@ export function trackerSummary(trackerUpdate) {
             disposition,
             `life:${value?.lifecycle ?? 'Active'}`,
             `rapport:${value?.currentRapport ?? 0}`,
+            `rapportActive:${value?.rapportActiveMs ?? 0}`,
             `rapportCooldown:${value?.rapportCooldownUntilActiveMs ?? 0}`,
             `history:${value?.userHistory?.knowsUser ?? 'N'}/${value?.userHistory?.standing ?? 'neutral'}`,
             `race:${value?.raceProfile?.category ?? 'unknown'}/${value?.raceProfile?.fearProfile ?? 'normal'}`,
@@ -1637,6 +1638,7 @@ export function normalizeTrackerEntry(value) {
     return {
         currentDisposition: normalizeDisposition(value?.currentDisposition),
         currentRapport: clamp(Number(value?.currentRapport ?? 0), 0, 5),
+        rapportActiveMs: Math.max(0, Math.floor(Number(value?.rapportActiveMs || 0))),
         rapportCooldownUntilActiveMs: Math.max(0, Math.floor(Number(value?.rapportCooldownUntilActiveMs || 0))),
         establishedRelationship: value?.establishedRelationship === 'Y' ? 'Y' : 'N',
         userHistory: normalizeUserHistory(value?.userHistory),

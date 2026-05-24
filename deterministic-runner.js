@@ -74,7 +74,7 @@ const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 const USER_PROACTIVITY_TARGET = '{{user}}';
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
-const RAPPORT_COOLDOWN_MS = 90 * 60 * 1000;
+const RAPPORT_COOLDOWN_MS = 45 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
 const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
@@ -332,6 +332,8 @@ function normalizeRapportClock(value = {}) {
     return {
         activeMs: Math.max(0, Math.floor(Number(value?.activeMs || 0))),
         lastActivityAt: Math.max(0, Math.floor(Number(value?.lastActivityAt || 0))),
+        activeDeltaMs: Math.max(0, Math.floor(Number(value?.activeDeltaMs || 0))),
+        idleGapIgnored: value?.idleGapIgnored === 'Y' ? 'Y' : 'N',
     };
 }
 
@@ -351,11 +353,16 @@ function advanceRapportClock(context, audit) {
     const clock = {
         activeMs: previous.activeMs + activeDeltaMs,
         lastActivityAt: now,
+        activeDeltaMs,
+        idleGapIgnored,
     };
 
     root.npcs = root.npcs || {};
     root.user = root.user || {};
-    root.rapportClock = clock;
+    root.rapportClock = {
+        activeMs: clock.activeMs,
+        lastActivityAt: clock.lastActivityAt,
+    };
     context.chatMetadata.structuredPreflightTracker = root;
     audit.push(`RAPPORT_CLOCK=${compact({ ...clock, elapsedMs, activeDeltaMs, idleGapIgnored })}`);
     return clock;
@@ -680,8 +687,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const rawState = trackerSnapshot[npc] || {};
         const firstTrackedEncounter = !rawState.currentDisposition;
         const state = normalizeTrackerEntry(rawState);
+        const rapportActiveDeltaMs = Math.max(0, Math.floor(Number(rapportClock?.activeDeltaMs || 0)));
+        let rapportActiveMs = state.rapportActiveMs + rapportActiveDeltaMs;
         let rapportCooldownUntilActiveMs = state.rapportCooldownUntilActiveMs;
-        const rapportEligible = firstTrackedEncounter || rapportClock.activeMs >= rapportCooldownUntilActiveMs;
+        const rapportEligible = firstTrackedEncounter || rapportActiveMs >= rapportCooldownUntilActiveMs;
         let currentDisposition = state.currentDisposition;
         let currentRapport = state.currentRapport;
         let hostilePressure = state.hostilePressure;
@@ -693,7 +702,11 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         let initMetadata = null;
 
         audit.push(`3.3 getCurrentRelationalState=${compact(state)}`);
-        audit.push(`3.3a rapportClock=${compact({ activeMs: rapportClock.activeMs, cooldownUntilActiveMs: rapportCooldownUntilActiveMs })}`);
+        audit.push(`3.3a rapportTimer=${compact({
+            npcActiveMs: rapportActiveMs,
+            addedActiveDeltaMs: rapportActiveDeltaMs,
+            cooldownUntilNpcActiveMs: rapportCooldownUntilActiveMs,
+        })}`);
         audit.push(`3.3b firstTrackedEncounter=${yn(firstTrackedEncounter)}`);
         audit.push(`3.3c rapportEligible=${yn(rapportEligible)}`);
 
@@ -740,7 +753,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const rapportConsumedCooldown = rapportEligible && consumesRapportCooldown(target, hostilePressureResult ? 'hostilePressure' : 'normal');
         currentRapport = rapport.currentRapport;
         if (rapportConsumedCooldown) {
-            rapportCooldownUntilActiveMs = rapportClock.activeMs + RAPPORT_COOLDOWN_MS;
+            rapportCooldownUntilActiveMs = rapportActiveMs + RAPPORT_COOLDOWN_MS;
         }
         hostilePressure = hostilePressureResult?.hostilePressure ?? hostilePressure;
         hostileLandedPressure = hostilePressureResult?.hostileLandedPressure ?? hostileLandedPressure;
@@ -777,6 +790,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             consumed: yn(rapportConsumedCooldown),
             cooldownMinutes: RAPPORT_COOLDOWN_MS / 60000,
             untilActiveMs: rapportCooldownUntilActiveMs,
+            npcActiveMs: rapportActiveMs,
         })}`);
 
         const deltas = hostilePressureResult?.deltas || boundaryPressureResult?.deltas || deriveDirection(target, currentDisposition, currentRapport, auditInteraction, resolutionPacket);
@@ -898,6 +912,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             ...state,
             currentDisposition,
             currentRapport,
+            rapportActiveMs,
             rapportCooldownUntilActiveMs,
             establishedRelationship,
             userHistory: initMetadata?.userHistory || state.userHistory,
