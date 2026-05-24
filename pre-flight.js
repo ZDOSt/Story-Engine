@@ -1080,7 +1080,7 @@ function intimacyBoundaryText(target) {
         return `Intimacy is permitted for ${npcName} because ${intimacyBoundarySourceText(target.IntimacyBoundarySource)}; narrate the NPC response naturally according to context, privacy, safety, mood, and personality. Do not reverse, withdraw, panic, or stop at the moment of follow-through unless new danger, interruption, explicit withdrawal, or established characterization makes that reversal concrete in-scene. Do not force explicit intimacy if the scene makes it implausible. Keep ${npcName}'s behavior aligned with: ${npcGuide}`;
     }
     if (target.IntimacyBoundary === 'DENY') {
-        return `Intimacy is not permitted for ${npcName} here. Narrate a refusal, deflection, pause, boundary, non-cooperation, or backing off; do not narrate reciprocation, compliance, arousal, escalating intimacy, or a successful intimate result. This denial alone is not a dice roll or relationship penalty. Tune the refusal as ${intimacyRefusalGuide(target)} Keep ${npcName}'s behavior aligned with: ${npcGuide}`;
+        return `Intimacy is not permitted for ${npcName}. Render the denial as a real boundary, not coyness, teasing, hesitation, or a conditional delay. Include a clear refusal and an active boundary action: moving hands away, blocking contact, covering or protecting the touched area, stepping back, creating distance, or otherwise stopping the intimate advance. If the attempted intimacy is physical, the boundary must be physical. Do not phrase the refusal as "not here", "not now", "later", "somewhere private", or any equivalent that implies intimacy would be accepted under different timing, privacy, location, or mood unless IntimacyBoundary is ALLOW. Do not narrate reciprocation, compliance, arousal, escalating intimacy, or a successful intimate result. This denial alone is not a dice roll or relationship penalty, but it is an explicit boundary for later turns. Tune the refusal as ${intimacyRefusalGuide(target)} Keep ${npcName}'s behavior aligned with: ${npcGuide}`;
     }
     return '';
 }
@@ -1354,19 +1354,19 @@ function deniedIntimacyCompatibleProactivityDescription(name, intent, target = '
         case 'Romantic_Nervous':
             return `${npc} shows romantic nervousness as part of the refusal through hesitation, careful wording, changed distance, object handling, or an interrupted routine while keeping the boundary clear.`;
         case 'Romantic_Flirt':
-            return `${npc} handles the refusal with playful or flirtatious deflection toward ${target}, keeping the tone warm if appropriate while still refusing intimacy.`;
+            return `${npc} handles the refusal with playful or flirtatious deflection toward ${target}, keeping the tone warm if appropriate while still setting a firm intimacy boundary.`;
         case 'Romantic_Attention':
-            return `${npc} gives ${target} focused romantic attention without allowing intimacy: closeness, careful notice, lingering presence, or a personal gesture while keeping the boundary clear.`;
+            return `${npc} gives ${target} focused romantic attention without allowing intimacy: careful notice, changed distance, lingering presence, or a personal gesture that does not invite contact while keeping the boundary clear.`;
         case 'Thoughtful_Gift':
             return `${npc} may still offer or prepare a small thoughtful gift for ${target}, chosen in a way that fits the NPC, setting, and current relationship.`;
         case 'Ask_Date':
-            return `${npc} may redirect toward a non-intimate romantic date later, with a believable public or ordinary plan, while making clear that intimacy is not happening now.`;
+            return `${npc} may redirect only toward a non-intimate romantic date, with a believable public or ordinary plan, while making clear that no intimate access is granted or implied.`;
         case 'Date_And_Confess':
             return '';
         case 'Partner_Intimacy':
-            return `${npc} shifts the partner intimacy impulse into affection, a check-in, or a private boundary-respecting moment without sexual or intimate escalation.`;
+            return `${npc} shifts the partner intimacy impulse into affection, a check-in, or a boundary-respecting moment without sexual or intimate escalation.`;
         case 'INTIMACY_OR_FLIRT':
-            return `${npc} may show only boundary-compatible flirtation or warmth toward ${target}; do not narrate intimacy.`;
+            return `${npc} may show only boundary-compatible flirtation or warmth toward ${target}; keep the intimacy boundary firm and do not narrate intimacy.`;
         default:
             return null;
     }
