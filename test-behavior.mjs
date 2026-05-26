@@ -5613,7 +5613,7 @@ const tests = [
     run() {
       const userText = "The bystander's name is Torvinash.";
       const assistantText = 'The bystander watched Aelemar without offering a name.';
-      const indexSource = fs.readFileSync('C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/index.js', 'utf8');
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const promotionFunction = indexSource.match(/function applyExplicitNamePromotions[\s\S]*?\n}\n/)?.[0] || '';
       assert.deepEqual(getExplicitNamePromotions(userText, ['bystander']), [{ oldName: 'bystander', newName: 'Torvinash' }]);
       assert.deepEqual(getExplicitNamePromotions(assistantText, ['bystander']), []);
@@ -6357,7 +6357,7 @@ const tests = [
   {
     name: '45 writing style placement labels and depth wiring are correct',
     run() {
-      const source = fs.readFileSync('C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/index.js', 'utf8');
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       assert.match(source, /<option value="before_prompt">↑ Char<\/option>/);
       assert.match(source, /<option value="in_prompt">↓ Char<\/option>/);
       assert.doesNotMatch(source, /â†|Ã¢/);
@@ -6372,8 +6372,8 @@ const tests = [
   {
     name: '46 prose rules block body and vocal shorthand equivalents',
     run() {
-      const indexSource = fs.readFileSync('C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/index.js', 'utf8');
-      const handoffSource = fs.readFileSync('C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/pre-flight.js', 'utf8');
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
       assert.match(indexSource, /Equivalent phrasing is also banned/);
       assert.match(indexSource, /localized reddening\/paling\/whitening/);
       assert.match(indexSource, /Dialogue delivery is allowed when physically grounded/);
@@ -6386,6 +6386,36 @@ const tests = [
       assert.match(handoffSource, /Dialogue delivery may describe lowered voice, trembling/);
       assert.match(handoffSource, /barely above a whisper/);
       assert.doesNotMatch(handoffSource, /trembling voice, breathy line, hiss, growl/);
+    },
+  },
+  {
+    name: '47 Prose Guard settings and prompt preserve mechanics while targeting prose violations',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.match(source, /postNarrationProseGuardEnabled:\s*true/);
+      assert.match(source, /proseGuardConnectionProfile:\s*PROSE_GUARD_PROFILE_CURRENT/);
+      assert.match(source, /id="structured_preflight_prose_guard_enabled"/);
+      assert.match(source, /id="structured_preflight_prose_guard_profile"/);
+      assert.match(source, /function buildProseGuardPrompt\(narrationText\)/);
+      assert.match(source, /Do not add new actions, remove valid actions, add reactions, add dialogue/);
+      assert.match(source, /success or failure, landed contact, injuries, death, condition, intimacy permission/);
+      assert.match(source, /equivalent workaround phrases/);
+      assert.match(source, /Do not replace a violation with another coded tell or workaround phrase/);
+      assert.match(source, /GOOD REPLACEMENT PATTERN/);
+    },
+  },
+  {
+    name: '48 Prose Guard runs before tracker and tracker receives corrected narration',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const guardIndex = source.indexOf('requestProseGuardCorrection(narrationText)');
+      const trackerIndex = source.indexOf('requestPostNarrationTrackerDelta({');
+      const displayIndex = source.indexOf('message.extra.display_text = narrationText');
+      assert.ok(guardIndex > 0, 'Prose Guard request call missing.');
+      assert.ok(trackerIndex > guardIndex, 'Tracker update must run after Prose Guard.');
+      assert.ok(displayIndex > trackerIndex, 'Final displayed narration should use the post-guard narration text.');
+      assert.match(source, /setChatInputLocked\(true, 'Finalizing narration\.\.\.'\)/);
+      assert.match(source, /Prose Guard failed; keeping sanitized narrator text/);
     },
   },
 ];

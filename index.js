@@ -31,6 +31,7 @@ const LEGACY_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_writing_style';
 const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
 const TRACKER_PROFILE_CURRENT = '<Current semantic profile>';
+const PROSE_GUARD_PROFILE_CURRENT = '<Current semantic profile>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 const TRACKER_DISPLAY_VERSION = 1;
@@ -293,6 +294,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     disableSemanticThinking: true,
     postNarrationTrackerEnabled: true,
     trackerConnectionProfile: TRACKER_PROFILE_CURRENT,
+    postNarrationProseGuardEnabled: true,
+    proseGuardConnectionProfile: PROSE_GUARD_PROFILE_CURRENT,
     writingStyleEnabled: true,
     writingStylePrompt: DEFAULT_WRITING_STYLE_PROMPT,
     writingStylePlacement: 'before_prompt',
@@ -566,6 +569,24 @@ async function withTrackerGenerationSettings(callback) {
     return await withSemanticGenerationSettings(callback);
 }
 
+async function withProseGuardGenerationSettings(callback) {
+    const settings = getSettings();
+    const proseGuardProfile = String(settings.proseGuardConnectionProfile || PROSE_GUARD_PROFILE_CURRENT).trim();
+    if (proseGuardProfile && proseGuardProfile !== PROSE_GUARD_PROFILE_CURRENT) {
+        const profile = getConnectionProfileByName(proseGuardProfile);
+        if (!profile) {
+            throw new Error(`Prose Guard connection profile "${proseGuardProfile}" was not found.`);
+        }
+        console.info(`[${EXTENSION_NAME}] using direct Prose Guard connection profile request: ${profile.name}`);
+        return await withConnectionProfileSecret(profile, () => callback({
+            disableSemanticThinking: settings.disableSemanticThinking !== false,
+            semanticProfileId: profile.id,
+            semanticProfileName: profile.name,
+        }));
+    }
+    return await withSemanticGenerationSettings(callback);
+}
+
 function setSelectOptions(select, values, placeholder, selectedValue, missingLabel = 'Missing') {
     if (!select) return;
     select.innerHTML = '';
@@ -677,6 +698,8 @@ function refreshSettingsControls() {
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const trackerProfileSelect = document.getElementById('structured_preflight_tracker_profile');
+    const proseGuardEnabledCheckbox = document.getElementById('structured_preflight_prose_guard_enabled');
+    const proseGuardProfileSelect = document.getElementById('structured_preflight_prose_guard_profile');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
     const disableThinkingCheckbox = document.getElementById('structured_preflight_disable_semantic_thinking');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
@@ -686,6 +709,7 @@ function refreshSettingsControls() {
 
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
+    if (proseGuardEnabledCheckbox) proseGuardEnabledCheckbox.checked = settings.postNarrationProseGuardEnabled !== false;
     if (disableThinkingCheckbox) disableThinkingCheckbox.checked = settings.disableSemanticThinking !== false;
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
     if (writingStylePrompt && writingStylePrompt.value !== settings.writingStylePrompt) {
@@ -713,9 +737,17 @@ function refreshSettingsControls() {
         settings.trackerConnectionProfile || TRACKER_PROFILE_CURRENT,
         'Profile not found',
     );
+    setSelectOptions(
+        proseGuardProfileSelect,
+        [PROSE_GUARD_PROFILE_CURRENT, ...getConnectionProfileNames()],
+        PROSE_GUARD_PROFILE_CURRENT,
+        settings.proseGuardConnectionProfile || PROSE_GUARD_PROFILE_CURRENT,
+        'Profile not found',
+    );
 
     if (profileSelect) profileSelect.disabled = !enabled;
     if (trackerProfileSelect) trackerProfileSelect.disabled = settings.postNarrationTrackerEnabled === false;
+    if (proseGuardProfileSelect) proseGuardProfileSelect.disabled = settings.postNarrationProseGuardEnabled === false;
     if (writingStylePrompt) writingStylePrompt.disabled = settings.writingStyleEnabled === false;
     if (writingStyleDrawer) {
         writingStyleDrawer.hidden = settings.writingStyleEnabled === false;
@@ -790,6 +822,15 @@ function renderSettingsPanel() {
                     <select id="structured_preflight_tracker_profile" class="text_pole flex1"></select>
                 </div>
                 <small>Runs after narration to update the visible tracker from final prose. Disable for compatibility with other tracker extensions.</small>
+                <label class="checkbox_label flexNoGap">
+                    <input id="structured_preflight_prose_guard_enabled" type="checkbox">
+                    <span>Enable Prose Guard</span>
+                </label>
+                <div class="flex-container alignItemsBaseline">
+                    <label for="structured_preflight_prose_guard_profile">Prose Guard connection profile</label>
+                    <select id="structured_preflight_prose_guard_profile" class="text_pole flex1"></select>
+                </div>
+                <small>Runs after narration and before tracker update. It edits only prose-rule violations and preserves scene outcomes.</small>
                 <hr>
                 <div class="flex-container alignItemsBaseline">
                     <label for="structured_preflight_name_style">Name style</label>
@@ -873,6 +914,16 @@ function renderSettingsPanel() {
     document.getElementById('structured_preflight_tracker_profile')?.addEventListener('change', event => {
         const selected = String(event.target?.value || TRACKER_PROFILE_CURRENT);
         settings.trackerConnectionProfile = selected || TRACKER_PROFILE_CURRENT;
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_prose_guard_enabled')?.addEventListener('change', event => {
+        settings.postNarrationProseGuardEnabled = Boolean(event.target?.checked);
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_prose_guard_profile')?.addEventListener('change', event => {
+        const selected = String(event.target?.value || PROSE_GUARD_PROFILE_CURRENT);
+        settings.proseGuardConnectionProfile = selected || PROSE_GUARD_PROFILE_CURRENT;
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_name_style')?.addEventListener('change', event => {
@@ -3495,6 +3546,83 @@ async function persistMetadata(context = getContext()) {
     }
 }
 
+function buildProseGuardPrompt(narrationText) {
+    return [
+        'STORY_ENGINE_PROSE_GUARD',
+        '',
+        'You are PROSE_GUARD, a strict prose compliance editor.',
+        '',
+        'TASK:',
+        'Edit TEXT_TO_CHECK only to remove prose-rule violations. Preserve the scene exactly.',
+        'If no violations exist, return TEXT_TO_CHECK unchanged.',
+        '',
+        'DO NOT CHANGE:',
+        '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
+        '- Do not add new actions, remove valid actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
+        '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
+        '',
+        'VIOLATION FAMILIES:',
+        '1. Stock body-emotion shorthand:',
+        'Ban blush, flush, cheeks heating, ears reddening, jaw tightening, jaw setting, jaw working, mouth firming, lips parting without consequence, throat bobbing, fingers twitching, knuckles whitening, breath hitching, breath catching, heart pounding, pulse jumping, stomach dropping, heat pooling, and equivalent workaround phrases.',
+        '',
+        '2. Skin-color shorthand:',
+        'Do not use reddening, paling, whitening, darkening, flushing, or color changes as emotional, romantic, sexual, psychological, or physical-effort shorthand.',
+        '',
+        '3. Lazy voice shorthand:',
+        'Ban trope phrases such as "barely above a whisper," "just above a whisper," "almost a whisper," "voice barely audible," "low murmur," "soft murmur," "a thread of sound," or equivalent canned quiet-voice phrasing. Low, quiet, shaking, hoarse, or trembling speech is allowed only when physically specific and not trope shorthand.',
+        '',
+        '4. Nonliteral prose:',
+        'Ban metaphor, simile, idiom, hyperbole, ellipsis, poetic framing, personification, emotional physics, vibe adjectives, decorative sensual haze, sensory analogy phrasing, atmospheric filler, and "not X, but Y" contrast constructions.',
+        '',
+        '5. Unsupported emotion labels:',
+        'Do not state feelings directly unless the text also shows consequential visible behavior.',
+        '',
+        'VALID REPLACEMENTS:',
+        'Replace violations with concrete, consequential physical behavior: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, or environmental interaction.',
+        'Do not replace a violation with another coded tell or workaround phrase.',
+        '',
+        'GOOD REPLACEMENT PATTERN:',
+        'Invalid: "Her jaw tightened. She spoke barely above a whisper."',
+        'Valid: "She set her hand against his wrist and pushed it away. Her voice dropped low enough that the words stayed between them."',
+        '',
+        'OUTPUT CONTRACT:',
+        'Return only the corrected narration text. No labels, bullets, commentary, markdown fences, XML, JSON, analysis, or preamble.',
+        '',
+        '==TEXT_TO_CHECK==',
+        narrationText || '(empty)',
+        '',
+        '==CORRECTED_TEXT==',
+    ].join('\n');
+}
+
+function sanitizeProseGuardResponse(raw, fallbackText) {
+    const extracted = extractGeneratedText(raw);
+    const cleaned = sanitizeAssistantNarration(stripStructuredArtifacts(stripNarratorMetaPrefix(extracted))).trim();
+    return cleaned || fallbackText;
+}
+
+async function requestProseGuardCorrection(narrationText) {
+    const prompt = buildProseGuardPrompt(narrationText);
+    const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
+    state.bypassPromptReady = true;
+    try {
+        return await withProseGuardGenerationSettings(async settings => {
+            if (settings?.semanticProfileId) {
+                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
+                    temperature: 0,
+                });
+            }
+            const context = getContext();
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for Prose Guard.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
+        });
+    } finally {
+        state.bypassPromptReady = false;
+    }
+}
+
 function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
     const report = pendingRun?.report || {};
     const handoff = report?.finalNarrativeHandoff || {};
@@ -3611,8 +3739,8 @@ async function prependComputedDebug(messageId, type) {
     }
 
     clearPendingRunCleanupTimer();
-    setChatInputLocked(true, 'Updating tracker...');
-    const trackerToast = showProgress('Updating tracker...');
+    setChatInputLocked(true, 'Finalizing narration...');
+    const finalizingToast = showProgress('Finalizing narration...');
 
     try {
         message.extra = message.extra || {};
@@ -3621,10 +3749,19 @@ async function prependComputedDebug(messageId, type) {
         const displayText = message.extra.display_text == null ? null : String(message.extra.display_text);
         const rawAssistantText = displayText ?? currentText;
         const visibleText = stripComputedDebugPrefix(rawAssistantText);
-        const narrationText = sanitizeAssistantNarration(visibleText);
+        let narrationText = sanitizeAssistantNarration(visibleText);
         const narratorHandoff = state.lastNarratorHandoff;
         const pendingRun = state.pendingRun;
         let trackerDeltaWarning = null;
+
+        if (getSettings().postNarrationProseGuardEnabled !== false && narrationText) {
+            try {
+                const proseGuardRaw = await requestProseGuardCorrection(narrationText);
+                narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
+            } catch (error) {
+                console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
+            }
+        }
 
         const root = getTrackerRoot(context);
         if (root && pendingRun) {
@@ -3696,7 +3833,7 @@ async function prependComputedDebug(messageId, type) {
         clearRuntimePrompts();
         state.chatSignature = captureChatSignature(context);
     } finally {
-        clearProgress(trackerToast);
+        clearProgress(finalizingToast);
         setChatInputLocked(false);
     }
 }
@@ -3784,8 +3921,9 @@ function handleGenerationLifecycleEnd() {
     clearRuntimePrompts();
 
     if (state.pendingRun && !state.pendingRunCleanupTimer) {
-        if (getSettings().postNarrationTrackerEnabled !== false) {
-            setChatInputLocked(true, 'Updating tracker...');
+        const settings = getSettings();
+        if (settings.postNarrationTrackerEnabled !== false || settings.postNarrationProseGuardEnabled !== false) {
+            setChatInputLocked(true, 'Finalizing narration...');
         }
         state.pendingRunCleanupTimer = setTimeout(() => {
             state.pendingRunCleanupTimer = null;
