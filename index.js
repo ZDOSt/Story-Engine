@@ -262,9 +262,9 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - First sentence must begin with external consequence, NPC response, environmental change, or new stimulus. It must not begin by recapping, echoing, paraphrasing, or summarizing {{user}}.
       - Never write {{user}} speech, thoughts, feelings, reactions, silence, decisions, or voluntary actions unless the narrator handoff explicitly enables PROXY USER ACTION MODE.
       - If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return immediately to normal agency separation.
-      - Stop immediately when {{user}} is directly addressed, directly acted upon in a response-demanding way, presented with a choice, or reached by an unresolved attack, impact, grab, demand, refusal, obstacle, or decision frame.
       - Allow at most 1 inter-NPC exchange and at most 3 sentences per monologue.
-      - End on a concrete playable beat that gives {{user}} something immediate to answer, resist, inspect, interrupt, take, refuse, choose, defend against, or act upon.
+      - End on the first concrete playable beat that directly involves {{user}}: a question, command, request, refusal, threat, incoming action, unresolved attack frame, impact, grab, obstacle, blocked access, revealed consequence, object in reach, changed position, or decision point that {{user}} can immediately answer, resist, inspect, interrupt, take, refuse, defend against, or act upon. Once that beat exists, stop immediately. Do not add any further narration after it.
+      - The final beat must not be ambient, decorative, environmental-only, crowd-only, side-character-only, mood-only, passive waiting, all-eyes-on-user framing, or unrelated scene noise. Do not end on background activity unless that activity directly creates an immediate obstacle, danger, opportunity, or demand for {{user}}.
 
     ABSOLUTE BAN:
       - Echoing, restating, paraphrasing, or summarizing {{user}} input; "as you" phrasing; opening recap transitions; writing beyond the response point; answering questions directed at {{user}}; ambient filler endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
