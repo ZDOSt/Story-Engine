@@ -6399,7 +6399,11 @@ const tests = [
       assert.match(source, /function buildProseGuardPrompt\(narrationText\)/);
       assert.match(source, /Do not add new actions, remove valid actions, add reactions, add dialogue/);
       assert.match(source, /success or failure, landed contact, injuries, death, condition, intimacy permission/);
-      assert.match(source, /equivalent workaround phrases/);
+      assert.match(source, /equivalent workaround phrase/);
+      assert.match(source, /words cannot land, drop, hang, cut, hit, weigh, burn, freeze, crawl/);
+      assert.match(source, /Smoke, rooms, silence, tension, heat, darkness, and atmosphere cannot breathe/);
+      assert.match(source, /dropped like a stone/);
+      assert.match(source, /the word lands flat and hard/);
       assert.match(source, /Do not replace a violation with another coded tell or workaround phrase/);
       assert.match(source, /GOOD REPLACEMENT PATTERN/);
     },
@@ -6416,6 +6420,13 @@ const tests = [
       assert.ok(displayIndex > trackerIndex, 'Final displayed narration should use the post-guard narration text.');
       assert.match(source, /setChatInputLocked\(true, 'Finalizing narration\.\.\.'\)/);
       assert.match(source, /Prose Guard failed; keeping sanitized narrator text/);
+      assert.match(source, /beginProseGuardDisplayIntercept\(type \|\| 'normal'\)/);
+      assert.match(source, /function ensureProseGuardDisplayInterceptor\(\)/);
+      assert.match(source, /function beginProseGuardDisplayIntercept\(type, dryRun = false\) \{\s*ensureProseGuardDisplayInterceptor\(\);/);
+      assert.match(source, /eventTypes\.GENERATION_STARTED\) context\.eventSource\.on\(context\.eventTypes\.GENERATION_STARTED, ensureProseGuardDisplayInterceptor\)/);
+      assert.match(source, /new MutationObserver\(mutations =>/);
+      assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: !finalNarrationRendered \}\)/);
+      assert.match(source, /Story Engine is finalizing narration/);
     },
   },
 ];

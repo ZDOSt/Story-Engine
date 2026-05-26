@@ -362,6 +362,14 @@ const state = {
     progressToasts: new Set(),
     pendingRunCleanupTimer: null,
     playerSetupBusy: false,
+    proseGuardHideNextMessage: false,
+    proseGuardGenerationType: null,
+    proseGuardChatObserver: null,
+    proseGuardStreamObserver: null,
+    proseGuardStreamElement: null,
+    proseGuardStreamOriginalHtml: '',
+    proseGuardStreamMessageId: null,
+    proseGuardStreamResetting: false,
 };
 
 function getContext() {
@@ -2490,12 +2498,132 @@ function ensureTrackerDisplayStyles() {
     document.head.append(style);
 }
 
+function getMessageElement(messageId) {
+    if (typeof document === 'undefined') return null;
+    return document.querySelector(`#chat .mes[mesid="${messageId}"]`);
+}
+
+function getMessageTextElement(messageId) {
+    return getMessageElement(messageId)?.querySelector?.('.mes_text') || null;
+}
+
+function shouldUseProseGuardDisplayIntercept(type) {
+    const normalizedType = String(type || 'normal');
+    return getSettings().postNarrationProseGuardEnabled !== false
+        && normalizedType !== 'impersonate'
+        && Boolean(state.pendingGeneration)
+        && ['normal', 'swipe', 'regenerate', 'continue'].includes(normalizedType);
+}
+
+function releaseProseGuardDisplayIntercept({ restore = false } = {}) {
+    if (state.proseGuardStreamObserver) {
+        state.proseGuardStreamObserver.disconnect();
+    }
+    if (restore && state.proseGuardStreamElement) {
+        state.proseGuardStreamElement.innerHTML = state.proseGuardStreamOriginalHtml || '';
+    }
+
+    state.proseGuardStreamObserver = null;
+    state.proseGuardStreamElement = null;
+    state.proseGuardStreamOriginalHtml = '';
+    state.proseGuardStreamMessageId = null;
+    state.proseGuardStreamResetting = false;
+    state.proseGuardHideNextMessage = false;
+    state.proseGuardGenerationType = null;
+}
+
+function attachProseGuardStreamIntercept(textElement, { preserveText = false, messageId = null } = {}) {
+    if (!textElement || typeof MutationObserver === 'undefined') return;
+
+    releaseProseGuardDisplayIntercept();
+    state.proseGuardStreamElement = textElement;
+    state.proseGuardStreamOriginalHtml = preserveText ? textElement.innerHTML : '';
+    state.proseGuardStreamMessageId = messageId;
+
+    if (!preserveText) {
+        textElement.innerHTML = '';
+    }
+
+    const observer = new MutationObserver(() => {
+        if (state.proseGuardStreamResetting) return;
+
+        state.proseGuardStreamResetting = true;
+        observer.disconnect();
+        textElement.innerHTML = state.proseGuardStreamOriginalHtml || '';
+        observer.observe(textElement, { childList: true, subtree: true, characterData: true });
+        state.proseGuardStreamResetting = false;
+    });
+
+    observer.observe(textElement, { childList: true, subtree: true, characterData: true });
+    state.proseGuardStreamObserver = observer;
+}
+
+function beginProseGuardDisplayIntercept(type, dryRun = false) {
+    ensureProseGuardDisplayInterceptor();
+
+    if (dryRun || !shouldUseProseGuardDisplayIntercept(type) || typeof document === 'undefined') {
+        releaseProseGuardDisplayIntercept();
+        return;
+    }
+
+    const normalizedType = String(type || 'normal');
+    state.proseGuardGenerationType = normalizedType;
+
+    if (['swipe', 'regenerate', 'continue'].includes(normalizedType)) {
+        const context = getContext();
+        const messageId = Array.isArray(context?.chat) ? context.chat.length - 1 : null;
+        if (messageId != null && !context.chat[messageId]?.is_user) {
+            attachProseGuardStreamIntercept(getMessageTextElement(messageId), {
+                preserveText: normalizedType === 'continue',
+                messageId,
+            });
+        }
+        return;
+    }
+
+    state.proseGuardHideNextMessage = true;
+}
+
+function ensureProseGuardDisplayInterceptor() {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    if (state.proseGuardChatObserver) return;
+
+    const chatElement = document.getElementById('chat');
+    if (!chatElement) return;
+
+    state.proseGuardChatObserver = new MutationObserver(mutations => {
+        if (!state.proseGuardHideNextMessage) return;
+
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (
+                    node?.nodeType === Node.ELEMENT_NODE
+                    && node.classList?.contains('mes')
+                    && node.getAttribute('is_user') !== 'true'
+                ) {
+                    const messageId = Number(node.getAttribute('mesid'));
+                    const textElement = node.querySelector('.mes_text');
+                    if (textElement) {
+                        state.proseGuardHideNextMessage = false;
+                        attachProseGuardStreamIntercept(textElement, {
+                            preserveText: false,
+                            messageId: Number.isFinite(messageId) ? messageId : null,
+                        });
+                    }
+                    return;
+                }
+            }
+        }
+    });
+    state.proseGuardChatObserver.observe(chatElement, { childList: true });
+}
+
 function renderNarratorHandoffBlockForMessage(messageId, payload = null, context = getContext()) {
     const message = context?.chat?.[messageId];
     const handoff = payload || getMessageNarratorHandoff(message);
     if (typeof document === 'undefined') return;
 
-    const messageElement = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
+    const messageElement = getMessageElement(messageId);
     if (!messageElement) return;
 
     messageElement.querySelector(`.${NARRATOR_HANDOFF_BLOCK_CLASS}`)?.remove();
@@ -2516,7 +2644,7 @@ function renderNarratorHandoffBlockForMessage(messageId, payload = null, context
 function renderTrackerDisplayBlockForMessage(messageId, snapshot = null, context = getContext()) {
     if (typeof document === 'undefined') return;
 
-    const messageElement = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
+    const messageElement = getMessageElement(messageId);
     if (!messageElement) return;
 
     messageElement.querySelector(`.${TRACKER_DISPLAY_BLOCK_CLASS}`)?.remove();
@@ -3563,27 +3691,34 @@ function buildProseGuardPrompt(narrationText) {
         '',
         'VIOLATION FAMILIES:',
         '1. Stock body-emotion shorthand:',
-        'Ban blush, flush, cheeks heating, ears reddening, jaw tightening, jaw setting, jaw working, mouth firming, lips parting without consequence, throat bobbing, fingers twitching, knuckles whitening, breath hitching, breath catching, heart pounding, pulse jumping, stomach dropping, heat pooling, and equivalent workaround phrases.',
+        'Ban stock physical tells used as emotion/sexual/effort shorthand. This includes blush, flush, cheeks heating, ears reddening, face paling, jaw tightening, jaw setting, jaw working, mouth firming, lips parting without consequence, throat bobbing, fingers twitching, knuckles whitening, grip color changes, breath hitching, breath catching, heart pounding, pulse jumping, stomach dropping, heat pooling, and any equivalent workaround phrase.',
+        'Do not preserve the same coded tell by rewording it. Replace it with action that changes contact, space, timing, posture, speech content, object handling, or visible consequence.',
         '',
         '2. Skin-color shorthand:',
-        'Do not use reddening, paling, whitening, darkening, flushing, or color changes as emotional, romantic, sexual, psychological, or physical-effort shorthand.',
+        'Do not use reddening, paling, whitening, darkening, flushing, or color changes as emotional, romantic, sexual, psychological, fear, pain, exertion, anger, embarrassment, arousal, or physical-effort shorthand.',
         '',
         '3. Lazy voice shorthand:',
-        'Ban trope phrases such as "barely above a whisper," "just above a whisper," "almost a whisper," "voice barely audible," "low murmur," "soft murmur," "a thread of sound," or equivalent canned quiet-voice phrasing. Low, quiet, shaking, hoarse, or trembling speech is allowed only when physically specific and not trope shorthand.',
+        'Ban canned quiet-voice phrasing and its equivalents: "barely above a whisper," "just above a whisper," "almost a whisper," "voice barely audible," "low murmur," "soft murmur," "a thread of sound," "a thin whisper," "a small voice," "a fragile whisper," or similar trope delivery. Low, quiet, shaking, hoarse, rough, strained, interrupted, or trembling speech is allowed only when physically specific and not canned shorthand.',
         '',
         '4. Nonliteral prose:',
         'Ban metaphor, simile, idiom, hyperbole, ellipsis, poetic framing, personification, emotional physics, vibe adjectives, decorative sensual haze, sensory analogy phrasing, atmospheric filler, and "not X, but Y" contrast constructions.',
+        'This includes abstract events treated as physical objects or forces: words cannot land, drop, hang, cut, hit, weigh, burn, freeze, crawl, bloom, bloom under skin, fill the room, stretch between people, fall like stones, or behave like weather/liquid/pressure. Smoke, rooms, silence, tension, heat, darkness, and atmosphere cannot breathe, swallow, press, listen, wait, coil, curl with intent, or otherwise act like characters.',
+        'Directly ban patterns like "the word lands flat and hard," "dropped like a stone," "like a stone on still water," "silence stretches," "tension coils," "the room holds its breath," and equivalent nonliteral replacements.',
         '',
         '5. Unsupported emotion labels:',
         'Do not state feelings directly unless the text also shows consequential visible behavior.',
         '',
+        '6. Decorative filler:',
+        'Remove or rewrite ornamental atmosphere that does not change action, visibility, sound, contact, footing, threat, or available choices. Keep environmental detail only when it materially affects the scene.',
+        '',
         'VALID REPLACEMENTS:',
         'Replace violations with concrete, consequential physical behavior: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, or environmental interaction.',
         'Do not replace a violation with another coded tell or workaround phrase.',
+        'Use literal sentences that preserve intensity through action and consequence, not poetic comparison.',
         '',
         'GOOD REPLACEMENT PATTERN:',
-        'Invalid: "Her jaw tightened. She spoke barely above a whisper."',
-        'Valid: "She set her hand against his wrist and pushed it away. Her voice dropped low enough that the words stayed between them."',
+        'Invalid: "Her jaw tightened. The word landed flat and hard, dropped like a stone between them."',
+        'Valid: "She set her hand against his wrist and pushed it away. She said the word once, low and clear, then stepped back to keep distance between them."',
         '',
         'OUTPUT CONTRACT:',
         'Return only the corrected narration text. No labels, bullets, commentary, markdown fences, XML, JSON, analysis, or preamble.',
@@ -3726,6 +3861,7 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
 async function prependComputedDebug(messageId, type) {
     const context = getContext();
     const messageKey = getMessageKey(messageId, context);
+    let finalNarrationRendered = false;
 
     if (!state.lastNarratorHandoff || state.lastNarratorHandoffKey === messageKey || type === 'impersonate') {
         clearRuntimePrompts();
@@ -3817,9 +3953,14 @@ async function prependComputedDebug(messageId, type) {
         state.lastNarratorHandoffKey = messageKey;
         state.lastNarratorHandoff = '';
 
+        releaseProseGuardDisplayIntercept();
         if (typeof context.updateMessageBlock === 'function') {
             context.updateMessageBlock(messageId, message);
+        } else {
+            const textElement = getMessageTextElement(messageId);
+            if (textElement) textElement.textContent = narrationText;
         }
+        finalNarrationRendered = true;
         renderNarratorHandoffBlockForMessage(messageId, null, context);
         renderTrackerDisplayBlockForMessage(messageId, null, context);
         renderTrackerWidget(context);
@@ -3833,6 +3974,7 @@ async function prependComputedDebug(messageId, type) {
         clearRuntimePrompts();
         state.chatSignature = captureChatSignature(context);
     } finally {
+        releaseProseGuardDisplayIntercept({ restore: !finalNarrationRendered });
         clearProgress(finalizingToast);
         setChatInputLocked(false);
     }
@@ -3898,6 +4040,7 @@ function handleChatChanged() {
     clearPendingRunCleanupTimer();
     clearAllProgress();
     setChatInputLocked(false);
+    releaseProseGuardDisplayIntercept();
     const context = getContext();
     injectPromptOptionPrompts();
     getPlayerRoot(context);
@@ -3920,7 +4063,9 @@ function handleGenerationLifecycleEnd() {
     state.pendingGeneration = null;
     clearRuntimePrompts();
 
-    if (state.pendingRun && !state.pendingRunCleanupTimer) {
+    if (!state.pendingRun) {
+        releaseProseGuardDisplayIntercept({ restore: true });
+    } else if (!state.pendingRunCleanupTimer) {
         const settings = getSettings();
         if (settings.postNarrationTrackerEnabled !== false || settings.postNarrationProseGuardEnabled !== false) {
             setChatInputLocked(true, 'Finalizing narration...');
@@ -3931,6 +4076,7 @@ function handleGenerationLifecycleEnd() {
             state.pendingRun = null;
             state.lastNarratorHandoff = '';
             state.lastNarratorHandoffKey = null;
+            releaseProseGuardDisplayIntercept({ restore: true });
             setChatInputLocked(false);
             console.warn(`[${EXTENSION_NAME}] cleared pending pre-flight handoff because no assistant message was received after generation ended.`);
         }, 5000);
@@ -3949,6 +4095,7 @@ function subscribeMessageHandler() {
     if (context.eventTypes.MESSAGE_SWIPED) context.eventSource.on(context.eventTypes.MESSAGE_SWIPED, handleMessageSwiped);
     if (context.eventTypes.CHAT_CHANGED) context.eventSource.on(context.eventTypes.CHAT_CHANGED, handleChatChanged);
     if (context.eventTypes.CHAT_CREATED) context.eventSource.on(context.eventTypes.CHAT_CREATED, handleChatChanged);
+    if (context.eventTypes.GENERATION_STARTED) context.eventSource.on(context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
     if (context.eventTypes.GENERATION_ENDED) context.eventSource.on(context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
     if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
     if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
@@ -3960,7 +4107,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
     if (state.trackerUpdating) {
         try {
-            globalThis.toastr?.info?.('Story Engine is updating the tracker. Please wait a moment before sending another message.', EXTENSION_NAME, { timeOut: 4000 });
+            globalThis.toastr?.info?.('Story Engine is finalizing narration. Please wait a moment before sending another message.', EXTENSION_NAME, { timeOut: 4000 });
         } catch {
             // Toasts are optional.
         }
@@ -3995,6 +4142,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
             createdAt: Date.now(),
         };
         state.activeRunId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        releaseProseGuardDisplayIntercept();
         showProgress('Handling out-of-character reply...');
         return false;
     }
@@ -4031,6 +4179,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         createdAt: Date.now(),
     };
     state.activeRunId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    beginProseGuardDisplayIntercept(type || 'normal');
     showProgress('Computing structured pre-flight...');
 
     return false;
@@ -4094,6 +4243,7 @@ async function handleChatCompletionPromptReady(eventData) {
     } catch (error) {
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
+        releaseProseGuardDisplayIntercept({ restore: true });
         clearAllProgress();
         clearRuntimePrompts();
         showBlockingError(error);
@@ -4175,10 +4325,16 @@ export function onDisable() {
         if (context.eventTypes.MESSAGE_SWIPED) removeEventHandler(context, context.eventTypes.MESSAGE_SWIPED, handleMessageSwiped);
         if (context.eventTypes.CHAT_CHANGED) removeEventHandler(context, context.eventTypes.CHAT_CHANGED, handleChatChanged);
         if (context.eventTypes.CHAT_CREATED) removeEventHandler(context, context.eventTypes.CHAT_CREATED, handleChatChanged);
+        if (context.eventTypes.GENERATION_STARTED) removeEventHandler(context, context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
         if (context.eventTypes.GENERATION_ENDED) removeEventHandler(context, context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
         if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
         if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
         state.subscribed = false;
+    }
+    releaseProseGuardDisplayIntercept({ restore: true });
+    if (state.proseGuardChatObserver) {
+        state.proseGuardChatObserver.disconnect();
+        state.proseGuardChatObserver = null;
     }
 }
 
@@ -4196,6 +4352,7 @@ ensureStreamingArtifactRegex();
 if (typeof jQuery === 'function') {
     jQuery(() => {
         ensureStreamingArtifactRegex();
+        ensureProseGuardDisplayInterceptor();
         renderSettingsPanel();
         injectPromptOptionPrompts();
         setTimeout(() => {
@@ -4208,6 +4365,7 @@ if (typeof jQuery === 'function') {
     });
 } else {
     ensureStreamingArtifactRegex();
+    ensureProseGuardDisplayInterceptor();
     renderSettingsPanel();
     injectPromptOptionPrompts();
     setTimeout(() => {
