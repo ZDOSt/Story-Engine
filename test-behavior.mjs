@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { runDeterministicEngines } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/deterministic-runner.js';
-import { aggressionReactionOutcome, deriveDirection, updateDisposition } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/engines.js';
-import { formatNarratorModelPromptContext, formatNarratorPromptContext } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/pre-flight.js';
-import { TRACKER_DELTA_TEMPLATE } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/tracker-delta-contract.js';
-import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/tracker-injury-caps.js';
-import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/streaming-artifact-regex.js';
-import { getExplicitNamePromotions, isPromotableTrackerName } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/tracker-name-promotions.js';
-import { sanitizeAssistantNarration, stripComputedDebugPrefix } from 'file:///C:/Users/User/Documents/SillyTavern/public/scripts/extensions/third-party/st-engine-injector/narration-sanitizer.js';
+import { runDeterministicEngines } from './deterministic-runner.js';
+import { aggressionReactionOutcome, deriveDirection, updateDisposition } from './engines.js';
+import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
+import { TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
+import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
+import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
+import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
+import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
 
 const stakeKeys = [
   'no_roll',
@@ -6389,6 +6389,9 @@ const tests = [
     },
   },
 ];
+
+const EXTENSION_DIR = new URL('.', import.meta.url);
+const extensionFile = (name) => new URL(name, EXTENSION_DIR);
 
 const results = [];
 for (const test of tests) {
