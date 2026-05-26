@@ -2271,7 +2271,7 @@ function buildTrackerDisplayHtml(snapshot) {
                 <div class="structured-preflight-tracker-name">${escapeHtml(name)}</div>
                 <div>Toward User <code>${escapeHtml(relationshipTowardUser(disposition, classified))}</code></div>
                 <div>Condition <code>${escapeHtml(formatTrackerCondition(entry.condition))}</code></div>
-                ${entry.personalitySummary ? `<div>Personality <code>${escapeHtml(entry.personalitySummary)}</code></div>` : ''}
+                <div>Personality <code>${escapeHtml(entry.personalitySummary || 'Developing')}</code></div>
                 <div><code>${escapeHtml(formatDisposition(disposition))}</code> | Lock <code>${escapeHtml(classified.lock)}</code> | Behavior <code>${escapeHtml(classified.behavior)}</code></div>
                 <div>Rapport <code>${escapeHtml(entry.currentRapport)}/5</code> | Relationship <code>${escapeHtml(entry.establishedRelationship || 'N')}</code></div>
                 <div>Stats <code>${escapeHtml(formatCoreStats(entry.currentCoreStats))}</code></div>
@@ -2698,7 +2698,7 @@ function renderTrackerWidget(context = getContext()) {
             <div id="${TRACKER_WIDGET_PANEL_ID}" hidden>
                 <div class="structured-preflight-tracker-widget-title">
                     <span>Tracker</span>
-                    <button class="structured-preflight-tracker-widget-close" type="button" title="Collapse" aria-label="Collapse">Ã—</button>
+                    <button class="structured-preflight-tracker-widget-close" type="button" title="Collapse" aria-label="Collapse">x</button>
                 </div>
                 <div data-structured-preflight-tracker-widget-body></div>
             </div>`;
