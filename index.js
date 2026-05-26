@@ -3762,6 +3762,9 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
     const report = pendingRun?.report || {};
     const handoff = report?.finalNarrativeHandoff || {};
     const resolution = handoff.resolutionPacket || {};
+    const semanticTrackerNpcs = Array.isArray(report?.semanticLedger?.trackerUpdateEngine?.npcs)
+        ? report.semanticLedger.trackerUpdateEngine.npcs
+        : [];
     const previous = {
         user: pendingRun?.userBefore || {},
         npcs: pendingRun?.trackerBefore || {},
@@ -3805,6 +3808,13 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
             behavior: npc.Behavior || '',
             relationState: npc.FinalState || '',
         }));
+    const semanticPersonalityEvidence = buildSemanticPersonalityEvidence({
+        activeNpcNames,
+        handoff,
+        previousNpcs: previous.npcs,
+        trackerNpcs: trackerDisplaySnapshot?.npcs || {},
+        semanticTrackerNpcs,
+    });
 
     return [
         'STORY_ENGINE_POST_NARRATION_TRACKER_UPDATE',
@@ -3829,11 +3839,50 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         '==FIRST_CONTACT_PERSONALITY_SEEDS==',
         JSON.stringify(firstContactPersonalitySeeds),
         '',
+        '==SEMANTIC_PERSONALITY_EVIDENCE==',
+        JSON.stringify(semanticPersonalityEvidence),
+        '',
         '==FINAL_NARRATION==',
         narrationText || '(empty)',
         '',
         '==OUTPUT==',
     ].join('\n');
+}
+
+function buildSemanticPersonalityEvidence({ activeNpcNames, handoff, previousNpcs, trackerNpcs, semanticTrackerNpcs }) {
+    const activeSet = new Set((activeNpcNames || []).map(name => String(name || '').trim()).filter(isRealName).map(name => name.toLowerCase()));
+    const semanticByName = new Map();
+    for (const item of semanticTrackerNpcs || []) {
+        const name = String(item?.NPC || '').trim();
+        if (!isRealName(name)) continue;
+        const personalitySummary = cleanPersonalitySummary(item?.personalitySummary);
+        if (personalitySummary) semanticByName.set(name.toLowerCase(), personalitySummary);
+    }
+
+    return (handoff?.npcHandoffs || [])
+        .map(npc => {
+            const name = String(npc?.NPC || '').trim();
+            if (!isRealName(name)) return null;
+            if (activeSet.size && !activeSet.has(name.toLowerCase())) return null;
+            const existingSummary = cleanPersonalitySummary(previousNpcs?.[name]?.personalitySummary);
+            const currentSummary = cleanPersonalitySummary(trackerNpcs?.[name]?.personalitySummary);
+            const semanticSeed = semanticByName.get(name.toLowerCase()) || '';
+            if (existingSummary && !semanticSeed) return null;
+            return {
+                NPC: name,
+                existingPersonalitySummary: existingSummary,
+                currentPersonalitySummary: currentSummary,
+                semanticSeed,
+                behaviorBand: npc?.Behavior || '',
+                relationshipState: npc?.FinalState || '',
+                lock: npc?.Lock || '',
+                romanceStyle: npc?.RomanceStyle || '',
+                establishedRelationship: npc?.EstablishedRelationship || 'N',
+                boundaryStyle: npc?.IntimacyRefusalStyle || '',
+            };
+        })
+        .filter(Boolean)
+        .slice(0, 12);
 }
 
 async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {

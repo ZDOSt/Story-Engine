@@ -5,6 +5,30 @@ export const TRACKER_DELTA_WRAPPER_END = 'STORY_ENGINE_TRACKER_DELTA_END -->';
 export const TRACKER_DELTA_FENCE = '```story_engine_tracker_delta';
 export const TRACKER_DELTA_FENCE_END = '```';
 
+export const PERSONALITY_ARCHETYPE_GLOSSARY = [
+    'deredere: openly warm, affectionate, cheerful, direct with care or admiration.',
+    'tsundere: guarded or sharp outwardly, softens through action, hides concern behind criticism.',
+    'yandere: possessive, obsessive, intensely attached, affection can become controlling or dangerous.',
+    'kuudere: cool, composed, restrained, emotionally contained, shows care through calm action.',
+    'dandere: quiet, shy, withdrawn, opens slowly when trust or safety grows.',
+    'himedere: expects special treatment, proud, imperious, princess-like entitlement.',
+    'oujidere: princely, commanding, polished, expects deference through confidence or rank.',
+    'kamidere: superiority complex, godlike self-regard, controlling or judgmental certainty.',
+    'mayadere: starts antagonistic or dangerous, may soften into loyalty or affection.',
+    'sadodere: teasing, cruel, dominant, enjoys provoking discomfort or submission.',
+    'hiyakasudere: flirtatious tease, playful provocation, enjoys making others react.',
+    'hajidere: easily embarrassed by affection, bashful, visibly struggles with romantic attention.',
+    'bakadere: foolish, impulsive, naive, sincere or comic lack of judgment.',
+    'erodere: openly sensual or provocative while retaining emotional selectiveness or restraint.',
+    'dorodere: sweet or harmless surface masking darker instability, bitterness, or hidden malice.',
+    'shundere: gloomy, sad, self-effacing, melancholy baseline.',
+    'undere: agreeable, eager to please, readily follows another person lead.',
+    'goudere: overzealous devotion, extreme helpfulness, acts too aggressively for someone good.',
+    'kanedere: money/status motivated, transactional, values wealth or advantage.',
+    'byoukidere: frail, sickly, vulnerable, shaped by illness or physical fragility.',
+    'none/custom: no listed archetype clearly fits; use concrete stable traits instead.',
+].join('\n');
+
 export const TRACKER_DELTA_CONTRACT = [
     'STRICT POST-NARRATION TRACKER DELTA CONTRACT:',
     '- Output one tracker delta block based only on explicit state changes in FINAL_NARRATION and authoritative MECHANICAL_TRACKER_AUTHORITY.',
@@ -12,9 +36,12 @@ export const TRACKER_DELTA_CONTRACT = [
     '- MECHANICAL_TRACKER_AUTHORITY is binding for target, condition ceilings, fatal outcomes, and contextual injury caps. Use FINAL_NARRATION to choose concrete wording/body part/detail when authority delegates detail to narration.',
     '- Use semantic reading, not keyword matching. Identify who is affected, what changed, and whether the change persists beyond the instant of narration.',
     '- Do not infer hidden consequences. Do not add momentary pain, effort, hesitation, fear, impact, or flavor as wounds/status.',
-    '- NPC personalitySummary is stable personality memory only: a concise 8-20 word phrase or compact seed for enduring temperament, values, manner, archetype, or interaction style revealed by FINAL_NARRATION or explicit first-contact personality seed.',
-    '- When a tracked NPC has no personalitySummary and first-contact evidence supports it, you may write a compact seed using an optional whitelisted archetype plus concrete traits, e.g. "tsundere; proud, guarded, sharp-tongued; hides concern through criticism; intensity:medium".',
-    '- Whitelisted archetypes: deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, byoukidere, none/custom.',
+    '- NPC personalitySummary is stable personality memory only: a concise compact seed for enduring temperament, values, manner, archetype, or interaction style revealed by FINAL_NARRATION, SEMANTIC_PERSONALITY_EVIDENCE, or explicit first-contact personality seed.',
+    '- When an active tracked NPC has no personalitySummary and durable first-contact evidence supports one, write a compact seed using the best matching glossary archetype plus concrete traits and intensity, e.g. "tsundere; proud, guarded, sharp-tongued; hides concern through criticism; intensity:medium".',
+    '- Choose an archetype only when evidence clearly matches the glossary. If unclear, mixed, or not a dere-style pattern, use none/custom plus concrete stable traits. Never guess a flashy archetype from mood, attraction, relationship score, fear/hostility score, injury, gear, or a one-turn reaction.',
+    '- Personality evidence may come from FINAL_NARRATION, SEMANTIC_PERSONALITY_EVIDENCE, previous tracker history, or explicit card/lore/scenario/context evidence summarized in the prompt. If those sources give no durable temperament, output unchanged.',
+    'PERSONALITY_ARCHETYPE_GLOSSARY:',
+    PERSONALITY_ARCHETYPE_GLOSSARY,
     '- If personalitySummary already exists, use unchanged unless FINAL_NARRATION or explicit first-contact seed gives durable, non-temporary refinement. Do not rewrite it from current mood, attraction, relationship state, fear/hostility level, wounds, status, gear, temporary reactions, or this-turn events.',
     '- NPC revealedName is identity tracking only. If the final narration explicitly reveals that an already tracked generic NPC/person/role is actually named something, set NPC to the existing tracker label and revealedName to the revealed proper name. Example: tracked NPC "bystander" says "Torvinash." as an introduction -> NPC=bystander and revealedName=Torvinash.',
     '- Use revealedName only when the narration semantically identifies which tracked generic NPC received the name. If there are multiple possible generic NPCs and identity is unclear, use (none).',
