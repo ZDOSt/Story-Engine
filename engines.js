@@ -390,9 +390,9 @@ function RelationshipEngine(npc, resolutionPacket) {
   updateRapport(currentRapport, target, rapportEligible):
     rule: positive encounter = target in [Bond,No Change]
     rule: negative encounter = target in [Hostility,Fear,FearHostility]
-    rule: rapportEligible = Y only for first tracked encounter or if this NPC's hidden involved-time rapport cooldown has expired
+    rule: rapportEligible = Y only if this NPC has no prior rapport gain or 30 minutes of global active play passed since this NPC's last rapport gain
     rule: cooldown expiry does not change rapport by itself; rapport changes only on the next qualifying interaction with this NPC
-    rule: when rapport is consumed by Bond or No Change, set this NPC's hidden cooldown to this NPC's current involved active time + 45 minutes
+    rule: when rapport is consumed by Bond or No Change, set this NPC's last rapport gain active time to the current global active play time
     if target in [Bond,No Change] and rapportEligible!=Y -> return {currentRapport:currentRapport}
     if target in [Bond,No Change] -> return {currentRapport:min(5,currentRapport+1)}
     if target in [Hostility,Fear,FearHostility] -> return {currentRapport:max(0,currentRapport-1)}
@@ -481,15 +481,15 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   execution:
     if npc not in resolutionPacket.NPCInScene -> return uninitialized handoff
-    read state, initialize disposition if missing, and check hidden involved-time rapport cooldown
+    read state, initialize disposition if missing, and check hidden rapport cooldown against global active play time
     read stakeChangeByOutcome for actual resolution outcome, set NPC_STAKES from benefit/harm vs none, audit benefit interaction, route disposition target
     hostilePressureResult = applyHostilePhysicalPressure(npc, resolutionPacket, state)
     if hostilePressureResult exists -> target = hostilePressureResult.target else target = routeDispositionTarget
-    update rapport from final target; if a positive/neutral eligible interaction consumed rapport, reset hidden cooldown for this NPC
+    update rapport from final target; if a positive/neutral eligible interaction consumed rapport, stamp this NPC's last rapport gain active time
     if hostilePressureResult exists -> deltas = hostilePressureResult.deltas else deltas = deriveDirection(target, audit, currentDisposition, rapport.currentRapport, resolutionPacket)
     update disposition and apply rapport reset if present
     if hostilePressureResult.dominatedFearBreak=Y and currentDisposition.F>=4 and currentDisposition.H>=3 -> lower currentDisposition.H by 1
-    save currentRapport, rapportActiveMs, rapportCooldownUntilActiveMs, hostilePressure, hostileLandedPressure, dominantLock, and pressureMode to sceneTracker
+    save currentRapport, lastRapportGainActiveMs, hostilePressure, hostileLandedPressure, dominantLock, and pressureMode to sceneTracker
     classify disposition, update slowBondEvidence, check slowBondEligible, resolve threshold/override, and check establishedRelationship
     RelationToUserAction = {isDirect, isOpp, isBenefited, isHarmed}
     return NPC handoff including HostilePressure, HostileLandedPressure, DominantLock, PressureMode, and RelationToUserAction
@@ -996,7 +996,7 @@ export function routeDispositionTarget(npc, packet, auditInteraction, sem) {
         && directOrOpposedBenefitAllowed(npc, packet, sem);
 
     if (!isDirect && !isOpp && !isBenefited && !isHarmed) return 'No Change';
-    if (!hasStakes) return 'No Change';
+    if (!hasStakes) return softBondAllowedForNoStakes(npc, packet, sem) ? 'Bond' : 'No Change';
     if (packet.boundaryViolationExplicit === 'Y' && (isDirect || isOpp)) {
         return bool(sem.explicitIntimidationOrCoercion) || packet.classifyHostilePhysicalIntent === 'Y'
             ? 'FearHostility'
@@ -1011,6 +1011,21 @@ export function routeDispositionTarget(npc, packet, auditInteraction, sem) {
     if (benefitAllowedForDirect) return 'Bond';
     if (auditInteraction === 'Y' && !isDirect && !isOpp && !isHarmed) return 'Bond';
     return 'No Change';
+}
+
+function softBondAllowedForNoStakes(npc, packet, sem = {}) {
+    const relation = relationToUserAction(npc, packet);
+    if ((!relation.isDirect && !relation.isBenefited) || relation.isOpp || relation.isHarmed) return false;
+    if (packet.classifyHostilePhysicalIntent === 'Y') return false;
+    if (packet.classifyPhysicalBoundaryPressure === 'Y') return false;
+    if (packet.boundaryViolationExplicit === 'Y') return false;
+    if (packet.intimacyAdvanceExplicit === 'Y') return false;
+    if (packet.activeHostileThreat === 'Y') return false;
+    if (bool(sem.explicitIntimidationOrCoercion)) return false;
+
+    const evidence = normalizeSlowBondEvidence(sem.slowBondEvidence || {});
+    if (evidence.blockers.length) return false;
+    return slowBondEvidenceCount(evidence) > 0;
 }
 
 function landedActionHarmsRelationship(packet, sem, outcome, isHarmed) {
@@ -1526,7 +1541,7 @@ export function buildNarrationGuidance(resolution, handoffs, chaos, proactivity,
 export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
-        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'rapportActiveMs', 'rapportCooldownUntilActiveMs', 'userHistory', 'raceProfile', 'personalitySummary', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
+        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'userHistory', 'raceProfile', 'personalitySummary', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'STAKES', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
@@ -1547,8 +1562,7 @@ export function trackerSummary(trackerUpdate) {
             disposition,
             `life:${value?.lifecycle ?? 'Active'}`,
             `rapport:${value?.currentRapport ?? 0}`,
-            `rapportActive:${value?.rapportActiveMs ?? 0}`,
-            `rapportCooldown:${value?.rapportCooldownUntilActiveMs ?? 0}`,
+            `lastRapportGainActive:${value?.lastRapportGainActiveMs ?? -1}`,
             `history:${value?.userHistory?.knowsUser ?? 'N'}/${value?.userHistory?.standing ?? 'neutral'}`,
             `race:${value?.raceProfile?.category ?? 'unknown'}/${value?.raceProfile?.fearProfile ?? 'normal'}`,
             `personality:${value?.personalitySummary ? 'Y' : 'N'}`,
@@ -1631,15 +1645,16 @@ export function isSlowBondEligible(disposition, rapport, evidence) {
         && disposition.H < 3
         && Number(rapport || 0) >= 5
         && normalized.blockers.length === 0
-        && slowBondEvidenceCount(normalized) >= 3;
+        && slowBondEvidenceCount(normalized) >= 2;
 }
 
 export function normalizeTrackerEntry(value) {
     return {
         currentDisposition: normalizeDisposition(value?.currentDisposition),
         currentRapport: clamp(Number(value?.currentRapport ?? 0), 0, 5),
-        rapportActiveMs: Math.max(0, Math.floor(Number(value?.rapportActiveMs || 0))),
-        rapportCooldownUntilActiveMs: Math.max(0, Math.floor(Number(value?.rapportCooldownUntilActiveMs || 0))),
+        lastRapportGainActiveMs: Number.isFinite(Number(value?.lastRapportGainActiveMs))
+            ? Math.max(-1, Math.floor(Number(value.lastRapportGainActiveMs)))
+            : -1,
         establishedRelationship: value?.establishedRelationship === 'Y' ? 'Y' : 'N',
         userHistory: normalizeUserHistory(value?.userHistory),
         raceProfile: normalizeNpcRaceProfile(value?.raceProfile),

@@ -147,8 +147,7 @@ function trackerEntry(overrides = {}) {
   return {
     currentDisposition: { B: 2, F: 2, H: 2 },
     currentRapport: 0,
-    rapportActiveMs: 0,
-    rapportCooldownUntilActiveMs: 0,
+    lastRapportGainActiveMs: -1,
     establishedRelationship: 'N',
     userHistory: { knowsUser: 'N', standing: 'neutral' },
     raceProfile: { race: '', category: 'unknown', fearProfile: 'normal' },
@@ -1291,7 +1290,7 @@ const tests = [
     },
   },
   {
-    name: '08 slow bond promotes B3 to B4 with three evidence categories',
+    name: '08 slow bond promotes B3 to B4 with two evidence categories',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -1313,18 +1312,17 @@ const tests = [
             slowBondEvidence: {
               respectfulContact: true,
               cooperation: true,
-              comfortInProximity: true,
             },
           })],
         }),
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 4);
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEligible, 'Y');
-      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEvidenceCount, 3);
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEvidenceCount, 2);
     },
   },
   {
-    name: '09 slow bond does not promote with only two evidence categories',
+    name: '09 slow bond does not promote with only one evidence category',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
@@ -1345,14 +1343,136 @@ const tests = [
           relationshipEngine: [relationship('Seraphina', {
             slowBondEvidence: {
               cooperation: true,
-              boundaryRespect: true,
             },
           })],
         }),
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 3);
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEligible, 'N');
-      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEvidenceCount, 2);
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEvidenceCount, 1);
+    },
+  },
+  {
+    name: '09a no-stakes friendly interaction can promote B1 to B2 with rapport one',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 1, F: 1, H: 1 },
+          currentRapport: 1,
+        }),
+      };
+      const report = runCase({
+        userText: 'I sit with Seraphina and help her sort the camp supplies.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'help Seraphina sort camp supplies',
+            identifyChallenge: 'help Seraphina sort camp supplies',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', {
+            slowBondEvidence: {
+              cooperation: true,
+            },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Bond');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 2);
+    },
+  },
+  {
+    name: '09b no-stakes friendly interaction can promote B2 to B3 with rapport three',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 2, F: 1, H: 1 },
+          currentRapport: 3,
+        }),
+      };
+      const report = runCase({
+        userText: 'I walk beside Seraphina and trade easy jokes while we repair the fence.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'repair the fence with Seraphina',
+            identifyChallenge: 'repair the fence with Seraphina',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', {
+            slowBondEvidence: {
+              cooperation: true,
+              playfulness: true,
+            },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Bond');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 3);
+    },
+  },
+  {
+    name: '09c no-stakes friendly interaction alone does not promote B3 to B4',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 3, F: 1, H: 1 },
+          currentRapport: 5,
+        }),
+      };
+      const report = runCase({
+        userText: 'I share a quiet meal with Seraphina at the edge of camp.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'share a quiet meal with Seraphina',
+            identifyChallenge: 'share a quiet meal with Seraphina',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', {
+            slowBondEvidence: {
+              sharedRoutine: true,
+            },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Bond');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 3);
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEligible, 'N');
+    },
+  },
+  {
+    name: '09d no-stakes friendly interaction is blocked by slow-bond blockers',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 1, F: 1, H: 1 },
+          currentRapport: 1,
+        }),
+      };
+      const report = runCase({
+        userText: 'I sit near Seraphina and try to chat after ignoring her boundary.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'chat with Seraphina after ignoring her boundary',
+            identifyChallenge: 'chat with Seraphina after ignoring her boundary',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', {
+            slowBondEvidence: {
+              personalAttention: true,
+              blockers: ['boundary violation'],
+            },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 1);
     },
   },
   {
@@ -1431,19 +1551,18 @@ const tests = [
     },
   },
   {
-    name: '12a involved-time cooldown blocks rapport before 45 minutes',
+    name: '12a per-NPC rapport cooldown blocks before 30 active minutes',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
           currentDisposition: { B: 2, F: 2, H: 2 },
           currentRapport: 1,
-          rapportActiveMs: 20 * 60 * 1000,
-          rapportCooldownUntilActiveMs: 45 * 60 * 1000,
+          lastRapportGainActiveMs: 20 * 60 * 1000,
         }),
       };
       const report = runCase({
         userText: 'I stay beside Seraphina in the same room and ask what she needs help with next.',
-        rapportClock: { activeMs: 30 * 60 * 1000, lastActivityAt: Date.now() },
+        rapportClock: { activeMs: 40 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -1467,24 +1586,23 @@ const tests = [
         }),
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.rapportActiveMs, 20 * 60 * 1000);
+      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 20 * 60 * 1000);
       assert.equal(auditIncludes(report, 'rapportEligible=N'), true);
     },
   },
   {
-    name: '12b involved-time cooldown expiry increases rapport on next interaction',
+    name: '12b per-NPC rapport cooldown expiry increases rapport on next qualifying interaction',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
           currentDisposition: { B: 2, F: 2, H: 2 },
           currentRapport: 1,
-          rapportActiveMs: 45 * 60 * 1000,
-          rapportCooldownUntilActiveMs: 45 * 60 * 1000,
+          lastRapportGainActiveMs: 30 * 60 * 1000,
         }),
       };
       const report = runCase({
         userText: 'I find Seraphina at the edge of camp and ask what she needs help with first.',
-        rapportClock: { activeMs: 45 * 60 * 1000, lastActivityAt: Date.now() },
+        rapportClock: { activeMs: 60 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -1509,7 +1627,7 @@ const tests = [
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 2);
       assert.equal(auditIncludes(report, 'rapportEligible=Y'), true);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.rapportCooldownUntilActiveMs >= 90 * 60 * 1000, true);
+      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 60 * 60 * 1000);
     },
   },
   {
@@ -1534,25 +1652,78 @@ const tests = [
         }),
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.rapportCooldownUntilActiveMs >= 45 * 60 * 1000, true);
+      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 10 * 60 * 1000);
       assert.equal(auditIncludes(report, 'firstTrackedEncounter=Y'), true);
       assert.equal(auditIncludes(report, 'rapportEligible=Y'), true);
     },
   },
   {
-    name: '12d time-skip wording does not bypass active-time cooldown',
+    name: '12c.1 rapport gain at zero active time still starts cooldown',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 2, F: 2, H: 2 },
+          currentRapport: 0,
+        }),
+      };
+      const report = runCase({
+        userText: 'I greet Seraphina warmly and ask about her morning.',
+        rapportClock: { activeMs: 0, lastActivityAt: Date.now() },
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'greet Seraphina warmly',
+            explicitMeans: 'greet Seraphina warmly',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      });
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
+      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 0);
+
+      const second = runCase({
+        userText: 'I keep chatting with Seraphina about the road ahead.',
+        rapportClock: { activeMs: 10 * 60 * 1000, lastActivityAt: Date.now() },
+        tracker: report.trackerUpdate.npcs,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'chat with Seraphina',
+            explicitMeans: 'chat with Seraphina',
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      });
+      assert.equal(second.trackerUpdate.npcs.Seraphina.currentRapport, 1);
+      assert.equal(auditIncludes(second, 'rapportEligible=N'), true);
+    },
+  },
+  {
+    name: '12d time-skip wording does not bypass active-play cooldown',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
           currentDisposition: { B: 2, F: 2, H: 2 },
           currentRapport: 1,
-          rapportActiveMs: 20 * 60 * 1000,
-          rapportCooldownUntilActiveMs: 45 * 60 * 1000,
+          lastRapportGainActiveMs: 20 * 60 * 1000,
         }),
       };
       const report = runCase({
         userText: 'I tell Seraphina, "I will come back tomorrow morning and help you then."',
-        rapportClock: { activeMs: 30 * 60 * 1000, lastActivityAt: Date.now() },
+        rapportClock: { activeMs: 40 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -1570,30 +1741,27 @@ const tests = [
         }),
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.rapportActiveMs, 20 * 60 * 1000);
+      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 20 * 60 * 1000);
       assert.equal(auditIncludes(report, 'rapportEligible=N'), true);
     },
   },
   {
-    name: '12d.1 absent NPC rapport timer does not advance while another NPC is involved',
+    name: '12d.1 active play with another NPC can expire an absent NPC rapport cooldown',
     run() {
       const tracker = {
         Seraphina: trackerEntry({
           currentDisposition: { B: 2, F: 2, H: 2 },
           currentRapport: 1,
-          rapportActiveMs: 20 * 60 * 1000,
-          rapportCooldownUntilActiveMs: 45 * 60 * 1000,
+          lastRapportGainActiveMs: 20 * 60 * 1000,
         }),
         Mara: trackerEntry({
           currentDisposition: { B: 2, F: 2, H: 2 },
           currentRapport: 0,
-          rapportActiveMs: 0,
-          rapportCooldownUntilActiveMs: 0,
         }),
       };
       const report = runCase({
         userText: 'I leave Seraphina at camp and help Mara sort the supply crates.',
-        rapportClock: { activeMs: 20 * 60 * 1000, lastActivityAt: Date.now() - (5 * 60 * 1000) },
+        rapportClock: { activeMs: 50 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -1611,9 +1779,8 @@ const tests = [
         }),
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.rapportActiveMs, 20 * 60 * 1000);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.rapportCooldownUntilActiveMs, 45 * 60 * 1000);
-      assert.equal(report.trackerUpdate.npcs.Mara.rapportActiveMs >= 5 * 60 * 1000, true);
+      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 20 * 60 * 1000);
+      assert.equal(report.trackerUpdate.npcs.Mara.lastRapportGainActiveMs, 50 * 60 * 1000);
     },
   },
   {
@@ -1623,13 +1790,12 @@ const tests = [
         Seraphina: trackerEntry({
           currentDisposition: { B: 1, F: 3, H: 2 },
           currentRapport: 4,
-          rapportActiveMs: 45 * 60 * 1000,
-          rapportCooldownUntilActiveMs: 45 * 60 * 1000,
+          lastRapportGainActiveMs: 30 * 60 * 1000,
         }),
       };
       const report = runCase({
         userText: 'The next morning, I sit near Seraphina and keep quiet company without pushing her.',
-        rapportClock: { activeMs: 45 * 60 * 1000, lastActivityAt: Date.now() },
+        rapportClock: { activeMs: 60 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -1670,13 +1836,12 @@ const tests = [
         Seraphina: trackerEntry({
           currentDisposition: { B: 1, F: 4, H: 2 },
           currentRapport: 5,
-          rapportActiveMs: 45 * 60 * 1000,
-          rapportCooldownUntilActiveMs: 45 * 60 * 1000,
+          lastRapportGainActiveMs: 30 * 60 * 1000,
         }),
       };
       const report = runCase({
         userText: 'The next morning, I sit near Seraphina and say nothing for a while.',
-        rapportClock: { activeMs: 45 * 60 * 1000, lastActivityAt: Date.now() },
+        rapportClock: { activeMs: 60 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {

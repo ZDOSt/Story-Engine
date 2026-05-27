@@ -74,7 +74,7 @@ const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 const USER_PROACTIVITY_TARGET = '{{user}}';
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
-const RAPPORT_COOLDOWN_MS = 45 * 60 * 1000;
+const RAPPORT_COOLDOWN_MS = 30 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
 const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
@@ -687,10 +687,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const rawState = trackerSnapshot[npc] || {};
         const firstTrackedEncounter = !rawState.currentDisposition;
         const state = normalizeTrackerEntry(rawState);
-        const rapportActiveDeltaMs = Math.max(0, Math.floor(Number(rapportClock?.activeDeltaMs || 0)));
-        let rapportActiveMs = state.rapportActiveMs + rapportActiveDeltaMs;
-        let rapportCooldownUntilActiveMs = state.rapportCooldownUntilActiveMs;
-        const rapportEligible = firstTrackedEncounter || rapportActiveMs >= rapportCooldownUntilActiveMs;
+        const globalActiveMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
+        let lastRapportGainActiveMs = state.lastRapportGainActiveMs;
+        const rapportElapsedActiveMs = lastRapportGainActiveMs >= 0 ? Math.max(0, globalActiveMs - lastRapportGainActiveMs) : 0;
+        const rapportEligible = firstTrackedEncounter || lastRapportGainActiveMs < 0 || rapportElapsedActiveMs >= RAPPORT_COOLDOWN_MS;
         let currentDisposition = state.currentDisposition;
         let currentRapport = state.currentRapport;
         let hostilePressure = state.hostilePressure;
@@ -703,9 +703,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
 
         audit.push(`3.3 getCurrentRelationalState=${compact(state)}`);
         audit.push(`3.3a rapportTimer=${compact({
-            npcActiveMs: rapportActiveMs,
-            addedActiveDeltaMs: rapportActiveDeltaMs,
-            cooldownUntilNpcActiveMs: rapportCooldownUntilActiveMs,
+            globalActiveMs,
+            lastRapportGainActiveMs,
+            elapsedSinceLastGainMs: rapportElapsedActiveMs,
+            cooldownMs: RAPPORT_COOLDOWN_MS,
         })}`);
         audit.push(`3.3b firstTrackedEncounter=${yn(firstTrackedEncounter)}`);
         audit.push(`3.3c rapportEligible=${yn(rapportEligible)}`);
@@ -753,7 +754,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const rapportConsumedCooldown = rapportEligible && consumesRapportCooldown(target, hostilePressureResult ? 'hostilePressure' : 'normal');
         currentRapport = rapport.currentRapport;
         if (rapportConsumedCooldown) {
-            rapportCooldownUntilActiveMs = rapportActiveMs + RAPPORT_COOLDOWN_MS;
+            lastRapportGainActiveMs = globalActiveMs;
         }
         hostilePressure = hostilePressureResult?.hostilePressure ?? hostilePressure;
         hostileLandedPressure = hostilePressureResult?.hostileLandedPressure ?? hostileLandedPressure;
@@ -789,8 +790,8 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         audit.push(`3.4e rapportCooldown=${compact({
             consumed: yn(rapportConsumedCooldown),
             cooldownMinutes: RAPPORT_COOLDOWN_MS / 60000,
-            untilActiveMs: rapportCooldownUntilActiveMs,
-            npcActiveMs: rapportActiveMs,
+            lastRapportGainActiveMs,
+            globalActiveMs,
         })}`);
 
         const deltas = hostilePressureResult?.deltas || boundaryPressureResult?.deltas || deriveDirection(target, currentDisposition, currentRapport, auditInteraction, resolutionPacket);
@@ -912,8 +913,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             ...state,
             currentDisposition,
             currentRapport,
-            rapportActiveMs,
-            rapportCooldownUntilActiveMs,
+            lastRapportGainActiveMs,
             establishedRelationship,
             userHistory: initMetadata?.userHistory || state.userHistory,
             raceProfile: initMetadata?.raceProfile || state.raceProfile,
