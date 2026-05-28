@@ -1383,6 +1383,36 @@ const tests = [
     },
   },
   {
+    name: '09a.1 no-stakes friendly No Change can promote B1 to B2 with rapport one',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 1, F: 1, H: 1 },
+          currentRapport: 1,
+        }),
+      };
+      const report = runCase({
+        userText: 'I spend a quiet evening talking with Seraphina about ordinary things.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'talk with Seraphina',
+            identifyChallenge: 'talk with Seraphina',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', {
+            slowBondEvidence: {
+              blockers: [''],
+            },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 2);
+    },
+  },
+  {
     name: '09b no-stakes friendly interaction can promote B2 to B3 with rapport three',
     run() {
       const tracker = {
@@ -1414,6 +1444,36 @@ const tests = [
     },
   },
   {
+    name: '09b.1 no-stakes friendly No Change can promote B2 to B3 with rapport three',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 2, F: 1, H: 1 },
+          currentRapport: 3,
+        }),
+      };
+      const report = runCase({
+        userText: 'I keep Seraphina company during the slow watch.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'keep Seraphina company',
+            identifyChallenge: 'keep Seraphina company',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', {
+            slowBondEvidence: {
+              blockers: [''],
+            },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 3);
+    },
+  },
+  {
     name: '09c no-stakes friendly interaction alone does not promote B3 to B4',
     run() {
       const tracker = {
@@ -1440,6 +1500,37 @@ const tests = [
         }),
       });
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Bond');
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 3);
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEligible, 'N');
+    },
+  },
+  {
+    name: '09c.1 no-stakes friendly No Change does not promote B3 to B4',
+    run() {
+      const tracker = {
+        Seraphina: trackerEntry({
+          currentDisposition: { B: 3, F: 1, H: 1 },
+          currentRapport: 5,
+        }),
+      };
+      const report = runCase({
+        userText: 'I sit with Seraphina during a quiet stretch of travel.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'sit with Seraphina',
+            identifyChallenge: 'sit with Seraphina',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina', {
+            slowBondEvidence: {
+              blockers: [''],
+            },
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 3);
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEligible, 'N');
     },

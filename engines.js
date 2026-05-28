@@ -399,7 +399,8 @@ function RelationshipEngine(npc, resolutionPacket) {
     return {currentRapport:currentRapport}
 
   deriveDirection(target, audit, currentDisposition, currentRapport, resolutionPacket):
-    if target=No Change -> {b:0,f:0,h:0}
+    if target=No Change and currentDisposition.B<3 and non-negative involved interaction -> may promote early Bond by rapport threshold
+    if target=No Change otherwise -> {b:0,f:0,h:0}
     if target=Hostility -> {b:-1,f:0,h:1}
     if target=Fear -> {b:-1,f:1,h:0}
     if target=FearHostility -> {b:-1,f:1,h:1}
@@ -415,13 +416,14 @@ function RelationshipEngine(npc, resolutionPacket) {
       else:
         return {b:0,f:0,h:0}
 
-    if target=Bond:
+    if target=Bond or allowed early No Change:
       if currentDisposition.B=1:
         if currentRapport>=1 -> {b:1,f:0,h:0}
         else -> {b:0,f:0,h:0}
       if currentDisposition.B=2:
         if currentRapport>=3 -> {b:1,f:0,h:0}
         else -> {b:0,f:0,h:0}
+    if target=Bond:
       if currentDisposition.B=3:
         if currentRapport>=5 && audit=Y -> {b:1,f:0,h:0}
         else -> {b:0,f:0,h:0}
@@ -1338,8 +1340,16 @@ export function targetFromDeltas(deltas) {
     return 'No Change';
 }
 
-export function deriveDirection(target, currentDisposition, currentRapport, auditInteraction, packet = {}) {
+export function deriveDirection(target, currentDisposition, currentRapport, auditInteraction, packet = {}, options = {}) {
     const landed = landedBool(packet.LandedActions);
+    const noChangeCanPromoteEarlyBond = target === 'No Change'
+        && currentDisposition.B < 3
+        && options.allowNoChangeEarlyBond === true
+        && packet.classifyHostilePhysicalIntent !== 'Y'
+        && packet.classifyPhysicalBoundaryPressure !== 'Y'
+        && packet.boundaryViolationExplicit !== 'Y'
+        && packet.intimacyAdvanceExplicit !== 'Y'
+        && packet.activeHostileThreat !== 'Y';
 
     if (target === 'Hostility') return { b: -1, f: 0, h: 1 };
     if (target === 'Fear') return { b: -1, f: 1, h: 0 };
@@ -1356,11 +1366,15 @@ export function deriveDirection(target, currentDisposition, currentRapport, audi
         }
         return { b: 0, f: 0, h: 0 };
     }
-    if (target === 'No Change') return { b: 0, f: 0, h: 0 };
+    if (target === 'No Change' && !noChangeCanPromoteEarlyBond) return { b: 0, f: 0, h: 0 };
     if (target === 'Bond') {
         if (currentDisposition.B === 1) return currentRapport >= 1 ? { b: 1, f: 0, h: 0 } : { b: 0, f: 0, h: 0 };
         if (currentDisposition.B === 2) return currentRapport >= 3 ? { b: 1, f: 0, h: 0 } : { b: 0, f: 0, h: 0 };
         if (currentDisposition.B === 3) return currentRapport >= 5 && auditInteraction === 'Y' ? { b: 1, f: 0, h: 0 } : { b: 0, f: 0, h: 0 };
+    }
+    if (noChangeCanPromoteEarlyBond) {
+        if (currentDisposition.B === 1) return currentRapport >= 1 ? { b: 1, f: 0, h: 0 } : { b: 0, f: 0, h: 0 };
+        if (currentDisposition.B === 2) return currentRapport >= 3 ? { b: 1, f: 0, h: 0 } : { b: 0, f: 0, h: 0 };
     }
     return { b: 0, f: 0, h: 0 };
 }

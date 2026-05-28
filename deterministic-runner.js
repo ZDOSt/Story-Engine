@@ -739,6 +739,8 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const npcStakes = resolutionPacket.STAKES === 'Y' && ['benefit', 'harm'].includes(stakeChange) ? 'Y' : 'N';
         const auditInteraction = npcStakes === 'Y' && stakeChange === 'benefit' ? 'Y' : 'N';
         const routedTarget = routeDispositionTarget(npc, resolutionPacket, auditInteraction, relationshipContext);
+        const relation = relationToUserAction(npc, resolutionPacket);
+        const slowBondBlockersNow = toRealArray(relationshipContext.slowBondEvidence?.blockers);
         const boundaryPressureResult = applyPhysicalBoundaryPressure(npc, resolutionPacket, {
             currentDisposition,
         });
@@ -794,7 +796,14 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             globalActiveMs,
         })}`);
 
-        const deltas = hostilePressureResult?.deltas || boundaryPressureResult?.deltas || deriveDirection(target, currentDisposition, currentRapport, auditInteraction, resolutionPacket);
+        const deltas = hostilePressureResult?.deltas || boundaryPressureResult?.deltas || deriveDirection(target, currentDisposition, currentRapport, auditInteraction, resolutionPacket, {
+            allowNoChangeEarlyBond: target === 'No Change'
+                && (relation.isDirect || relation.isBenefited)
+                && !relation.isOpp
+                && !relation.isHarmed
+                && !bool(relationshipContext.explicitIntimidationOrCoercion)
+                && slowBondBlockersNow.length === 0,
+        });
         const updatedDisposition = updateDisposition(currentDisposition, deltas);
         currentDisposition = updatedDisposition;
         if (hostilePressureResult?.dominatedFearBreak && currentDisposition.F >= 4 && currentDisposition.H >= 3) {
@@ -899,7 +908,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             Condition: state.condition || 'healthy',
             Wounds: state.wounds || [],
             StatusEffects: state.statusEffects || [],
-            RelationToUserAction: relationToUserAction(npc, resolutionPacket),
+            RelationToUserAction: relation,
             ProactivityMemory: proactivityMemory,
         };
         handoffs.push(handoff);
