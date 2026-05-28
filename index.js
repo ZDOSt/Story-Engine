@@ -48,53 +48,52 @@ const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
 const PLAYER_SETUP_STYLE_ID = 'structured_preflight_player_setup_styles';
 const PLAYER_STATS = Object.freeze(['PHY', 'MND', 'CHA']);
 const PLAYER_RACE_CHOICES = Object.freeze([
-    'Human',
-    'Elf',
-    'Half-Elf',
-    'Dwarf',
-    'Halfling',
-    'Gnome',
-    'Orc',
-    'Half-Orc',
-    'Oni',
-    'Goblin',
-    'Hobgoblin',
-    'Kobold',
-    'Lizardfolk',
-    'Lamian',
-    'Harpy',
-    'Arachne',
-    'Centaur',
-    'Minotaur',
-    'Satyr',
-    'Merfolk',
-    'Naga',
-    'Slimekin',
-    'Mushroomfolk',
-    'Automaton',
-    'Homunculus',
-    'Vampire',
-    'Dhampir',
-    'Werewolf',
-    'Catfolk',
-    'Wolfkin',
-    'Foxkin',
-    'Rabbitfolk',
-    'Bearkin',
-    'Dragonkin',
-    'Tiefling',
     'Aasimar',
-    'Demon',
-    'Half-Demon',
     'Angelkin',
+    'Arachne',
+    'Automaton',
+    'Bearkin',
+    'Catfolk',
+    'Centaur',
+    'Demon',
+    'Dhampir',
+    'Dragonkin',
+    'Dryad',
+    'Dwarf',
+    'Elf',
     'Fae',
     'Fairy',
-    'Dryad',
-    'Spirit-Touched',
-    'Undead',
-    'Revenant',
+    'Foxkin',
+    'Gnome',
+    'Goblin',
+    'Half-Demon',
+    'Half-Elf',
+    'Half-Orc',
+    'Halfling',
+    'Harpy',
+    'Hobgoblin',
+    'Homunculus',
+    'Human',
     'Hybrid',
-    'Random',
+    'Kobold',
+    'Lamian',
+    'Lizardfolk',
+    'Merfolk',
+    'Minotaur',
+    'Mushroomfolk',
+    'Naga',
+    'Oni',
+    'Orc',
+    'Rabbitfolk',
+    'Revenant',
+    'Satyr',
+    'Slimekin',
+    'Spirit-Touched',
+    'Tiefling',
+    'Undead',
+    'Vampire',
+    'Werewolf',
+    'Wolfkin',
 ]);
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
@@ -1584,6 +1583,8 @@ function buildNewCharacterRollState() {
         rerollSkipped: false,
         swapApplied: null,
         identity: {
+            characterName: '',
+            sex: '',
             raceMode: 'random',
             pickedRace: 'Human',
             specifiedRace: '',
@@ -3012,6 +3013,14 @@ function buildPlayerIdentityHtml(creator) {
     return `
         ${buildStatsGridHtml(creator)}
         <div class="spe-player-row">
+            <label class="flex1">Name
+                <input id="spe_player_character_name" class="text_pole" value="${escapeHtml(identity.characterName || '')}" placeholder="Optional. Leave blank to generate.">
+            </label>
+            <label class="flex1">Sex
+                <input id="spe_player_sex" class="text_pole" value="${escapeHtml(identity.sex || '')}" placeholder="Optional. Leave blank to generate.">
+            </label>
+        </div>
+        <div class="spe-player-row">
             <label class="flex1">Race
                 <select id="spe_player_race_mode" class="text_pole">
                     <option value="random" ${raceMode === 'random' ? 'selected' : ''}>Random</option>
@@ -3021,7 +3030,7 @@ function buildPlayerIdentityHtml(creator) {
             </label>
             <label class="flex1">Pick
                 <select id="spe_player_race_pick" class="text_pole">
-                    ${PLAYER_RACE_CHOICES.filter(race => race !== 'Random').map(race => `<option value="${escapeHtml(race)}" ${identity.pickedRace === race ? 'selected' : ''}>${escapeHtml(race)}</option>`).join('')}
+                    ${PLAYER_RACE_CHOICES.map(race => `<option value="${escapeHtml(race)}" ${identity.pickedRace === race ? 'selected' : ''}>${escapeHtml(race)}</option>`).join('')}
                 </select>
             </label>
         </div>
@@ -3203,6 +3212,8 @@ function advanceAfterSwap(creator) {
 
 function syncIdentityInputs(creator) {
     creator.identity = creator.identity || {};
+    creator.identity.characterName = String(document.getElementById('spe_player_character_name')?.value || creator.identity.characterName || '').trim();
+    creator.identity.sex = String(document.getElementById('spe_player_sex')?.value || creator.identity.sex || '').trim();
     creator.identity.raceMode = document.getElementById('spe_player_race_mode')?.value || creator.identity.raceMode || 'random';
     creator.identity.pickedRace = document.getElementById('spe_player_race_pick')?.value || creator.identity.pickedRace || 'Human';
     creator.identity.specifiedRace = String(document.getElementById('spe_player_race_specify')?.value || creator.identity.specifiedRace || '').trim();
@@ -3315,6 +3326,8 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
     const stats = normalizeCoreStats(creator.stats || {});
     const identity = creator.identity || {};
     const raceInstruction = buildNewCharacterRaceInstruction(identity);
+    const nameInstruction = buildNewCharacterNameInstruction(identity);
+    const sexInstruction = buildNewCharacterSexInstruction(identity);
     const appearanceInstruction = identity.appearance
         ? `Use these user appearance notes as hard constraints: ${identity.appearance}.`
         : 'Generate a fitting appearance from the chosen race and concept.';
@@ -3331,7 +3344,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
             content:
                 'Return only the finished character sheet in markdown. No preface and no questions.\n\n' +
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
-                `${raceInstruction}\n${appearanceInstruction}\n\n` +
+                `${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${appearanceInstruction}\n\n` +
                 'Required sections:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and a brief identity note if relevant.\n' +
                 '# APPEARANCE: height, build, hair, eyes, skin, distinctive traits, voice.\n' +
@@ -3345,6 +3358,22 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
     return sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
         temperature: 0.7,
     }));
+}
+
+function buildNewCharacterNameInstruction(identity = {}) {
+    const name = String(identity.characterName || '').trim();
+    if (name) {
+        return `Use this character name exactly: ${name}.`;
+    }
+    return 'Generate a fitting character name.';
+}
+
+function buildNewCharacterSexInstruction(identity = {}) {
+    const sex = String(identity.sex || '').trim();
+    if (sex) {
+        return `Use this character sex exactly: ${sex}.`;
+    }
+    return 'Generate a fitting character sex or leave it unspecified.';
 }
 
 function buildNewCharacterRaceInstruction(identity = {}) {

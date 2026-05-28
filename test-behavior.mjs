@@ -6594,6 +6594,27 @@ const tests = [
       assert.match(source, /Story Engine is finalizing narration/);
     },
   },
+  {
+    name: '49 player creator supports name, freeform sex, and alphabetical race choices',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const raceBlock = source.match(/const PLAYER_RACE_CHOICES = Object\.freeze\(\[\n([\s\S]*?)\n\]\);/)?.[1] || '';
+      const races = [...raceBlock.matchAll(/'([^']+)'/g)].map(match => match[1]);
+      assert.ok(races.length > 10, 'Race choices should be present.');
+      assert.deepEqual(races, [...races].sort((a, b) => a.localeCompare(b)));
+      assert.doesNotMatch(raceBlock, /'Random'/);
+      assert.match(source, /id="spe_player_character_name"/);
+      assert.match(source, /<input id="spe_player_sex"/);
+      assert.match(source, /creator\.identity\.characterName = String\(document\.getElementById\('spe_player_character_name'\)/);
+      assert.match(source, /creator\.identity\.sex = String\(document\.getElementById\('spe_player_sex'\)/);
+      assert.match(source, /buildNewCharacterNameInstruction\(identity\)/);
+      assert.match(source, /buildNewCharacterSexInstruction\(identity\)/);
+      assert.match(source, /Use this character name exactly/);
+      assert.match(source, /Use this character sex exactly/);
+      assert.match(source, /Generate a fitting character sex or leave it unspecified/);
+      assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
+    },
+  },
 ];
 
 const EXTENSION_DIR = new URL('.', import.meta.url);
