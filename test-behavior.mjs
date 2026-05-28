@@ -6715,6 +6715,10 @@ const tests = [
       assert.match(source, /All races are valid in all genres/);
       assert.match(source, /If race is Random, choose any playable race first/);
       assert.match(source, /You generate a SillyTavern user persona character sheet for roleplay/);
+      assert.match(source, /# TRAITS \(ALWAYS ACTIVE\): exactly one passive trait/);
+      assert.match(source, /unique, impactful, and inherent to the character race/);
+      assert.match(source, /# ABILITIES \/ SKILLS \(REQUIRE ACTIVATION\): exactly one activated ability or practiced technique/);
+      assert.match(source, /Do not write numerical bonuses, dice modifiers, HP rules/);
       assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
     },
   },
