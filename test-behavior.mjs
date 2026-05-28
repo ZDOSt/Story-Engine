@@ -6725,12 +6725,21 @@ const tests = [
       assert.match(source, /Do not soften high PHY into a default lean, wiry, fragile, noncombatant, or untrained description/);
       assert.match(source, /# TRAITS \(ALWAYS ACTIVE\): exactly one passive trait/);
       assert.match(source, /unique, impactful, permanent, and inherent to the character race/);
-      assert.match(source, /It must not be a chosen action, learned skill, activated power, or disguised ability/);
-      assert.match(source, /# ABILITIES \/ SKILLS \(REQUIRE ACTIVATION\): exactly one activated ability or practiced technique/);
+      assert.match(source, /It is always true and applies automatically when relevant/);
+      assert.match(source, /If something is passive and always-on, it belongs here/);
+      assert.match(source, /It must not be a learned skill, chosen action, trigger-based power, or disguised ability/);
+      assert.match(source, /# ABILITIES \/ SKILLS: exactly one usable ability, power, technique, or special method/);
+      assert.match(source, /The user does not need to name the ability/);
+      assert.match(source, /fictional permission to attempt that kind of action/);
+      assert.match(source, /Utility use may simply work in narration only when it is unopposed, low-stakes, outside active danger/);
+      assert.match(source, /has no immediate harmful, contested, stealth, escape, security-bypass, control, ambush, trap, or unwilling-target consequence/);
+      assert.match(source, /If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm/);
+      assert.match(source, /normal scene resolution decides the result/);
       assert.match(source, /Limits must be fictional constraints, not cooldown timers or usage counts/);
       assert.match(source, /Do not write numerical bonuses, dice modifiers, HP rules/);
-      assert.match(source, /# FIXED FACTS:/);
-      assert.match(source, /Do not include personality, future plans, preferred tactics, fighting style/);
+      assert.match(source, /# FLAVOR \/ FIXED FACTS:/);
+      assert.match(source, /This section must add context the user can play with, not decisions made for them/);
+      assert.match(source, /Do not include personality, future plans, preferred tactics, combat style/);
       assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
     },
   },
