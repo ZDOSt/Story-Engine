@@ -3356,6 +3356,7 @@ function parsePersonaAnalysis(raw) {
 async function generateNewPlayerCharacterSheet(creator, context = getContext()) {
     const stats = normalizeCoreStats(creator.stats || {});
     const identity = creator.identity || {};
+    const statInstruction = buildNewCharacterStatInstruction(stats);
     const genreInstruction = buildNewCharacterGenreInstruction(identity);
     const raceInstruction = buildNewCharacterRaceInstruction(identity);
     const nameInstruction = buildNewCharacterNameInstruction(identity);
@@ -3368,6 +3369,8 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
             role: 'system',
             content:
                 'You generate a SillyTavern user persona character sheet for roleplay. ' +
+                'This is a playable user character shell, not an authored protagonist. Fill only fixed starting facts the user can step into. ' +
+                'Do not decide future choices, personality, habits, emotional reactions, combat preferences, social strategy, morals, goals, fears, or how the character will behave in play. ' +
                 'The numeric stats are locked and must be copied exactly. Do not reroll, rebalance, or assign new numbers. ' +
                 'Generate flavorful but grounded details. Avoid overpowered abilities. Keep inventory appropriate to the character, genre, and setting.',
         },
@@ -3376,15 +3379,15 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
             content:
                 'Return only the finished character sheet in markdown. No preface and no questions.\n\n' +
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
-                `${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${appearanceInstruction}\n\n` +
+                `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${appearanceInstruction}\n\n` +
                 'Required sections:\n' +
-                '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and a brief identity note if relevant.\n' +
-                '# APPEARANCE: height, build, hair, eyes, skin, distinctive traits, voice.\n' +
+                '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
+                '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
-                '# TRAITS (ALWAYS ACTIVE): exactly one passive trait. The trait must be unique, impactful, and inherent to the character race, body, origin, or nature. It is always true, or it naturally takes effect when the right circumstance occurs. It must create concrete fictional consequences: what the character can perceive, survive, recover from, be vulnerable to, or naturally do without deliberately invoking a power. Example: a vampire slowly mends wounds after feeding on fresh blood; a cave-born species sees clearly in darkness. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic success, immunity to consequences, or vague expertise.\n' +
-                '# ABILITIES / SKILLS (REQUIRE ACTIVATION): exactly one activated ability or practiced technique. This is a deliberate capability the character can choose to use during play, and it remains inactive until attempted. It must be a concrete, usable action with a clear fictional effect, practical limits, and possible opposition. Example: opening a small dimensional pocket to store or retrieve an object; stepping through shadow to cross a short distance. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic success, immunity to consequences, or vague expertise.\n' +
-                '# INVENTORY: setting-appropriate gear, no currency amount unless requested, no weapon unless justified by background.\n' +
-                '# NOTES: concise character notes, limits, background hooks, secrecy rules, or fighting style if relevant.',
+                '# TRAITS (ALWAYS ACTIVE): exactly one passive trait. The trait must be unique, impactful, permanent, and inherent to the character race, body, origin, or nature. It is always true, even if it only matters when relevant circumstances arise. It must not be a chosen action, learned skill, activated power, or disguised ability. It must create concrete fictional consequences: what the character can perceive, physically be, naturally endure, naturally recover from, be vulnerable to, or do by nature. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic success, immunity to consequences, vague expertise, or conditional mini-abilities.\n' +
+                '# ABILITIES / SKILLS (REQUIRE ACTIVATION): exactly one activated ability or practiced technique. This is a deliberate capability the character can choose to attempt during play, and it remains inactive until attempted. It must be a concrete, usable action with a clear fictional effect, practical limits, and possible opposition. Limits must be fictional constraints, not cooldown timers or usage counts. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic success, immunity to consequences, or vague expertise.\n' +
+                '# INVENTORY: setting-appropriate starting gear only. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
+                '# FIXED FACTS: concise fixed origin facts, immutable constraints, ability/trait limits, unresolved background hooks, or secrecy facts if relevant. Do not include personality, future plans, preferred tactics, fighting style, social strategy, goals, fears, habits, emotional reactions, or statements about what the character will/may/usually/tends to do.',
         },
     ];
     return sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
@@ -3406,6 +3409,36 @@ function buildNewCharacterSexInstruction(identity = {}) {
         return `Use this character sex exactly: ${sex}.`;
     }
     return 'Generate a fitting character sex or leave it unspecified.';
+}
+
+function buildNewCharacterStatInstruction(stats = {}) {
+    const normalized = normalizeCoreStats(stats);
+    const statMeanings = {
+        PHY: 'physical capability, athleticism, endurance, combat readiness, bodily skill, or movement competence',
+        MND: 'knowledge, perception, reasoning, focus, technical skill, magical discipline, or mental resilience',
+        CHA: 'presence, confidence, persuasion, deception, intimidation, charm, leadership, or social fluency',
+    };
+    const ordered = PLAYER_STATS
+        .map(stat => ({ stat, value: Number(normalized[stat] || 1) }))
+        .sort((a, b) => (b.value - a.value) || PLAYER_STATS.indexOf(a.stat) - PLAYER_STATS.indexOf(b.stat));
+    const allEqual = ordered.every(entry => entry.value === ordered[0].value);
+    if (allEqual) {
+        return [
+            `STAT SHAPE: balanced (${PLAYER_STATS.map(stat => `${stat} ${normalized[stat]}`).join(', ')}).`,
+            'The character concept, prior competence, appearance, and starting gear should show balanced physical, mental, and social capability without contradicting any locked stat.',
+        ].join('\n');
+    }
+
+    const strongest = ordered.slice(0, 2);
+    const weak = ordered[2];
+    return [
+        `STAT SHAPE: strongest stats are ${strongest.map(entry => `${entry.stat} ${entry.value}`).join(' and ')}; relative weak point is ${weak.stat} ${weak.value}.`,
+        `Build the shell around those strengths: ${strongest.map(entry => `${entry.stat} means ${statMeanings[entry.stat]}`).join('; ')}.`,
+        `Treat ${weak.stat} as the relative weak point, even if its number is still high. Do not contradict the locked stats with background, appearance, training, or limits.`,
+        'If PHY is one of the strongest stats, the body and prior competence must show real physical capability. Do not soften high PHY into a default lean, wiry, fragile, noncombatant, or untrained description unless the concept gives an equally physical explanation such as acrobatics, dueling, athletics, labor, survival, dance, martial training, or monster-body strength.',
+        'If CHA is one of the strongest stats, the shell must show social presence, influence, confidence, performance, command, negotiation, deception, intimidation, or charm without dictating future social choices.',
+        'If MND is one of the strongest stats, the shell must show mental, technical, scholarly, perceptive, magical, strategic, or investigative competence without turning the character into a fixed personality.',
+    ].join('\n');
 }
 
 function buildNewCharacterGenreInstruction(identity = {}) {

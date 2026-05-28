@@ -6709,16 +6709,28 @@ const tests = [
       assert.match(source, /buildNewCharacterNameInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterSexInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterGenreInstruction\(identity\)/);
+      assert.match(source, /buildNewCharacterStatInstruction\(stats\)/);
       assert.match(source, /Use this character name exactly/);
       assert.match(source, /Use this character sex exactly/);
       assert.match(source, /Generate a fitting character sex or leave it unspecified/);
       assert.match(source, /All races are valid in all genres/);
       assert.match(source, /If race is Random, choose any playable race first/);
       assert.match(source, /You generate a SillyTavern user persona character sheet for roleplay/);
+      assert.match(source, /This is a playable user character shell, not an authored protagonist/);
+      assert.match(source, /Do not decide future choices, personality, habits, emotional reactions/);
+      assert.match(source, /STAT SHAPE: strongest stats are/);
+      assert.match(source, /relative weak point/);
+      assert.match(source, /Do not contradict the locked stats/);
+      assert.match(source, /Appearance must reflect PHY when relevant/);
+      assert.match(source, /Do not soften high PHY into a default lean, wiry, fragile, noncombatant, or untrained description/);
       assert.match(source, /# TRAITS \(ALWAYS ACTIVE\): exactly one passive trait/);
-      assert.match(source, /unique, impactful, and inherent to the character race/);
+      assert.match(source, /unique, impactful, permanent, and inherent to the character race/);
+      assert.match(source, /It must not be a chosen action, learned skill, activated power, or disguised ability/);
       assert.match(source, /# ABILITIES \/ SKILLS \(REQUIRE ACTIVATION\): exactly one activated ability or practiced technique/);
+      assert.match(source, /Limits must be fictional constraints, not cooldown timers or usage counts/);
       assert.match(source, /Do not write numerical bonuses, dice modifiers, HP rules/);
+      assert.match(source, /# FIXED FACTS:/);
+      assert.match(source, /Do not include personality, future plans, preferred tactics, fighting style/);
       assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
     },
   },
