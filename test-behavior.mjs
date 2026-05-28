@@ -5204,7 +5204,14 @@ const tests = [
       for (const name of [...pool.male, ...pool.female, ...pool.location]) {
         assert.doesNotMatch(name, /(?:Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
       }
-      assert.match(prompt(report), /Name pool use must obey fogOfWar\(\)\./);
+      const modelPrompt = prompt(report);
+      assert.match(modelPrompt, /Name pool use is mandatory and obeys fogOfWar\(\)\./);
+      assert.match(modelPrompt, /approved generated name pool is mandatory and closed-world/);
+      assert.match(modelPrompt, /Do not invent, modify, translate, combine, suffix, add surnames to, or derive names/);
+      for (const name of [...pool.male, ...pool.female, ...pool.location]) {
+        assert.equal(modelPrompt.includes(name), true);
+      }
+      assert.doesNotMatch(modelPrompt, /Versobom|Staistu|Vaisailnok/);
       assert.match(auditPrompt(report), /nameGeneration\.result: style: Balanced Fantasy; semanticCandidates:/);
       assert.match(auditPrompt(report), /rejected: .*Versobom/);
       assert.match(auditPrompt(report), /final: male:/);
@@ -5230,9 +5237,10 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /Name pool use must obey fogOfWar\(\)\./);
-      assert.match(text, /approved person name pool/);
-      assert.match(text, /approved location name pool/);
+      assert.match(text, /Name pool use is mandatory and obeys fogOfWar\(\)\./);
+      assert.match(text, /Person\/entity names allowed for newly revealed people\/entities:/);
+      assert.match(text, /Location\/place names allowed for newly revealed places:/);
+      assert.match(text, /Any newly revealed proper name in this response must come only from the approved generated name pool in ACTIVE_BRANCH_FACTS/);
       assert.match(text, /Do not assign names to background, incidental, or unnamed figures/);
     },
   },

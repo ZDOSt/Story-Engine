@@ -597,8 +597,21 @@ function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollA
     if (!isNoneText(inflictedNpcInjury)) facts.push(`NPC injury/death branch: ${inflictedNpcInjury}.`);
     if (!isNoneText(inflictedUserInjury)) facts.push(`User injury branch: ${inflictedUserInjury}.`);
     if (resolution?.CompanionCommand?.Mode === 'REQUEST_ONLY') facts.push(`Companion command branch: request-only command to ${list(resolution.CompanionCommand.NPCs)}; no obedience or companion hit is resolved unless proactivity/aggression says so.`);
-    if (handoff?.nameGeneration?.namePool) facts.push('Name branch: name pool exists, but fog-of-war controls whether a name may appear.');
+    const namePoolFact = closedWorldNamePoolFact(handoff?.nameGeneration);
+    if (namePoolFact) facts.push(namePoolFact);
     return facts.map(fact => `- ${fact}`).join('\n') || '- none';
+}
+
+function closedWorldNamePoolFact(nameGeneration) {
+    const pool = nameGeneration?.namePool;
+    if (!pool) return '';
+    const personNames = [...(pool.male || []), ...(pool.female || [])]
+        .map(name => String(name ?? '').trim())
+        .filter(name => name && !isNoneText(name));
+    const locationNames = (pool.location || [])
+        .map(name => String(name ?? '').trim())
+        .filter(name => name && !isNoneText(name));
+    return `Name branch: approved generated name pool is mandatory and closed-world. Person/entity names allowed for newly revealed people/entities: ${list(personNames)}. Location/place names allowed for newly revealed places: ${list(locationNames)}. If a new proper name is revealed this turn, it must be one unused name from the matching approved pool. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. If no appropriate unused approved name exists, keep the person/place unnamed or use a role/description.`;
 }
 
 function hasLandedPhysicalResult(resolution) {
@@ -1118,7 +1131,7 @@ function intimacyRefusalGuide(npc) {
 
 function nameGenerationGuide(nameGeneration) {
     if (!nameGeneration?.namePool) return '';
-    return ` Name pool use must obey fogOfWar(). A name may appear only after the scene has already explicitly revealed that specific person, entity, or place through speech, readable text, self-introduction, direct in-world reference, signage, documents, or clear recognition. Once revealed, use an unused name from the approved person name pool for that already-identified person/entity, or an unused name from the approved location name pool for that already-identified place. Do not assign names to background, incidental, or unnamed figures, and do not introduce a name as an appositive unless the scene has already revealed it first. If no such reveal occurred, keep the character or place unnamed.`;
+    return ` Name pool use is mandatory and obeys fogOfWar(). Already revealed names from chat, character card, lore, or tracker may continue unchanged. Any newly revealed proper name in this response must come only from the approved generated name pool in ACTIVE_BRANCH_FACTS. A new name may appear only after the scene has explicitly revealed that specific person, entity, or place through speech, readable text, self-introduction, direct in-world reference, signage, documents, or clear recognition. Once revealed, use one unused approved person/entity name for that already-identified person/entity, or one unused approved location/place name for that already-identified place. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. Do not assign names to background, incidental, or unnamed figures, and do not introduce a name as an appositive unless the scene has already revealed it first. If no such reveal occurred, or no appropriate unused approved name exists, keep the character or place unnamed or use a role/description.`;
 }
 
 function namePoolText(pool = {}) {
