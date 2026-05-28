@@ -6657,14 +6657,21 @@ const tests = [
     run() {
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      assert.match(indexSource, /FINAL ACTIONABLE BEAT HARD STOP/);
+      assert.match(indexSource, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
       assert.match(indexSource, /The moment an actionable beat exists, stop immediately/);
       assert.match(indexSource, /Do not add after-beat tailing/);
       assert.match(indexSource, /Direct address to \{\{user\}\} is usually an actionable beat/);
+      assert.match(indexSource, /If direct speech to \{\{user\}\} contains a question, command, request, offer/);
+      assert.match(indexSource, /separator lines used to append ambient\/actionless cleanup/);
       assert.match(indexSource, /ambient traffic, crowd movement, side-character activity/);
       assert.match(indexSource, /after-beat tailing/);
+      assert.match(handoffSource, /FINAL ACTIONABLE BEAT HARD STOP/);
+      assert.match(handoffSource, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
       assert.match(handoffSource, /The moment an actionable beat exists, stop immediately/);
       assert.match(handoffSource, /Do not add after-beat tailing/);
       assert.match(handoffSource, /Direct address to \{\{user\}\} is usually an actionable beat/);
+      assert.match(handoffSource, /If direct speech to \{\{user\}\} contains a question, command, request, offer/);
       assert.match(handoffSource, /ambient traffic, crowd movement, side-character activity/);
     },
   },
@@ -6677,7 +6684,8 @@ const tests = [
       assert.match(source, /id="structured_preflight_prose_guard_enabled"/);
       assert.match(source, /id="structured_preflight_prose_guard_profile"/);
       assert.match(source, /function buildProseGuardPrompt\(narrationText\)/);
-      assert.match(source, /Do not add new actions, remove valid actions, add reactions, add dialogue/);
+      assert.match(source, /Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue/);
+      assert.match(source, /Exception: remove every sentence, paragraph, separator line, or outro/);
       assert.match(source, /success or failure, landed contact, injuries, death, condition, intimacy permission/);
       assert.match(source, /equivalent workaround phrase/);
       assert.match(source, /words cannot land, drop, hang, cut, hit, weigh, burn, freeze, crawl/);
@@ -6685,6 +6693,12 @@ const tests = [
       assert.match(source, /dropped like a stone/);
       assert.match(source, /the word lands flat and hard/);
       assert.match(source, /Do not replace a violation with another coded tell or workaround phrase/);
+      assert.match(source, /A turn-boundary violation is a prose-rule violation/);
+      assert.match(source, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
+      assert.match(source, /Delete all text after the final actionable beat/);
+      assert.match(source, /horizontal rule, separator, or scene-break tail/);
+      assert.match(source, /Do not replace after-beat tailing with different after-beat tailing\. Cut it\./);
+      assert.match(source, /Invalid after-beat tail/);
       assert.match(source, /GOOD REPLACEMENT PATTERN/);
     },
   },

@@ -278,13 +278,15 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Never write {{user}} speech, thoughts, feelings, reactions, silence, decisions, or voluntary actions unless the narrator handoff explicitly enables PROXY USER ACTION MODE.
       - If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return immediately to normal agency separation.
       - Allow at most 1 inter-NPC exchange and at most 3 sentences per monologue.
-      - End on the first concrete playable beat that directly involves {{user}}: a question, command, request, refusal, threat, incoming action, unresolved attack frame, impact, grab, obstacle, blocked access, revealed consequence, object in reach, changed position, or decision point that {{user}} can immediately answer, resist, inspect, interrupt, take, refuse, defend against, or act upon. The moment an actionable beat exists, stop immediately and allow {{user}} to respond.
+      - FINAL ACTIONABLE BEAT HARD STOP: end on the first concrete playable beat that directly involves {{user}}: a question, command, request, refusal, threat, incoming action, unresolved attack frame, impact, grab, obstacle, blocked access, revealed consequence, object in reach, changed position, or decision point that {{user}} can immediately answer, resist, inspect, interrupt, take, refuse, defend against, or act upon.
+      - NO NARRATION AFTER THE FINAL ACTIONABLE BEAT. The moment an actionable beat exists, stop immediately and allow {{user}} to respond. Do not add one more sentence. Do not add one more paragraph. Do not add an outro. Do not add a separator or scene-break line.
       - Do not add after-beat tailing: no extra posture, gaze, scanning, lingering contact, ambient traffic, crowd movement, side-character activity, environmental detail, recap, mood line, or passive waiting after the response point.
       - Direct address to {{user}} is usually an actionable beat; after an NPC speaks to, questions, commands, refuses, threatens, touches, blocks, or pressures {{user}}, stop unless a listed resolved mechanic requires one more immediate consequence.
+      - If direct speech to {{user}} contains a question, command, request, offer, refusal, threat, accusation, invitation, or concrete information {{user}} can answer or act on, the response ends at that speech unit.
       - The final beat must not be ambient, decorative, environmental-only, crowd-only, side-character-only, mood-only, passive waiting, all-eyes-on-user framing, or unrelated scene noise. Do not end on background activity unless that activity directly creates an immediate obstacle, danger, opportunity, or demand for {{user}}.
 
     ABSOLUTE BAN:
-      - Echoing, restating, paraphrasing, or summarizing {{user}} input; "as you" phrasing; opening recap transitions; writing beyond the response point; after-beat tailing; answering questions directed at {{user}}; ambient filler endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
+      - Echoing, restating, paraphrasing, or summarizing {{user}} input; "as you" phrasing; opening recap transitions; writing beyond the response point; narration after the final actionable beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; answering questions directed at {{user}}; ambient filler endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
 
   execution:
     This is the required render order before the first visible output token.
@@ -3789,10 +3791,12 @@ function buildProseGuardPrompt(narrationText) {
         'TASK:',
         'Edit TEXT_TO_CHECK only to remove prose-rule violations. Preserve the scene exactly.',
         'If no violations exist, return TEXT_TO_CHECK unchanged.',
+        'A turn-boundary violation is a prose-rule violation. Cut invalid after-beat tailing instead of preserving it.',
         '',
         'DO NOT CHANGE:',
         '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
-        '- Do not add new actions, remove valid actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
+        '- Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
+        '- Exception: remove every sentence, paragraph, separator line, or outro that appears after the first final actionable beat unless it is required by an explicit resolved mechanic.',
         '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
         '',
         'VIOLATION FAMILIES:',
@@ -3817,6 +3821,14 @@ function buildProseGuardPrompt(narrationText) {
         '6. Decorative filler:',
         'Remove or rewrite ornamental atmosphere that does not change action, visibility, sound, contact, footing, threat, or available choices. Keep environmental detail only when it materially affects the scene.',
         '',
+        '7. Turn-boundary / after-beat tailing:',
+        'NO NARRATION AFTER THE FINAL ACTIONABLE BEAT.',
+        'The final actionable beat is the first moment that directly gives the user something immediate to answer, resist, inspect, interrupt, take, refuse, defend against, or act upon.',
+        'Examples: direct speech to the user, a question, command, request, offer, refusal, threat, accusation, invitation, touch, blocked path, incoming action, revealed consequence, object in reach, changed position, or decision point.',
+        'If an NPC directly speaks to the user with actionable information, the response usually ends at the end of that speech unit.',
+        'Delete all text after the final actionable beat when it is only posture, gaze, scanning, lingering contact, ambient traffic, crowd movement, side-character activity, environmental detail, recap, mood, waiting, outro, horizontal rule, separator, or scene-break tail.',
+        'Do not replace after-beat tailing with different after-beat tailing. Cut it.',
+        '',
         'VALID REPLACEMENTS:',
         'Replace violations with concrete, consequential physical behavior: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, or environmental interaction.',
         'Do not replace a violation with another coded tell or workaround phrase.',
@@ -3825,6 +3837,8 @@ function buildProseGuardPrompt(narrationText) {
         'GOOD REPLACEMENT PATTERN:',
         'Invalid: "Her jaw tightened. The word landed flat and hard, dropped like a stone between them."',
         'Valid: "She set her hand against his wrist and pushed it away. She said the word once, low and clear, then stepped back to keep distance between them."',
+        'Invalid after-beat tail: "She says, \"Come with me.\" A cart rattles past behind her, and two guards continue down the street."',
+        'Valid after-beat cut: "She says, \"Come with me.\"',
         '',
         'OUTPUT CONTRACT:',
         'Return only the corrected narration text. No labels, bullets, commentary, markdown fences, XML, JSON, analysis, or preamble.',
