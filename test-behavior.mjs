@@ -6653,6 +6653,22 @@ const tests = [
     },
   },
   {
+    name: '46a turn boundary blocks after-beat tailing',
+    run() {
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      assert.match(indexSource, /The moment an actionable beat exists, stop immediately/);
+      assert.match(indexSource, /Do not add after-beat tailing/);
+      assert.match(indexSource, /Direct address to \{\{user\}\} is usually an actionable beat/);
+      assert.match(indexSource, /ambient traffic, crowd movement, side-character activity/);
+      assert.match(indexSource, /after-beat tailing/);
+      assert.match(handoffSource, /The moment an actionable beat exists, stop immediately/);
+      assert.match(handoffSource, /Do not add after-beat tailing/);
+      assert.match(handoffSource, /Direct address to \{\{user\}\} is usually an actionable beat/);
+      assert.match(handoffSource, /ambient traffic, crowd movement, side-character activity/);
+    },
+  },
+  {
     name: '47 Prose Guard settings and prompt preserve mechanics while targeting prose violations',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
