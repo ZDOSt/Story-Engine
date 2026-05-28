@@ -6686,7 +6686,7 @@ const tests = [
     },
   },
   {
-    name: '49 player creator supports name, freeform sex, and alphabetical race choices',
+    name: '49 player creator supports name, freeform sex, one race dropdown, genre, and alphabetical race choices',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const raceBlock = source.match(/const PLAYER_RACE_CHOICES = Object\.freeze\(\[\n([\s\S]*?)\n\]\);/)?.[1] || '';
@@ -6694,15 +6694,27 @@ const tests = [
       assert.ok(races.length > 10, 'Race choices should be present.');
       assert.deepEqual(races, [...races].sort((a, b) => a.localeCompare(b)));
       assert.doesNotMatch(raceBlock, /'Random'/);
+      assert.match(source, /const PLAYER_GENRE_CHOICES = Object\.freeze/);
       assert.match(source, /id="spe_player_character_name"/);
       assert.match(source, /<input id="spe_player_sex"/);
+      assert.match(source, /id="spe_player_genre"/);
+      assert.match(source, /id="spe_player_race"/);
+      assert.match(source, /<option value="random"/);
+      assert.match(source, /<option value="custom"/);
+      assert.doesNotMatch(source, /id="spe_player_race_mode"/);
+      assert.doesNotMatch(source, /id="spe_player_race_pick"/);
       assert.match(source, /creator\.identity\.characterName = String\(document\.getElementById\('spe_player_character_name'\)/);
       assert.match(source, /creator\.identity\.sex = String\(document\.getElementById\('spe_player_sex'\)/);
+      assert.match(source, /creator\.identity\.genre = PLAYER_GENRE_CHOICES\.includes\(genre\) \? genre : 'Fantasy'/);
       assert.match(source, /buildNewCharacterNameInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterSexInstruction\(identity\)/);
+      assert.match(source, /buildNewCharacterGenreInstruction\(identity\)/);
       assert.match(source, /Use this character name exactly/);
       assert.match(source, /Use this character sex exactly/);
       assert.match(source, /Generate a fitting character sex or leave it unspecified/);
+      assert.match(source, /All races are valid in all genres/);
+      assert.match(source, /If race is Random, choose any playable race first/);
+      assert.match(source, /You generate a SillyTavern user persona character sheet for roleplay/);
       assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
     },
   },

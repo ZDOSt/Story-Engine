@@ -95,6 +95,22 @@ const PLAYER_RACE_CHOICES = Object.freeze([
     'Werewolf',
     'Wolfkin',
 ]);
+const PLAYER_GENRE_CHOICES = Object.freeze([
+    'Fantasy',
+    'Sci-fi',
+    'Modern',
+    'Slice of Life',
+    'Isekai',
+    'Urban Fantasy',
+    'Cyberpunk',
+    'Post-Apocalyptic',
+    'Horror',
+    'Supernatural',
+    'Superhero',
+    'Steampunk',
+    'Historical',
+    'Wuxia / Xianxia',
+]);
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
@@ -1585,6 +1601,7 @@ function buildNewCharacterRollState() {
         identity: {
             characterName: '',
             sex: '',
+            genre: 'Fantasy',
             raceMode: 'random',
             pickedRace: 'Human',
             specifiedRace: '',
@@ -3009,7 +3026,12 @@ function buildPlayerSwapHtml(creator) {
 
 function buildPlayerIdentityHtml(creator) {
     const identity = creator.identity || {};
-    const raceMode = identity.raceMode || 'random';
+    const genre = PLAYER_GENRE_CHOICES.includes(identity.genre) ? identity.genre : 'Fantasy';
+    const raceValue = identity.raceMode === 'specify'
+        ? 'custom'
+        : identity.raceMode === 'pick'
+            ? identity.pickedRace || 'Human'
+            : 'random';
     return `
         ${buildStatsGridHtml(creator)}
         <div class="spe-player-row">
@@ -3021,16 +3043,16 @@ function buildPlayerIdentityHtml(creator) {
             </label>
         </div>
         <div class="spe-player-row">
-            <label class="flex1">Race
-                <select id="spe_player_race_mode" class="text_pole">
-                    <option value="random" ${raceMode === 'random' ? 'selected' : ''}>Random</option>
-                    <option value="pick" ${raceMode === 'pick' ? 'selected' : ''}>Pick From List</option>
-                    <option value="specify" ${raceMode === 'specify' ? 'selected' : ''}>Specify</option>
+            <label class="flex1">Genre
+                <select id="spe_player_genre" class="text_pole">
+                    ${PLAYER_GENRE_CHOICES.map(item => `<option value="${escapeHtml(item)}" ${genre === item ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}
                 </select>
             </label>
-            <label class="flex1">Pick
-                <select id="spe_player_race_pick" class="text_pole">
-                    ${PLAYER_RACE_CHOICES.map(race => `<option value="${escapeHtml(race)}" ${identity.pickedRace === race ? 'selected' : ''}>${escapeHtml(race)}</option>`).join('')}
+            <label class="flex1">Race
+                <select id="spe_player_race" class="text_pole">
+                    <option value="random" ${raceValue === 'random' ? 'selected' : ''}>Random</option>
+                    ${PLAYER_RACE_CHOICES.map(race => `<option value="${escapeHtml(race)}" ${raceValue === race ? 'selected' : ''}>${escapeHtml(race)}</option>`).join('')}
+                    <option value="custom" ${raceValue === 'custom' ? 'selected' : ''}>Custom / Specify</option>
                 </select>
             </label>
         </div>
@@ -3214,8 +3236,17 @@ function syncIdentityInputs(creator) {
     creator.identity = creator.identity || {};
     creator.identity.characterName = String(document.getElementById('spe_player_character_name')?.value || creator.identity.characterName || '').trim();
     creator.identity.sex = String(document.getElementById('spe_player_sex')?.value || creator.identity.sex || '').trim();
-    creator.identity.raceMode = document.getElementById('spe_player_race_mode')?.value || creator.identity.raceMode || 'random';
-    creator.identity.pickedRace = document.getElementById('spe_player_race_pick')?.value || creator.identity.pickedRace || 'Human';
+    const genre = document.getElementById('spe_player_genre')?.value || creator.identity.genre || 'Fantasy';
+    creator.identity.genre = PLAYER_GENRE_CHOICES.includes(genre) ? genre : 'Fantasy';
+    const raceValue = document.getElementById('spe_player_race')?.value || (creator.identity.raceMode === 'pick' ? creator.identity.pickedRace : creator.identity.raceMode) || 'random';
+    if (raceValue === 'custom') {
+        creator.identity.raceMode = 'specify';
+    } else if (raceValue === 'random') {
+        creator.identity.raceMode = 'random';
+    } else {
+        creator.identity.raceMode = 'pick';
+        creator.identity.pickedRace = PLAYER_RACE_CHOICES.includes(raceValue) ? raceValue : 'Human';
+    }
     creator.identity.specifiedRace = String(document.getElementById('spe_player_race_specify')?.value || creator.identity.specifiedRace || '').trim();
     creator.identity.specifiedRaceDescriptionMode = document.getElementById('spe_player_race_description_mode')?.value || creator.identity.specifiedRaceDescriptionMode || 'system';
     creator.identity.specifiedRaceDescription = String(document.getElementById('spe_player_race_description')?.value || creator.identity.specifiedRaceDescription || '').trim();
@@ -3325,32 +3356,33 @@ function parsePersonaAnalysis(raw) {
 async function generateNewPlayerCharacterSheet(creator, context = getContext()) {
     const stats = normalizeCoreStats(creator.stats || {});
     const identity = creator.identity || {};
+    const genreInstruction = buildNewCharacterGenreInstruction(identity);
     const raceInstruction = buildNewCharacterRaceInstruction(identity);
     const nameInstruction = buildNewCharacterNameInstruction(identity);
     const sexInstruction = buildNewCharacterSexInstruction(identity);
     const appearanceInstruction = identity.appearance
         ? `Use these user appearance notes as hard constraints: ${identity.appearance}.`
-        : 'Generate a fitting appearance from the chosen race and concept.';
+        : 'Generate a fitting appearance from the chosen race, genre, and concept.';
     const prompt = [
         {
             role: 'system',
             content:
-                'You generate a SillyTavern user persona character sheet for a fantasy roleplay. ' +
+                'You generate a SillyTavern user persona character sheet for roleplay. ' +
                 'The numeric stats are locked and must be copied exactly. Do not reroll, rebalance, or assign new numbers. ' +
-                'Generate flavorful but grounded details. Avoid overpowered abilities. Keep inventory appropriate to the character and setting.',
+                'Generate flavorful but grounded details. Avoid overpowered abilities. Keep inventory appropriate to the character, genre, and setting.',
         },
         {
             role: 'user',
             content:
                 'Return only the finished character sheet in markdown. No preface and no questions.\n\n' +
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
-                `${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${appearanceInstruction}\n\n` +
+                `${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${appearanceInstruction}\n\n` +
                 'Required sections:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and a brief identity note if relevant.\n' +
                 '# APPEARANCE: height, build, hair, eyes, skin, distinctive traits, voice.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
-                '# RACIAL TRAITS (ALWAYS ACTIVE): exactly two passive traits that enhance existing human faculties; do not add impossible new senses or active powers.\n' +
-                '# ABILITIES (REQUIRE ACTIVATION): exactly two activated abilities. Each ability must clearly come from the chosen race, ancestry, physiology, passive traits, or stated character concept. Do not invent unrelated powers. Keep them useful, character-defining, and not overpowered.\n' +
+                '# TRAITS (ALWAYS ACTIVE): exactly two passive traits. They may be racial, cultural, trained, technological, supernatural, social, or mundane depending on genre and concept. Keep them useful but not overpowered.\n' +
+                '# ABILITIES / SKILLS (REQUIRE ACTIVATION): exactly two activated abilities, techniques, skills, spells, tools, talents, or maneuvers. They must fit the chosen race, genre, background, physiology, training, technology, or concept. Do not invent unrelated powers. Keep them character-defining and not overpowered.\n' +
                 '# INVENTORY: setting-appropriate gear, no currency amount unless requested, no weapon unless justified by background.\n' +
                 '# NOTES: concise character notes, limits, background hooks, secrecy rules, or fighting style if relevant.',
         },
@@ -3374,6 +3406,16 @@ function buildNewCharacterSexInstruction(identity = {}) {
         return `Use this character sex exactly: ${sex}.`;
     }
     return 'Generate a fitting character sex or leave it unspecified.';
+}
+
+function buildNewCharacterGenreInstruction(identity = {}) {
+    const genre = PLAYER_GENRE_CHOICES.includes(identity.genre) ? identity.genre : 'Fantasy';
+    return [
+        `Selected genre: ${genre}.`,
+        'Use the selected genre as the creative frame for the character concept, setting assumptions, background hooks, abilities or skills, inventory, and tone.',
+        'All races are valid in all genres. Do not reject, avoid, or replace a race because it seems genre-incongruent; reinterpret its origin, traits, social role, gear, and abilities through the selected genre.',
+        'If race is Random, choose any playable race first, then make the character sheet explain how that race fits the selected genre.',
+    ].join('\n');
 }
 
 function buildNewCharacterRaceInstruction(identity = {}) {
@@ -3407,7 +3449,7 @@ function buildNewCharacterRaceInstruction(identity = {}) {
         return `Use this race/ancestry: ${identity.pickedRace || 'Human'}.`;
     }
 
-    return 'Randomly choose a fantasy humanoid, demi-human, monster-humanoid, undead, construct, spirit-touched, or hybrid race. Keep the result playable as {{user}} unless the chosen race explicitly demands otherwise.';
+    return 'Randomly choose any playable humanoid, demi-human, monster-humanoid, alien, undead, construct, spirit-touched, supernatural, engineered, hybrid, or genre-adapted race. Keep the result playable as {{user}} unless the chosen race explicitly demands otherwise.';
 }
 
 async function generateExistingPersonaCharacterSheet(creator, context = getContext()) {
