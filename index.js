@@ -42,6 +42,9 @@ const TRACKER_WIDGET_PANEL_ID = 'structured_preflight_tracker_panel';
 const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
 const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
 const NARRATOR_HANDOFF_VERSION = 1;
+const PROSE_GUARD_DISPLAY_STYLE_ID = 'structured_preflight_prose_guard_display_styles';
+const PROSE_GUARD_HIDE_NEXT_CLASS = 'structured-preflight-proseguard-hide-next';
+const PROSE_GUARD_HIDDEN_TEXT_CLASS = 'structured-preflight-proseguard-hidden-text';
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
 const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
@@ -435,6 +438,7 @@ const state = {
     proseGuardStreamElement: null,
     proseGuardStreamOriginalHtml: '',
     proseGuardStreamMessageId: null,
+    proseGuardExpectedMessageId: null,
     proseGuardStreamResetting: false,
 };
 
@@ -2611,6 +2615,57 @@ function getMessageTextElement(messageId) {
     return getMessageElement(messageId)?.querySelector?.('.mes_text') || null;
 }
 
+function ensureProseGuardDisplayStyles() {
+    if (typeof document === 'undefined' || document.getElementById(PROSE_GUARD_DISPLAY_STYLE_ID)) return;
+
+    const style = document.createElement('style');
+    style.id = PROSE_GUARD_DISPLAY_STYLE_ID;
+    style.textContent = `
+        #chat.${PROSE_GUARD_HIDE_NEXT_CLASS} > .mes:not([is_user="true"]):last-child .mes_text,
+        #chat .mes_text.${PROSE_GUARD_HIDDEN_TEXT_CLASS} {
+            visibility: hidden !important;
+        }
+    `;
+    document.head.append(style);
+}
+
+function setProseGuardNextMessageHidden(enabled) {
+    if (typeof document === 'undefined') return;
+    ensureProseGuardDisplayStyles();
+    document.getElementById('chat')?.classList?.toggle(PROSE_GUARD_HIDE_NEXT_CLASS, Boolean(enabled));
+}
+
+function isExpectedProseGuardMessageElement(node) {
+    if (!node || node.getAttribute?.('is_user') === 'true') return false;
+
+    const expectedMessageId = Number(state.proseGuardExpectedMessageId);
+    if (!Number.isFinite(expectedMessageId)) return true;
+
+    const messageId = Number(node.getAttribute?.('mesid'));
+    return Number.isFinite(messageId) && messageId === expectedMessageId;
+}
+
+function tryAttachProseGuardPendingMessage() {
+    if (!state.proseGuardHideNextMessage || typeof document === 'undefined') return false;
+
+    const chatElement = document.getElementById('chat');
+    if (!chatElement) return false;
+
+    const expectedMessageId = Number(state.proseGuardExpectedMessageId);
+    const messageElement = Number.isFinite(expectedMessageId)
+        ? chatElement.querySelector(`.mes[mesid="${expectedMessageId}"]:not([is_user="true"])`)
+        : [...chatElement.querySelectorAll('.mes:not([is_user="true"])')].at(-1);
+    const textElement = messageElement?.querySelector?.('.mes_text');
+    if (!textElement) return false;
+
+    state.proseGuardHideNextMessage = false;
+    attachProseGuardStreamIntercept(textElement, {
+        preserveText: false,
+        messageId: Number.isFinite(expectedMessageId) ? expectedMessageId : null,
+    });
+    return true;
+}
+
 function shouldUseProseGuardDisplayIntercept(type) {
     const normalizedType = String(type || 'normal');
     return getSettings().postNarrationProseGuardEnabled !== false
@@ -2626,23 +2681,36 @@ function releaseProseGuardDisplayIntercept({ restore = false } = {}) {
     if (restore && state.proseGuardStreamElement) {
         state.proseGuardStreamElement.innerHTML = state.proseGuardStreamOriginalHtml || '';
     }
+    state.proseGuardStreamElement?.classList?.remove(PROSE_GUARD_HIDDEN_TEXT_CLASS);
+    setProseGuardNextMessageHidden(false);
 
     state.proseGuardStreamObserver = null;
     state.proseGuardStreamElement = null;
     state.proseGuardStreamOriginalHtml = '';
     state.proseGuardStreamMessageId = null;
+    state.proseGuardExpectedMessageId = null;
     state.proseGuardStreamResetting = false;
     state.proseGuardHideNextMessage = false;
     state.proseGuardGenerationType = null;
+}
+
+function disconnectProseGuardStreamObserver() {
+    if (state.proseGuardStreamObserver) {
+        state.proseGuardStreamObserver.disconnect();
+    }
+    state.proseGuardStreamObserver = null;
+    state.proseGuardStreamResetting = false;
 }
 
 function attachProseGuardStreamIntercept(textElement, { preserveText = false, messageId = null } = {}) {
     if (!textElement || typeof MutationObserver === 'undefined') return;
 
     releaseProseGuardDisplayIntercept();
+    ensureProseGuardDisplayStyles();
     state.proseGuardStreamElement = textElement;
     state.proseGuardStreamOriginalHtml = preserveText ? textElement.innerHTML : '';
     state.proseGuardStreamMessageId = messageId;
+    textElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
 
     if (!preserveText) {
         textElement.innerHTML = '';
@@ -2653,6 +2721,7 @@ function attachProseGuardStreamIntercept(textElement, { preserveText = false, me
 
         state.proseGuardStreamResetting = true;
         observer.disconnect();
+        textElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
         textElement.innerHTML = state.proseGuardStreamOriginalHtml || '';
         observer.observe(textElement, { childList: true, subtree: true, characterData: true });
         state.proseGuardStreamResetting = false;
@@ -2677,6 +2746,7 @@ function beginProseGuardDisplayIntercept(type, dryRun = false) {
         const context = getContext();
         const messageId = Array.isArray(context?.chat) ? context.chat.length - 1 : null;
         if (messageId != null && !context.chat[messageId]?.is_user) {
+            state.proseGuardExpectedMessageId = messageId;
             attachProseGuardStreamIntercept(getMessageTextElement(messageId), {
                 preserveText: normalizedType === 'continue',
                 messageId,
@@ -2685,11 +2755,17 @@ function beginProseGuardDisplayIntercept(type, dryRun = false) {
         return;
     }
 
+    const context = getContext();
+    state.proseGuardExpectedMessageId = Array.isArray(context?.chat) ? context.chat.length : null;
     state.proseGuardHideNextMessage = true;
+    setProseGuardNextMessageHidden(true);
+    tryAttachProseGuardPendingMessage();
 }
 
 function ensureProseGuardDisplayInterceptor() {
     if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    ensureProseGuardDisplayStyles();
+    tryAttachProseGuardPendingMessage();
     if (state.proseGuardChatObserver) return;
 
     const chatElement = document.getElementById('chat');
@@ -2700,13 +2776,17 @@ function ensureProseGuardDisplayInterceptor() {
 
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
-                if (
-                    node?.nodeType === Node.ELEMENT_NODE
-                    && node.classList?.contains('mes')
-                    && node.getAttribute('is_user') !== 'true'
-                ) {
-                    const messageId = Number(node.getAttribute('mesid'));
-                    const textElement = node.querySelector('.mes_text');
+                if (node?.nodeType !== Node.ELEMENT_NODE) continue;
+
+                const messageNodes = [
+                    ...(node.classList?.contains('mes') ? [node] : []),
+                    ...Array.from(node.querySelectorAll?.('.mes') || []),
+                ];
+                for (const messageNode of messageNodes) {
+                    if (!isExpectedProseGuardMessageElement(messageNode)) continue;
+
+                    const messageId = Number(messageNode.getAttribute('mesid'));
+                    const textElement = messageNode.querySelector('.mes_text');
                     if (textElement) {
                         state.proseGuardHideNextMessage = false;
                         attachProseGuardStreamIntercept(textElement, {
@@ -2720,6 +2800,7 @@ function ensureProseGuardDisplayInterceptor() {
         }
     });
     state.proseGuardChatObserver.observe(chatElement, { childList: true });
+    tryAttachProseGuardPendingMessage();
 }
 
 function renderNarratorHandoffBlockForMessage(messageId, payload = null, context = getContext()) {
@@ -3699,8 +3780,8 @@ function detectStructuredUserInputMode(text) {
     const trimmed = String(text ?? '').trim();
     if (!trimmed) return { mode: 'normal', innerText: '' };
 
-    if (trimmed.length >= 6 && trimmed.startsWith('(((') && trimmed.endsWith(')))')) {
-        return { mode: 'proxy', innerText: trimmed.slice(3, -3).trim() };
+    if (trimmed.length >= 4 && trimmed.startsWith('[[') && trimmed.endsWith(']]')) {
+        return { mode: 'proxy', innerText: trimmed.slice(2, -2).trim() };
     }
 
     if (trimmed.length >= 4 && trimmed.startsWith('((') && trimmed.endsWith('))')) {
@@ -4230,13 +4311,19 @@ async function prependComputedDebug(messageId, type) {
         state.lastNarratorHandoffKey = messageKey;
         state.lastNarratorHandoff = '';
 
-        releaseProseGuardDisplayIntercept();
+        disconnectProseGuardStreamObserver();
+        const currentTextElement = getMessageTextElement(messageId);
+        if (currentTextElement) {
+            currentTextElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
+            currentTextElement.textContent = narrationText;
+        }
         if (typeof context.updateMessageBlock === 'function') {
             context.updateMessageBlock(messageId, message);
         } else {
             const textElement = getMessageTextElement(messageId);
             if (textElement) textElement.textContent = narrationText;
         }
+        releaseProseGuardDisplayIntercept();
         finalNarrationRendered = true;
         renderNarratorHandoffBlockForMessage(messageId, null, context);
         renderTrackerDisplayBlockForMessage(messageId, null, context);

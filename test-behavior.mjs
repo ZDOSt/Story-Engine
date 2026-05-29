@@ -5911,6 +5911,46 @@ const tests = [
     },
   },
   {
+    name: '34b proxy mode uses square brackets and keeps normal engine handoff',
+    run() {
+      const indexSource = fs.readFileSync(extensionFile('index.js'), 'utf8');
+      const runnerSource = fs.readFileSync(extensionFile('deterministic-runner.js'), 'utf8');
+      const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
+      assert.match(indexSource, /startsWith\('\[\['\) && trimmed\.endsWith\('\]\]'\)/);
+      assert.match(indexSource, /return \{ mode: 'proxy', innerText: trimmed\.slice\(2, -2\)\.trim\(\) \}/);
+      assert.match(indexSource, /startsWith\('\(\('\) && trimmed\.endsWith\('\)\)'\)/);
+      assert.doesNotMatch(indexSource, /mode: 'proxy'[\s\S]{0,120}startsWith\('\(\(\('\)/);
+      assert.match(indexSource, /userInputMode\.mode === 'ooc'[\s\S]*runSemanticPassWithPromptReadyBypass/);
+      assert.match(runnerSource, /startsWith\('\[\['\) && trimmed\.endsWith\('\]\]'\)/);
+      assert.match(semanticSource, /double square brackets for proxy action mode/);
+
+      const report = runCase({
+        userText: '[[I walk to Mira and offer her the sealed letter.]]',
+        tracker: {
+          Mira: trackerEntry({ currentDisposition: { B: 2, F: 2, H: 2 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Deliver_Letter',
+            identifyChallenge: 'offer Mira the sealed letter',
+            explicitMeans: 'walk to Mira and offer her the sealed letter',
+            identifyTargets: { ActionTargets: ['Mira'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Mira')],
+        }),
+      });
+      const text = formatNarratorModelPromptContext(report, {
+        mode: 'proxy',
+        latestUserText: 'I walk to Mira and offer her the sealed letter.',
+      });
+      assert.match(text, /PROXY USER ACTION MODE/);
+      assert.match(text, /double square brackets/);
+      assert.match(text, /NARRATOR_HANDOFF|RESOLVED_SCENE_FACTS/);
+      assert.match(text, /sealed letter/);
+    },
+  },
+  {
     name: '35 name promotion does not retire established named NPCs',
     run() {
       const text = 'Seraphina and I enter a ruined roadside shrine at dusk. A wounded merchant named Darai is pinned behind a broken pillar.';

@@ -1555,8 +1555,8 @@ function getLatestUserTextFromContext(context) {
 
 function unwrapStructuredUserInputText(text) {
     const trimmed = String(text ?? '').trim();
-    if (trimmed.length >= 6 && trimmed.startsWith('(((') && trimmed.endsWith(')))')) {
-        return trimmed.slice(3, -3).trim();
+    if (trimmed.length >= 4 && trimmed.startsWith('[[') && trimmed.endsWith(']]')) {
+        return trimmed.slice(2, -2).trim();
     }
     if (trimmed.length >= 4 && trimmed.startsWith('((') && trimmed.endsWith('))')) {
         return trimmed.slice(2, -2).trim();

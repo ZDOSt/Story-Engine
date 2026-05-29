@@ -339,7 +339,7 @@ function proxyUserActionInstruction(options = {}) {
     const action = valueOrNone(options?.latestUserText || options?.proxyUserAction);
     return [
         'PROXY USER ACTION MODE:',
-        `The latest user message used triple parentheses. For this response only, you may narrate {{user}}'s voluntary action as needed to carry out this exact user instruction: ${action}`,
+        `The latest user message used double square brackets. For this response only, you may narrate {{user}}'s voluntary action as needed to carry out this exact user instruction: ${action}`,
         'This is the only exception to the normal agency ban.',
         'Do not add extra {{user}} dialogue, thoughts, feelings, decisions, follow-up actions, reactions, silence, or choices beyond that instruction and the resolved mechanics.',
     ].join('\n');
@@ -481,7 +481,7 @@ function formatNarratorPromptSections(summary) {
 
 function buildNarratorAuthority({ resolution, handoff, options = {} }) {
     const proxyInstruction = options?.mode === 'proxy'
-        ? `Proxy user action mode is active: narrate {{user}} attempting or completing only the specified triple-parentheses action as resolved by this prompt; do not invent extra {{user}} speech, thoughts, choices, reactions, or follow-up actions.`
+        ? `Proxy user action mode is active: narrate {{user}} attempting or completing only the specified action from the double square brackets as resolved by this prompt; do not invent extra {{user}} speech, thoughts, choices, reactions, or follow-up actions.`
         : '';
     return [
         narratorAuthorityContract(),
