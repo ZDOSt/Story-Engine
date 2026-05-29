@@ -436,7 +436,6 @@ const state = {
     proseGuardChatObserver: null,
     proseGuardStreamObserver: null,
     proseGuardStreamElement: null,
-    proseGuardStreamOriginalHtml: '',
     proseGuardStreamMessageId: null,
     proseGuardExpectedMessageId: null,
     proseGuardStreamResetting: false,
@@ -2623,7 +2622,7 @@ function ensureProseGuardDisplayStyles() {
     style.textContent = `
         #chat.${PROSE_GUARD_HIDE_NEXT_CLASS} > .mes:not([is_user="true"]):last-child .mes_text,
         #chat .mes_text.${PROSE_GUARD_HIDDEN_TEXT_CLASS} {
-            visibility: hidden !important;
+            display: none !important;
         }
     `;
     document.head.append(style);
@@ -2678,15 +2677,16 @@ function releaseProseGuardDisplayIntercept({ restore = false } = {}) {
     if (state.proseGuardStreamObserver) {
         state.proseGuardStreamObserver.disconnect();
     }
-    if (restore && state.proseGuardStreamElement) {
-        state.proseGuardStreamElement.innerHTML = state.proseGuardStreamOriginalHtml || '';
-    }
     state.proseGuardStreamElement?.classList?.remove(PROSE_GUARD_HIDDEN_TEXT_CLASS);
+    if (typeof document !== 'undefined') {
+        document
+            .querySelectorAll(`#chat .mes_text.${PROSE_GUARD_HIDDEN_TEXT_CLASS}`)
+            .forEach(element => element.classList.remove(PROSE_GUARD_HIDDEN_TEXT_CLASS));
+    }
     setProseGuardNextMessageHidden(false);
 
     state.proseGuardStreamObserver = null;
     state.proseGuardStreamElement = null;
-    state.proseGuardStreamOriginalHtml = '';
     state.proseGuardStreamMessageId = null;
     state.proseGuardExpectedMessageId = null;
     state.proseGuardStreamResetting = false;
@@ -2708,26 +2708,24 @@ function attachProseGuardStreamIntercept(textElement, { preserveText = false, me
     releaseProseGuardDisplayIntercept();
     ensureProseGuardDisplayStyles();
     state.proseGuardStreamElement = textElement;
-    state.proseGuardStreamOriginalHtml = preserveText ? textElement.innerHTML : '';
     state.proseGuardStreamMessageId = messageId;
     textElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
-
-    if (!preserveText) {
-        textElement.innerHTML = '';
-    }
 
     const observer = new MutationObserver(() => {
         if (state.proseGuardStreamResetting) return;
 
         state.proseGuardStreamResetting = true;
-        observer.disconnect();
         textElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
-        textElement.innerHTML = state.proseGuardStreamOriginalHtml || '';
-        observer.observe(textElement, { childList: true, subtree: true, characterData: true });
         state.proseGuardStreamResetting = false;
     });
 
-    observer.observe(textElement, { childList: true, subtree: true, characterData: true });
+    observer.observe(textElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['class'],
+    });
     state.proseGuardStreamObserver = observer;
 }
 

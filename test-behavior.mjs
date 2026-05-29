@@ -6888,6 +6888,10 @@ const tests = [
       assert.match(source, /new MutationObserver\(mutations =>/);
       assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: !finalNarrationRendered \}\)/);
       assert.match(source, /Story Engine is finalizing narration/);
+      const interceptSource = source.slice(source.indexOf('function attachProseGuardStreamIntercept'), source.indexOf('function beginProseGuardDisplayIntercept'));
+      assert.doesNotMatch(interceptSource, /\.innerHTML\s*=\s*''/);
+      assert.doesNotMatch(interceptSource, /innerHTML\s*=\s*state\.proseGuardStreamOriginalHtml/);
+      assert.match(source, /PROSE_GUARD_HIDDEN_TEXT_CLASS/);
     },
   },
   {
