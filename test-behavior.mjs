@@ -6670,34 +6670,39 @@ const tests = [
     run() {
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
-      assert.match(indexSource, /FINAL ACTIONABLE BEAT HARD STOP/);
-      assert.match(indexSource, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
+      assert.match(indexSource, /REQUIRED FINAL RESPONSE BEAT/);
+      assert.match(indexSource, /direct, concrete beat \{\{user\}\} can immediately answer with action or dialogue/);
       assert.match(indexSource, /Do not restage, re-perform, summarize, or narrate declared \{\{user\}\} actions back to \{\{user\}\}/);
       assert.match(indexSource, /USER AGENCY HARD LOCK/);
       assert.match(indexSource, /Involuntary physical reactions caused by external stimulus may be narrated/);
       assert.match(indexSource, /Voluntary actions are never involuntary reactions/);
       assert.match(indexSource, /If an NPC gives, returns, drops, slides, or places an object or note for \{\{user\}\}/);
       assert.match(indexSource, /begin with what changes because of it, what becomes visible from the new position/);
-      assert.match(indexSource, /The moment an actionable beat exists, stop immediately/);
+      assert.match(indexSource, /Valid final beats are only/);
+      assert.match(indexSource, /environmental stimulus that immediately changes \{\{user\}\}'s options/);
+      assert.match(indexSource, /must not merely point at \{\{user\}\}/);
+      assert.match(indexSource, /HARD STOP AFTER THE FINAL RESPONSE BEAT/);
       assert.match(indexSource, /Do not add after-beat tailing/);
-      assert.match(indexSource, /Direct address to \{\{user\}\} is usually an actionable beat/);
+      assert.match(indexSource, /Direct address to \{\{user\}\} is usually the final response beat/);
       assert.match(indexSource, /If direct speech to \{\{user\}\} contains a question, command, request, offer/);
       assert.match(indexSource, /separator lines used to append ambient\/actionless cleanup/);
       assert.match(indexSource, /ambient traffic, crowd movement, side-character activity/);
-      assert.match(indexSource, /after-beat tailing/);
-      assert.match(handoffSource, /FINAL ACTIONABLE BEAT HARD STOP/);
-      assert.match(handoffSource, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
+      assert.match(indexSource, /fake response cue endings/);
+      assert.match(indexSource, /watching for \{\{user\}\} to respond/);
+      assert.match(handoffSource, /REQUIRED FINAL RESPONSE BEAT/);
+      assert.match(handoffSource, /direct, concrete beat \{\{user\}\} can immediately answer with action or dialogue/);
       assert.match(handoffSource, /Do not restage, re-perform, summarize, or narrate the declared action back to \{\{user\}\}/);
       assert.match(handoffSource, /USER AGENCY HARD LOCK/);
       assert.match(handoffSource, /Involuntary physical reactions caused by external stimulus may be narrated/);
       assert.match(handoffSource, /Voluntary actions are never involuntary reactions/);
       assert.match(handoffSource, /If an NPC gives, returns, drops, slides, or places an object or note for \{\{user\}\}/);
       assert.match(handoffSource, /begin with what changes because of it, what becomes visible from the new position/);
-      assert.match(handoffSource, /The moment an actionable beat exists, stop immediately/);
-      assert.match(handoffSource, /Do not add after-beat tailing/);
-      assert.match(handoffSource, /Direct address to \{\{user\}\} is usually an actionable beat/);
-      assert.match(handoffSource, /If direct speech to \{\{user\}\} contains a question, command, request, offer/);
+      assert.match(handoffSource, /Valid final beats are only/);
+      assert.match(handoffSource, /HARD STOP AFTER THE FINAL RESPONSE BEAT/);
+      assert.match(handoffSource, /Direct address to \{\{user\}\} is usually the final response beat/);
+      assert.match(handoffSource, /If direct speech to \{\{user\}\} contains actionable content/);
       assert.match(handoffSource, /ambient traffic, crowd movement, side-character activity/);
+      assert.match(handoffSource, /watching for \{\{user\}\} to respond/);
     },
   },
   {
@@ -6728,8 +6733,11 @@ const tests = [
       assert.match(source, /Involuntary physical reactions caused by external stimulus may remain/);
       assert.match(source, /Voluntary actions are never involuntary reactions/);
       assert.match(source, /the valid response point is the object being delivered, available, visible, or within reach/);
-      assert.match(source, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
-      assert.match(source, /Delete all text after the final actionable beat/);
+      assert.match(source, /REQUIRED FINAL RESPONSE BEAT/);
+      assert.match(source, /Valid final beats are only/);
+      assert.match(source, /Treat waiting and response-nudge endings as invalid final beats/);
+      assert.match(source, /HARD STOP AFTER THE FINAL RESPONSE BEAT/);
+      assert.match(source, /Delete after-beat tailing/);
       assert.match(source, /horizontal rule, separator, or scene-break tail/);
       assert.match(source, /Do not replace after-beat tailing with different after-beat tailing\. Cut it\./);
       assert.match(source, /Invalid after-beat tail/);

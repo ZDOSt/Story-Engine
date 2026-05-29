@@ -285,15 +285,17 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Never write {{user}} speech, thoughts, feelings, reactions, silence, decisions, or voluntary actions unless the narrator handoff explicitly enables PROXY USER ACTION MODE.
       - If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return immediately to normal agency separation.
       - Allow at most 1 inter-NPC exchange and at most 3 sentences per monologue.
-      - FINAL ACTIONABLE BEAT HARD STOP: end on the first concrete playable beat that directly involves {{user}}: a question, command, request, refusal, threat, incoming action, unresolved attack frame, impact, grab, obstacle, blocked access, revealed consequence, object in reach, changed position, or decision point that {{user}} can immediately answer, resist, inspect, interrupt, take, refuse, defend against, or act upon.
-      - NO NARRATION AFTER THE FINAL ACTIONABLE BEAT. The moment an actionable beat exists, stop immediately and allow {{user}} to respond. Do not add one more sentence. Do not add one more paragraph. Do not add an outro. Do not add a separator or scene-break line.
+      - REQUIRED FINAL RESPONSE BEAT: every response must end on a direct, concrete beat {{user}} can immediately answer with action or dialogue.
+      - Valid final beats are only: direct NPC speech to {{user}} with a question, command, request, offer, refusal, threat, accusation, invitation, or information requiring a choice; direct NPC action or pressure aimed at {{user}} such as handing/placing an object within reach, blocking a path, touching, grabbing, attacking, changing distance, opening/closing access, or creating a demand; or an environmental stimulus that immediately changes {{user}}'s options, danger, access, visibility, footing, or available objects.
+      - The final beat must itself carry the playable prompt. It must not merely point at {{user}}, nudge {{user}} to respond, or simulate a pause for {{user}}.
+      - HARD STOP AFTER THE FINAL RESPONSE BEAT: once that beat exists, output nothing else. Do not add one more sentence, paragraph, outro, separator, scene-break line, or atmospheric tag.
       - Do not add after-beat tailing: no extra posture, gaze, scanning, lingering contact, ambient traffic, crowd movement, side-character activity, environmental detail, recap, mood line, or passive waiting after the response point.
-      - Direct address to {{user}} is usually an actionable beat; after an NPC speaks to, questions, commands, refuses, threatens, touches, blocks, or pressures {{user}}, stop unless a listed resolved mechanic requires one more immediate consequence.
+      - Direct address to {{user}} is usually the final response beat; after an NPC speaks to, questions, commands, refuses, threatens, touches, blocks, or pressures {{user}}, stop unless a listed resolved mechanic requires one more immediate consequence.
       - If direct speech to {{user}} contains a question, command, request, offer, refusal, threat, accusation, invitation, or concrete information {{user}} can answer or act on, the response ends at that speech unit.
-      - The final beat must not be ambient, decorative, environmental-only, crowd-only, side-character-only, mood-only, passive waiting, all-eyes-on-user framing, or unrelated scene noise. Do not end on background activity unless that activity directly creates an immediate obstacle, danger, opportunity, or demand for {{user}}.
+      - Invalid final beats: waiting, watching for {{user}} to respond, all-eyes-on-user framing, silence/room/crowd pressure, ambient-only motion, decorative environmental detail, mood-only closure, side-character-only activity, passive attention, meta-questions, or unrelated scene noise.
 
     ABSOLUTE BAN:
-      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; making {{user}} act; making {{user}} open/read/inspect/take/follow/answer without explicit input; "as you" phrasing; opening recap transitions; writing beyond the response point; narration after the final actionable beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; answering questions directed at {{user}}; ambient filler endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
+      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; making {{user}} act; making {{user}} open/read/inspect/take/follow/answer without explicit input; "as you" phrasing; opening recap transitions; writing beyond the response point; narration after the final response beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; answering questions directed at {{user}}; ambient filler endings; fake response cue endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
 
   execution:
     This is the required render order before the first visible output token.
@@ -3839,7 +3841,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'DO NOT CHANGE:',
         '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
         '- Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
-        '- Exception: remove every sentence, paragraph, separator line, or outro that appears after the first final actionable beat unless it is required by an explicit resolved mechanic.',
+        '- Exception: remove every sentence, paragraph, separator line, or outro that appears after the final response beat unless it is required by an explicit resolved mechanic.',
         '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
         '',
         'VIOLATION FAMILIES:',
@@ -3865,11 +3867,13 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Remove or rewrite ornamental atmosphere that does not change action, visibility, sound, contact, footing, threat, or available choices. Keep environmental detail only when it materially affects the scene.',
         '',
         '7. Turn-boundary / after-beat tailing:',
-        'NO NARRATION AFTER THE FINAL ACTIONABLE BEAT.',
-        'The final actionable beat is the first moment that directly gives the user something immediate to answer, resist, inspect, interrupt, take, refuse, defend against, or act upon.',
-        'Examples: direct speech to the user, a question, command, request, offer, refusal, threat, accusation, invitation, touch, blocked path, incoming action, revealed consequence, object in reach, changed position, or decision point.',
+        'REQUIRED FINAL RESPONSE BEAT: the text must end on a direct, concrete beat the user can immediately answer with action or dialogue.',
+        'Valid final beats are only: direct NPC speech to the user with a question, command, request, offer, refusal, threat, accusation, invitation, or information requiring a choice; direct NPC action or pressure aimed at the user such as handing/placing an object within reach, blocking a path, touching, grabbing, attacking, changing distance, opening/closing access, or creating a demand; or an environmental stimulus that immediately changes the user\'s options, danger, access, visibility, footing, or available objects.',
+        'The final beat must itself carry the playable prompt. It must not merely point at the user, nudge the user to respond, or simulate a pause for the user.',
+        'HARD STOP AFTER THE FINAL RESPONSE BEAT: remove every sentence, paragraph, separator line, outro, or atmospheric tag after that beat unless it is required by an explicit resolved mechanic.',
+        'Treat waiting and response-nudge endings as invalid final beats: waiting, watching for the user to respond, all-eyes-on-user framing, silence/room/crowd pressure, ambient-only motion, decorative environmental detail, mood-only closure, side-character-only activity, passive attention, meta-questions, "what do you do," or "the choice is yours."',
         'If an NPC directly speaks to the user with actionable information, the response usually ends at the end of that speech unit.',
-        'Delete all text after the final actionable beat when it is only posture, gaze, scanning, lingering contact, ambient traffic, crowd movement, side-character activity, environmental detail, recap, mood, waiting, outro, horizontal rule, separator, or scene-break tail.',
+        'Delete after-beat tailing when it is only posture, gaze, scanning, lingering contact, ambient traffic, crowd movement, side-character activity, environmental detail, recap, mood, waiting, outro, horizontal rule, separator, or scene-break tail.',
         'Do not replace after-beat tailing with different after-beat tailing. Cut it.',
         '',
         '8. T+1 / user-input restatement:',
