@@ -700,6 +700,7 @@ function buildNpcGuidanceSummary(npcHandoffs) {
 }
 
 function relationshipNarrationGuide(npc) {
+    const state = relationshipStateNarrationGuide(npc);
     const behavior = behaviorNarrationGuide(npc?.Behavior);
     const target = relationshipTargetNarrationGuide(npc?.Target);
     const personality = npc?.PersonalitySummary && !isNoneText(npc.PersonalitySummary)
@@ -708,7 +709,7 @@ function relationshipNarrationGuide(npc) {
     const boundary = npc?.BoundaryPressure === 'Y'
         ? ' Respect active boundary pressure through space, refusal, guarded movement, or physical protection.'
         : '';
-    return `${behavior} ${target}${personality}${boundary}`.trim();
+    return `${state} ${behavior} ${target}${personality}${boundary}`.trim();
 }
 
 function cleanNarratorDirective(text) {
@@ -727,7 +728,7 @@ function behaviorNarrationGuide(behavior) {
         case 'HATRED':
             return 'The NPC is openly hostile; allow obstruction, threats, attack preparation, refusal, sabotage, or escalation when the scene supports it.';
         case 'FREEZE':
-            return 'The NPC is guarded, tense, wary, hesitant, submissive, avoidant, or frozen by fear/hostility; keep reactions restrained or protective.';
+            return 'The NPC is guarded, tense, wary, hesitant, avoidant, appeasing, or frozen by fear/hostility; keep reactions restrained or protective.';
         case 'CLOSE':
             return 'The NPC is close or deeply trusting; allow warmth, loyalty, proximity, confiding, and personal investment, but not automatic romance or intimacy.';
         case 'FRIENDLY':
@@ -739,6 +740,39 @@ function behaviorNarrationGuide(behavior) {
         default:
             return 'Use the NPC current relationship state naturally.';
     }
+}
+
+function relationshipStateNarrationGuide(npc) {
+    const state = parseRelationshipState(npc?.FinalState);
+    if (!state) return 'Neutral default: practical, reserved, context-led behavior; no default trust, vulnerability, hostility, fear, romance, or intimacy.';
+    const tag = `B${state.B}/F${state.F}/H${state.H}.`;
+    if (state.F >= 4) return `${tag} Terror-led: escape, surrender, help-seeking, freezing, pleading, or desperate self-protection; compliance is fear management, not consent, comfort, or trust.`;
+    if (state.H >= 4) return `${tag} Hatred-led: wants harm, removal, exposure, humiliation, sabotage, defeat, or driving away.`;
+    if (state.F >= 3) return `${tag} Fear-led: wants distance, safety, witnesses, or an exit; staying, answering, or complying is defensive appeasement/caution, not comfort, attraction, trust, or willingness.`;
+    if (state.H >= 3) return `${tag} Hostility-led: argues, refuses, obstructs, challenges, mocks, threatens, or interferes.`;
+    if (state.B >= 4) return `${tag} Close trust: confides, seeks closeness, shows loyalty, support, vulnerability, and deep personal investment; still not automatic romance or intimacy.`;
+    if (state.B >= 3) return `${tag} Friendly comfort: cooperative, relaxed, warm; ordinary closeness can fit when context supports it, but not automatic romance or intimacy.`;
+    if (state.B <= 1) return `${tag} Low trust: keeps distance, avoids vulnerability and private closeness, cautious or transactional if engagement is necessary.`;
+    return `${tag} Neutral default: polite, practical, reserved, curious, formal, businesslike, or situationally cooperative; no default vulnerability or personal closeness.`;
+}
+
+function parseRelationshipState(value) {
+    const match = String(value ?? '').match(/B(\d+)\/F(\d+)\/H(\d+)/i);
+    if (!match) return null;
+    const state = {
+        B: clampRelationshipBand(Number(match[1])),
+        F: clampRelationshipBand(Number(match[2])),
+        H: clampRelationshipBand(Number(match[3])),
+    };
+    if (state.F >= 3 || state.H >= 3) {
+        state.B = 1;
+    }
+    return state;
+}
+
+function clampRelationshipBand(value) {
+    if (!Number.isFinite(value)) return 1;
+    return Math.max(1, Math.min(4, value));
 }
 
 function relationshipTargetNarrationGuide(target) {

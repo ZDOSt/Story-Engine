@@ -4498,7 +4498,7 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
     } else if (flags.userBadRep) {
         base = { label: 'userBadRep', disposition: { B: 1, F: 2, H: 3 } };
     } else if (flags.priorUserGoodRep) {
-        base = { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 2 } };
+        base = { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 1 } };
     } else if (flags.userNonHuman && !flags.fearImmunity) {
         base = { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
     }

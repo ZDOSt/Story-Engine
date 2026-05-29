@@ -225,9 +225,9 @@ function RelationshipEngine(npc, resolutionPacket) {
     UNIVERSAL:
 'Use resolutionPacket as final for GOAL, intimacyAdvanceExplicit, boundaryViolationExplicit, LandedActions, OutcomeTier, Outcome, ActionTargets, OppTargets, BenefitedObservers, and HarmedObservers.',
     BANDS:
-'BOND(B): 1 Avoid/Ignore (keeps distance, disengages). 2 Neutral/Transactional (polite, businesslike, no trust). 3 Friendly/Comfortable (cooperative, relaxed, familiar). 4 Close/Trusting (confides, seeks closeness, shows loyalty and deep personal investment). FEAR(F): 1 Unshaken (steady, not intimidated). 2 Alert/Wary (cautious, watchful). 3 Freezing/Submissive (hesitates, yields, avoids escalation). 4 Terrified/Panic (flight, surrender, desperate compliance). HOSTILITY(H): 1 Warm/Loyal (supportive, protective). 2 Neutral (no active ill will). 3 Aggressive/Obstructive (resentful, argumentative, interfering). 4 Hatred/Violent (wants harm, sabotage, escalation).',
+'BOND(B): 1 Low trust/Avoidant (keeps distance, avoids vulnerability and private closeness, cautious or transactional if engagement is necessary). 2 Neutral/Transactional (polite, practical, reserved, curious, formal, situationally cooperative, no default vulnerability or personal closeness). 3 Friendly/Comfortable (cooperative, relaxed, warm, ordinary closeness acceptable when context supports it; not automatic romance or intimacy). 4 Close/Trusting (confides, seeks closeness, shows loyalty, support, vulnerability, and deep personal investment; still not automatic romance or intimacy). FEAR(F): 1 Unshaken (steady, not intimidated). 2 Alert/Wary (cautious, watchful). 3 Afraid/Self-protective (wants distance, safety, witnesses, or an exit; staying, answering, or complying is defensive appeasement/caution, not comfort, attraction, trust, or willingness). 4 Terrified/Panic (escape, surrender, help-seeking, freezing, pleading, or desperate self-protection; compliance is fear management, not consent, comfort, or trust). HOSTILITY(H): 1 Warm/Loyal (supportive, protective). 2 Neutral (no active ill will). 3 Hostile/Obstructive (argues, refuses, obstructs, challenges, mocks, threatens, or interferes). 4 Hatred/Violent (wants harm, removal, exposure, humiliation, sabotage, defeat, or driving away).',
     LOCK:
-'If F=4 -> TERROR. Else if H=4 -> HATRED. Else if F=3 or H=3 -> FREEZE. If lock is active, behavior must equal lock.'
+'If F=4 -> TERROR. Else if H=4 -> HATRED. Else if F=3 or H=3 -> FREEZE. If lock is active, behavior must equal lock. Invariant: F>=3 or H>=3 forces B=1.'
   });
 
   getCurrentRelationalState(npc):
@@ -256,7 +256,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     if NPC is already romantically/intimately involved with {{user}}, willing toward {{user}}, or in love -> {Label:romanticOpen,B:4,F:1,H:1}
     if {{user}} is hated, distrusted, wanted, enemy-coded, or bad-reputation with this NPC before the current first interaction -> {Label:userBadRep,B:1,F:2,H:3}
     rule: first encounter kindness, opening-scene rescue, courtesy, friendliness, praise, or a warm first impression do NOT count as prior favorable reputation
-    if {{user}} is explicitly shown by prior lore, card, scenario, tracker, or chat history to have an established favorable reputation with this NPC that predates the current scene -> {Label:priorUserGoodRep,B:3,F:1,H:2}
+    if {{user}} is explicitly shown by prior lore, card, scenario, tracker, or chat history to have an established favorable reputation with this NPC that predates the current scene -> {Label:priorUserGoodRep,B:3,F:1,H:1}
     if {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like AND NPC lacks explicit fear immunity -> {Label:userNonHuman,B:1,F:3,H:2}
     else -> {Label:neutralDefault,B:2,F:2,H:2}
 
@@ -1380,12 +1380,22 @@ export function deriveDirection(target, currentDisposition, currentRapport, audi
 }
 
 export function updateDisposition(disposition, deltas) {
-    const next = {
+    return enforceDispositionInvariants({
         B: clamp(disposition.B + (deltas.b || 0), 1, 4),
         F: clamp(disposition.F + (deltas.f || 0), 1, 4),
         H: clamp(disposition.H + (deltas.h || 0), 1, 4),
+    });
+}
+
+export function enforceDispositionInvariants(disposition) {
+    const next = {
+        B: clamp(Number(disposition?.B), 1, 4),
+        F: clamp(Number(disposition?.F), 1, 4),
+        H: clamp(Number(disposition?.H), 1, 4),
     };
-    if (next.F >= 3 || next.H >= 3) next.B = 1;
+    if (next.F >= 3 || next.H >= 3) {
+        next.B = 1;
+    }
     return next;
 }
 
@@ -1843,10 +1853,10 @@ export function normalizeDisposition(value) {
     if (!value) return null;
     if (typeof value === 'string') {
         const match = value.match(/B(\d+)\/F(\d+)\/H(\d+)/i);
-        if (match) return { B: Number(match[1]), F: Number(match[2]), H: Number(match[3]) };
+        if (match) return enforceDispositionInvariants({ B: Number(match[1]), F: Number(match[2]), H: Number(match[3]) });
     }
     if (typeof value === 'object' && value.B && value.F && value.H) {
-        return { B: clamp(Number(value.B), 1, 4), F: clamp(Number(value.F), 1, 4), H: clamp(Number(value.H), 1, 4) };
+        return enforceDispositionInvariants(value);
     }
     return null;
 }

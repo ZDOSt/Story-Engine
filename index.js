@@ -2342,7 +2342,7 @@ function relationshipTowardUser(disposition, classified) {
     if (disposition.B >= 4 && disposition.H <= 2 && disposition.F <= 2) return 'Close or trusting';
     if (disposition.B >= 3 && disposition.H <= 2) return 'Friendly or comfortable';
     if (disposition.H >= 3) return 'Hostile or obstructive';
-    if (disposition.F >= 3) return 'Afraid or submissive';
+    if (disposition.F >= 3) return 'Afraid or self-protective';
     if (disposition.B <= 1) return 'Avoidant or distant';
     return 'Neutral or transactional';
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { runDeterministicEngines } from './deterministic-runner.js';
-import { aggressionReactionOutcome, deriveDirection, updateDisposition } from './engines.js';
+import { aggressionReactionOutcome, deriveDirection, normalizeDisposition, updateDisposition } from './engines.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
@@ -274,6 +274,17 @@ function runCaseWithRandoms(config, randoms) {
 }
 
 const tests = [
+  {
+    name: '00 relationship disposition invariants normalize trust and locks',
+    run() {
+      assert.deepEqual(updateDisposition({ B: 2, F: 2, H: 2 }, { b: 1, f: 0, h: 0 }), { B: 3, F: 2, H: 2 });
+      assert.deepEqual(updateDisposition({ B: 3, F: 1, H: 1 }, { b: 1, f: 1, h: 1 }), { B: 4, F: 2, H: 2 });
+      assert.deepEqual(normalizeDisposition({ B: 3, F: 2, H: 2 }), { B: 3, F: 2, H: 2 });
+      assert.deepEqual(normalizeDisposition({ B: 4, F: 2, H: 2 }), { B: 4, F: 2, H: 2 });
+      assert.deepEqual(normalizeDisposition({ B: 3, F: 3, H: 2 }), { B: 1, F: 3, H: 2 });
+      assert.deepEqual(normalizeDisposition('B4/F2/H2'), { B: 4, F: 2, H: 2 });
+    },
+  },
   {
     name: '01 I love you stays no-stakes social',
     run() {
@@ -756,7 +767,7 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.boundaryViolationExplicit, 'Y');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'Y');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Hostility');
-      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.H, 2);
+      assert.deepEqual(report.trackerUpdate.npcs.Seraphina.currentDisposition, { B: 3, F: 1, H: 2 });
     },
   },
   {
@@ -1285,7 +1296,7 @@ const tests = [
       const mira = report.finalNarrativeHandoff.npcHandoffs.find(item => item.NPC === 'Mira');
       assert.equal(seraphina?.Target, 'Hostility');
       assert.equal(mira, undefined);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.H, 2);
+      assert.deepEqual(report.trackerUpdate.npcs.Seraphina.currentDisposition, { B: 3, F: 1, H: 2 });
       assert.equal(report.trackerUpdate.npcs.Mira.currentDisposition.H, 2);
     },
   },
@@ -4300,7 +4311,7 @@ const tests = [
     },
   },
   {
-    name: '09b semantic priorUserGoodRep initializes B3/F1/H2',
+    name: '09b semantic priorUserGoodRep initializes B3/F1/H1',
     run() {
       const tracker = {
         Mira: trackerEntry({ currentDisposition: null }),
@@ -4319,7 +4330,7 @@ const tests = [
           relationshipEngine: [relationship('Mira', { initPreset: { priorUserGoodRep: true } })],
         }),
       });
-      assert.deepEqual(report.trackerUpdate.npcs.Mira.currentDisposition, { B: 3, F: 1, H: 2 });
+      assert.deepEqual(report.trackerUpdate.npcs.Mira.currentDisposition, { B: 3, F: 1, H: 1 });
       assert.deepEqual(report.trackerUpdate.npcs.Mira.userHistory, { knowsUser: 'Y', standing: 'positive' });
       assert.equal(auditIncludes(report, 'initPreset=priorUserGoodRep'), true);
     },
@@ -5617,6 +5628,53 @@ const tests = [
       assert.equal(report.trackerUpdate.npcs.Seraphina.personalitySummary, 'Gentle, observant, and cautious with new trust.');
       assert.match(prompt(report), /stable personality note as expression guidance/);
       assert.match(prompt(report), /Gentle, observant, and cautious with new trust/);
+    },
+  },
+  {
+    name: '29a narrator relationship guide uses refined fear and trust state wording',
+    run() {
+      const fearReport = runCase({
+        userText: 'I speak calmly to Seraphina.',
+        tracker: {
+          Seraphina: trackerEntry({
+            currentDisposition: { B: 1, F: 3, H: 2 },
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'speak calmly to Seraphina',
+            explicitMeans: 'speak calmly',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      });
+      assert.match(prompt(fearReport), /Fear-led: wants distance, safety, witnesses, or an exit/);
+      assert.match(prompt(fearReport), /not comfort, attraction, trust, or willingness/);
+      assert.doesNotMatch(prompt(fearReport), /submissive/i);
+
+      const trustReport = runCase({
+        userText: 'I talk with Mira by the fire.',
+        tracker: {
+          Mira: trackerEntry({
+            currentDisposition: { B: 3, F: 1, H: 1 },
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'talk with Mira',
+            explicitMeans: 'talk with Mira',
+            identifyTargets: { ActionTargets: ['Mira'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Mira')],
+        }),
+      });
+      assert.match(prompt(trustReport), /Friendly comfort: cooperative, relaxed, warm/);
+      assert.match(prompt(trustReport), /not automatic romance or intimacy/);
     },
   },
   {
