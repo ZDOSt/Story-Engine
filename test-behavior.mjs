@@ -6659,6 +6659,8 @@ const tests = [
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
       assert.match(indexSource, /FINAL ACTIONABLE BEAT HARD STOP/);
       assert.match(indexSource, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
+      assert.match(indexSource, /Do not restage, re-perform, summarize, or narrate declared \{\{user\}\} actions back to \{\{user\}\}/);
+      assert.match(indexSource, /begin with what changes because of it, what becomes visible from the new position/);
       assert.match(indexSource, /The moment an actionable beat exists, stop immediately/);
       assert.match(indexSource, /Do not add after-beat tailing/);
       assert.match(indexSource, /Direct address to \{\{user\}\} is usually an actionable beat/);
@@ -6668,6 +6670,8 @@ const tests = [
       assert.match(indexSource, /after-beat tailing/);
       assert.match(handoffSource, /FINAL ACTIONABLE BEAT HARD STOP/);
       assert.match(handoffSource, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
+      assert.match(handoffSource, /Do not restage, re-perform, summarize, or narrate the declared action back to \{\{user\}\}/);
+      assert.match(handoffSource, /begin with what changes because of it, what becomes visible from the new position/);
       assert.match(handoffSource, /The moment an actionable beat exists, stop immediately/);
       assert.match(handoffSource, /Do not add after-beat tailing/);
       assert.match(handoffSource, /Direct address to \{\{user\}\} is usually an actionable beat/);
@@ -6683,7 +6687,7 @@ const tests = [
       assert.match(source, /proseGuardConnectionProfile:\s*PROSE_GUARD_PROFILE_CURRENT/);
       assert.match(source, /id="structured_preflight_prose_guard_enabled"/);
       assert.match(source, /id="structured_preflight_prose_guard_profile"/);
-      assert.match(source, /function buildProseGuardPrompt\(narrationText\)/);
+      assert.match(source, /function buildProseGuardPrompt\(narrationText, latestUserText = ''\)/);
       assert.match(source, /Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue/);
       assert.match(source, /Exception: remove every sentence, paragraph, separator line, or outro/);
       assert.match(source, /success or failure, landed contact, injuries, death, condition, intimacy permission/);
@@ -6694,6 +6698,10 @@ const tests = [
       assert.match(source, /the word lands flat and hard/);
       assert.match(source, /Do not replace a violation with another coded tell or workaround phrase/);
       assert.match(source, /A turn-boundary violation is a prose-rule violation/);
+      assert.match(source, /A T\+1 violation is a prose-rule violation/);
+      assert.match(source, /RECENT_USER_INPUT/);
+      assert.match(source, /Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT/);
+      assert.match(source, /Invalid T\+1 restatement/);
       assert.match(source, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
       assert.match(source, /Delete all text after the final actionable beat/);
       assert.match(source, /horizontal rule, separator, or scene-break tail/);
@@ -6706,11 +6714,13 @@ const tests = [
     name: '48 Prose Guard runs before tracker and tracker receives corrected narration',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
-      const guardIndex = source.indexOf('requestProseGuardCorrection(narrationText)');
-      const trackerIndex = source.indexOf('requestPostNarrationTrackerDelta({');
+      const guardIndex = source.indexOf('const proseGuardRaw = await requestProseGuardCorrection(');
+      const guardCallWithUserInputIndex = source.indexOf("const proseGuardRaw = await requestProseGuardCorrection(narrationText, pendingRun?.latestUserText || '')");
+      const trackerIndex = source.indexOf('const trackerRaw = await requestPostNarrationTrackerDelta({');
       const displayIndex = source.indexOf('message.extra.display_text = narrationText');
-      assert.ok(guardIndex > 0, 'Prose Guard request call missing.');
-      assert.ok(trackerIndex > guardIndex, 'Tracker update must run after Prose Guard.');
+      assert.ok(guardIndex > 0 || guardCallWithUserInputIndex > 0, 'Prose Guard request call missing.');
+      assert.ok(guardCallWithUserInputIndex > 0, 'Prose Guard must receive latest user input for T+1 checks.');
+      assert.ok(trackerIndex > guardCallWithUserInputIndex, 'Tracker update must run after Prose Guard.');
       assert.ok(displayIndex > trackerIndex, 'Final displayed narration should use the post-guard narration text.');
       assert.match(source, /setChatInputLocked\(true, 'Finalizing narration\.\.\.'\)/);
       assert.match(source, /Prose Guard failed; keeping sanitized narrator text/);

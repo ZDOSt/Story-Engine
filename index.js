@@ -275,6 +275,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     rules:
       - Begin at T+1 after {{user}} input. Treat {{user}} input as already completed unless mechanics say it failed, stalled, or was interrupted.
       - First sentence must begin with external consequence, NPC response, environmental change, or new stimulus. It must not begin by recapping, echoing, paraphrasing, or summarizing {{user}}.
+      - Do not restage, re-perform, summarize, or narrate declared {{user}} actions back to {{user}}. If {{user}} says they sit, enter, walk, watch, scan, speak, take, open, or move, do not begin by saying they do that same thing; begin with what changes because of it, what becomes visible from the new position, who reacts, what blocks them, or what happens next.
       - Never write {{user}} speech, thoughts, feelings, reactions, silence, decisions, or voluntary actions unless the narrator handoff explicitly enables PROXY USER ACTION MODE.
       - If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return immediately to normal agency separation.
       - Allow at most 1 inter-NPC exchange and at most 3 sentences per monologue.
@@ -286,7 +287,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - The final beat must not be ambient, decorative, environmental-only, crowd-only, side-character-only, mood-only, passive waiting, all-eyes-on-user framing, or unrelated scene noise. Do not end on background activity unless that activity directly creates an immediate obstacle, danger, opportunity, or demand for {{user}}.
 
     ABSOLUTE BAN:
-      - Echoing, restating, paraphrasing, or summarizing {{user}} input; "as you" phrasing; opening recap transitions; writing beyond the response point; narration after the final actionable beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; answering questions directed at {{user}}; ambient filler endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
+      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; "as you" phrasing; opening recap transitions; writing beyond the response point; narration after the final actionable beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; answering questions directed at {{user}}; ambient filler endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
 
   execution:
     This is the required render order before the first visible output token.
@@ -3782,7 +3783,7 @@ async function persistMetadata(context = getContext()) {
     }
 }
 
-function buildProseGuardPrompt(narrationText) {
+function buildProseGuardPrompt(narrationText, latestUserText = '') {
     return [
         'STORY_ENGINE_PROSE_GUARD',
         '',
@@ -3792,6 +3793,7 @@ function buildProseGuardPrompt(narrationText) {
         'Edit TEXT_TO_CHECK only to remove prose-rule violations. Preserve the scene exactly.',
         'If no violations exist, return TEXT_TO_CHECK unchanged.',
         'A turn-boundary violation is a prose-rule violation. Cut invalid after-beat tailing instead of preserving it.',
+        'A T+1 violation is a prose-rule violation. Remove or rewrite narration that merely restates RECENT_USER_INPUT instead of showing consequence.',
         '',
         'DO NOT CHANGE:',
         '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
@@ -3829,6 +3831,13 @@ function buildProseGuardPrompt(narrationText) {
         'Delete all text after the final actionable beat when it is only posture, gaze, scanning, lingering contact, ambient traffic, crowd movement, side-character activity, environmental detail, recap, mood, waiting, outro, horizontal rule, separator, or scene-break tail.',
         'Do not replace after-beat tailing with different after-beat tailing. Cut it.',
         '',
+        '8. T+1 / user-input restatement:',
+        'The user input is already complete. The narration must begin after it, with consequence, revealed information, NPC response, environmental change, or new stimulus.',
+        'Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT.',
+        'If RECENT_USER_INPUT says the user sits, enters, walks, watches, scans, speaks, takes, opens, moves, leans, observes, or looks around, do not write the user doing that same thing again.',
+        'Valid continuation may describe what changes because of the declared action: who reacts, what becomes visible from the new position, what sound interrupts, what blocks access, what object is within reach, what NPC says, or what happens next.',
+        'If the first sentence merely repeats the user action, remove that sentence or rewrite it as consequence without adding new user action.',
+        '',
         'VALID REPLACEMENTS:',
         'Replace violations with concrete, consequential physical behavior: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, or environmental interaction.',
         'Do not replace a violation with another coded tell or workaround phrase.',
@@ -3839,9 +3848,14 @@ function buildProseGuardPrompt(narrationText) {
         'Valid: "She set her hand against his wrist and pushed it away. She said the word once, low and clear, then stepped back to keep distance between them."',
         'Invalid after-beat tail: "She says, \"Come with me.\" A cart rattles past behind her, and two guards continue down the street."',
         'Valid after-beat cut: "She says, \"Come with me.\"',
+        'Invalid T+1 restatement: User said "I take a seat and scan the room." Narration says "You take the empty desk and let your gaze drift across the room."',
+        'Valid T+1 continuation: "The nearest students stop whispering. A girl in the second row catches the look and turns back to her slate."',
         '',
         'OUTPUT CONTRACT:',
         'Return only the corrected narration text. No labels, bullets, commentary, markdown fences, XML, JSON, analysis, or preamble.',
+        '',
+        '==RECENT_USER_INPUT==',
+        latestUserText || '(empty)',
         '',
         '==TEXT_TO_CHECK==',
         narrationText || '(empty)',
@@ -3856,8 +3870,8 @@ function sanitizeProseGuardResponse(raw, fallbackText) {
     return cleaned || fallbackText;
 }
 
-async function requestProseGuardCorrection(narrationText) {
-    const prompt = buildProseGuardPrompt(narrationText);
+async function requestProseGuardCorrection(narrationText, latestUserText = '') {
+    const prompt = buildProseGuardPrompt(narrationText, latestUserText);
     const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
     state.bypassPromptReady = true;
     try {
@@ -4061,7 +4075,7 @@ async function prependComputedDebug(messageId, type) {
 
         if (getSettings().postNarrationProseGuardEnabled !== false && narrationText) {
             try {
-                const proseGuardRaw = await requestProseGuardCorrection(narrationText);
+                const proseGuardRaw = await requestProseGuardCorrection(narrationText, pendingRun?.latestUserText || '');
                 narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
             } catch (error) {
                 console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
