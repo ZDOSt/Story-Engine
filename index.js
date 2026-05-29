@@ -267,15 +267,25 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     ABSOLUTE BAN:
       - Robotic one-action-per-sentence cadence, repetitive subject-verb action lists, pingpong structure, isolated speech balloons, same-speaker fragmentation, narration/speech/narration/speech chains from the same NPC before {{user}} can respond, and stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand instead of physically grounded delivery.
 
-  turnBoundaryControl(response, context):
+  chronologyControl(response, input, context):
     policy: LOCKED, EXPLICIT-ONLY
     mandate:
-      Preserve strict user agency, strict linear chronology, and a clean response handoff. The latest {{user}} input is already complete; the response begins with what happens next.
+      Preserve strict linear chronology. The latest {{user}} input is already complete; the response begins at the immediate consequence, interruption, revealed information, NPC response, environmental change, or new stimulus.
 
     rules:
       - Begin at T+1 after {{user}} input. Treat {{user}} input as already completed unless mechanics say it failed, stalled, or was interrupted.
       - First sentence must begin with external consequence, NPC response, environmental change, or new stimulus. It must not begin by recapping, echoing, paraphrasing, or summarizing {{user}}.
       - Do not restage, re-perform, summarize, or narrate declared {{user}} actions back to {{user}}. If {{user}} says they sit, enter, walk, watch, scan, speak, take, open, or move, do not begin by saying they do that same thing; begin with what changes because of it, what becomes visible from the new position, who reacts, what blocks them, or what happens next.
+
+    ABSOLUTE BAN:
+      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; opening recap transitions; and "as you" phrasing.
+
+  userAgencyControl(response, input, context):
+    policy: LOCKED, EXPLICIT-ONLY
+    mandate:
+      Preserve absolute separation of control. The world, NPCs, objects, hazards, and consequences may move; {{user}}'s voluntary actions, speech, thoughts, feelings, decisions, silence, and intentional reactions belong only to {{user}}.
+
+    rules:
       - USER AGENCY HARD LOCK: never make {{user}} perform any voluntary action unless the latest user input explicitly declares that exact action or PROXY USER ACTION MODE allows that exact action. This is absolute.
       - Involuntary physical reactions caused by external stimulus may be narrated when concrete and proportional: being knocked back, falling from impact, waking because something happens, flinching from sudden force/noise, coughing from smoke, bleeding from injury, losing balance, being restrained, or reflexively recoiling from direct contact.
       - Voluntary actions are never involuntary reactions. Choosing to take, open, read, inspect, answer, follow, approach, retreat, attack, defend, search, examine, accept, refuse, speak, nod, smile, look around, or move deliberately belongs only to {{user}}.
@@ -284,7 +294,30 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Do not reveal contents that require {{user}} to open, unfold, read, or inspect something. The correct response point is the delivered object, blocked access, incoming action, spoken demand, visible consequence, or available choice; stop there.
       - Never write {{user}} speech, thoughts, feelings, reactions, silence, decisions, or voluntary actions unless the narrator handoff explicitly enables PROXY USER ACTION MODE.
       - If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return immediately to normal agency separation.
+
+    ABSOLUTE BAN:
+      - Making {{user}} act; making {{user}} open/read/inspect/take/follow/answer without explicit input; answering questions directed at {{user}}; writing {{user}} speech, thought, feeling, reaction, silence, choice, decision, or voluntary movement.
+
+  turnStructureControl(response, context):
+    policy: LOCKED
+    mandate:
+      Preserve readable turn flow. Keep NPC action and dialogue cohesive without letting NPCs continue past the point where {{user}} should regain control.
+
+    rules:
       - Allow at most 1 inter-NPC exchange and at most 3 sentences per monologue.
+      - Never answer a question directed at {{user}}.
+      - Keep same-speaker action and dialogue together when they belong to one beat.
+      - Do not split one speaker into narration/speech/narration/speech chains before {{user}} can respond.
+
+    ABSOLUTE BAN:
+      - Pingpong structure, same-speaker fragmentation, isolated speech balloons, and answering for {{user}}.
+
+  responseEndpointControl(response, context):
+    policy: LOCKED, EXPLICIT-ONLY
+    mandate:
+      Preserve a clean response handoff. Before writing, choose the natural user-relevant response point for this beat; write only until that point is complete.
+
+    rules:
       - REQUIRED FINAL RESPONSE BEAT: every response must end on a direct, concrete beat {{user}} can immediately answer with action or dialogue.
       - Valid final beats are only: direct NPC speech to {{user}} with a question, command, request, offer, refusal, threat, accusation, invitation, or information requiring a choice; direct NPC action or pressure aimed at {{user}} such as handing/placing an object within reach, blocking a path, touching, grabbing, attacking, changing distance, opening/closing access, or creating a demand; or an environmental stimulus that immediately changes {{user}}'s options, danger, access, visibility, footing, or available objects.
       - The final beat must itself carry the playable prompt. It must not merely point at {{user}}, nudge {{user}} to respond, or simulate a pause for {{user}}.
@@ -295,7 +328,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Invalid final beats: waiting, watching for {{user}} to respond, all-eyes-on-user framing, silence/room/crowd pressure, ambient-only motion, decorative environmental detail, mood-only closure, side-character-only activity, passive attention, meta-questions, or unrelated scene noise.
 
     ABSOLUTE BAN:
-      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; making {{user}} act; making {{user}} open/read/inspect/take/follow/answer without explicit input; "as you" phrasing; opening recap transitions; writing beyond the response point; narration after the final response beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; answering questions directed at {{user}}; ambient filler endings; fake response cue endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
+      - Writing beyond the response point; narration after the final response beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; ambient filler endings; fake response cue endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
 
   execution:
     This is the required render order before the first visible output token.
@@ -306,7 +339,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     behavioralRender(response)
     literalStyleFilter(response)
     sceneBeatComposition(response)
-    turnBoundaryControl(response, context)
+    chronologyControl(response, input, context)
+    userAgencyControl(response, input, context)
+    turnStructureControl(response, context)
+    responseEndpointControl(response, context)
 
     VALIDITY CONTRACT:
       - Every stage is mandatory.

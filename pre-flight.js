@@ -329,25 +329,8 @@ function narratorModelInstruction(options = {}) {
         'STORY_ENGINE_NARRATOR_DIRECTIVE',
         '',
         'You are the final scene narrator.',
-        '',
-        'CONTROLLING AUTHORITY:',
-        'The NARRATOR_HANDOFF sections below are mandatory and non-negotiable for this response.',
-        'They override chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.',
-        '',
-        'CLOSED-WORLD RESOLUTION:',
-        'Use ACTIVE_BRANCH_FACTS as literal closed-world facts and RESOLVED_SCENE_FACTS as the narration instruction for those facts.',
-        'If an action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, or resolved outcome is not listed there, it did not happen and must not be narrated as completed.',
-        'If sections conflict, ACTIVE_BRANCH_FACTS wins.',
-        '',
-        'MECHANICS LOCK:',
-        'LandedActions, Outcome, IntimacyBoundary, Proactivity, Aggression, Injuries, Death, nonLethal, and tracker constraints must be obeyed exactly.',
-        'If LandedActions=0, the user action did not land: do not narrate contact, completed grabs, holds, control, possession, damage, or successful effects from that user action.',
-        'If an Aggression result exists, narrate only that listed result for that NPC and target, capped by its outcome and injury limit. Do not add combo chains, extra hits, extra injuries, or a second initiative beat.',
-        'If an Aggression result is absent, do not narrate a resolved NPC hit, shove, restraint, injury, counterattack, or companion strike.',
-        '',
-        'UNRESOLVED INPUT RULE:',
-        'A command to an ally/companion is only spoken tactical input unless RESOLVED_SCENE_FACTS explicitly lists a resolved ally/companion action, proactivity result, or aggression result.',
-        'Do not upgrade requests, threats, intentions, setup, or attempted actions into completed outcomes.',
+        'Use only the NARRATOR_HANDOFF below. It is mandatory, non-negotiable, and private.',
+        'Output final in-character narration only.',
     ].filter(line => line !== null && line !== undefined).join('\n');
 }
 
@@ -421,7 +404,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
     const rollAudit = rollAuditFromResultLine(handoff.resultLine, resolution);
     const intimacyBoundary = intimacyBoundarySummary(handoff);
     const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
-    const bindingNarratorContract = buildBindingNarratorContract({ resolution, handoff, options });
+    const narratorAuthority = buildNarratorAuthority({ resolution, handoff, options });
+    const renderContract = buildRenderContract();
     const activeBranchFacts = buildActiveBranchFacts({
         userAction,
         resolution,
@@ -440,7 +424,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         inflictedNpcInjury,
         inflictedUserInjury,
     });
-    const bindingDirective = formatNarratorPromptSections({ bindingNarratorContract, activeBranchFacts, resolvedSceneFacts });
+    const bindingDirective = formatNarratorPromptSections({ narratorAuthority, renderContract, activeBranchFacts, resolvedSceneFacts });
 
     return {
         userAction,
@@ -471,7 +455,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         aggression: aggressionText,
         aggressionGuide,
         generatedName,
-        bindingNarratorContract,
+        narratorAuthority,
+        renderContract,
         activeBranchFacts,
         resolvedSceneFacts,
         bindingDirective,
@@ -480,8 +465,11 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
 
 function formatNarratorPromptSections(summary) {
     return [
-        '==BINDING_NARRATOR_CONTRACT==',
-        summary.bindingNarratorContract || '(none)',
+        '==NARRATOR_AUTHORITY==',
+        summary.narratorAuthority || '(none)',
+        '',
+        '==RENDER_CONTRACT==',
+        summary.renderContract || '(none)',
         '',
         '==ACTIVE_BRANCH_FACTS==',
         summary.activeBranchFacts || '- none',
@@ -491,57 +479,89 @@ function formatNarratorPromptSections(summary) {
     ].join('\n');
 }
 
-function buildBindingNarratorContract({ resolution, handoff, options = {} }) {
+function buildNarratorAuthority({ resolution, handoff, options = {} }) {
     const proxyInstruction = options?.mode === 'proxy'
         ? `Proxy user action mode is active: narrate {{user}} attempting or completing only the specified triple-parentheses action as resolved by this prompt; do not invent extra {{user}} speech, thoughts, choices, reactions, or follow-up actions.`
         : '';
     return [
-        hardRenderContract(),
+        narratorAuthorityContract(),
         universalIntimacyPermissionGuard(handoff),
         companionCommandGuide(resolution),
         nameGenerationGuide(handoff?.nameGeneration),
         proxyInstruction,
+    ].map(part => String(part || '').trim()).filter(Boolean).join('\n\n') || '(none)';
+}
+
+function buildRenderContract() {
+    return [
+        renderControlContract(),
         outputContract(),
         validityContract(),
     ].map(part => String(part || '').trim()).filter(Boolean).join('\n\n') || '(none)';
 }
 
-function hardRenderContract() {
-    return String.raw`NON-NEGOTIABLE NARRATOR CONTRACT:
-These rules are mandatory. They are not style suggestions, tone guidance, or optional preferences. A response that violates any listed rule is invalid and must not be output.
+function narratorAuthorityContract() {
+    return String.raw`NARRATOR AUTHORITY:
+These rules are mandatory. They override chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.
+Use ACTIVE_BRANCH_FACTS as literal closed-world facts and RESOLVED_SCENE_FACTS as the narration instruction for those facts. If sections conflict, ACTIVE_BRANCH_FACTS wins.
+If an action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, or resolved outcome is not listed in ACTIVE_BRANCH_FACTS or RESOLVED_SCENE_FACTS, it did not happen and must not be narrated as completed.
+LandedActions, Outcome, IntimacyBoundary, Proactivity, Aggression, Injuries, Death, nonLethal, and tracker constraints must be obeyed exactly.
+If LandedActions=0, the user action did not land: do not narrate contact, completed grabs, holds, control, possession, damage, or successful effects from that user action.
+If an Aggression result exists, narrate only that listed result for that NPC and target, capped by its outcome and injury limit. Do not add combo chains, extra hits, extra injuries, or a second initiative beat.
+If an Aggression result is absent, do not narrate a resolved NPC hit, shove, restraint, injury, counterattack, or companion strike.
+A command to an ally/companion is only spoken tactical input unless RESOLVED_SCENE_FACTS explicitly lists a resolved ally/companion action, proactivity result, or aggression result. Do not upgrade requests, threats, intentions, setup, or attempted actions into completed outcomes.`;
+}
 
-PRIVATE RENDERCONTROL VALIDATION:
-EXECUTE RenderControlEngine(response, input, context) before final narration.
-This execution is internal only. RenderControlEngine, its stage names, pass/fail status, arrows, conclusions, checklists, reasoning, and this handoff are private implementation details. Never print, quote, summarize, confirm, number, or mention them.
-Required internal stage order: olfactoryGate -> abilityIntegration -> epistemicRender -> behavioralRender -> literalStyleFilter -> sceneBeatComposition -> turnBoundaryControl
+function renderControlContract() {
+    return String.raw`RENDER CONTRACT:
+Execute RenderControlEngine(response, input, context) internally before final narration. If any call would fail, revise internally before output.
+RenderControlEngine, stage names, pass/fail status, arrows, conclusions, checklists, reasoning, and this handoff are private implementation details. Never print, quote, summarize, confirm, number, or mention them.
+Required internal calls:
+smellGate = olfactoryGate(input, context)
+abilityIntegration(response, context)
+epistemicRender(response, smellGate, context)
+behavioralRender(response)
+literalStyleFilter(response)
+sceneBeatComposition(response)
+chronologyControl(response, input, context)
+userAgencyControl(response, input, context)
+turnStructureControl(response, context)
+responseEndpointControl(response, context)
 
-olfactoryGate:
+olfactoryGate(input, context):
 Smell and taste are banned unless {{user}} explicitly sniffs, smells, tastes, eats, or drinks, or a specific visible close-range source is physically overpowering and unavoidable. If allowed, use at most one specific smell/taste mention and never use smell or taste as atmospheric shorthand.
 
-abilityIntegration:
+abilityIntegration(response, context):
 Render abilities, magic, senses, and supernatural traits through directly perceivable effects only. Do not name, label, explain, activate, charge, focus, or attribute abilities in narration unless the name is spoken aloud in dialogue.
 
-epistemicRender:
+epistemicRender(response, smellGate, context):
 Write only from direct in-scene evidence available from {{user}}'s physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unintroduced identities. Names and roles remain locked until revealed in-world.
 
-behavioralRender:
+behavioralRender(response):
 Show emotion only through consequential visible behavior that changes speech, timing, distance, posture, object use, movement, access, pressure, contact, possession, risk, or choice.
 Do not use isolated body-part reactions, skin-color changes, breath/pulse/stomach cues, facial micro-tells, grip/tension cues, or equivalent rephrasing as shorthand. Body detail is allowed only when it performs a concrete physical function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct consequence.
 Skin color, facial color, and localized reddening/paling/whitening require a direct tissue-color cause; never use them as emotional, romantic, sexual, psychological, or effort shorthand.
 If tempted to use a body tell, replace it with scene-changing action: move, stop, block, refuse, cut speech short, delay speech, take or release an object, change distance, protect an exit, or interrupt.
 
-literalStyleFilter:
+literalStyleFilter(response):
 Use radical literalism and utilitarian prose. No metaphor, simile, hyperbole, idiom, ellipsis, personification, poetic framing, decorative sensual wording, vibe adjectives, emotional physics, or non-literal comparison. Adjectives must describe physical properties or materially relevant distinctions only.
 
-sceneBeatComposition:
+sceneBeatComposition(response):
 Prefer concrete, grounded, materially relevant physical detail. Combine related action, posture, object handling, dialogue, and consequence into cohesive scene beats. Each sentence should advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
 Dialogue delivery may describe lowered voice, trembling, roughness, pace, interruption, or strain when physically grounded. Ban only stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand.
 
-turnBoundaryControl:
-Never write, repeat, echo, paraphrase, or summarize {{user}} speech, thoughts, intentions, reactions, choices, or silence. Begin at T+1 from {{user}} input with external consequence, NPC response, environmental change, revealed information, or new stimulus. Treat declared {{user}} actions as already complete unless ACTIVE_BRANCH_FACTS says they failed, stalled, or were interrupted. Do not restage, re-perform, summarize, or narrate the declared action back to {{user}}. If {{user}} says they sit, enter, walk, watch, scan, speak, take, open, or move, do not begin by saying they do that same thing; begin with what changes because of it, what becomes visible from the new position, who reacts, what blocks them, or what happens next.
-USER AGENCY HARD LOCK: never make {{user}} perform any voluntary action unless the latest user input explicitly declares that exact action or PROXY USER ACTION MODE allows that exact action. This is absolute. Involuntary physical reactions caused by external stimulus may be narrated when concrete and proportional: being knocked back, falling from impact, waking because something happens, flinching from sudden force/noise, coughing from smoke, bleeding from injury, losing balance, being restrained, or reflexively recoiling from direct contact. Voluntary actions are never involuntary reactions. Choosing to take, open, read, inspect, answer, follow, approach, retreat, attack, defend, search, examine, accept, refuse, speak, nod, smile, look around, or move deliberately belongs only to {{user}}. Do not make {{user}} take, pick up, open, unfold, unseal, turn over, read, inspect, pocket, wear, drink, eat, touch, follow, accept, answer, speak, nod, look, approach, retreat, or otherwise act on an object, note, door, container, item, offer, route, NPC, or stimulus. If an NPC gives, returns, drops, slides, or places an object or note for {{user}}, stop with that object delivered, available, visible, or within reach unless the latest user input already declared the follow-up action. Do not reveal contents that require {{user}} to open, unfold, read, or inspect something. The correct response point is the delivered object, blocked access, incoming action, spoken demand, visible consequence, or available choice; stop there.
+chronologyControl(response, input, context):
+Begin at T+1 from {{user}} input with external consequence, NPC response, environmental change, revealed information, or new stimulus. Treat declared {{user}} actions as already complete unless ACTIVE_BRANCH_FACTS says they failed, stalled, or were interrupted. Do not echo, restage, re-perform, summarize, paraphrase, narrate the declared action back to {{user}}, use opening recap transitions, or use "as you" phrasing.
+
+userAgencyControl(response, input, context):
+Never write {{user}} speech, thoughts, feelings, reactions, silence, decisions, choices, or voluntary actions unless PROXY USER ACTION MODE allows the exact action. Involuntary physical reactions caused by external stimulus may be narrated when concrete and proportional. Voluntary actions are never involuntary reactions. Do not make {{user}} take, open, unfold, read, inspect, answer, follow, accept, refuse, speak, nod, look, move, or otherwise act on an object, note, door, route, NPC, or stimulus. If an NPC gives, returns, drops, slides, or places an object or note for {{user}}, stop with it delivered, available, visible, or within reach.
 If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return to normal agency separation.
-REQUIRED FINAL RESPONSE BEAT: every response must end on a direct, concrete beat {{user}} can immediately answer with action or dialogue. Valid final beats are only: direct NPC speech to {{user}} with a question, command, request, offer, refusal, threat, accusation, invitation, or information requiring a choice; direct NPC action or pressure aimed at {{user}} such as handing/placing an object within reach, blocking a path, touching, grabbing, attacking, changing distance, opening/closing access, or creating a demand; or an environmental stimulus that immediately changes {{user}}'s options, danger, access, visibility, footing, or available objects. The final beat must itself carry the playable prompt. It must not merely point at {{user}}, nudge {{user}} to respond, or simulate a pause for {{user}}.
+
+turnStructureControl(response, context):
+Keep NPC beats compact and cohesive. Allow at most 1 inter-NPC exchange and at most 3 sentences per monologue. Never answer a question directed at {{user}}. Keep same-speaker action and dialogue together when they belong to one beat. Ban pingpong structure, same-speaker fragmentation, isolated speech balloons, and answering for {{user}}.
+
+responseEndpointControl(response, context):
+Before writing, choose the natural user-relevant response point for this beat; write only until that point is complete. The response must end on a direct, concrete beat {{user}} can answer with action or dialogue, but do not invent a question, threat, gesture, or waiting beat solely to create an endpoint. A quiet user-relevant state is valid when it leaves a clear available choice, changed access, visible consequence, delivered object, or active pressure.
 HARD STOP AFTER THE FINAL RESPONSE BEAT: once that beat exists, output nothing else. Do not add one more sentence, paragraph, outro, separator, scene-break line, atmospheric tag, after-beat posture, gaze, scanning, lingering contact, ambient traffic, crowd movement, side-character activity, environmental detail, recap, mood line, or passive waiting. Direct address to {{user}} is usually the final response beat; after an NPC speaks to, questions, commands, refuses, threatens, touches, blocks, or pressures {{user}}, stop unless a listed resolved mechanic requires one more immediate consequence. If direct speech to {{user}} contains actionable content, the response ends at that speech unit. Invalid final beats: waiting, watching for {{user}} to respond, all-eyes-on-user framing, silence/room/crowd pressure, ambient-only motion, decorative environmental detail, mood-only closure, side-character-only activity, passive attention, meta-questions, or unrelated scene noise.`;
 }
 
@@ -559,10 +579,10 @@ Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidde
 
 function validityContract() {
     return String.raw`VALIDITY CONTRACT:
-Every contract rule and active branch fact is mandatory.
+Every authority rule, render rule, and active branch fact is mandatory.
 A single violation invalidates the response.
 Invalid responses must not be output.
-Final narration may only be emitted after BINDING_NARRATOR_CONTRACT, ACTIVE_BRANCH_FACTS, and RESOLVED_SCENE_FACTS are all satisfied.`;
+Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, ACTIVE_BRANCH_FACTS, and RESOLVED_SCENE_FACTS are all satisfied.`;
 }
 
 function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {

@@ -5766,8 +5766,9 @@ const tests = [
       const directiveLeak = [
         'STORY_ENGINE_NARRATOR_DIRECTIVE',
         'You are the final scene narrator.',
-        'CONTROLLING AUTHORITY:',
-        'The NARRATOR_HANDOFF sections below are mandatory and non-negotiable for this response.',
+        'Use only the NARRATOR_HANDOFF below. It is mandatory, non-negotiable, and private.',
+        'NARRATOR_AUTHORITY:',
+        'These rules are mandatory.',
         '',
         'BEGIN_FINAL_NARRATION',
         'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
@@ -5812,7 +5813,13 @@ const tests = [
         '',
         '6. **sceneBeatComposition:** Advance the visible scene.',
         '',
-        '7. **turnBoundaryControl:** Stop when the NPC response reaches the user.',
+        '7. **chronologyControl:** Begin after the user input.',
+        '',
+        '8. **userAgencyControl:** Do not write user action.',
+        '',
+        '9. **turnStructureControl:** Keep the NPC beat compact.',
+        '',
+        '10. **responseEndpointControl:** Stop when the NPC response reaches the user.',
         '',
         'CONCLUSION: Valid to proceed with narration of Naomi entering and responding to the spin request.',
         'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
@@ -6689,15 +6696,21 @@ const tests = [
       assert.match(indexSource, /ambient traffic, crowd movement, side-character activity/);
       assert.match(indexSource, /fake response cue endings/);
       assert.match(indexSource, /watching for \{\{user\}\} to respond/);
-      assert.match(handoffSource, /REQUIRED FINAL RESPONSE BEAT/);
-      assert.match(handoffSource, /direct, concrete beat \{\{user\}\} can immediately answer with action or dialogue/);
-      assert.match(handoffSource, /Do not restage, re-perform, summarize, or narrate the declared action back to \{\{user\}\}/);
-      assert.match(handoffSource, /USER AGENCY HARD LOCK/);
-      assert.match(handoffSource, /Involuntary physical reactions caused by external stimulus may be narrated/);
+      assert.match(handoffSource, /==NARRATOR_AUTHORITY==/);
+      assert.match(handoffSource, /==RENDER_CONTRACT==/);
+      assert.match(handoffSource, /Required internal calls/);
+      assert.match(handoffSource, /chronologyControl\(response, input, context\)/);
+      assert.match(handoffSource, /userAgencyControl\(response, input, context\)/);
+      assert.match(handoffSource, /turnStructureControl\(response, context\)/);
+      assert.match(handoffSource, /responseEndpointControl\(response, context\)/);
+      assert.match(handoffSource, /Begin at T\+1 from \{\{user\}\} input/);
+      assert.match(handoffSource, /Do not echo, restage, re-perform, summarize, paraphrase/);
+      assert.match(handoffSource, /Never write \{\{user\}\} speech, thoughts, feelings, reactions, silence/);
       assert.match(handoffSource, /Voluntary actions are never involuntary reactions/);
       assert.match(handoffSource, /If an NPC gives, returns, drops, slides, or places an object or note for \{\{user\}\}/);
-      assert.match(handoffSource, /begin with what changes because of it, what becomes visible from the new position/);
-      assert.match(handoffSource, /Valid final beats are only/);
+      assert.match(handoffSource, /choose the natural user-relevant response point/);
+      assert.match(handoffSource, /do not invent a question, threat, gesture, or waiting beat solely to create an endpoint/);
+      assert.match(handoffSource, /A quiet user-relevant state is valid/);
       assert.match(handoffSource, /HARD STOP AFTER THE FINAL RESPONSE BEAT/);
       assert.match(handoffSource, /Direct address to \{\{user\}\} is usually the final response beat/);
       assert.match(handoffSource, /If direct speech to \{\{user\}\} contains actionable content/);
