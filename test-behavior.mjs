@@ -6660,6 +6660,10 @@ const tests = [
       assert.match(indexSource, /FINAL ACTIONABLE BEAT HARD STOP/);
       assert.match(indexSource, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
       assert.match(indexSource, /Do not restage, re-perform, summarize, or narrate declared \{\{user\}\} actions back to \{\{user\}\}/);
+      assert.match(indexSource, /USER AGENCY HARD LOCK/);
+      assert.match(indexSource, /Involuntary physical reactions caused by external stimulus may be narrated/);
+      assert.match(indexSource, /Voluntary actions are never involuntary reactions/);
+      assert.match(indexSource, /If an NPC gives, returns, drops, slides, or places an object or note for \{\{user\}\}/);
       assert.match(indexSource, /begin with what changes because of it, what becomes visible from the new position/);
       assert.match(indexSource, /The moment an actionable beat exists, stop immediately/);
       assert.match(indexSource, /Do not add after-beat tailing/);
@@ -6671,6 +6675,10 @@ const tests = [
       assert.match(handoffSource, /FINAL ACTIONABLE BEAT HARD STOP/);
       assert.match(handoffSource, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
       assert.match(handoffSource, /Do not restage, re-perform, summarize, or narrate the declared action back to \{\{user\}\}/);
+      assert.match(handoffSource, /USER AGENCY HARD LOCK/);
+      assert.match(handoffSource, /Involuntary physical reactions caused by external stimulus may be narrated/);
+      assert.match(handoffSource, /Voluntary actions are never involuntary reactions/);
+      assert.match(handoffSource, /If an NPC gives, returns, drops, slides, or places an object or note for \{\{user\}\}/);
       assert.match(handoffSource, /begin with what changes because of it, what becomes visible from the new position/);
       assert.match(handoffSource, /The moment an actionable beat exists, stop immediately/);
       assert.match(handoffSource, /Do not add after-beat tailing/);
@@ -6702,6 +6710,11 @@ const tests = [
       assert.match(source, /RECENT_USER_INPUT/);
       assert.match(source, /Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT/);
       assert.match(source, /Invalid T\+1 restatement/);
+      assert.match(source, /User agency hard lock/);
+      assert.match(source, /Never make the user perform a voluntary action unless RECENT_USER_INPUT explicitly declared that exact action/);
+      assert.match(source, /Involuntary physical reactions caused by external stimulus may remain/);
+      assert.match(source, /Voluntary actions are never involuntary reactions/);
+      assert.match(source, /the valid response point is the object being delivered, available, visible, or within reach/);
       assert.match(source, /NO NARRATION AFTER THE FINAL ACTIONABLE BEAT/);
       assert.match(source, /Delete all text after the final actionable beat/);
       assert.match(source, /horizontal rule, separator, or scene-break tail/);

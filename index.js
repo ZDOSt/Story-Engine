@@ -276,6 +276,12 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Begin at T+1 after {{user}} input. Treat {{user}} input as already completed unless mechanics say it failed, stalled, or was interrupted.
       - First sentence must begin with external consequence, NPC response, environmental change, or new stimulus. It must not begin by recapping, echoing, paraphrasing, or summarizing {{user}}.
       - Do not restage, re-perform, summarize, or narrate declared {{user}} actions back to {{user}}. If {{user}} says they sit, enter, walk, watch, scan, speak, take, open, or move, do not begin by saying they do that same thing; begin with what changes because of it, what becomes visible from the new position, who reacts, what blocks them, or what happens next.
+      - USER AGENCY HARD LOCK: never make {{user}} perform any voluntary action unless the latest user input explicitly declares that exact action or PROXY USER ACTION MODE allows that exact action. This is absolute.
+      - Involuntary physical reactions caused by external stimulus may be narrated when concrete and proportional: being knocked back, falling from impact, waking because something happens, flinching from sudden force/noise, coughing from smoke, bleeding from injury, losing balance, being restrained, or reflexively recoiling from direct contact.
+      - Voluntary actions are never involuntary reactions. Choosing to take, open, read, inspect, answer, follow, approach, retreat, attack, defend, search, examine, accept, refuse, speak, nod, smile, look around, or move deliberately belongs only to {{user}}.
+      - Do not make {{user}} take, pick up, open, unfold, unseal, turn over, read, inspect, pocket, wear, drink, eat, touch, follow, accept, answer, speak, nod, look, approach, retreat, or otherwise act on an object, note, door, container, item, offer, route, NPC, or stimulus.
+      - If an NPC gives, returns, drops, slides, or places an object or note for {{user}}, stop with that object delivered, available, visible, or within reach unless the latest user input already declared the follow-up action.
+      - Do not reveal contents that require {{user}} to open, unfold, read, or inspect something. The correct response point is the delivered object, blocked access, incoming action, spoken demand, visible consequence, or available choice; stop there.
       - Never write {{user}} speech, thoughts, feelings, reactions, silence, decisions, or voluntary actions unless the narrator handoff explicitly enables PROXY USER ACTION MODE.
       - If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return immediately to normal agency separation.
       - Allow at most 1 inter-NPC exchange and at most 3 sentences per monologue.
@@ -287,7 +293,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - The final beat must not be ambient, decorative, environmental-only, crowd-only, side-character-only, mood-only, passive waiting, all-eyes-on-user framing, or unrelated scene noise. Do not end on background activity unless that activity directly creates an immediate obstacle, danger, opportunity, or demand for {{user}}.
 
     ABSOLUTE BAN:
-      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; "as you" phrasing; opening recap transitions; writing beyond the response point; narration after the final actionable beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; answering questions directed at {{user}}; ambient filler endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
+      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; making {{user}} act; making {{user}} open/read/inspect/take/follow/answer without explicit input; "as you" phrasing; opening recap transitions; writing beyond the response point; narration after the final actionable beat; after-beat tailing; outro paragraphs; separator lines used to append ambient/actionless cleanup; answering questions directed at {{user}}; ambient filler endings; passive waiting endings; explicit waiting; all-eyes-on-user framing; meta-questions; and lines such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
 
   execution:
     This is the required render order before the first visible output token.
@@ -3837,6 +3843,13 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'If RECENT_USER_INPUT says the user sits, enters, walks, watches, scans, speaks, takes, opens, moves, leans, observes, or looks around, do not write the user doing that same thing again.',
         'Valid continuation may describe what changes because of the declared action: who reacts, what becomes visible from the new position, what sound interrupts, what blocks access, what object is within reach, what NPC says, or what happens next.',
         'If the first sentence merely repeats the user action, remove that sentence or rewrite it as consequence without adding new user action.',
+        '',
+        '9. User agency hard lock:',
+        'Never make the user perform a voluntary action unless RECENT_USER_INPUT explicitly declared that exact action.',
+        'Involuntary physical reactions caused by external stimulus may remain when concrete and proportional: being knocked back, falling from impact, waking because something happens, flinching from sudden force/noise, coughing from smoke, bleeding from injury, losing balance, being restrained, or reflexively recoiling from direct contact.',
+        'Voluntary actions are never involuntary reactions. Choosing to take, open, read, inspect, answer, follow, approach, retreat, attack, defend, search, examine, accept, refuse, speak, nod, smile, look around, or move deliberately belongs only to the user.',
+        'If the narration makes the user voluntarily open, unfold, read, inspect, take, follow, answer, speak, nod, look, move, accept, or refuse without RECENT_USER_INPUT declaring it, remove that action and stop at the available response point.',
+        'When an NPC gives, returns, drops, slides, or places an object or note for the user, the valid response point is the object being delivered, available, visible, or within reach. Do not make the user open/read/inspect it.',
         '',
         'VALID REPLACEMENTS:',
         'Replace violations with concrete, consequential physical behavior: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, or environmental interaction.',
