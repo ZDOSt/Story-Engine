@@ -225,10 +225,12 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Body, face, breath, pulse, throat, jaw, hand, grip, eye, expression, and skin-color cues may appear only for concrete physical function. They may not appear as shorthand for emotion, romance, sexuality, psychology, tension, determination, fear, consent, resistance, or effort without direct consequence.
       - Skin color, facial color, and localized reddening/paling/whitening may appear only for direct tissue-color causes: injury, illness, blood loss, heat, cold, choking, poison, visible magic effect, makeup, lighting, species trait, existing complexion, bruising, or direct material pressure.
       - Equivalent phrasing is also banned. Rewording the same shortcut with substitute language is still invalid.
+      - Do not chain or oscillate micro-cues to simulate emotion. Reversal loops such as mouth opening/closing/opening again, grip tightening/loosening/tightening, looking away/back/down, starting/stopping/restarting, tapping/regripping/releasing, or repeated hands/eyes/mouth/shoulder movements are invalid unless they directly change speech, distance, contact, object control, balance, access, injury, or risk.
 
     ABSOLUTE BAN:
       - Internal-state labels, canned body-language shorthand, somatic emotional shorthand, autonomic tells used as emotion labels, micro-expression shorthand, body-part emotion metonymy, and empty expressive gestures that do not affect action, speech, timing, objects, or space.
       - Stock shorthand or equivalents, including blush/flush color cues, cheeks or ears reddening, face paling, knuckles whitening, grip-color language, heart/pulse/breath/stomach cues, jaw setting/tightening/clenching, throat working/bobbing, lips parting without consequence, mouth opening and closing, fingers twitching, shadows over eyes, eyes darkening/softening, expression flickering, face softening, and similar coded shortcuts.
+      - Oscillating micro-cue loops and body-language churn: open-close-open mouth beats, tighten-loosen-tighten grip beats, look-away-look-back gaze beats, start-stop-restart gestures, repeated tapping/gripping/releasing, and stacked hands/eyes/mouth/shoulder tells used only to show hesitation, fear, arousal, embarrassment, tension, or uncertainty.
 
   literalStyleFilter(response):
     policy: LOCKED, EXPLICIT-ONLY
@@ -257,6 +259,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Prefer one strong NPC beat that creates a response point for {{user}} over several small fragments from the same speaker.
       - Keep dialogue reactive, pressured, specific, and short enough to preserve turn flow.
       - Dialogue delivery is allowed when physically grounded. Volume, pace, roughness, trembling, lowered voice, interruption, or vocal strain may be described when it changes audibility, privacy, speech control, injury, fatigue, fear, anger, restraint, intimacy, or scene pressure.
+      - Do not replace a scene beat with a sequence of twitch reactions. Prefer one consequential physical choice plus dialogue over several isolated body cues.
       - Each sentence must advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
 
     pattern:
@@ -266,6 +269,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
     ABSOLUTE BAN:
       - Robotic one-action-per-sentence cadence, repetitive subject-verb action lists, pingpong structure, isolated speech balloons, same-speaker fragmentation, narration/speech/narration/speech chains from the same NPC before {{user}} can respond, and stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand instead of physically grounded delivery.
+      - Micro-reaction loops, twitch-cadence narration, and body-cue pileups where several small gestures substitute for one meaningful beat.
 
   chronologyControl(response, input, context):
     policy: LOCKED, EXPLICIT-ONLY
@@ -3882,6 +3886,8 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '1. Stock body-emotion shorthand:',
         'Ban stock physical tells used as emotion/sexual/effort shorthand. This includes blush, flush, cheeks heating, ears reddening, face paling, jaw tightening, jaw setting, jaw working, mouth firming, lips parting without consequence, throat bobbing, fingers twitching, knuckles whitening, grip color changes, breath hitching, breath catching, heart pounding, pulse jumping, stomach dropping, heat pooling, and any equivalent workaround phrase.',
         'Do not preserve the same coded tell by rewording it. Replace it with action that changes contact, space, timing, posture, speech content, object handling, or visible consequence.',
+        'Ban oscillating micro-cue loops and body-language churn: mouth opens/closes/opens, grip tightens/loosens/tightens, gaze looks away/back/down, gestures start/stop/restart, repeated tapping/gripping/releasing, and stacked hands/eyes/mouth/shoulder tells used only to show hesitation, fear, arousal, embarrassment, tension, or uncertainty.',
+        'Replace twitch loops with one consequential physical choice plus dialogue, such as increasing distance, blocking contact, keeping an object, refusing, protecting an exit, changing position, or stopping at a clear boundary.',
         '',
         '2. Skin-color shorthand:',
         'Do not use reddening, paling, whitening, darkening, flushing, or color changes as emotional, romantic, sexual, psychological, fear, pain, exertion, anger, embarrassment, arousal, or physical-effort shorthand.',
@@ -3927,6 +3933,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'VALID REPLACEMENTS:',
         'Replace violations with concrete, consequential physical behavior: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, or environmental interaction.',
         'Do not replace a violation with another coded tell or workaround phrase.',
+        'Do not replace one invalid tell with a pileup of smaller tells. Collapse repeated micro-reactions into a single scene-changing beat.',
         'Use literal sentences that preserve intensity through action and consequence, not poetic comparison.',
         '',
         'GOOD REPLACEMENT PATTERN:',

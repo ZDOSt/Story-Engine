@@ -6665,11 +6665,21 @@ const tests = [
       assert.match(indexSource, /knuckles whitening/);
       assert.match(indexSource, /lowered voice/);
       assert.match(indexSource, /trembling/);
+      assert.match(indexSource, /Do not chain or oscillate micro-cues/);
+      assert.match(indexSource, /open-close-open mouth beats/);
+      assert.match(indexSource, /tighten-loosen-tighten grip beats/);
+      assert.match(indexSource, /body-cue pileups/);
       assert.match(handoffSource, /equivalent rephrasing as shorthand/);
       assert.match(handoffSource, /localized reddening\/paling\/whitening/);
       assert.match(handoffSource, /Dialogue delivery may describe lowered voice, trembling/);
       assert.match(handoffSource, /barely above a whisper/);
+      assert.match(handoffSource, /Do not chain or oscillate micro-cues/);
+      assert.match(handoffSource, /open-close-open mouth beats/);
+      assert.match(handoffSource, /tighten-loosen-tighten grip beats/);
+      assert.match(handoffSource, /twitch-cadence narration/);
       assert.doesNotMatch(handoffSource, /trembling voice, breathy line, hiss, growl/);
+      assert.match(indexSource, /Ban oscillating micro-cue loops and body-language churn/);
+      assert.match(indexSource, /Do not replace one invalid tell with a pileup of smaller tells/);
     },
   },
   {
