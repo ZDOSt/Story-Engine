@@ -5860,6 +5860,8 @@ const tests = [
     run() {
       assert.equal(isPromotableTrackerName('Raider1'), true);
       assert.equal(isPromotableTrackerName('Unknown Woman'), true);
+      assert.equal(isPromotableTrackerName('Lavender-haired girl'), true);
+      assert.equal(isPromotableTrackerName('silver haired student'), true);
       const promotions = getExplicitNamePromotions('The Raider1 name is Mora.', ['Raider1']);
       assert.deepEqual(promotions, [{ oldName: 'Raider1', newName: 'Mora' }]);
     },
@@ -5883,6 +5885,17 @@ const tests = [
       assert.deepEqual(getExplicitNamePromotions(assistantText, ['bystander']), []);
       assert.equal(/getExplicitNamePromotions\s*\(\s*latestUserText\b/.test(promotionFunction), false);
       assert.equal(/getExplicitNamePromotions\s*\(\s*assistantText\b/.test(promotionFunction), true);
+    },
+  },
+  {
+    name: '36c post-narration tracker reconciles named duplicate with single descriptive placeholder',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.match(source, /function reconcileNamedNpcDuplicates/);
+      assert.match(source, /previousActivePromotable\.length !== 1/);
+      assert.match(source, /isPromotableTrackerName\(name\)/);
+      assert.match(source, /promoteTrackerEntry\(normalized, placeholder, candidates\[0\]\)/);
+      assert.match(source, /beforeNpcs: pendingRun\.trackerBefore/);
     },
   },
   {

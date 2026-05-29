@@ -1907,6 +1907,41 @@ function promoteTrackerEntry(npcs, oldName, newName) {
     return true;
 }
 
+function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null) {
+    const normalized = normalizeDisplayTrackerNpcs(npcs || {});
+    const previous = normalizeDisplayTrackerNpcs(beforeNpcs || {});
+    const previousActivePromotable = Object.entries(previous)
+        .filter(([name, entry]) => entry?.lifecycle === 'Active' && isPromotableTrackerName(name))
+        .map(([name]) => name);
+    if (previousActivePromotable.length !== 1) return normalized;
+
+    const placeholder = previousActivePromotable[0];
+    if (!normalized[placeholder] || normalized[placeholder].lifecycle !== 'Active') return normalized;
+
+    const deltaNpcNames = new Set((delta?.npcs || [])
+        .map(item => cleanRevealedTrackerName(item?.NPC))
+        .filter(Boolean)
+        .map(name => name.toLowerCase()));
+    const explicitRevealed = (delta?.npcs || [])
+        .some(item =>
+            String(item?.NPC || '').trim().toLowerCase() === placeholder.toLowerCase()
+            && cleanRevealedTrackerName(item?.revealedName));
+    if (explicitRevealed) return normalized;
+
+    const candidates = Object.keys(normalized).filter(name => {
+        if (name.toLowerCase() === placeholder.toLowerCase()) return false;
+        if (previous[name]) return false;
+        if (isPromotableTrackerName(name)) return false;
+        if (!deltaNpcNames.has(name.toLowerCase())) return false;
+        const entry = normalized[name];
+        return entry?.lifecycle === 'Active';
+    });
+    if (candidates.length !== 1) return normalized;
+
+    promoteTrackerEntry(normalized, placeholder, candidates[0]);
+    return normalized;
+}
+
 function buildTrackerUpdateForPersistence(displaySnapshot) {
     return {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
@@ -1933,7 +1968,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
             promoteTrackerEntry(npcs, name, revealedName);
         }
     }
-    merged.npcs = applyExplicitNamePromotions(npcs, options).npcs;
+    merged.npcs = reconcileNamedNpcDuplicates(applyExplicitNamePromotions(npcs, options).npcs, options.beforeNpcs, delta);
     const deltaActiveNames = new Set();
     for (const npcDelta of delta.npcs || []) {
         addActiveDisplayNpcName(deltaActiveNames, merged.npcs, npcDelta?.NPC);
@@ -4119,6 +4154,7 @@ async function prependComputedDebug(messageId, type) {
                         messageKey,
                         latestUserText: pendingRun.latestUserText,
                         assistantText: narrationText,
+                        beforeNpcs: pendingRun.trackerBefore,
                     });
                 } catch (error) {
                     trackerDeltaWarning = error instanceof Error ? error.message : String(error);

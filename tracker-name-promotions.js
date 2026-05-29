@@ -39,6 +39,7 @@ const GENERIC_NAME_ROLES = Object.freeze([
     'shopkeeper',
     'soldier',
     'stranger',
+    'student',
     'thug',
     'traveler',
     'villager',
@@ -57,7 +58,10 @@ export function isPromotableTrackerName(value) {
     if (/^(?:npc|person|stranger|figure|enemy|attacker|assailant|bystander)\s*\d+$/.test(compact)) return true;
     const numbered = /^([a-z][a-z\s']*?)\s*\d+$/.exec(compact);
     const role = numbered?.[1]?.trim() || compact;
-    return GENERIC_ROLE_SET.has(role);
+    if (GENERIC_ROLE_SET.has(role)) return true;
+    const words = compact.split(/\s+/).filter(Boolean);
+    const lastWord = words[words.length - 1] || '';
+    return words.length > 1 && GENERIC_ROLE_SET.has(lastWord);
 }
 
 export function getExplicitNamePromotions(text, trackedNames) {
