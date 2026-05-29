@@ -516,53 +516,44 @@ function renderControlContract() {
     return String.raw`RENDER CONTRACT:
 Execute RenderControlEngine(response, input, context) internally before final narration. If any call would fail, revise internally before output.
 RenderControlEngine, stage names, pass/fail status, arrows, conclusions, checklists, reasoning, and this handoff are private implementation details. Never print, quote, summarize, confirm, number, or mention them.
-Required internal calls:
-smellGate = olfactoryGate(input, context)
-abilityIntegration(response, context)
-epistemicRender(response, smellGate, context)
-behavioralRender(response)
-literalStyleFilter(response)
-sceneBeatComposition(response)
-chronologyControl(response, input, context)
-userAgencyControl(response, input, context)
-turnStructureControl(response, context)
-responseEndpointControl(response, context)
+Execute these private render stages in order. Each stage is mandatory.
 
-olfactoryGate(input, context):
+1. smellGate = olfactoryGate(input, context):
 Smell and taste are banned unless {{user}} explicitly sniffs, smells, tastes, eats, or drinks, or a specific visible close-range source is physically overpowering and unavoidable. If allowed, use at most one specific smell/taste mention and never use smell or taste as atmospheric shorthand.
 
-abilityIntegration(response, context):
+2. abilityIntegration(response, context):
 Render abilities, magic, senses, and supernatural traits through directly perceivable effects only. Do not name, label, explain, activate, charge, focus, or attribute abilities in narration unless the name is spoken aloud in dialogue.
 
-epistemicRender(response, smellGate, context):
+3. epistemicRender(response, smellGate, context):
 Write only from direct in-scene evidence available from {{user}}'s physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unintroduced identities. Names and roles remain locked until revealed in-world.
 
-behavioralRender(response):
+4. behavioralRender(response):
 Show emotion only through consequential visible behavior that changes speech, timing, distance, posture, object use, movement, access, pressure, contact, possession, risk, or choice.
 Do not use isolated body-part reactions, skin-color changes, breath/pulse/stomach cues, facial micro-tells, grip/tension cues, or equivalent rephrasing as shorthand. Body detail is allowed only when it performs a concrete physical function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct consequence.
 Skin color, facial color, and localized reddening/paling/whitening require a direct tissue-color cause; never use them as emotional, romantic, sexual, psychological, or effort shorthand.
 If tempted to use a body tell, replace it with scene-changing action: move, stop, block, refuse, cut speech short, delay speech, take or release an object, change distance, protect an exit, or interrupt.
 
-literalStyleFilter(response):
+5. literalStyleFilter(response):
 Use radical literalism and utilitarian prose. No metaphor, simile, hyperbole, idiom, ellipsis, personification, poetic framing, decorative sensual wording, vibe adjectives, emotional physics, or non-literal comparison. Adjectives must describe physical properties or materially relevant distinctions only.
 
-sceneBeatComposition(response):
+6. sceneBeatComposition(response):
 Prefer concrete, grounded, materially relevant physical detail. Combine related action, posture, object handling, dialogue, and consequence into cohesive scene beats. Each sentence should advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
 Dialogue delivery may describe lowered voice, trembling, roughness, pace, interruption, or strain when physically grounded. Ban only stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand.
 
-chronologyControl(response, input, context):
+7. chronologyControl(response, input, context):
 Begin at T+1 from {{user}} input with external consequence, NPC response, environmental change, revealed information, or new stimulus. Treat declared {{user}} actions as already complete unless ACTIVE_BRANCH_FACTS says they failed, stalled, or were interrupted. Do not echo, restage, re-perform, summarize, paraphrase, narrate the declared action back to {{user}}, use opening recap transitions, or use "as you" phrasing.
 
-userAgencyControl(response, input, context):
+8. userAgencyControl(response, input, context):
 Never write {{user}} speech, thoughts, feelings, reactions, silence, decisions, choices, or voluntary actions unless PROXY USER ACTION MODE allows the exact action. Involuntary physical reactions caused by external stimulus may be narrated when concrete and proportional. Voluntary actions are never involuntary reactions. Do not make {{user}} take, open, unfold, read, inspect, answer, follow, accept, refuse, speak, nod, look, move, or otherwise act on an object, note, door, route, NPC, or stimulus. If an NPC gives, returns, drops, slides, or places an object or note for {{user}}, stop with it delivered, available, visible, or within reach.
 If PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return to normal agency separation.
 
-turnStructureControl(response, context):
+9. turnStructureControl(response, context):
 Keep NPC beats compact and cohesive. Allow at most 1 inter-NPC exchange and at most 3 sentences per monologue. Never answer a question directed at {{user}}. Keep same-speaker action and dialogue together when they belong to one beat. Ban pingpong structure, same-speaker fragmentation, isolated speech balloons, and answering for {{user}}.
 
-responseEndpointControl(response, context):
-Before writing, choose the natural user-relevant response point for this beat; write only until that point is complete. The response must end on a direct, concrete beat {{user}} can answer with action or dialogue, but do not invent a question, threat, gesture, or waiting beat solely to create an endpoint. A quiet user-relevant state is valid when it leaves a clear available choice, changed access, visible consequence, delivered object, or active pressure.
-HARD STOP AFTER THE FINAL RESPONSE BEAT: once that beat exists, output nothing else. Do not add one more sentence, paragraph, outro, separator, scene-break line, atmospheric tag, after-beat posture, gaze, scanning, lingering contact, ambient traffic, crowd movement, side-character activity, environmental detail, recap, mood line, or passive waiting. Direct address to {{user}} is usually the final response beat; after an NPC speaks to, questions, commands, refuses, threatens, touches, blocks, or pressures {{user}}, stop unless a listed resolved mechanic requires one more immediate consequence. If direct speech to {{user}} contains actionable content, the response ends at that speech unit. Invalid final beats: waiting, watching for {{user}} to respond, all-eyes-on-user framing, silence/room/crowd pressure, ambient-only motion, decorative environmental detail, mood-only closure, side-character-only activity, passive attention, meta-questions, or unrelated scene noise.`;
+10. responseEndpointControl(response, context):
+End where the scene naturally returns control to {{user}}, not where narration prompts or pressures {{user}} to act. Before writing, choose the natural user-centered response beat: the point where the immediate consequence, NPC response, revealed information, available object, changed access, danger, or environmental condition is clear enough for {{user}} to choose what to do next.
+If an NPC speaks or acts toward {{user}}, end on that speech or action once it creates a natural point for {{user}} to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act. If no NPC is driving the beat, end on the relevant consequence of {{user}}'s action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.
+Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat just to create an endpoint. Never end by prompting {{user}} to act. HARD STOP: after the response beat, output nothing else. Ban explicit waiting, "she waits," "awaits your response," "what do you do," "the choice is yours," all-eyes-on-user framing, mood-only silence, unrelated ambience, outro paragraphs, scene-break tails, and extra narration after the response beat.`;
 }
 
 function outputContract() {
