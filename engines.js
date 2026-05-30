@@ -257,8 +257,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     if {{user}} is hated, distrusted, wanted, enemy-coded, or bad-reputation with this NPC before the current first interaction -> {Label:userBadRep,B:1,F:2,H:3}
     rule: first encounter kindness, opening-scene rescue, courtesy, friendliness, praise, or a warm first impression do NOT count as prior favorable reputation
     if {{user}} is explicitly shown by prior lore, card, scenario, tracker, or chat history to have an established favorable reputation with this NPC that predates the current scene -> {Label:priorUserGoodRep,B:3,F:1,H:1}
-    if {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like AND NPC lacks explicit fear immunity -> {Label:userNonHuman,B:1,F:2,H:1,nonHumanFearPrimed:Y}
-    rule: nonHumanFearPrimed means narrative awe/caution, not a fear lock. While currentDisposition.B<3, any direct/material threatening or negative user action toward that NPC promotes Fear to at least F3. At B3+, clear nonHumanFearPrimed and use normal Fear rules. Fear immunity suppresses both the baseline and the primed F3 escalation.
+    if {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like AND NPC lacks explicit fear immunity -> {Label:userNonHuman,B:1,F:3,H:2}
     else -> {Label:neutralDefault,B:2,F:2,H:2}
 
   auditInteraction(npc, resolutionPacket):
@@ -488,7 +487,6 @@ function RelationshipEngine(npc, resolutionPacket) {
     read stakeChangeByOutcome for actual resolution outcome, set NPC_STAKES from benefit/harm vs none, audit benefit interaction, route disposition target
     hostilePressureResult = applyHostilePhysicalPressure(npc, resolutionPacket, state)
     if hostilePressureResult exists -> target = hostilePressureResult.target else target = routeDispositionTarget
-    if nonHumanFearPrimed=Y, currentDisposition.B<3, and current action is direct/material and threatening or negative toward this NPC -> target includes Fear and deltas must promote Fear to at least F3
     update rapport from final target; if a positive/neutral eligible interaction consumed rapport, stamp this NPC's last rapport gain active time
     if hostilePressureResult exists -> deltas = hostilePressureResult.deltas else deltas = deriveDirection(target, audit, currentDisposition, rapport.currentRapport, resolutionPacket)
     update disposition and apply rapport reset if present
@@ -1704,9 +1702,7 @@ export function normalizeUserHistory(value) {
     const source = value && typeof value === 'object' ? value : {};
     const knowsUser = source.knowsUser === 'Y' ? 'Y' : 'N';
     const standing = ['positive', 'neutral', 'negative'].includes(source.standing) ? source.standing : 'neutral';
-    const history = { knowsUser, standing };
-    if (source.nonHumanFearPrimed === 'Y') history.nonHumanFearPrimed = 'Y';
-    return history;
+    return { knowsUser, standing };
 }
 
 export function normalizeNpcRaceProfile(value) {

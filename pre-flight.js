@@ -355,7 +355,6 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         `landed:${h.Landed}`,
         `intimacy:${h.IntimacyBoundary ?? 'SKIP'}/${h.IntimacyBoundarySource ?? 'NONE'}/${h.IntimacyRefusalStyle ?? 'NONE'}`,
         `boundary:${h.BoundaryPressure ?? 'N'}`,
-        h.NonHumanFear && h.NonHumanFear !== 'NONE' ? `nonHumanFear:${h.NonHumanFear}` : '',
         `pressure:${h.HostilePressure ?? 0}/${h.HostileLandedPressure ?? 0}/${h.DominantLock ?? 'None'}/${h.PressureMode ?? 'none'}`,
         h.PersonalitySummary && !isNoneText(h.PersonalitySummary) ? `personality:${h.PersonalitySummary}` : '',
     ].filter(Boolean).join('/')).join(';') || 'none';
@@ -711,8 +710,7 @@ function relationshipNarrationGuide(npc) {
     const boundary = npc?.BoundaryPressure === 'Y'
         ? ' Respect active boundary pressure through space, refusal, guarded movement, or physical protection.'
         : '';
-    const nonHumanFear = nonHumanFearNarrationGuide(npc?.NonHumanFear);
-    return `${state} ${behavior} ${target}${nonHumanFear}${personality}${boundary}`.trim();
+    return `${state} ${behavior} ${target}${personality}${boundary}`.trim();
 }
 
 function cleanNarratorDirective(text) {
@@ -757,19 +755,6 @@ function relationshipStateNarrationGuide(npc) {
     if (state.B >= 3) return `${tag} Friendly comfort: cooperative, relaxed, warm; ordinary closeness can fit when context supports it, but not automatic romance or intimacy.`;
     if (state.B <= 1) return `${tag} Low trust: keeps distance, avoids vulnerability and private closeness, cautious or transactional if engagement is necessary.`;
     return `${tag} Neutral default: polite, practical, reserved, curious, formal, businesslike, or situationally cooperative; no default vulnerability or personal closeness.`;
-}
-
-function nonHumanFearNarrationGuide(value) {
-    switch (value) {
-        case 'PRIMED':
-            return ' The NPC recognizes {{user}} as visibly inhuman or frightening and may show awe, caution, distance, formality, or careful curiosity; this is not a fear lock or automatic refusal.';
-        case 'ESCALATED':
-            return ' The NPC had been primed by {{user}}\'s inhuman nature, and this threatening/negative beat pushed that caution into active fear.';
-        case 'IMMUNE':
-            return ' Do not render special fear from {{user}}\'s inhuman nature; this NPC is immune, equivalent, or experienced enough for normal relationship mechanics only.';
-        default:
-            return '';
-    }
 }
 
 function parseRelationshipState(value) {
