@@ -5350,9 +5350,9 @@ const tests = [
         assert.equal(modelPrompt.includes(name), true);
       }
       assert.doesNotMatch(modelPrompt, /Versobom|Staistu|Vaisailnok/);
-      assert.match(auditPrompt(report), /nameGeneration\.result: style: Balanced Fantasy; semanticCandidates:/);
-      assert.match(auditPrompt(report), /rejected: .*Versobom/);
-      assert.match(auditPrompt(report), /final: male:/);
+      assert.match(auditPrompt(report), /nameGeneration\.result: style: Balanced Fantasy; final: Male:/);
+      assert.doesNotMatch(auditPrompt(report), /semanticCandidates|rejected:|replacements:|Versobom|Staistu|Vaisailnok/);
+      assert.match(auditPrompt(report), /final: Male:/);
       const reserved = ctx.chatMetadata.structuredPreflightNameRegistry?.used || [];
       assert.equal(pool.male.every(name => reserved.includes(name)), true);
       assert.equal(pool.female.every(name => reserved.includes(name)), true);
@@ -5376,10 +5376,14 @@ const tests = [
       });
       const text = prompt(report);
       assert.match(text, /Name pool use is mandatory and obeys fogOfWar\(\)\./);
-      assert.match(text, /Person\/entity names allowed for newly revealed people\/entities:/);
+      assert.match(text, /Male person\/entity names allowed only for newly revealed male/);
+      assert.match(text, /Female person\/entity names allowed only for newly revealed female/);
       assert.match(text, /Location\/place names allowed for newly revealed places:/);
       assert.match(text, /Any newly revealed proper name in this response must come only from the approved generated name pool in ACTIVE_BRANCH_FACTS/);
+      assert.match(text, /Female\/girl\/woman\/she-her NPCs must use the female list only/);
+      assert.match(text, /A girl, woman, female, or she\/her NPC must never receive a male-list name/);
       assert.match(text, /Do not assign names to background, incidental, or unnamed figures/);
+      assert.doesNotMatch(text, /semanticCandidates|rejected:|replacements:/);
     },
   },
   {

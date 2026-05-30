@@ -114,9 +114,7 @@ function buildReadableSemanticDebug(ledger) {
         'chaosSemantic.sceneSummary=' + valueOrNone(chaos.sceneSummary),
         'trackerUpdateEngine=' + inline(tracker),
         'nameSemantic.selectedStyle=' + valueOrNone(nameSemantic.selectedStyle),
-        'nameSemantic.maleCandidates=' + list(nameSemantic.maleCandidates),
-        'nameSemantic.femaleCandidates=' + list(nameSemantic.femaleCandidates),
-        'nameSemantic.locationCandidates=' + list(nameSemantic.locationCandidates),
+        'nameSemantic.candidates=hidden; final approved pool shown in deterministic nameGeneration',
         'proactivitySemantic=deterministic cap 3',
     ];
 
@@ -182,7 +180,7 @@ function buildReadableDeterministicDebug(handoff) {
         }),
         'proactivityResults=' + inline(formatProactivityForNarration(proactivity)),
         ...formatAggressionDebugLines(aggression),
-        'nameGeneration=' + inline(name),
+        'nameGeneration=' + nameGenerationSummary(name),
         'trackerUpdate=' + inline(handoff?.sceneTrackerUpdate ?? {}),
     ];
 }
@@ -623,13 +621,16 @@ function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollA
 function closedWorldNamePoolFact(nameGeneration) {
     const pool = nameGeneration?.namePool;
     if (!pool) return '';
-    const personNames = [...(pool.male || []), ...(pool.female || [])]
+    const maleNames = (pool.male || [])
+        .map(name => String(name ?? '').trim())
+        .filter(name => name && !isNoneText(name));
+    const femaleNames = (pool.female || [])
         .map(name => String(name ?? '').trim())
         .filter(name => name && !isNoneText(name));
     const locationNames = (pool.location || [])
         .map(name => String(name ?? '').trim())
         .filter(name => name && !isNoneText(name));
-    return `Name branch: approved generated name pool is mandatory and closed-world. Person/entity names allowed for newly revealed people/entities: ${list(personNames)}. Location/place names allowed for newly revealed places: ${list(locationNames)}. If a new proper name is revealed this turn, it must be one unused name from the matching approved pool. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. If no appropriate unused approved name exists, keep the person/place unnamed or use a role/description.`;
+    return `Name branch: approved generated name pool is mandatory and closed-world. Male person/entity names allowed only for newly revealed male, masculine, boy/man, or he/him people/entities: ${list(maleNames)}. Female person/entity names allowed only for newly revealed female, feminine, girl/woman, or she/her people/entities: ${list(femaleNames)}. Location/place names allowed for newly revealed places: ${list(locationNames)}. If a new proper name is revealed this turn, it must be one unused name from the matching approved pool and matching gender/presentation bucket when known. A girl, woman, female, or she/her NPC must never receive a male-list name; a boy, man, male, or he/him NPC must never receive a female-list name. If gender/presentation is unknown, choose an unused person/entity name without contradicting established or immediately narrated pronouns. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. If no appropriate unused approved name exists, keep the person/place unnamed or use a role/description.`;
 }
 
 function hasLandedPhysicalResult(resolution) {
@@ -961,18 +962,9 @@ function nameGenerationSummary(nameGeneration) {
         return 'none';
     }
     const style = valueOrNone(nameGeneration.style);
-    const candidates = nameGeneration.semanticCandidates
-        ? `; semanticCandidates: ${namePoolText(nameGeneration.semanticCandidates)}`
-        : '';
-    const replacements = Array.isArray(nameGeneration.replacements) && nameGeneration.replacements.length
-        ? `; replacements: ${nameGeneration.replacements.map(item => `${valueOrNone(item.bucket)}:${valueOrNone(item.name)}`).join(',')}`
-        : '; replacements: none';
-    const rejected = Array.isArray(nameGeneration.semanticRejected) && nameGeneration.semanticRejected.length
-        ? `; rejected: ${nameGeneration.semanticRejected.map(item => `${valueOrNone(item.bucket)}:${valueOrNone(item.name)}(${valueOrNone(item.reason)})`).join(',')}`
-        : '; rejected: none';
     return style !== '(none)'
-        ? `style: ${style}${candidates}${rejected}${replacements}; final: ${namePoolText(nameGeneration.namePool)}`
-        : `${namePoolText(nameGeneration.namePool)}${candidates}${rejected}${replacements}`;
+        ? `style: ${style}; final: ${namePoolText(nameGeneration.namePool)}`
+        : namePoolText(nameGeneration.namePool);
 }
 
 function readableActionDescription(semanticResolution, resolution) {
@@ -1197,11 +1189,11 @@ function intimacyRefusalGuide(npc) {
 
 function nameGenerationGuide(nameGeneration) {
     if (!nameGeneration?.namePool) return '';
-    return ` Name pool use is mandatory and obeys fogOfWar(). Already revealed names from chat, character card, lore, or tracker may continue unchanged. Any newly revealed proper name in this response must come only from the approved generated name pool in ACTIVE_BRANCH_FACTS. A new name may appear only after the scene has explicitly revealed that specific person, entity, or place through speech, readable text, self-introduction, direct in-world reference, signage, documents, or clear recognition. Once revealed, use one unused approved person/entity name for that already-identified person/entity, or one unused approved location/place name for that already-identified place. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. Do not assign names to background, incidental, or unnamed figures, and do not introduce a name as an appositive unless the scene has already revealed it first. If no such reveal occurred, or no appropriate unused approved name exists, keep the character or place unnamed or use a role/description.`;
+    return ` Name pool use is mandatory and obeys fogOfWar(). Already revealed names from chat, character card, lore, or tracker may continue unchanged. Any newly revealed proper name in this response must come only from the approved generated name pool in ACTIVE_BRANCH_FACTS. A new name may appear only after the scene has explicitly revealed that specific person, entity, or place through speech, readable text, self-introduction, direct in-world reference, signage, documents, or clear recognition. Once revealed, use one unused approved person/entity name from the matching gender/presentation bucket for that already-identified person/entity, or one unused approved location/place name for that already-identified place. Female/girl/woman/she-her NPCs must use the female list only; male/boy/man/he-him NPCs must use the male list only. If gender/presentation is unknown, choose without contradicting established or immediately narrated pronouns. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. Do not assign names to background, incidental, or unnamed figures, and do not introduce a name as an appositive unless the scene has already revealed it first. If no such reveal occurred, or no appropriate unused approved name exists, keep the character or place unnamed or use a role/description.`;
 }
 
 function namePoolText(pool = {}) {
-    return `male: ${list(pool.male)}; female: ${list(pool.female)}; location: ${list(pool.location)}`;
+    return `Male: ${list(pool.male)}; Female: ${list(pool.female)}; Location: ${list(pool.location)}`;
 }
 
 function userImpairmentGuide(impairment, summaryText) {
