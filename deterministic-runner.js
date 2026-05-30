@@ -700,6 +700,8 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         let slowBondEvidence = state.slowBondEvidence;
         let proactivityMemory = beginProactivityMemoryTurn(state.proactivityMemory);
         let initMetadata = null;
+        let currentUserHistory = state.userHistory;
+        const semInitFlags = normalizeSemanticInitPresetFlags(sem?.initPreset);
 
         audit.push(`3.3 getCurrentRelationalState=${compact(state)}`);
         audit.push(`3.3a rapportTimer=${compact({
@@ -715,6 +717,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             const init = resolveDeterministicInitPreset(npc, state, sem, audit, `3.3 ${npc}.initPreset`);
             initMetadata = init;
             currentDisposition = init.disposition;
+            currentUserHistory = init.userHistory;
             audit.push(`3.3d initPreset.userHistory=${compact(init.userHistory)}`);
             audit.push(`3.3e initPreset.flags=${compact(init.flags)}`);
             audit.push(`3.3f initPreset.fearImmunity=${init.flags.fearImmunity ? 'Y' : 'N'}`);
@@ -724,6 +727,8 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             audit.push(`3.3d currentDisposition=${formatDisposition(currentDisposition)}`);
         }
 
+        currentUserHistory = normalizeNonHumanFearPrimedHistory(currentUserHistory, currentDisposition, semInitFlags);
+        audit.push(`3.3g nonHumanFearPrimed=${currentUserHistory.nonHumanFearPrimed === 'Y' ? 'Y' : 'N'}`);
         audit.push(`3.3k currentRapport=${currentRapport}`);
 
         const outcomeKey = String(resolutionPacket.Outcome || 'no_roll');
@@ -751,7 +756,20 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             dominantLock,
             pressureMode,
         });
-        const target = hostilePressureResult?.target || boundaryPressureResult?.target || routedTarget;
+        let target = hostilePressureResult?.target || boundaryPressureResult?.target || routedTarget;
+        const nonHumanFearRoute = resolveNonHumanPrimedFearRoute({
+            userHistory: currentUserHistory,
+            currentDisposition,
+            target,
+            relation,
+            resolutionPacket,
+            relationshipContext,
+            boundaryPressureResult,
+            hostilePressureResult,
+        });
+        if (nonHumanFearRoute.triggered) {
+            target = nonHumanFearRoute.target;
+        }
         const rapport = updateRapport(currentRapport, target, rapportEligible, hostilePressureResult ? 'hostilePressure' : 'normal');
         const rapportConsumedCooldown = rapportEligible && consumesRapportCooldown(target, hostilePressureResult ? 'hostilePressure' : 'normal');
         currentRapport = rapport.currentRapport;
@@ -788,6 +806,9 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
                 deltas: hostilePressureResult.deltas,
             })}`);
         }
+        if (nonHumanFearRoute.triggered) {
+            audit.push(`3.4c.2 nonHumanPrimedFear=${compact(nonHumanFearRoute)}`);
+        }
         audit.push(`3.4d updateRapport=${compact(rapport)}`);
         audit.push(`3.4e rapportCooldown=${compact({
             consumed: yn(rapportConsumedCooldown),
@@ -796,7 +817,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             globalActiveMs,
         })}`);
 
-        const deltas = hostilePressureResult?.deltas || boundaryPressureResult?.deltas || deriveDirection(target, currentDisposition, currentRapport, auditInteraction, resolutionPacket, {
+        let deltas = hostilePressureResult?.deltas || boundaryPressureResult?.deltas || deriveDirection(target, currentDisposition, currentRapport, auditInteraction, resolutionPacket, {
             allowNoChangeEarlyBond: target === 'No Change'
                 && (relation.isDirect || relation.isBenefited)
                 && !relation.isOpp
@@ -804,6 +825,9 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
                 && !bool(relationshipContext.explicitIntimidationOrCoercion)
                 && slowBondBlockersNow.length === 0,
         });
+        if (nonHumanFearRoute.triggered) {
+            deltas = applyNonHumanPrimedFearDeltas(deltas, currentDisposition);
+        }
         const updatedDisposition = updateDisposition(currentDisposition, deltas);
         currentDisposition = updatedDisposition;
         if (hostilePressureResult?.dominatedFearBreak && currentDisposition.F >= 4 && currentDisposition.H >= 3) {
@@ -823,12 +847,20 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         if (slowBondEligible === 'Y') {
             currentDisposition = { ...currentDisposition, B: 4 };
         }
+        currentUserHistory = normalizeNonHumanFearPrimedHistory(currentUserHistory, currentDisposition, semInitFlags);
+        const nonHumanFearState = resolveNonHumanFearHandoffState({
+            userHistory: currentUserHistory,
+            currentDisposition,
+            semInitFlags,
+            escalated: nonHumanFearRoute.triggered,
+        });
         audit.push(`3.5g slowBondEvidence=${compact(slowBondEvidence)}`);
         audit.push(`3.5h slowBondEvidenceChanged=${compact(slowBondMerge.changed)}`);
         audit.push(`3.5i slowBondEligible=${slowBondEligible}`);
         if (slowBondEligible === 'Y') {
             audit.push(`3.5j slowBondPromotion=B4`);
         }
+        audit.push(`3.5m nonHumanFearState=${nonHumanFearState}`);
         proactivityMemory = resetRomanceMemoryOnB4Reentry(proactivityMemory, state.currentDisposition, currentDisposition);
         const memoryOutcome = resolveProactivityMemoryPending(proactivityMemory, context, {
             npc,
@@ -903,6 +935,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             HostilePressure: hostilePressure,
             HostileLandedPressure: hostileLandedPressure,
             BoundaryPressure: boundaryPressureResult ? 'Y' : 'N',
+            NonHumanFear: nonHumanFearState,
             DominantLock: dominantLock,
             PressureMode: pressureMode,
             Condition: state.condition || 'healthy',
@@ -924,7 +957,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             currentRapport,
             lastRapportGainActiveMs,
             establishedRelationship,
-            userHistory: initMetadata?.userHistory || state.userHistory,
+            userHistory: currentUserHistory,
             raceProfile: initMetadata?.raceProfile || state.raceProfile,
             slowBondEvidence,
             currentCoreStats: coreStats,
@@ -4489,7 +4522,6 @@ function getCardFields(context) {
 
 function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
     const flags = normalizeSemanticInitPresetFlags(sem?.initPreset);
-    const userHistory = initUserHistoryFromFlags(flags, state?.userHistory);
     const raceProfile = normalizeNpcRaceProfile(state?.raceProfile);
 
     let base = { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } };
@@ -4500,8 +4532,9 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
     } else if (flags.priorUserGoodRep) {
         base = { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 1 } };
     } else if (flags.userNonHuman && !flags.fearImmunity) {
-        base = { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
+        base = { label: 'userNonHuman', disposition: { B: 1, F: 2, H: 1 } };
     }
+    const userHistory = initUserHistoryForPreset(flags, state?.userHistory, base.label);
 
     audit.push(`${label}.semantic=${compact({
         npc,
@@ -4520,6 +4553,14 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
         userHistory,
         raceProfile,
     };
+}
+
+function initUserHistoryForPreset(flags, stored, initLabel) {
+    const userHistory = initUserHistoryFromFlags(flags, stored);
+    if (initLabel === 'userNonHuman') {
+        return { ...userHistory, nonHumanFearPrimed: 'Y' };
+    }
+    return clearNonHumanFearPrimed(userHistory);
 }
 
 function normalizeSemanticInitPresetFlags(value) {
@@ -4545,7 +4586,72 @@ function normalizeInitUserHistory(value) {
     const source = value && typeof value === 'object' ? value : {};
     const knowsUser = source.knowsUser === 'Y' ? 'Y' : 'N';
     const standing = ['positive', 'neutral', 'negative'].includes(source.standing) ? source.standing : 'neutral';
-    return { knowsUser, standing };
+    const history = { knowsUser, standing };
+    if (source.nonHumanFearPrimed === 'Y') history.nonHumanFearPrimed = 'Y';
+    return history;
+}
+
+function clearNonHumanFearPrimed(userHistory) {
+    const history = normalizeInitUserHistory(userHistory);
+    delete history.nonHumanFearPrimed;
+    return history;
+}
+
+function normalizeNonHumanFearPrimedHistory(userHistory, currentDisposition, semInitFlags = {}) {
+    const history = normalizeInitUserHistory(userHistory);
+    if (semInitFlags?.fearImmunity || Number(currentDisposition?.B || 0) >= 3) {
+        delete history.nonHumanFearPrimed;
+    }
+    return history;
+}
+
+function resolveNonHumanFearHandoffState({ userHistory, currentDisposition, semInitFlags, escalated }) {
+    if (escalated) return 'ESCALATED';
+    if (userHistory?.nonHumanFearPrimed === 'Y' && Number(currentDisposition?.B || 0) < 3) return 'PRIMED';
+    if (semInitFlags?.userNonHuman && semInitFlags?.fearImmunity) return 'IMMUNE';
+    return 'NONE';
+}
+
+function resolveNonHumanPrimedFearRoute({ userHistory, currentDisposition, target, relation, resolutionPacket, relationshipContext, boundaryPressureResult, hostilePressureResult }) {
+    if (userHistory?.nonHumanFearPrimed !== 'Y') return { triggered: false, target };
+    if (Number(currentDisposition?.B || 0) >= 3) return { triggered: false, target };
+    if (Number(currentDisposition?.F || 0) >= 3) return { triggered: false, target };
+    if (!relation?.isDirect && !relation?.isOpp && !relation?.isHarmed) return { triggered: false, target };
+
+    const negativeTarget = ['Fear', 'FearHostility', 'Hostility'].includes(target);
+    const threateningSignal = negativeTarget
+        || Boolean(boundaryPressureResult)
+        || Boolean(hostilePressureResult)
+        || resolutionPacket?.classifyHostilePhysicalIntent === 'Y'
+        || resolutionPacket?.classifyPhysicalBoundaryPressure === 'Y'
+        || resolutionPacket?.boundaryViolationExplicit === 'Y'
+        || bool(relationshipContext?.explicitIntimidationOrCoercion)
+        || relation.isHarmed;
+    if (!threateningSignal) return { triggered: false, target };
+
+    const escalatedTarget = target === 'Hostility' || target === 'FearHostility'
+        ? 'FearHostility'
+        : 'Fear';
+    return {
+        triggered: true,
+        target: escalatedTarget,
+        fromTarget: target,
+        reason: 'visibly inhuman user + direct/material threatening or negative action before B3',
+    };
+}
+
+function applyNonHumanPrimedFearDeltas(deltas, currentDisposition) {
+    const next = { ...(deltas || {}) };
+    const projectedFear = clamp(Number(currentDisposition?.F || 1) + Number(next.f || 0), 1, 4);
+    const neededFear = Math.max(0, 3 - projectedFear);
+    if (neededFear > 0) {
+        next.f = Number(next.f || 0) + neededFear;
+    }
+    if (Number(next.f || 0) > 0) {
+        next.b = Math.min(Number(next.b || 0), -1);
+    }
+    next.nonHumanPrimedFear = 'Y';
+    return next;
 }
 
 function buildUserReferenceNames(context, fields = {}) {

@@ -4336,7 +4336,7 @@ const tests = [
     },
   },
   {
-    name: '09c semantic userNonHuman initializes fear unless fearImmune',
+    name: '09c semantic userNonHuman initializes primed caution unless fearImmune',
     run() {
       const tracker = {
         Villager: trackerEntry({ currentDisposition: null }),
@@ -4359,10 +4359,137 @@ const tests = [
           ],
         }),
       });
-      assert.deepEqual(report.trackerUpdate.npcs.Villager.currentDisposition, { B: 1, F: 3, H: 2 });
+      assert.deepEqual(report.trackerUpdate.npcs.Villager.currentDisposition, { B: 2, F: 2, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.Villager.userHistory.nonHumanFearPrimed, 'Y');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs.find(npc => npc.NPC === 'Villager')?.NonHumanFear, 'PRIMED');
       assert.deepEqual(report.trackerUpdate.npcs.DemonPeer.currentDisposition, { B: 2, F: 2, H: 2 });
+      assert.equal(report.trackerUpdate.npcs.DemonPeer.userHistory.nonHumanFearPrimed, undefined);
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs.find(npc => npc.NPC === 'DemonPeer')?.NonHumanFear, 'IMMUNE');
       assert.equal(auditIncludes(report, 'initPreset=userNonHuman'), true);
       assert.equal(auditIncludes(report, 'fearImmunity=Y'), true);
+    },
+  },
+  {
+    name: '09c.1 nonhuman primed fear escalates on direct threat before B3',
+    run() {
+      const tracker = {
+        Villager: trackerEntry({
+          currentDisposition: { B: 1, F: 2, H: 1 },
+          userHistory: { knowsUser: 'N', standing: 'neutral', nonHumanFearPrimed: 'Y' },
+        }),
+      };
+      const report = runCase({
+        userText: 'I bare my claws and threaten the villager.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Intimidate',
+            identifyChallenge: 'threaten Villager',
+            explicitMeans: 'bare claws and threaten Villager',
+            identifyTargets: { ActionTargets: ['Villager'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Villager', { explicitIntimidationOrCoercion: true })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Villager.currentDisposition, { B: 1, F: 3, H: 1 });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Fear');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].NonHumanFear, 'ESCALATED');
+      assert.equal(auditIncludes(report, 'nonHumanPrimedFear'), true);
+    },
+  },
+  {
+    name: '09c.2 nonhuman primed fear turns hostility into fear-hostility',
+    run() {
+      const tracker = {
+        Villager: trackerEntry({
+          currentDisposition: { B: 1, F: 2, H: 1 },
+          userHistory: { knowsUser: 'N', standing: 'neutral', nonHumanFearPrimed: 'Y' },
+        }),
+      };
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'harm';
+      const report = runCase({
+        userText: 'I shove the villager back from the door.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'ForceEntry',
+            identifyChallenge: 'shove Villager from the door',
+            explicitMeans: 'shove Villager',
+            identifyTargets: { ActionTargets: ['Villager'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: true,
+            mapStats: { USER: 'PHY', OPP: 'PHY' },
+            classifyPhysicalBoundaryPressure: true,
+          },
+          relationshipEngine: [relationship('Villager', { stakeChangeByOutcome: stakes })],
+        }),
+        dice: [15, 8, 10, 10, 10, 10],
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Villager.currentDisposition, { B: 1, F: 3, H: 2 });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'FearHostility');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].NonHumanFear, 'ESCALATED');
+    },
+  },
+  {
+    name: '09c.3 B3 clears nonhuman primed fear and uses normal fear rules',
+    run() {
+      const tracker = {
+        Villager: trackerEntry({
+          currentDisposition: { B: 3, F: 1, H: 1 },
+          userHistory: { knowsUser: 'N', standing: 'neutral', nonHumanFearPrimed: 'Y' },
+        }),
+      };
+      const report = runCase({
+        userText: 'I threaten the villager with a quiet warning.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Intimidate',
+            identifyChallenge: 'threaten Villager',
+            explicitMeans: 'quiet warning',
+            identifyTargets: { ActionTargets: ['Villager'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Villager', { explicitIntimidationOrCoercion: true })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Villager.currentDisposition, { B: 3, F: 1, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.Villager.userHistory.nonHumanFearPrimed, undefined);
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].NonHumanFear, 'NONE');
+      assert.equal(auditIncludes(report, 'nonHumanPrimedFear'), false);
+    },
+  },
+  {
+    name: '09c.4 fearImmune suppresses nonhuman primed escalation',
+    run() {
+      const tracker = {
+        DemonPeer: trackerEntry({
+          currentDisposition: { B: 1, F: 2, H: 1 },
+          userHistory: { knowsUser: 'N', standing: 'neutral', nonHumanFearPrimed: 'Y' },
+        }),
+      };
+      const report = runCase({
+        userText: 'I threaten DemonPeer with a quiet warning.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Intimidate',
+            identifyChallenge: 'threaten DemonPeer',
+            explicitMeans: 'quiet warning',
+            identifyTargets: { ActionTargets: ['DemonPeer'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('DemonPeer', {
+            initPreset: { userNonHuman: true, fearImmunity: true },
+            explicitIntimidationOrCoercion: true,
+          })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.DemonPeer.currentDisposition, { B: 1, F: 2, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.DemonPeer.userHistory.nonHumanFearPrimed, undefined);
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].NonHumanFear, 'IMMUNE');
+      assert.equal(auditIncludes(report, 'nonHumanPrimedFear'), false);
     },
   },
   {
