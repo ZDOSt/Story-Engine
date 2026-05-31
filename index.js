@@ -32,6 +32,7 @@ const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
 const TRACKER_PROFILE_CURRENT = '<Current semantic profile>';
 const PROSE_GUARD_PROFILE_CURRENT = '<Current semantic profile>';
+const PROGRESSION_PROFILE_CURRENT = '<Current semantic profile>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 const TRACKER_DISPLAY_VERSION = 1;
@@ -49,6 +50,14 @@ const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
 const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
 const PLAYER_SETUP_STYLE_ID = 'structured_preflight_player_setup_styles';
+const PROGRESSION_KEY = 'structuredPreflightProgression';
+const PROGRESSION_VERSION = 1;
+const PROGRESSION_CARD_ID = 'structured_preflight_progression_card';
+const PROGRESSION_STYLE_ID = 'structured_preflight_progression_styles';
+const PROGRESSION_REQUIRED_ACCOMPLISHMENTS = 3;
+const PROGRESSION_REQUIRED_ABILITIES = 2;
+const PROGRESSION_MAX_STAT = 10;
+const PROGRESSION_ABILITY_OPTIONS = 3;
 const PLAYER_STATS = Object.freeze(['PHY', 'MND', 'CHA']);
 const PLAYER_RACE_CHOICES = Object.freeze([
     'Aasimar',
@@ -365,6 +374,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     trackerConnectionProfile: TRACKER_PROFILE_CURRENT,
     postNarrationProseGuardEnabled: true,
     proseGuardConnectionProfile: PROSE_GUARD_PROFILE_CURRENT,
+    characterProgressionEnabled: true,
+    progressionConnectionProfile: PROGRESSION_PROFILE_CURRENT,
     writingStyleEnabled: true,
     writingStylePrompt: DEFAULT_WRITING_STYLE_PROMPT,
     writingStylePlacement: 'before_prompt',
@@ -431,6 +442,7 @@ const state = {
     progressToasts: new Set(),
     pendingRunCleanupTimer: null,
     playerSetupBusy: false,
+    progressionBusy: false,
     proseGuardHideNextMessage: false,
     proseGuardGenerationType: null,
     proseGuardChatObserver: null,
@@ -664,6 +676,24 @@ async function withProseGuardGenerationSettings(callback) {
     return await withSemanticGenerationSettings(callback);
 }
 
+async function withProgressionGenerationSettings(callback) {
+    const settings = getSettings();
+    const progressionProfile = String(settings.progressionConnectionProfile || PROGRESSION_PROFILE_CURRENT).trim();
+    if (progressionProfile && progressionProfile !== PROGRESSION_PROFILE_CURRENT) {
+        const profile = getConnectionProfileByName(progressionProfile);
+        if (!profile) {
+            throw new Error(`Progression connection profile "${progressionProfile}" was not found.`);
+        }
+        console.info(`[${EXTENSION_NAME}] using direct Progression connection profile request: ${profile.name}`);
+        return await withConnectionProfileSecret(profile, () => callback({
+            disableSemanticThinking: settings.disableSemanticThinking !== false,
+            semanticProfileId: profile.id,
+            semanticProfileName: profile.name,
+        }));
+    }
+    return await withSemanticGenerationSettings(callback);
+}
+
 function setSelectOptions(select, values, placeholder, selectedValue, missingLabel = 'Missing') {
     if (!select) return;
     select.innerHTML = '';
@@ -777,6 +807,8 @@ function refreshSettingsControls() {
     const trackerProfileSelect = document.getElementById('structured_preflight_tracker_profile');
     const proseGuardEnabledCheckbox = document.getElementById('structured_preflight_prose_guard_enabled');
     const proseGuardProfileSelect = document.getElementById('structured_preflight_prose_guard_profile');
+    const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
+    const progressionProfileSelect = document.getElementById('structured_preflight_progression_profile');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
     const disableThinkingCheckbox = document.getElementById('structured_preflight_disable_semantic_thinking');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
@@ -787,6 +819,7 @@ function refreshSettingsControls() {
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (proseGuardEnabledCheckbox) proseGuardEnabledCheckbox.checked = settings.postNarrationProseGuardEnabled !== false;
+    if (progressionEnabledCheckbox) progressionEnabledCheckbox.checked = settings.characterProgressionEnabled !== false;
     if (disableThinkingCheckbox) disableThinkingCheckbox.checked = settings.disableSemanticThinking !== false;
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
     if (writingStylePrompt && writingStylePrompt.value !== settings.writingStylePrompt) {
@@ -821,10 +854,18 @@ function refreshSettingsControls() {
         settings.proseGuardConnectionProfile || PROSE_GUARD_PROFILE_CURRENT,
         'Profile not found',
     );
+    setSelectOptions(
+        progressionProfileSelect,
+        [PROGRESSION_PROFILE_CURRENT, ...getConnectionProfileNames()],
+        PROGRESSION_PROFILE_CURRENT,
+        settings.progressionConnectionProfile || PROGRESSION_PROFILE_CURRENT,
+        'Profile not found',
+    );
 
     if (profileSelect) profileSelect.disabled = !enabled;
     if (trackerProfileSelect) trackerProfileSelect.disabled = settings.postNarrationTrackerEnabled === false;
     if (proseGuardProfileSelect) proseGuardProfileSelect.disabled = settings.postNarrationProseGuardEnabled === false;
+    if (progressionProfileSelect) progressionProfileSelect.disabled = settings.characterProgressionEnabled === false;
     if (writingStylePrompt) writingStylePrompt.disabled = settings.writingStyleEnabled === false;
     if (writingStyleDrawer) {
         writingStyleDrawer.hidden = settings.writingStyleEnabled === false;
@@ -908,6 +949,15 @@ function renderSettingsPanel() {
                     <select id="structured_preflight_prose_guard_profile" class="text_pole flex1"></select>
                 </div>
                 <small>Runs after narration and before tracker update. It edits only prose-rule violations and preserves scene outcomes.</small>
+                <label class="checkbox_label flexNoGap">
+                    <input id="structured_preflight_progression_enabled" type="checkbox">
+                    <span>Enable Character Progression</span>
+                </label>
+                <div class="flex-container alignItemsBaseline">
+                    <label for="structured_preflight_progression_profile">Progression ability profile</label>
+                    <select id="structured_preflight_progression_profile" class="text_pole flex1"></select>
+                </div>
+                <small>Counts one critical accomplishment per turn. Ability options use this profile and default to the semantic profile.</small>
                 <hr>
                 <div class="flex-container alignItemsBaseline">
                     <label for="structured_preflight_name_style">Name style</label>
@@ -1001,6 +1051,16 @@ function renderSettingsPanel() {
     document.getElementById('structured_preflight_prose_guard_profile')?.addEventListener('change', event => {
         const selected = String(event.target?.value || PROSE_GUARD_PROFILE_CURRENT);
         settings.proseGuardConnectionProfile = selected || PROSE_GUARD_PROFILE_CURRENT;
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_progression_enabled')?.addEventListener('change', event => {
+        settings.characterProgressionEnabled = Boolean(event.target?.checked);
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_progression_profile')?.addEventListener('change', event => {
+        const selected = String(event.target?.value || PROGRESSION_PROFILE_CURRENT);
+        settings.progressionConnectionProfile = selected || PROGRESSION_PROFILE_CURRENT;
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_name_style')?.addEventListener('change', event => {
@@ -1312,6 +1372,23 @@ function getPlayerRoot(context = getContext()) {
         root.creator.stage = 'offer';
     }
     return root;
+}
+
+function getProgressionRoot(context = getContext()) {
+    if (!context?.chatMetadata) return null;
+    context.chatMetadata[PROGRESSION_KEY] = context.chatMetadata[PROGRESSION_KEY] || {};
+    const root = context.chatMetadata[PROGRESSION_KEY];
+    root.version = PROGRESSION_VERSION;
+    root.accomplishments = Array.isArray(root.accomplishments) ? root.accomplishments : [];
+    root.spentAdvancements = Math.max(0, Math.floor(Number(root.spentAdvancements || 0)));
+    root.pendingAdvancement = root.pendingAdvancement && typeof root.pendingAdvancement === 'object' ? root.pendingAdvancement : null;
+    root.ui = root.ui && typeof root.ui === 'object' ? root.ui : {};
+    return root;
+}
+
+function progressionPending(context = getContext()) {
+    const root = getProgressionRoot(context);
+    return Boolean(getSettings().characterProgressionEnabled !== false && root?.pendingAdvancement);
 }
 
 function getCharacterCardFieldsSafe(context = getContext()) {
@@ -1736,6 +1813,174 @@ async function writePlayerSheetToPersona(sheetText, context = getContext()) {
     saveExtensionSettings();
     if (typeof context?.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
     return { previous: current, next: nextDescription };
+}
+
+function findPersonaSection(text, matcher) {
+    const lines = String(text ?? '').split(/\r?\n/);
+    let start = -1;
+    let end = lines.length;
+    for (let index = 0; index < lines.length; index += 1) {
+        if (!isPersonaSectionHeading(lines[index])) continue;
+        if (start >= 0) {
+            end = index;
+            break;
+        }
+        if (matcher(lines[index])) {
+            start = index;
+        }
+    }
+    return { lines, start, end };
+}
+
+function normalizedPersonaHeading(line) {
+    return stripMarkdownFormatting(line)
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/[:=]+$/g, '')
+        .replace(/[^\p{L}\p{N}\s/&-]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function isStatsSectionHeading(line) {
+    return normalizedPersonaHeading(line) === 'stats';
+}
+
+function isAbilitiesSectionHeading(line) {
+    const heading = normalizedPersonaHeading(line);
+    return /\babilities\b/.test(heading) || /\bskills\b/.test(heading);
+}
+
+function parseAbilityStartLine(line) {
+    const text = String(line ?? '').trim();
+    if (!text) return null;
+    const heading = /^#{2,6}\s+(.+?)\s*$/.exec(text);
+    if (heading && !isPersonaSectionHeading(text)) {
+        return { name: cleanAbilityName(heading[1]) };
+    }
+    const bold = /^(?:[-*+]\s*)?\*\*(.+?)\*\*\s*(?:[:\u2014-]\s*)?/.exec(text);
+    if (bold) return { name: cleanAbilityName(bold[1]) };
+    const plain = /^(?:[-*+]\s*)?([A-Z][\p{L}\p{N}' -]{1,60})\s*(?::|\u2014| - )\s+/u.exec(text);
+    if (plain) return { name: cleanAbilityName(plain[1]) };
+    return null;
+}
+
+function cleanAbilityName(value) {
+    return String(value ?? '')
+        .replace(/[`*_~]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/[:\u2014-]+$/g, '')
+        .trim()
+        .slice(0, 80);
+}
+
+function isEmptyAbilityPlaceholder(value) {
+    const normalized = stripMarkdownFormatting(value)
+        .replace(/^[-*+]\s*/gm, '')
+        .replace(/[.:;]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    return /^(?:none|n\/a|na|not specified|no ability|no abilities|no explicit ability|no explicit abilities)$/i.test(normalized);
+}
+
+function extractPersonaAbilities(personaText) {
+    const section = findPersonaSection(personaText, isAbilitiesSectionHeading);
+    if (section.start < 0) return [];
+    const bodyText = section.lines.slice(section.start + 1, section.end).join('\n').trim();
+    if (isEmptyAbilityPlaceholder(bodyText)) return [];
+    const entries = [];
+    for (let index = section.start + 1; index < section.end; index += 1) {
+        const start = parseAbilityStartLine(section.lines[index]);
+        if (!start) continue;
+        entries.push({
+            name: start.name || `Ability ${entries.length + 1}`,
+            start,
+            lineStart: index,
+            lineEnd: section.end,
+        });
+    }
+    if (!entries.length) {
+        const first = findFirstNonBlankLine(section.lines, section.start + 1, section.end);
+        const last = findLastNonBlankLine(section.lines, section.start + 1, section.end);
+        if (first >= 0 && last >= first) {
+            return [{
+                name: 'Existing Ability',
+                text: section.lines.slice(first, last + 1).join('\n').trim(),
+                lineStart: first,
+                lineEnd: last + 1,
+            }];
+        }
+        return [];
+    }
+    for (let index = 0; index < entries.length; index += 1) {
+        let lineEnd = index + 1 < entries.length ? entries[index + 1].lineStart : section.end;
+        while (lineEnd > entries[index].lineStart + 1 && !String(section.lines[lineEnd - 1] || '').trim()) {
+            lineEnd -= 1;
+        }
+        entries[index].lineEnd = lineEnd;
+        entries[index].text = section.lines.slice(entries[index].lineStart, lineEnd).join('\n').trim();
+    }
+    return entries;
+}
+
+function findFirstNonBlankLine(lines, start, end) {
+    for (let index = start; index < end; index += 1) {
+        if (String(lines[index] || '').trim()) return index;
+    }
+    return -1;
+}
+
+function findLastNonBlankLine(lines, start, end) {
+    for (let index = end - 1; index >= start; index -= 1) {
+        if (String(lines[index] || '').trim()) return index;
+    }
+    return -1;
+}
+
+function formatProgressionAbility(option) {
+    const name = cleanAbilityName(option?.name);
+    const description = String(option?.description || '').replace(/\s+/g, ' ').trim();
+    if (!name || !description) throw new Error('Generated ability option is incomplete.');
+    return `**${name}** - ${description}`;
+}
+
+function replaceAbilityInPersona(personaText, abilityIndex, option) {
+    const section = findPersonaSection(personaText, isAbilitiesSectionHeading);
+    const entries = extractPersonaAbilities(personaText);
+    const index = Math.max(0, Math.floor(Number(abilityIndex)));
+    const entry = entries[index];
+    if (section.start < 0 || !entry) {
+        throw new Error('Could not find the selected ability in the persona sheet.');
+    }
+    const lines = [...section.lines];
+    lines.splice(entry.lineStart, Math.max(1, entry.lineEnd - entry.lineStart), formatProgressionAbility(option));
+    return lines.join('\n').trim();
+}
+
+function updatePersonaStatText(personaText, stat, value) {
+    const statName = String(stat || '').toUpperCase();
+    if (!PLAYER_STATS.includes(statName)) throw new Error('Choose a valid stat.');
+    const nextValue = clampNumber(value, 1, PROGRESSION_MAX_STAT, 1);
+    const section = findPersonaSection(personaText, isStatsSectionHeading);
+    const lines = [...section.lines];
+    const start = section.start >= 0 ? section.start + 1 : 0;
+    const end = section.start >= 0 ? section.end : lines.length;
+    const pattern = new RegExp(`^(\\s*(?:[-*+]\\s*)?(?:\\*\\*)?${statName}(?:\\*\\*)?\\s*(?::|=|-)\\s*)(10|[1-9])(\\b.*)$`, 'i');
+    for (let index = start; index < end; index += 1) {
+        const match = pattern.exec(lines[index]);
+        if (!match) continue;
+        lines[index] = `${match[1]}${nextValue}${match[3] || ''}`;
+        return lines.join('\n').trim();
+    }
+    throw new Error(`Could not find ${statName} in the persona # STATS section.`);
+}
+
+function syncPlayerRootAfterPersonaEdit(context, nextText, stats = null) {
+    const playerRoot = getPlayerRoot(context);
+    if (!playerRoot) return;
+    if (playerRoot.sheet) playerRoot.sheet.text = nextText;
+    if (isValidCoreStats(stats)) playerRoot.stats = normalizeCoreStats(stats);
 }
 
 function formatStatsTable(stats) {
@@ -3082,6 +3327,60 @@ function ensurePlayerSetupStyles() {
     document.head.append(style);
 }
 
+function ensureProgressionStyles() {
+    if (document.getElementById(PROGRESSION_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = PROGRESSION_STYLE_ID;
+    style.textContent = `
+        #${PROGRESSION_CARD_ID} {
+            margin: 0.75rem auto;
+            padding: 0.85rem;
+            width: min(760px, calc(100% - 1.2rem));
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 34%, transparent);
+            box-shadow: 0 10px 26px rgba(0,0,0,0.22);
+            line-height: 1.45;
+        }
+        #${PROGRESSION_CARD_ID} .spe-progression-title {
+            font-weight: 700;
+            font-size: 1rem;
+            margin-bottom: 0.35rem;
+        }
+        #${PROGRESSION_CARD_ID} .spe-progression-muted {
+            opacity: 0.78;
+            font-size: 0.9rem;
+        }
+        #${PROGRESSION_CARD_ID} .spe-progression-row,
+        #${PROGRESSION_CARD_ID} .spe-progression-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            align-items: center;
+            margin-top: 0.55rem;
+        }
+        #${PROGRESSION_CARD_ID} [hidden] {
+            display: none !important;
+        }
+        #${PROGRESSION_CARD_ID} .spe-progression-option {
+            width: 100%;
+            padding: 0.55rem;
+            border-left: 2px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
+            border-radius: 6px;
+        }
+        #${PROGRESSION_CARD_ID} select {
+            width: 100%;
+        }
+        #${PROGRESSION_CARD_ID} .spe-progression-error {
+            margin-top: 0.55rem;
+            color: var(--SmartThemeQuoteColor, #ffb4b4);
+            font-weight: 600;
+        }
+    `;
+    document.head.append(style);
+}
+
 function renderPlayerSetupCard(context = getContext()) {
     if (typeof document === 'undefined') return;
     const existing = document.getElementById(PLAYER_SETUP_CARD_ID);
@@ -3102,6 +3401,26 @@ function renderPlayerSetupCard(context = getContext()) {
         chat.append(card);
     }
     bindPlayerSetupCardEvents(card, context);
+}
+
+function renderProgressionCard(context = getContext()) {
+    if (typeof document === 'undefined') return;
+    const existing = document.getElementById(PROGRESSION_CARD_ID);
+    if (getSettings().characterProgressionEnabled === false || !progressionPending(context)) {
+        existing?.remove();
+        return;
+    }
+
+    ensureProgressionStyles();
+    const chat = document.getElementById('chat') || document.querySelector('#chat_container') || document.body;
+    if (!chat) return;
+
+    const root = getProgressionRoot(context);
+    const card = existing || document.createElement('div');
+    card.id = PROGRESSION_CARD_ID;
+    card.innerHTML = buildProgressionCardHtml(root, context);
+    if (!existing) chat.append(card);
+    bindProgressionCardEvents(card, context);
 }
 
 function buildPlayerSetupCardHtml(root) {
@@ -3140,6 +3459,71 @@ function buildPlayerOfferHtml() {
             <button class="menu_button" data-spe-player-action="skip-chat">Disable For This Chat</button>
         </div>
         <div class="spe-player-muted">Create rolls a new character. Use Existing Persona only asks the model which stat should be highest; the extension still rolls the actual values.</div>
+    `;
+}
+
+function buildProgressionCardHtml(root, context = getContext()) {
+    const pending = root?.pendingAdvancement || {};
+    const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || { PHY: 1, MND: 1, CHA: 1 };
+    const abilities = extractPersonaAbilities(getPersonaText(context));
+    const abilityCount = abilities.length;
+    const canRaiseStat = PLAYER_STATS.some(stat => Number(stats?.[stat] || 0) < PROGRESSION_MAX_STAT);
+    const canSwapAbility = abilityCount >= 1;
+    const choice = pending.choice || 'choose';
+    const error = root?.ui?.error ? `<div class="spe-progression-error">${escapeHtml(root.ui.error)}</div>` : '';
+    const busy = state.progressionBusy ? '<div class="spe-progression-muted">Working...</div>' : '';
+    let body = '';
+
+    if (choice === 'stat') {
+        body = `
+            <div class="spe-progression-muted">Choose one stat to raise. Stats cannot go above ${PROGRESSION_MAX_STAT}.</div>
+            <div class="spe-progression-actions">
+                ${PLAYER_STATS.map(stat => {
+                    const value = Number(stats?.[stat] || 1);
+                    const disabled = value >= PROGRESSION_MAX_STAT ? 'disabled' : '';
+                    return `<button class="menu_button" data-spe-progression-action="apply-stat" data-stat="${stat}" ${disabled}>${stat} ${value} -> ${Math.min(PROGRESSION_MAX_STAT, value + 1)}</button>`;
+                }).join('')}
+                <button class="menu_button" data-spe-progression-action="back">Back</button>
+            </div>`;
+    } else if (choice === 'swapAbility') {
+        const options = Array.isArray(pending.abilityOptions) ? pending.abilityOptions : [];
+        const swapSelect = `<div class="spe-progression-row">
+                <label class="flex1">Ability to replace
+                    <select id="spe_progression_swap_ability" class="text_pole" ${options.length ? 'disabled' : ''}>
+                        ${abilities.map((ability, index) => `<option value="${index}" ${Number(pending.swapAbilityIndex) === index ? 'selected' : ''}>${escapeHtml(ability.name || `Ability ${index + 1}`)}</option>`).join('')}
+                    </select>
+                </label>
+            </div>`;
+        body = `
+            <div class="spe-progression-muted">Choose the existing ability to replace, then choose one generated replacement. Ability options cannot be rerolled.</div>
+            ${swapSelect}
+            <div class="spe-progression-actions">
+                ${options.length ? '' : '<button class="menu_button" data-spe-progression-action="generate-abilities">Generate Ability Options</button>'}
+                ${options.length ? '' : '<button class="menu_button" data-spe-progression-action="back">Back</button>'}
+            </div>
+            ${options.map((option, index) => `
+                <div class="spe-progression-option">
+                    <b>${escapeHtml(option.name || `Option ${index + 1}`)}</b>
+                    <div>${escapeHtml(option.description || '')}</div>
+                    <div class="spe-progression-actions">
+                        <button class="menu_button" data-spe-progression-action="choose-ability" data-option-index="${index}">Choose This Ability</button>
+                    </div>
+                </div>
+            `).join('')}`;
+    } else {
+        body = `
+            <div class="spe-progression-muted">${PROGRESSION_REQUIRED_ACCOMPLISHMENTS} critical accomplishments reached. Choose how the character advances.</div>
+            <div class="spe-progression-actions">
+                ${canRaiseStat ? '<button class="menu_button" data-spe-progression-action="choose-stat">Raise Stat</button>' : ''}
+                ${canSwapAbility ? '<button class="menu_button" data-spe-progression-action="choose-swap-ability">Swap Ability</button>' : ''}
+            </div>`;
+    }
+
+    return `
+        <div class="spe-progression-title">Character Progression</div>
+        ${busy}
+        ${body}
+        ${error}
     `;
 }
 
@@ -3322,6 +3706,79 @@ function bindPlayerSetupCardEvents(card, context = getContext()) {
     };
 }
 
+function bindProgressionCardEvents(card, context = getContext()) {
+    if (!card) return;
+    const runButtonAction = async button => {
+        if (!button || state.progressionBusy) return;
+        const action = button.getAttribute('data-spe-progression-action');
+        const stat = button.getAttribute('data-stat');
+        const optionIndex = button.getAttribute('data-option-index');
+        await handleProgressionAction(action, { stat, optionIndex, card }, getContext() || context);
+    };
+    card.querySelectorAll('[data-spe-progression-action]').forEach(button => {
+        button.onclick = async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            await runButtonAction(button);
+        };
+    });
+    card.onclick = async event => {
+        const button = event.target?.closest?.('[data-spe-progression-action]');
+        if (!button || !card.contains(button)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        await runButtonAction(button);
+    };
+}
+
+async function handleProgressionAction(action, details = {}, context = getContext()) {
+    if (state.progressionBusy) return;
+    const root = getProgressionRoot(context);
+    if (!root?.pendingAdvancement) return;
+    root.ui = root.ui || {};
+    delete root.ui.error;
+
+    try {
+        if (action === 'choose-stat') {
+            root.pendingAdvancement.choice = 'stat';
+        } else if (action === 'choose-swap-ability') {
+            root.pendingAdvancement.choice = 'swapAbility';
+            root.pendingAdvancement.abilityOptions = [];
+            delete root.pendingAdvancement.generatedAt;
+        } else if (action === 'back') {
+            if (Array.isArray(root.pendingAdvancement.abilityOptions) && root.pendingAdvancement.abilityOptions.length) {
+                throw new Error('Ability options are already generated. Choose one of the presented abilities.');
+            }
+            root.pendingAdvancement.choice = 'choose';
+            root.pendingAdvancement.abilityOptions = [];
+            delete root.pendingAdvancement.generatedAt;
+            delete root.pendingAdvancement.swapAbilityIndex;
+        } else if (action === 'apply-stat') {
+            await applyProgressionStatChoice(root, details.stat, context);
+        } else if (action === 'generate-abilities') {
+            state.progressionBusy = true;
+            root.pendingAdvancement.swapAbilityIndex = getSelectedProgressionSwapAbilityIndex(context);
+            renderProgressionCard(context);
+            root.pendingAdvancement.abilityOptions = await requestProgressionAbilityOptions(root.pendingAdvancement, context);
+            root.pendingAdvancement.generatedAt = Date.now();
+        } else if (action === 'choose-ability') {
+            if (!Array.isArray(root.pendingAdvancement.abilityOptions) || !root.pendingAdvancement.abilityOptions.length) {
+                root.pendingAdvancement.swapAbilityIndex = getSelectedProgressionSwapAbilityIndex(context);
+            }
+            await applyProgressionAbilityChoice(root, Number(details.optionIndex), context);
+        }
+        await persistMetadata(context);
+    } catch (error) {
+        root.ui.error = error instanceof Error ? error.message : String(error);
+        console.error(`[${EXTENSION_NAME}] progression action failed`, error);
+        await persistMetadata(context);
+    } finally {
+        state.progressionBusy = false;
+        renderProgressionCard(context);
+        refreshSettingsControls();
+    }
+}
+
 function updatePlayerIdentityOptionalFields(card) {
     if (!card) return;
     const raceIsCustom = card.querySelector('#spe_player_race')?.value === 'custom';
@@ -3479,6 +3936,291 @@ async function approvePlayerSheet(root, context = getContext()) {
     globalThis.toastr?.success?.('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
 }
 
+async function applyProgressionStatChoice(root, stat, context = getContext()) {
+    const statName = String(stat || '').toUpperCase();
+    if (!PLAYER_STATS.includes(statName)) throw new Error('Choose a valid stat.');
+    const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
+    if (!isValidCoreStats(stats)) throw new Error('Cannot raise a stat because the active persona has no valid PHY/MND/CHA block.');
+    if (Number(stats[statName]) >= PROGRESSION_MAX_STAT) {
+        throw new Error(`${statName} is already at ${PROGRESSION_MAX_STAT}.`);
+    }
+    const nextStats = normalizeCoreStats({
+        ...stats,
+        [statName]: Number(stats[statName]) + 1,
+    });
+    const nextText = updatePersonaStatText(getPersonaText(context), statName, nextStats[statName]);
+    await writePlayerSheetToPersona(nextText, context);
+    syncPlayerRootAfterPersonaEdit(context, nextText, nextStats);
+    completeProgressionAdvancement(root, {
+        type: 'stat',
+        stat: statName,
+        value: nextStats[statName],
+    });
+}
+
+async function applyProgressionAbilityChoice(root, optionIndex, context = getContext()) {
+    const pending = root?.pendingAdvancement;
+    const options = Array.isArray(pending?.abilityOptions) ? pending.abilityOptions : [];
+    const index = Math.max(0, Math.floor(Number(optionIndex)));
+    const option = options[index];
+    if (!option) throw new Error('Choose one of the generated ability options.');
+
+    const persona = getPersonaText(context);
+    const abilities = extractPersonaAbilities(persona);
+    if (pending.choice !== 'swapAbility') {
+        throw new Error('Choose an ability progression mode first.');
+    }
+    if (!abilities.length) {
+        throw new Error('Could not find an existing ability to replace in the persona sheet.');
+    }
+    const nextText = replaceAbilityInPersona(persona, pending.swapAbilityIndex, option);
+
+    await writePlayerSheetToPersona(nextText, context);
+    syncPlayerRootAfterPersonaEdit(context, nextText, getPersonaCoreStats(context));
+    completeProgressionAdvancement(root, {
+        type: 'swapAbility',
+        ability: option,
+        replacedIndex: pending.swapAbilityIndex,
+    });
+}
+
+function completeProgressionAdvancement(root, reward) {
+    const pending = root?.pendingAdvancement;
+    if (!root || !pending) return;
+    const sourceIds = new Set(Array.isArray(pending.sourceRecordIds) ? pending.sourceRecordIds : []);
+    root.accomplishments = (root.accomplishments || []).map(record => sourceIds.has(record.id)
+        ? { ...record, spent: true, spentAt: Date.now() }
+        : record);
+    root.spentAdvancements = Math.max(0, Math.floor(Number(root.spentAdvancements || 0))) + 1;
+    root.lastAdvancement = {
+        id: pending.id,
+        reward,
+        resolvedAt: Date.now(),
+    };
+    root.pendingAdvancement = null;
+    root.ui = {};
+}
+
+function getSelectedProgressionSwapAbilityIndex(context = getContext()) {
+    const raw = typeof document !== 'undefined'
+        ? document.getElementById('spe_progression_swap_ability')?.value
+        : null;
+    const selected = Number(raw);
+    if (Number.isInteger(selected) && selected >= 0) return selected;
+    const pending = getProgressionRoot(context)?.pendingAdvancement;
+    const stored = Number(pending?.swapAbilityIndex);
+    return Number.isInteger(stored) && stored >= 0 ? stored : 0;
+}
+
+async function requestProgressionAbilityOptions(pending, context = getContext()) {
+    if (Array.isArray(pending?.abilityOptions) && pending.abilityOptions.length === PROGRESSION_ABILITY_OPTIONS) {
+        return pending.abilityOptions;
+    }
+    const prompt = buildProgressionAbilityPrompt(pending, context);
+    const raw = await requestProgressionText(prompt, 1700, {
+        temperature: 0.45,
+        stop: ['END_PROGRESSION_ABILITIES'],
+        stopping_strings: ['END_PROGRESSION_ABILITIES'],
+        stop_sequence: ['END_PROGRESSION_ABILITIES'],
+    });
+    return parseProgressionAbilityOptions(raw);
+}
+
+function buildProgressionAbilityPrompt(pending, context = getContext()) {
+    const persona = getPersonaText(context);
+    const abilities = extractPersonaAbilities(persona);
+    const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || {};
+    const recent = getProgressionRecentAccomplishments(getProgressionRoot(context), pending);
+    const replacing = pending?.choice === 'swapAbility'
+        ? abilities[Math.max(0, Math.floor(Number(pending.swapAbilityIndex || 0)))]
+        : null;
+    return [
+        {
+            role: 'system',
+            content:
+                'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
+                'Abilities are fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing trait/abilities, genre, stats, and recent critical accomplishments. ' +
+                'Each option must be directly usable in narration as a concrete action, perception, movement, communication, conjuration, transformation, attack method, utility method, or special technique. Do not return passive traits, vague expertise, personality flavor, lore labels, or background-only qualities. ' +
+                'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed escape, guaranteed control, or automatic solutions. ' +
+                'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, or dangerous use still requires normal scene resolution. ' +
+                'Do not duplicate existing abilities. Return exactly three usable replacement ability options.',
+        },
+        {
+            role: 'user',
+            content:
+                'Return only this compact block. No markdown before or after it.\n' +
+                'BEGIN_PROGRESSION_ABILITIES\n' +
+                'Option1Name=short ability name\n' +
+                'Option1Description=one or two sentences, directly usable fictional permission only, with fictional limits and no mechanics or measurements\n' +
+                'Option2Name=short ability name\n' +
+                'Option2Description=one or two sentences, directly usable fictional permission only, with fictional limits and no mechanics or measurements\n' +
+                'Option3Name=short ability name\n' +
+                'Option3Description=one or two sentences, directly usable fictional permission only, with fictional limits and no mechanics or measurements\n' +
+                'END_PROGRESSION_ABILITIES\n\n' +
+                'MODE: SWAP_ABILITY\n' +
+                `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
+                `EXISTING ABILITIES:\n${abilities.length ? abilities.map((ability, index) => `${index + 1}. ${ability.text}`).join('\n') : 'none'}\n\n` +
+                `${replacing ? `ABILITY BEING REPLACED:\n${replacing.text}\n\n` : ''}` +
+                `RECENT CRITICAL ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
+                `PERSONA SHEET:\n${clipText(persona, 5000)}`,
+        },
+    ];
+}
+
+function getProgressionRecentAccomplishments(root, pending) {
+    const ids = new Set(Array.isArray(pending?.sourceRecordIds) ? pending.sourceRecordIds : []);
+    const source = Array.isArray(root?.accomplishments) ? root.accomplishments : [];
+    const selected = source.filter(record => ids.has(record.id));
+    return (selected.length ? selected : source.filter(record => !record.spent).slice(-PROGRESSION_REQUIRED_ACCOMPLISHMENTS)).slice(-PROGRESSION_REQUIRED_ACCOMPLISHMENTS);
+}
+
+function formatProgressionRecordForPrompt(record) {
+    return [
+        `userAction=${clipText(record?.userText || '', 220) || 'unknown'}`,
+        `goal=${record?.goal || 'unknown'}`,
+        `stat=${record?.stat || 'unknown'}`,
+        `targets=${Array.isArray(record?.targets) && record.targets.length ? record.targets.join(', ') : 'none'}`,
+        `outcome=${record?.outcomeTier || 'unknown'}`,
+    ].join('; ');
+}
+
+function maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context = getContext() } = {}) {
+    if (getSettings().characterProgressionEnabled === false) return false;
+    if (!pendingRun || !messageKey) return false;
+    const root = getProgressionRoot(context);
+    if (!root || root.pendingAdvancement) return false;
+    if (!isEligibleCriticalAccomplishment(pendingRun)) return false;
+    if (root.accomplishments.some(record => record.messageKey === messageKey)) return false;
+
+    const record = buildProgressionAccomplishmentRecord(pendingRun, messageKey);
+    root.accomplishments.push(record);
+    root.accomplishments = root.accomplishments.slice(-24);
+
+    const unspent = root.accomplishments.filter(item => !item.spent);
+    if (unspent.length >= PROGRESSION_REQUIRED_ACCOMPLISHMENTS) {
+        const sourceRecords = unspent.slice(0, PROGRESSION_REQUIRED_ACCOMPLISHMENTS);
+        root.pendingAdvancement = {
+            id: `adv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            createdAt: Date.now(),
+            choice: 'choose',
+            sourceRecordIds: sourceRecords.map(item => item.id),
+            abilityOptions: [],
+        };
+        root.ui = {};
+    }
+    return true;
+}
+
+function isEligibleCriticalAccomplishment(pendingRun) {
+    const packet = pendingRun?.resolutionPacket || pendingRun?.report?.finalNarrativeHandoff?.resolutionPacket || {};
+    return packet.STAKES === 'Y' && packet.OutcomeTier === 'Critical_Success';
+}
+
+function buildProgressionAccomplishmentRecord(pendingRun, messageKey) {
+    const packet = pendingRun?.resolutionPacket || pendingRun?.report?.finalNarrativeHandoff?.resolutionPacket || {};
+    const resultLine = String(pendingRun?.report?.finalNarrativeHandoff?.resultLine || '');
+    return {
+        id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        messageKey,
+        createdAt: Date.now(),
+        spent: false,
+        userText: String(pendingRun?.latestUserText || '').trim(),
+        goal: String(packet.GOAL || 'unknown'),
+        stat: parseUserStatFromResultLine(resultLine),
+        targets: unique([
+            ...toRealNameArray(packet.ActionTargets),
+            ...toRealNameArray(packet.OppTargets?.NPC),
+            ...toRealNameArray(packet.OppTargets?.ENV),
+            ...toRealNameArray(packet.BenefitedObservers),
+            ...toRealNameArray(packet.HarmedObservers),
+        ]).slice(0, 8),
+        outcomeTier: String(packet.OutcomeTier || 'unknown'),
+        outcome: String(packet.Outcome || 'unknown'),
+    };
+}
+
+function parseUserStatFromResultLine(resultLine) {
+    const match = /\+\s*(PHY|MND|CHA)\s*\(/i.exec(String(resultLine || ''));
+    return match ? match[1].toUpperCase() : 'unknown';
+}
+
+function removeProgressionRecordsForMessage(messageKey, context = getContext()) {
+    const root = getProgressionRoot(context);
+    if (!root || !messageKey) return false;
+    const before = root.accomplishments.length;
+    const removedIds = new Set(root.accomplishments.filter(record => record.messageKey === messageKey).map(record => record.id));
+    root.accomplishments = root.accomplishments.filter(record => record.messageKey !== messageKey);
+    if (root.pendingAdvancement?.sourceRecordIds?.some(id => removedIds.has(id))) {
+        root.pendingAdvancement = null;
+        root.ui = {};
+    }
+    return root.accomplishments.length !== before;
+}
+
+async function requestProgressionText(prompt, responseLength, overridePayload = {}) {
+    const context = getContext();
+    state.bypassPromptReady = true;
+    try {
+        return await withProgressionGenerationSettings(async settings => {
+            if (settings?.semanticProfileId) {
+                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, overridePayload);
+            }
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for progression ability generation.');
+            }
+            const textPrompt = Array.isArray(prompt)
+                ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
+                : String(prompt || '');
+            return await context.generateRawData({ prompt: textPrompt, responseLength });
+        });
+    } finally {
+        state.bypassPromptReady = false;
+    }
+}
+
+function parseProgressionAbilityOptions(raw) {
+    const text = extractGeneratedText(raw);
+    const fields = {};
+    for (const line of text.split(/\r?\n/)) {
+        const match = /^Option([123])(Name|Description|Text)\s*=\s*(.+)$/i.exec(line.trim());
+        if (!match) continue;
+        const index = Number(match[1]) - 1;
+        fields[index] = fields[index] || {};
+        const key = match[2].toLowerCase() === 'name' ? 'name' : 'description';
+        fields[index][key] = String(match[3] || '').trim();
+    }
+    const options = [0, 1, 2].map(index => sanitizeProgressionAbilityOption(fields[index]));
+    if (options.some(option => !option)) {
+        throw new Error('Progression ability generation did not return three valid options.');
+    }
+    const names = new Set();
+    for (const option of options) {
+        const key = option.name.toLowerCase();
+        if (names.has(key)) throw new Error('Progression ability generation returned duplicate options.');
+        names.add(key);
+    }
+    return options;
+}
+
+function sanitizeProgressionAbilityOption(option) {
+    const name = cleanAbilityName(option?.name);
+    const description = String(option?.description || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!name || !description) return null;
+    if (hasProgressionMechanicalLanguage(description)) {
+        throw new Error(`Generated ability "${name}" included mechanical language.`);
+    }
+    return { name, description: clipText(description, 520) };
+}
+
+function hasProgressionMechanicalLanguage(value) {
+    const text = String(value || '').toLowerCase();
+    return /(?:^|[^\w])[-+]?\d+\s*(?:to|bonus|modifier|mod|uses?|times?|rounds?|turns?|seconds?|minutes?|hours?|days?|feet|foot|ft|yards?|meters?|metres?|miles?|paces?|steps?|squares?|tiles?|hexes?|radius|range|area|cone|line|sphere|cube|points?|hp|hit points?|damage|defense|defence|armor|armour|ac|dc|difficulty|rolls?|checks?|saves?|saving throws?|percent|%)(?=$|[^\w])/.test(text)
+        || /(?:^|[^\w])(?:advantage|disadvantage|cooldowns?|uses?\s+per|times?\s+per|per\s+(?:day|scene|turn|round|rest)|once\s+per|twice\s+per|rerolls?|dice|die|d20|d12|d10|d8|d6|d4|dc|difficulty class|armor class|hit points?|hp|feet|foot|ft|yards?|meters?|metres?|miles?|radius|range)(?=$|[^\w])/.test(text)
+        || /(?:^|[^\w])[-+]\d+(?=$|[^\w])/.test(text);
+}
+
 function buildPersonaStatsSheet(creator) {
     const stats = normalizeCoreStats(creator.stats || {});
     const analysis = creator.personaAnalysis || {};
@@ -3583,7 +4325,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
                 '# TRAITS (ALWAYS ACTIVE): exactly one passive trait. The trait must be unique, impactful, permanent, and inherent to the character race, body, origin, or nature. It is always true and applies automatically when relevant. If something is passive and always-on, it belongs here. It must not be a learned skill, chosen action, trigger-based power, or disguised ability. It must create concrete fictional consequences: what the character can perceive, physically be, naturally endure, naturally recover from, be vulnerable to, or do by nature. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic success, immunity to consequences, vague expertise, or conditional mini-abilities.\n' +
-                '# ABILITIES / SKILLS: exactly one usable ability, power, technique, or special method. If something requires a deliberate trigger, use, gesture, focus, exertion, target, transformation, attack, conjuration, message, or other described attempt, it belongs here. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. The ability grants fictional permission to attempt that kind of action, but it does not grant mechanical advantage or guaranteed success. Utility use may simply work in narration only when it is unopposed, low-stakes, outside active danger, and has no immediate harmful, contested, stealth, escape, security-bypass, control, ambush, trap, or unwilling-target consequence. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, or any meaningful consequence, normal scene resolution decides the result. Limits must be fictional constraints, not cooldown timers or usage counts. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic combat success, guaranteed escape, guaranteed control, or automatic solutions.\n' +
+                `# ABILITIES / SKILLS: exactly ${PROGRESSION_REQUIRED_ABILITIES} usable abilities, powers, techniques, or special methods. Each ability must be directly usable in narration as a concrete action, perception, movement, communication, conjuration, transformation, attack method, utility method, or special technique. If something requires a deliberate trigger, use, gesture, focus, exertion, target, transformation, attack, conjuration, message, or other described attempt, it belongs here. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that kind of action, but it does not grant mechanical advantage or guaranteed success. Utility use may simply work in narration only when it is unopposed, low-stakes, outside active danger, and has no immediate harmful, contested, stealth, escape, security-bypass, control, ambush, trap, or unwilling-target consequence. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, or any meaningful consequence, normal scene resolution decides the result. Limits must be fictional constraints, not numerical values, measured ranges, distances, radii, durations, cooldown timers, or usage counts. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, or measurements like feet/meters/yards.\n` +
                 '# INVENTORY: setting-appropriate starting gear only. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
                 '# FLAVOR / FIXED FACTS: concise fixed background flavor, origin facts, prior role, prior training, immutable constraints, ability/trait limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Do not include personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, emotional reactions, or statements about what the character will/may/usually/tends to do.',
         },
@@ -4357,6 +5099,8 @@ async function prependComputedDebug(messageId, type) {
             if (state.pendingRun === pendingRun) state.pendingRun = null;
         }
 
+        maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context });
+
         message.mes = narrationText;
         message.extra.display_text = narrationText;
         setMessageNarratorHandoff(message, narratorHandoff);
@@ -4380,6 +5124,7 @@ async function prependComputedDebug(messageId, type) {
         renderNarratorHandoffBlockForMessage(messageId, null, context);
         renderTrackerDisplayBlockForMessage(messageId, null, context);
         renderTrackerWidget(context);
+        renderProgressionCard(context);
 
         if (typeof context.saveChat === 'function') {
             await context.saveChat();
@@ -4418,6 +5163,7 @@ async function handleMessageDeleted(newLength) {
                 restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser };
             }
             delete root.snapshots[key];
+            removeProgressionRecordsForMessage(key, context);
         }
     }
 
@@ -4436,6 +5182,7 @@ async function handleMessageDeleted(newLength) {
         console.info(`[${EXTENSION_NAME}] restored tracker display snapshot after message deletion.`);
     }
     setTimeout(() => renderAllTrackerDisplayBlocks(context), 0);
+    setTimeout(() => renderProgressionCard(context), 0);
 }
 
 async function handleMessageSwiped(messageId) {
@@ -4450,6 +5197,7 @@ async function handleMessageSwiped(messageId) {
     state.chatSignature = captureChatSignature();
     clearRuntimePrompts();
     setTimeout(() => renderAllTrackerDisplayBlocks(context), 0);
+    setTimeout(() => renderProgressionCard(context), 0);
 }
 
 function handleChatChanged() {
@@ -4470,6 +5218,7 @@ function handleChatChanged() {
     setTimeout(() => {
         renderAllTrackerDisplayBlocks(context);
         renderPlayerSetupCard(context);
+        renderProgressionCard(context);
     }, 0);
 }
 
@@ -4497,7 +5246,10 @@ function handleGenerationLifecycleEnd() {
             console.warn(`[${EXTENSION_NAME}] cleared pending pre-flight handoff because no assistant message was received after generation ended.`);
         }, 5000);
     }
-    setTimeout(() => renderAllTrackerDisplayBlocks(), 0);
+    setTimeout(() => {
+        renderAllTrackerDisplayBlocks();
+        renderProgressionCard();
+    }, 0);
 }
 
 function subscribeMessageHandler() {
@@ -4574,6 +5326,20 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         clearAllProgress();
         try {
             globalThis.toastr?.info?.('Complete Player Setup before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
+        } catch {
+            // Toasts are optional.
+        }
+        if (typeof abort === 'function') abort(true);
+        return true;
+    }
+
+    if (progressionPending(context)) {
+        await persistMetadata(context);
+        renderProgressionCard(context);
+        clearRuntimePrompts();
+        clearAllProgress();
+        try {
+            globalThis.toastr?.info?.('Complete Character Progression before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
         } catch {
             // Toasts are optional.
         }
@@ -4777,6 +5543,7 @@ if (typeof jQuery === 'function') {
             migrateVisibleHandoffDisplays();
             renderAllTrackerDisplayBlocks();
             renderPlayerSetupCard();
+            renderProgressionCard();
         }, 0);
     });
 } else {
@@ -4790,6 +5557,7 @@ if (typeof jQuery === 'function') {
         migrateVisibleHandoffDisplays();
         renderAllTrackerDisplayBlocks();
         renderPlayerSetupCard();
+        renderProgressionCard();
     }, 0);
 }
 clearRuntimePrompts();

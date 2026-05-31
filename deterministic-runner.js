@@ -368,6 +368,21 @@ function advanceRapportClock(context, audit) {
     return clock;
 }
 
+function normalizeUserAbilityUseForHandoff(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const used = bool(source.used ?? source.Used);
+    const abilityName = String(source.abilityName ?? source.AbilityName ?? '').trim();
+    const evidence = String(source.evidence ?? source.Evidence ?? '').trim();
+    const narrativeEffect = String(source.narrativeEffect ?? source.NarrativeEffect ?? '').trim();
+    return {
+        Used: used ? 'Y' : 'N',
+        AbilityName: used && isReal(abilityName) ? abilityName : NONE,
+        Evidence: used && isReal(evidence) ? evidence : NONE,
+        NarrativeEffect: used && isReal(narrativeEffect) ? narrativeEffect : NONE,
+        MechanicalScope: 'flavor_only_no_bonus',
+    };
+}
+
 function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext) {
     const semantic = ledger.resolutionEngine || {};
     const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, refereeContext);
@@ -608,6 +623,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
 
     const packet = {
         GOAL: goal,
+        UserAbilityUse: normalizeUserAbilityUseForHandoff(semantic.userAbilityUse),
         actions,
         intimacyAdvanceExplicit,
         boundaryViolationExplicit,
@@ -640,6 +656,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     };
 
     audit.push(`2.7q InflictedNpcInjuryEngine=${compact(inflictedInjuries)}`);
+    audit.push(`2.7r UserAbilityUse=${compact(packet.UserAbilityUse)}`);
     audit.push(`2.8 HANDOFF=${compact(packet)}`);
     audit.push('---');
 

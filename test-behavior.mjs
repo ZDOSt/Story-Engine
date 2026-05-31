@@ -103,6 +103,13 @@ function baseLedger(overrides = {}) {
       identifyGoal: 'Normal_Interaction',
       identifyChallenge: 'ordinary conversation',
       explicitMeans: 'ordinary conversation',
+      userAbilityUse: {
+        used: false,
+        abilityName: '(none)',
+        evidence: '(none)',
+        narrativeEffect: '(none)',
+        mechanicalScope: 'flavor_only_no_bonus',
+      },
       identifyTargets: {
         hostilesInScene: { NPC: [] },
         ActionTargets: [],
@@ -5955,6 +5962,69 @@ const tests = [
     },
   },
   {
+    name: '34c user ability use is semantic-only and carried into narrator handoff',
+    run() {
+      const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
+      const runnerSource = fs.readFileSync(extensionFile('deterministic-runner.js'), 'utf8');
+      const preflightSource = fs.readFileSync(extensionFile('pre-flight.js'), 'utf8');
+
+      assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.Used=N/);
+      assert.match(semanticSource, /compare the latest user input against active \{\{user\}\}\/persona abilities/i);
+      assert.match(semanticSource, /MechanicalScope must always be flavor_only_no_bonus/i);
+      assert.match(semanticSource, /never a bonus, never a dice modifier, never a separate roll/i);
+      assert.match(semanticSource, /userAbilityUse:\s*normalizeUserAbilityUse/);
+      assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
+      assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
+      assert.match(preflightSource, /When ACTIVE_BRANCH_FACTS lists UserAbilityUse, preserve its NarrativeEffect/i);
+      assert.match(preflightSource, /do not announce, name, activate, focus, channel, charge, or explain the ability/i);
+
+      const report = runCase({
+        userText: 'I whisper under my breath, meant only for Alice: "Leave him alone."',
+        tracker: {
+          Alice: trackerEntry({ currentDisposition: { B: 2, F: 2, H: 2 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Private_Warning',
+            identifyChallenge: 'privately warn Alice',
+            explicitMeans: 'whisper under my breath meant only for Alice',
+            userAbilityUse: {
+              used: true,
+              abilityName: 'Resonant Voice',
+              evidence: 'meant only for Alice',
+              narrativeEffect: 'Alice alone hears the whispered words',
+              mechanicalScope: 'flavor_only_no_bonus',
+            },
+            identifyTargets: {
+              ActionTargets: ['Alice'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Alice')],
+        }),
+      });
+
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.deepEqual(packet.UserAbilityUse, {
+        Used: 'Y',
+        AbilityName: 'Resonant Voice',
+        Evidence: 'meant only for Alice',
+        NarrativeEffect: 'Alice alone hears the whispered words',
+        MechanicalScope: 'flavor_only_no_bonus',
+      });
+      assert.equal(packet.STAKES, 'N');
+
+      const prompt = formatNarratorModelPromptContext(report);
+      assert.match(prompt, /UserAbilityUse: Resonant Voice; evidence:meant only for Alice; effect:Alice alone hears the whispered words; scope:flavor_only_no_bonus/i);
+      assert.match(prompt, /Preserve user ability effect as direct scene fact: Alice alone hears the whispered words/i);
+      assert.match(prompt, /do not announce, name, activate, focus, channel, charge, or explain the ability/i);
+      assert.match(prompt, /do not add bonuses, success, roll changes, extra landed actions, or bypassed stakes/i);
+    },
+  },
+  {
     name: '35 name promotion does not retire established named NPCs',
     run() {
       const text = 'Seraphina and I enter a ruined roadside shrine at dusk. A wounded merchant named Darai is pinned behind a broken pillar.';
@@ -6959,19 +7029,70 @@ const tests = [
       assert.match(source, /It is always true and applies automatically when relevant/);
       assert.match(source, /If something is passive and always-on, it belongs here/);
       assert.match(source, /It must not be a learned skill, chosen action, trigger-based power, or disguised ability/);
-      assert.match(source, /# ABILITIES \/ SKILLS: exactly one usable ability, power, technique, or special method/);
+      assert.match(source, /const PROGRESSION_REQUIRED_ABILITIES = 2/);
+      assert.match(source, /# ABILITIES \/ SKILLS: exactly \$\{PROGRESSION_REQUIRED_ABILITIES\} usable abilities/);
+      assert.match(source, /Each ability must be directly usable in narration/);
       assert.match(source, /The user does not need to name the ability/);
       assert.match(source, /fictional permission to attempt that kind of action/);
       assert.match(source, /Utility use may simply work in narration only when it is unopposed, low-stakes, outside active danger/);
       assert.match(source, /has no immediate harmful, contested, stealth, escape, security-bypass, control, ambush, trap, or unwilling-target consequence/);
       assert.match(source, /If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm/);
       assert.match(source, /normal scene resolution decides the result/);
-      assert.match(source, /Limits must be fictional constraints, not cooldown timers or usage counts/);
+      assert.match(source, /Limits must be fictional constraints, not numerical values, measured ranges, distances, radii, durations/);
       assert.match(source, /Do not write numerical bonuses, dice modifiers, HP rules/);
       assert.match(source, /# FLAVOR \/ FIXED FACTS:/);
       assert.match(source, /This section must add context the user can play with, not decisions made for them/);
       assert.match(source, /Do not include personality, future plans, preferred tactics, combat style/);
       assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
+    },
+  },
+  {
+    name: '50 character progression settings, gating, and persona edits are wired',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.match(source, /const PROGRESSION_REQUIRED_ACCOMPLISHMENTS = 3/);
+      assert.match(source, /const PROGRESSION_MAX_STAT = 10/);
+      assert.match(source, /characterProgressionEnabled: true/);
+      assert.match(source, /progressionConnectionProfile: PROGRESSION_PROFILE_CURRENT/);
+      assert.match(source, /id="structured_preflight_progression_enabled"/);
+      assert.match(source, /id="structured_preflight_progression_profile"/);
+      assert.match(source, /async function withProgressionGenerationSettings/);
+      assert.match(source, /return await withSemanticGenerationSettings\(callback\)/);
+      assert.match(source, /function getProgressionRoot/);
+      assert.match(source, /function progressionPending/);
+      assert.match(source, /renderProgressionCard\(context\)/);
+      assert.match(source, /Complete Character Progression before roleplay generation can continue/);
+      assert.match(source, /function maybeRecordProgressionAccomplishment/);
+      assert.match(source, /packet\.STAKES === 'Y' && packet\.OutcomeTier === 'Critical_Success'/);
+      assert.match(source, /root\.accomplishments\.some\(record => record\.messageKey === messageKey\)/);
+      assert.match(source, /sourceRecords = unspent\.slice\(0, PROGRESSION_REQUIRED_ACCOMPLISHMENTS\)/);
+      assert.match(source, /maybeRecordProgressionAccomplishment\(\{ pendingRun, messageKey, context \}\)/);
+      assert.match(source, /removeProgressionRecordsForMessage\(key, context\)/);
+      assert.doesNotMatch(source, /choose-gain-ability/);
+      assert.doesNotMatch(source, /Gain Ability/);
+      assert.doesNotMatch(source, /gainAbility/);
+      assert.match(source, /Choose the existing ability to replace, then choose one generated replacement\. Ability options cannot be rerolled/);
+      assert.match(source, /options\.length \? '' : '<button class="menu_button" data-spe-progression-action="generate-abilities">Generate Ability Options<\/button>'/);
+      assert.match(source, /options\.length \? '' : '<button class="menu_button" data-spe-progression-action="back">Back<\/button>'/);
+      assert.match(source, /Ability options are already generated\. Choose one of the presented abilities/);
+      assert.match(source, /id="spe_progression_swap_ability" class="text_pole" \$\{options\.length \? 'disabled' : ''\}/);
+      assert.match(source, /stats cannot go above|Stats cannot go above/);
+      assert.match(source, /value >= PROGRESSION_MAX_STAT \? 'disabled'/);
+      assert.match(source, /extractPersonaAbilities/);
+      assert.match(source, /function isEmptyAbilityPlaceholder/);
+      assert.match(source, /not specified\|no ability\|no abilities/);
+      assert.match(source, /replaceAbilityInPersona/);
+      assert.match(source, /updatePersonaStatText/);
+      assert.match(source, /writePlayerSheetToPersona\(nextText, context\)/);
+      assert.match(source, /Do not give numerical values, measured ranges, distances, radii, durations/);
+      assert.match(source, /Opposed, risky, combat, stealth, coercive/);
+      assert.match(source, /Return exactly three usable replacement ability options/);
+      assert.match(source, /Progression ability generation did not return three valid options/);
+      assert.match(source, /Generated ability ".+" included mechanical language/);
+      assert.match(source, /function hasProgressionMechanicalLanguage/);
+      assert.match(source, /\[-\+\]\?\\d\+\\s\*\(\?:to\|bonus\|modifier/);
+      assert.match(source, /feet\|foot\|ft\|yards\?\|meters\?/);
+      assert.match(source, /uses\?\\s\+per\|times\?\\s\+per\|per\\s\+\(\?:day\|scene\|turn\|round\|rest\)/);
     },
   },
 ];

@@ -657,6 +657,7 @@ function buildSemanticPreflightSchema() {
                     'identifyGoal',
                     'identifyChallenge',
                     'explicitMeans',
+                    'userAbilityUse',
                     'identifyTargets',
                     'intimacyAdvanceExplicit',
                     'boundaryViolationExplicit',
@@ -673,6 +674,25 @@ function buildSemanticPreflightSchema() {
                     identifyGoal: { type: 'string' },
                     identifyChallenge: { type: 'string' },
                     explicitMeans: { type: 'string' },
+                    userAbilityUse: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['used', 'abilityName', 'evidence', 'narrativeEffect', 'mechanicalScope'],
+                        properties: {
+                            used: {
+                                type: 'boolean',
+                                description: 'Y when latest user input explicitly or implicitly uses one of the active user/persona abilities from context, even if not named directly.',
+                            },
+                            abilityName: { type: 'string' },
+                            evidence: { type: 'string' },
+                            narrativeEffect: { type: 'string' },
+                            mechanicalScope: {
+                                type: 'string',
+                                enum: ['flavor_only_no_bonus'],
+                                description: 'Always flavor_only_no_bonus. Ability use is fictional permission/method only and never changes dice, stats, stakes, or outcomes.',
+                            },
+                        },
+                    },
                     identifyTargets: {
                         type: 'object',
                         additionalProperties: false,
@@ -1066,6 +1086,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- RelationshipEngine[index].romanceStyle is for B4 pre-relationship initiative only. Return nervous if explicit card/lore/context portrays this NPC as shy, reserved, guarded, restrained, formal, awkward, timid, emotionally cautious, or likely to show romantic interest through hesitation. Return flirt if explicit card/lore/context portrays this NPC as bold, outgoing, playful, teasing, direct, seductive, socially confident, or likely to show romantic interest through open flirtation. Return auto if unclear or mixed.',
     '- RelationshipEngine[index].checkThreshold override flags must use all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. CurrentInvitation=Y when this NPC clearly and directly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene, and has not withdrawn, refused, panicked, or been interrupted by danger. Mark CurrentInvitation=Y for irrefutable sexual invitation hints even when phrased as teasing questions, such as "I wonder how tight I would be for you. Want to find out?" Do not mark CurrentInvitation for ordinary flirting, suggestive banter, compliments, attraction, embarrassment, vague innuendo without an invitation, or a user-originated proposal the NPC has not accepted. Exploitation=Y when card/lore/context explicitly makes this NPC exploitable by {{user}} or the current situation: naive, easily led or persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, sheltered to an unsafe degree, or otherwise unable to safely judge/resist. Do not mark Exploitation for mere innocence, shyness, kindness, friendliness, attraction, low confidence, or normal inexperience without explicit vulnerability/suggestibility. Hedonist=Y only for explicitly sexually open, pleasure-seeking, casual, promiscuous, or eager intimacy context. Transactional=Y only for explicit willingness to exchange intimacy for money, goods, favors, protection, status, or services. Established=Y only for explicit prior/current intimate access with current or recent receptivity toward {{user}}, such as casual lovers, friends with benefits, an ongoing sexual arrangement, or explicit comfort/willingness with renewed intimacy. Do not mark Established for prior intimacy alone when current receptivity is absent, stale, unclear, refused, fearful, hostile, coerced, or boundary-limited. establishedRelationship remains its separate relationship-state mechanic.',
     '- RelationshipEngine[index].slowBondEvidence is scene-local semantic evidence for slow B3-to-B4 trust growth. Mark only categories explicitly shown in the latest scene/current immediate context. respectfulContact=welcome/respectful physical contact or physical help; cooperation=constructive cooperation toward a shared purpose; comfortInProximity=NPC remains or settles close without fear, duty, coercion, or forced circumstance; boundaryRespect={{user}} respects refusal, hesitation, privacy, space, limits, consent, or a stated boundary; sharedRoutine=repeated or mundane togetherness such as eating/traveling/working/resting/training/tending camp; playfulness=mutual light teasing, joking, banter, or relaxed warmth; teamwork=coordinated effort under pressure/danger/conflict/crisis; personalAttention=specific attention to NPC needs, preferences, wellbeing, vulnerability, history, comfort, or concerns. blockers include coercion, intimidation, betrayal, humiliation, unwanted intimacy pressure, boundary violation, unresolved harm, exploitation, active fear, active hostility, or trapped/dependent/powerless circumstances that make closeness unsafe to count.',
+    '- ResolutionEngine.userAbilityUse is semantic-only ability detection. Compare the latest user input against active {{user}}/persona abilities, including abilities described in character persona, sheet, lore, or prompt stack. Mark Used=Y when the input explicitly names an ability or implicitly describes using it through its trigger/effect/delivery method. Use the exact persona ability name when possible. Evidence is the user wording that signals the ability. NarrativeEffect is the direct in-world fictional effect to preserve. MechanicalScope must always be flavor_only_no_bonus: the ability can make a fictional method possible, but it never changes hasStakes, actionCount, mapStats, rolls, bonuses, margins, landed actions, relationship state, injury severity, or outcome. If the ability delivers a threat, persuasion, attack, escape, or other stakes-bearing goal, classify and roll the broader goal normally; do not roll the ability separately. If no clear ability match exists, output Used=N and (none) for the name, evidence, and effect.',
     '- ResolutionEngine.identifyTargets.hostilesInScene.NPC is scene-level: list ALL established, present, living hostile entities currently threatening {{user}}, companions, protected NPCs, bystanders, or the scene generally. Identify this broad hostile pool before choosing OppTargets.NPC. Establishment must come from assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create a hostile from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated entities no longer posing danger, and non-living hazards/obstacles.',
     '- ResolutionEngine.identifyTargets.OppTargets.NPC is narrower: list only living entities directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}\'s current action/challenge. Do not put every enemy in OppTargets.NPC just because they are hostile; use hostilesInScene.NPC for the broader hostile pool.',
     '- ResolutionEngine.activeHostileThreat is strict. Return Y only if the current scene contains an immediate hostile danger from an NPC/entity: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster/hostile creature engagement, armed standoff, capture attempt, or imminent physical/supernatural harm. Return N for negotiation, refusal, bargaining, argument, social resistance, authority denial, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger.',
@@ -1100,6 +1121,11 @@ engineContext.getUserCoreStats.CHA=1
 ResolutionEngine.identifyGoal=Normal_Interaction
 ResolutionEngine.identifyChallenge=Normal_Interaction
 ResolutionEngine.explicitMeans=(none)
+ResolutionEngine.userAbilityUse.Used=N
+ResolutionEngine.userAbilityUse.AbilityName=(none)
+ResolutionEngine.userAbilityUse.Evidence=(none)
+ResolutionEngine.userAbilityUse.NarrativeEffect=(none)
+ResolutionEngine.userAbilityUse.MechanicalScope=flavor_only_no_bonus
 ResolutionEngine.identifyTargets.hostilesInScene.NPC=(none)
 ResolutionEngine.identifyTargets.ActionTargets=(none)
 ResolutionEngine.identifyTargets.OppTargets.NPC=(none)
@@ -1279,8 +1305,9 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'For each living NPC in relationshipEngine, stakeChangeByOutcome must describe that NPC stakes change for each outcome: benefit means their stakes improve, harm means their stakes worsen, none means no meaningful stake change. For explicit boundary violations toward a direct/opposing NPC target, successful or landed outcomes worsen that NPC boundary/autonomy/trust stakes, so use harm and not none. ' +
         'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC core stat block from explicit portrayal and copy the same block into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
         'Do not leave a named portrayed NPC as Rank none or 1/1/1 unless the card, scene, and tracker give no explicit portrayal at all. ' +
+        'Detect user ability use before target/risk classification: compare the latest user input against active {{user}}/persona abilities in the assembled SillyTavern prompt stack, character persona/sheet, scenario, lore/world info, and chat context. Mark ResolutionEngine.userAbilityUse.Used=Y when the input explicitly names an ability or implicitly describes using that ability through its trigger, delivery method, or effect; otherwise mark Used=N. Use the exact persona ability name when possible. Evidence is the input wording that signals the use. NarrativeEffect is the direct in-world effect the narrator must preserve, such as a private projected voice being heard only by the target. MechanicalScope must always be flavor_only_no_bonus: ability use is fictional permission/method only, never a bonus, never a dice modifier, never a separate roll, and never a bypass for broader stakes or outcomes. If the ability is used to deliver a threat, persuasion, attack, escape, or other contested goal, classify and roll the broader goal normally while keeping the ability as delivery/flavor. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, hasStakes, actionCount, mapStats, getUserCoreStats, getCurrentCoreStats/genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, hasStakes, actionCount, mapStats, getUserCoreStats, getCurrentCoreStats/genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do NOT execute ResolutionEngine.resolveOutcome, dice, margins, landed actions, or counter potential; deterministic code handles those after your ledger. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
@@ -1517,6 +1544,9 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.resolutionEngine) missing.push('resolutionEngine');
     if (!ledger?.resolutionEngine?.identifyGoal) missing.push('resolutionEngine.identifyGoal');
     if (!ledger?.resolutionEngine?.identifyChallenge) missing.push('resolutionEngine.identifyChallenge');
+    if (!ledger?.resolutionEngine?.userAbilityUse) missing.push('resolutionEngine.userAbilityUse');
+    if (typeof ledger?.resolutionEngine?.userAbilityUse?.used !== 'boolean') missing.push('resolutionEngine.userAbilityUse.used:boolean');
+    if (!ledger?.resolutionEngine?.userAbilityUse?.mechanicalScope) missing.push('resolutionEngine.userAbilityUse.mechanicalScope');
     if (!ledger?.resolutionEngine?.identifyTargets) missing.push('resolutionEngine.identifyTargets');
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.hostilesInScene?.NPC)) missing.push('resolutionEngine.identifyTargets.hostilesInScene.NPC');
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.ActionTargets)) missing.push('resolutionEngine.identifyTargets.ActionTargets');
@@ -1597,6 +1627,11 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.identifyGoal',
         'ResolutionEngine.identifyChallenge',
         'ResolutionEngine.explicitMeans',
+        'ResolutionEngine.userAbilityUse.Used',
+        'ResolutionEngine.userAbilityUse.AbilityName',
+        'ResolutionEngine.userAbilityUse.Evidence',
+        'ResolutionEngine.userAbilityUse.NarrativeEffect',
+        'ResolutionEngine.userAbilityUse.MechanicalScope',
         'ResolutionEngine.identifyTargets.hostilesInScene.NPC',
         'ResolutionEngine.identifyTargets.ActionTargets',
         'ResolutionEngine.identifyTargets.OppTargets.NPC',
@@ -1784,6 +1819,13 @@ function parseCompactLedger(text, trackerSnapshot) {
         identifyGoal: cleanScalar(fields.get('ResolutionEngine.identifyGoal')) || 'Normal_Interaction',
         identifyChallenge: cleanScalar(fields.get('ResolutionEngine.identifyChallenge')) || cleanScalar(fields.get('ResolutionEngine.identifyGoal')) || 'Normal_Interaction',
         explicitMeans: cleanScalar(fields.get('ResolutionEngine.explicitMeans')) || '(none)',
+        userAbilityUse: normalizeUserAbilityUse({
+            used: readBoolean(fields, 'ResolutionEngine.userAbilityUse.Used', false),
+            abilityName: cleanScalar(fields.get('ResolutionEngine.userAbilityUse.AbilityName')) || '(none)',
+            evidence: cleanScalar(fields.get('ResolutionEngine.userAbilityUse.Evidence')) || '(none)',
+            narrativeEffect: cleanScalar(fields.get('ResolutionEngine.userAbilityUse.NarrativeEffect')) || '(none)',
+            mechanicalScope: cleanScalar(fields.get('ResolutionEngine.userAbilityUse.MechanicalScope')) || 'flavor_only_no_bonus',
+        }),
         identifyTargets: {
             hostilesInScene: {
                 NPC: readList(fields, 'ResolutionEngine.identifyTargets.hostilesInScene.NPC'),
@@ -2417,6 +2459,7 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.identifyTargets.OppTargets = ledger.resolutionEngine.identifyTargets.OppTargets || {};
     ledger.resolutionEngine.actionCount = normalizeActionMarkers(ledger.resolutionEngine.actionCount);
     ledger.resolutionEngine.mapStats = ledger.resolutionEngine.mapStats || {};
+    ledger.resolutionEngine.userAbilityUse = normalizeUserAbilityUse(ledger.resolutionEngine.userAbilityUse);
     ledger.resolutionEngine.hasStakes = toBoolean(ledger.resolutionEngine.hasStakes, false);
     ledger.resolutionEngine.intimacyAdvanceExplicit = toBoolean(ledger.resolutionEngine.intimacyAdvanceExplicit, false);
     ledger.resolutionEngine.boundaryViolationExplicit = toBoolean(ledger.resolutionEngine.boundaryViolationExplicit, false);
@@ -2491,6 +2534,21 @@ function normalizeLedger(ledger) {
     return ledger;
 }
 
+function normalizeUserAbilityUse(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const used = toBoolean(source.used ?? source.Used, false);
+    const abilityName = cleanScalar(source.abilityName ?? source.AbilityName) || '(none)';
+    const evidence = cleanScalar(source.evidence ?? source.Evidence) || '(none)';
+    const narrativeEffect = cleanScalar(source.narrativeEffect ?? source.NarrativeEffect) || '(none)';
+    return {
+        used,
+        abilityName: used && !isNoneValue(abilityName) ? abilityName : '(none)',
+        evidence: used && !isNoneValue(evidence) ? evidence : '(none)',
+        narrativeEffect: used && !isNoneValue(narrativeEffect) ? narrativeEffect : '(none)',
+        mechanicalScope: 'flavor_only_no_bonus',
+    };
+}
+
 function normalizeCore(core) {
     return {
         Rank: core?.Rank ?? 'none',
@@ -2541,6 +2599,9 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.resolutionEngine) missing.push('resolutionEngine');
     if (!ledger.resolutionEngine?.identifyGoal) missing.push('resolutionEngine.identifyGoal');
     if (!ledger.resolutionEngine?.identifyChallenge) missing.push('resolutionEngine.identifyChallenge');
+    if (!ledger.resolutionEngine?.userAbilityUse) missing.push('resolutionEngine.userAbilityUse');
+    if (typeof ledger.resolutionEngine?.userAbilityUse?.used !== 'boolean') missing.push('resolutionEngine.userAbilityUse.used:boolean');
+    if (ledger.resolutionEngine?.userAbilityUse?.mechanicalScope !== 'flavor_only_no_bonus') missing.push('resolutionEngine.userAbilityUse.mechanicalScope:flavor_only_no_bonus');
     if (!ledger.resolutionEngine?.identifyTargets) missing.push('resolutionEngine.identifyTargets');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.hostilesInScene?.NPC)) missing.push('resolutionEngine.identifyTargets.hostilesInScene.NPC');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.ActionTargets)) missing.push('resolutionEngine.identifyTargets.ActionTargets');
