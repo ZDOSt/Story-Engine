@@ -3608,12 +3608,16 @@ function buildNewCharacterStatInstruction(stats = {}) {
 
 function buildNewCharacterGenreInstruction(identity = {}) {
     const genre = PLAYER_GENRE_CHOICES.includes(identity.genre) ? identity.genre : 'Fantasy';
-    return [
+    const instructions = [
         `Selected genre: ${genre}.`,
         'Use the selected genre as the creative frame for the character concept, setting assumptions, background hooks, abilities or skills, inventory, and tone.',
         'All races are valid in all genres. Do not reject, avoid, or replace a race because it seems genre-incongruent; reinterpret its origin, traits, social role, gear, and abilities through the selected genre.',
         'If race is Random, choose any playable race first, then make the character sheet explain how that race fits the selected genre.',
-    ].join('\n');
+    ];
+    if (genre === 'Isekai') {
+        instructions.push('For Isekai, the character must originate from Earth before arriving, reincarnating, transferring, being summoned, or otherwise crossing into the new world.');
+    }
+    return instructions.join('\n');
 }
 
 function buildNewCharacterRaceInstruction(identity = {}) {

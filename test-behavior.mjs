@@ -6928,6 +6928,7 @@ const tests = [
       assert.match(source, /Generate a fitting character sex or leave it unspecified/);
       assert.match(source, /All races are valid in all genres/);
       assert.match(source, /If race is Random, choose any playable race first/);
+      assert.match(source, /For Isekai, the character must originate from Earth/);
       assert.match(source, /You generate a SillyTavern user persona character sheet for roleplay/);
       assert.match(source, /This is a playable user character shell, not an authored protagonist/);
       assert.match(source, /Do not decide future choices, personality, habits, emotional reactions/);
