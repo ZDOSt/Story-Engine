@@ -6921,6 +6921,7 @@ const tests = [
       assert.match(source, /Use my notes \+ fill the rest/);
       assert.match(source, /data-spe-player-additional-details/);
       assert.match(source, /function updatePlayerIdentityOptionalFields/);
+      assert.match(source, /\[hidden\]\s*\{\s*display: none !important;/);
       assert.doesNotMatch(source, /id="spe_player_race_mode"/);
       assert.doesNotMatch(source, /id="spe_player_race_pick"/);
       assert.doesNotMatch(source, /id="spe_player_appearance"/);

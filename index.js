@@ -3036,6 +3036,9 @@ function ensurePlayerSetupStyles() {
             align-items: center;
             margin-top: 0.55rem;
         }
+        #${PLAYER_SETUP_CARD_ID} [hidden] {
+            display: none !important;
+        }
         #${PLAYER_SETUP_CARD_ID} .spe-player-grid {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
