@@ -6899,7 +6899,7 @@ const tests = [
     },
   },
   {
-    name: '49 player creator supports name, freeform sex, one race dropdown, genre, and alphabetical race choices',
+    name: '49 player creator supports compact identity fields, custom details, and alphabetical race choices',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const raceBlock = source.match(/const PLAYER_RACE_CHOICES = Object\.freeze\(\[\n([\s\S]*?)\n\]\);/)?.[1] || '';
@@ -6914,21 +6914,37 @@ const tests = [
       assert.match(source, /id="spe_player_race"/);
       assert.match(source, /<option value="random"/);
       assert.match(source, /<option value="custom"/);
+      assert.match(source, /data-spe-player-custom-race/);
+      assert.match(source, /data-spe-player-race-description/);
+      assert.match(source, /id="spe_player_additional_details_mode"/);
+      assert.match(source, /id="spe_player_additional_details"/);
+      assert.match(source, /Use my notes \+ fill the rest/);
+      assert.match(source, /data-spe-player-additional-details/);
+      assert.match(source, /function updatePlayerIdentityOptionalFields/);
       assert.doesNotMatch(source, /id="spe_player_race_mode"/);
       assert.doesNotMatch(source, /id="spe_player_race_pick"/);
+      assert.doesNotMatch(source, /id="spe_player_appearance"/);
       assert.match(source, /creator\.identity\.characterName = String\(document\.getElementById\('spe_player_character_name'\)/);
       assert.match(source, /creator\.identity\.sex = String\(document\.getElementById\('spe_player_sex'\)/);
       assert.match(source, /creator\.identity\.genre = PLAYER_GENRE_CHOICES\.includes\(genre\) \? genre : 'Fantasy'/);
+      assert.match(source, /const additionalDetailsMode = document\.getElementById\('spe_player_additional_details_mode'\)/);
+      assert.match(source, /creator\.identity\.additionalDetailsMode = additionalDetailsMode === 'user' \? 'user' : 'system'/);
+      assert.match(source, /creator\.identity\.additionalDetails = String\(document\.getElementById\('spe_player_additional_details'\)/);
       assert.match(source, /buildNewCharacterNameInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterSexInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterGenreInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterStatInstruction\(stats\)/);
+      assert.match(source, /buildNewCharacterAdditionalDetailsInstruction\(identity\)/);
       assert.match(source, /Use this character name exactly/);
       assert.match(source, /Use this character sex exactly/);
       assert.match(source, /Generate a fitting character sex or leave it unspecified/);
       assert.match(source, /All races are valid in all genres/);
       assert.match(source, /If race is Random, choose any playable race first/);
       assert.match(source, /For Isekai, the character must originate from Earth/);
+      assert.match(source, /The user-provided additional character details are locked starting facts/);
+      assert.match(source, /Use them to shape background, Earth life, arrival\/origin, appearance, clothing/);
+      assert.match(source, /Because the selected genre is Isekai, any Earth-life details/);
+      assert.match(source, /LOCKED USER ADDITIONAL DETAILS/);
       assert.match(source, /You generate a SillyTavern user persona character sheet for roleplay/);
       assert.match(source, /This is a playable user character shell, not an authored protagonist/);
       assert.match(source, /Do not decide future choices, personality, habits, emotional reactions/);

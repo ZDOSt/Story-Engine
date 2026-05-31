@@ -1661,7 +1661,8 @@ function buildNewCharacterRollState() {
             specifiedRace: '',
             specifiedRaceDescriptionMode: 'system',
             specifiedRaceDescription: '',
-            appearance: '',
+            additionalDetailsMode: 'system',
+            additionalDetails: '',
         },
     };
 }
@@ -3197,6 +3198,11 @@ function buildPlayerIdentityHtml(creator) {
         : identity.raceMode === 'pick'
             ? identity.pickedRace || 'Human'
             : 'random';
+    const raceIsCustom = raceValue === 'custom';
+    const raceDescriptionMode = identity.specifiedRaceDescriptionMode || 'system';
+    const additionalDetails = String(identity.additionalDetails || identity.appearance || '').trim();
+    const hasStoredAdditionalDetailsMode = Object.prototype.hasOwnProperty.call(identity, 'additionalDetailsMode');
+    const additionalDetailsMode = identity.additionalDetailsMode === 'user' || (!hasStoredAdditionalDetailsMode && additionalDetails) ? 'user' : 'system';
     return `
         ${buildStatsGridHtml(creator)}
         <div class="spe-player-row">
@@ -3221,27 +3227,35 @@ function buildPlayerIdentityHtml(creator) {
                 </select>
             </label>
         </div>
-        <div class="spe-player-row">
+        <div class="spe-player-row" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>
             <label class="flex1">Specify race or ancestry
                 <input id="spe_player_race_specify" class="text_pole" value="${escapeHtml(identity.specifiedRace || '')}" placeholder="Optional">
             </label>
         </div>
-        <div class="spe-player-row">
+        <div class="spe-player-row" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>
             <label class="flex1">Specified race details
                 <select id="spe_player_race_description_mode" class="text_pole">
-                    <option value="system" ${(identity.specifiedRaceDescriptionMode || 'system') === 'system' ? 'selected' : ''}>Let system describe it</option>
-                    <option value="user" ${identity.specifiedRaceDescriptionMode === 'user' ? 'selected' : ''}>Describe it myself</option>
+                    <option value="system" ${raceDescriptionMode === 'system' ? 'selected' : ''}>Let system describe it</option>
+                    <option value="user" ${raceDescriptionMode === 'user' ? 'selected' : ''}>Describe it myself</option>
                 </select>
             </label>
         </div>
-        <div class="spe-player-row">
+        <div class="spe-player-row" data-spe-player-race-description ${raceIsCustom && raceDescriptionMode === 'user' ? '' : 'hidden'}>
             <label class="flex1">Your race description
                 <textarea id="spe_player_race_description" class="text_pole" placeholder="Optional unless you choose Describe it myself.">${escapeHtml(identity.specifiedRaceDescription || '')}</textarea>
             </label>
         </div>
         <div class="spe-player-row">
-            <label class="flex1">Appearance notes
-                <textarea id="spe_player_appearance" class="text_pole" placeholder="Optional. Leave blank for model-generated appearance.">${escapeHtml(identity.appearance || '')}</textarea>
+            <label class="flex1">Additional character details
+                <select id="spe_player_additional_details_mode" class="text_pole">
+                    <option value="system" ${additionalDetailsMode === 'system' ? 'selected' : ''}>Let AI decide</option>
+                    <option value="user" ${additionalDetailsMode === 'user' ? 'selected' : ''}>Use my notes + fill the rest</option>
+                </select>
+            </label>
+        </div>
+        <div class="spe-player-row" data-spe-player-additional-details ${additionalDetailsMode === 'user' ? '' : 'hidden'}>
+            <label class="flex1">Your character details
+                <textarea id="spe_player_additional_details" class="text_pole" placeholder="Optional background, Earth life, appearance, clothing, training, inventory, origin, scars, or other fixed starting facts.">${escapeHtml(additionalDetails)}</textarea>
             </label>
         </div>
         <div class="spe-player-actions">
@@ -3278,6 +3292,7 @@ function buildPlayerPersonaSheetHtml(creator) {
 
 function bindPlayerSetupCardEvents(card, context = getContext()) {
     if (!card) return;
+    const updateOptionalFields = () => updatePlayerIdentityOptionalFields(card);
     const runButtonAction = async button => {
         if (!button || state.playerSetupBusy) return;
         const action = button.getAttribute('data-spe-player-action');
@@ -3291,6 +3306,10 @@ function bindPlayerSetupCardEvents(card, context = getContext()) {
             await runButtonAction(button);
         };
     });
+    card.querySelector('#spe_player_race')?.addEventListener('change', updateOptionalFields);
+    card.querySelector('#spe_player_race_description_mode')?.addEventListener('change', updateOptionalFields);
+    card.querySelector('#spe_player_additional_details_mode')?.addEventListener('change', updateOptionalFields);
+    updateOptionalFields();
     card.onclick = async event => {
         const button = event.target?.closest?.('[data-spe-player-action]');
         if (!button || !card.contains(button)) return;
@@ -3298,6 +3317,16 @@ function bindPlayerSetupCardEvents(card, context = getContext()) {
         event.stopPropagation();
         await runButtonAction(button);
     };
+}
+
+function updatePlayerIdentityOptionalFields(card) {
+    if (!card) return;
+    const raceIsCustom = card.querySelector('#spe_player_race')?.value === 'custom';
+    const raceDescriptionMode = card.querySelector('#spe_player_race_description_mode')?.value || 'system';
+    const additionalDetailsMode = card.querySelector('#spe_player_additional_details_mode')?.value || 'system';
+    card.querySelectorAll('[data-spe-player-custom-race]').forEach(element => { element.hidden = !raceIsCustom; });
+    card.querySelectorAll('[data-spe-player-race-description]').forEach(element => { element.hidden = !(raceIsCustom && raceDescriptionMode === 'user'); });
+    card.querySelectorAll('[data-spe-player-additional-details]').forEach(element => { element.hidden = additionalDetailsMode !== 'user'; });
 }
 
 async function handlePlayerSetupAction(action, details = {}, context = getContext()) {
@@ -3415,7 +3444,10 @@ function syncIdentityInputs(creator) {
     creator.identity.specifiedRace = String(document.getElementById('spe_player_race_specify')?.value || creator.identity.specifiedRace || '').trim();
     creator.identity.specifiedRaceDescriptionMode = document.getElementById('spe_player_race_description_mode')?.value || creator.identity.specifiedRaceDescriptionMode || 'system';
     creator.identity.specifiedRaceDescription = String(document.getElementById('spe_player_race_description')?.value || creator.identity.specifiedRaceDescription || '').trim();
-    creator.identity.appearance = String(document.getElementById('spe_player_appearance')?.value || creator.identity.appearance || '').trim();
+    const additionalDetailsMode = document.getElementById('spe_player_additional_details_mode')?.value || creator.identity.additionalDetailsMode || 'system';
+    creator.identity.additionalDetailsMode = additionalDetailsMode === 'user' ? 'user' : 'system';
+    creator.identity.additionalDetails = String(document.getElementById('spe_player_additional_details')?.value || creator.identity.additionalDetails || creator.identity.appearance || '').trim();
+    delete creator.identity.appearance;
 }
 
 async function approvePlayerSheet(root, context = getContext()) {
@@ -3526,9 +3558,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
     const raceInstruction = buildNewCharacterRaceInstruction(identity);
     const nameInstruction = buildNewCharacterNameInstruction(identity);
     const sexInstruction = buildNewCharacterSexInstruction(identity);
-    const appearanceInstruction = identity.appearance
-        ? `Use these user appearance notes as hard constraints: ${identity.appearance}.`
-        : 'Generate a fitting appearance from the chosen race, genre, and concept.';
+    const additionalDetailsInstruction = buildNewCharacterAdditionalDetailsInstruction(identity);
     const prompt = [
         {
             role: 'system',
@@ -3544,7 +3574,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
             content:
                 'Return only the finished character sheet in markdown. No preface and no questions.\n\n' +
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
-                `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${appearanceInstruction}\n\n` +
+                `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
                 'Required sections:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
@@ -3574,6 +3604,23 @@ function buildNewCharacterSexInstruction(identity = {}) {
         return `Use this character sex exactly: ${sex}.`;
     }
     return 'Generate a fitting character sex or leave it unspecified.';
+}
+
+function buildNewCharacterAdditionalDetailsInstruction(identity = {}) {
+    const details = String(identity.additionalDetails || identity.appearance || '').trim();
+    if (identity.additionalDetailsMode === 'user' && details) {
+        return [
+            'The user-provided additional character details are locked starting facts. Preserve their meaning exactly.',
+            'Use them to shape background, Earth life, arrival/origin, appearance, clothing, profession, prior training, inventory, scars, marks, body type, race flavor, or other fixed sheet details as applicable.',
+            'Fill missing details normally, but do not contradict, replace, weaken, intensify, or ignore these notes.',
+            'Do not turn these notes into personality, future choices, goals, fears, habits, tactics, morals, emotional reactions, preferred behavior, or statements about what the character will/may/usually/tends to do.',
+            identity.genre === 'Isekai'
+                ? 'Because the selected genre is Isekai, any Earth-life details in these notes describe the character before arrival in the new world.'
+                : '',
+            `LOCKED USER ADDITIONAL DETAILS:\n${details}`,
+        ].filter(Boolean).join('\n');
+    }
+    return 'Generate fitting background, origin, appearance, clothing, training, inventory, and fixed details from the chosen race, genre, stats, and concept.';
 }
 
 function buildNewCharacterStatInstruction(stats = {}) {
