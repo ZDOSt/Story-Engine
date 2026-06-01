@@ -6955,7 +6955,8 @@ const tests = [
       assert.ok(displayIndex > trackerIndex, 'Final displayed narration should use the post-guard narration text.');
       assert.match(source, /setChatInputLocked\(true, 'Finalizing narration\.\.\.'\)/);
       assert.match(source, /Prose Guard failed; keeping sanitized narrator text/);
-      assert.match(source, /beginProseGuardDisplayIntercept\(type \|\| 'normal'\)/);
+      assert.match(source, /state\.lastNarratorHandoff = narratorContext;\s*beginProseGuardDisplayIntercept\(state\.pendingGeneration\.type \|\| 'normal'\)/);
+      assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: true \}\);\s*showProgress\('Computing structured pre-flight\.\.\.'\)/);
       assert.match(source, /function ensureProseGuardDisplayInterceptor\(\)/);
       assert.match(source, /function beginProseGuardDisplayIntercept\(type, dryRun = false\) \{\s*ensureProseGuardDisplayInterceptor\(\);/);
       assert.match(source, /eventTypes\.GENERATION_STARTED\) context\.eventSource\.on\(context\.eventTypes\.GENERATION_STARTED, ensureProseGuardDisplayInterceptor\)/);

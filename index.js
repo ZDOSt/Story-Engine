@@ -2881,7 +2881,6 @@ function ensureProseGuardDisplayStyles() {
     const style = document.createElement('style');
     style.id = PROSE_GUARD_DISPLAY_STYLE_ID;
     style.textContent = `
-        #chat.${PROSE_GUARD_HIDE_NEXT_CLASS} > .mes:not([is_user="true"]):last-child .mes_text,
         #chat .mes.${PROSE_GUARD_HIDDEN_MESSAGE_CLASS} .mes_text,
         #chat .mes_text.${PROSE_GUARD_HIDDEN_TEXT_CLASS} {
             display: none !important;
@@ -2947,7 +2946,7 @@ function hasPendingProseGuardGenerationInput() {
 }
 
 function hasActiveProseGuardDisplayRun() {
-    return Boolean(hasPendingProseGuardGenerationInput() || state.pendingRun || state.lastNarratorHandoff);
+    return Boolean(state.pendingRun || state.lastNarratorHandoff);
 }
 
 function tryAttachProseGuardPendingMessage() {
@@ -2977,6 +2976,7 @@ function shouldUseProseGuardDisplayIntercept(type) {
         && normalizedType !== 'impersonate'
         && Boolean(state.pendingGeneration)
         && hasPendingProseGuardGenerationInput()
+        && hasActiveProseGuardDisplayRun()
         && ['normal', 'swipe', 'regenerate', 'continue'].includes(normalizedType);
 }
 
@@ -3071,6 +3071,9 @@ function beginProseGuardDisplayIntercept(type, dryRun = false) {
 function ensureProseGuardDisplayInterceptor() {
     if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
     ensureProseGuardDisplayStyles();
+    if (!hasActiveProseGuardDisplayRun()) {
+        releaseProseGuardDisplayIntercept({ restore: true });
+    }
     tryAttachProseGuardPendingMessage();
     if (state.proseGuardChatObserver) return;
 
@@ -5515,7 +5518,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         createdAt: Date.now(),
     };
     state.activeRunId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    beginProseGuardDisplayIntercept(type || 'normal');
+    releaseProseGuardDisplayIntercept({ restore: true });
     showProgress('Computing structured pre-flight...');
 
     return false;
@@ -5573,6 +5576,7 @@ async function handleChatCompletionPromptReady(eventData) {
         };
         state.lastNarratorHandoff = narratorContext;
 
+        beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
         sanitizeFinalPromptHistory(eventData.chat);
         appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
         clearAllProgress();
