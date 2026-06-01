@@ -6119,6 +6119,7 @@ const tests = [
       assert.match(semanticSource, /Identify ResolutionEngine\.identifyTargets\.PowerActors during target discovery/);
       assert.match(semanticSource, /PowerActorEnmity\.assessments is audit-only diagnosis/);
       assert.match(semanticSource, /Assess semantically, not by keywords or titles/);
+      assert.match(semanticSource, /A prominent merchant should be assessed as a potential power actor/);
       assert.match(semanticSource, /PowerActors and PowerActorEnmity never replace RelationshipEngine/);
       assert.match(semanticSource, /PowerActors and PowerActorEnmity never replace RelationshipEngine/);
       assert.match(semanticSource, /powerActorEnmity/);
@@ -7265,15 +7266,27 @@ const tests = [
       );
       assert.match(source, /postNarrationProseGuardEnabled:\s*true/);
       assert.match(source, /proseGuardConnectionProfile:\s*PROSE_GUARD_PROFILE_CURRENT/);
+      assert.match(source, /proseGuardFormattingEnabled:\s*true/);
+      assert.match(source, /proseGuardFormattingPrompt:\s*DEFAULT_PROSE_GUARD_FORMATTING_PROMPT/);
       assert.match(source, /id="structured_preflight_prose_guard_enabled"/);
       assert.match(source, /id="structured_preflight_prose_guard_profile"/);
+      assert.match(source, /id="structured_preflight_prose_guard_formatting_enabled"/);
+      assert.match(source, /id="structured_preflight_prose_guard_formatting_prompt"/);
+      assert.match(source, /id="structured_preflight_reset_prose_guard_formatting"/);
       assert.match(source, /function buildProseGuardPrompt\(narrationText, latestUserText = ''\)/);
       assert.match(source, /ONE-CALL PRIVATE PASS PIPELINE/);
       assert.match(source, /literalStyleFilter\(response\)/);
       assert.match(source, /chronologyControl\(response, RECENT_USER_INPUT\)/);
       assert.match(source, /responseEndpointControl\(response\)/);
+      assert.match(source, /formattingControl\(response\)/);
       assert.match(source, /integrityCheck\(original, corrected\)/);
+      assert.match(source, /DEFAULT_PROSE_GUARD_FORMATTING_PROMPT/);
+      assert.match(source, /Underline all character names, location names, unnamed scene roles, scene placeholders, and role\/pronoun references/);
+      assert.match(source, /__the shopkeeper__/);
+      assert.match(source, /One speaker equals one cohesive block/);
+      assert.match(source, /Use \*\*\* only for environmental narration to character block/);
       assert.match(source, /PROTECTED FACTS \/ INTEGRITY LOCK/);
+      assert.match(source, /Required formatting is protected unless it violates endpoint control/);
       assert.match(source, /Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue/);
       assert.match(source, /Exception: remove every sentence, paragraph, separator line, or outro/);
       assert.match(source, /success or failure, landed contact, injuries, death, condition, intimacy permission/);
@@ -7533,6 +7546,10 @@ const tests = [
         'structured_preflight_tracker_profile',
         'structured_preflight_prose_guard_enabled',
         'structured_preflight_prose_guard_profile',
+        'structured_preflight_prose_guard_formatting_enabled',
+        'structured_preflight_prose_guard_formatting_drawer',
+        'structured_preflight_reset_prose_guard_formatting',
+        'structured_preflight_prose_guard_formatting_prompt',
         'structured_preflight_progression_enabled',
         'structured_preflight_progression_profile',
         'structured_preflight_name_style',

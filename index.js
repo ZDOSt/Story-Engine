@@ -170,6 +170,46 @@ Use plain anatomical language when the scene is explicit. Avoid coy euphemism, d
 Write in cohesive scene beats. Combine related action, posture, object handling, dialogue, and consequence into natural paragraphs. Use shorter sentences for impact and longer sentences for continuous movement, observation, or pressure.
 
 The prose should be detailed without becoming ornate, physical without becoming robotic, and intense without losing spatial clarity.`;
+const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
+Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
+
+UNDERLINE RULE:
+- Underline all character names, location names, unnamed scene roles, scene placeholders, and role/pronoun references with double underscores.
+- This includes proper names and descriptive references such as __Seraphina__, __Urakami Village__, __the guard__, __the innkeeper__, __the shopkeeper__, __the teacher__, __the student__, __the girl__, or __the merchant__.
+- Preserve existing valid __underlines__. Add missing underlines only around the exact name/role phrase already present. Do not invent names, titles, labels, or new role descriptions.
+
+BLOCK RULE:
+- One speaker equals one cohesive block.
+- Keep one speaker's dialogue, action, and follow-up dialogue together when they belong to the same beat.
+- Do not split the same speaker across separators.
+- Max 3 paragraphs per speaker/NPC.
+- Paragraph breaks are allowed only inside the same speaker block.
+
+SEPARATOR RULE:
+- Use *** only for environmental narration to character block, speaker change, major scene/time shift, or OOC message.
+- Never use *** inside a single speaker block.
+- Never use *** between one speaker's dialogue and that same speaker's action.
+- Never use *** between one speaker's first line and second line.
+- If endpoint cleanup removes text, remove only separators made empty or invalid by that cut.
+
+VALID FORMAT:
+***
+The fire cracked in the hearth. Rain streaked the windows.
+***
+"I told you not to come." __Seraphina__ set the glass down. "But you never listen."
+She turned to the window. "You never do."
+***
+__The innkeeper__ shrugged. "Not my business."
+
+INVALID FORMAT:
+***
+"I told you."
+***
+She set the glass down.
+***
+"But you never listen."
+
+Formatting violations are invalid. Repair formatting before output.`;
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
   olfactoryGate(input, context):
     policy: STRICT_LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
@@ -383,6 +423,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     trackerConnectionProfile: TRACKER_PROFILE_CURRENT,
     postNarrationProseGuardEnabled: true,
     proseGuardConnectionProfile: PROSE_GUARD_PROFILE_CURRENT,
+    proseGuardFormattingEnabled: true,
+    proseGuardFormattingPrompt: DEFAULT_PROSE_GUARD_FORMATTING_PROMPT,
     characterProgressionEnabled: true,
     progressionConnectionProfile: PROGRESSION_PROFILE_CURRENT,
     writingStyleEnabled: true,
@@ -745,6 +787,9 @@ function refreshSettingsControls() {
     const trackerProfileSelect = document.getElementById('structured_preflight_tracker_profile');
     const proseGuardEnabledCheckbox = document.getElementById('structured_preflight_prose_guard_enabled');
     const proseGuardProfileSelect = document.getElementById('structured_preflight_prose_guard_profile');
+    const proseGuardFormattingEnabled = document.getElementById('structured_preflight_prose_guard_formatting_enabled');
+    const proseGuardFormattingDrawer = document.getElementById('structured_preflight_prose_guard_formatting_drawer');
+    const proseGuardFormattingPrompt = document.getElementById('structured_preflight_prose_guard_formatting_prompt');
     const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
     const progressionProfileSelect = document.getElementById('structured_preflight_progression_profile');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
@@ -757,6 +802,10 @@ function refreshSettingsControls() {
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (proseGuardEnabledCheckbox) proseGuardEnabledCheckbox.checked = settings.postNarrationProseGuardEnabled !== false;
+    if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.checked = settings.proseGuardFormattingEnabled !== false;
+    if (proseGuardFormattingPrompt && proseGuardFormattingPrompt.value !== settings.proseGuardFormattingPrompt) {
+        proseGuardFormattingPrompt.value = String(settings.proseGuardFormattingPrompt ?? DEFAULT_PROSE_GUARD_FORMATTING_PROMPT);
+    }
     if (progressionEnabledCheckbox) progressionEnabledCheckbox.checked = settings.characterProgressionEnabled !== false;
     if (disableThinkingCheckbox) disableThinkingCheckbox.checked = settings.disableSemanticThinking !== false;
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
@@ -803,6 +852,12 @@ function refreshSettingsControls() {
     if (profileSelect) profileSelect.disabled = !enabled;
     if (trackerProfileSelect) trackerProfileSelect.disabled = settings.postNarrationTrackerEnabled === false;
     if (proseGuardProfileSelect) proseGuardProfileSelect.disabled = settings.postNarrationProseGuardEnabled === false;
+    if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.disabled = settings.postNarrationProseGuardEnabled === false;
+    if (proseGuardFormattingPrompt) proseGuardFormattingPrompt.disabled = settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
+    if (proseGuardFormattingDrawer) {
+        proseGuardFormattingDrawer.hidden = settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
+        if (proseGuardFormattingDrawer.hidden) proseGuardFormattingDrawer.open = false;
+    }
     if (progressionProfileSelect) progressionProfileSelect.disabled = settings.characterProgressionEnabled === false;
     if (writingStylePrompt) writingStylePrompt.disabled = settings.writingStyleEnabled === false;
     if (writingStyleDrawer) {
@@ -1061,6 +1116,20 @@ function renderSettingsPanel() {
                                 <label for="structured_preflight_prose_guard_profile">Prose Guard profile</label>
                                 <select id="structured_preflight_prose_guard_profile" class="text_pole flex1"></select>
                             </div>
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_prose_guard_formatting_enabled" type="checkbox">
+                                <span>Enable Prose Guard formatting rules</span>
+                            </label>
+                            <details id="structured_preflight_prose_guard_formatting_drawer" data-structured-preflight-prompt-drawer>
+                                <summary class="spe-settings-writing-summary">
+                                    <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Formatting Prompt</button>
+                                    <button id="structured_preflight_reset_prose_guard_formatting" class="menu_button" type="button">Reset</button>
+                                </summary>
+                                <div class="spe-settings-body">
+                                    <small class="spe-settings-note">Included only in Prose Guard. It repairs display formatting after narration without changing mechanics or scene content.</small>
+                                    <textarea id="structured_preflight_prose_guard_formatting_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
+                                </div>
+                            </details>
                             <small class="spe-settings-note">Runs after narration and before tracker update. It edits only prose-rule violations and preserves scene outcomes.</small>
                         </div>
                     </section>
@@ -1147,6 +1216,22 @@ function renderSettingsPanel() {
     document.getElementById('structured_preflight_prose_guard_profile')?.addEventListener('change', event => {
         const selected = String(event.target?.value || PROSE_GUARD_PROFILE_CURRENT);
         settings.proseGuardConnectionProfile = selected || PROSE_GUARD_PROFILE_CURRENT;
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_prose_guard_formatting_enabled')?.addEventListener('change', event => {
+        settings.proseGuardFormattingEnabled = Boolean(event.target?.checked);
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_prose_guard_formatting_prompt')?.addEventListener('input', event => {
+        settings.proseGuardFormattingPrompt = String(event.target?.value ?? '');
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_reset_prose_guard_formatting')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        settings.proseGuardFormattingPrompt = DEFAULT_PROSE_GUARD_FORMATTING_PROMPT;
+        refreshSettingsControls();
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_progression_enabled')?.addEventListener('change', event => {
@@ -4917,6 +5002,10 @@ async function persistMetadata(context = getContext()) {
 }
 
 function buildProseGuardPrompt(narrationText, latestUserText = '') {
+    const settings = getSettings();
+    const formattingPrompt = settings.proseGuardFormattingEnabled !== false
+        ? String(settings.proseGuardFormattingPrompt ?? DEFAULT_PROSE_GUARD_FORMATTING_PROMPT).trim()
+        : '';
     return [
         'STORY_ENGINE_PROSE_GUARD',
         '',
@@ -4933,10 +5022,18 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '1. literalStyleFilter(response): remove literal prose/style violations only.',
         '2. chronologyControl(response, RECENT_USER_INPUT): remove T+1/user-input restatement violations only.',
         '3. responseEndpointControl(response): cut invalid after-beat tailing only.',
-        '4. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
+        ...(formattingPrompt ? [
+            '4. formattingControl(response): preserve and repair required markdown formatting only.',
+            '5. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
+        ] : [
+            '4. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
+        ]),
         '',
         'PROTECTED FACTS / INTEGRITY LOCK:',
         '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
+        ...(formattingPrompt ? [
+            '- Required formatting is protected unless it violates endpoint control: valid __underlined names/roles/locations__, valid *** separators, speaker block structure, and paragraph breaks.',
+        ] : []),
         '- Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
         '- Exception: remove every sentence, paragraph, separator line, or outro that appears after the final response beat unless it is required by an explicit resolved mechanic.',
         '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
@@ -4991,9 +5088,20 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Ban explicit waiting, "she waits," "awaits your response," "what do you do," "the choice is yours," all-eyes-on-user framing, mood-only silence, unrelated ambience, outro paragraphs, scene-break tails, and extra narration after the response beat.',
         'Do not replace after-beat tailing with different after-beat tailing. Cut it.',
         '',
-        'PASS 4: integrityCheck(original, corrected)',
+        ...(formattingPrompt ? [
+            'PASS 4: formattingControl(response)',
+            'Goal: preserve and repair required display formatting without changing scene content.',
+            formattingPrompt,
+            '',
+            'PASS 5: integrityCheck(original, corrected)',
+        ] : [
+            'PASS 4: integrityCheck(original, corrected)',
+        ]),
         'Goal: return only a corrected narration that preserves the resolved scene.',
         'Before answering, verify that the corrected text did not change protected facts, did not add a new scene beat, did not delete a valid pre-boundary scene beat, and did not reinterpret mechanics or character decisions.',
+        ...(formattingPrompt ? [
+            'Verify that required formatting remains intact after prose corrections. Do not flatten speaker blocks, remove valid underlines, or remove valid separators.',
+        ] : []),
         'If a proposed correction would change protected facts, keep the original valid content and only remove the prose violation.',
         'If a sentence is both a valid resolved scene beat and contains a prose violation, rewrite the sentence narrowly instead of deleting it.',
         '',
