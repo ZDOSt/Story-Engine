@@ -6814,8 +6814,8 @@ const tests = [
     name: '45 writing style placement labels and depth wiring are correct',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
-      assert.match(source, /<option value="before_prompt">↑ Char<\/option>/);
-      assert.match(source, /<option value="in_prompt">↓ Char<\/option>/);
+      assert.match(source, /<option value="before_prompt">Above Character<\/option>/);
+      assert.match(source, /<option value="in_prompt">Below Character<\/option>/);
       assert.doesNotMatch(source, /â†|Ã¢/);
       assert.match(source, /writingStylePlacement:\s*'before_prompt'/);
       assert.match(source, /writingStyleDepth:\s*0/);
@@ -7143,6 +7143,72 @@ const tests = [
       assert.match(source, /\[-\+\]\?\\d\+\\s\*\(\?:to\|bonus\|modifier/);
       assert.match(source, /feet\|foot\|ft\|yards\?\|meters\?/);
       assert.match(source, /uses\?\\s\+per\|times\?\\s\+per\|per\\s\+\(\?:day\|scene\|turn\|round\|rest\)/);
+    },
+  },
+  {
+    name: '51 settings panel is grouped by execution order and preserves existing controls',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const renderStart = source.indexOf('function renderSettingsPanel()');
+      const renderEnd = source.indexOf('const settings = getSettings();', renderStart);
+      assert.ok(renderStart > 0, 'renderSettingsPanel should exist.');
+      assert.ok(renderEnd > renderStart, 'renderSettingsPanel setup markup should be readable.');
+      const renderSource = source.slice(renderStart, renderEnd);
+
+      assert.match(source, /const SETTINGS_STYLE_ID = 'structured_preflight_settings_styles'/);
+      assert.match(source, /function ensureSettingsPanelStyles\(\)/);
+      assert.ok(renderSource.includes('ensureSettingsPanelStyles();'));
+      assert.ok(renderSource.includes('spe-settings-shell'));
+      assert.ok(renderSource.includes('spe-settings-section'));
+
+      const sections = [
+        ['data-spe-settings-step="setup"', '0. Setup', 'Player Setup'],
+        ['data-spe-settings-step="semantic"', '1. First model call', 'Semantic Preflight'],
+        ['data-spe-settings-step="narrator-inputs"', '2. Narrator inputs', 'Narrator Context'],
+        ['data-spe-settings-step="prose-guard"', '3. After narration', 'Prose Guard'],
+        ['data-spe-settings-step="tracker"', '4. After final prose', 'Tracker Update'],
+        ['data-spe-settings-step="progression"', '5. Advancement', 'Character Progression'],
+      ];
+      let previousIndex = -1;
+      for (const [step, kicker, title] of sections) {
+        const stepIndex = renderSource.indexOf(step);
+        assert.ok(stepIndex > previousIndex, `${step} should appear in execution order.`);
+        assert.ok(renderSource.indexOf(kicker, stepIndex) > stepIndex, `${kicker} label should be inside ${step}.`);
+        assert.ok(renderSource.indexOf(title, stepIndex) > stepIndex, `${title} title should be inside ${step}.`);
+        previousIndex = stepIndex;
+      }
+
+      const controlIds = [
+        'structured_preflight_use_separate_semantic_settings',
+        'structured_preflight_semantic_profile',
+        'structured_preflight_refresh_semantic_settings',
+        'structured_preflight_disable_semantic_thinking',
+        'structured_preflight_post_tracker_enabled',
+        'structured_preflight_tracker_profile',
+        'structured_preflight_prose_guard_enabled',
+        'structured_preflight_prose_guard_profile',
+        'structured_preflight_progression_enabled',
+        'structured_preflight_progression_profile',
+        'structured_preflight_name_style',
+        'structured_preflight_writing_style_enabled',
+        'structured_preflight_writing_style_drawer',
+        'structured_preflight_reset_writing_style',
+        'structured_preflight_writingStyle_placement',
+        'structured_preflight_writingStyle_depth_row',
+        'structured_preflight_writingStyle_depth',
+        'structured_preflight_writingStyle_role',
+        'structured_preflight_writing_style_prompt',
+        'structured_preflight_player_setup_status',
+        'structured_preflight_show_player_setup',
+        'structured_preflight_force_player_setup',
+        'structured_preflight_reset_player_setup',
+      ];
+      for (const id of controlIds) {
+        const count = renderSource.split(`id="${id}"`).length - 1;
+        assert.equal(count, 1, `${id} should remain present exactly once in the settings markup.`);
+      }
+
+      assert.doesNotMatch(renderSource, /<hr>/);
     },
   },
 ];

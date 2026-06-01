@@ -22,6 +22,7 @@ import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMeta
 const EXTENSION_NAME = 'Story Engine';
 const SETTINGS_KEY = 'structuredPreflightEngines';
 const SETTINGS_CONTAINER_ID = 'structured_preflight_settings_container';
+const SETTINGS_STYLE_ID = 'structured_preflight_settings_styles';
 const NARRATOR_PROMPT_KEY = 'structured_preflight_narrator_context';
 const WRITING_STYLE_PROMPT_KEY = 'structured_preflight_10_writing_style';
 const PROSE_RULES_PROMPT_KEY = 'structured_preflight_20_prose_rules';
@@ -827,6 +828,115 @@ function refreshSettingsControls() {
     }
 }
 
+function ensureSettingsPanelStyles() {
+    if (document.getElementById(SETTINGS_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = SETTINGS_STYLE_ID;
+    style.textContent = `
+        #${SETTINGS_CONTAINER_ID} .spe-settings-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 8px 0 10px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section {
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.16));
+            border-radius: 6px;
+            background: rgba(255,255,255,0.035);
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #1a1a1a) 88%, transparent);
+            padding: 12px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-kicker {
+            display: block;
+            margin-bottom: 4px;
+            color: var(--SmartThemeQuoteColor, #aaa);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-title {
+            margin: 0;
+            font-size: 1.05rem;
+            font-weight: 700;
+            line-height: 1.25;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-description {
+            display: block;
+            margin-top: 5px;
+            color: var(--SmartThemeQuoteColor, #aaa);
+            line-height: 1.35;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-body {
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+            margin-top: 11px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-row label:not(.checkbox_label) {
+            min-width: 8.5rem;
+            margin: 0;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-row select {
+            min-width: 0;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-note {
+            color: var(--SmartThemeQuoteColor, #aaa);
+            line-height: 1.35;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-player-status {
+            display: block;
+            margin-bottom: 2px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-writing-summary {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        #${SETTINGS_CONTAINER_ID} details[data-structured-preflight-prompt-drawer] summary {
+            list-style: none;
+        }
+        #${SETTINGS_CONTAINER_ID} details[data-structured-preflight-prompt-drawer] summary::-webkit-details-marker {
+            display: none;
+        }
+        #${SETTINGS_CONTAINER_ID} details[data-structured-preflight-prompt-drawer] {
+            margin-top: -2px;
+        }
+        #${SETTINGS_CONTAINER_ID} details[data-structured-preflight-prompt-drawer] > .spe-settings-body {
+            margin-top: 9px;
+        }
+        @media (max-width: 720px) {
+            #${SETTINGS_CONTAINER_ID} .spe-settings-row {
+                align-items: stretch;
+                flex-direction: column;
+            }
+            #${SETTINGS_CONTAINER_ID} .spe-settings-row label:not(.checkbox_label) {
+                min-width: 0;
+            }
+            #${SETTINGS_CONTAINER_ID} .spe-settings-row .menu_button {
+                width: 100%;
+            }
+            #${SETTINGS_CONTAINER_ID} .spe-settings-writing-summary {
+                align-items: stretch;
+                flex-direction: column;
+            }
+        }
+    `;
+    document.head.append(style);
+}
+
 function collapsePromptOptionDrawers(container = document) {
     container.querySelectorAll('[data-structured-preflight-prompt-drawer]').forEach(details => {
         details.open = false;
@@ -841,6 +951,7 @@ function renderSettingsPanel() {
     }
 
     document.getElementById(SETTINGS_CONTAINER_ID)?.remove();
+    ensureSettingsPanelStyles();
 
     const container = document.createElement('div');
     container.id = SETTINGS_CONTAINER_ID;
@@ -851,97 +962,145 @@ function renderSettingsPanel() {
                 <b>${EXTENSION_NAME}</b>
             </div>
             <div class="inline-drawer-content">
-                <label class="checkbox_label flexNoGap">
-                    <input id="structured_preflight_use_separate_semantic_settings" type="checkbox">
-                    <span>Use separate semantic connection profile</span>
-                </label>
-                <div class="flex-container alignItemsBaseline">
-                    <label for="structured_preflight_semantic_profile">Semantic connection profile</label>
-                    <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
-                </div>
-                <div class="flex-container alignitemscenter">
-                    <small class="flex1">The semantic pass uses the fully assembled SillyTavern prompt stack and internally forces deterministic request settings.</small>
-                    <button id="structured_preflight_refresh_semantic_settings" class="menu_button">Refresh</button>
-                </div>
-                <label class="checkbox_label flexNoGap">
-                    <input id="structured_preflight_disable_semantic_thinking" type="checkbox">
-                    <span>Disable thinking for semantic requests</span>
-                </label>
-                <small>Applies only to Story Engine semantic, tracker, and player setup calls. Main narration keeps its own profile settings.</small>
-                <label class="checkbox_label flexNoGap">
-                    <input id="structured_preflight_post_tracker_enabled" type="checkbox">
-                    <span>Enable post-narration tracker update</span>
-                </label>
-                <div class="flex-container alignItemsBaseline">
-                    <label for="structured_preflight_tracker_profile">Tracker connection profile</label>
-                    <select id="structured_preflight_tracker_profile" class="text_pole flex1"></select>
-                </div>
-                <small>Runs after narration to update the visible tracker from final prose. Disable for compatibility with other tracker extensions.</small>
-                <label class="checkbox_label flexNoGap">
-                    <input id="structured_preflight_prose_guard_enabled" type="checkbox">
-                    <span>Enable Prose Guard</span>
-                </label>
-                <div class="flex-container alignItemsBaseline">
-                    <label for="structured_preflight_prose_guard_profile">Prose Guard connection profile</label>
-                    <select id="structured_preflight_prose_guard_profile" class="text_pole flex1"></select>
-                </div>
-                <small>Runs after narration and before tracker update. It edits only prose-rule violations and preserves scene outcomes.</small>
-                <label class="checkbox_label flexNoGap">
-                    <input id="structured_preflight_progression_enabled" type="checkbox">
-                    <span>Enable Character Progression</span>
-                </label>
-                <div class="flex-container alignItemsBaseline">
-                    <label for="structured_preflight_progression_profile">Progression ability profile</label>
-                    <select id="structured_preflight_progression_profile" class="text_pole flex1"></select>
-                </div>
-                <small>Counts one critical accomplishment per turn. Ability options use this profile and default to the semantic profile.</small>
-                <hr>
-                <div class="flex-container alignItemsBaseline">
-                    <label for="structured_preflight_name_style">Name style</label>
-                    <select id="structured_preflight_name_style" class="text_pole flex1"></select>
-                </div>
-                <small>Controls deterministic generated name pools sent to the narrator prompt.</small>
-                <hr>
-                <label class="checkbox_label flexNoGap">
-                    <input id="structured_preflight_writing_style_enabled" type="checkbox">
-                    <span>Enable Writing Style</span>
-                </label>
-                <details id="structured_preflight_writing_style_drawer" data-structured-preflight-prompt-drawer>
-                    <summary class="flex-container alignitemscenter">
-                        <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Writing Style</button>
-                        <button id="structured_preflight_reset_writing_style" class="menu_button" type="button">Reset</button>
-                    </summary>
-                    <div class="flex-container alignItemsBaseline">
-                        <label for="structured_preflight_writingStyle_placement">Placement</label>
-                        <select id="structured_preflight_writingStyle_placement" class="text_pole flex1">
-                            <option value="before_prompt">↑ Char</option>
-                            <option value="in_prompt">↓ Char</option>
-                            <option value="in_chat">In-Chat @Depth</option>
-                            <option value="none">Disabled</option>
-                        </select>
-                    </div>
-                    <div id="structured_preflight_writingStyle_depth_row" class="flex-container alignItemsBaseline">
-                        <label for="structured_preflight_writingStyle_depth">Depth</label>
-                        <input id="structured_preflight_writingStyle_depth" class="text_pole widthNatural" type="number" min="0" max="10000" step="1">
-                        <label for="structured_preflight_writingStyle_role">Role</label>
-                        <select id="structured_preflight_writingStyle_role" class="text_pole flex1">
-                            <option value="0">System</option>
-                            <option value="1">User</option>
-                            <option value="2">Assistant</option>
-                        </select>
-                    </div>
-                    <small>Injected into the regular SillyTavern prompt stack. Edit freely; whatever text is here will be sent as writing style context.</small>
-                    <textarea id="structured_preflight_writing_style_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
-                </details>
-                <hr>
-                <div class="flex-container alignitemscenter">
-                    <small id="structured_preflight_player_setup_status" class="flex1"></small>
-                    <button id="structured_preflight_show_player_setup" class="menu_button">Show Player Setup</button>
-                    <button id="structured_preflight_force_player_setup" class="menu_button">Run Character Creator</button>
-                    <button id="structured_preflight_reset_player_setup" class="menu_button">Reset Chat Setup</button>
+                <div class="spe-settings-shell">
+                    <section class="spe-settings-section" data-spe-settings-step="setup">
+                        <span class="spe-settings-kicker">0. Setup</span>
+                        <h4 class="spe-settings-title">Player Setup</h4>
+                        <small class="spe-settings-description">Create, resume, or reset the playable character shell before roleplay generation.</small>
+                        <div class="spe-settings-body">
+                            <small id="structured_preflight_player_setup_status" class="spe-settings-player-status"></small>
+                            <div class="spe-settings-buttons">
+                                <button id="structured_preflight_show_player_setup" class="menu_button">Show Player Setup</button>
+                                <button id="structured_preflight_force_player_setup" class="menu_button">Run Character Creator</button>
+                                <button id="structured_preflight_reset_player_setup" class="menu_button">Reset Chat Setup</button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="spe-settings-section" data-spe-settings-step="semantic">
+                        <span class="spe-settings-kicker">1. First model call</span>
+                        <h4 class="spe-settings-title">Semantic Preflight</h4>
+                        <small class="spe-settings-description">The private structured pass reads the assembled prompt stack and resolves mechanics before narration.</small>
+                        <div class="spe-settings-body">
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_use_separate_semantic_settings" type="checkbox">
+                                <span>Use separate semantic connection profile</span>
+                            </label>
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_semantic_profile">Semantic profile</label>
+                                <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
+                            </div>
+                            <div class="spe-settings-row">
+                                <small class="spe-settings-note flex1">Uses the fully assembled SillyTavern prompt stack and internally forces deterministic request settings.</small>
+                                <button id="structured_preflight_refresh_semantic_settings" class="menu_button">Refresh</button>
+                            </div>
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_disable_semantic_thinking" type="checkbox">
+                                <span>Disable thinking for semantic requests</span>
+                            </label>
+                            <small class="spe-settings-note">Applies only to Story Engine semantic, tracker, Prose Guard, progression, and player setup calls. Main narration keeps its own profile settings.</small>
+                        </div>
+                    </section>
+
+                    <section class="spe-settings-section" data-spe-settings-step="narrator-inputs">
+                        <span class="spe-settings-kicker">2. Narrator inputs</span>
+                        <h4 class="spe-settings-title">Narrator Context</h4>
+                        <small class="spe-settings-description">Controls deterministic name pools and optional writing style context sent into the narrator prompt.</small>
+                        <div class="spe-settings-body">
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_name_style">Name style</label>
+                                <select id="structured_preflight_name_style" class="text_pole flex1"></select>
+                            </div>
+                            <small class="spe-settings-note">Controls deterministic generated name pools sent to the narrator prompt.</small>
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_writing_style_enabled" type="checkbox">
+                                <span>Enable Writing Style</span>
+                            </label>
+                            <details id="structured_preflight_writing_style_drawer" data-structured-preflight-prompt-drawer>
+                                <summary class="spe-settings-writing-summary">
+                                    <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Writing Style</button>
+                                    <button id="structured_preflight_reset_writing_style" class="menu_button" type="button">Reset</button>
+                                </summary>
+                                <div class="spe-settings-body">
+                                    <div class="spe-settings-row">
+                                        <label for="structured_preflight_writingStyle_placement">Placement</label>
+                                        <select id="structured_preflight_writingStyle_placement" class="text_pole flex1">
+                                            <option value="before_prompt">Above Character</option>
+                                            <option value="in_prompt">Below Character</option>
+                                            <option value="in_chat">In-Chat @Depth</option>
+                                            <option value="none">Disabled</option>
+                                        </select>
+                                    </div>
+                                    <div id="structured_preflight_writingStyle_depth_row" class="spe-settings-row">
+                                        <label for="structured_preflight_writingStyle_depth">Depth</label>
+                                        <input id="structured_preflight_writingStyle_depth" class="text_pole widthNatural" type="number" min="0" max="10000" step="1">
+                                        <label for="structured_preflight_writingStyle_role">Role</label>
+                                        <select id="structured_preflight_writingStyle_role" class="text_pole flex1">
+                                            <option value="0">System</option>
+                                            <option value="1">User</option>
+                                            <option value="2">Assistant</option>
+                                        </select>
+                                    </div>
+                                    <small class="spe-settings-note">Injected into the regular SillyTavern prompt stack. Edit freely; whatever text is here will be sent as writing style context.</small>
+                                    <textarea id="structured_preflight_writing_style_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
+                                </div>
+                            </details>
+                        </div>
+                    </section>
+
+                    <section class="spe-settings-section" data-spe-settings-step="prose-guard">
+                        <span class="spe-settings-kicker">3. After narration</span>
+                        <h4 class="spe-settings-title">Prose Guard</h4>
+                        <small class="spe-settings-description">Optionally checks final narration for prose-rule violations before anything is shown as final.</small>
+                        <div class="spe-settings-body">
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_prose_guard_enabled" type="checkbox">
+                                <span>Enable Prose Guard</span>
+                            </label>
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_prose_guard_profile">Prose Guard profile</label>
+                                <select id="structured_preflight_prose_guard_profile" class="text_pole flex1"></select>
+                            </div>
+                            <small class="spe-settings-note">Runs after narration and before tracker update. It edits only prose-rule violations and preserves scene outcomes.</small>
+                        </div>
+                    </section>
+
+                    <section class="spe-settings-section" data-spe-settings-step="tracker">
+                        <span class="spe-settings-kicker">4. After final prose</span>
+                        <h4 class="spe-settings-title">Tracker Update</h4>
+                        <small class="spe-settings-description">Updates the visible tracker from the final narration text after Prose Guard finishes or is skipped.</small>
+                        <div class="spe-settings-body">
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_post_tracker_enabled" type="checkbox">
+                                <span>Enable post-narration tracker update</span>
+                            </label>
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_tracker_profile">Tracker profile</label>
+                                <select id="structured_preflight_tracker_profile" class="text_pole flex1"></select>
+                            </div>
+                            <small class="spe-settings-note">Disable for compatibility with other tracker extensions.</small>
+                        </div>
+                    </section>
+
+                    <section class="spe-settings-section" data-spe-settings-step="progression">
+                        <span class="spe-settings-kicker">5. Advancement</span>
+                        <h4 class="spe-settings-title">Character Progression</h4>
+                        <small class="spe-settings-description">Counts critical accomplishments and offers stat increases or generated ability swaps when advancement is ready.</small>
+                        <div class="spe-settings-body">
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_progression_enabled" type="checkbox">
+                                <span>Enable Character Progression</span>
+                            </label>
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_progression_profile">Progression profile</label>
+                                <select id="structured_preflight_progression_profile" class="text_pole flex1"></select>
+                            </div>
+                            <small class="spe-settings-note">Counts one critical accomplishment per turn. Ability options use this profile and default to the semantic profile.</small>
+                        </div>
+                    </section>
                 </div>
             </div>
-	        </div>`;
+        </div>`;
     host.prepend(container);
     collapsePromptOptionDrawers(container);
     container.querySelector('.inline-drawer-toggle')?.addEventListener('click', () => {
