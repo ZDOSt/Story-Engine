@@ -6922,6 +6922,12 @@ const tests = [
       assert.match(source, /id="structured_preflight_prose_guard_enabled"/);
       assert.match(source, /id="structured_preflight_prose_guard_profile"/);
       assert.match(source, /function buildProseGuardPrompt\(narrationText, latestUserText = ''\)/);
+      assert.match(source, /ONE-CALL PRIVATE PASS PIPELINE/);
+      assert.match(source, /literalStyleFilter\(response\)/);
+      assert.match(source, /chronologyControl\(response, RECENT_USER_INPUT\)/);
+      assert.match(source, /responseEndpointControl\(response\)/);
+      assert.match(source, /integrityCheck\(original, corrected\)/);
+      assert.match(source, /PROTECTED FACTS \/ INTEGRITY LOCK/);
       assert.match(source, /Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue/);
       assert.match(source, /Exception: remove every sentence, paragraph, separator line, or outro/);
       assert.match(source, /success or failure, landed contact, injuries, death, condition, intimacy permission/);
@@ -6934,6 +6940,9 @@ const tests = [
       assert.match(source, /A turn-boundary violation is a prose-rule violation/);
       assert.match(source, /A T\+1 violation is a prose-rule violation/);
       assert.match(source, /RECENT_USER_INPUT/);
+      assert.match(source, /PASS 2: chronologyControl\(response, RECENT_USER_INPUT\)/);
+      assert.match(source, /PASS 3: responseEndpointControl\(response\)/);
+      assert.match(source, /PASS 4: integrityCheck\(original, corrected\)/);
       assert.match(source, /Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT/);
       assert.match(source, /Invalid T\+1 restatement/);
       assert.doesNotMatch(proseGuardPromptSource, /User agency hard lock/);
@@ -6951,6 +6960,7 @@ const tests = [
       assert.match(source, /Do not replace after-beat tailing with different after-beat tailing\. Cut it\./);
       assert.match(source, /Invalid after-beat tail/);
       assert.match(source, /GOOD REPLACEMENT PATTERN/);
+      assert.match(source, /If a proposed correction would change protected facts, keep the original valid content/);
     },
   },
   {
