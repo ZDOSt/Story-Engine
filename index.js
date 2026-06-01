@@ -303,12 +303,15 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
   userAgencyControl(response, input, context):
     policy: LOCKED, EXPLICIT-ONLY
     mandate:
-      Preserve absolute separation of control. The world, NPCs, objects, hazards, and consequences may move; {{user}}'s voluntary actions, speech, thoughts, feelings, decisions, silence, and intentional reactions belong only to {{user}}.
+      Preserve absolute separation of control. Render the world, NPCs, objects, hazards, and consequences as active and independent. Render {{user}}'s voluntary actions only when the latest user input explicitly declares them.
 
     rules:
-      - USER AGENCY HARD LOCK: never make {{user}} perform any voluntary action unless the latest user input explicitly declares that exact action or PROXY USER ACTION MODE allows that exact action. This is absolute.
+      - NPCs may act independently: they may speak, move, leave, approach, block, offer, refuse, attack, retreat, reveal, hide, interrupt, or change the scene according to the resolved facts.
+      - {{user}} takes no voluntary action unless the latest user input explicitly declares that action, or PROXY USER ACTION MODE allows that exact action.
+      - If {{user}} did not explicitly declare a voluntary action in the latest input, that action did not happen.
       - Involuntary physical reactions caused by external stimulus may be narrated when concrete and proportional: being knocked back, falling from impact, waking because something happens, flinching from sudden force/noise, coughing from smoke, bleeding from injury, losing balance, being restrained, or reflexively recoiling from direct contact.
       - Voluntary actions are never involuntary reactions. Choosing to take, open, read, inspect, answer, follow, approach, retreat, attack, defend, search, examine, accept, refuse, speak, nod, smile, look around, or move deliberately belongs only to {{user}}.
+      - Never assume, infer, imply, bridge, complete, or narrate undeclared {{user}} actions, decisions, compliance, movement, speech, silence, attention, inspection, acceptance, refusal, or reactions.
       - Do not make {{user}} take, pick up, open, unfold, unseal, turn over, read, inspect, pocket, wear, drink, eat, touch, follow, accept, answer, speak, nod, look, approach, retreat, or otherwise act on an object, note, door, container, item, offer, route, NPC, or stimulus.
       - If an NPC gives, returns, drops, slides, or places an object or note for {{user}}, stop with that object delivered, available, visible, or within reach unless the latest user input already declared the follow-up action.
       - Do not reveal contents that require {{user}} to open, unfold, read, or inspect something. The correct response point is the delivered object, blocked access, incoming action, spoken demand, visible consequence, or available choice; stop there.
@@ -339,7 +342,9 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
     rules:
       - Before writing, choose the natural user-centered response beat for this turn: the point where the immediate consequence, NPC response, revealed information, available object, changed access, danger, or environmental condition is clear enough for {{user}} to choose what to do next.
+      - Continue NPC/world action only while it remains independent of any new {{user}} choice or action.
       - If an NPC speaks or acts toward {{user}}, end on that speech or action once it creates a natural point for {{user}} to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act.
+      - Stop at the first beat where continuing would require {{user}} to choose, respond, move, comply, inspect, answer, follow, accept, refuse, or otherwise act. Do not advance location, time, conversation, sensory access, or scene state through undeclared {{user}} participation.
       - If no NPC is driving the beat, end on the relevant consequence of {{user}}'s action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.
       - Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat just to create an endpoint.
       - Never end by prompting {{user}} to act.
@@ -4875,13 +4880,6 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'If RECENT_USER_INPUT says the user sits, enters, walks, watches, scans, speaks, takes, opens, moves, leans, observes, or looks around, do not write the user doing that same thing again.',
         'Valid continuation may describe what changes because of the declared action: who reacts, what becomes visible from the new position, what sound interrupts, what blocks access, what object is within reach, what NPC says, or what happens next.',
         'If the first sentence merely repeats the user action, remove that sentence or rewrite it as consequence without adding new user action.',
-        '',
-        '9. User agency hard lock:',
-        'Never make the user perform a voluntary action unless RECENT_USER_INPUT explicitly declared that exact action.',
-        'Involuntary physical reactions caused by external stimulus may remain when concrete and proportional: being knocked back, falling from impact, waking because something happens, flinching from sudden force/noise, coughing from smoke, bleeding from injury, losing balance, being restrained, or reflexively recoiling from direct contact.',
-        'Voluntary actions are never involuntary reactions. Choosing to take, open, read, inspect, answer, follow, approach, retreat, attack, defend, search, examine, accept, refuse, speak, nod, smile, look around, or move deliberately belongs only to the user.',
-        'If the narration makes the user voluntarily open, unfold, read, inspect, take, follow, answer, speak, nod, look, move, accept, or refuse without RECENT_USER_INPUT declaring it, remove that action and stop at the available response point.',
-        'When an NPC gives, returns, drops, slides, or places an object or note for the user, the valid response point is the object being delivered, available, visible, or within reach. Do not make the user open/read/inspect it.',
         '',
         'VALID REPLACEMENTS:',
         'Replace violations with concrete, consequential physical behavior: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, or environmental interaction.',

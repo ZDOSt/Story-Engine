@@ -6862,9 +6862,13 @@ const tests = [
       assert.match(indexSource, /End where the scene naturally returns control to \{\{user\}\}/);
       assert.match(indexSource, /natural user-centered response beat/);
       assert.match(indexSource, /Do not restage, re-perform, summarize, or narrate declared \{\{user\}\} actions back to \{\{user\}\}/);
-      assert.match(indexSource, /USER AGENCY HARD LOCK/);
+      assert.match(indexSource, /Render the world, NPCs, objects, hazards, and consequences as active and independent/);
+      assert.match(indexSource, /NPCs may act independently/);
+      assert.match(indexSource, /\{\{user\}\} takes no voluntary action unless the latest user input explicitly declares that action/);
+      assert.match(indexSource, /If \{\{user\}\} did not explicitly declare a voluntary action in the latest input, that action did not happen/);
       assert.match(indexSource, /Involuntary physical reactions caused by external stimulus may be narrated/);
       assert.match(indexSource, /Voluntary actions are never involuntary reactions/);
+      assert.match(indexSource, /Never assume, infer, imply, bridge, complete, or narrate undeclared \{\{user\}\} actions/);
       assert.match(indexSource, /If an NPC gives, returns, drops, slides, or places an object or note for \{\{user\}\}/);
       assert.match(indexSource, /begin with what changes because of it, what becomes visible from the new position/);
       assert.match(indexSource, /If an NPC speaks or acts toward \{\{user\}\}/);
@@ -6887,11 +6891,16 @@ const tests = [
       assert.match(handoffSource, /responseEndpointControl\(response, context\)/);
       assert.match(handoffSource, /Begin at T\+1 from \{\{user\}\} input/);
       assert.match(handoffSource, /Do not echo, restage, re-perform, summarize, paraphrase/);
-      assert.match(handoffSource, /Never write \{\{user\}\} speech, thoughts, feelings, reactions, silence/);
+      assert.match(handoffSource, /Render NPCs and the world as active and independent/);
+      assert.match(handoffSource, /NPCs may speak, move, leave, approach, block, offer, refuse, attack, retreat, reveal, hide, interrupt, or change the scene/);
+      assert.match(handoffSource, /\{\{user\}\} takes no voluntary action unless the latest user input explicitly declares that action/);
+      assert.match(handoffSource, /If \{\{user\}\} did not explicitly declare a voluntary action in the latest input, that action did not happen/);
+      assert.match(handoffSource, /Never assume, infer, imply, bridge, complete, or narrate undeclared \{\{user\}\} actions/);
       assert.match(handoffSource, /Voluntary actions are never involuntary reactions/);
       assert.match(handoffSource, /If an NPC gives, returns, drops, slides, or places an object or note for \{\{user\}\}/);
       assert.match(handoffSource, /End where the scene naturally returns control to \{\{user\}\}/);
       assert.match(handoffSource, /natural user-centered response beat/);
+      assert.match(handoffSource, /Continue NPC\/world action only while it remains independent of any new \{\{user\}\} choice or action/);
       assert.match(handoffSource, /If an NPC speaks or acts toward \{\{user\}\}/);
       assert.match(handoffSource, /If no NPC is driving the beat/);
       assert.match(handoffSource, /Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat/);
@@ -6904,6 +6913,10 @@ const tests = [
     name: '47 Prose Guard settings and prompt preserve mechanics while targeting prose violations',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const proseGuardPromptSource = source.slice(
+        source.indexOf('function buildProseGuardPrompt'),
+        source.indexOf('function sanitizeProseGuardResponse'),
+      );
       assert.match(source, /postNarrationProseGuardEnabled:\s*true/);
       assert.match(source, /proseGuardConnectionProfile:\s*PROSE_GUARD_PROFILE_CURRENT/);
       assert.match(source, /id="structured_preflight_prose_guard_enabled"/);
@@ -6923,11 +6936,10 @@ const tests = [
       assert.match(source, /RECENT_USER_INPUT/);
       assert.match(source, /Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT/);
       assert.match(source, /Invalid T\+1 restatement/);
-      assert.match(source, /User agency hard lock/);
-      assert.match(source, /Never make the user perform a voluntary action unless RECENT_USER_INPUT explicitly declared that exact action/);
-      assert.match(source, /Involuntary physical reactions caused by external stimulus may remain/);
-      assert.match(source, /Voluntary actions are never involuntary reactions/);
-      assert.match(source, /the valid response point is the object being delivered, available, visible, or within reach/);
+      assert.doesNotMatch(proseGuardPromptSource, /User agency hard lock/);
+      assert.doesNotMatch(proseGuardPromptSource, /takes no voluntary action/);
+      assert.doesNotMatch(proseGuardPromptSource, /undeclared user actions/);
+      assert.doesNotMatch(proseGuardPromptSource, /If any sentence depends on an undeclared user action/);
       assert.match(source, /End where the scene naturally returns control to the user/);
       assert.match(source, /The response beat is the point where the immediate consequence/);
       assert.match(source, /If an NPC speaks or acts toward the user/);
