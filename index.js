@@ -44,6 +44,7 @@ const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
 const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
 const NARRATOR_HANDOFF_VERSION = 1;
 const PROSE_GUARD_DISPLAY_STYLE_ID = 'structured_preflight_prose_guard_display_styles';
+const PROSE_GUARD_EXPECTED_STYLE_ID = 'structured_preflight_prose_guard_expected_styles';
 const PROSE_GUARD_HIDE_NEXT_CLASS = 'structured-preflight-proseguard-hide-next';
 const PROSE_GUARD_HIDDEN_MESSAGE_CLASS = 'structured-preflight-proseguard-hidden-message';
 const PROSE_GUARD_HIDDEN_TEXT_CLASS = 'structured-preflight-proseguard-hidden-text';
@@ -2895,6 +2896,24 @@ function setProseGuardNextMessageHidden(enabled) {
     document.getElementById('chat')?.classList?.toggle(PROSE_GUARD_HIDE_NEXT_CLASS, Boolean(enabled));
 }
 
+function setProseGuardExpectedMessageHidden(messageId = null) {
+    if (typeof document === 'undefined') return;
+
+    document.getElementById(PROSE_GUARD_EXPECTED_STYLE_ID)?.remove();
+    const normalizedId = Number(messageId);
+    if (!Number.isFinite(normalizedId)) return;
+
+    ensureProseGuardDisplayStyles();
+    const style = document.createElement('style');
+    style.id = PROSE_GUARD_EXPECTED_STYLE_ID;
+    style.textContent = `
+        #chat .mes[mesid="${normalizedId}"]:not([is_user="true"]) .mes_text {
+            display: none !important;
+        }
+    `;
+    document.head.append(style);
+}
+
 function isExpectedProseGuardMessageElement(node) {
     if (!node || node.getAttribute?.('is_user') === 'true') return false;
 
@@ -2971,6 +2990,7 @@ function releaseProseGuardDisplayIntercept({ restore = false, messageId = null }
             .forEach(element => element.classList.remove(PROSE_GUARD_HIDDEN_TEXT_CLASS));
     }
     setProseGuardNextMessageHidden(false);
+    setProseGuardExpectedMessageHidden(null);
 
     state.proseGuardStreamObserver = null;
     state.proseGuardStreamElement = null;
@@ -3018,6 +3038,7 @@ function beginProseGuardDisplayIntercept(type, dryRun = false) {
         const messageId = Array.isArray(context?.chat) ? context.chat.length - 1 : null;
         if (messageId != null && !context.chat[messageId]?.is_user) {
             state.proseGuardExpectedMessageId = messageId;
+            setProseGuardExpectedMessageHidden(messageId);
             if (!hideProseGuardMessageById(messageId)) {
                 state.proseGuardHideNextMessage = true;
             }
@@ -3027,6 +3048,7 @@ function beginProseGuardDisplayIntercept(type, dryRun = false) {
 
     const context = getContext();
     state.proseGuardExpectedMessageId = Array.isArray(context?.chat) ? context.chat.length : null;
+    setProseGuardExpectedMessageHidden(state.proseGuardExpectedMessageId);
     state.proseGuardHideNextMessage = true;
     setProseGuardNextMessageHidden(true);
     tryAttachProseGuardPendingMessage();
