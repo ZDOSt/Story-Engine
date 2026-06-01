@@ -79,6 +79,7 @@ const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
 const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
+const POWER_ACTOR_ENMITY_VERSION = 1;
 
 const NAME_STYLE_PROFILES = Object.freeze({
     'Balanced Fantasy': {
@@ -248,12 +249,17 @@ export function buildPlayerTrackerSnapshot(context) {
     return normalizeTrackerUserState(trackerUser);
 }
 
+export function buildPowerActorSnapshot(context) {
+    return normalizePowerActors(context?.chatMetadata?.structuredPreflightTracker?.powerActors || {});
+}
+
 export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (!context?.chatMetadata || !trackerUpdate) return;
 
     const root = context.chatMetadata.structuredPreflightTracker || { npcs: {}, user: {}, rapportClock: normalizeRapportClock() };
     root.npcs = root.npcs || {};
     root.user = normalizeTrackerUserState(root.user || {});
+    root.powerActors = normalizePowerActors(root.powerActors || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
 
     for (const [name, value] of Object.entries(trackerUpdate.npcs || {})) {
@@ -266,6 +272,12 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
         root.user = normalizeTrackerUserState({
             ...root.user,
             ...trackerUpdate.user,
+        });
+    }
+    if (trackerUpdate.powerActors) {
+        root.powerActors = normalizePowerActors({
+            ...root.powerActors,
+            ...trackerUpdate.powerActors,
         });
     }
 
@@ -298,10 +310,12 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
     applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit, rapportClock);
     const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext);
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas);
+    const powerActors = runPowerActorEnmity(ledger, context, audit);
 
     const trackerUpdate = {
         npcs: trackerDeltas.npcs,
         user: trackerDeltas.user,
+        powerActors: powerActors.trackerUpdate,
     };
     const finalNarrativeHandoff = {
         generationType: type || 'normal',
@@ -311,6 +325,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
         nameGeneration: name,
         proactivityResults: proactivity.results,
         aggressionResults: aggression.results,
+        powerActorPressure: powerActors.handoff,
         persistencePolicy: buildPersistencePolicy(),
         resultLine: resolution.resultLine,
         narrationGuidance: buildNarrationGuidance(resolution.packet, relationships.handoffs, chaos.handoff, proactivity.results, aggression.results),
@@ -366,6 +381,207 @@ function advanceRapportClock(context, audit) {
     context.chatMetadata.structuredPreflightTracker = root;
     audit.push(`RAPPORT_CLOCK=${compact({ ...clock, elapsedMs, activeDeltaMs, idleGapIgnored })}`);
     return clock;
+}
+
+function runPowerActorEnmity(ledger, context, audit) {
+    const before = buildPowerActorSnapshot(context);
+    const trackerUpdate = {};
+    const handoffEntries = [];
+    const effects = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
+
+    audit.push(`STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER`);
+    audit.push(`3P.0 currentPowerActors=${powerActorSummary(before)}`);
+    audit.push(`3P.1 semanticPowerActorEffects=${effects.length ? compact(effects) : 'none'}`);
+
+    for (const rawEffect of effects) {
+        const effect = normalizePowerActorEffect(rawEffect);
+        if (!effect) {
+            audit.push(`3P.2 ignoredPowerActorEffect=${compact({ reason: 'invalid/no reach/no known actor/no enmity effect', rawEffect })}`);
+            continue;
+        }
+
+        const previousName = findExistingPowerActorName(before, effect.actor)
+            || findExistingPowerActorName(trackerUpdate, effect.actor)
+            || effect.actor;
+        const previous = normalizePowerActorState(trackerUpdate[previousName] || before[previousName] || {});
+        const delta = powerActorEnmityDelta(effect.severity);
+        if (delta <= 0) {
+            audit.push(`3P.3 ignoredPowerActorEffect=${compact({ actor: effect.actor, reason: 'zero delta', severity: effect.severity })}`);
+            continue;
+        }
+
+        const reasons = unique([...previous.reasons, effect.reason]).slice(-8);
+        const responseHistory = previous.responseHistory;
+        const enmity = clamp(previous.enmity + delta, 0, 20);
+        const tier = powerActorTier(enmity);
+        const next = normalizePowerActorState({
+            ...previous,
+            version: POWER_ACTOR_ENMITY_VERSION,
+            name: previousName,
+            type: effect.actorType || previous.type,
+            enmity,
+            tier,
+            reasons,
+            responseHistory,
+            lastEffect: {
+                effect: effect.effect,
+                severity: effect.severity,
+                reason: effect.reason,
+                delta,
+                at: Date.now(),
+            },
+        });
+        trackerUpdate[previousName] = next;
+        handoffEntries.push(powerActorHandoffEntry(next));
+        audit.push(`3P.4 powerActorEnmityUpdate=${compact({ actor: previousName, delta, enmity: `${previous.enmity}->${next.enmity}`, tier: `${previous.tier}->${next.tier}`, effect: effect.effect, reason: effect.reason })}`);
+    }
+
+    for (const [name, state] of Object.entries({ ...before, ...trackerUpdate })) {
+        const normalized = normalizePowerActorState(state);
+        if (normalized.enmity <= 0) continue;
+        if (!handoffEntries.some(entry => sameName(entry.Actor, name))) {
+            handoffEntries.push(powerActorHandoffEntry(normalized));
+        }
+    }
+
+    const handoff = {
+        version: POWER_ACTOR_ENMITY_VERSION,
+        entries: handoffEntries
+            .filter(entry => entry.Enmity > 0)
+            .sort((a, b) => b.Enmity - a.Enmity || String(a.Actor).localeCompare(String(b.Actor)))
+            .slice(0, 8),
+    };
+    audit.push(`3P.5 powerActorPressureHandoff=${handoff.entries.length ? compact(handoff.entries) : 'none'}`);
+    return { trackerUpdate, handoff };
+}
+
+function normalizePowerActorEffect(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const actor = cleanPowerActorScalar(source.actor ?? source.Actor, 100);
+    if (!actor) return null;
+    const hasReach = bool(source.hasReach ?? source.HasReach);
+    const knownToActor = bool(source.knownToActor ?? source.KnownToActor);
+    const effect = normalizePowerActorEffectType(source.effect ?? source.Effect);
+    const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
+    if (!hasReach || !knownToActor || effect === 'none' || severity === 'none') return null;
+    return {
+        actor,
+        actorType: cleanPowerActorScalar(source.actorType ?? source.ActorType, 80) || 'power actor',
+        hasReach: true,
+        effect,
+        severity,
+        reason: cleanPowerActorScalar(source.reason ?? source.Reason, 180) || effect.replace(/_/g, ' '),
+        knownToActor: true,
+    };
+}
+
+function normalizePowerActors(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const result = {};
+    for (const [name, state] of Object.entries(source)) {
+        const normalized = normalizePowerActorState({ ...(state || {}), name: state?.name || name });
+        if (!normalized.name || normalized.enmity <= 0) continue;
+        result[normalized.name] = normalized;
+    }
+    return result;
+}
+
+function normalizePowerActorState(value = {}) {
+    const name = cleanPowerActorScalar(value.name ?? value.Actor, 100);
+    const enmity = clamp(Math.floor(Number(value.enmity ?? value.Enmity ?? 0) || 0), 0, 20);
+    return {
+        version: POWER_ACTOR_ENMITY_VERSION,
+        name,
+        type: cleanPowerActorScalar(value.type ?? value.actorType ?? value.Type, 80) || 'power actor',
+        enmity,
+        tier: powerActorTier(enmity),
+        reasons: normalizePowerActorStringList(value.reasons ?? value.Reasons).slice(-8),
+        responseHistory: normalizePowerActorStringList(value.responseHistory ?? value.ResponseHistory).slice(-12),
+        lastEffect: normalizePowerActorLastEffect(value.lastEffect ?? value.LastEffect),
+    };
+}
+
+function normalizePowerActorLastEffect(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        effect: normalizePowerActorEffectType(source.effect ?? source.Effect),
+        severity: normalizePowerActorSeverity(source.severity ?? source.Severity),
+        reason: cleanPowerActorScalar(source.reason ?? source.Reason, 180),
+        delta: clamp(Math.floor(Number(source.delta ?? source.Delta ?? 0) || 0), 0, 5),
+        at: Math.max(0, Math.floor(Number(source.at ?? source.At ?? 0) || 0)),
+    };
+}
+
+function powerActorEnmityDelta(severity) {
+    if (severity === 'major') return 3;
+    if (severity === 'meaningful') return 2;
+    if (severity === 'minor') return 1;
+    return 0;
+}
+
+function powerActorTier(enmity) {
+    const value = Math.max(0, Math.floor(Number(enmity || 0)));
+    if (value >= 5) return 'Strategic Campaign';
+    if (value >= 4) return 'Infiltration Eligible';
+    if (value >= 3) return 'Direct Retaliation Eligible';
+    if (value >= 2) return 'Obstructive';
+    if (value >= 1) return 'Noticed';
+    return 'Unaware';
+}
+
+function powerActorHandoffEntry(state) {
+    const normalized = normalizePowerActorState(state);
+    return {
+        Actor: normalized.name,
+        Type: normalized.type,
+        Enmity: normalized.enmity,
+        Tier: normalized.tier,
+        Reasons: normalized.reasons,
+        LastEffect: normalized.lastEffect,
+    };
+}
+
+function powerActorSummary(powerActors) {
+    const entries = Object.entries(powerActors || {});
+    if (!entries.length) return 'none';
+    return entries
+        .map(([name, state]) => {
+            const normalized = normalizePowerActorState({ ...(state || {}), name });
+            return `${normalized.name}/${normalized.enmity}/${normalized.tier}`;
+        })
+        .join('; ');
+}
+
+function findExistingPowerActorName(powerActors, actor) {
+    const key = normalizeNameKey(actor);
+    if (!key) return '';
+    return Object.keys(powerActors || {}).find(name => normalizeNameKey(name) === key) || '';
+}
+
+function normalizePowerActorEffectType(value) {
+    const text = cleanPowerActorScalar(value, 80).toLowerCase().replace(/[\s-]+/g, '_');
+    const allowed = ['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income'];
+    return allowed.includes(text) ? text : 'none';
+}
+
+function normalizePowerActorSeverity(value) {
+    const text = cleanPowerActorScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return ['none', 'minor', 'meaningful', 'major'].includes(text) ? text : 'none';
+}
+
+function normalizePowerActorStringList(value) {
+    const source = Array.isArray(value) ? value : [];
+    return unique(source.map(item => cleanPowerActorScalar(item, 180)).filter(Boolean)).slice(0, 20);
+}
+
+function cleanPowerActorScalar(value, maxLength = 120) {
+    const text = String(value ?? '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/^["']|["']$/g, '')
+        .trim();
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
+    return text.slice(0, maxLength);
 }
 
 function normalizeUserAbilityUseForHandoff(value = {}) {

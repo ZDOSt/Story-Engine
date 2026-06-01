@@ -17,6 +17,8 @@ const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'st
 const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
 const DISABLE_THINKING_INCLUDE_BODY = 'thinking:\n  type: disabled';
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
+const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
+const POWER_ACTOR_SEVERITIES = Object.freeze(['none', 'minor', 'meaningful', 'major']);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -620,6 +622,26 @@ function buildSemanticPreflightSchema() {
             affectsAction: { type: 'boolean' },
         },
     };
+    const powerActorEffectSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['actor', 'actorType', 'hasReach', 'effect', 'severity', 'reason', 'knownToActor'],
+        properties: {
+            actor: { type: 'string' },
+            actorType: { type: 'string' },
+            hasReach: {
+                type: 'boolean',
+                description: 'Y only for organizations or unusually influential individuals with resources, agents, authority, territory, money, magic, reputation, or information access.',
+            },
+            effect: { type: 'string', enum: POWER_ACTOR_EFFECT_TYPES },
+            severity: { type: 'string', enum: POWER_ACTOR_SEVERITIES },
+            reason: { type: 'string' },
+            knownToActor: {
+                type: 'boolean',
+                description: 'Y only if the actor plausibly knows, observes, is informed of, or can discover the user action through ordinary reach.',
+            },
+        },
+    };
     const stakeChangeSchema = {
         type: 'object',
         additionalProperties: false,
@@ -630,7 +652,7 @@ function buildSemanticPreflightSchema() {
     return {
         type: 'object',
         additionalProperties: false,
-        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic'],
+        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'powerActorEnmity', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic'],
         properties: {
             engineContext: {
                 type: 'object',
@@ -850,6 +872,17 @@ function buildSemanticPreflightSchema() {
                     effects: {
                         type: 'array',
                         items: injuryEffectSchema,
+                    },
+                },
+            },
+            powerActorEnmity: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['effects'],
+                properties: {
+                    effects: {
+                        type: 'array',
+                        items: powerActorEffectSchema,
                     },
                 },
             },
@@ -1107,6 +1140,9 @@ const COMPACT_LEDGER_CONTRACT = [
     PERSONALITY_ARCHETYPE_GLOSSARY,
     '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory is not tracked. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
+    '- PowerActorEnmity is hidden power-actor memory. Track only organizations, institutions, factions, crews, noble houses, offices, companies, gangs, cults, guilds, military units, recurring parties/groups, or unusually influential individuals with resources, agents, authority, territory, money, magic, reputation, or information access. Do not track ordinary individuals who can only personally react; use NPC B/F/H for them instead.',
+    '- PowerActorEnmity effects are only for the latest user input and immediate visible context. Add an entry only if the user meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor. If the affected party lacks reach, hasReach=N and severity=none. If the actor cannot plausibly know or discover it, knownToActor=N and deterministic code will not increase enmity.',
+    '- PowerActorEnmity severity: minor=small obstruction or insult; meaningful=real setback, exposure, loss, asset harm, or operation disruption; major=severe public exposure, major defeat, major theft, death/capture of members, ruined operation, or serious reputation/income damage. If none, output count=0.',
     '- NameGenerationEngine semantic lines are candidate generation only. Generate exactly 3 male person/entity names, 3 female person/entity names, and 3 location names matching the selected style line. Make them creative, readable, pronounceable, and real-but-unplaceable. Avoid Western stock fantasy, Tolkien/JRPG drift, ordinary modern names, famous names, joke names, and letter soup. These are candidates only; deterministic validation may reject, repair, or replace them before narration.',
     '- Companion/ally commands are tactical requests only. They can address the companion as an ActionTarget and can refer to an established hostile by name for later companion crisis targeting, but they must not be treated as {{user}} making the companion act, must not force a companion attack, and must not create a user-resolved success/failure roll for companion obedience. The named hostile must still be established through assistant narration/tracker/card/scenario/lore/initial test setup and belongs in hostilesInScene.NPC unless it directly opposes {{user}}\'s current action. If several hostiles exist and no specific one is named, do not guess a target.',
     '- Do not output primaryOppTarget or primaryOpposition. The only opposing living target list is identifyTargets.OppTargets.NPC; the separate broad hostile pool is identifyTargets.hostilesInScene.NPC.',
@@ -1174,6 +1210,14 @@ TrackerUpdateEngine.NPC[0].statusAdd=(none)
 TrackerUpdateEngine.NPC[0].statusRemove=(none)
 TrackerUpdateEngine.NPC[0].gearAdd=(none)
 TrackerUpdateEngine.NPC[0].gearRemove=(none)
+PowerActorEnmity.count=0
+PowerActorEnmity[0].actor=(none)
+PowerActorEnmity[0].actorType=(none)
+PowerActorEnmity[0].hasReach=N
+PowerActorEnmity[0].effect=none
+PowerActorEnmity[0].severity=none
+PowerActorEnmity[0].reason=(none)
+PowerActorEnmity[0].knownToActor=N
 CHAOS_INTERRUPT.sceneSummary=short scene summary
 NameGenerationEngine.selectedStyle=Balanced Fantasy
 NameGenerationEngine.maleCandidates=(none)
@@ -1314,6 +1358,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. ' +
         `Execute NameGenerationEngine as semantic candidate generation only: selectedStyle must be "${nameStyle}", maleCandidates must contain exactly 3 male person/entity names, femaleCandidates exactly 3 female person/entity names, and locationCandidates exactly 3 location names. Follow the selected style and naming rules in the engine reference. Do not use fixed stock names, ordinary modern-Western names, famous names, jokes, or letter soup. Deterministic code will validate and expose only the approved final pool. ` +
+        'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or unusually influential individual with resources, agents, authority, territory, money, magic, reputation, or information access. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor. Mark knownToActor=Y only when the actor plausibly knows, can observe, is informed of, or can discover the action through ordinary reach. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
         'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
         'Use condition=unchanged unless the latest user input or immediate visible context explicitly establishes a completed/current health state as healthy, bruised, wounded, badly_wounded, critical, or dead. Do not set condition from a desired/requested future injury or from an attempted action before narration confirms the result. ' +
@@ -1569,6 +1614,8 @@ function validateRawLedgerContract(ledger, raw) {
     if (!Array.isArray(ledger?.relationshipEngine)) missing.push('relationshipEngine');
     if (!ledger?.injuryEffectEngine) missing.push('injuryEffectEngine');
     if (!Array.isArray(ledger?.injuryEffectEngine?.effects)) missing.push('injuryEffectEngine.effects');
+    if (!ledger?.powerActorEnmity) missing.push('powerActorEnmity');
+    if (!Array.isArray(ledger?.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
     if (!ledger?.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger?.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
@@ -1671,6 +1718,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.User.commitmentsAdd',
         'TrackerUpdateEngine.User.commitmentsRemove',
         'TrackerUpdateEngine.NPC.count',
+        'PowerActorEnmity.count',
         'NameGenerationEngine.selectedStyle',
         'NameGenerationEngine.maleCandidates',
         'NameGenerationEngine.femaleCandidates',
@@ -1718,6 +1766,26 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.affectsAction`,
         ];
         for (const key of effectRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const powerActorEffectCount = clampNumber(readNumber(fields, 'PowerActorEnmity.count', 0), 0, 12);
+    for (let index = 0; index < powerActorEffectCount; index += 1) {
+        const prefix = `PowerActorEnmity[${index}]`;
+        const powerActorRequired = [
+            `${prefix}.actor`,
+            `${prefix}.actorType`,
+            `${prefix}.hasReach`,
+            `${prefix}.effect`,
+            `${prefix}.severity`,
+            `${prefix}.reason`,
+            `${prefix}.knownToActor`,
+        ];
+        for (const key of powerActorRequired) {
             if (!fields.has(key)) missing.push(key);
         }
     }
@@ -1872,6 +1940,21 @@ function parseCompactLedger(text, trackerSnapshot) {
         });
     }
 
+    const powerActorEnmity = { effects: [] };
+    for (let index = 0; index < powerActorEffectCount; index += 1) {
+        const prefix = `PowerActorEnmity[${index}]`;
+        const effect = normalizePowerActorEffect({
+            actor: fields.get(`${prefix}.actor`),
+            actorType: fields.get(`${prefix}.actorType`),
+            hasReach: readBoolean(fields, `${prefix}.hasReach`, false),
+            effect: fields.get(`${prefix}.effect`),
+            severity: fields.get(`${prefix}.severity`),
+            reason: fields.get(`${prefix}.reason`),
+            knownToActor: readBoolean(fields, `${prefix}.knownToActor`, false),
+        });
+        if (effect) powerActorEnmity.effects.push(effect);
+    }
+
     const trackerUpdateEngine = {
         user: {
             condition: normalizeTrackerDeltaCondition(fields.get('TrackerUpdateEngine.User.condition')),
@@ -1916,6 +1999,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         resolutionEngine,
         relationshipEngine,
         injuryEffectEngine,
+        powerActorEnmity,
         chaosSemantic: {
             sceneSummary: cleanScalar(fields.get('CHAOS_INTERRUPT.sceneSummary')) || '',
         },
@@ -2512,6 +2596,10 @@ function normalizeLedger(ledger) {
             };
         }).filter(Boolean)
         : [];
+    ledger.powerActorEnmity = ledger.powerActorEnmity || {};
+    ledger.powerActorEnmity.effects = Array.isArray(ledger.powerActorEnmity.effects)
+        ? ledger.powerActorEnmity.effects.map(normalizePowerActorEffect).filter(Boolean)
+        : [];
     ledger.trackerUpdateEngine = ledger.trackerUpdateEngine || {};
     ledger.trackerUpdateEngine.user = normalizeTrackerDelta(ledger.trackerUpdateEngine.user, TRACKER_USER_DELTA_FIELDS);
     ledger.trackerUpdateEngine.npcs = Array.isArray(ledger.trackerUpdateEngine.npcs)
@@ -2548,6 +2636,38 @@ function normalizeUserAbilityUse(value) {
         narrativeEffect: used && !isNoneValue(narrativeEffect) ? narrativeEffect : '(none)',
         mechanicalScope: 'flavor_only_no_bonus',
     };
+}
+
+function normalizePowerActorEffect(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const actor = cleanScalar(source.actor ?? source.Actor).replace(/\s+/g, ' ').slice(0, 100);
+    if (!actor || isNoneValue(actor)) return null;
+    const effect = normalizePowerActorEffectType(source.effect ?? source.Effect);
+    const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
+    const hasReach = toBoolean(source.hasReach ?? source.HasReach, false);
+    const knownToActor = toBoolean(source.knownToActor ?? source.KnownToActor, false);
+    if (!hasReach || !knownToActor || effect === 'none' || severity === 'none') return null;
+    const actorType = cleanScalar(source.actorType ?? source.ActorType).replace(/\s+/g, ' ').slice(0, 80) || 'power actor';
+    const reason = cleanScalar(source.reason ?? source.Reason).replace(/\s+/g, ' ').slice(0, 180) || effect.replace(/_/g, ' ');
+    return {
+        actor,
+        actorType,
+        hasReach,
+        effect,
+        severity,
+        reason,
+        knownToActor,
+    };
+}
+
+function normalizePowerActorEffectType(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_EFFECT_TYPES.includes(text) ? text : 'none';
+}
+
+function normalizePowerActorSeverity(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_SEVERITIES.includes(text) ? text : 'none';
 }
 
 function normalizeCore(core) {
@@ -2625,6 +2745,8 @@ function validateNormalizedLedger(ledger, raw) {
     if (!Array.isArray(ledger.relationshipEngine)) missing.push('relationshipEngine');
     if (!ledger.injuryEffectEngine) missing.push('injuryEffectEngine');
     if (!Array.isArray(ledger.injuryEffectEngine?.effects)) missing.push('injuryEffectEngine.effects');
+    if (!ledger.powerActorEnmity) missing.push('powerActorEnmity');
+    if (!Array.isArray(ledger.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
     if (!ledger.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');

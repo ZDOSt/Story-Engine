@@ -1567,6 +1567,7 @@ export function buildPersistencePolicy() {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
         npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'userHistory', 'raceProfile', 'personalitySummary', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
+        hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'STAKES', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
 }
@@ -1574,7 +1575,8 @@ export function buildPersistencePolicy() {
 export function trackerSummary(trackerUpdate) {
     const npcs = Object.entries(trackerUpdate?.npcs || {});
     const user = trackerUpdate?.user ? normalizeTrackerUserState(trackerUpdate.user) : null;
-    if (!npcs.length && !user) return 'N';
+    const powerActors = Object.entries(trackerUpdate?.powerActors || {});
+    if (!npcs.length && !user && !powerActors.length) return 'N';
 
     const npcSummary = npcs.map(([name, value]) => {
         const disposition = value?.currentDisposition ? formatDisposition(value.currentDisposition) : 'UNINITIALIZED';
@@ -1601,7 +1603,10 @@ export function trackerSummary(trackerUpdate) {
     const userSummary = user
         ? `USER/cond:${user.condition}/wounds:${user.wounds.length}/status:${user.statusEffects.length}/gear:${user.gear.length}/inv:${user.inventory.length}/tasks:${user.tasks.length}/commitments:${user.commitments.length}`
         : '';
-    return [npcSummary, userSummary].filter(Boolean).join(';');
+    const powerActorSummary = powerActors
+        .map(([name, value]) => `${name}/enmity:${value?.enmity ?? 0}/tier:${value?.tier ?? 'Unaware'}`)
+        .join(';');
+    return [npcSummary, userSummary, powerActorSummary].filter(Boolean).join(';');
 }
 
 const TRACKER_CONDITIONS = Object.freeze(['healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead']);

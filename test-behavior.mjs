@@ -133,6 +133,10 @@ function baseLedger(overrides = {}) {
       effects: [],
       ...(overrides.injuryEffectEngine || {}),
     },
+    powerActorEnmity: {
+      effects: [],
+      ...(overrides.powerActorEnmity || {}),
+    },
     trackerUpdateEngine: {
       user: emptyUserDelta(),
       npcs: [],
@@ -203,7 +207,7 @@ function trackerEntry(overrides = {}) {
   };
 }
 
-function context(latestUserText = '', tracker = {}, user = {}, persona = 'PHY: 6\nMND: 6\nCHA: 6', chat = null, rapportClock = {}, cardFields = {}) {
+function context(latestUserText = '', tracker = {}, user = {}, persona = 'PHY: 6\nMND: 6\nCHA: 6', chat = null, rapportClock = {}, cardFields = {}, powerActors = {}) {
   return {
     chat: chat || (latestUserText ? [{ is_user: true, mes: latestUserText }] : []),
     name1: cardFields.name1 || 'Aelemar',
@@ -214,6 +218,7 @@ function context(latestUserText = '', tracker = {}, user = {}, persona = 'PHY: 6
         npcs: tracker,
         user,
         rapportClock,
+        powerActors,
         snapshots: {},
       },
     },
@@ -242,7 +247,7 @@ function runCase(config) {
     runDeterministicEngines(
       config.ledger,
       config.tracker || {},
-      context(config.userText || '', config.tracker || {}, config.userState || {}, config.persona, config.chat || null, config.rapportClock || {}, config.cardFields || {}),
+      context(config.userText || '', config.tracker || {}, config.userState || {}, config.persona, config.chat || null, config.rapportClock || {}, config.cardFields || {}, config.powerActors || {}),
       'normal',
     ),
   );
@@ -272,7 +277,7 @@ function runCaseWithRandoms(config, randoms) {
     return runDeterministicEngines(
       config.ledger,
       config.tracker || {},
-      context(config.userText || '', config.tracker || {}, config.userState || {}, config.persona, null, config.rapportClock || {}, config.cardFields || {}),
+      context(config.userText || '', config.tracker || {}, config.userState || {}, config.persona, null, config.rapportClock || {}, config.cardFields || {}, config.powerActors || {}),
       'normal',
     );
   } finally {
@@ -1777,7 +1782,7 @@ const tests = [
       };
       const report = runCase({
         userText: 'I greet Seraphina warmly and ask about her morning.',
-        rapportClock: { activeMs: 0, lastActivityAt: Date.now() },
+        rapportClock: { activeMs: 0, lastActivityAt: 0 },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -5804,6 +5809,158 @@ const tests = [
       assert.doesNotMatch(prompt, /```story_engine_tracker_delta/i);
       assert.doesNotMatch(prompt, /BEGIN_TRACKER_DELTA/i);
       assert.match(prompt, /Do not output tracker updates/i);
+    },
+  },
+  {
+    name: '33a hidden power actor enmity records meaningful known setbacks',
+    run() {
+      const report = runCase({
+        userText: 'I burn the Red Glass Syndicate ledger in front of their dock crew.',
+        ledger: baseLedger({
+          powerActorEnmity: {
+            effects: [{
+              actor: 'Red Glass Syndicate',
+              actorType: 'criminal syndicate',
+              hasReach: true,
+              effect: 'disrupt_operation',
+              severity: 'meaningful',
+              reason: 'User destroyed their smuggling ledger',
+              knownToActor: true,
+            }],
+          },
+        }),
+      });
+      const actor = report.trackerUpdate.powerActors['Red Glass Syndicate'];
+      assert.equal(actor.enmity, 2);
+      assert.equal(actor.tier, 'Obstructive');
+      assert.equal(actor.type, 'criminal syndicate');
+      assert.deepEqual(actor.reasons, ['User destroyed their smuggling ledger']);
+      assert.equal(actor.lastEffect.effect, 'disrupt_operation');
+      assert.equal(actor.lastEffect.severity, 'meaningful');
+      assert.equal(actor.lastEffect.delta, 2);
+      assert.equal(report.finalNarrativeHandoff.powerActorPressure.entries[0].Actor, 'Red Glass Syndicate');
+      assert.equal(report.finalNarrativeHandoff.powerActorPressure.entries[0].Tier, 'Obstructive');
+      assert.match(prompt(report), /Power actor pressure: Red Glass Syndicate \(criminal syndicate\): enmity 2, tier Obstructive/);
+      assert.match(prompt(report), /Use only as subtle world pressure when natural/);
+      assert.match(prompt(report), /never reveal hidden metadata, true plans, secret alignment, or offscreen knowledge/);
+      assert.equal(auditIncludes(report, 'STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER'), true);
+      assert.equal(auditIncludes(report, 'powerActorEnmityUpdate='), true);
+    },
+  },
+  {
+    name: '33b hidden power actor enmity ignores ordinary or unknown actors',
+    run() {
+      const report = runCase({
+        userText: 'I insult a random dockhand and quietly steal from a distant baron no one can trace.',
+        ledger: baseLedger({
+          powerActorEnmity: {
+            effects: [
+              {
+                actor: 'angry dockhand',
+                actorType: 'ordinary individual',
+                hasReach: false,
+                effect: 'humiliate',
+                severity: 'minor',
+                reason: 'User insulted one ordinary person',
+                knownToActor: true,
+              },
+              {
+                actor: 'House Veyr',
+                actorType: 'noble house',
+                hasReach: true,
+                effect: 'steal',
+                severity: 'meaningful',
+                reason: 'User stole a sealed coin purse without witnesses',
+                knownToActor: false,
+              },
+            ],
+          },
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.powerActors, {});
+      assert.deepEqual(report.finalNarrativeHandoff.powerActorPressure.entries, []);
+      assert.equal(auditIncludes(report, 'ignoredPowerActorEffect'), true);
+      assert.doesNotMatch(prompt(report), /Power actor pressure:/);
+    },
+  },
+  {
+    name: '33c hidden power actor enmity escalates existing state without visible NPC tracker exposure',
+    run() {
+      const report = runCase({
+        userText: 'I publicly expose the Red Glass Syndicate captain and hand over their route maps.',
+        powerActors: {
+          'red glass syndicate': {
+            name: 'red glass syndicate',
+            type: 'criminal syndicate',
+            enmity: 2,
+            reasons: ['User destroyed their smuggling ledger'],
+            responseHistory: ['paid street toughs to watch the docks'],
+            lastEffect: {
+              effect: 'disrupt_operation',
+              severity: 'meaningful',
+              reason: 'User destroyed their smuggling ledger',
+              delta: 2,
+              at: 100,
+            },
+          },
+        },
+        ledger: baseLedger({
+          powerActorEnmity: {
+            effects: [{
+              actor: 'Red Glass Syndicate',
+              actorType: 'criminal syndicate',
+              hasReach: true,
+              effect: 'expose',
+              severity: 'major',
+              reason: 'User publicly exposed their smuggling route maps',
+              knownToActor: true,
+            }],
+          },
+        }),
+      });
+      const actor = report.trackerUpdate.powerActors['red glass syndicate'];
+      assert.equal(actor.enmity, 5);
+      assert.equal(actor.tier, 'Strategic Campaign');
+      assert.deepEqual(actor.reasons, [
+        'User destroyed their smuggling ledger',
+        'User publicly exposed their smuggling route maps',
+      ]);
+      assert.equal(actor.responseHistory[0], 'paid street toughs to watch the docks');
+      assert.equal(report.finalNarrativeHandoff.powerActorPressure.entries[0].Actor, 'red glass syndicate');
+      assert.equal(report.finalNarrativeHandoff.powerActorPressure.entries[0].Tier, 'Strategic Campaign');
+
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const displaySource = source.slice(
+        source.indexOf('function buildTrackerDisplayHtml'),
+        source.indexOf('function cleanTrackerDisplayName'),
+      );
+      assert.doesNotMatch(displaySource, /powerActors/);
+      assert.doesNotMatch(displaySource, /Power actor/i);
+      assert.doesNotMatch(displaySource, /enmity/i);
+    },
+  },
+  {
+    name: '33d semantic contract includes hidden power actor enmity and no spy lifecycle',
+    run() {
+      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      const deterministicSource = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
+      const preflightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+
+      assert.match(semanticSource, /PowerActorEnmity\.count=0/);
+      assert.match(semanticSource, /powerActorEnmity/);
+      assert.match(semanticSource, /Do not track ordinary individuals who can only personally react/);
+      assert.match(semanticSource, /This semantic section is hidden memory only, not visible tracker text/);
+      assert.match(deterministicSource, /STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER/);
+      assert.match(deterministicSource, /powerActorTier\(enmity\)/);
+      assert.match(preflightSource, /Power actor pressure: /);
+      assert.match(preflightSource, /Use only as subtle world pressure when natural/);
+      assert.match(indexSource, /beforePowerActors/);
+      assert.match(indexSource, /afterPowerActors/);
+      assert.match(indexSource, /root\.powerActors/);
+
+      const combined = [semanticSource, deterministicSource, preflightSource, indexSource].join('\n');
+      assert.doesNotMatch(combined, /spyStatus|fakeFriend|betrayalLifecycle|suspicionScore|evidenceScore/);
     },
   },
   {

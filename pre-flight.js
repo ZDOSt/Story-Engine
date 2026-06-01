@@ -61,6 +61,7 @@ function buildReadableSemanticDebug(ledger) {
     const chaos = ledger?.chaosSemantic ?? {};
     const nameSemantic = ledger?.nameSemantic ?? {};
     const tracker = ledger?.trackerUpdateEngine ?? {};
+    const powerActors = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
     const userCore = ledger?.engineContext?.userCoreStats ?? {};
     const trackerNpcs = Array.isArray(ledger?.engineContext?.trackerRelevantNPCs)
         ? ledger.engineContext.trackerRelevantNPCs
@@ -114,6 +115,7 @@ function buildReadableSemanticDebug(ledger) {
         '',
         'chaosSemantic.sceneSummary=' + valueOrNone(chaos.sceneSummary),
         'trackerUpdateEngine=' + inline(tracker),
+        'powerActorEnmity.effects=' + (powerActors.length ? inline(powerActors) : 'none'),
         'nameSemantic.selectedStyle=' + valueOrNone(nameSemantic.selectedStyle),
         'nameSemantic.candidates=hidden; final approved pool shown in deterministic nameGeneration',
         'proactivitySemantic=deterministic cap 3',
@@ -129,6 +131,7 @@ function buildReadableDeterministicDebug(handoff) {
     const proactivity = handoff?.proactivityResults ?? {};
     const aggression = handoff?.aggressionResults ?? {};
     const name = handoff?.nameGeneration ?? {};
+    const powerActorPressure = handoff?.powerActorPressure ?? {};
 
     return [
         'resolutionPacket.GOAL=' + valueOrNone(resolution.GOAL),
@@ -182,6 +185,7 @@ function buildReadableDeterministicDebug(handoff) {
         }),
         'proactivityResults=' + inline(formatProactivityForNarration(proactivity)),
         ...formatAggressionDebugLines(aggression),
+        'powerActorPressure=' + powerActorPressureSummary(powerActorPressure),
         'nameGeneration=' + nameGenerationSummary(name),
         'trackerUpdate=' + inline(handoff?.sceneTrackerUpdate ?? {}),
     ];
@@ -393,6 +397,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         ? buildNoAggressionGuide(resolution, handoff)
         : buildAggressionGuide(handoff.aggressionResults);
     const generatedName = nameGenerationSummary(handoff.nameGeneration);
+    const powerActorPressure = powerActorPressureNarratorSummary(handoff.powerActorPressure);
     const userAbilityUse = userAbilityUseSummary(resolution.UserAbilityUse);
     const userAbilityGuide = userAbilityUseGuide(resolution.UserAbilityUse);
     const userImpairment = userImpairmentSummary(resolution.UserImpairment);
@@ -424,6 +429,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         chaosGuide,
         userAbilityUse,
         userAbilityGuide,
+        powerActorPressure,
         userImpairment,
         npcImpairment,
         inflictedNpcInjury,
@@ -462,6 +468,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         aggression: aggressionText,
         aggressionGuide,
         generatedName,
+        powerActorPressure,
         narratorAuthority,
         renderContract,
         activeBranchFacts,
@@ -588,7 +595,7 @@ Invalid responses must not be output.
 Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, ACTIVE_BRANCH_FACTS, and RESOLVED_SCENE_FACTS are all satisfied.`;
 }
 
-function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
+function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, powerActorPressure, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
     const facts = [];
     facts.push(`User action: ${valueOrNone(userAction)}.`);
     if (!isNoneText(userAbilityUse)) facts.push(`UserAbilityUse: ${userAbilityUse}. ${userAbilityGuide}`);
@@ -625,6 +632,7 @@ function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollA
     if (!isNoneText(inflictedNpcInjury)) facts.push(`NPC injury/death branch: ${inflictedNpcInjury}.`);
     if (!isNoneText(inflictedUserInjury)) facts.push(`User injury branch: ${inflictedUserInjury}.`);
     if (resolution?.CompanionCommand?.Mode === 'REQUEST_ONLY') facts.push(`Companion command branch: request-only command to ${list(resolution.CompanionCommand.NPCs)}; no obedience or companion hit is resolved unless proactivity/aggression says so.`);
+    if (!isNoneText(powerActorPressure)) facts.push(`Power actor pressure: ${powerActorPressure}. Use only as subtle world pressure when natural; never reveal hidden metadata, true plans, secret alignment, or offscreen knowledge.`);
     const namePoolFact = closedWorldNamePoolFact(handoff?.nameGeneration);
     if (namePoolFact) facts.push(namePoolFact);
     return facts.map(fact => `- ${fact}`).join('\n') || '- none';
@@ -963,6 +971,26 @@ function nameGenerationSummary(nameGeneration) {
     return style !== '(none)'
         ? `style: ${style}; final: ${namePoolText(nameGeneration.namePool)}`
         : namePoolText(nameGeneration.namePool);
+}
+
+function powerActorPressureSummary(powerActorPressure) {
+    const entries = Array.isArray(powerActorPressure?.entries) ? powerActorPressure.entries : [];
+    if (!entries.length) return 'none';
+    return entries
+        .map(entry => `${valueOrNone(entry.Actor)}/${entry.Enmity ?? 0}/${valueOrNone(entry.Tier)}`)
+        .join('; ');
+}
+
+function powerActorPressureNarratorSummary(powerActorPressure) {
+    const entries = Array.isArray(powerActorPressure?.entries) ? powerActorPressure.entries : [];
+    if (!entries.length) return 'none';
+    return entries
+        .map(entry => {
+            const tier = valueOrNone(entry.Tier);
+            const reasons = Array.isArray(entry.Reasons) && entry.Reasons.length ? `reasons:${list(entry.Reasons)}` : '';
+            return `${valueOrNone(entry.Actor)} (${valueOrNone(entry.Type)}): enmity ${entry.Enmity ?? 0}, tier ${tier}${reasons ? `, ${reasons}` : ''}`;
+        })
+        .join('; ');
 }
 
 function readableActionDescription(semanticResolution, resolution) {

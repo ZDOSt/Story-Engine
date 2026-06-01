@@ -7,7 +7,7 @@ import { setPersonaDescription, user_avatar } from '../../../../scripts/personas
 import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildPlayerTrackerSnapshot, buildTrackerSnapshot, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
 import { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import {
@@ -1452,6 +1452,7 @@ function getTrackerRoot(context = getContext()) {
     const root = context.chatMetadata.structuredPreflightTracker;
     root.npcs = root.npcs || {};
     root.user = normalizeTrackerUserState(root.user || {});
+    root.powerActors = root.powerActors && typeof root.powerActors === 'object' ? root.powerActors : {};
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
     if (seededPlayerTracker && typeof context.saveMetadataDebounced === 'function') {
         context.saveMetadataDebounced();
@@ -2240,6 +2241,10 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         ...(pendingRun?.userBefore || {}),
         ...(pendingRun?.userAfter || {}),
     });
+    const powerActors = {
+        ...(pendingRun?.powerActorsBefore || {}),
+        ...(pendingRun?.powerActorsAfter || {}),
+    };
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -2251,6 +2256,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         savedAt: Date.now(),
         userCoreStats: pendingRun?.userCoreStats || report?.semanticLedger?.engineContext?.userCoreStats || null,
         user,
+        powerActors,
         npcs: promotionResult.npcs,
     };
     const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
@@ -2339,6 +2345,7 @@ function buildTrackerUpdateForPersistence(displaySnapshot) {
     return {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
         user: normalizeTrackerUserState(displaySnapshot?.user || {}),
+        powerActors: displaySnapshot?.powerActors || {},
     };
 }
 
@@ -2631,6 +2638,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     const rapportClock = normalizeRapportClockState(root.rapportClock);
     root.npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
     root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
+    root.powerActors = snapshot.powerActors || root.powerActors || {};
     root.rapportClock = rapportClock;
     return true;
 }
@@ -2643,6 +2651,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     const rapportClock = normalizeRapportClockState(root.rapportClock);
     root.npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
     root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
+    root.powerActors = snapshot.powerActors || root.powerActors || {};
     root.rapportClock = rapportClock;
     return true;
 }
@@ -4889,6 +4898,7 @@ function restoreTrackerForRegeneration(type) {
         const rapportClock = normalizeRapportClockState(root.rapportClock);
         root.npcs = normalizeDisplayTrackerNpcs(snapshot);
         root.user = normalizeTrackerUserState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUser || root.user || {});
+        root.powerActors = root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforePowerActors || root.powerActors || {};
         root.rapportClock = rapportClock;
         root.snapshots[getMessageKey(targetMessageId, context)].restoredForRegeneration = Date.now();
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot before ${type} of message ${targetMessageId}`);
@@ -5356,8 +5366,10 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             root.snapshots[messageKey] = {
                 before: clone(pendingRun.trackerBefore),
                 beforeUser: clone(pendingRun.userBefore),
+                beforePowerActors: clone(pendingRun.powerActorsBefore),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
+                afterPowerActors: clone(trackerDisplaySnapshot.powerActors || {}),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
                 trackerDeltaWarning,
@@ -5429,7 +5441,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforePowerActors: snapshot.beforePowerActors };
             }
             delete root.snapshots[key];
             removeProgressionRecordsForMessage(key, context);
@@ -5444,6 +5456,7 @@ async function handleMessageDeleted(newLength) {
     if (restoreCandidate) {
         root.npcs = normalizeDisplayTrackerNpcs(restoreCandidate.before);
         root.user = normalizeTrackerUserState(restoreCandidate.beforeUser || root.user || {});
+        root.powerActors = restoreCandidate.beforePowerActors || {};
         await persistMetadata(context);
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${Math.min(chatLength, firstAffectedIndex)}`);
     } else if (restoreTrackerFromLatestDisplaySnapshot(context)) {
@@ -5627,6 +5640,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         latestUserText: userInputMode.innerText || latestUserText,
         trackerSnapshot: buildTrackerSnapshot(context),
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
+        powerActorSnapshot: buildPowerActorSnapshot(context),
         contextSize,
         createdAt: Date.now(),
     };
@@ -5681,6 +5695,8 @@ async function handleChatCompletionPromptReady(eventData) {
             trackerAfter: report.trackerUpdate?.npcs || {},
             userBefore: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             userAfter: report.trackerUpdate?.user || {},
+            powerActorsBefore: state.pendingGeneration.powerActorSnapshot || buildPowerActorSnapshot(context),
+            powerActorsAfter: report.trackerUpdate?.powerActors || {},
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
