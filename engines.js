@@ -1878,6 +1878,7 @@ export function normalizeTargets(value) {
         },
         BenefitedObservers: toRealArray(value?.BenefitedObservers),
         HarmedObservers: toRealArray(value?.HarmedObservers),
+        PowerActors: toRealArray(value?.PowerActors),
     };
 }
 
@@ -1927,6 +1928,7 @@ export function sanitizeTargets(targets, classifier, options = {}) {
         },
         BenefitedObservers: unique(benefited),
         HarmedObservers: unique(harmed),
+        PowerActors: unique(targets.PowerActors),
     };
 }
 
@@ -1946,6 +1948,7 @@ export function targetSummary(targets) {
         },
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
+        PowerActors: showNone(targets.PowerActors),
     };
 }
 
@@ -2158,6 +2161,7 @@ export function formatTargets(targets) {
         OppTargets: { NPC: showNone(targets.OppTargets.NPC), ENV: showNone(targets.OppTargets.ENV) },
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
+        PowerActors: showNone(targets.PowerActors),
     });
 }
 

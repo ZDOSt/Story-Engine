@@ -116,6 +116,7 @@ function baseLedger(overrides = {}) {
         OppTargets: { NPC: [], ENV: [] },
         BenefitedObservers: [],
         HarmedObservers: [],
+        PowerActors: [],
       },
       intimacyAdvanceExplicit: false,
       boundaryViolationExplicit: false,
@@ -1863,6 +1864,8 @@ const tests = [
   {
     name: '12d.1 active play with another NPC can expire an absent NPC rapport cooldown',
     run() {
+      const realDateNow = Date.now;
+      const now = 1_700_000_000_000;
       const tracker = {
         Seraphina: trackerEntry({
           currentDisposition: { B: 2, F: 2, H: 2 },
@@ -1874,28 +1877,33 @@ const tests = [
           currentRapport: 0,
         }),
       };
-      const report = runCase({
-        userText: 'I leave Seraphina at camp and help Mara sort the supply crates.',
-        rapportClock: { activeMs: 50 * 60 * 1000, lastActivityAt: Date.now() },
-        tracker,
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Normal_Interaction',
-            identifyChallenge: 'help Mara sort supply crates',
-            explicitMeans: 'help Mara sort supply crates',
-            identifyTargets: {
-              ActionTargets: ['Mara'],
-              OppTargets: { NPC: [], ENV: [] },
-              BenefitedObservers: [],
-              HarmedObservers: [],
+      Date.now = () => now;
+      try {
+        const report = runCase({
+          userText: 'I leave Seraphina at camp and help Mara sort the supply crates.',
+          rapportClock: { activeMs: 50 * 60 * 1000, lastActivityAt: now },
+          tracker,
+          ledger: baseLedger({
+            resolutionEngine: {
+              identifyGoal: 'Normal_Interaction',
+              identifyChallenge: 'help Mara sort supply crates',
+              explicitMeans: 'help Mara sort supply crates',
+              identifyTargets: {
+                ActionTargets: ['Mara'],
+                OppTargets: { NPC: [], ENV: [] },
+                BenefitedObservers: [],
+                HarmedObservers: [],
+              },
             },
-          },
-          relationshipEngine: [relationship('Mara')],
-        }),
-      });
-      assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 20 * 60 * 1000);
-      assert.equal(report.trackerUpdate.npcs.Mara.lastRapportGainActiveMs, 50 * 60 * 1000);
+            relationshipEngine: [relationship('Mara')],
+          }),
+        });
+        assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
+        assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 20 * 60 * 1000);
+        assert.equal(report.trackerUpdate.npcs.Mara.lastRapportGainActiveMs, 50 * 60 * 1000);
+      } finally {
+        Date.now = realDateNow;
+      }
     },
   },
   {
@@ -5866,6 +5874,7 @@ const tests = [
               OppTargets: { NPC: [], ENV: [] },
               BenefitedObservers: [],
               HarmedObservers: [],
+              PowerActors: ['shopkeeper'],
             },
             hasStakes: false,
           },
@@ -5889,10 +5898,118 @@ const tests = [
       assert.match(audit, /- powerActor\.assessment: shopkeeper\/Y\/individual\/prominent merchant\/reach:capital trade network,money,reputation/);
       assert.match(audit, /- powerActor\.enmityEffect: none/);
       assert.match(audit, /- powerActor\.pressure: none/);
+      assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.PowerActors, ['shopkeeper']);
+      assert.match(audit, /- resolution\.targets: action:shopkeeper; power:shopkeeper/);
       assert.match(audit, /npc\.state: shopkeeper/);
       assert.doesNotMatch(modelPrompt, /Power actor pressure:/);
       assert.doesNotMatch(modelPrompt, /powerActor\.assessment/);
       assert.doesNotMatch(modelPrompt, /prominent merchant\/reach/);
+    },
+  },
+  {
+    name: '33a.2 power actor target bucket does not create relationship by itself',
+    run() {
+      const report = runCase({
+        userText: 'I pass under banners belonging to House Veyra without speaking to anyone.',
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'pass under House Veyra banners',
+            identifyChallenge: 'walk through the street',
+            explicitMeans: 'walking',
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+              PowerActors: ['House Veyra'],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [],
+          powerActorEnmity: {
+            assessments: [{
+              actor: 'House Veyra',
+              scope: 'organization',
+              isPowerActor: true,
+              actorType: 'noble house',
+              reach: ['guards', 'political leverage'],
+              evidence: 'banners identify the house controlling the street',
+              assessmentReason: 'noble house has resources and authority',
+            }],
+            effects: [],
+          },
+        }),
+      });
+      const audit = auditPrompt(report);
+      assert.deepEqual(report.trackerUpdate.npcs, {});
+      assert.deepEqual(report.finalNarrativeHandoff.npcHandoffs, []);
+      assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.PowerActors, ['House Veyra']);
+      assert.match(audit, /- resolution\.targets: power:House Veyra/);
+      assert.match(audit, /- npc\.state: none/);
+      assert.match(audit, /- powerActor\.assessment: House Veyra\/Y\/organization\/noble house/);
+      assert.doesNotMatch(prompt(report), /Power actor pressure:/);
+    },
+  },
+  {
+    name: '33a.3 harmed observer can also be power actor',
+    run() {
+      const report = runCase({
+        userText: 'I publicly shame Lady Veyra by exposing her brother as a fraud.',
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'publicly shame Lady Veyra through her brother',
+            identifyChallenge: 'expose her brother as a fraud in public',
+            explicitMeans: 'public accusation',
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: ['Lady Veyra'],
+              PowerActors: ['Lady Veyra', 'House Veyra'],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Lady Veyra', {
+            stakeChangeByOutcome: emptyStakeMap('harm'),
+          })],
+          powerActorEnmity: {
+            assessments: [{
+              actor: 'Lady Veyra',
+              scope: 'individual',
+              isPowerActor: true,
+              actorType: 'noblewoman',
+              reach: ['family guards', 'social reputation'],
+              evidence: 'publicly shamed noblewoman',
+              assessmentReason: 'individual has noble-house reach beyond personal reaction',
+            }, {
+              actor: 'House Veyra',
+              scope: 'organization',
+              isPowerActor: true,
+              actorType: 'noble house',
+              reach: ['guards', 'political leverage'],
+              evidence: 'her house reputation is implicated',
+              assessmentReason: 'house has institutional reach',
+            }],
+            effects: [{
+              actor: 'House Veyra',
+              actorType: 'noble house',
+              hasReach: true,
+              effect: 'damage_reputation_or_income',
+              severity: 'meaningful',
+              reason: 'User publicly exposed a family fraud',
+              knownToActor: true,
+            }],
+          },
+        }),
+      });
+      const audit = auditPrompt(report);
+      assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.HarmedObservers, ['Lady Veyra']);
+      assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.PowerActors, ['Lady Veyra', 'House Veyra']);
+      assert.match(audit, /- resolution\.targets: harms:Lady Veyra; power:Lady Veyra,House Veyra/);
+      assert.match(audit, /- npc\.state: Lady Veyra/);
+      assert.match(audit, /- powerActor\.assessment: Lady Veyra\/Y\/individual\/noblewoman/);
+      assert.match(audit, /- powerActor\.enmityEffect: House Veyra\/noble house\/damage_reputation_or_income\/meaningful\/known:Y/);
+      assert.match(prompt(report), /Power actor pressure: House Veyra \(noble house\): enmity 2, tier Obstructive/);
     },
   },
   {
@@ -5997,9 +6114,13 @@ const tests = [
 
       assert.match(semanticSource, /PowerActorEnmity\.count=0/);
       assert.match(semanticSource, /PowerActorAssessment\.count=0/);
+      assert.match(semanticSource, /ResolutionEngine\.identifyTargets\.PowerActors=\(none\)/);
+      assert.match(semanticSource, /ResolutionEngine\.identifyTargets\.PowerActors is strategic-only/);
+      assert.match(semanticSource, /Identify ResolutionEngine\.identifyTargets\.PowerActors during target discovery/);
       assert.match(semanticSource, /PowerActorEnmity\.assessments is audit-only diagnosis/);
       assert.match(semanticSource, /Assess semantically, not by keywords or titles/);
-      assert.match(semanticSource, /PowerActorEnmity never replaces RelationshipEngine/);
+      assert.match(semanticSource, /PowerActors and PowerActorEnmity never replace RelationshipEngine/);
+      assert.match(semanticSource, /PowerActors and PowerActorEnmity never replace RelationshipEngine/);
       assert.match(semanticSource, /powerActorEnmity/);
       assert.match(semanticSource, /Ordinary people with only personal reaction are not power actors/);
       assert.match(semanticSource, /Do not create power-actor enmity for ordinary individuals who can only personally react/);
@@ -6014,6 +6135,21 @@ const tests = [
 
       const combined = [semanticSource, deterministicSource, preflightSource, indexSource].join('\n');
       assert.doesNotMatch(combined, /spyStatus|fakeFriend|betrayalLifecycle|suspicionScore|evidenceScore/);
+    },
+  },
+  {
+    name: '33e semantic coverage repair prevents missing relationship aborts',
+    run() {
+      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      const deterministicSource = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
+
+      assert.match(semanticSource, /function repairRelationshipCoverage/);
+      assert.match(semanticSource, /function createFallbackRelationshipEntry/);
+      assert.match(semanticSource, /missing RelationshipEngine entry for target\/observer living NPC/);
+      assert.match(semanticSource, /repairRelationshipCoverage\(resolutionEngine, relationshipEngine, 'compact_ledger_parse'\)/);
+      assert.match(semanticSource, /repairRelationshipCoverage\(ledger\.resolutionEngine, ledger\.relationshipEngine, 'normalized_ledger'\)/);
+      assert.match(semanticSource, /semanticLedgerRepair: mergeSemanticLedgerRepair/);
+      assert.match(deterministicSource, /SEMANTIC_LEDGER_REPAIR/);
     },
   },
   {

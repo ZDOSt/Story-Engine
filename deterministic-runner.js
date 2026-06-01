@@ -865,6 +865,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         OppTargets: { NPC: showNone(targets.OppTargets.NPC), ENV: showNone(targets.OppTargets.ENV) },
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
+        PowerActors: showNone(targets.PowerActors),
         NPCInScene: showNone(npcInScene),
         UserImpairment: userImpairment,
         NPCImpairment: npcImpairment,
@@ -2240,6 +2241,7 @@ function repairLivingOppositionTargets(targets, classifier, options = {}, audit)
         },
         BenefitedObservers: toRealArray(targets.BenefitedObservers),
         HarmedObservers: toRealArray(targets.HarmedObservers),
+        PowerActors: toRealArray(targets.PowerActors),
     };
     if (options.hasStakes !== 'Y') return repaired;
     if (firstReal(repaired.OppTargets.NPC)) return repaired;
@@ -2380,6 +2382,7 @@ function normalizeDirectedCompanionCommandTargets(targets, classifier, semantic,
         OppTargets: { NPC: [], ENV: toRealArray(targets?.OppTargets?.ENV) },
         BenefitedObservers: [],
         HarmedObservers: [],
+        PowerActors: toRealArray(targets?.PowerActors),
     };
     audit?.push(`2.4c.1 directedCompanionCommandTargetNormalization=${compact({
         hardRule: 'ally commands are request-only; keep addressed companion as ActionTarget, preserve hostile pool, and remove requested victims/beneficiaries from resolution routing until companion proactivity actually acts',
@@ -2401,6 +2404,7 @@ function repairDirectedCompanionAttackHostilePool(targets, ledger, trackerSnapsh
         },
         BenefitedObservers: toRealArray(targets.BenefitedObservers),
         HarmedObservers: toRealArray(targets.HarmedObservers),
+        PowerActors: toRealArray(targets.PowerActors),
     };
     const latestUserText = relationshipText(getLatestUserTextFromContext(context));
     const companionCommands = repaired.ActionTargets
@@ -4836,6 +4840,7 @@ function removeUserReferencesFromTargets(targets, refereeContext = null) {
         },
         BenefitedObservers: withoutUser(targets?.BenefitedObservers),
         HarmedObservers: withoutUser(targets?.HarmedObservers),
+        PowerActors: withoutUser(targets?.PowerActors),
     };
 }
 

@@ -93,6 +93,7 @@ function buildReadableSemanticDebug(ledger) {
         'OppTargets.ENV=' + list(oppTargets.ENV),
         'BenefitedObservers=' + list(targets.BenefitedObservers),
         'HarmedObservers=' + list(targets.HarmedObservers),
+        'PowerActors=' + list(targets.PowerActors),
         'intimacyAdvanceExplicit=' + String(Boolean(resolution.intimacyAdvanceExplicit)),
         'boundaryViolationExplicit=' + String(Boolean(resolution.boundaryViolationExplicit)),
         'hasStakes=' + String(Boolean(resolution.hasStakes)),
@@ -1053,12 +1054,14 @@ function targetSummary(resolution) {
     const oppEnv = list(resolution.OppTargets?.ENV);
     const benefited = list(resolution.BenefitedObservers);
     const harmed = list(resolution.HarmedObservers);
+    const powerActors = list(resolution.PowerActors);
     if (!isNoneText(hostiles)) parts.push(`hostiles:${hostiles}`);
     if (!isNoneText(actionTargets)) parts.push(`action:${actionTargets}`);
     if (!isNoneText(oppNpc)) parts.push(`opposes:${oppNpc}`);
     if (!isNoneText(oppEnv)) parts.push(`env:${oppEnv}`);
     if (!isNoneText(benefited)) parts.push(`benefits:${benefited}`);
     if (!isNoneText(harmed)) parts.push(`harms:${harmed}`);
+    if (!isNoneText(powerActors)) parts.push(`power:${powerActors}`);
     return parts.join('; ') || 'none';
 }
 
