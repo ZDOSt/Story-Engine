@@ -2901,6 +2901,7 @@ function setProseGuardExpectedMessageHidden(messageId = null) {
     document.getElementById(PROSE_GUARD_EXPECTED_STYLE_ID)?.remove();
     const normalizedId = Number(messageId);
     if (!Number.isFinite(normalizedId)) return;
+    if (!canHideExpectedProseGuardMessage(normalizedId)) return;
 
     ensureProseGuardDisplayStyles();
     const style = document.createElement('style');
@@ -2917,7 +2918,7 @@ function isExpectedProseGuardMessageElement(node) {
     if (!node || node.getAttribute?.('is_user') === 'true') return false;
 
     const expectedMessageId = Number(state.proseGuardExpectedMessageId);
-    if (!Number.isFinite(expectedMessageId)) return true;
+    if (!Number.isFinite(expectedMessageId)) return false;
 
     const messageId = Number(node.getAttribute?.('mesid'));
     return Number.isFinite(messageId) && messageId === expectedMessageId;
@@ -2949,6 +2950,17 @@ function hasActiveProseGuardDisplayRun() {
     return Boolean(state.pendingRun || state.lastNarratorHandoff);
 }
 
+function canHideExpectedProseGuardMessage(messageId) {
+    const normalizedId = Number(messageId);
+    if (!Number.isFinite(normalizedId) || normalizedId <= 0) return false;
+    if (!hasActiveProseGuardDisplayRun()) return false;
+
+    const context = getContext();
+    const priorMessages = Array.isArray(context?.chat) ? context.chat.slice(0, normalizedId) : [];
+    const hasPriorUserMessage = priorMessages.some(message => message?.is_user || message?.role === 'user');
+    return hasPriorUserMessage || hasPendingProseGuardGenerationInput();
+}
+
 function tryAttachProseGuardPendingMessage() {
     if (!state.proseGuardHideNextMessage || typeof document === 'undefined') return false;
     if (!hasActiveProseGuardDisplayRun()) {
@@ -2960,9 +2972,12 @@ function tryAttachProseGuardPendingMessage() {
     if (!chatElement) return false;
 
     const expectedMessageId = Number(state.proseGuardExpectedMessageId);
-    const messageElement = Number.isFinite(expectedMessageId)
-        ? chatElement.querySelector(`.mes[mesid="${expectedMessageId}"]:not([is_user="true"])`)
-        : [...chatElement.querySelectorAll('.mes:not([is_user="true"])')].at(-1);
+    if (!Number.isFinite(expectedMessageId) || !canHideExpectedProseGuardMessage(expectedMessageId)) {
+        releaseProseGuardDisplayIntercept({ restore: true });
+        return false;
+    }
+
+    const messageElement = chatElement.querySelector(`.mes[mesid="${expectedMessageId}"]:not([is_user="true"])`);
     if (!messageElement) return false;
 
     state.proseGuardHideNextMessage = false;

@@ -6957,6 +6957,9 @@ const tests = [
       assert.match(source, /Prose Guard failed; keeping sanitized narrator text/);
       assert.match(source, /state\.lastNarratorHandoff = narratorContext;\s*beginProseGuardDisplayIntercept\(state\.pendingGeneration\.type \|\| 'normal'\)/);
       assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: true \}\);\s*showProgress\('Computing structured pre-flight\.\.\.'\)/);
+      assert.match(source, /function canHideExpectedProseGuardMessage\(messageId\)/);
+      assert.match(source, /if \(!Number\.isFinite\(normalizedId\) \|\| normalizedId <= 0\) return false;/);
+      assert.match(source, /if \(!Number\.isFinite\(expectedMessageId\)\) return false;/);
       assert.match(source, /function ensureProseGuardDisplayInterceptor\(\)/);
       assert.match(source, /function beginProseGuardDisplayIntercept\(type, dryRun = false\) \{\s*ensureProseGuardDisplayInterceptor\(\);/);
       assert.match(source, /eventTypes\.GENERATION_STARTED\) context\.eventSource\.on\(context\.eventTypes\.GENERATION_STARTED, ensureProseGuardDisplayInterceptor\)/);
