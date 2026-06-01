@@ -6945,8 +6945,8 @@ const tests = [
     name: '48 Prose Guard runs before tracker and tracker receives corrected narration',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
-      const guardIndex = source.indexOf('const proseGuardRaw = await requestProseGuardCorrection(');
-      const guardCallWithUserInputIndex = source.indexOf("const proseGuardRaw = await requestProseGuardCorrection(narrationText, pendingRun?.latestUserText || '')");
+      const guardIndex = source.indexOf('const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(');
+      const guardCallWithUserInputIndex = source.indexOf("const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '')");
       const trackerIndex = source.indexOf('const trackerRaw = await requestPostNarrationTrackerDelta({');
       const displayIndex = source.indexOf('message.extra.display_text = narrationText');
       assert.ok(guardIndex > 0 || guardCallWithUserInputIndex > 0, 'Prose Guard request call missing.');
@@ -6960,11 +6960,18 @@ const tests = [
       assert.match(source, /function beginProseGuardDisplayIntercept\(type, dryRun = false\) \{\s*ensureProseGuardDisplayInterceptor\(\);/);
       assert.match(source, /eventTypes\.GENERATION_STARTED\) context\.eventSource\.on\(context\.eventTypes\.GENERATION_STARTED, ensureProseGuardDisplayInterceptor\)/);
       assert.match(source, /new MutationObserver\(mutations =>/);
-      assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: !finalNarrationRendered \}\)/);
+      assert.match(source, /PROSE_GUARD_HIDDEN_MESSAGE_CLASS/);
+      assert.match(source, /function hideProseGuardMessageElement/);
+      assert.match(source, /function requestProseGuardCorrectionWithTimeout/);
+      assert.match(source, /Prose Guard timed out after/);
+      assert.match(source, /setTimeout\(finalize, PROSE_GUARD_DEFER_MS\)/);
+      assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: !finalNarrationRendered, messageId \}\)/);
       assert.match(source, /Story Engine is finalizing narration/);
       const interceptSource = source.slice(source.indexOf('function attachProseGuardStreamIntercept'), source.indexOf('function beginProseGuardDisplayIntercept'));
       assert.doesNotMatch(interceptSource, /\.innerHTML\s*=\s*''/);
       assert.doesNotMatch(interceptSource, /innerHTML\s*=\s*state\.proseGuardStreamOriginalHtml/);
+      assert.doesNotMatch(interceptSource, /new MutationObserver/);
+      assert.doesNotMatch(interceptSource, /characterData:\s*true/);
       assert.match(source, /PROSE_GUARD_HIDDEN_TEXT_CLASS/);
     },
   },

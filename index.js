@@ -45,7 +45,10 @@ const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-bloc
 const NARRATOR_HANDOFF_VERSION = 1;
 const PROSE_GUARD_DISPLAY_STYLE_ID = 'structured_preflight_prose_guard_display_styles';
 const PROSE_GUARD_HIDE_NEXT_CLASS = 'structured-preflight-proseguard-hide-next';
+const PROSE_GUARD_HIDDEN_MESSAGE_CLASS = 'structured-preflight-proseguard-hidden-message';
 const PROSE_GUARD_HIDDEN_TEXT_CLASS = 'structured-preflight-proseguard-hidden-text';
+const PROSE_GUARD_DEFER_MS = 0;
+const PROSE_GUARD_TIMEOUT_MS = 90000;
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
 const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
@@ -451,6 +454,9 @@ const state = {
     proseGuardStreamMessageId: null,
     proseGuardExpectedMessageId: null,
     proseGuardStreamResetting: false,
+    proseGuardHiddenMessageIds: new Set(),
+    postNarrationFinalizers: new Set(),
+    postNarrationFinalizerTimers: new Map(),
 };
 
 function getContext() {
@@ -1320,6 +1326,14 @@ function clearPendingRunCleanupTimer() {
         clearTimeout(state.pendingRunCleanupTimer);
         state.pendingRunCleanupTimer = null;
     }
+}
+
+function clearPostNarrationFinalizerTimers() {
+    for (const timer of state.postNarrationFinalizerTimers.values()) {
+        clearTimeout(timer);
+    }
+    state.postNarrationFinalizerTimers.clear();
+    state.postNarrationFinalizers.clear();
 }
 
 function showBlockingError(error) {
@@ -2867,6 +2881,7 @@ function ensureProseGuardDisplayStyles() {
     style.id = PROSE_GUARD_DISPLAY_STYLE_ID;
     style.textContent = `
         #chat.${PROSE_GUARD_HIDE_NEXT_CLASS} > .mes:not([is_user="true"]):last-child .mes_text,
+        #chat .mes.${PROSE_GUARD_HIDDEN_MESSAGE_CLASS} .mes_text,
         #chat .mes_text.${PROSE_GUARD_HIDDEN_TEXT_CLASS} {
             display: none !important;
         }
@@ -2890,6 +2905,23 @@ function isExpectedProseGuardMessageElement(node) {
     return Number.isFinite(messageId) && messageId === expectedMessageId;
 }
 
+function hideProseGuardMessageElement(messageElement, messageId = null) {
+    if (!messageElement) return false;
+
+    ensureProseGuardDisplayStyles();
+    messageElement.classList?.add(PROSE_GUARD_HIDDEN_MESSAGE_CLASS);
+    const normalizedId = Number(messageId ?? messageElement.getAttribute?.('mesid'));
+    if (Number.isFinite(normalizedId)) {
+        state.proseGuardHiddenMessageIds.add(normalizedId);
+    }
+    return true;
+}
+
+function hideProseGuardMessageById(messageId) {
+    const messageElement = getMessageElement(messageId);
+    return hideProseGuardMessageElement(messageElement, messageId);
+}
+
 function tryAttachProseGuardPendingMessage() {
     if (!state.proseGuardHideNextMessage || typeof document === 'undefined') return false;
 
@@ -2900,14 +2932,10 @@ function tryAttachProseGuardPendingMessage() {
     const messageElement = Number.isFinite(expectedMessageId)
         ? chatElement.querySelector(`.mes[mesid="${expectedMessageId}"]:not([is_user="true"])`)
         : [...chatElement.querySelectorAll('.mes:not([is_user="true"])')].at(-1);
-    const textElement = messageElement?.querySelector?.('.mes_text');
-    if (!textElement) return false;
+    if (!messageElement) return false;
 
     state.proseGuardHideNextMessage = false;
-    attachProseGuardStreamIntercept(textElement, {
-        preserveText: false,
-        messageId: Number.isFinite(expectedMessageId) ? expectedMessageId : null,
-    });
+    hideProseGuardMessageElement(messageElement, Number.isFinite(expectedMessageId) ? expectedMessageId : null);
     return true;
 }
 
@@ -2919,12 +2947,25 @@ function shouldUseProseGuardDisplayIntercept(type) {
         && ['normal', 'swipe', 'regenerate', 'continue'].includes(normalizedType);
 }
 
-function releaseProseGuardDisplayIntercept({ restore = false } = {}) {
+function releaseProseGuardDisplayIntercept({ restore = false, messageId = null } = {}) {
     if (state.proseGuardStreamObserver) {
         state.proseGuardStreamObserver.disconnect();
     }
     state.proseGuardStreamElement?.classList?.remove(PROSE_GUARD_HIDDEN_TEXT_CLASS);
     if (typeof document !== 'undefined') {
+        const idsToRelease = Number.isFinite(Number(messageId))
+            ? [Number(messageId)]
+            : [...state.proseGuardHiddenMessageIds];
+        for (const id of idsToRelease) {
+            getMessageElement(id)?.classList?.remove(PROSE_GUARD_HIDDEN_MESSAGE_CLASS);
+            state.proseGuardHiddenMessageIds.delete(id);
+        }
+        if (!Number.isFinite(Number(messageId))) {
+            document
+                .querySelectorAll(`#chat .mes.${PROSE_GUARD_HIDDEN_MESSAGE_CLASS}`)
+                .forEach(element => element.classList.remove(PROSE_GUARD_HIDDEN_MESSAGE_CLASS));
+            state.proseGuardHiddenMessageIds.clear();
+        }
         document
             .querySelectorAll(`#chat .mes_text.${PROSE_GUARD_HIDDEN_TEXT_CLASS}`)
             .forEach(element => element.classList.remove(PROSE_GUARD_HIDDEN_TEXT_CLASS));
@@ -2949,30 +2990,16 @@ function disconnectProseGuardStreamObserver() {
 }
 
 function attachProseGuardStreamIntercept(textElement, { preserveText = false, messageId = null } = {}) {
-    if (!textElement || typeof MutationObserver === 'undefined') return;
+    if (!textElement) return;
 
     releaseProseGuardDisplayIntercept();
     ensureProseGuardDisplayStyles();
+    const messageElement = Number.isFinite(Number(messageId)) ? getMessageElement(messageId) : textElement.closest?.('.mes');
+    if (hideProseGuardMessageElement(messageElement, messageId)) return;
+
     state.proseGuardStreamElement = textElement;
     state.proseGuardStreamMessageId = messageId;
     textElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
-
-    const observer = new MutationObserver(() => {
-        if (state.proseGuardStreamResetting) return;
-
-        state.proseGuardStreamResetting = true;
-        textElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
-        state.proseGuardStreamResetting = false;
-    });
-
-    observer.observe(textElement, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-        attributes: true,
-        attributeFilter: ['class'],
-    });
-    state.proseGuardStreamObserver = observer;
 }
 
 function beginProseGuardDisplayIntercept(type, dryRun = false) {
@@ -2991,10 +3018,9 @@ function beginProseGuardDisplayIntercept(type, dryRun = false) {
         const messageId = Array.isArray(context?.chat) ? context.chat.length - 1 : null;
         if (messageId != null && !context.chat[messageId]?.is_user) {
             state.proseGuardExpectedMessageId = messageId;
-            attachProseGuardStreamIntercept(getMessageTextElement(messageId), {
-                preserveText: normalizedType === 'continue',
-                messageId,
-            });
+            if (!hideProseGuardMessageById(messageId)) {
+                state.proseGuardHideNextMessage = true;
+            }
         }
         return;
     }
@@ -3030,14 +3056,8 @@ function ensureProseGuardDisplayInterceptor() {
                     if (!isExpectedProseGuardMessageElement(messageNode)) continue;
 
                     const messageId = Number(messageNode.getAttribute('mesid'));
-                    const textElement = messageNode.querySelector('.mes_text');
-                    if (textElement) {
-                        state.proseGuardHideNextMessage = false;
-                        attachProseGuardStreamIntercept(textElement, {
-                            preserveText: false,
-                            messageId: Number.isFinite(messageId) ? messageId : null,
-                        });
-                    }
+                    state.proseGuardHideNextMessage = false;
+                    hideProseGuardMessageElement(messageNode, Number.isFinite(messageId) ? messageId : null);
                     return;
                 }
             }
@@ -4860,6 +4880,38 @@ async function requestProseGuardCorrection(narrationText, latestUserText = '') {
     }
 }
 
+function deferForProseGuardFinalization() {
+    return new Promise(resolve => setTimeout(resolve, PROSE_GUARD_DEFER_MS));
+}
+
+async function requestProseGuardCorrectionWithTimeout(narrationText, latestUserText = '') {
+    let timeoutId = null;
+    try {
+        return await Promise.race([
+            requestProseGuardCorrection(narrationText, latestUserText),
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => {
+                        state.bypassPromptReady = false;
+                        reject(new Error(`Prose Guard timed out after ${Math.round(PROSE_GUARD_TIMEOUT_MS / 1000)} seconds.`));
+                    },
+                    PROSE_GUARD_TIMEOUT_MS,
+                );
+            }),
+        ]);
+    } finally {
+        if (timeoutId != null) clearTimeout(timeoutId);
+    }
+}
+
+function isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured = {}) {
+    if (!context || !Array.isArray(context.chat)) return false;
+    if (captured?.chatId && getChatId(context) !== captured.chatId) return false;
+    if (getMessageKey(messageId, context) !== messageKey) return false;
+    const message = context.chat[messageId];
+    return Boolean(message && !message.is_user);
+}
+
 function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
     const report = pendingRun?.report || {};
     const handoff = report?.finalNarrativeHandoff || {};
@@ -5009,10 +5061,9 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
     }
 }
 
-async function prependComputedDebug(messageId, type) {
+function prependComputedDebug(messageId, type) {
     const context = getContext();
     const messageKey = getMessageKey(messageId, context);
-    let finalNarrationRendered = false;
 
     if (!state.lastNarratorHandoff || state.lastNarratorHandoffKey === messageKey || type === 'impersonate') {
         clearRuntimePrompts();
@@ -5025,11 +5076,64 @@ async function prependComputedDebug(messageId, type) {
         return;
     }
 
+    const proseGuardEnabled = getSettings().postNarrationProseGuardEnabled !== false;
+    if (state.postNarrationFinalizers.has(messageKey)) return;
+
     clearPendingRunCleanupTimer();
+    if (proseGuardEnabled) {
+        hideProseGuardMessageById(messageId);
+    }
     setChatInputLocked(true, 'Finalizing narration...');
     const finalizingToast = showProgress('Finalizing narration...');
+    const captured = {
+        chatId: getChatId(context),
+        narratorHandoff: state.lastNarratorHandoff,
+        pendingRun: state.pendingRun,
+    };
+    state.postNarrationFinalizers.add(messageKey);
+
+    const finalize = () => {
+        state.postNarrationFinalizerTimers.delete(messageKey);
+        void finalizePostNarrationMessage(messageId, type, messageKey, finalizingToast, captured)
+            .catch(error => {
+                console.error(`[${EXTENSION_NAME}] post-narration finalization failed.`, error);
+            })
+            .finally(() => {
+                state.postNarrationFinalizers.delete(messageKey);
+            });
+    };
+
+    if (proseGuardEnabled) {
+        const timer = setTimeout(finalize, PROSE_GUARD_DEFER_MS);
+        state.postNarrationFinalizerTimers.set(messageKey, timer);
+        return;
+    }
+
+    return finalizePostNarrationMessage(messageId, type, messageKey, finalizingToast, captured)
+        .catch(error => {
+            console.error(`[${EXTENSION_NAME}] post-narration finalization failed.`, error);
+        })
+        .finally(() => {
+            state.postNarrationFinalizers.delete(messageKey);
+        });
+}
+
+async function finalizePostNarrationMessage(messageId, type, messageKey, finalizingToast = null, captured = {}) {
+    let finalNarrationRendered = false;
 
     try {
+        const context = getContext();
+        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
+            clearRuntimePrompts();
+            return;
+        }
+
+        const message = context?.chat?.[messageId];
+        if (!message || message.is_user || type === 'impersonate') {
+            clearRuntimePrompts();
+            return;
+        }
+
         message.extra = message.extra || {};
 
         const currentText = String(message.mes ?? '');
@@ -5037,17 +5141,23 @@ async function prependComputedDebug(messageId, type) {
         const rawAssistantText = displayText ?? currentText;
         const visibleText = stripComputedDebugPrefix(rawAssistantText);
         let narrationText = sanitizeAssistantNarration(visibleText);
-        const narratorHandoff = state.lastNarratorHandoff;
-        const pendingRun = state.pendingRun;
+        const narratorHandoff = captured?.narratorHandoff ?? state.lastNarratorHandoff;
+        const pendingRun = captured?.pendingRun ?? state.pendingRun;
         let trackerDeltaWarning = null;
 
         if (getSettings().postNarrationProseGuardEnabled !== false && narrationText) {
             try {
-                const proseGuardRaw = await requestProseGuardCorrection(narrationText, pendingRun?.latestUserText || '');
+                await deferForProseGuardFinalization();
+                const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
                 narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
             } catch (error) {
                 console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
             }
+        }
+
+        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
+            clearRuntimePrompts();
+            return;
         }
 
         const root = getTrackerRoot(context);
@@ -5099,6 +5209,11 @@ async function prependComputedDebug(messageId, type) {
             if (state.pendingRun === pendingRun) state.pendingRun = null;
         }
 
+        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
+            clearRuntimePrompts();
+            return;
+        }
+
         maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context });
 
         message.mes = narrationText;
@@ -5108,18 +5223,14 @@ async function prependComputedDebug(messageId, type) {
         state.lastNarratorHandoff = '';
 
         disconnectProseGuardStreamObserver();
-        const currentTextElement = getMessageTextElement(messageId);
-        if (currentTextElement) {
-            currentTextElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
-            currentTextElement.textContent = narrationText;
-        }
+        hideProseGuardMessageById(messageId);
         if (typeof context.updateMessageBlock === 'function') {
             context.updateMessageBlock(messageId, message);
         } else {
             const textElement = getMessageTextElement(messageId);
             if (textElement) textElement.textContent = narrationText;
         }
-        releaseProseGuardDisplayIntercept();
+        releaseProseGuardDisplayIntercept({ messageId });
         finalNarrationRendered = true;
         renderNarratorHandoffBlockForMessage(messageId, null, context);
         renderTrackerDisplayBlockForMessage(messageId, null, context);
@@ -5135,7 +5246,7 @@ async function prependComputedDebug(messageId, type) {
         clearRuntimePrompts();
         state.chatSignature = captureChatSignature(context);
     } finally {
-        releaseProseGuardDisplayIntercept({ restore: !finalNarrationRendered });
+        releaseProseGuardDisplayIntercept({ restore: !finalNarrationRendered, messageId });
         clearProgress(finalizingToast);
         setChatInputLocked(false);
     }
@@ -5202,6 +5313,7 @@ async function handleMessageSwiped(messageId) {
 
 function handleChatChanged() {
     clearPendingRunCleanupTimer();
+    clearPostNarrationFinalizerTimers();
     clearAllProgress();
     setChatInputLocked(false);
     releaseProseGuardDisplayIntercept();
@@ -5490,6 +5602,7 @@ function abortGenerationAfterPromptReady(context) {
 
 export function onDisable() {
     const context = getContext();
+    clearPostNarrationFinalizerTimers();
     clearAllProgress();
     setChatInputLocked(false);
     removeStreamingArtifactRegex();
