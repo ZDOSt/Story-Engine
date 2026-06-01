@@ -7002,6 +7002,23 @@ const tests = [
     },
   },
   {
+    name: '48a direct semantic profile requests do not rotate active API secrets',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      assert.doesNotMatch(source, /rotateSecret/);
+      assert.doesNotMatch(source, /secret_state/);
+      assert.doesNotMatch(source, /withConnectionProfileSecret/);
+      assert.doesNotMatch(source, /CHAT_COMPLETION_SECRET_KEYS/);
+      assert.match(semanticSource, /secret_id:\s*profile\['secret-id'\]/);
+      assert.match(semanticSource, /chat_completion_source:\s*chatCompletionSource/);
+      assert.match(source, /using direct semantic connection profile request/);
+      assert.match(source, /using direct tracker connection profile request/);
+      assert.match(source, /using direct Prose Guard connection profile request/);
+      assert.match(source, /using direct Progression connection profile request/);
+    },
+  },
+  {
     name: '49 player creator supports compact identity fields, custom details, and alphabetical race choices',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');

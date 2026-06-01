@@ -4,7 +4,6 @@ import { extension_settings } from '../../../../scripts/extensions.js';
 import { addEphemeralStoppingString, flushEphemeralStoppingStrings } from '../../../../scripts/power-user.js';
 import { persona_description_positions, power_user } from '../../../../scripts/power-user.js';
 import { setPersonaDescription, user_avatar } from '../../../../scripts/personas.js';
-import { rotateSecret, SECRET_KEYS, secret_state } from '../../../../scripts/secrets.js';
 import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
@@ -395,31 +394,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     trackerWidgetX: 24,
     trackerWidgetY: 120,
 });
-const CHAT_COMPLETION_SECRET_KEYS = Object.freeze({
-    ai21: SECRET_KEYS.AI21,
-    aimlapi: SECRET_KEYS.AIMLAPI,
-    azure_openai: SECRET_KEYS.AZURE_OPENAI,
-    chutes: SECRET_KEYS.CHUTES,
-    claude: SECRET_KEYS.CLAUDE,
-    cohere: SECRET_KEYS.COHERE,
-    cometapi: SECRET_KEYS.COMETAPI,
-    custom: SECRET_KEYS.CUSTOM,
-    deepseek: SECRET_KEYS.DEEPSEEK,
-    electronhub: SECRET_KEYS.ELECTRONHUB,
-    fireworks: SECRET_KEYS.FIREWORKS,
-    google: SECRET_KEYS.MAKERSUITE,
-    groq: SECRET_KEYS.GROQ,
-    mistralai: SECRET_KEYS.MISTRALAI,
-    moonshot: SECRET_KEYS.MOONSHOT,
-    nanogpt: SECRET_KEYS.NANOGPT,
-    openai: SECRET_KEYS.OPENAI,
-    openrouter: SECRET_KEYS.OPENROUTER,
-    perplexity: SECRET_KEYS.PERPLEXITY,
-    pollinations: SECRET_KEYS.POLLINATIONS,
-    vertexai: SECRET_KEYS.VERTEXAI,
-    xai: SECRET_KEYS.XAI,
-    zai: SECRET_KEYS.ZAI,
-});
 const EXTENSION_PROMPT_TYPES = Object.freeze({
     NONE: -1,
     IN_PROMPT: 0,
@@ -578,55 +552,6 @@ async function applyConnectionProfileName(profileName) {
     await command.callback({ 'await': 'true', timeout: '10000' }, normalized);
 }
 
-function getSecretKeyForConnectionProfile(profile) {
-    const context = getContext();
-    const apiMap = context?.CONNECT_API_MAP?.[profile?.api];
-    return CHAT_COMPLETION_SECRET_KEYS[apiMap?.source] || null;
-}
-
-function getActiveSecretId(secretKey) {
-    const secrets = secret_state?.[secretKey];
-    if (!Array.isArray(secrets)) return '';
-    return secrets.find(secret => secret?.active)?.id || '';
-}
-
-async function withConnectionProfileSecret(profile, callback) {
-    const secretKey = getSecretKeyForConnectionProfile(profile);
-    const targetSecretId = String(profile?.['secret-id'] || '').trim();
-    if (!secretKey || !targetSecretId) {
-        return await callback();
-    }
-
-    const originalSecretId = getActiveSecretId(secretKey);
-    const shouldRotate = originalSecretId && originalSecretId !== targetSecretId;
-
-    try {
-        if (shouldRotate) {
-            console.info(`[${EXTENSION_NAME}] activating semantic profile secret for ${profile.name}.`);
-            await rotateSecret(secretKey, targetSecretId);
-        }
-        return await callback();
-    } finally {
-        if (shouldRotate) {
-            try {
-                await rotateSecret(secretKey, originalSecretId);
-                console.info(`[${EXTENSION_NAME}] restored roleplay secret after semantic pass.`);
-            } catch (error) {
-                console.error(`[${EXTENSION_NAME}] failed to restore roleplay secret after semantic pass.`, error);
-                try {
-                    globalThis.toastr?.error?.(
-                        'Semantic pass finished, but restoring the original API secret failed. Check ST connection settings before continuing.',
-                        EXTENSION_NAME,
-                        { timeOut: 15000, extendedTimeOut: 15000 },
-                    );
-                } catch {
-                    // Toasts are best-effort only.
-                }
-            }
-        }
-    }
-}
-
 async function withSemanticGenerationSettings(callback) {
     const settings = getSettings();
     const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
@@ -645,11 +570,11 @@ async function withSemanticGenerationSettings(callback) {
     }
 
     console.info(`[${EXTENSION_NAME}] using direct semantic connection profile request: ${profile.name}`);
-    return await withConnectionProfileSecret(profile, () => callback({
+    return await callback({
         ...semanticOptions,
         semanticProfileId: profile.id,
         semanticProfileName: profile.name,
-    }));
+    });
 }
 
 async function withTrackerGenerationSettings(callback) {
@@ -661,11 +586,11 @@ async function withTrackerGenerationSettings(callback) {
             throw new Error(`Tracker connection profile "${trackerProfile}" was not found.`);
         }
         console.info(`[${EXTENSION_NAME}] using direct tracker connection profile request: ${profile.name}`);
-        return await withConnectionProfileSecret(profile, () => callback({
+        return await callback({
             disableSemanticThinking: settings.disableSemanticThinking !== false,
             semanticProfileId: profile.id,
             semanticProfileName: profile.name,
-        }));
+        });
     }
     return await withSemanticGenerationSettings(callback);
 }
@@ -679,11 +604,11 @@ async function withProseGuardGenerationSettings(callback) {
             throw new Error(`Prose Guard connection profile "${proseGuardProfile}" was not found.`);
         }
         console.info(`[${EXTENSION_NAME}] using direct Prose Guard connection profile request: ${profile.name}`);
-        return await withConnectionProfileSecret(profile, () => callback({
+        return await callback({
             disableSemanticThinking: settings.disableSemanticThinking !== false,
             semanticProfileId: profile.id,
             semanticProfileName: profile.name,
-        }));
+        });
     }
     return await withSemanticGenerationSettings(callback);
 }
@@ -697,11 +622,11 @@ async function withProgressionGenerationSettings(callback) {
             throw new Error(`Progression connection profile "${progressionProfile}" was not found.`);
         }
         console.info(`[${EXTENSION_NAME}] using direct Progression connection profile request: ${profile.name}`);
-        return await withConnectionProfileSecret(profile, () => callback({
+        return await callback({
             disableSemanticThinking: settings.disableSemanticThinking !== false,
             semanticProfileId: profile.id,
             semanticProfileName: profile.name,
-        }));
+        });
     }
     return await withSemanticGenerationSettings(callback);
 }

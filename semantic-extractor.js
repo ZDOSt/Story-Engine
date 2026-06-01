@@ -442,6 +442,7 @@ async function sendChatCompletionProfileRequest(prompt, responseLength, options 
             max_tokens: responseLength,
             model: profile.model,
             chat_completion_source: chatCompletionSource,
+            secret_id: profile['secret-id'],
             custom_url: profile['api-url'],
             vertexai_region: profile['api-url'],
             zai_endpoint: profile['api-url'],
