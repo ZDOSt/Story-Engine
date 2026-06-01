@@ -6119,7 +6119,10 @@ const tests = [
       assert.match(semanticSource, /Identify ResolutionEngine\.identifyTargets\.PowerActors during target discovery/);
       assert.match(semanticSource, /PowerActorEnmity\.assessments is audit-only diagnosis/);
       assert.match(semanticSource, /Assess semantically, not by keywords or titles/);
-      assert.match(semanticSource, /A prominent merchant should be assessed as a potential power actor/);
+      assert.match(semanticSource, /credible means to affect \{\{user\}\} beyond acting alone in the moment/);
+      assert.match(semanticSource, /the active character\/card actor when relevant/);
+      assert.match(semanticSource, /Do this even when PowerActorEnmity\.effects count is 0/);
+      assert.match(semanticSource, /A prominent local figure should be assessed as a potential power actor/);
       assert.match(semanticSource, /PowerActors and PowerActorEnmity never replace RelationshipEngine/);
       assert.match(semanticSource, /PowerActors and PowerActorEnmity never replace RelationshipEngine/);
       assert.match(semanticSource, /powerActorEnmity/);
