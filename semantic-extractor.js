@@ -19,6 +19,7 @@ const DISABLE_THINKING_INCLUDE_BODY = 'thinking:\n  type: disabled';
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
 const POWER_ACTOR_SEVERITIES = Object.freeze(['none', 'minor', 'meaningful', 'major']);
+const POWER_ACTOR_ASSESSMENT_SCOPES = Object.freeze(['individual', 'organization', 'institution', 'group', 'unknown']);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -642,6 +643,23 @@ function buildSemanticPreflightSchema() {
             },
         },
     };
+    const powerActorAssessmentSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['actor', 'scope', 'isPowerActor', 'actorType', 'reach', 'evidence', 'assessmentReason'],
+        properties: {
+            actor: { type: 'string' },
+            scope: { type: 'string', enum: POWER_ACTOR_ASSESSMENT_SCOPES },
+            isPowerActor: {
+                type: 'boolean',
+                description: 'Y when the entity has meaningful reach/resources/authority/influence beyond personal reaction. Assess semantically, not by title keyword.',
+            },
+            actorType: { type: 'string' },
+            reach: stringListSchema,
+            evidence: { type: 'string' },
+            assessmentReason: { type: 'string' },
+        },
+    };
     const stakeChangeSchema = {
         type: 'object',
         additionalProperties: false,
@@ -878,8 +896,12 @@ function buildSemanticPreflightSchema() {
             powerActorEnmity: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['effects'],
+                required: ['assessments', 'effects'],
                 properties: {
+                    assessments: {
+                        type: 'array',
+                        items: powerActorAssessmentSchema,
+                    },
                     effects: {
                         type: 'array',
                         items: powerActorEffectSchema,
@@ -1140,7 +1162,8 @@ const COMPACT_LEDGER_CONTRACT = [
     PERSONALITY_ARCHETYPE_GLOSSARY,
     '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory is not tracked. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
-    '- PowerActorEnmity is hidden power-actor memory. Track only organizations, institutions, factions, crews, noble houses, offices, companies, gangs, cults, guilds, military units, recurring parties/groups, or unusually influential individuals with resources, agents, authority, territory, money, magic, reputation, or information access. Do not track ordinary individuals who can only personally react; use NPC B/F/H for them instead.',
+    '- PowerActorEnmity is hidden power-actor memory. First assess relevant entities semantically, not by keyword/title: an entity is a power actor only if it has meaningful reach/resources/authority/influence beyond personal reaction, such as agents, institutional role, faction backing, territory, reputation, money, magic, information access, political leverage, guild backing, trade network, command structure, or social power. Ordinary people with only personal reaction are not power actors even if they have a job title.',
+    '- PowerActorEnmity.assessments is audit-only diagnosis. Include relevant living NPCs in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers when context suggests possible reach or ordinary status should be auditable. You may also include an explicitly affected organization/group. Assessment never creates enmity by itself and never replaces RelationshipEngine. If a living NPC appears in a target/observer list, still create the required RelationshipEngine entry even when isPowerActor=Y.',
     '- PowerActorEnmity effects are only for the latest user input and immediate visible context. Add an entry only if the user meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor. If the affected party lacks reach, hasReach=N and severity=none. If the actor cannot plausibly know or discover it, knownToActor=N and deterministic code will not increase enmity.',
     '- PowerActorEnmity severity: minor=small obstruction or insult; meaningful=real setback, exposure, loss, asset harm, or operation disruption; major=severe public exposure, major defeat, major theft, death/capture of members, ruined operation, or serious reputation/income damage. If none, output count=0.',
     '- NameGenerationEngine semantic lines are candidate generation only. Generate exactly 3 male person/entity names, 3 female person/entity names, and 3 location names matching the selected style line. Make them creative, readable, pronounceable, and real-but-unplaceable. Avoid Western stock fantasy, Tolkien/JRPG drift, ordinary modern names, famous names, joke names, and letter soup. These are candidates only; deterministic validation may reject, repair, or replace them before narration.',
@@ -1210,6 +1233,14 @@ TrackerUpdateEngine.NPC[0].statusAdd=(none)
 TrackerUpdateEngine.NPC[0].statusRemove=(none)
 TrackerUpdateEngine.NPC[0].gearAdd=(none)
 TrackerUpdateEngine.NPC[0].gearRemove=(none)
+PowerActorAssessment.count=0
+PowerActorAssessment[0].actor=(none)
+PowerActorAssessment[0].scope=unknown
+PowerActorAssessment[0].isPowerActor=N
+PowerActorAssessment[0].actorType=(none)
+PowerActorAssessment[0].reach=(none)
+PowerActorAssessment[0].evidence=(none)
+PowerActorAssessment[0].assessmentReason=(none)
 PowerActorEnmity.count=0
 PowerActorEnmity[0].actor=(none)
 PowerActorEnmity[0].actorType=(none)
@@ -1346,7 +1377,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute target identification in this order: first identify hostilesInScene.NPC as ALL established, present, living hostile entities in scene; then identify which targets, if any, directly oppose {{user}}\'s current action as OppTargets.NPC. hostilesInScene.NPC is a broad hostile pool and does not itself create relationship changes, rolls, NPCInScene entries, or OppTargets.NPC. A hostile is established only if present in assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create hostiles from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated enemies no longer posing danger, and non-living hazards/obstacles. Companion/ally commands are tactical requests only: they may address the companion as an ActionTarget and may name an established hostile for later companion crisis targeting, but do not treat the command as {{user}} making the companion act, do not force a companion attack, and do not create a user-resolved success/failure roll for companion obedience. If several hostiles exist and no specific hostile is named, do not guess. ' +
         'OppTargets.NPC is only for stakes-bearing living opposition/resistance/contest against {{user}}\'s current action/challenge: directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}. If hasStakes=false, OppTargets.NPC must be ["(none)"]. If a living ActionTarget meaningfully resists/opposes a stakes-bearing action, that same NPC may also appear in OppTargets.NPC. Do not put every enemy in OppTargets.NPC merely because they are hostile; use hostilesInScene.NPC for the broader hostile pool. ' +
         'BenefitedObservers and HarmedObservers are living entities present in scene who are NOT already in ActionTargets or OppTargets.NPC. Do not put a direct target or opposing NPC in observer lists. ' +
-        'Create one relationshipEngine entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. Do not create entries for bystanders, hostilesInScene-only NPCs, or inferred scene participants outside those target/observer lists. ' +
+        'Create one relationshipEngine entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. This coverage is mandatory even when that same NPC is also assessed as a PowerActorEnmity power actor. PowerActorEnmity never replaces RelationshipEngine. Do not create entries for bystanders, hostilesInScene-only NPCs, or inferred scene participants outside those target/observer lists. ' +
         'For each living NPC in relationshipEngine, stakeChangeByOutcome must describe that NPC stakes change for each outcome: benefit means their stakes improve, harm means their stakes worsen, none means no meaningful stake change. For explicit boundary violations toward a direct/opposing NPC target, successful or landed outcomes worsen that NPC boundary/autonomy/trust stakes, so use harm and not none. ' +
         'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC core stat block from explicit portrayal and copy the same block into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
         'Do not leave a named portrayed NPC as Rank none or 1/1/1 unless the card, scene, and tracker give no explicit portrayal at all. ' +
@@ -1358,7 +1389,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. ' +
         `Execute NameGenerationEngine as semantic candidate generation only: selectedStyle must be "${nameStyle}", maleCandidates must contain exactly 3 male person/entity names, femaleCandidates exactly 3 female person/entity names, and locationCandidates exactly 3 location names. Follow the selected style and naming rules in the engine reference. Do not use fixed stock names, ordinary modern-Western names, famous names, jokes, or letter soup. Deterministic code will validate and expose only the approved final pool. ` +
-        'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or unusually influential individual with resources, agents, authority, territory, money, magic, reputation, or information access. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor. Mark knownToActor=Y only when the actor plausibly knows, can observe, is informed of, or can discover the action through ordinary reach. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
+        'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for relevant target/observer NPCs and explicitly affected organizations/groups so the user can inspect whether they were semantically recognized as power actors. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or unusually influential individual with meaningful reach/resources/authority/influence beyond personal reaction: resources, agents, authority, territory, money, magic, reputation, information access, political leverage, guild/faction backing, trade network, command structure, or social power. A job title alone is not enough. A prominent merchant in the capital may be a power actor if context gives real trade network, wealth, influence, reputation, agents, guild backing, or political leverage; an ordinary shopkeeper without reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor. Mark knownToActor=Y only when the actor plausibly knows, can observe, is informed of, or can discover the action through ordinary reach. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
         'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
         'Use condition=unchanged unless the latest user input or immediate visible context explicitly establishes a completed/current health state as healthy, bruised, wounded, badly_wounded, critical, or dead. Do not set condition from a desired/requested future injury or from an attempted action before narration confirms the result. ' +
@@ -1615,6 +1646,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.injuryEffectEngine) missing.push('injuryEffectEngine');
     if (!Array.isArray(ledger?.injuryEffectEngine?.effects)) missing.push('injuryEffectEngine.effects');
     if (!ledger?.powerActorEnmity) missing.push('powerActorEnmity');
+    if (!Array.isArray(ledger?.powerActorEnmity?.assessments)) missing.push('powerActorEnmity.assessments');
     if (!Array.isArray(ledger?.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
     if (!ledger?.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
@@ -1718,6 +1750,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.User.commitmentsAdd',
         'TrackerUpdateEngine.User.commitmentsRemove',
         'TrackerUpdateEngine.NPC.count',
+        'PowerActorAssessment.count',
         'PowerActorEnmity.count',
         'NameGenerationEngine.selectedStyle',
         'NameGenerationEngine.maleCandidates',
@@ -1766,6 +1799,26 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.affectsAction`,
         ];
         for (const key of effectRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const powerActorAssessmentCount = clampNumber(readNumber(fields, 'PowerActorAssessment.count', 0), 0, 20);
+    for (let index = 0; index < powerActorAssessmentCount; index += 1) {
+        const prefix = `PowerActorAssessment[${index}]`;
+        const powerActorAssessmentRequired = [
+            `${prefix}.actor`,
+            `${prefix}.scope`,
+            `${prefix}.isPowerActor`,
+            `${prefix}.actorType`,
+            `${prefix}.reach`,
+            `${prefix}.evidence`,
+            `${prefix}.assessmentReason`,
+        ];
+        for (const key of powerActorAssessmentRequired) {
             if (!fields.has(key)) missing.push(key);
         }
     }
@@ -1940,7 +1993,20 @@ function parseCompactLedger(text, trackerSnapshot) {
         });
     }
 
-    const powerActorEnmity = { effects: [] };
+    const powerActorEnmity = { assessments: [], effects: [] };
+    for (let index = 0; index < powerActorAssessmentCount; index += 1) {
+        const prefix = `PowerActorAssessment[${index}]`;
+        const assessment = normalizePowerActorAssessment({
+            actor: fields.get(`${prefix}.actor`),
+            scope: fields.get(`${prefix}.scope`),
+            isPowerActor: readBoolean(fields, `${prefix}.isPowerActor`, false),
+            actorType: fields.get(`${prefix}.actorType`),
+            reach: readList(fields, `${prefix}.reach`),
+            evidence: fields.get(`${prefix}.evidence`),
+            assessmentReason: fields.get(`${prefix}.assessmentReason`),
+        });
+        if (assessment) powerActorEnmity.assessments.push(assessment);
+    }
     for (let index = 0; index < powerActorEffectCount; index += 1) {
         const prefix = `PowerActorEnmity[${index}]`;
         const effect = normalizePowerActorEffect({
@@ -2597,6 +2663,9 @@ function normalizeLedger(ledger) {
         }).filter(Boolean)
         : [];
     ledger.powerActorEnmity = ledger.powerActorEnmity || {};
+    ledger.powerActorEnmity.assessments = Array.isArray(ledger.powerActorEnmity.assessments)
+        ? ledger.powerActorEnmity.assessments.map(normalizePowerActorAssessment).filter(Boolean)
+        : [];
     ledger.powerActorEnmity.effects = Array.isArray(ledger.powerActorEnmity.effects)
         ? ledger.powerActorEnmity.effects.map(normalizePowerActorEffect).filter(Boolean)
         : [];
@@ -2636,6 +2705,41 @@ function normalizeUserAbilityUse(value) {
         narrativeEffect: used && !isNoneValue(narrativeEffect) ? narrativeEffect : '(none)',
         mechanicalScope: 'flavor_only_no_bonus',
     };
+}
+
+function normalizePowerActorAssessment(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const actor = cleanScalar(source.actor ?? source.Actor).replace(/\s+/g, ' ').slice(0, 100);
+    if (!actor || isNoneValue(actor)) return null;
+    const scope = normalizePowerActorAssessmentScope(source.scope ?? source.Scope);
+    const isPowerActor = toBoolean(source.isPowerActor ?? source.IsPowerActor, false);
+    const actorType = cleanScalar(source.actorType ?? source.ActorType).replace(/\s+/g, ' ').slice(0, 80) || (isPowerActor ? 'power actor' : 'ordinary actor');
+    const reachSource = Array.isArray(source.reach ?? source.Reach)
+        ? (source.reach ?? source.Reach)
+        : String(source.reach ?? source.Reach ?? '')
+            .split(',')
+            .map(item => item.trim())
+            .filter(Boolean);
+    const reach = reachSource
+        .map(item => cleanScalar(item).replace(/\s+/g, ' ').slice(0, 80))
+        .filter(item => item && !isNoneValue(item))
+        .slice(0, 8);
+    const evidence = cleanScalar(source.evidence ?? source.Evidence).replace(/\s+/g, ' ').slice(0, 180) || '(none)';
+    const assessmentReason = cleanScalar(source.assessmentReason ?? source.AssessmentReason ?? source.reason ?? source.Reason).replace(/\s+/g, ' ').slice(0, 180) || (isPowerActor ? 'has meaningful reach' : 'no meaningful reach beyond personal reaction');
+    return {
+        actor,
+        scope,
+        isPowerActor,
+        actorType,
+        reach,
+        evidence,
+        assessmentReason,
+    };
+}
+
+function normalizePowerActorAssessmentScope(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_ASSESSMENT_SCOPES.includes(text) ? text : 'unknown';
 }
 
 function normalizePowerActorEffect(value) {
@@ -2746,6 +2850,7 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.injuryEffectEngine) missing.push('injuryEffectEngine');
     if (!Array.isArray(ledger.injuryEffectEngine?.effects)) missing.push('injuryEffectEngine.effects');
     if (!ledger.powerActorEnmity) missing.push('powerActorEnmity');
+    if (!Array.isArray(ledger.powerActorEnmity?.assessments)) missing.push('powerActorEnmity.assessments');
     if (!Array.isArray(ledger.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
     if (!ledger.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');

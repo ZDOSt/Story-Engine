@@ -134,6 +134,7 @@ function baseLedger(overrides = {}) {
       ...(overrides.injuryEffectEngine || {}),
     },
     powerActorEnmity: {
+      assessments: [],
       effects: [],
       ...(overrides.powerActorEnmity || {}),
     },
@@ -5848,6 +5849,53 @@ const tests = [
     },
   },
   {
+    name: '33a.1 power actor assessment is audit-only without enmity pressure',
+    run() {
+      const report = runCase({
+        userText: 'I greet the prominent merchant in the capital as I walk by.',
+        tracker: {
+          shopkeeper: trackerEntry({ currentDisposition: { B: 2, F: 2, H: 2 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'greet the prominent merchant in the capital',
+            identifyChallenge: 'greet the prominent merchant in the capital',
+            explicitMeans: 'greet the merchant',
+            identifyTargets: {
+              ActionTargets: ['shopkeeper'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('shopkeeper')],
+          powerActorEnmity: {
+            assessments: [{
+              actor: 'shopkeeper',
+              scope: 'individual',
+              isPowerActor: true,
+              actorType: 'prominent merchant',
+              reach: ['capital trade network', 'money', 'reputation'],
+              evidence: 'character card says prominent merchant in the capital',
+              assessmentReason: 'has influence and trade reach beyond personal reaction',
+            }],
+            effects: [],
+          },
+        }),
+      });
+      const audit = auditPrompt(report);
+      const modelPrompt = prompt(report);
+      assert.match(audit, /- powerActor\.assessment: shopkeeper\/Y\/individual\/prominent merchant\/reach:capital trade network,money,reputation/);
+      assert.match(audit, /- powerActor\.enmityEffect: none/);
+      assert.match(audit, /- powerActor\.pressure: none/);
+      assert.match(audit, /npc\.state: shopkeeper/);
+      assert.doesNotMatch(modelPrompt, /Power actor pressure:/);
+      assert.doesNotMatch(modelPrompt, /powerActor\.assessment/);
+      assert.doesNotMatch(modelPrompt, /prominent merchant\/reach/);
+    },
+  },
+  {
     name: '33b hidden power actor enmity ignores ordinary or unknown actors',
     run() {
       const report = runCase({
@@ -5948,8 +5996,13 @@ const tests = [
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
 
       assert.match(semanticSource, /PowerActorEnmity\.count=0/);
+      assert.match(semanticSource, /PowerActorAssessment\.count=0/);
+      assert.match(semanticSource, /PowerActorEnmity\.assessments is audit-only diagnosis/);
+      assert.match(semanticSource, /Assess semantically, not by keywords or titles/);
+      assert.match(semanticSource, /PowerActorEnmity never replaces RelationshipEngine/);
       assert.match(semanticSource, /powerActorEnmity/);
-      assert.match(semanticSource, /Do not track ordinary individuals who can only personally react/);
+      assert.match(semanticSource, /Ordinary people with only personal reaction are not power actors/);
+      assert.match(semanticSource, /Do not create power-actor enmity for ordinary individuals who can only personally react/);
       assert.match(semanticSource, /This semantic section is hidden memory only, not visible tracker text/);
       assert.match(deterministicSource, /STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER/);
       assert.match(deterministicSource, /powerActorTier\(enmity\)/);

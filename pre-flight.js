@@ -61,6 +61,7 @@ function buildReadableSemanticDebug(ledger) {
     const chaos = ledger?.chaosSemantic ?? {};
     const nameSemantic = ledger?.nameSemantic ?? {};
     const tracker = ledger?.trackerUpdateEngine ?? {};
+    const powerActorAssessments = Array.isArray(ledger?.powerActorEnmity?.assessments) ? ledger.powerActorEnmity.assessments : [];
     const powerActors = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
     const userCore = ledger?.engineContext?.userCoreStats ?? {};
     const trackerNpcs = Array.isArray(ledger?.engineContext?.trackerRelevantNPCs)
@@ -115,6 +116,7 @@ function buildReadableSemanticDebug(ledger) {
         '',
         'chaosSemantic.sceneSummary=' + valueOrNone(chaos.sceneSummary),
         'trackerUpdateEngine=' + inline(tracker),
+        'powerActorEnmity.assessments=' + (powerActorAssessments.length ? inline(powerActorAssessments) : 'none'),
         'powerActorEnmity.effects=' + (powerActors.length ? inline(powerActors) : 'none'),
         'nameSemantic.selectedStyle=' + valueOrNone(nameSemantic.selectedStyle),
         'nameSemantic.candidates=hidden; final approved pool shown in deterministic nameGeneration',
@@ -240,6 +242,9 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['chaos.result', summary.chaos],
         ['proactivity.result', summary.proactive],
         ['aggression.result', summary.aggression],
+        ['powerActor.assessment', summary.powerActorAssessment],
+        ['powerActor.enmityEffect', summary.powerActorEnmityEffect],
+        ['powerActor.pressure', summary.powerActorPressure],
         ['nameGeneration.result', summary.generatedName],
         ...aggressionEntries,
     ].map(([key, value]) => `- ${key}: ${valueOrNone(value)}`);
@@ -397,6 +402,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         ? buildNoAggressionGuide(resolution, handoff)
         : buildAggressionGuide(handoff.aggressionResults);
     const generatedName = nameGenerationSummary(handoff.nameGeneration);
+    const powerActorAssessment = powerActorAssessmentSummary(ledger?.powerActorEnmity?.assessments);
+    const powerActorEnmityEffect = powerActorEnmityEffectSummary(ledger?.powerActorEnmity?.effects);
     const powerActorPressure = powerActorPressureNarratorSummary(handoff.powerActorPressure);
     const userAbilityUse = userAbilityUseSummary(resolution.UserAbilityUse);
     const userAbilityGuide = userAbilityUseGuide(resolution.UserAbilityUse);
@@ -468,6 +475,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         aggression: aggressionText,
         aggressionGuide,
         generatedName,
+        powerActorAssessment,
+        powerActorEnmityEffect,
         powerActorPressure,
         narratorAuthority,
         renderContract,
@@ -971,6 +980,39 @@ function nameGenerationSummary(nameGeneration) {
     return style !== '(none)'
         ? `style: ${style}; final: ${namePoolText(nameGeneration.namePool)}`
         : namePoolText(nameGeneration.namePool);
+}
+
+function powerActorAssessmentSummary(assessments) {
+    const entries = Array.isArray(assessments) ? assessments : [];
+    if (!entries.length) return 'none';
+    return entries
+        .map(entry => {
+            const actor = valueOrNone(entry.actor ?? entry.Actor);
+            const flag = (entry.isPowerActor ?? entry.IsPowerActor) ? 'Y' : 'N';
+            const scope = valueOrNone(entry.scope ?? entry.Scope);
+            const type = valueOrNone(entry.actorType ?? entry.ActorType);
+            const reach = list(entry.reach ?? entry.Reach);
+            const evidence = valueOrNone(entry.evidence ?? entry.Evidence);
+            const reason = valueOrNone(entry.assessmentReason ?? entry.AssessmentReason ?? entry.reason ?? entry.Reason);
+            return `${actor}/${flag}/${scope}/${type}/reach:${reach}/evidence:${evidence}/reason:${reason}`;
+        })
+        .join('; ');
+}
+
+function powerActorEnmityEffectSummary(effects) {
+    const entries = Array.isArray(effects) ? effects : [];
+    if (!entries.length) return 'none';
+    return entries
+        .map(entry => {
+            const actor = valueOrNone(entry.actor ?? entry.Actor);
+            const type = valueOrNone(entry.actorType ?? entry.ActorType);
+            const effect = valueOrNone(entry.effect ?? entry.Effect);
+            const severity = valueOrNone(entry.severity ?? entry.Severity);
+            const known = (entry.knownToActor ?? entry.KnownToActor) ? 'Y' : 'N';
+            const reason = valueOrNone(entry.reason ?? entry.Reason);
+            return `${actor}/${type}/${effect}/${severity}/known:${known}/reason:${reason}`;
+        })
+        .join('; ');
 }
 
 function powerActorPressureSummary(powerActorPressure) {
