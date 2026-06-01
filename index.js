@@ -2941,8 +2941,21 @@ function hideProseGuardMessageById(messageId) {
     return hideProseGuardMessageElement(messageElement, messageId);
 }
 
+function hasPendingProseGuardGenerationInput() {
+    const pendingText = String(state.pendingGeneration?.latestUserText || state.pendingGeneration?.rawUserText || '').trim();
+    return Boolean(pendingText);
+}
+
+function hasActiveProseGuardDisplayRun() {
+    return Boolean(hasPendingProseGuardGenerationInput() || state.pendingRun || state.lastNarratorHandoff);
+}
+
 function tryAttachProseGuardPendingMessage() {
     if (!state.proseGuardHideNextMessage || typeof document === 'undefined') return false;
+    if (!hasActiveProseGuardDisplayRun()) {
+        releaseProseGuardDisplayIntercept({ restore: true });
+        return false;
+    }
 
     const chatElement = document.getElementById('chat');
     if (!chatElement) return false;
@@ -2963,6 +2976,7 @@ function shouldUseProseGuardDisplayIntercept(type) {
     return getSettings().postNarrationProseGuardEnabled !== false
         && normalizedType !== 'impersonate'
         && Boolean(state.pendingGeneration)
+        && hasPendingProseGuardGenerationInput()
         && ['normal', 'swipe', 'regenerate', 'continue'].includes(normalizedType);
 }
 
@@ -3065,6 +3079,10 @@ function ensureProseGuardDisplayInterceptor() {
 
     state.proseGuardChatObserver = new MutationObserver(mutations => {
         if (!state.proseGuardHideNextMessage) return;
+        if (!hasActiveProseGuardDisplayRun()) {
+            releaseProseGuardDisplayIntercept({ restore: true });
+            return;
+        }
 
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
@@ -5088,12 +5106,14 @@ function prependComputedDebug(messageId, type) {
     const messageKey = getMessageKey(messageId, context);
 
     if (!state.lastNarratorHandoff || state.lastNarratorHandoffKey === messageKey || type === 'impersonate') {
+        releaseProseGuardDisplayIntercept({ restore: true, messageId });
         clearRuntimePrompts();
         return;
     }
 
     const message = context?.chat?.[messageId];
     if (!message || message.is_user) {
+        releaseProseGuardDisplayIntercept({ restore: true, messageId });
         clearRuntimePrompts();
         return;
     }
