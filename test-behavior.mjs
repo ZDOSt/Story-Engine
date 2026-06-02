@@ -6126,8 +6126,10 @@ const tests = [
 
       assert.match(source, /function trackerDetailLine/);
       assert.match(source, /function trackerDetailTone/);
+      assert.match(source, /function trackerChipLabelTone/);
       assert.match(source, /function trackerChip/);
       assert.match(source, /function trackerStatPills/);
+      assert.match(source, /function trackerStatCluster/);
       assert.match(source, /function trackerConditionTone/);
       assert.match(source, /function trackerDispositionTone/);
       assert.match(displaySource, /structured-preflight-tracker-card/);
@@ -6136,6 +6138,8 @@ const tests = [
       assert.match(displaySource, /structured-preflight-tracker-name-npc/);
       assert.match(displaySource, /structured-preflight-tracker-role/);
       assert.match(displaySource, /structured-preflight-tracker-chip-row/);
+      assert.match(displaySource, /structured-preflight-tracker-npc-metrics/);
+      assert.match(displaySource, /structured-preflight-tracker-npc-mechanic-row/);
       assert.match(displaySource, /structured-preflight-tracker-detail-grid/);
       assert.match(displaySource, /trackerChip\('Toward User'/);
       assert.match(displaySource, /trackerChip\('Condition'/);
@@ -6144,8 +6148,8 @@ const tests = [
       assert.match(displaySource, /trackerChip\('Behavior'/);
       assert.match(displaySource, /trackerChip\('Rapport'/);
       assert.match(displaySource, /trackerChip\('Relationship'/);
-      assert.match(displaySource, /trackerStatPills\(entry\.currentCoreStats\)/);
-      assert.match(displaySource, /trackerStatPills\(userCore\)/);
+      assert.match(displaySource, /trackerStatCluster\(entry\.currentCoreStats\)/);
+      assert.match(displaySource, /trackerStatCluster\(userCore\)/);
       assert.match(displaySource, /trackerDetailLine\('Personality'/);
       assert.match(displaySource, /trackerDetailLine\('Wounds'/);
       assert.match(displaySource, /trackerDetailLine\('Status'/);
@@ -6158,6 +6162,19 @@ const tests = [
       assert.match(styleSource, /structured-preflight-tracker-chip-good/);
       assert.match(styleSource, /structured-preflight-tracker-chip-warn/);
       assert.match(styleSource, /structured-preflight-tracker-chip-danger/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-label-toward-user/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-label-condition/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-label-b-f-h/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-label-lock/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-label-behavior/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-label-rapport/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-label-relationship/);
+      assert.match(styleSource, /width: min\(540px, calc\(100vw - 36px\)\)/);
+      assert.match(styleSource, /structured-preflight-tracker-npc-metrics/);
+      assert.match(styleSource, /structured-preflight-tracker-npc-mechanic-row/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-cluster/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-cluster-label/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-pill-row/);
       assert.match(styleSource, /structured-preflight-tracker-stat-pill/);
       assert.match(styleSource, /structured-preflight-tracker-stat-label/);
       assert.match(styleSource, /structured-preflight-tracker-stat-pill code \{[\s\S]*font-weight: 900/);

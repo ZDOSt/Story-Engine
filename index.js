@@ -2911,10 +2911,20 @@ function trackerDetailLine(label, value, options = {}) {
         </div>`;
 }
 
+function trackerChipLabelTone(label) {
+    const key = String(label || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    const known = new Set(['toward-user', 'condition', 'b-f-h', 'lock', 'behavior', 'rapport', 'relationship']);
+    return known.has(key) ? key : 'neutral';
+}
+
 function trackerChip(label, value, tone = 'neutral') {
+    const labelTone = trackerChipLabelTone(label);
     return `
         <span class="structured-preflight-tracker-chip structured-preflight-tracker-chip-${escapeHtml(tone)}">
-            <span>${escapeHtml(label)}</span>
+            <span class="structured-preflight-tracker-chip-label structured-preflight-tracker-chip-label-${escapeHtml(labelTone)}">${escapeHtml(label)}</span>
             <code>${escapeHtml(value)}</code>
         </span>`;
 }
@@ -2930,6 +2940,14 @@ function trackerStatPills(core) {
             <span class="structured-preflight-tracker-stat-label">${escapeHtml(label)}</span>
             <code>${escapeHtml(value)}</code>
         </span>`).join('');
+}
+
+function trackerStatCluster(core) {
+    return `
+        <div class="structured-preflight-tracker-stat-cluster">
+            <span class="structured-preflight-tracker-stat-cluster-label">Stats</span>
+            <span class="structured-preflight-tracker-stat-pill-row">${trackerStatPills(core)}</span>
+        </div>`;
 }
 
 function trackerConditionTone(value) {
@@ -3000,13 +3018,15 @@ function buildTrackerDisplayHtml(snapshot) {
                         ${trackerChip('Condition', condition, trackerConditionTone(entry.condition))}
                     </div>
                 </div>
-                <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-stat-row">
-                    ${trackerChip('B/F/H', formatDisposition(disposition))}
-                    ${trackerChip('Lock', classified.lock)}
-                    ${trackerChip('Behavior', classified.behavior)}
-                    ${trackerChip('Rapport', `${entry.currentRapport}/5`)}
-                    ${trackerChip('Relationship', entry.establishedRelationship || 'N')}
-                    ${trackerStatPills(entry.currentCoreStats)}
+                <div class="structured-preflight-tracker-npc-metrics">
+                    <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-npc-mechanic-row">
+                        ${trackerChip('B/F/H', formatDisposition(disposition))}
+                        ${trackerChip('Lock', classified.lock)}
+                        ${trackerChip('Behavior', classified.behavior)}
+                        ${trackerChip('Rapport', `${entry.currentRapport}/5`)}
+                        ${trackerChip('Relationship', entry.establishedRelationship || 'N')}
+                    </div>
+                    ${trackerStatCluster(entry.currentCoreStats)}
                 </div>
                 <div class="structured-preflight-tracker-detail-grid">
                     ${trackerDetailLine('Personality', entry.personalitySummary || 'Developing', { showEmpty: true })}
@@ -3035,7 +3055,7 @@ function buildTrackerDisplayHtml(snapshot) {
                             <div class="structured-preflight-tracker-role">Player</div>
                         </div>
                         <div class="structured-preflight-tracker-chip-row">
-                            ${trackerStatPills(userCore)}
+                            ${trackerStatCluster(userCore)}
                             ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
                         </div>
                     </div>
@@ -3117,7 +3137,7 @@ function ensureTrackerDisplayStyles() {
         }
         #${TRACKER_WIDGET_PANEL_ID} {
             position: fixed;
-            width: min(420px, calc(100vw - 36px));
+            width: min(540px, calc(100vw - 36px));
             max-height: min(620px, calc(100vh - 36px));
             margin: 0;
             padding: 0.7rem;
@@ -3212,7 +3232,7 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-card {
             display: grid;
-            gap: 0.5rem;
+            gap: 0.58rem;
             padding: 0.55rem 0.6rem;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
             border-radius: 7px;
@@ -3238,28 +3258,71 @@ function ensureTrackerDisplayStyles() {
         .structured-preflight-tracker-stat-row {
             padding-top: 0.1rem;
         }
+        .structured-preflight-tracker-npc-metrics {
+            display: grid;
+            gap: 0.38rem;
+            padding-top: 0.02rem;
+        }
+        .structured-preflight-tracker-npc-mechanic-row {
+            padding: 0.28rem 0.32rem;
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 20%, transparent);
+        }
         .structured-preflight-tracker-chip {
             display: inline-flex;
             align-items: center;
             gap: 0.28rem;
             max-width: 100%;
             min-height: 1.5rem;
-            padding: 0.16rem 0.42rem;
+            padding: 0.12rem 0.42rem 0.12rem 0.12rem;
             border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255,255,255,0.22)) 70%, transparent);
             border-radius: 5px;
             background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 46%, transparent);
             line-height: 1.25;
         }
-        .structured-preflight-tracker-chip > span {
-            opacity: 0.78;
-            font-size: 0.76rem;
-            font-weight: 600;
+        .structured-preflight-tracker-chip-label {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 1.24rem;
+            padding: 0.08rem 0.34rem;
+            border-radius: 4px;
+            color: #f4f4f4;
+            font-size: 0.72rem;
+            font-weight: 800;
+            line-height: 1;
+            text-transform: uppercase;
             white-space: nowrap;
         }
         .structured-preflight-tracker-chip code {
             font-size: 0.78rem;
+            font-weight: 700;
             white-space: normal;
             overflow-wrap: anywhere;
+        }
+        .structured-preflight-tracker-chip-label-toward-user {
+            background: #1d6c65;
+        }
+        .structured-preflight-tracker-chip-label-condition {
+            background: #285b78;
+        }
+        .structured-preflight-tracker-chip-label-b-f-h {
+            background: #37415d;
+        }
+        .structured-preflight-tracker-chip-label-lock {
+            background: #4a4655;
+        }
+        .structured-preflight-tracker-chip-label-behavior {
+            background: #5b4a7a;
+        }
+        .structured-preflight-tracker-chip-label-rapport {
+            background: #54428a;
+        }
+        .structured-preflight-tracker-chip-label-relationship {
+            background: #286447;
+        }
+        .structured-preflight-tracker-chip-label-neutral {
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 20%, transparent);
         }
         .structured-preflight-tracker-chip-good {
             background: color-mix(in srgb, #1f7a4d 42%, transparent);
@@ -3269,6 +3332,37 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-chip-danger {
             background: color-mix(in srgb, #7c3238 46%, transparent);
+        }
+        .structured-preflight-tracker-stat-cluster {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.32rem;
+            min-width: 0;
+            padding: 0.28rem 0.32rem;
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 20%, transparent);
+        }
+        .structured-preflight-tracker-stat-cluster-label {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 1.5rem;
+            padding: 0.16rem 0.42rem;
+            border-radius: 5px;
+            background: #203a48;
+            color: #f4f4f4;
+            font-size: 0.76rem;
+            font-weight: 800;
+            line-height: 1;
+            text-transform: uppercase;
+        }
+        .structured-preflight-tracker-stat-pill-row {
+            display: inline-flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.32rem;
+            min-width: 0;
         }
         .structured-preflight-tracker-stat-pill {
             display: inline-flex;
@@ -3379,9 +3473,13 @@ function ensureTrackerDisplayStyles() {
                 grid-template-columns: 1fr;
                 gap: 0.12rem;
             }
-            .structured-preflight-tracker-chip {
+            .structured-preflight-tracker-chip,
+            .structured-preflight-tracker-stat-cluster {
                 width: 100%;
                 justify-content: space-between;
+            }
+            .structured-preflight-tracker-stat-pill-row {
+                justify-content: flex-end;
             }
         }
         .${NARRATOR_HANDOFF_BLOCK_CLASS} {
