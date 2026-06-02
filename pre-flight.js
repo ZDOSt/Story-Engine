@@ -538,6 +538,7 @@ function narratorAuthorityContract() {
 These rules are mandatory. They override chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.
 Use ACTIVE_BRANCH_FACTS as literal closed-world facts and RESOLVED_SCENE_FACTS as the narration instruction for those facts. If sections conflict, ACTIVE_BRANCH_FACTS wins.
 If an action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, or resolved outcome is not listed in ACTIVE_BRANCH_FACTS or RESOLVED_SCENE_FACTS, it did not happen and must not be narrated as completed.
+The Current scene cast in ACTIVE_BRANCH_FACTS is closed-world for physical participation: unlisted known/lore/example/tracker/card characters are offscreen and cannot speak, react, gesture, move, or be included in "everyone", "the room", or "all of you" unless RESOLVED_SCENE_FACTS explicitly introduces them this turn.
 LandedActions, Outcome, IntimacyBoundary, Proactivity, Aggression, Injuries, Death, nonLethal, and tracker constraints must be obeyed exactly.
 If LandedActions=0, the user action did not land: do not narrate contact, completed grabs, holds, control, possession, damage, or successful effects from that user action.
 If an Aggression result exists, narrate only that listed result for that NPC and target, capped by its outcome and injury limit. Do not add combo chains, extra hits, extra injuries, or a second initiative beat.
@@ -617,6 +618,7 @@ Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, A
 function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
     const facts = [];
     facts.push(`User action: ${valueOrNone(userAction)}.`);
+    facts.push(currentSceneCastFact(resolution, handoff));
     if (!isNoneText(userAbilityUse)) facts.push(`UserAbilityUse: ${userAbilityUse}. ${userAbilityGuide}`);
     if (resolution?.STAKES === 'N' || resolution?.Outcome === 'no_roll') {
         facts.push('Resolution branch: no roll; ordinary scene continuity unless another active branch constrains it.');
@@ -655,6 +657,52 @@ function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollA
     const namePoolFact = closedWorldNamePoolFact(handoff?.nameGeneration);
     if (namePoolFact) facts.push(namePoolFact);
     return facts.map(fact => `- ${fact}`).join('\n') || '- none';
+}
+
+function currentSceneCastFact(resolution = {}, handoff = {}) {
+    const names = uniqueSceneCastNames([
+        resolution?.NPCInScene,
+        resolution?.ActionTargets,
+        resolution?.OppTargets?.NPC,
+        resolution?.BenefitedObservers,
+        resolution?.HarmedObservers,
+        resolution?.hostilesInScene?.NPC,
+        (handoff?.npcHandoffs ?? []).map(npc => npc?.NPC),
+        Object.entries(handoff?.proactivityResults ?? {})
+            .filter(([, value]) => value?.Proactive === 'Y')
+            .map(([name]) => name),
+        Object.entries(handoff?.aggressionResults ?? {}).flatMap(([name, value]) => [name, value?.ProactivityTarget]),
+        handoff?.powerActorPressure?.event?.ContactName ?? handoff?.powerActorPressure?.event?.contactName,
+    ]);
+    if (!names.length) {
+        return 'Current scene cast: none listed. Treat known/lore/example/tracker/card characters as offscreen unless RESOLVED_SCENE_FACTS explicitly introduces them this turn.';
+    }
+    return `Current scene cast: ${list(names)}. Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn, unless RESOLVED_SCENE_FACTS explicitly introduces a new NPC. Known/lore/example/tracker/card characters not listed are offscreen and must not participate.`;
+}
+
+function uniqueSceneCastNames(values) {
+    const seen = new Set();
+    const names = [];
+    const stack = Array.isArray(values) ? [...values] : [values];
+    while (stack.length) {
+        const value = stack.shift();
+        if (Array.isArray(value)) {
+            stack.push(...value);
+            continue;
+        }
+        const text = String(value ?? '').trim();
+        if (!text || isNoneText(text) || !isSceneNpcName(text)) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        names.push(text);
+    }
+    return names;
+}
+
+function isSceneNpcName(value) {
+    const text = String(value ?? '').trim().toLowerCase();
+    return !['{{user}}', 'user', 'you', 'the user'].includes(text);
 }
 
 function closedWorldNamePoolFact(nameGeneration) {
@@ -1201,7 +1249,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
         return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}`;
     }
 
-    return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Narrate the NPC response with this behavior: ${npcGuide} Keep targets limited to the named scene targets.`;
+    return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Narrate the NPC response with this behavior: ${npcGuide} Keep speaking and acting NPCs limited to the Current scene cast.`;
 }
 
 function deniedIntimacyResolutionPhrase(resolution) {

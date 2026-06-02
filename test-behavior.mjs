@@ -6112,6 +6112,50 @@ const tests = [
     },
   },
   {
+    name: '33c.1 visible tracker uses compact grouped display and hides inactive NPC section',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const displaySource = source.slice(
+        source.indexOf('function buildTrackerDisplayHtml'),
+        source.indexOf('function cleanTrackerDisplayName'),
+      );
+      const styleSource = source.slice(
+        source.indexOf('function ensureTrackerDisplayStyles'),
+        source.indexOf('function getMessageElement'),
+      );
+
+      assert.match(source, /function trackerDetailLine/);
+      assert.match(source, /function trackerChip/);
+      assert.match(source, /function trackerConditionTone/);
+      assert.match(source, /function trackerDispositionTone/);
+      assert.match(displaySource, /structured-preflight-tracker-card/);
+      assert.match(displaySource, /structured-preflight-tracker-chip-row/);
+      assert.match(displaySource, /structured-preflight-tracker-detail-grid/);
+      assert.match(displaySource, /trackerChip\('Toward User'/);
+      assert.match(displaySource, /trackerChip\('Condition'/);
+      assert.match(displaySource, /trackerChip\('B\/F\/H'/);
+      assert.match(displaySource, /trackerChip\('Lock'/);
+      assert.match(displaySource, /trackerChip\('Behavior'/);
+      assert.match(displaySource, /trackerChip\('Rapport'/);
+      assert.match(displaySource, /trackerChip\('Relationship'/);
+      assert.match(displaySource, /trackerChip\('Stats'/);
+      assert.match(displaySource, /trackerDetailLine\('Personality'/);
+      assert.match(displaySource, /trackerDetailLine\('Wounds'/);
+      assert.match(displaySource, /trackerDetailLine\('Status'/);
+      assert.match(displaySource, /trackerDetailLine\('Gear'/);
+      assert.match(displaySource, /trackerDetailLine\('Inventory'/);
+      assert.match(displaySource, /trackerDetailLine\('Tasks'/);
+      assert.match(displaySource, /trackerDetailLine\('Commitments'/);
+      assert.doesNotMatch(displaySource, /Inactive NPCs/);
+      assert.doesNotMatch(displaySource, /const inactive/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-good/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-warn/);
+      assert.match(styleSource, /structured-preflight-tracker-chip-danger/);
+      assert.match(styleSource, /grid-template-columns: repeat\(auto-fit/);
+      assert.match(styleSource, /@media \(max-width: 520px\)/);
+    },
+  },
+  {
     name: '33d semantic contract includes hidden power actor enmity and no spy lifecycle',
     run() {
       const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
@@ -6821,6 +6865,53 @@ const tests = [
       };
       assert.match(prompt(report), /Universal intimacy guard: no intimacy permission is active for Naomi/);
       assert.match(prompt(report), /Unless IntimacyBoundary explicitly permits it for that exact NPC/);
+    },
+  },
+  {
+    name: '40b narrator handoff treats current scene cast as closed-world',
+    run() {
+      const report = runCase({
+        userText: 'I address the room and ask who wants to join me.',
+        tracker: {
+          Chandra: trackerEntry(),
+          "T'Sha": trackerEntry(),
+          Medli: trackerEntry(),
+          Marianne: trackerEntry(),
+          Kefka: trackerEntry(),
+          Rem: trackerEntry(),
+          Harmony: trackerEntry(),
+          Jessie: trackerEntry(),
+          'Lady Void': trackerEntry(),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'AddressRoom',
+            identifyChallenge: 'address the present room',
+            explicitMeans: 'ask the room who wants to join me',
+            identifyTargets: {
+              ActionTargets: ['Chandra', "T'Sha", 'Medli', 'Marianne', 'Kefka'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [
+            relationship('Chandra'),
+            relationship("T'Sha"),
+            relationship('Medli'),
+            relationship('Marianne'),
+            relationship('Kefka'),
+          ],
+        }),
+      });
+      const text = prompt(report);
+      const castLine = text.split('\n').find(line => line.includes('Current scene cast:')) || '';
+      assert.match(castLine, /Current scene cast: Chandra,T'Sha,Medli,Marianne,Kefka/);
+      assert.doesNotMatch(castLine, /Rem|Harmony|Jessie|Lady Void/);
+      assert.match(text, /closed-world for physical participation/);
+      assert.match(text, /Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn/);
+      assert.match(text, /Known\/lore\/example\/tracker\/card characters not listed are offscreen and must not participate/);
     },
   },
   {

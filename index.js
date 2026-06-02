@@ -2888,20 +2888,41 @@ function formatTrackerList(items) {
     return list.length ? list.join('; ') : 'None';
 }
 
-function trackerListLine(label, items, options = {}) {
-    const list = Array.isArray(items) ? items.filter(Boolean) : [];
-    if (!list.length) {
-        return options.showEmpty
-            ? `<div class="structured-preflight-tracker-list"><div class="structured-preflight-tracker-list-label">${escapeHtml(label)}</div><div class="structured-preflight-tracker-empty">None</div></div>`
-            : '';
-    }
+function trackerDetailLine(label, value, options = {}) {
+    const text = Array.isArray(value)
+        ? formatTrackerList(value)
+        : String(value ?? '').trim();
+    const display = text || 'None';
+    if (!options.showEmpty && display === 'None') return '';
     return `
-        <div class="structured-preflight-tracker-list">
-            <div class="structured-preflight-tracker-list-label">${escapeHtml(label)}</div>
-            <ul>
-                ${list.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
-            </ul>
+        <div class="structured-preflight-tracker-detail">
+            <span class="structured-preflight-tracker-detail-label">${escapeHtml(label)}</span>
+            <span class="structured-preflight-tracker-detail-value">${escapeHtml(display)}</span>
         </div>`;
+}
+
+function trackerChip(label, value, tone = 'neutral') {
+    return `
+        <span class="structured-preflight-tracker-chip structured-preflight-tracker-chip-${escapeHtml(tone)}">
+            <span>${escapeHtml(label)}</span>
+            <code>${escapeHtml(value)}</code>
+        </span>`;
+}
+
+function trackerConditionTone(value) {
+    const text = String(value || '').toLowerCase();
+    if (!text || text === 'healthy' || text === 'unchanged') return 'good';
+    if (text.includes('dead') || text.includes('critical') || text.includes('badly')) return 'danger';
+    if (text.includes('wounded') || text.includes('bruised')) return 'warn';
+    return 'neutral';
+}
+
+function trackerDispositionTone(disposition, classified) {
+    if (!disposition) return 'neutral';
+    if (classified?.lock === 'HATRED' || disposition.H >= 3) return 'danger';
+    if (classified?.lock === 'TERROR' || classified?.lock === 'FREEZE' || disposition.F >= 3) return 'warn';
+    if (disposition.B >= 3 && disposition.F <= 2 && disposition.H <= 2) return 'good';
+    return 'neutral';
 }
 
 function relationshipTowardUser(disposition, classified) {
@@ -2929,7 +2950,6 @@ function buildTrackerDisplayHtml(snapshot) {
         .filter(name => !visibleNames || visibleNames.has(name.toLowerCase()))
         .sort((a, b) => a.localeCompare(b));
     const active = names.filter(name => npcs[name]?.lifecycle === 'Active');
-    const inactive = names.filter(name => npcs[name]?.lifecycle !== 'Active');
     const userCore = snapshot?.userCoreStats;
     const user = normalizeTrackerUserState(snapshot?.user || {});
     const personaName = cleanTrackerDisplayName(name1) || 'User';
@@ -2941,21 +2961,34 @@ function buildTrackerDisplayHtml(snapshot) {
         const pressure = Number(entry.hostilePressure || 0);
         const landedPressure = Number(entry.hostileLandedPressure || 0);
         const pressureLine = pressure || landedPressure || entry.dominantLock !== 'None' || entry.pressureMode !== 'none'
-            ? `<div class="structured-preflight-tracker-muted">Pressure ${pressure}/${landedPressure} | Mode ${escapeHtml(entry.pressureMode || 'none')} | Dominant ${escapeHtml(entry.dominantLock || 'None')}</div>`
+            ? trackerDetailLine('Pressure', `${pressure}/${landedPressure} | Mode ${entry.pressureMode || 'none'} | Dominant ${entry.dominantLock || 'None'}`, { showEmpty: true })
             : '';
+        const relation = relationshipTowardUser(disposition, classified);
+        const condition = formatTrackerCondition(entry.condition);
         return `
-            <div class="structured-preflight-tracker-npc">
-                <div class="structured-preflight-tracker-name">${escapeHtml(name)}</div>
-                <div>Toward User <code>${escapeHtml(relationshipTowardUser(disposition, classified))}</code></div>
-                <div>Condition <code>${escapeHtml(formatTrackerCondition(entry.condition))}</code></div>
-                <div>Personality <code>${escapeHtml(entry.personalitySummary || 'Developing')}</code></div>
-                <div><code>${escapeHtml(formatDisposition(disposition))}</code> | Lock <code>${escapeHtml(classified.lock)}</code> | Behavior <code>${escapeHtml(classified.behavior)}</code></div>
-                <div>Rapport <code>${escapeHtml(entry.currentRapport)}/5</code> | Relationship <code>${escapeHtml(entry.establishedRelationship || 'N')}</code></div>
-                <div>Stats <code>${escapeHtml(formatCoreStats(entry.currentCoreStats))}</code></div>
-                ${trackerListLine('Wounds', entry.wounds)}
-                ${trackerListLine('Status Effects', entry.statusEffects)}
-                ${trackerListLine('Gear', entry.gear)}
-                ${pressureLine}
+            <div class="structured-preflight-tracker-card structured-preflight-tracker-npc">
+                <div class="structured-preflight-tracker-card-head">
+                    <div class="structured-preflight-tracker-name">${escapeHtml(name)}</div>
+                    <div class="structured-preflight-tracker-chip-row">
+                        ${trackerChip('Toward User', relation, trackerDispositionTone(disposition, classified))}
+                        ${trackerChip('Condition', condition, trackerConditionTone(entry.condition))}
+                    </div>
+                </div>
+                <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-stat-row">
+                    ${trackerChip('B/F/H', formatDisposition(disposition))}
+                    ${trackerChip('Lock', classified.lock)}
+                    ${trackerChip('Behavior', classified.behavior)}
+                    ${trackerChip('Rapport', `${entry.currentRapport}/5`)}
+                    ${trackerChip('Relationship', entry.establishedRelationship || 'N')}
+                    ${trackerChip('Stats', formatCoreStats(entry.currentCoreStats))}
+                </div>
+                <div class="structured-preflight-tracker-detail-grid">
+                    ${trackerDetailLine('Personality', entry.personalitySummary || 'Developing', { showEmpty: true })}
+                    ${trackerDetailLine('Wounds', entry.wounds)}
+                    ${trackerDetailLine('Status', entry.statusEffects)}
+                    ${trackerDetailLine('Gear', entry.gear)}
+                    ${pressureLine}
+                </div>
             </div>`;
     };
 
@@ -2968,22 +3001,27 @@ function buildTrackerDisplayHtml(snapshot) {
     return `
         <div class="structured-preflight-tracker-body">
             <div class="structured-preflight-tracker-section structured-preflight-tracker-user">
-                <div class="structured-preflight-tracker-title">${escapeHtml(personaName)}</div>
-                <div class="structured-preflight-tracker-rows">
-                    <div>Stats <code>${escapeHtml(formatCoreStats(userCore))}</code></div>
-                    <div>Condition <code>${escapeHtml(formatTrackerCondition(user.condition))}</code></div>
-                    ${trackerListLine('Wounds', user.wounds)}
-                    ${trackerListLine('Status Effects', user.statusEffects)}
-                    ${trackerListLine('Gear', user.gear, { showEmpty: true })}
-                    ${trackerListLine('Inventory', user.inventory, { showEmpty: true })}
-                    ${trackerListLine('Tasks', user.tasks, { showEmpty: true })}
-                    ${trackerListLine('Commitments', user.commitments, { showEmpty: true })}
+                <div class="structured-preflight-tracker-heading">Player</div>
+                <div class="structured-preflight-tracker-card">
+                    <div class="structured-preflight-tracker-card-head">
+                        <div class="structured-preflight-tracker-title">${escapeHtml(personaName)}</div>
+                        <div class="structured-preflight-tracker-chip-row">
+                            ${trackerChip('Stats', formatCoreStats(userCore), 'neutral')}
+                            ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
+                        </div>
+                    </div>
+                    <div class="structured-preflight-tracker-detail-grid">
+                        ${trackerDetailLine('Wounds', user.wounds, { showEmpty: true })}
+                        ${trackerDetailLine('Status', user.statusEffects, { showEmpty: true })}
+                        ${trackerDetailLine('Gear', user.gear, { showEmpty: true })}
+                        ${trackerDetailLine('Inventory', user.inventory, { showEmpty: true })}
+                        ${trackerDetailLine('Tasks', user.tasks, { showEmpty: true })}
+                        ${trackerDetailLine('Commitments', user.commitments, { showEmpty: true })}
+                    </div>
                 </div>
             </div>
             <div class="structured-preflight-tracker-divider"></div>
-            <div class="structured-preflight-tracker-title">NPCs</div>
             ${renderSection('Active NPCs', active)}
-            ${inactive.length ? renderSection('Inactive NPCs', inactive) : ''}
         </div>`;
 }
 
@@ -3099,7 +3137,7 @@ function ensureTrackerDisplayStyles() {
         .structured-preflight-tracker-body {
             margin-top: 0.55rem;
             display: grid;
-            gap: 0.7rem;
+            gap: 0.75rem;
         }
         .structured-preflight-tracker-title,
         .structured-preflight-tracker-heading,
@@ -3107,34 +3145,99 @@ function ensureTrackerDisplayStyles() {
             font-weight: 600;
         }
         .structured-preflight-tracker-title {
-            padding-bottom: 0.2rem;
-            border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
+            font-size: 1rem;
+            overflow-wrap: anywhere;
         }
         .structured-preflight-tracker-section {
             display: grid;
-            gap: 0.45rem;
+            gap: 0.5rem;
         }
         .structured-preflight-tracker-user {
             padding-bottom: 0.1rem;
         }
-        .structured-preflight-tracker-rows {
+        .structured-preflight-tracker-card {
             display: grid;
-            gap: 0.4rem;
-            line-height: 1.45;
+            gap: 0.5rem;
+            padding: 0.55rem 0.6rem;
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
+            border-radius: 7px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 34%, transparent);
         }
-        .structured-preflight-tracker-list {
-            display: grid;
-            gap: 0.18rem;
+        .structured-preflight-tracker-card-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.55rem;
+            flex-wrap: wrap;
         }
-        .structured-preflight-tracker-list-label {
+        .structured-preflight-tracker-chip-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.32rem;
+            min-width: 0;
+        }
+        .structured-preflight-tracker-stat-row {
+            padding-top: 0.1rem;
+        }
+        .structured-preflight-tracker-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.28rem;
+            max-width: 100%;
+            min-height: 1.5rem;
+            padding: 0.16rem 0.42rem;
+            border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255,255,255,0.22)) 70%, transparent);
+            border-radius: 5px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 46%, transparent);
+            line-height: 1.25;
+        }
+        .structured-preflight-tracker-chip > span {
+            opacity: 0.78;
+            font-size: 0.76rem;
             font-weight: 600;
+            white-space: nowrap;
         }
-        .structured-preflight-tracker-list ul {
-            margin: 0;
-            padding-left: 1.15rem;
+        .structured-preflight-tracker-chip code {
+            font-size: 0.78rem;
+            white-space: normal;
+            overflow-wrap: anywhere;
         }
-        .structured-preflight-tracker-list li {
-            margin: 0.08rem 0;
+        .structured-preflight-tracker-chip-good {
+            background: color-mix(in srgb, #1f7a4d 42%, transparent);
+        }
+        .structured-preflight-tracker-chip-warn {
+            background: color-mix(in srgb, #8a661f 42%, transparent);
+        }
+        .structured-preflight-tracker-chip-danger {
+            background: color-mix(in srgb, #7c3238 46%, transparent);
+        }
+        .structured-preflight-tracker-detail-grid {
+            display: grid;
+            gap: 0.32rem;
+            grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
+        }
+        .structured-preflight-tracker-detail {
+            display: grid;
+            grid-template-columns: minmax(5.6rem, max-content) minmax(0, 1fr);
+            gap: 0.45rem;
+            align-items: start;
+            min-width: 0;
+            padding: 0.28rem 0.36rem;
+            border-radius: 5px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 22%, transparent);
+            line-height: 1.35;
+        }
+        .structured-preflight-tracker-detail-label {
+            opacity: 0.76;
+            font-size: 0.76rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .structured-preflight-tracker-detail-value {
+            min-width: 0;
+            overflow-wrap: anywhere;
         }
         .structured-preflight-tracker-divider {
             height: 1px;
@@ -3142,13 +3245,21 @@ function ensureTrackerDisplayStyles() {
             opacity: 0.9;
         }
         .structured-preflight-tracker-npc {
-            padding-left: 0.45rem;
-            border-left: 2px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
-            line-height: 1.45;
+            border-left: 3px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
         }
         .structured-preflight-tracker-muted,
         .structured-preflight-tracker-empty {
             opacity: 0.78;
+        }
+        @media (max-width: 520px) {
+            .structured-preflight-tracker-detail {
+                grid-template-columns: 1fr;
+                gap: 0.12rem;
+            }
+            .structured-preflight-tracker-chip {
+                width: 100%;
+                justify-content: space-between;
+            }
         }
         .${NARRATOR_HANDOFF_BLOCK_CLASS} {
             margin-top: 0.75rem;
