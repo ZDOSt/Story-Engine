@@ -20,6 +20,9 @@ const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
 const POWER_ACTOR_SEVERITIES = Object.freeze(['none', 'minor', 'meaningful', 'major']);
 const POWER_ACTOR_ASSESSMENT_SCOPES = Object.freeze(['individual', 'organization', 'institution', 'group', 'unknown']);
+const POWER_EVENT_TYPES = Object.freeze(['none', 'minor_obstruction', 'warning', 'ambush', 'frame_user', 'plant_contact', 'agent_mislead', 'agent_report', 'agent_sabotage']);
+const POWER_EVENT_FITS = Object.freeze(['none', 'use_now', 'defer', 'drop']);
+const POWER_EVENT_CONTACT_GENDERS = Object.freeze(['none', 'male', 'female', 'unknown']);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -660,6 +663,25 @@ function buildSemanticPreflightSchema() {
             assessmentReason: { type: 'string' },
         },
     };
+    const powerEventShapeSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['eventId', 'actor', 'eventType', 'fit', 'visibleInstruction', 'contactName', 'contactGender', 'surfaceRole', 'deferReason'],
+        properties: {
+            eventId: { type: 'string' },
+            actor: { type: 'string' },
+            eventType: { type: 'string', enum: POWER_EVENT_TYPES },
+            fit: { type: 'string', enum: POWER_EVENT_FITS },
+            visibleInstruction: {
+                type: 'string',
+                description: 'Narrator-safe surface scene instruction only. No hidden motive, allegiance, sponsor, spy, agent, infiltration, betrayal, or metadata language.',
+            },
+            contactName: { type: 'string' },
+            contactGender: { type: 'string', enum: POWER_EVENT_CONTACT_GENDERS },
+            surfaceRole: { type: 'string' },
+            deferReason: { type: 'string' },
+        },
+    };
     const stakeChangeSchema = {
         type: 'object',
         additionalProperties: false,
@@ -670,7 +692,7 @@ function buildSemanticPreflightSchema() {
     return {
         type: 'object',
         additionalProperties: false,
-        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'powerActorEnmity', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic'],
+        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'powerActorEnmity', 'powerEventShape', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic'],
         properties: {
             engineContext: {
                 type: 'object',
@@ -906,6 +928,17 @@ function buildSemanticPreflightSchema() {
                     effects: {
                         type: 'array',
                         items: powerActorEffectSchema,
+                    },
+                },
+            },
+            powerEventShape: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['events'],
+                properties: {
+                    events: {
+                        type: 'array',
+                        items: powerEventShapeSchema,
                     },
                 },
             },
@@ -1168,6 +1201,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- PowerActorEnmity.assessments is audit-only diagnosis. Include one assessment for each meaningful ResolutionEngine.identifyTargets.PowerActors entry and for every current-scene or active-card candidate whose possible reach should be auditable: the active character/card actor, named scene NPCs, target/observer NPCs, and any affected organization/group when context gives credible reach beyond personal action. Do this even when PowerActorEnmity.effects count is 0. Assessment never creates enmity by itself and never replaces RelationshipEngine. If a living NPC appears in a normal target/observer list, still create the required RelationshipEngine entry even when isPowerActor=Y.',
     '- PowerActorEnmity effects are only for the latest user input and immediate visible context. Add an entry only if the user meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor. If the affected party lacks reach, hasReach=N and severity=none. If the actor cannot plausibly know or discover it, knownToActor=N and deterministic code will not increase enmity.',
     '- PowerActorEnmity severity: minor=small obstruction or insult; meaningful=real setback, exposure, loss, asset harm, or operation disruption; major=severe public exposure, major defeat, major theft, death/capture of members, ruined operation, or serious reputation/income damage. If none, output count=0.',
+    '- PowerEventShape is hidden pending pressure shaping. Use it only when the Power actor snapshot contains a pendingEvent. If no pending event exists, output PowerEventShape.count=0. For each pending event, decide if it fits the current scene now. fit=use_now only when it can enter naturally through visible scene logic without forcing {{user}} action or revealing hidden motives. fit=defer when the current scene cannot naturally support it yet. fit=drop only if it is impossible or would contradict visible facts. visibleInstruction must be narrator-safe surface instruction only: describe what visibly happens or what an ordinary NPC/contact does, not why. Never include the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative in visibleInstruction. For plant_contact, use the provided contactName when available and describe only an ordinary plausible introduction, role, offer, request, trade, work, travel, help, rumor, or social contact. For agent_* events, use the activeAgent name as an ordinary established NPC and describe only the visible action/suggestion/setback.',
     '- NameGenerationEngine semantic lines are candidate generation only. Generate exactly 3 male person/entity names, 3 female person/entity names, and 3 location names matching the selected style line. Make them creative, readable, pronounceable, and real-but-unplaceable. Avoid Western stock fantasy, Tolkien/JRPG drift, ordinary modern names, famous names, joke names, and letter soup. These are candidates only; deterministic validation may reject, repair, or replace them before narration.',
     '- Companion/ally commands are tactical requests only. They can address the companion as an ActionTarget and can refer to an established hostile by name for later companion crisis targeting, but they must not be treated as {{user}} making the companion act, must not force a companion attack, and must not create a user-resolved success/failure roll for companion obedience. The named hostile must still be established through assistant narration/tracker/card/scenario/lore/initial test setup and belongs in hostilesInScene.NPC unless it directly opposes {{user}}\'s current action. If several hostiles exist and no specific one is named, do not guess a target.',
     '- Do not output primaryOppTarget or primaryOpposition. The only opposing living target list is identifyTargets.OppTargets.NPC; the separate broad hostile pool is identifyTargets.hostilesInScene.NPC.',
@@ -1252,6 +1286,16 @@ PowerActorEnmity[0].effect=none
 PowerActorEnmity[0].severity=none
 PowerActorEnmity[0].reason=(none)
 PowerActorEnmity[0].knownToActor=N
+PowerEventShape.count=0
+PowerEventShape[0].eventId=(none)
+PowerEventShape[0].actor=(none)
+PowerEventShape[0].eventType=none
+PowerEventShape[0].fit=none
+PowerEventShape[0].visibleInstruction=(none)
+PowerEventShape[0].contactName=(none)
+PowerEventShape[0].contactGender=none
+PowerEventShape[0].surfaceRole=(none)
+PowerEventShape[0].deferReason=(none)
 CHAOS_INTERRUPT.sceneSummary=short scene summary
 NameGenerationEngine.selectedStyle=Balanced Fantasy
 NameGenerationEngine.maleCandidates=(none)
@@ -1367,7 +1411,9 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     const proxyAction = options?.userInputMode === 'proxy'
         ? String(options?.proxyUserAction || '').trim()
         : '';
+    const powerActorSnapshot = sanitizePowerActorSnapshotForSemantic(options?.powerActorSnapshot || {});
     return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nSelected name style=${nameStyle}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
+        `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
         'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
@@ -1394,6 +1440,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. ' +
         `Execute NameGenerationEngine as semantic candidate generation only: selectedStyle must be "${nameStyle}", maleCandidates must contain exactly 3 male person/entity names, femaleCandidates exactly 3 female person/entity names, and locationCandidates exactly 3 location names. Follow the selected style and naming rules in the engine reference. Do not use fixed stock names, ordinary modern-Western names, famous names, jokes, or letter soup. Deterministic code will validate and expose only the approved final pool. ` +
         'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor. Mark knownToActor=Y only when the actor plausibly knows, can observe, is informed of, or can discover the action through ordinary reach. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
+        'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
         'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
         'Use condition=unchanged unless the latest user input or immediate visible context explicitly establishes a completed/current health state as healthy, bruised, wounded, badly_wounded, critical, or dead. Do not set condition from a desired/requested future injury or from an attempted action before narration confirms the result. ' +
@@ -1653,6 +1700,8 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.powerActorEnmity) missing.push('powerActorEnmity');
     if (!Array.isArray(ledger?.powerActorEnmity?.assessments)) missing.push('powerActorEnmity.assessments');
     if (!Array.isArray(ledger?.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
+    if (!ledger?.powerEventShape) missing.push('powerEventShape');
+    if (!Array.isArray(ledger?.powerEventShape?.events)) missing.push('powerEventShape.events');
     if (!ledger?.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger?.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
@@ -1758,6 +1807,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.NPC.count',
         'PowerActorAssessment.count',
         'PowerActorEnmity.count',
+        'PowerEventShape.count',
         'NameGenerationEngine.selectedStyle',
         'NameGenerationEngine.maleCandidates',
         'NameGenerationEngine.femaleCandidates',
@@ -1845,6 +1895,28 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.knownToActor`,
         ];
         for (const key of powerActorRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const powerEventShapeCount = clampNumber(readNumber(fields, 'PowerEventShape.count', 0), 0, 4);
+    for (let index = 0; index < powerEventShapeCount; index += 1) {
+        const prefix = `PowerEventShape[${index}]`;
+        const powerEventRequired = [
+            `${prefix}.eventId`,
+            `${prefix}.actor`,
+            `${prefix}.eventType`,
+            `${prefix}.fit`,
+            `${prefix}.visibleInstruction`,
+            `${prefix}.contactName`,
+            `${prefix}.contactGender`,
+            `${prefix}.surfaceRole`,
+            `${prefix}.deferReason`,
+        ];
+        for (const key of powerEventRequired) {
             if (!fields.has(key)) missing.push(key);
         }
     }
@@ -2028,6 +2100,23 @@ function parseCompactLedger(text, trackerSnapshot) {
         if (effect) powerActorEnmity.effects.push(effect);
     }
 
+    const powerEventShape = { events: [] };
+    for (let index = 0; index < powerEventShapeCount; index += 1) {
+        const prefix = `PowerEventShape[${index}]`;
+        const event = normalizePowerEventShape({
+            eventId: fields.get(`${prefix}.eventId`),
+            actor: fields.get(`${prefix}.actor`),
+            eventType: fields.get(`${prefix}.eventType`),
+            fit: fields.get(`${prefix}.fit`),
+            visibleInstruction: fields.get(`${prefix}.visibleInstruction`),
+            contactName: fields.get(`${prefix}.contactName`),
+            contactGender: fields.get(`${prefix}.contactGender`),
+            surfaceRole: fields.get(`${prefix}.surfaceRole`),
+            deferReason: fields.get(`${prefix}.deferReason`),
+        });
+        if (event) powerEventShape.events.push(event);
+    }
+
     const trackerUpdateEngine = {
         user: {
             condition: normalizeTrackerDeltaCondition(fields.get('TrackerUpdateEngine.User.condition')),
@@ -2073,6 +2162,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         relationshipEngine,
         injuryEffectEngine,
         powerActorEnmity,
+        powerEventShape,
         chaosSemantic: {
             sceneSummary: cleanScalar(fields.get('CHAOS_INTERRUPT.sceneSummary')) || '',
         },
@@ -2802,6 +2892,10 @@ function normalizeLedger(ledger) {
     ledger.powerActorEnmity.effects = Array.isArray(ledger.powerActorEnmity.effects)
         ? ledger.powerActorEnmity.effects.map(normalizePowerActorEffect).filter(Boolean)
         : [];
+    ledger.powerEventShape = ledger.powerEventShape || {};
+    ledger.powerEventShape.events = Array.isArray(ledger.powerEventShape.events)
+        ? ledger.powerEventShape.events.map(normalizePowerEventShape).filter(Boolean)
+        : [];
     ledger.trackerUpdateEngine = ledger.trackerUpdateEngine || {};
     ledger.trackerUpdateEngine.user = normalizeTrackerDelta(ledger.trackerUpdateEngine.user, TRACKER_USER_DELTA_FIELDS);
     ledger.trackerUpdateEngine.npcs = Array.isArray(ledger.trackerUpdateEngine.npcs)
@@ -2897,6 +2991,52 @@ function normalizePowerActorEffect(value) {
     };
 }
 
+function normalizePowerEventShape(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const eventId = cleanScalar(source.eventId ?? source.EventId).replace(/\s+/g, ' ').slice(0, 80);
+    const actor = cleanScalar(source.actor ?? source.Actor).replace(/\s+/g, ' ').slice(0, 100);
+    if (!eventId || isNoneValue(eventId) || !actor || isNoneValue(actor)) return null;
+    const fit = normalizePowerEventFit(source.fit ?? source.Fit);
+    const eventType = normalizePowerEventType(source.eventType ?? source.EventType);
+    if (fit === 'none') return null;
+    const visibleInstruction = sanitizePowerEventVisibleInstruction(source.visibleInstruction ?? source.VisibleInstruction);
+    return {
+        eventId,
+        actor,
+        eventType,
+        fit,
+        visibleInstruction: fit === 'use_now' ? visibleInstruction : '(none)',
+        contactName: cleanScalar(source.contactName ?? source.ContactName).replace(/\s+/g, ' ').slice(0, 80) || '(none)',
+        contactGender: normalizePowerEventContactGender(source.contactGender ?? source.ContactGender),
+        surfaceRole: cleanScalar(source.surfaceRole ?? source.SurfaceRole).replace(/\s+/g, ' ').slice(0, 120) || '(none)',
+        deferReason: cleanScalar(source.deferReason ?? source.DeferReason).replace(/\s+/g, ' ').slice(0, 160) || '(none)',
+    };
+}
+
+function normalizePowerEventType(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_EVENT_TYPES.includes(text) ? text : 'none';
+}
+
+function normalizePowerEventFit(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_EVENT_FITS.includes(text) ? text : 'none';
+}
+
+function normalizePowerEventContactGender(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_EVENT_CONTACT_GENDERS.includes(text) ? text : 'unknown';
+}
+
+function sanitizePowerEventVisibleInstruction(value) {
+    const text = cleanScalar(value).replace(/\s+/g, ' ').slice(0, 360);
+    if (!text || isNoneValue(text)) return '(none)';
+    if (/\b(?:spy|spies|agent|infiltrat(?:e|es|ed|ing|or|ors|ion)|sponsor|handler|hidden\s+(?:motive|allegiance|alignment|orders?)|secret\s+(?:motive|allegiance|alignment|orders?)|betray(?:al|s|ed|ing)?|double\s+agent|plant(?:ed)?\s+(?:contact|operative)|covert\s+operative)\b/i.test(text)) {
+        return '(none)';
+    }
+    return text;
+}
+
 function normalizePowerActorEffectType(value) {
     const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
     return POWER_ACTOR_EFFECT_TYPES.includes(text) ? text : 'none';
@@ -2905,6 +3045,41 @@ function normalizePowerActorEffectType(value) {
 function normalizePowerActorSeverity(value) {
     const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
     return POWER_ACTOR_SEVERITIES.includes(text) ? text : 'none';
+}
+
+function sanitizePowerActorSnapshotForSemantic(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const result = {};
+    for (const [name, rawState] of Object.entries(source)) {
+        const state = rawState && typeof rawState === 'object' ? rawState : {};
+        const actor = cleanScalar(state.name ?? name).replace(/\s+/g, ' ').slice(0, 100);
+        if (!actor || isNoneValue(actor)) continue;
+        const pending = state.pendingEvent && typeof state.pendingEvent === 'object' ? state.pendingEvent : {};
+        const agent = state.activeAgent && typeof state.activeAgent === 'object' ? state.activeAgent : {};
+        result[actor] = {
+            name: actor,
+            type: cleanScalar(state.type ?? state.actorType).replace(/\s+/g, ' ').slice(0, 80) || 'power actor',
+            enmity: toNumber(state.enmity, 0),
+            tier: cleanScalar(state.tier).replace(/\s+/g, ' ').slice(0, 80) || 'Unaware',
+            reasons: readPlainArray(state.reasons).slice(-4),
+            pendingEvent: pending?.id ? {
+                id: cleanScalar(pending.id).replace(/\s+/g, ' ').slice(0, 80),
+                eventType: normalizePowerEventType(pending.eventType),
+                severityBand: cleanScalar(pending.severityBand).replace(/\s+/g, ' ').slice(0, 40) || 'none',
+                premise: cleanScalar(pending.premise).replace(/\s+/g, ' ').slice(0, 220) || '(none)',
+                contactName: cleanScalar(pending.contactName).replace(/\s+/g, ' ').slice(0, 80) || '(none)',
+                contactGender: normalizePowerEventContactGender(pending.contactGender),
+                attempts: toNumber(pending.attempts, 0),
+            } : null,
+            activeAgent: agent?.name ? {
+                name: cleanScalar(agent.name).replace(/\s+/g, ' ').slice(0, 80),
+                gender: normalizePowerEventContactGender(agent.gender),
+                coverRole: cleanScalar(agent.coverRole).replace(/\s+/g, ' ').slice(0, 120) || 'scene contact',
+                actionCount: toNumber(agent.actionCount, 0),
+            } : null,
+        };
+    }
+    return result;
 }
 
 function normalizeCore(core) {
@@ -2986,6 +3161,8 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.powerActorEnmity) missing.push('powerActorEnmity');
     if (!Array.isArray(ledger.powerActorEnmity?.assessments)) missing.push('powerActorEnmity.assessments');
     if (!Array.isArray(ledger.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
+    if (!ledger.powerEventShape) missing.push('powerEventShape');
+    if (!Array.isArray(ledger.powerEventShape?.events)) missing.push('powerEventShape.events');
     if (!ledger.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');

@@ -416,6 +416,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     return response
 }`;
 const DEFAULT_SETTINGS = Object.freeze({
+    storyEngineEnabled: true,
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
     disableSemanticThinking: true,
@@ -496,11 +497,18 @@ function getSettings() {
     return extension_settings[SETTINGS_KEY];
 }
 
+function isStoryEngineEnabled() {
+    return getSettings().storyEngineEnabled !== false;
+}
+
 function saveExtensionSettings() {
     saveSettingsDebounced();
 }
 
 function ensureStreamingArtifactRegex() {
+    if (!isStoryEngineEnabled()) {
+        return removeStreamingArtifactRegex();
+    }
     if (!extension_settings || typeof extension_settings !== 'object') return false;
     if (!Array.isArray(extension_settings.regex)) {
         extension_settings.regex = [];
@@ -770,6 +778,10 @@ function injectMovablePrompt(key, promptText, placement, depth, role) {
 }
 
 function injectPromptOptionPrompts() {
+    if (!isStoryEngineEnabled()) {
+        clearPromptOptionPrompts();
+        return;
+    }
     clearFinalReminderPrompt();
     injectWritingStylePrompt();
     injectProseRulesPrompt();
@@ -781,7 +793,9 @@ function clearFinalReminderPrompt(context = getContext()) {
 
 function refreshSettingsControls() {
     const settings = getSettings();
+    const engineEnabled = isStoryEngineEnabled();
     const enabled = Boolean(settings.useSeparateSemanticSettings);
+    const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const trackerProfileSelect = document.getElementById('structured_preflight_tracker_profile');
@@ -798,7 +812,11 @@ function refreshSettingsControls() {
     const writingStyleDrawer = document.getElementById('structured_preflight_writing_style_drawer');
     const writingStylePrompt = document.getElementById('structured_preflight_writing_style_prompt');
     const nameStyleSelect = document.getElementById('structured_preflight_name_style');
+    const refreshSemanticButton = document.getElementById('structured_preflight_refresh_semantic_settings');
+    const resetProseGuardFormattingButton = document.getElementById('structured_preflight_reset_prose_guard_formatting');
+    const resetWritingStyleButton = document.getElementById('structured_preflight_reset_writing_style');
 
+    if (storyEngineCheckbox) storyEngineCheckbox.checked = engineEnabled;
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (proseGuardEnabledCheckbox) proseGuardEnabledCheckbox.checked = settings.postNarrationProseGuardEnabled !== false;
@@ -812,7 +830,7 @@ function refreshSettingsControls() {
     if (writingStylePrompt && writingStylePrompt.value !== settings.writingStylePrompt) {
         writingStylePrompt.value = String(settings.writingStylePrompt ?? DEFAULT_WRITING_STYLE_PROMPT);
     }
-    setPromptPlacementControls('writingStyle', settings, settings.writingStyleEnabled !== false);
+    setPromptPlacementControls('writingStyle', settings, engineEnabled && settings.writingStyleEnabled !== false);
     setSelectOptions(
         nameStyleSelect,
         NAME_STYLE_OPTIONS,
@@ -849,38 +867,64 @@ function refreshSettingsControls() {
         'Profile not found',
     );
 
-    if (profileSelect) profileSelect.disabled = !enabled;
-    if (trackerProfileSelect) trackerProfileSelect.disabled = settings.postNarrationTrackerEnabled === false;
-    if (proseGuardProfileSelect) proseGuardProfileSelect.disabled = settings.postNarrationProseGuardEnabled === false;
-    if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.disabled = settings.postNarrationProseGuardEnabled === false;
-    if (proseGuardFormattingPrompt) proseGuardFormattingPrompt.disabled = settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
+    if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
+    if (trackerProfileSelect) trackerProfileSelect.disabled = !engineEnabled || settings.postNarrationTrackerEnabled === false;
+    if (proseGuardProfileSelect) proseGuardProfileSelect.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
+    if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
+    if (proseGuardFormattingPrompt) proseGuardFormattingPrompt.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
     if (proseGuardFormattingDrawer) {
-        proseGuardFormattingDrawer.hidden = settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
+        proseGuardFormattingDrawer.hidden = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
         if (proseGuardFormattingDrawer.hidden) proseGuardFormattingDrawer.open = false;
     }
-    if (progressionProfileSelect) progressionProfileSelect.disabled = settings.characterProgressionEnabled === false;
-    if (writingStylePrompt) writingStylePrompt.disabled = settings.writingStyleEnabled === false;
+    if (progressionProfileSelect) progressionProfileSelect.disabled = !engineEnabled || settings.characterProgressionEnabled === false;
+    if (writingStylePrompt) writingStylePrompt.disabled = !engineEnabled || settings.writingStyleEnabled === false;
     if (writingStyleDrawer) {
-        writingStyleDrawer.hidden = settings.writingStyleEnabled === false;
+        writingStyleDrawer.hidden = !engineEnabled || settings.writingStyleEnabled === false;
         if (writingStyleDrawer.hidden) writingStyleDrawer.open = false;
     }
+    [
+        trackerEnabledCheckbox,
+        proseGuardEnabledCheckbox,
+        progressionEnabledCheckbox,
+        enabledCheckbox,
+        disableThinkingCheckbox,
+        writingStyleEnabled,
+        nameStyleSelect,
+        refreshSemanticButton,
+        resetProseGuardFormattingButton,
+        resetWritingStyleButton,
+    ].forEach(control => {
+        if (control) control.disabled = !engineEnabled;
+    });
     const playerStatus = document.getElementById('structured_preflight_player_setup_status');
     if (playerStatus) {
-        const context = getContext();
-        const root = getPlayerRoot(context);
-        const personaStats = getPersonaCoreStats(context);
-        const rootStats = root?.stats;
-        const status = root?.forceCreator
-            ? 'Character creator forced for this chat.'
-            : root?.ready
-            ? `Ready for this chat (${formatStatsTable(rootStats)}).`
-            : personaStats
-                ? `Active persona already has stats (${formatStatsTable(personaStats)}).`
-                : root?.disabled
-                    ? 'Disabled for this chat.'
-                    : 'Player setup required for this chat.';
+        const status = !engineEnabled
+            ? 'Story Engine disabled.'
+            : (() => {
+                const context = getContext();
+                const root = getPlayerRoot(context);
+                const personaStats = getPersonaCoreStats(context);
+                const rootStats = root?.stats;
+                return root?.forceCreator
+                    ? 'Character creator forced for this chat.'
+                    : root?.ready
+                    ? `Ready for this chat (${formatStatsTable(rootStats)}).`
+                    : personaStats
+                        ? `Active persona already has stats (${formatStatsTable(personaStats)}).`
+                        : root?.disabled
+                            ? 'Disabled for this chat.'
+                            : 'Player setup required for this chat.';
+            })();
         playerStatus.textContent = status;
     }
+
+    [
+        document.getElementById('structured_preflight_show_player_setup'),
+        document.getElementById('structured_preflight_force_player_setup'),
+        document.getElementById('structured_preflight_reset_player_setup'),
+    ].forEach(control => {
+        if (control) control.disabled = !engineEnabled;
+    });
 }
 
 function ensureSettingsPanelStyles() {
@@ -1018,6 +1062,19 @@ function renderSettingsPanel() {
             </div>
             <div class="inline-drawer-content">
                 <div class="spe-settings-shell">
+                    <section class="spe-settings-section" data-spe-settings-step="master">
+                        <span class="spe-settings-kicker">Master switch</span>
+                        <h4 class="spe-settings-title">Story Engine</h4>
+                        <small class="spe-settings-description">Enable or disable the entire extension without removing it.</small>
+                        <div class="spe-settings-body">
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_story_engine_enabled" type="checkbox">
+                                <span>Enable Story Engine</span>
+                            </label>
+                            <small class="spe-settings-note">When disabled, Story Engine skips semantic preflight, mechanics, narrator handoff, Prose Guard, tracker updates, character progression, and prompt injection.</small>
+                        </div>
+                    </section>
+
                     <section class="spe-settings-section" data-spe-settings-step="setup">
                         <span class="spe-settings-kicker">0. Setup</span>
                         <h4 class="spe-settings-title">Player Setup</h4>
@@ -1185,6 +1242,24 @@ function renderSettingsPanel() {
     });
 
     const settings = getSettings();
+    document.getElementById('structured_preflight_story_engine_enabled')?.addEventListener('change', event => {
+        settings.storyEngineEnabled = Boolean(event.target?.checked);
+        if (settings.storyEngineEnabled === false) {
+            disableStoryEngineRuntime();
+        } else {
+            const context = getContext();
+            ensureStreamingArtifactRegex();
+            injectPromptOptionPrompts();
+            getPlayerRoot(context);
+            restoreTrackerFromLatestDisplaySnapshot(context);
+            migrateVisibleHandoffDisplays(context);
+            renderAllTrackerDisplayBlocks(context);
+            renderPlayerSetupCard(context);
+            renderProgressionCard(context);
+        }
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
     document.getElementById('structured_preflight_use_separate_semantic_settings')?.addEventListener('change', event => {
         settings.useSeparateSemanticSettings = Boolean(event.target?.checked);
         refreshSettingsControls();
@@ -1291,6 +1366,11 @@ function renderSettingsPanel() {
     }
     document.getElementById('structured_preflight_refresh_semantic_settings')?.addEventListener('click', refreshSettingsControls);
     document.getElementById('structured_preflight_show_player_setup')?.addEventListener('click', () => {
+        if (!isStoryEngineEnabled()) {
+            disableStoryEngineRuntime();
+            refreshSettingsControls();
+            return;
+        }
         const context = getContext();
         const root = getPlayerRoot(context);
         if (root && !root.ready && !getPersonaCoreStats(context)) {
@@ -1302,6 +1382,11 @@ function renderSettingsPanel() {
         refreshSettingsControls();
     });
     document.getElementById('structured_preflight_force_player_setup')?.addEventListener('click', async () => {
+        if (!isStoryEngineEnabled()) {
+            disableStoryEngineRuntime();
+            refreshSettingsControls();
+            return;
+        }
         const context = getContext();
         const root = getPlayerRoot(context);
         if (root) {
@@ -1318,6 +1403,11 @@ function renderSettingsPanel() {
         closeExtensionsDrawer();
     });
     document.getElementById('structured_preflight_reset_player_setup')?.addEventListener('click', async () => {
+        if (!isStoryEngineEnabled()) {
+            disableStoryEngineRuntime();
+            refreshSettingsControls();
+            return;
+        }
         const context = getContext();
         const root = getPlayerRoot(context);
         if (root) {
@@ -1361,7 +1451,7 @@ function injectWritingStylePrompt() {
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
 
     const settings = getSettings();
-    if (settings.writingStyleEnabled === false) {
+    if (!isStoryEngineEnabled() || settings.writingStyleEnabled === false) {
         if (context.extensionPrompts) delete context.extensionPrompts[WRITING_STYLE_PROMPT_KEY];
         return;
     }
@@ -1383,6 +1473,10 @@ function injectProseRulesPrompt() {
     }
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
     clearFinalReminderPrompt(context);
+    if (!isStoryEngineEnabled()) {
+        if (context.extensionPrompts) delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
+        return;
+    }
 
     injectMovablePrompt(
         PROSE_RULES_PROMPT_KEY,
@@ -1451,6 +1545,34 @@ function clearRuntimePrompts() {
     if (!context?.extensionPrompts) return;
 
     delete context.extensionPrompts[NARRATOR_PROMPT_KEY];
+}
+
+function disableStoryEngineRuntime() {
+    clearPostNarrationFinalizerTimers();
+    clearPendingRunCleanupTimer();
+    clearAllProgress();
+    clearRuntimePrompts();
+    clearPromptOptionPrompts();
+    setChatInputLocked(false);
+    releaseProseGuardDisplayIntercept({ restore: true });
+    if (state.proseGuardChatObserver) {
+        state.proseGuardChatObserver.disconnect();
+        state.proseGuardChatObserver = null;
+    }
+    removeStreamingArtifactRegex();
+    state.runningSemanticPass = false;
+    state.bypassPromptReady = false;
+    state.activeRunId = null;
+    state.lastNarratorHandoff = '';
+    state.lastNarratorHandoffKey = null;
+    state.pendingRun = null;
+    state.pendingGeneration = null;
+    state.proseGuardHideNextMessage = false;
+    state.proseGuardExpectedMessageId = null;
+    document.querySelectorAll?.(`.${TRACKER_DISPLAY_BLOCK_CLASS}, .${NARRATOR_HANDOFF_BLOCK_CLASS}`)?.forEach(element => element.remove());
+    document.getElementById(TRACKER_WIDGET_ID)?.remove();
+    document.getElementById(PLAYER_SETUP_CARD_ID)?.remove();
+    document.getElementById(PROGRESSION_CARD_ID)?.remove();
 }
 
 function showProgress(message) {
@@ -1532,6 +1654,7 @@ function getMessageKey(messageId, context = getContext()) {
 }
 
 function getTrackerRoot(context = getContext()) {
+    if (!isStoryEngineEnabled()) return null;
     if (!context?.chatMetadata) return null;
     context.chatMetadata.structuredPreflightTracker = context.chatMetadata.structuredPreflightTracker || { npcs: {}, user: {}, snapshots: {} };
     const root = context.chatMetadata.structuredPreflightTracker;
@@ -1548,6 +1671,7 @@ function getTrackerRoot(context = getContext()) {
 }
 
 function getPlayerRoot(context = getContext()) {
+    if (!isStoryEngineEnabled()) return null;
     if (!context?.chatMetadata) return null;
     context.chatMetadata[PLAYER_SETUP_KEY] = context.chatMetadata[PLAYER_SETUP_KEY] || {};
     const root = context.chatMetadata[PLAYER_SETUP_KEY];
@@ -1565,6 +1689,7 @@ function getPlayerRoot(context = getContext()) {
 }
 
 function getProgressionRoot(context = getContext()) {
+    if (!isStoryEngineEnabled()) return null;
     if (!context?.chatMetadata) return null;
     context.chatMetadata[PROGRESSION_KEY] = context.chatMetadata[PROGRESSION_KEY] || {};
     const root = context.chatMetadata[PROGRESSION_KEY];
@@ -1577,6 +1702,7 @@ function getProgressionRoot(context = getContext()) {
 }
 
 function progressionPending(context = getContext()) {
+    if (!isStoryEngineEnabled()) return false;
     const root = getProgressionRoot(context);
     return Boolean(getSettings().characterProgressionEnabled !== false && root?.pendingAdvancement);
 }
@@ -3170,7 +3296,8 @@ function tryAttachProseGuardPendingMessage() {
 
 function shouldUseProseGuardDisplayIntercept(type) {
     const normalizedType = String(type || 'normal');
-    return getSettings().postNarrationProseGuardEnabled !== false
+    return isStoryEngineEnabled()
+        && getSettings().postNarrationProseGuardEnabled !== false
         && normalizedType !== 'impersonate'
         && Boolean(state.pendingGeneration)
         && hasPendingProseGuardGenerationInput()
@@ -3268,6 +3395,10 @@ function beginProseGuardDisplayIntercept(type, dryRun = false) {
 
 function ensureProseGuardDisplayInterceptor() {
     if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        return;
+    }
     ensureProseGuardDisplayStyles();
     if (!hasActiveProseGuardDisplayRun()) {
         releaseProseGuardDisplayIntercept({ restore: true });
@@ -3341,6 +3472,12 @@ function renderTrackerDisplayBlockForMessage(messageId, snapshot = null, context
 }
 
 function renderAllTrackerDisplayBlocks(context = getContext()) {
+    if (!isStoryEngineEnabled()) {
+        if (typeof document !== 'undefined') {
+            document.getElementById(TRACKER_WIDGET_ID)?.remove();
+        }
+        return;
+    }
     if (!Array.isArray(context?.chat)) return;
     context.chat.forEach((message, index) => {
         if (!message?.is_user) {
@@ -3370,7 +3507,7 @@ function renderTrackerWidget(context = getContext()) {
     ensureTrackerDisplayStyles();
 
     const settings = getSettings();
-    if (settings.postNarrationTrackerEnabled === false) {
+    if (!isStoryEngineEnabled() || settings.postNarrationTrackerEnabled === false) {
         document.getElementById(TRACKER_WIDGET_ID)?.remove();
         return;
     }
@@ -3645,6 +3782,10 @@ function ensureProgressionStyles() {
 function renderPlayerSetupCard(context = getContext()) {
     if (typeof document === 'undefined') return;
     const existing = document.getElementById(PLAYER_SETUP_CARD_ID);
+    if (!isStoryEngineEnabled()) {
+        existing?.remove();
+        return;
+    }
     if (!playerSetupNeeded(context)) {
         existing?.remove();
         return;
@@ -3667,7 +3808,7 @@ function renderPlayerSetupCard(context = getContext()) {
 function renderProgressionCard(context = getContext()) {
     if (typeof document === 'undefined') return;
     const existing = document.getElementById(PROGRESSION_CARD_ID);
-    if (getSettings().characterProgressionEnabled === false || !progressionPending(context)) {
+    if (!isStoryEngineEnabled() || getSettings().characterProgressionEnabled === false || !progressionPending(context)) {
         existing?.remove();
         return;
     }
@@ -3993,6 +4134,10 @@ function bindProgressionCardEvents(card, context = getContext()) {
 }
 
 async function handleProgressionAction(action, details = {}, context = getContext()) {
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        return;
+    }
     if (state.progressionBusy) return;
     const root = getProgressionRoot(context);
     if (!root?.pendingAdvancement) return;
@@ -4051,6 +4196,10 @@ function updatePlayerIdentityOptionalFields(card) {
 }
 
 async function handlePlayerSetupAction(action, details = {}, context = getContext()) {
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        return;
+    }
     if (state.playerSetupBusy) return;
     const root = getPlayerRoot(context);
     if (!root) return;
@@ -4274,6 +4423,9 @@ function getSelectedProgressionSwapAbilityIndex(context = getContext()) {
 }
 
 async function requestProgressionAbilityOptions(pending, context = getContext()) {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
     if (Array.isArray(pending?.abilityOptions) && pending.abilityOptions.length === PROGRESSION_ABILITY_OPTIONS) {
         return pending.abilityOptions;
     }
@@ -4346,6 +4498,7 @@ function formatProgressionRecordForPrompt(record) {
 }
 
 function maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context = getContext() } = {}) {
+    if (!isStoryEngineEnabled()) return false;
     if (getSettings().characterProgressionEnabled === false) return false;
     if (!pendingRun || !messageKey) return false;
     const root = getProgressionRoot(context);
@@ -4419,6 +4572,9 @@ function removeProgressionRecordsForMessage(messageKey, context = getContext()) 
 }
 
 async function requestProgressionText(prompt, responseLength, overridePayload = {}) {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
     const context = getContext();
     state.bypassPromptReady = true;
     try {
@@ -4768,6 +4924,9 @@ function previewPlayerSetupRaw(raw, extractedText = '') {
 }
 
 async function requestPlayerSetupText(prompt, responseLength, overridePayload = {}) {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
     const context = getContext();
     state.bypassPromptReady = true;
     try {
@@ -5133,6 +5292,9 @@ function sanitizeProseGuardResponse(raw, fallbackText) {
 }
 
 async function requestProseGuardCorrection(narrationText, latestUserText = '') {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
     const prompt = buildProseGuardPrompt(narrationText, latestUserText);
     const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
     state.bypassPromptReady = true;
@@ -5314,6 +5476,9 @@ function buildSemanticPersonalityEvidence({ activeNpcNames, handoff, previousNpc
 }
 
 async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
     const prompt = buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot });
     const responseLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
     state.bypassPromptReady = true;
@@ -5336,6 +5501,11 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
 }
 
 function prependComputedDebug(messageId, type) {
+    if (!isStoryEngineEnabled()) {
+        releaseProseGuardDisplayIntercept({ restore: true, messageId });
+        clearRuntimePrompts();
+        return;
+    }
     const context = getContext();
     const messageKey = getMessageKey(messageId, context);
 
@@ -5398,6 +5568,11 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
     let finalNarrationRendered = false;
 
     try {
+        if (!isStoryEngineEnabled()) {
+            clearRuntimePrompts();
+            releaseProseGuardDisplayIntercept({ restore: true, messageId });
+            return;
+        }
         const context = getContext();
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
             clearRuntimePrompts();
@@ -5531,6 +5706,11 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 }
 
 async function handleMessageDeleted(newLength) {
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        state.chatSignature = captureChatSignature();
+        return;
+    }
     const context = getContext();
     const root = getTrackerRoot(context);
     if (!root) return;
@@ -5576,6 +5756,11 @@ async function handleMessageDeleted(newLength) {
 }
 
 async function handleMessageSwiped(messageId) {
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        state.chatSignature = captureChatSignature();
+        return;
+    }
     const context = getContext();
     const resolvedMessageId = Number.isFinite(Number(messageId)) ? Number(messageId) : null;
     if (resolvedMessageId != null && restoreTrackerFromMessageDisplaySnapshot(resolvedMessageId, context)) {
@@ -5596,6 +5781,11 @@ function handleChatChanged() {
     clearAllProgress();
     setChatInputLocked(false);
     releaseProseGuardDisplayIntercept();
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        state.chatSignature = captureChatSignature();
+        return;
+    }
     const context = getContext();
     injectPromptOptionPrompts();
     getPlayerRoot(context);
@@ -5614,6 +5804,10 @@ function handleChatChanged() {
 }
 
 function handleGenerationLifecycleEnd() {
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        return;
+    }
     if (state.trackerUpdating) return;
     clearAllProgress();
     state.pendingGeneration = null;
@@ -5663,6 +5857,11 @@ function subscribeMessageHandler() {
 
 globalThis.StructuredPreflightEngines_generationInterceptor = async function (coreChat, contextSize, abort, type) {
     subscribeMessageHandler();
+
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        return false;
+    }
 
     if (state.trackerUpdating) {
         try {
@@ -5760,6 +5959,12 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 };
 
 async function handleChatCompletionPromptReady(eventData) {
+    if (!isStoryEngineEnabled()) {
+        clearRuntimePrompts();
+        clearPromptOptionPrompts();
+        state.pendingGeneration = null;
+        return;
+    }
     if (state.bypassPromptReady || state.runningSemanticPass) return;
     if (!eventData || eventData.dryRun || !Array.isArray(eventData.chat)) return;
     if (!state.pendingGeneration) return;
@@ -5840,6 +6045,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
         return await withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
             playerTrackerSnapshot: state.pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+            powerActorSnapshot: state.pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
             disableSemanticThinking: settings?.disableSemanticThinking !== false,
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
@@ -5929,11 +6135,19 @@ getSettings();
 ensureStreamingArtifactRegex();
 if (typeof jQuery === 'function') {
     jQuery(() => {
+        renderSettingsPanel();
+        if (!isStoryEngineEnabled()) {
+            disableStoryEngineRuntime();
+            return;
+        }
         ensureStreamingArtifactRegex();
         ensureProseGuardDisplayInterceptor();
-        renderSettingsPanel();
         injectPromptOptionPrompts();
         setTimeout(() => {
+            if (!isStoryEngineEnabled()) {
+                disableStoryEngineRuntime();
+                return;
+            }
             getPlayerRoot();
             restoreTrackerFromLatestDisplaySnapshot();
             migrateVisibleHandoffDisplays();
@@ -5943,11 +6157,19 @@ if (typeof jQuery === 'function') {
         }, 0);
     });
 } else {
-    ensureStreamingArtifactRegex();
-    ensureProseGuardDisplayInterceptor();
     renderSettingsPanel();
-    injectPromptOptionPrompts();
+    if (isStoryEngineEnabled()) {
+        ensureStreamingArtifactRegex();
+        ensureProseGuardDisplayInterceptor();
+        injectPromptOptionPrompts();
+    } else {
+        disableStoryEngineRuntime();
+    }
     setTimeout(() => {
+        if (!isStoryEngineEnabled()) {
+            disableStoryEngineRuntime();
+            return;
+        }
         getPlayerRoot();
         restoreTrackerFromLatestDisplaySnapshot();
         migrateVisibleHandoffDisplays();

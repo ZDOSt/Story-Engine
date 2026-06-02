@@ -139,6 +139,10 @@ function baseLedger(overrides = {}) {
       effects: [],
       ...(overrides.powerActorEnmity || {}),
     },
+    powerEventShape: {
+      events: [],
+      ...(overrides.powerEventShape || {}),
+    },
     trackerUpdateEngine: {
       user: emptyUserDelta(),
       npcs: [],
@@ -5849,9 +5853,10 @@ const tests = [
       assert.equal(actor.lastEffect.delta, 2);
       assert.equal(report.finalNarrativeHandoff.powerActorPressure.entries[0].Actor, 'Red Glass Syndicate');
       assert.equal(report.finalNarrativeHandoff.powerActorPressure.entries[0].Tier, 'Obstructive');
-      assert.match(prompt(report), /Power actor pressure: Red Glass Syndicate \(criminal syndicate\): enmity 2, tier Obstructive/);
-      assert.match(prompt(report), /Use only as subtle world pressure when natural/);
-      assert.match(prompt(report), /never reveal hidden metadata, true plans, secret alignment, or offscreen knowledge/);
+      assert.match(auditPrompt(report), /- powerActor\.pressure: Red Glass Syndicate \(criminal syndicate\): enmity 2, tier Obstructive/);
+      assert.doesNotMatch(prompt(report), /Power actor pressure:/);
+      assert.doesNotMatch(prompt(report), /Red Glass Syndicate \(criminal syndicate\): enmity 2/);
+      assert.doesNotMatch(prompt(report), /Red Glass Syndicate \(criminal syndicate\): enmity 2/);
       assert.equal(auditIncludes(report, 'STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER'), true);
       assert.equal(auditIncludes(report, 'powerActorEnmityUpdate='), true);
     },
@@ -6009,7 +6014,9 @@ const tests = [
       assert.match(audit, /- npc\.state: Lady Veyra/);
       assert.match(audit, /- powerActor\.assessment: Lady Veyra\/Y\/individual\/noblewoman/);
       assert.match(audit, /- powerActor\.enmityEffect: House Veyra\/noble house\/damage_reputation_or_income\/meaningful\/known:Y/);
-      assert.match(prompt(report), /Power actor pressure: House Veyra \(noble house\): enmity 2, tier Obstructive/);
+      assert.match(audit, /- powerActor\.pressure: House Veyra \(noble house\): enmity 2, tier Obstructive/);
+      assert.doesNotMatch(prompt(report), /Power actor pressure:/);
+      assert.doesNotMatch(prompt(report), /House Veyra \(noble house\): enmity 2/);
     },
   },
   {
@@ -6129,16 +6136,154 @@ const tests = [
       assert.match(semanticSource, /Ordinary people with only personal reaction are not power actors/);
       assert.match(semanticSource, /Do not create power-actor enmity for ordinary individuals who can only personally react/);
       assert.match(semanticSource, /This semantic section is hidden memory only, not visible tracker text/);
+      assert.match(semanticSource, /PowerEventShape\.count=0/);
+      assert.match(semanticSource, /Power actor snapshot JSON/);
+      assert.match(semanticSource, /visibleInstruction must be narrator-safe surface instruction only/);
       assert.match(deterministicSource, /STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER/);
       assert.match(deterministicSource, /powerActorTier\(enmity\)/);
-      assert.match(preflightSource, /Power actor pressure: /);
-      assert.match(preflightSource, /Use only as subtle world pressure when natural/);
+      assert.match(deterministicSource, /runPowerActorProactivity/);
+      assert.match(deterministicSource, /isSafePowerEventVisibleInstruction/);
+      assert.match(preflightSource, /World pressure event: /);
+      assert.match(preflightSource, /Render only the visible surface event/);
       assert.match(indexSource, /beforePowerActors/);
       assert.match(indexSource, /afterPowerActors/);
       assert.match(indexSource, /root\.powerActors/);
 
       const combined = [semanticSource, deterministicSource, preflightSource, indexSource].join('\n');
       assert.doesNotMatch(combined, /spyStatus|fakeFriend|betrayalLifecycle|suspicionScore|evidenceScore/);
+    },
+  },
+  {
+    name: '33d.1 power actor proactivity schedules hidden pending event without narrator leakage',
+    run() {
+      const report = runCase({
+        userText: 'I keep moving through the market.',
+        dice: [10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 20, 19],
+        ledger: baseLedger(),
+        powerActors: {
+          'Red Glass Syndicate': {
+            name: 'Red Glass Syndicate',
+            type: 'criminal syndicate',
+            enmity: 5,
+            reasons: ['User burned their ledger'],
+            responseHistory: [],
+          },
+        },
+      });
+      const actor = report.trackerUpdate.powerActors['Red Glass Syndicate'];
+      assert.equal(actor.enmity, 5);
+      assert.equal(actor.pendingEvent.eventType, 'plant_contact');
+      assert.equal(actor.pendingEvent.status, 'pending');
+      assert.equal(actor.pendingEvent.contactName, report.finalNarrativeHandoff.nameGeneration.namePool.male[0]);
+      assert.equal(report.finalNarrativeHandoff.powerActorPressure.event, null);
+      assert.equal(auditIncludes(report, 'powerActorPendingEventCreated='), true);
+      assert.doesNotMatch(prompt(report), /World pressure event:/);
+      assert.doesNotMatch(prompt(report), /spy|agent|infiltrat|hidden allegiance|sponsor|betray/i);
+    },
+  },
+  {
+    name: '33d.2 semantic-shaped power event reaches narrator as surface fact only and records hidden contact',
+    run() {
+      const report = runCase({
+        userText: 'I ask around the market for work.',
+        powerActors: {
+          'Red Glass Syndicate': {
+            name: 'Red Glass Syndicate',
+            type: 'criminal syndicate',
+            enmity: 5,
+            reasons: ['User burned their ledger'],
+            pendingEvent: {
+              id: 'red-glass-100-plant_contact-95',
+              eventType: 'plant_contact',
+              severityBand: 'strategic',
+              createdAtActiveMs: 100,
+              actor: 'Red Glass Syndicate',
+              actorType: 'criminal syndicate',
+              reason: 'User burned their ledger',
+              premise: 'A plausible new contact enters through ordinary market work.',
+              contactName: 'Torven',
+              contactGender: 'male',
+              status: 'pending',
+              attempts: 0,
+            },
+          },
+        },
+        ledger: baseLedger({
+          powerEventShape: {
+            events: [{
+              eventId: 'red-glass-100-plant_contact-95',
+              actor: 'Red Glass Syndicate',
+              eventType: 'plant_contact',
+              fit: 'use_now',
+              visibleInstruction: 'Introduce Torven as a caravan clerk offering paid unloading work at the west gate.',
+              contactName: 'Torven',
+              contactGender: 'male',
+              surfaceRole: 'caravan clerk',
+              deferReason: '(none)',
+            }],
+          },
+        }),
+      });
+      const actor = report.trackerUpdate.powerActors['Red Glass Syndicate'];
+      assert.equal(actor.pendingEvent.id, '');
+      assert.equal(actor.activeAgent.name, 'Torven');
+      assert.equal(actor.activeAgent.coverRole, 'caravan clerk');
+      assert.equal(report.finalNarrativeHandoff.powerActorPressure.event.VisibleInstruction, 'Introduce Torven as a caravan clerk offering paid unloading work at the west gate.');
+      const modelPrompt = prompt(report);
+      const eventLines = modelPrompt.split('\n').filter(line => /World pressure event|visible world-pressure event/i.test(line)).join('\n');
+      assert.match(eventLines, /World pressure event: Introduce Torven as a caravan clerk offering paid unloading work at the west gate/);
+      assert.doesNotMatch(eventLines, /Red Glass Syndicate|criminal syndicate|plant_contact/i);
+      assert.doesNotMatch(eventLines, /(?:\bspy\b|\bagent\b|infiltrat|sponsor|betray)/i);
+      assert.match(auditPrompt(report), /- powerActor\.event: plant_contact\/contact:Torven\/role:caravan clerk\/visible:Introduce Torven/);
+    },
+  },
+  {
+    name: '33d.3 unsafe covert event wording is held back from narrator',
+    run() {
+      const report = runCase({
+        userText: 'I ask around the market for work.',
+        powerActors: {
+          'Red Glass Syndicate': {
+            name: 'Red Glass Syndicate',
+            type: 'criminal syndicate',
+            enmity: 5,
+            pendingEvent: {
+              id: 'red-glass-100-plant_contact-95',
+              eventType: 'plant_contact',
+              severityBand: 'strategic',
+              createdAtActiveMs: 100,
+              actor: 'Red Glass Syndicate',
+              actorType: 'criminal syndicate',
+              premise: 'A plausible new contact enters.',
+              contactName: 'Torven',
+              contactGender: 'male',
+              status: 'pending',
+              attempts: 0,
+            },
+          },
+        },
+        ledger: baseLedger({
+          powerEventShape: {
+            events: [{
+              eventId: 'red-glass-100-plant_contact-95',
+              actor: 'Red Glass Syndicate',
+              eventType: 'plant_contact',
+              fit: 'use_now',
+              visibleInstruction: 'Torven is a spy planted by the Red Glass Syndicate.',
+              contactName: 'Torven',
+              contactGender: 'male',
+              surfaceRole: 'caravan clerk',
+              deferReason: '(none)',
+            }],
+          },
+        }),
+      });
+      const actor = report.trackerUpdate.powerActors['Red Glass Syndicate'];
+      assert.equal(actor.pendingEvent.id, 'red-glass-100-plant_contact-95');
+      assert.equal(actor.pendingEvent.attempts, 1);
+      assert.equal(report.finalNarrativeHandoff.powerActorPressure.event, null);
+      assert.doesNotMatch(prompt(report), /World pressure event:|spy|agent|Red Glass Syndicate/);
+      assert.equal(auditIncludes(report, 'unsafe_instruction_deferred'), true);
     },
   },
   {
@@ -7524,6 +7669,7 @@ const tests = [
       assert.ok(renderSource.includes('spe-settings-section'));
 
       const sections = [
+        ['data-spe-settings-step="master"', 'Master switch', 'Story Engine'],
         ['data-spe-settings-step="setup"', '0. Setup', 'Player Setup'],
         ['data-spe-settings-step="semantic"', '1. First model call', 'Semantic Preflight'],
         ['data-spe-settings-step="narrator-inputs"', '2. Narrator inputs', 'Narrator Context'],
@@ -7541,6 +7687,7 @@ const tests = [
       }
 
       const controlIds = [
+        'structured_preflight_story_engine_enabled',
         'structured_preflight_use_separate_semantic_settings',
         'structured_preflight_semantic_profile',
         'structured_preflight_refresh_semantic_settings',
@@ -7575,6 +7722,86 @@ const tests = [
       }
 
       assert.doesNotMatch(renderSource, /<hr>/);
+    },
+  },
+  {
+    name: '52 master Story Engine switch disables runtime paths without hiding settings',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const settingsSource = source.slice(
+        source.indexOf('function renderSettingsPanel()'),
+        source.indexOf('function closeExtensionsDrawer()'),
+      );
+      const runtimeSource = source.slice(
+        source.indexOf('function disableStoryEngineRuntime()'),
+        source.indexOf('function showProgress'),
+      );
+      const generationSource = source.slice(
+        source.indexOf('globalThis.StructuredPreflightEngines_generationInterceptor'),
+        source.indexOf('async function handleChatCompletionPromptReady'),
+      );
+      const promptReadySource = source.slice(
+        source.indexOf('async function handleChatCompletionPromptReady'),
+        source.indexOf('async function runSemanticPassWithPromptReadyBypass'),
+      );
+      const startupSource = source.slice(source.indexOf('subscribeMessageHandler();'));
+
+      assert.match(source, /storyEngineEnabled:\s*true/);
+      assert.match(source, /function isStoryEngineEnabled\(\) \{\s*return getSettings\(\)\.storyEngineEnabled !== false;\s*\}/);
+      assert.match(settingsSource, /data-spe-settings-step="master"/);
+      assert.match(settingsSource, /id="structured_preflight_story_engine_enabled"/);
+      assert.match(settingsSource, /Enable Story Engine/);
+      assert.match(settingsSource, /When disabled, Story Engine skips semantic preflight, mechanics, narrator handoff, Prose Guard, tracker updates, character progression, and prompt injection/);
+      assert.match(settingsSource, /settings\.storyEngineEnabled = Boolean\(event\.target\?\.checked\)/);
+      assert.match(settingsSource, /if \(settings\.storyEngineEnabled === false\) \{\s*disableStoryEngineRuntime\(\);/);
+      assert.match(settingsSource, /else \{\s*const context = getContext\(\);\s*ensureStreamingArtifactRegex\(\);\s*injectPromptOptionPrompts\(\);/);
+      assert.match(settingsSource, /restoreTrackerFromLatestDisplaySnapshot\(context\);\s*migrateVisibleHandoffDisplays\(context\);\s*renderAllTrackerDisplayBlocks\(context\);/);
+      assert.match(source, /if \(storyEngineCheckbox\) storyEngineCheckbox\.checked = engineEnabled/);
+      assert.match(source, /if \(control\) control\.disabled = !engineEnabled/);
+      assert.match(source, /Story Engine disabled\./);
+
+      assert.match(runtimeSource, /clearPostNarrationFinalizerTimers\(\)/);
+      assert.match(runtimeSource, /clearPendingRunCleanupTimer\(\)/);
+      assert.match(runtimeSource, /clearRuntimePrompts\(\)/);
+      assert.match(runtimeSource, /clearPromptOptionPrompts\(\)/);
+      assert.match(runtimeSource, /setChatInputLocked\(false\)/);
+      assert.match(runtimeSource, /releaseProseGuardDisplayIntercept\(\{ restore: true \}\)/);
+      assert.match(runtimeSource, /removeStreamingArtifactRegex\(\)/);
+      assert.match(runtimeSource, /document\.getElementById\(TRACKER_WIDGET_ID\)\?\.remove\(\)/);
+      assert.match(runtimeSource, /document\.getElementById\(PLAYER_SETUP_CARD_ID\)\?\.remove\(\)/);
+      assert.match(runtimeSource, /document\.getElementById\(PROGRESSION_CARD_ID\)\?\.remove\(\)/);
+
+      assert.match(source, /function ensureStreamingArtifactRegex\(\) \{\s*if \(!isStoryEngineEnabled\(\)\) \{\s*return removeStreamingArtifactRegex\(\);/);
+      assert.match(source, /function injectPromptOptionPrompts\(\) \{\s*if \(!isStoryEngineEnabled\(\)\) \{\s*clearPromptOptionPrompts\(\);/);
+      assert.match(source, /function injectWritingStylePrompt\(\)[\s\S]*if \(!isStoryEngineEnabled\(\) \|\| settings\.writingStyleEnabled === false\)/);
+      assert.match(source, /function injectProseRulesPrompt\(\)[\s\S]*if \(!isStoryEngineEnabled\(\)\)/);
+      assert.match(source, /function getTrackerRoot\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return null;/);
+      assert.match(source, /function getPlayerRoot\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return null;/);
+      assert.match(source, /function getProgressionRoot\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return null;/);
+      assert.match(source, /function progressionPending\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return false;/);
+
+      assert.match(generationSource, /if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);\s*return false;\s*\}/);
+      assert.match(promptReadySource, /if \(!isStoryEngineEnabled\(\)\) \{\s*clearRuntimePrompts\(\);\s*clearPromptOptionPrompts\(\);\s*state\.pendingGeneration = null;\s*return;\s*\}/);
+      assert.match(source, /function ensureProseGuardDisplayInterceptor\(\)[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);\s*return;\s*\}/);
+      assert.match(source, /function shouldUseProseGuardDisplayIntercept\(type\)[\s\S]*return isStoryEngineEnabled\(\)/);
+      assert.match(source, /function renderTrackerWidget\(context = getContext\(\)\)[\s\S]*if \(!isStoryEngineEnabled\(\) \|\| settings\.postNarrationTrackerEnabled === false\)/);
+      assert.match(source, /function renderPlayerSetupCard\(context = getContext\(\)\)[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*existing\?\.remove\(\);\s*return;/);
+      assert.match(source, /function renderProgressionCard\(context = getContext\(\)\)[\s\S]*if \(!isStoryEngineEnabled\(\) \|\| getSettings\(\)\.characterProgressionEnabled === false/);
+      assert.match(source, /function maybeRecordProgressionAccomplishment[\s\S]*if \(!isStoryEngineEnabled\(\)\) return false;/);
+      assert.match(source, /async function finalizePostNarrationMessage[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*clearRuntimePrompts\(\);\s*releaseProseGuardDisplayIntercept\(\{ restore: true, messageId \}\);\s*return;/);
+      assert.match(source, /async function requestProseGuardCorrection[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
+      assert.match(source, /async function requestPostNarrationTrackerDelta[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
+      assert.match(source, /async function requestPlayerSetupText[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
+      assert.match(source, /async function requestProgressionText[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
+      assert.match(source, /async function handlePlayerSetupAction[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);\s*return;/);
+      assert.match(source, /async function handleProgressionAction[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);\s*return;/);
+      assert.match(source, /async function handleMessageDeleted[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);/);
+      assert.match(source, /async function handleMessageSwiped[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);/);
+      assert.match(source, /function handleChatChanged\(\)[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);/);
+
+      assert.match(startupSource, /renderSettingsPanel\(\);\s*if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);\s*return;\s*\}/);
+      assert.match(startupSource, /if \(isStoryEngineEnabled\(\)\) \{\s*ensureStreamingArtifactRegex\(\);\s*ensureProseGuardDisplayInterceptor\(\);\s*injectPromptOptionPrompts\(\);/);
+      assert.match(startupSource, /setTimeout\(\(\) => \{\s*if \(!isStoryEngineEnabled\(\)\) \{\s*disableStoryEngineRuntime\(\);\s*return;/);
     },
   },
 ];

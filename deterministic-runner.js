@@ -80,6 +80,20 @@ const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 const POWER_ACTOR_ENMITY_VERSION = 1;
+const POWER_ACTOR_EVENT_FITS = Object.freeze(['none', 'use_now', 'defer', 'drop']);
+const POWER_ACTOR_EVENT_TYPES = Object.freeze(['none', 'minor_obstruction', 'warning', 'ambush', 'frame_user', 'plant_contact', 'agent_mislead', 'agent_report', 'agent_sabotage']);
+const POWER_ACTOR_CONTACT_GENDERS = Object.freeze(['none', 'male', 'female', 'unknown']);
+const POWER_ACTOR_EVENT_HISTORY_LIMIT = 12;
+const POWER_ACTOR_EVENT_COOLDOWN_MS = Object.freeze({
+    minor_obstruction: 2 * 60 * 60 * 1000,
+    warning: 2 * 60 * 60 * 1000,
+    ambush: 4 * 60 * 60 * 1000,
+    frame_user: 5 * 60 * 60 * 1000,
+    plant_contact: 6 * 60 * 60 * 1000,
+    agent_mislead: 3 * 60 * 60 * 1000,
+    agent_report: 3 * 60 * 60 * 1000,
+    agent_sabotage: 4 * 60 * 60 * 1000,
+});
 
 const NAME_STYLE_PROFILES = Object.freeze({
     'Balanced Fantasy': {
@@ -310,7 +324,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
     applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit, rapportClock);
     const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext);
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas);
-    const powerActors = runPowerActorEnmity(ledger, context, audit);
+    const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name);
 
     const trackerUpdate = {
         npcs: trackerDeltas.npcs,
@@ -383,15 +397,44 @@ function advanceRapportClock(context, audit) {
     return clock;
 }
 
-function runPowerActorEnmity(ledger, context, audit) {
+function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null) {
     const before = buildPowerActorSnapshot(context);
     const trackerUpdate = {};
     const handoffEntries = [];
     const effects = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
+    const eventShapes = Array.isArray(ledger?.powerEventShape?.events) ? ledger.powerEventShape.events : [];
+    let shapedEventHandoff = null;
 
     audit.push(`STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER`);
     audit.push(`3P.0 currentPowerActors=${powerActorSummary(before)}`);
     audit.push(`3P.1 semanticPowerActorEffects=${effects.length ? compact(effects) : 'none'}`);
+    audit.push(`3P.1a semanticPowerEventShapes=${eventShapes.length ? compact(eventShapes) : 'none'}`);
+
+    for (const rawShape of eventShapes) {
+        const shape = normalizePowerEventShape(rawShape);
+        if (!shape) {
+            audit.push(`3P.1b ignoredPowerEventShape=${compact({ reason: 'invalid shape', rawShape })}`);
+            continue;
+        }
+        const actorName = findExistingPowerActorName(trackerUpdate, shape.actor)
+            || findExistingPowerActorName(before, shape.actor)
+            || shape.actor;
+        const previous = normalizePowerActorState(trackerUpdate[actorName] || before[actorName] || {});
+        if (!previous.name || previous.enmity <= 0 || !previous.pendingEvent.id) {
+            audit.push(`3P.1c ignoredPowerEventShape=${compact({ actor: shape.actor, reason: 'no matching pending power event' })}`);
+            continue;
+        }
+        if (previous.pendingEvent.id !== shape.eventId) {
+            audit.push(`3P.1d ignoredPowerEventShape=${compact({ actor: actorName, reason: 'event id mismatch', expected: previous.pendingEvent.id, received: shape.eventId })}`);
+            continue;
+        }
+
+        const applied = applyPowerEventShape(previous, shape, rapportClock, audit);
+        trackerUpdate[actorName] = applied.state;
+        if (applied.handoffEntry) handoffEntries.push(applied.handoffEntry);
+        if (applied.surfaceEvent && !shapedEventHandoff) shapedEventHandoff = applied.surfaceEvent;
+        audit.push(`3P.1e powerEventShapeApplied=${compact(applied.audit)}`);
+    }
 
     for (const rawEffect of effects) {
         const effect = normalizePowerActorEffect(rawEffect);
@@ -436,6 +479,10 @@ function runPowerActorEnmity(ledger, context, audit) {
         audit.push(`3P.4 powerActorEnmityUpdate=${compact({ actor: previousName, delta, enmity: `${previous.enmity}->${next.enmity}`, tier: `${previous.tier}->${next.tier}`, effect: effect.effect, reason: effect.reason })}`);
     }
 
+    const proactivity = shapedEventHandoff
+        ? { handoffEvent: shapedEventHandoff }
+        : runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice, rapportClock, nameGeneration, audit });
+
     for (const [name, state] of Object.entries({ ...before, ...trackerUpdate })) {
         const normalized = normalizePowerActorState(state);
         if (normalized.enmity <= 0) continue;
@@ -450,8 +497,10 @@ function runPowerActorEnmity(ledger, context, audit) {
             .filter(entry => entry.Enmity > 0)
             .sort((a, b) => b.Enmity - a.Enmity || String(a.Actor).localeCompare(String(b.Actor)))
             .slice(0, 8),
+        event: shapedEventHandoff || proactivity?.handoffEvent || null,
     };
     audit.push(`3P.5 powerActorPressureHandoff=${handoff.entries.length ? compact(handoff.entries) : 'none'}`);
+    audit.push(`3P.6 powerEventHandoff=${handoff.event ? compact(handoff.event) : 'none'}`);
     return { trackerUpdate, handoff };
 }
 
@@ -480,7 +529,7 @@ function normalizePowerActors(value) {
     const result = {};
     for (const [name, state] of Object.entries(source)) {
         const normalized = normalizePowerActorState({ ...(state || {}), name: state?.name || name });
-        if (!normalized.name || normalized.enmity <= 0) continue;
+        if (!normalized.name || (normalized.enmity <= 0 && !normalized.pendingEvent.id && !normalized.activeAgent.name)) continue;
         result[normalized.name] = normalized;
     }
     return result;
@@ -489,6 +538,8 @@ function normalizePowerActors(value) {
 function normalizePowerActorState(value = {}) {
     const name = cleanPowerActorScalar(value.name ?? value.Actor, 100);
     const enmity = clamp(Math.floor(Number(value.enmity ?? value.Enmity ?? 0) || 0), 0, 20);
+    const pendingEvent = normalizePowerActorPendingEvent(value.pendingEvent ?? value.PendingEvent);
+    const activeAgent = normalizePowerActorAgent(value.activeAgent ?? value.ActiveAgent);
     return {
         version: POWER_ACTOR_ENMITY_VERSION,
         name,
@@ -498,6 +549,73 @@ function normalizePowerActorState(value = {}) {
         reasons: normalizePowerActorStringList(value.reasons ?? value.Reasons).slice(-8),
         responseHistory: normalizePowerActorStringList(value.responseHistory ?? value.ResponseHistory).slice(-12),
         lastEffect: normalizePowerActorLastEffect(value.lastEffect ?? value.LastEffect),
+        cooldownUntilActiveMs: Math.max(0, Math.floor(Number(value.cooldownUntilActiveMs ?? value.CooldownUntilActiveMs ?? 0) || 0)),
+        lastProactivityAtActiveMs: Math.max(0, Math.floor(Number(value.lastProactivityAtActiveMs ?? value.LastProactivityAtActiveMs ?? 0) || 0)),
+        pendingEvent,
+        activeAgent,
+    };
+}
+
+function normalizePowerActorPendingEvent(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const id = cleanPowerActorScalar(source.id ?? source.Id, 80);
+    const eventType = normalizePowerActorEventType(source.eventType ?? source.EventType);
+    if (!id || eventType === 'none') return emptyPowerActorPendingEvent();
+    return {
+        id,
+        eventType,
+        severityBand: normalizePowerActorEventBand(source.severityBand ?? source.SeverityBand),
+        createdAtActiveMs: Math.max(0, Math.floor(Number(source.createdAtActiveMs ?? source.CreatedAtActiveMs ?? 0) || 0)),
+        actor: cleanPowerActorScalar(source.actor ?? source.Actor, 100),
+        actorType: cleanPowerActorScalar(source.actorType ?? source.ActorType, 80) || 'power actor',
+        reason: cleanPowerActorScalar(source.reason ?? source.Reason, 180),
+        premise: cleanPowerActorScalar(source.premise ?? source.Premise, 220),
+        contactName: cleanPowerActorScalar(source.contactName ?? source.ContactName, 80),
+        contactGender: normalizePowerActorContactGender(source.contactGender ?? source.ContactGender),
+        status: normalizePowerActorPendingStatus(source.status ?? source.Status),
+        attempts: clamp(Math.floor(Number(source.attempts ?? source.Attempts ?? 0) || 0), 0, 5),
+    };
+}
+
+function emptyPowerActorPendingEvent() {
+    return {
+        id: '',
+        eventType: 'none',
+        severityBand: 'none',
+        createdAtActiveMs: 0,
+        actor: '',
+        actorType: 'power actor',
+        reason: '',
+        premise: '',
+        contactName: '',
+        contactGender: 'none',
+        status: 'none',
+        attempts: 0,
+    };
+}
+
+function normalizePowerActorAgent(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const name = cleanPowerActorScalar(source.name ?? source.Name, 80);
+    if (!name) return emptyPowerActorAgent();
+    return {
+        name,
+        gender: normalizePowerActorContactGender(source.gender ?? source.Gender),
+        coverRole: cleanPowerActorScalar(source.coverRole ?? source.CoverRole, 120) || 'scene contact',
+        plantedAtActiveMs: Math.max(0, Math.floor(Number(source.plantedAtActiveMs ?? source.PlantedAtActiveMs ?? 0) || 0)),
+        lastActionAtActiveMs: Math.max(0, Math.floor(Number(source.lastActionAtActiveMs ?? source.LastActionAtActiveMs ?? 0) || 0)),
+        actionCount: clamp(Math.floor(Number(source.actionCount ?? source.ActionCount ?? 0) || 0), 0, 999),
+    };
+}
+
+function emptyPowerActorAgent() {
+    return {
+        name: '',
+        gender: 'none',
+        coverRole: '',
+        plantedAtActiveMs: 0,
+        lastActionAtActiveMs: 0,
+        actionCount: 0,
     };
 }
 
@@ -510,6 +628,57 @@ function normalizePowerActorLastEffect(value = {}) {
         delta: clamp(Math.floor(Number(source.delta ?? source.Delta ?? 0) || 0), 0, 5),
         at: Math.max(0, Math.floor(Number(source.at ?? source.At ?? 0) || 0)),
     };
+}
+
+function normalizePowerEventShape(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const eventId = cleanPowerActorScalar(source.eventId ?? source.EventId, 80);
+    const actor = cleanPowerActorScalar(source.actor ?? source.Actor, 100);
+    const fit = normalizePowerActorEventFit(source.fit ?? source.Fit);
+    const eventType = normalizePowerActorEventType(source.eventType ?? source.EventType);
+    if (!eventId || !actor || fit === 'none') return null;
+    return {
+        eventId,
+        actor,
+        eventType,
+        fit,
+        visibleInstruction: cleanPowerActorScalar(source.visibleInstruction ?? source.VisibleInstruction, 360),
+        contactName: cleanPowerActorScalar(source.contactName ?? source.ContactName, 80),
+        contactGender: normalizePowerActorContactGender(source.contactGender ?? source.ContactGender),
+        surfaceRole: cleanPowerActorScalar(source.surfaceRole ?? source.SurfaceRole, 120),
+        deferReason: cleanPowerActorScalar(source.deferReason ?? source.DeferReason, 160),
+    };
+}
+
+function normalizePowerActorEventType(value) {
+    const text = cleanPowerActorScalar(value, 80).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_EVENT_TYPES.includes(text) ? text : 'none';
+}
+
+function normalizePowerActorEventBand(value) {
+    const text = cleanPowerActorScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return ['none', 'noticed', 'obstructive', 'retaliation', 'covert', 'strategic'].includes(text) ? text : 'none';
+}
+
+function normalizePowerActorPendingStatus(value) {
+    const text = cleanPowerActorScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return ['none', 'pending', 'shaped', 'deferred', 'dropped'].includes(text) ? text : 'pending';
+}
+
+function normalizePowerActorContactGender(value) {
+    const text = cleanPowerActorScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_CONTACT_GENDERS.includes(text) ? text : 'unknown';
+}
+
+function normalizePowerActorEventFit(value) {
+    const text = cleanPowerActorScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_EVENT_FITS.includes(text) ? text : 'none';
+}
+
+function isSafePowerEventVisibleInstruction(value) {
+    const text = cleanPowerActorScalar(value, 360);
+    if (!text) return false;
+    return !/\b(?:spy|spies|agent|infiltrat(?:e|es|ed|ing|or|ors|ion)|sponsor|handler|hidden\s+(?:motive|allegiance|alignment|orders?)|secret\s+(?:motive|allegiance|alignment|orders?)|betray(?:al|s|ed|ing)?|double\s+agent|plant(?:ed)?\s+(?:contact|operative)|covert\s+operative)\b/i.test(text);
 }
 
 function powerActorEnmityDelta(severity) {
@@ -539,6 +708,271 @@ function powerActorHandoffEntry(state) {
         Reasons: normalized.reasons,
         LastEffect: normalized.lastEffect,
     };
+}
+
+function runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice, rapportClock, nameGeneration, audit }) {
+    const activeMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
+    const actors = Object.entries({ ...before, ...trackerUpdate })
+        .map(([name, state]) => normalizePowerActorState({ ...(state || {}), name: state?.name || name }))
+        .filter(state => state.name && state.enmity > 0);
+    audit.push(`3P.7 powerActorProactivityCandidates=${actors.length ? powerActorSummary(Object.fromEntries(actors.map(state => [state.name, state]))) : 'none'}`);
+
+    const actorWithPending = actors.find(state => state.pendingEvent.id);
+    if (actorWithPending) {
+        audit.push(`3P.8 powerActorProactivityBlocked=pendingEvent:${actorWithPending.name}/${actorWithPending.pendingEvent.id}`);
+        return { handoffEvent: null };
+    }
+
+    const agentActor = actors.find(state => state.activeAgent.name);
+    const candidatePool = agentActor ? [agentActor] : actors.filter(state => activeMs >= state.cooldownUntilActiveMs);
+    if (!candidatePool.length) {
+        audit.push('3P.8 powerActorProactivityBlocked=cooldown_or_no_actor');
+        return { handoffEvent: null };
+    }
+
+    const candidates = candidatePool
+        .map(state => {
+            const die = typeof dice?.d20 === 'function' ? dice.d20() : Math.floor(Math.random() * 20) + 1;
+            const threshold = powerActorProactivityThreshold(state);
+            return { state, die, threshold, passes: die >= threshold };
+        })
+        .sort((a, b) => b.state.enmity - a.state.enmity || b.die - a.die);
+    audit.push(`3P.8 powerActorProactivityRolls=${compact(candidates.map(item => ({ actor: item.state.name, die: item.die, threshold: item.threshold, passes: item.passes ? 'Y' : 'N' })))}`);
+
+    const selected = candidates.find(item => item.passes);
+    if (!selected) return { handoffEvent: null };
+
+    const eventDie = typeof dice?.d100 === 'function' ? dice.d100() : Math.floor(Math.random() * 100) + 1;
+    const pendingEvent = buildPowerActorPendingEvent(selected.state, eventDie, activeMs, nameGeneration);
+    if (!pendingEvent.id) {
+        audit.push(`3P.9 powerActorProactivityNoEvent=${compact({ actor: selected.state.name, eventDie })}`);
+        return { handoffEvent: null };
+    }
+
+    const previous = normalizePowerActorState(trackerUpdate[selected.state.name] || before[selected.state.name] || selected.state);
+    const next = normalizePowerActorState({
+        ...previous,
+        pendingEvent,
+        lastProactivityAtActiveMs: activeMs,
+    });
+    trackerUpdate[next.name] = next;
+    audit.push(`3P.9 powerActorPendingEventCreated=${compact({ actor: next.name, eventType: pendingEvent.eventType, band: pendingEvent.severityBand, eventId: pendingEvent.id, nextTurn: 'semantic_shape_required' })}`);
+    upsertPowerActorHandoffEntry(handoffEntries, next);
+    return { handoffEvent: null };
+}
+
+function applyPowerEventShape(previous, shape, rapportClock, audit) {
+    const activeMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
+    const pending = previous.pendingEvent;
+    const eventType = normalizePowerActorEventType(shape.eventType && shape.eventType !== 'none' ? shape.eventType : pending.eventType);
+    let nextPending = emptyPowerActorPendingEvent();
+    let actorHandoffEntry = null;
+    let surfaceEvent = null;
+    let activeAgent = previous.activeAgent;
+    const responseHistory = [...previous.responseHistory];
+    const auditInfo = {
+        actor: previous.name,
+        eventId: pending.id,
+        eventType,
+        fit: shape.fit,
+    };
+
+    if (shape.fit === 'defer') {
+        const attempts = pending.attempts + 1;
+        nextPending = attempts >= 3
+            ? emptyPowerActorPendingEvent()
+            : normalizePowerActorPendingEvent({
+                ...pending,
+                attempts,
+                status: 'pending',
+            });
+        auditInfo.result = nextPending.id ? 'deferred' : 'dropped_after_defers';
+    } else if (shape.fit === 'drop') {
+        auditInfo.result = 'dropped';
+    } else if (!isSafePowerEventVisibleInstruction(shape.visibleInstruction)) {
+        const attempts = pending.attempts + 1;
+        nextPending = attempts >= 3
+            ? emptyPowerActorPendingEvent()
+            : normalizePowerActorPendingEvent({
+                ...pending,
+                attempts,
+                status: 'pending',
+            });
+        auditInfo.result = nextPending.id ? 'unsafe_instruction_deferred' : 'unsafe_instruction_dropped';
+    } else {
+        responseHistory.push(powerActorResponseHistoryLine(eventType, shape.visibleInstruction));
+        surfaceEvent = {
+            EventType: eventType,
+            VisibleInstruction: shape.visibleInstruction,
+            ContactName: shape.contactName || pending.contactName,
+            ContactGender: shape.contactGender || pending.contactGender,
+            SurfaceRole: shape.surfaceRole,
+        };
+        auditInfo.result = 'handoff_created';
+        if (eventType === 'plant_contact') {
+            activeAgent = normalizePowerActorAgent({
+                name: shape.contactName || pending.contactName,
+                gender: shape.contactGender || pending.contactGender,
+                coverRole: shape.surfaceRole || 'new scene contact',
+                plantedAtActiveMs: activeMs,
+                lastActionAtActiveMs: activeMs,
+                actionCount: 0,
+            });
+            auditInfo.hiddenAgent = activeAgent.name;
+        } else if (eventType.startsWith('agent_') && previous.activeAgent.name) {
+            activeAgent = normalizePowerActorAgent({
+                ...previous.activeAgent,
+                lastActionAtActiveMs: activeMs,
+                actionCount: previous.activeAgent.actionCount + 1,
+            });
+        }
+    }
+
+    const cooldownUntilActiveMs = (surfaceEvent || shape.fit === 'drop')
+        ? powerActorCooldownUntil(activeMs, eventType)
+        : previous.cooldownUntilActiveMs;
+    const state = normalizePowerActorState({
+        ...previous,
+        pendingEvent: nextPending,
+        activeAgent,
+        cooldownUntilActiveMs,
+        responseHistory: responseHistory.slice(-POWER_ACTOR_EVENT_HISTORY_LIMIT),
+    });
+    actorHandoffEntry = surfaceEvent ? powerActorHandoffEntry(state) : null;
+    return {
+        state,
+        handoffEntry: actorHandoffEntry,
+        surfaceEvent,
+        audit: auditInfo,
+    };
+}
+
+function upsertPowerActorHandoffEntry(entries, state) {
+    const entry = powerActorHandoffEntry(state);
+    const index = entries.findIndex(item => sameName(item.Actor, entry.Actor));
+    if (index >= 0) entries[index] = entry;
+    else entries.push(entry);
+}
+
+function powerActorProactivityThreshold(state) {
+    const enmity = Math.max(0, Math.floor(Number(state?.enmity || 0)));
+    if (state?.activeAgent?.name) return 16;
+    if (enmity >= 5) return 16;
+    if (enmity >= 4) return 17;
+    if (enmity >= 3) return 18;
+    if (enmity >= 2) return 19;
+    return 20;
+}
+
+function buildPowerActorPendingEvent(state, die, activeMs, nameGeneration) {
+    const normalized = normalizePowerActorState(state);
+    const eventType = selectPowerActorEventType(normalized, die);
+    if (eventType === 'none') return emptyPowerActorPendingEvent();
+    const contact = eventType === 'plant_contact'
+        ? choosePowerActorContact(nameGeneration, die)
+        : {};
+    return normalizePowerActorPendingEvent({
+        id: `${normalizeNameKey(normalized.name).slice(0, 28) || 'power'}-${activeMs}-${eventType}-${die}`,
+        eventType,
+        severityBand: powerActorEventBand(normalized.enmity),
+        createdAtActiveMs: activeMs,
+        actor: normalized.name,
+        actorType: normalized.type,
+        reason: normalized.reasons[normalized.reasons.length - 1] || normalized.lastEffect.reason || 'hidden opposition pressure',
+        premise: powerActorEventPremise(normalized, eventType),
+        contactName: contact.name || '',
+        contactGender: contact.gender || 'none',
+        status: 'pending',
+        attempts: 0,
+    });
+}
+
+function selectPowerActorEventType(state, die) {
+    if (state?.activeAgent?.name) {
+        if (die >= 76) return 'agent_sabotage';
+        if (die >= 46) return 'agent_mislead';
+        return 'agent_report';
+    }
+    const enmity = Math.max(0, Math.floor(Number(state?.enmity || 0)));
+    if (enmity >= 5) {
+        if (die >= 82) return 'plant_contact';
+        if (die >= 61) return 'frame_user';
+        if (die >= 36) return 'ambush';
+        if (die >= 16) return 'warning';
+        return 'minor_obstruction';
+    }
+    if (enmity >= 4) {
+        if (die >= 86) return 'plant_contact';
+        if (die >= 66) return 'frame_user';
+        if (die >= 41) return 'ambush';
+        if (die >= 21) return 'warning';
+        return 'minor_obstruction';
+    }
+    if (enmity >= 3) {
+        if (die >= 70) return 'ambush';
+        if (die >= 36) return 'warning';
+        return 'minor_obstruction';
+    }
+    if (enmity >= 2) {
+        return die >= 61 ? 'warning' : 'minor_obstruction';
+    }
+    return 'minor_obstruction';
+}
+
+function powerActorEventBand(enmity) {
+    const value = Math.max(0, Math.floor(Number(enmity || 0)));
+    if (value >= 5) return 'strategic';
+    if (value >= 4) return 'covert';
+    if (value >= 3) return 'retaliation';
+    if (value >= 2) return 'obstructive';
+    if (value >= 1) return 'noticed';
+    return 'none';
+}
+
+function powerActorEventPremise(state, eventType) {
+    const actor = state?.name || 'a power actor';
+    const agent = state?.activeAgent?.name || 'the planted contact';
+    switch (eventType) {
+        case 'minor_obstruction':
+            return `${actor} causes a small practical obstacle that fits the current location or activity.`;
+        case 'warning':
+            return `${actor} sends or arranges a warning, threat, demand, or sign of displeasure.`;
+        case 'ambush':
+            return `${actor} arranges direct hostile pressure such as hired attackers, guards, or a trap.`;
+        case 'frame_user':
+            return `${actor} arranges a false accusation, planted evidence, rumor, or official trouble.`;
+        case 'plant_contact':
+            return `${actor} introduces a plausible new contact through ordinary scene logic.`;
+        case 'agent_mislead':
+            return `${agent} steers {{user}} toward a worse route, choice, delay, lead, or contact through ordinary conversation.`;
+        case 'agent_report':
+            return `${agent} quietly creates an opportunity for information about {{user}} plans to leave the scene.`;
+        case 'agent_sabotage':
+            return `${agent} creates a subtle practical setback while staying plausible in the current scene.`;
+        default:
+            return '';
+    }
+}
+
+function choosePowerActorContact(nameGeneration, die) {
+    const pool = nameGeneration?.namePool || {};
+    const useFemale = die % 2 === 0;
+    const bucket = useFemale ? 'female' : 'male';
+    const names = Array.isArray(pool[bucket]) ? pool[bucket].filter(isReal) : [];
+    const fallback = Array.isArray(pool[useFemale ? 'male' : 'female']) ? pool[useFemale ? 'male' : 'female'].filter(isReal) : [];
+    const selected = names[0] || fallback[0] || '';
+    return {
+        name: selected,
+        gender: selected ? (names[0] ? bucket : (useFemale ? 'male' : 'female')) : 'unknown',
+    };
+}
+
+function powerActorCooldownUntil(activeMs, eventType) {
+    return clamp(activeMs + (POWER_ACTOR_EVENT_COOLDOWN_MS[eventType] || (2 * 60 * 60 * 1000)), 0, 1000000000000);
+}
+
+function powerActorResponseHistoryLine(eventType, instruction) {
+    return `${eventType}: ${cleanPowerActorScalar(instruction, 160)}`;
 }
 
 function powerActorSummary(powerActors) {
