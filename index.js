@@ -2919,6 +2919,19 @@ function trackerChip(label, value, tone = 'neutral') {
         </span>`;
 }
 
+function trackerStatPills(core) {
+    const stats = [
+        ['PHY', core?.PHY ?? '-'],
+        ['MND', core?.MND ?? '-'],
+        ['CHA', core?.CHA ?? '-'],
+    ];
+    return stats.map(([label, value]) => `
+        <span class="structured-preflight-tracker-stat-pill structured-preflight-tracker-stat-${escapeHtml(label.toLowerCase())}">
+            <span class="structured-preflight-tracker-stat-label">${escapeHtml(label)}</span>
+            <code>${escapeHtml(value)}</code>
+        </span>`).join('');
+}
+
 function trackerConditionTone(value) {
     const text = String(value || '').toLowerCase();
     if (!text || text === 'healthy' || text === 'unchanged') return 'good';
@@ -2993,7 +3006,7 @@ function buildTrackerDisplayHtml(snapshot) {
                     ${trackerChip('Behavior', classified.behavior)}
                     ${trackerChip('Rapport', `${entry.currentRapport}/5`)}
                     ${trackerChip('Relationship', entry.establishedRelationship || 'N')}
-                    ${trackerChip('Stats', formatCoreStats(entry.currentCoreStats))}
+                    ${trackerStatPills(entry.currentCoreStats)}
                 </div>
                 <div class="structured-preflight-tracker-detail-grid">
                     ${trackerDetailLine('Personality', entry.personalitySummary || 'Developing', { showEmpty: true })}
@@ -3022,7 +3035,7 @@ function buildTrackerDisplayHtml(snapshot) {
                             <div class="structured-preflight-tracker-role">Player</div>
                         </div>
                         <div class="structured-preflight-tracker-chip-row">
-                            ${trackerChip('Stats', formatCoreStats(userCore), 'neutral')}
+                            ${trackerStatPills(userCore)}
                             ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
                         </div>
                     </div>
@@ -3256,6 +3269,36 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-chip-danger {
             background: color-mix(in srgb, #7c3238 46%, transparent);
+        }
+        .structured-preflight-tracker-stat-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.28rem;
+            min-height: 1.5rem;
+            padding: 0.16rem 0.42rem;
+            border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255,255,255,0.22)) 70%, transparent);
+            border-radius: 5px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 46%, transparent);
+            line-height: 1.25;
+        }
+        .structured-preflight-tracker-stat-label {
+            font-size: 0.82rem;
+            font-weight: 900;
+            line-height: 1;
+        }
+        .structured-preflight-tracker-stat-pill code {
+            font-size: 0.86rem;
+            font-weight: 900;
+            line-height: 1;
+        }
+        .structured-preflight-tracker-stat-phy .structured-preflight-tracker-stat-label {
+            color: #ff9a9a;
+        }
+        .structured-preflight-tracker-stat-mnd .structured-preflight-tracker-stat-label {
+            color: #83cfff;
+        }
+        .structured-preflight-tracker-stat-cha .structured-preflight-tracker-stat-label {
+            color: #8ee0b0;
         }
         .structured-preflight-tracker-detail-grid {
             display: grid;

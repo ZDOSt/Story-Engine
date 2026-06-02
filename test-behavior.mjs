@@ -6127,6 +6127,7 @@ const tests = [
       assert.match(source, /function trackerDetailLine/);
       assert.match(source, /function trackerDetailTone/);
       assert.match(source, /function trackerChip/);
+      assert.match(source, /function trackerStatPills/);
       assert.match(source, /function trackerConditionTone/);
       assert.match(source, /function trackerDispositionTone/);
       assert.match(displaySource, /structured-preflight-tracker-card/);
@@ -6143,7 +6144,8 @@ const tests = [
       assert.match(displaySource, /trackerChip\('Behavior'/);
       assert.match(displaySource, /trackerChip\('Rapport'/);
       assert.match(displaySource, /trackerChip\('Relationship'/);
-      assert.match(displaySource, /trackerChip\('Stats'/);
+      assert.match(displaySource, /trackerStatPills\(entry\.currentCoreStats\)/);
+      assert.match(displaySource, /trackerStatPills\(userCore\)/);
       assert.match(displaySource, /trackerDetailLine\('Personality'/);
       assert.match(displaySource, /trackerDetailLine\('Wounds'/);
       assert.match(displaySource, /trackerDetailLine\('Status'/);
@@ -6156,6 +6158,12 @@ const tests = [
       assert.match(styleSource, /structured-preflight-tracker-chip-good/);
       assert.match(styleSource, /structured-preflight-tracker-chip-warn/);
       assert.match(styleSource, /structured-preflight-tracker-chip-danger/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-pill/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-label/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-pill code \{[\s\S]*font-weight: 900/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-phy/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-mnd/);
+      assert.match(styleSource, /structured-preflight-tracker-stat-cha/);
       assert.match(styleSource, /structured-preflight-tracker-detail-label-wounds/);
       assert.match(styleSource, /structured-preflight-tracker-detail-label-status/);
       assert.match(styleSource, /structured-preflight-tracker-detail-label-gear/);
