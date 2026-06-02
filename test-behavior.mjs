@@ -6125,10 +6125,15 @@ const tests = [
       );
 
       assert.match(source, /function trackerDetailLine/);
+      assert.match(source, /function trackerDetailTone/);
       assert.match(source, /function trackerChip/);
       assert.match(source, /function trackerConditionTone/);
       assert.match(source, /function trackerDispositionTone/);
       assert.match(displaySource, /structured-preflight-tracker-card/);
+      assert.match(displaySource, /structured-preflight-tracker-player-card/);
+      assert.match(displaySource, /structured-preflight-tracker-name-player/);
+      assert.match(displaySource, /structured-preflight-tracker-name-npc/);
+      assert.match(displaySource, /structured-preflight-tracker-role/);
       assert.match(displaySource, /structured-preflight-tracker-chip-row/);
       assert.match(displaySource, /structured-preflight-tracker-detail-grid/);
       assert.match(displaySource, /trackerChip\('Toward User'/);
@@ -6151,6 +6156,14 @@ const tests = [
       assert.match(styleSource, /structured-preflight-tracker-chip-good/);
       assert.match(styleSource, /structured-preflight-tracker-chip-warn/);
       assert.match(styleSource, /structured-preflight-tracker-chip-danger/);
+      assert.match(styleSource, /structured-preflight-tracker-detail-label-wounds/);
+      assert.match(styleSource, /structured-preflight-tracker-detail-label-status/);
+      assert.match(styleSource, /structured-preflight-tracker-detail-label-gear/);
+      assert.match(styleSource, /structured-preflight-tracker-detail-label-inventory/);
+      assert.match(styleSource, /structured-preflight-tracker-detail-label-tasks/);
+      assert.match(styleSource, /structured-preflight-tracker-detail-label-commitments/);
+      assert.match(styleSource, /structured-preflight-tracker-name-player/);
+      assert.match(styleSource, /structured-preflight-tracker-name-npc/);
       assert.match(styleSource, /grid-template-columns: repeat\(auto-fit/);
       assert.match(styleSource, /@media \(max-width: 520px\)/);
     },

@@ -2888,15 +2888,25 @@ function formatTrackerList(items) {
     return list.length ? list.join('; ') : 'None';
 }
 
+function trackerDetailTone(label) {
+    const key = String(label || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    const known = new Set(['personality', 'wounds', 'status', 'gear', 'inventory', 'tasks', 'commitments', 'pressure']);
+    return known.has(key) ? key : 'neutral';
+}
+
 function trackerDetailLine(label, value, options = {}) {
     const text = Array.isArray(value)
         ? formatTrackerList(value)
         : String(value ?? '').trim();
     const display = text || 'None';
     if (!options.showEmpty && display === 'None') return '';
+    const tone = trackerDetailTone(label);
     return `
         <div class="structured-preflight-tracker-detail">
-            <span class="structured-preflight-tracker-detail-label">${escapeHtml(label)}</span>
+            <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(tone)}">${escapeHtml(label)}</span>
             <span class="structured-preflight-tracker-detail-value">${escapeHtml(display)}</span>
         </div>`;
 }
@@ -2968,7 +2978,10 @@ function buildTrackerDisplayHtml(snapshot) {
         return `
             <div class="structured-preflight-tracker-card structured-preflight-tracker-npc">
                 <div class="structured-preflight-tracker-card-head">
-                    <div class="structured-preflight-tracker-name">${escapeHtml(name)}</div>
+                    <div class="structured-preflight-tracker-name-block">
+                        <div class="structured-preflight-tracker-name structured-preflight-tracker-name-npc">${escapeHtml(name)}</div>
+                        <div class="structured-preflight-tracker-role">Active NPC</div>
+                    </div>
                     <div class="structured-preflight-tracker-chip-row">
                         ${trackerChip('Toward User', relation, trackerDispositionTone(disposition, classified))}
                         ${trackerChip('Condition', condition, trackerConditionTone(entry.condition))}
@@ -3002,9 +3015,12 @@ function buildTrackerDisplayHtml(snapshot) {
         <div class="structured-preflight-tracker-body">
             <div class="structured-preflight-tracker-section structured-preflight-tracker-user">
                 <div class="structured-preflight-tracker-heading">Player</div>
-                <div class="structured-preflight-tracker-card">
+                <div class="structured-preflight-tracker-card structured-preflight-tracker-player-card">
                     <div class="structured-preflight-tracker-card-head">
-                        <div class="structured-preflight-tracker-title">${escapeHtml(personaName)}</div>
+                        <div class="structured-preflight-tracker-name-block">
+                            <div class="structured-preflight-tracker-title structured-preflight-tracker-name-player">${escapeHtml(personaName)}</div>
+                            <div class="structured-preflight-tracker-role">Player</div>
+                        </div>
                         <div class="structured-preflight-tracker-chip-row">
                             ${trackerChip('Stats', formatCoreStats(userCore), 'neutral')}
                             ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
@@ -3148,6 +3164,32 @@ function ensureTrackerDisplayStyles() {
             font-size: 1rem;
             overflow-wrap: anywhere;
         }
+        .structured-preflight-tracker-name,
+        .structured-preflight-tracker-title {
+            line-height: 1.15;
+        }
+        .structured-preflight-tracker-name-block {
+            min-width: 0;
+            display: grid;
+            gap: 0.1rem;
+        }
+        .structured-preflight-tracker-name-player,
+        .structured-preflight-tracker-name-npc {
+            font-weight: 800;
+        }
+        .structured-preflight-tracker-name-player {
+            color: color-mix(in srgb, #73d0ff 84%, var(--SmartThemeBodyColor, #eee));
+        }
+        .structured-preflight-tracker-name-npc {
+            color: color-mix(in srgb, #c7a7ff 82%, var(--SmartThemeBodyColor, #eee));
+        }
+        .structured-preflight-tracker-role {
+            color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 62%, transparent);
+            font-size: 0.64rem;
+            font-weight: 800;
+            line-height: 1;
+            text-transform: uppercase;
+        }
         .structured-preflight-tracker-section {
             display: grid;
             gap: 0.5rem;
@@ -3162,6 +3204,9 @@ function ensureTrackerDisplayStyles() {
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
             border-radius: 7px;
             background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 34%, transparent);
+        }
+        .structured-preflight-tracker-player-card {
+            border-left: 4px solid #1f7a8c;
         }
         .structured-preflight-tracker-card-head {
             display: flex;
@@ -3219,7 +3264,7 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-detail {
             display: grid;
-            grid-template-columns: minmax(5.6rem, max-content) minmax(0, 1fr);
+            grid-template-columns: minmax(5.8rem, max-content) minmax(0, 1fr);
             gap: 0.45rem;
             align-items: start;
             min-width: 0;
@@ -3229,11 +3274,46 @@ function ensureTrackerDisplayStyles() {
             line-height: 1.35;
         }
         .structured-preflight-tracker-detail-label {
-            opacity: 0.76;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            justify-self: start;
+            min-height: 1.15rem;
+            padding: 0.08rem 0.34rem;
+            border-radius: 4px;
+            color: #f4f4f4;
             font-size: 0.76rem;
-            font-weight: 700;
+            font-weight: 800;
+            line-height: 1.1;
             text-transform: uppercase;
             white-space: nowrap;
+        }
+        .structured-preflight-tracker-detail-label-personality {
+            background: #5b4a7a;
+        }
+        .structured-preflight-tracker-detail-label-wounds {
+            background: #6b2b32;
+        }
+        .structured-preflight-tracker-detail-label-status {
+            background: #285b78;
+        }
+        .structured-preflight-tracker-detail-label-gear {
+            background: #73521d;
+        }
+        .structured-preflight-tracker-detail-label-inventory {
+            background: #1d6c65;
+        }
+        .structured-preflight-tracker-detail-label-tasks {
+            background: #54428a;
+        }
+        .structured-preflight-tracker-detail-label-commitments {
+            background: #286447;
+        }
+        .structured-preflight-tracker-detail-label-pressure {
+            background: #6a3f1d;
+        }
+        .structured-preflight-tracker-detail-label-neutral {
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 20%, transparent);
         }
         .structured-preflight-tracker-detail-value {
             min-width: 0;
@@ -3245,7 +3325,7 @@ function ensureTrackerDisplayStyles() {
             opacity: 0.9;
         }
         .structured-preflight-tracker-npc {
-            border-left: 3px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
+            border-left: 4px solid #6a56a5;
         }
         .structured-preflight-tracker-muted,
         .structured-preflight-tracker-empty {
