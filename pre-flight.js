@@ -428,6 +428,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
     const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
     const narratorAuthority = buildNarratorAuthority({ resolution, handoff, options });
     const renderContract = buildRenderContract();
+    const narrationCraftDirective = buildNarrationCraftDirective();
     const activeBranchFacts = buildActiveBranchFacts({
         userAction,
         resolution,
@@ -450,7 +451,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         inflictedNpcInjury,
         inflictedUserInjury,
     });
-    const bindingDirective = formatNarratorPromptSections({ narratorAuthority, renderContract, activeBranchFacts, resolvedSceneFacts });
+    const bindingDirective = formatNarratorPromptSections({ narratorAuthority, renderContract, activeBranchFacts, resolvedSceneFacts, narrationCraftDirective });
 
     return {
         userAction,
@@ -492,6 +493,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         renderContract,
         activeBranchFacts,
         resolvedSceneFacts,
+        narrationCraftDirective,
         bindingDirective,
     };
 }
@@ -509,6 +511,9 @@ function formatNarratorPromptSections(summary) {
         '',
         '==RESOLVED_SCENE_FACTS==',
         summary.resolvedSceneFacts || 'Render the current beat from ACTIVE_BRANCH_FACTS. Do not add unresolved outcomes.',
+        '',
+        '==NARRATION_CRAFT_DIRECTIVE==',
+        summary.narrationCraftDirective || buildNarrationCraftDirective(),
     ].join('\n');
 }
 
@@ -531,6 +536,13 @@ function buildRenderContract() {
         outputContract(),
         validityContract(),
     ].map(part => String(part || '').trim()).filter(Boolean).join('\n\n') || '(none)';
+}
+
+function buildNarrationCraftDirective() {
+    return String.raw`NARRATION CRAFT DIRECTIVE:
+Write vivid literal prose. Create variety through sentence function, sentence length, syntax, and precise physical wording.
+Avoid repeating the same beat, verb, noun phrase, or sentence shape when another accurate wording fits. Use varied concrete verbs and specific object, body, space, and environment details, but do not use decorative, poetic, figurative, or imprecise synonyms.
+Advance from established scene state. Each sentence should change what is visible, reachable, known, pressured, said, blocked, offered, refused, damaged, moved, held, released, opened, closed, or possible.`;
 }
 
 function narratorAuthorityContract() {
@@ -614,7 +626,7 @@ function validityContract() {
 Every authority rule, render rule, and active branch fact is mandatory.
 A single violation invalidates the response.
 Invalid responses must not be output.
-Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, ACTIVE_BRANCH_FACTS, and RESOLVED_SCENE_FACTS are all satisfied.`;
+Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, ACTIVE_BRANCH_FACTS, RESOLVED_SCENE_FACTS, and NARRATION_CRAFT_DIRECTIVE are all satisfied.`;
 }
 
 function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {

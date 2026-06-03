@@ -7443,6 +7443,13 @@ const tests = [
       assert.doesNotMatch(source, /â†|Ã¢/);
       assert.match(source, /writingStylePlacement:\s*'before_prompt'/);
       assert.match(source, /writingStyleDepth:\s*0/);
+      assert.match(source, /const LEGACY_DEFAULT_WRITING_STYLE_PROMPT/);
+      assert.match(source, /writingStylePrompt === LEGACY_DEFAULT_WRITING_STYLE_PROMPT/);
+      assert.match(source, /\*\*SCENE PRESENCE\*\*/);
+      assert.match(source, /Create variety through scene function/);
+      assert.match(source, /Advance from established scene state/);
+      assert.match(source, /Use prior actions as facts the scene now contains/);
+      assert.match(source, /The prose should be detailed without becoming slow/);
       assert.match(source, /injectMovablePrompt\(\s*WRITING_STYLE_PROMPT_KEY,\s*promptText,\s*settings\.writingStylePlacement,\s*settings\.writingStyleDepth,\s*settings\.writingStyleRole,\s*\)/);
       assert.match(source, /context\.setExtensionPrompt\(\s*key,\s*text,\s*position,\s*normalizePromptDepth\(depth\),\s*false,\s*normalizePromptRole\(role\),\s*\)/);
       assert.match(source, /const showDepth = placement === 'in_chat';/);
@@ -7509,8 +7516,18 @@ const tests = [
       assert.match(indexSource, /mood-only silence/);
       assert.match(handoffSource, /==NARRATOR_AUTHORITY==/);
       assert.match(handoffSource, /==RENDER_CONTRACT==/);
+      assert.match(handoffSource, /==NARRATION_CRAFT_DIRECTIVE==/);
+      assert.match(handoffSource, /function buildNarrationCraftDirective/);
+      assert.match(handoffSource, /Create variety through sentence function, sentence length, syntax, and precise physical wording/);
+      assert.match(handoffSource, /Avoid repeating the same beat, verb, noun phrase, or sentence shape/);
+      assert.match(handoffSource, /Advance from established scene state/);
+      assert.match(handoffSource, /NARRATION_CRAFT_DIRECTIVE are all satisfied/);
       assert.match(handoffSource, /Execute these private render stages in order/);
       assert.doesNotMatch(handoffSource, /Required internal calls/);
+      assert.ok(
+        handoffSource.indexOf('==NARRATION_CRAFT_DIRECTIVE==') > handoffSource.indexOf('==RESOLVED_SCENE_FACTS=='),
+        'NARRATION_CRAFT_DIRECTIVE should appear after RESOLVED_SCENE_FACTS.',
+      );
       assert.match(handoffSource, /1\. smellGate = olfactoryGate\(input, context\)/);
       assert.match(handoffSource, /3\. epistemicRender\(response, smellGate, context\)/);
       assert.match(handoffSource, /chronologyControl\(response, input, context\)/);

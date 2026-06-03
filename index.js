@@ -139,7 +139,7 @@ const NAME_STYLE_OPTIONS = Object.freeze([
     'Classical / Romance Fantasy',
     'Dark Low Fantasy',
 ]);
-const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+const LEGACY_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
 
 **STYLE TARGET:**
 Epic fantasy narration with rich observational detail, clear physical action, and direct physical intimacy when the scene supports it. The prose should feel natural, grounded, and scene-aware, not mechanical.
@@ -170,6 +170,58 @@ Use plain anatomical language when the scene is explicit. Avoid coy euphemism, d
 Write in cohesive scene beats. Combine related action, posture, object handling, dialogue, and consequence into natural paragraphs. Use shorter sentences for impact and longer sentences for continuous movement, observation, or pressure.
 
 The prose should be detailed without becoming ornate, physical without becoming robotic, and intense without losing spatial clarity.`;
+const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+
+**STYLE TARGET**
+Epic fantasy narration with vivid literal detail, clear physical action, and grounded scene presence. The prose should feel inhabited, textured, and immediate.
+
+Use concrete scene evidence: people, clothing, tools, weapons, furniture, food, surfaces, doors, exits, weather, light, sound, spacing, rank markers, damaged objects, practical obstacles, social behavior, and immediate consequence.
+
+**SCENE PRESENCE**
+Make the reader feel physically present in the location. Use details that reveal how the place works: what people use, what blocks movement, what is worn down, what is watched, what is within reach, what is noisy, what is fragile, what is guarded, and what has recently changed.
+
+Let small details carry the world. A patched sleeve, a nicked cup, a damp boot print, a servant avoiding a noble's path, a sword belt left unbuckled, or smoke gathering under low rafters can make the scene feel real.
+
+**CRAFT**
+Create variety through scene function. Rotate what sentences do:
+- establish object state
+- change distance
+- change access
+- change possession
+- show consequence
+- deliver dialogue
+- reveal information
+- increase pressure
+- create an opening
+- close an option
+- end on a response point
+
+Each beat should make something clearer, closer, farther, louder, blocked, available, damaged, revealed, refused, offered, or changed.
+
+**CONTINUITY**
+Treat visible scene state as persistent. If an object is put down, it remains down. If a door opens, it remains open. If someone steps back, distance has changed. If a weapon is drawn, it remains drawn until changed again.
+
+Advance from established scene state. Use prior actions as facts the scene now contains.
+
+**CHARACTER BEHAVIOR**
+Show characters through practical choices: where they stand, what they keep hold of, what they put out of reach, what they leave available, what they stop doing, what they answer, what they avoid, what they protect, and how they use nearby objects or space.
+
+Let dialogue carry personality through wording, timing, directness, evasion, humor, formality, bluntness, or restraint.
+
+**ACTION**
+In combat, pursuit, restraint, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, impact, recovery, blocked access, injury, and changed distance.
+
+Violence should change the scene: balance, grip, weapon position, access, injury, distance, cover, or available choices.
+
+**INTIMACY**
+When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep focus on bodies, contact, pressure, position, pacing, consent, response, and consequence.
+
+**FLOW**
+Write in cohesive scene beats. Combine related action, posture, object handling, dialogue, and consequence into natural paragraphs.
+
+Use short sentences for impact, interruption, refusal, or sudden change. Use longer sentences for continuous movement, observation, pressure, or action tied to dialogue.
+
+The prose should be detailed without becoming slow, physical without becoming mechanical, and vivid without losing clarity.`;
 const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
 Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
 
@@ -495,6 +547,9 @@ function getSettings() {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = value;
         }
+    }
+    if (extension_settings[SETTINGS_KEY].writingStylePrompt === LEGACY_DEFAULT_WRITING_STYLE_PROMPT) {
+        extension_settings[SETTINGS_KEY].writingStylePrompt = DEFAULT_WRITING_STYLE_PROMPT;
     }
     return extension_settings[SETTINGS_KEY];
 }
