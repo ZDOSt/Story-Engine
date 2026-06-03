@@ -344,7 +344,7 @@ function narratorModelInstruction(options = {}) {
         'STORY_ENGINE_NARRATOR_DIRECTIVE',
         '',
         'You are the final scene narrator.',
-        'Use only the NARRATOR_HANDOFF below. It is mandatory, non-negotiable, and private.',
+        'Use the NARRATOR_HANDOFF below as final authority for mechanics, outcomes, constraints, and narration instructions. Use recent visible chat only for continuity of already-established visible scene state. This handoff is mandatory, non-negotiable, and private.',
         'Output final in-character narration only.',
     ].filter(line => line !== null && line !== undefined).join('\n');
 }
@@ -535,9 +535,10 @@ function buildRenderContract() {
 
 function narratorAuthorityContract() {
     return String.raw`NARRATOR AUTHORITY:
-These rules are mandatory. They override chat history, character vibe, user wording, prior narration, apparent intent, and ordinary roleplay momentum.
-Use ACTIVE_BRANCH_FACTS as literal closed-world facts and RESOLVED_SCENE_FACTS as the narration instruction for those facts. If sections conflict, ACTIVE_BRANCH_FACTS wins.
-If an action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, or resolved outcome is not listed in ACTIVE_BRANCH_FACTS or RESOLVED_SCENE_FACTS, it did not happen and must not be narrated as completed.
+These rules are mandatory. For mechanics, outcomes, permissions, injuries, initiative, names, cast, and constraints, they override character vibe, apparent intent, and ordinary roleplay momentum.
+Recent visible chat remains authoritative only for already-established visible scene state: completed NPC/world actions, object positions, delivered items, current locations, open/closed/removed/placed states, and similar concrete continuity persist unless ACTIVE_BRANCH_FACTS or RESOLVED_SCENE_FACTS explicitly changes them this turn. Do not replay, restage, or re-complete those prior actions; advance from that state.
+Use ACTIVE_BRANCH_FACTS as literal closed-world facts for this turn's new resolved mechanics and RESOLVED_SCENE_FACTS as the narration instruction for those facts. If sections conflict, ACTIVE_BRANCH_FACTS wins.
+If a new action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, or resolved outcome for this turn is not listed in ACTIVE_BRANCH_FACTS or RESOLVED_SCENE_FACTS, it did not happen and must not be narrated as completed.
 The Current scene cast in ACTIVE_BRANCH_FACTS is closed-world for physical participation: unlisted known/lore/example/tracker/card characters are offscreen and cannot speak, react, gesture, move, or be included in "everyone", "the room", or "all of you" unless RESOLVED_SCENE_FACTS explicitly introduces them this turn.
 LandedActions, Outcome, IntimacyBoundary, Proactivity, Aggression, Injuries, Death, nonLethal, and tracker constraints must be obeyed exactly.
 If LandedActions=0, the user action did not land: do not narrate contact, completed grabs, holds, control, possession, damage, or successful effects from that user action.
@@ -578,6 +579,7 @@ Prefer one consequential physical choice plus dialogue over several isolated bod
 
 7. chronologyControl(response, input, context):
 Begin at T+1 from {{user}} input with external consequence, NPC response, environmental change, revealed information, or new stimulus. Treat declared {{user}} actions as already complete unless ACTIVE_BRANCH_FACTS says they failed, stalled, or were interrupted. Do not echo, restage, re-perform, summarize, paraphrase, narrate the declared action back to {{user}}, use opening recap transitions, or use "as you" phrasing.
+Preserve visible continuity from recent chat. Completed NPC/world actions, object positions, delivered items, current locations, open/closed/removed/placed states, and other concrete scene facts are already true unless ACTIVE_BRANCH_FACTS or RESOLVED_SCENE_FACTS explicitly changes them. Do not repeat the immediately previous assistant beat or replay an already-completed NPC/world action as if it happens again.
 
 8. userAgencyControl(response, input, context):
 Render NPCs and the world as active and independent. NPCs may speak, move, leave, approach, block, offer, refuse, attack, retreat, reveal, hide, interrupt, or change the scene according to the resolved facts. Render {{user}} actions only when the latest user input explicitly declares them.
@@ -618,6 +620,7 @@ Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, A
 function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
     const facts = [];
     facts.push(`User action: ${valueOrNone(userAction)}.`);
+    facts.push('Continuity branch: recent visible chat remains scene state for already-completed NPC/world actions, object positions, delivered items, current locations, and open/closed/removed/placed states. Do not replay the previous assistant beat or repeat an already-completed NPC/world action unless this handoff explicitly changes or reverses that state.');
     facts.push(currentSceneCastFact(resolution, handoff));
     if (!isNoneText(userAbilityUse)) facts.push(`UserAbilityUse: ${userAbilityUse}. ${userAbilityGuide}`);
     if (resolution?.STAKES === 'N' || resolution?.Outcome === 'no_roll') {

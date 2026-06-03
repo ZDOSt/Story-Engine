@@ -334,11 +334,13 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
     rules:
       - Begin at T+1 after {{user}} input. Treat {{user}} input as already completed unless mechanics say it failed, stalled, or was interrupted.
+      - Preserve visible continuity from recent chat. Completed NPC/world actions, object positions, delivered items, current locations, open/closed/removed/placed states, and other concrete scene facts are already true unless the current narrator handoff explicitly changes them.
       - First sentence must begin with external consequence, NPC response, environmental change, or new stimulus. It must not begin by recapping, echoing, paraphrasing, or summarizing {{user}}.
       - Do not restage, re-perform, summarize, or narrate declared {{user}} actions back to {{user}}. If {{user}} says they sit, enter, walk, watch, scan, speak, take, open, or move, do not begin by saying they do that same thing; begin with what changes because of it, what becomes visible from the new position, who reacts, what blocks them, or what happens next.
+      - Do not replay the immediately previous assistant beat or repeat an already-completed NPC/world action as if it happens again.
 
     ABSOLUTE BAN:
-      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; opening recap transitions; and "as you" phrasing.
+      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input; replaying completed NPC/world actions from recent visible chat; opening recap transitions; and "as you" phrasing.
 
   userAgencyControl(response, input, context):
     policy: LOCKED, EXPLICIT-ONLY

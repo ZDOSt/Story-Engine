@@ -6412,7 +6412,7 @@ const tests = [
       const directiveLeak = [
         'STORY_ENGINE_NARRATOR_DIRECTIVE',
         'You are the final scene narrator.',
-        'Use only the NARRATOR_HANDOFF below. It is mandatory, non-negotiable, and private.',
+        'Use the NARRATOR_HANDOFF below as final authority for mechanics, outcomes, constraints, and narration instructions. Use recent visible chat only for continuity of already-established visible scene state. This handoff is mandatory, non-negotiable, and private.',
         'NARRATOR_AUTHORITY:',
         'These rules are mandatory.',
         '',
@@ -7488,6 +7488,10 @@ const tests = [
       assert.match(indexSource, /Do not restage, re-perform, summarize, or narrate declared \{\{user\}\} actions back to \{\{user\}\}/);
       assert.match(indexSource, /Render the world, NPCs, objects, hazards, and consequences as active and independent/);
       assert.match(indexSource, /NPCs may act independently/);
+      assert.match(indexSource, /Preserve visible continuity from recent chat/);
+      assert.match(indexSource, /Completed NPC\/world actions, object positions, delivered items/);
+      assert.match(indexSource, /Do not replay the immediately previous assistant beat/);
+      assert.match(indexSource, /replaying completed NPC\/world actions from recent visible chat/);
       assert.match(indexSource, /\{\{user\}\} takes no voluntary action unless the latest user input explicitly declares that action/);
       assert.match(indexSource, /If \{\{user\}\} did not explicitly declare a voluntary action in the latest input, that action did not happen/);
       assert.match(indexSource, /Involuntary physical reactions caused by external stimulus may be narrated/);
@@ -7515,6 +7519,10 @@ const tests = [
       assert.match(handoffSource, /responseEndpointControl\(response, context\)/);
       assert.match(handoffSource, /Begin at T\+1 from \{\{user\}\} input/);
       assert.match(handoffSource, /Do not echo, restage, re-perform, summarize, paraphrase/);
+      assert.match(handoffSource, /Recent visible chat remains authoritative only for already-established visible scene state/);
+      assert.match(handoffSource, /Do not replay, restage, or re-complete those prior actions/);
+      assert.match(handoffSource, /Continuity branch: recent visible chat remains scene state/);
+      assert.match(handoffSource, /Do not repeat the immediately previous assistant beat/);
       assert.match(handoffSource, /Render NPCs and the world as active and independent/);
       assert.match(handoffSource, /NPCs may speak, move, leave, approach, block, offer, refuse, attack, retreat, reveal, hide, interrupt, or change the scene/);
       assert.match(handoffSource, /\{\{user\}\} takes no voluntary action unless the latest user input explicitly declares that action/);
