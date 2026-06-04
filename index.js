@@ -6,7 +6,7 @@ import { persona_description_positions, power_user } from '../../../../scripts/p
 import { setPersonaDescription, user_avatar } from '../../../../scripts/personas.js';
 import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
-import { extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
+import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
 import { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
@@ -473,7 +473,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
-    disableSemanticThinking: true,
     postNarrationTrackerEnabled: true,
     trackerConnectionProfile: TRACKER_PROFILE_CURRENT,
     postNarrationProseGuardEnabled: true,
@@ -510,6 +509,8 @@ console.info(`[${EXTENSION_NAME}] module import started`);
 const state = {
     runningSemanticPass: false,
     bypassPromptReady: false,
+    storyEngineModelRequestDepth: 0,
+    narratorThinkingDisablePending: false,
     activeRunId: null,
     lastNarratorHandoff: '',
     lastNarratorHandoffKey: null,
@@ -543,6 +544,7 @@ function getContext() {
 
 function getSettings() {
     extension_settings[SETTINGS_KEY] = extension_settings[SETTINGS_KEY] || {};
+    delete extension_settings[SETTINGS_KEY].disableSemanticThinking;
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = value;
@@ -664,12 +666,9 @@ async function withSemanticGenerationSettings(callback) {
     const settings = getSettings();
     const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
     const semanticProfile = String(settings.semanticConnectionProfile || '').trim();
-    const semanticOptions = {
-        disableSemanticThinking: settings.disableSemanticThinking !== false,
-    };
 
     if (!useSeparateSettings || !semanticProfile) {
-        return await callback(semanticOptions);
+        return await callback({});
     }
 
     const profile = getConnectionProfileByName(semanticProfile);
@@ -679,7 +678,6 @@ async function withSemanticGenerationSettings(callback) {
 
     console.info(`[${EXTENSION_NAME}] using direct semantic connection profile request: ${profile.name}`);
     return await callback({
-        ...semanticOptions,
         semanticProfileId: profile.id,
         semanticProfileName: profile.name,
     });
@@ -695,7 +693,6 @@ async function withTrackerGenerationSettings(callback) {
         }
         console.info(`[${EXTENSION_NAME}] using direct tracker connection profile request: ${profile.name}`);
         return await callback({
-            disableSemanticThinking: settings.disableSemanticThinking !== false,
             semanticProfileId: profile.id,
             semanticProfileName: profile.name,
         });
@@ -713,7 +710,6 @@ async function withProseGuardGenerationSettings(callback) {
         }
         console.info(`[${EXTENSION_NAME}] using direct Prose Guard connection profile request: ${profile.name}`);
         return await callback({
-            disableSemanticThinking: settings.disableSemanticThinking !== false,
             semanticProfileId: profile.id,
             semanticProfileName: profile.name,
         });
@@ -731,12 +727,55 @@ async function withProgressionGenerationSettings(callback) {
         }
         console.info(`[${EXTENSION_NAME}] using direct Progression connection profile request: ${profile.name}`);
         return await callback({
-            disableSemanticThinking: settings.disableSemanticThinking !== false,
             semanticProfileId: profile.id,
             semanticProfileName: profile.name,
         });
     }
     return await withSemanticGenerationSettings(callback);
+}
+
+async function withStoryEngineModelRequest(callback) {
+    state.storyEngineModelRequestDepth += 1;
+    try {
+        return await callback();
+    } finally {
+        state.storyEngineModelRequestDepth = Math.max(0, state.storyEngineModelRequestDepth - 1);
+    }
+}
+
+function markNextNarratorRequestThinkingDisabled() {
+    state.narratorThinkingDisablePending = true;
+}
+
+function clearThinkingDisableRuntimeState() {
+    state.storyEngineModelRequestDepth = 0;
+    state.narratorThinkingDisablePending = false;
+}
+
+function shouldDisableThinkingForCurrentRequest() {
+    return isStoryEngineEnabled()
+        && (state.storyEngineModelRequestDepth > 0 || state.narratorThinkingDisablePending);
+}
+
+function consumeNarratorThinkingDisableIfNeeded() {
+    if (state.storyEngineModelRequestDepth <= 0) {
+        state.narratorThinkingDisablePending = false;
+    }
+}
+
+function handleChatCompletionSettingsReady(generateData) {
+    if (!shouldDisableThinkingForCurrentRequest()) return;
+    applySemanticThinkingPayload(generateData);
+    consumeNarratorThinkingDisableIfNeeded();
+}
+
+function handleTextCompletionSettingsReady(generateData) {
+    if (!shouldDisableThinkingForCurrentRequest()) return;
+    if (generateData && typeof generateData === 'object') {
+        generateData.include_reasoning = false;
+        delete generateData.reasoning_effort;
+    }
+    consumeNarratorThinkingDisableIfNeeded();
 }
 
 function setSelectOptions(select, values, placeholder, selectedValue, missingLabel = 'Missing') {
@@ -864,7 +903,6 @@ function refreshSettingsControls() {
     const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
     const progressionProfileSelect = document.getElementById('structured_preflight_progression_profile');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
-    const disableThinkingCheckbox = document.getElementById('structured_preflight_disable_semantic_thinking');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
     const writingStyleDrawer = document.getElementById('structured_preflight_writing_style_drawer');
     const writingStylePrompt = document.getElementById('structured_preflight_writing_style_prompt');
@@ -882,7 +920,6 @@ function refreshSettingsControls() {
         proseGuardFormattingPrompt.value = String(settings.proseGuardFormattingPrompt ?? DEFAULT_PROSE_GUARD_FORMATTING_PROMPT);
     }
     if (progressionEnabledCheckbox) progressionEnabledCheckbox.checked = settings.characterProgressionEnabled !== false;
-    if (disableThinkingCheckbox) disableThinkingCheckbox.checked = settings.disableSemanticThinking !== false;
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
     if (writingStylePrompt && writingStylePrompt.value !== settings.writingStylePrompt) {
         writingStylePrompt.value = String(settings.writingStylePrompt ?? DEFAULT_WRITING_STYLE_PROMPT);
@@ -1160,14 +1197,9 @@ function renderSettingsPanel() {
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                             </div>
                             <div class="spe-settings-row">
-                                <small class="spe-settings-note flex1">Uses the fully assembled SillyTavern prompt stack and internally forces deterministic request settings.</small>
+                                <small class="spe-settings-note flex1">Uses the fully assembled SillyTavern prompt stack and forces thinking/reasoning disabled on Story Engine model calls.</small>
                                 <button id="structured_preflight_refresh_semantic_settings" class="menu_button">Refresh</button>
                             </div>
-                            <label class="checkbox_label flexNoGap">
-                                <input id="structured_preflight_disable_semantic_thinking" type="checkbox">
-                                <span>Disable thinking for semantic requests</span>
-                            </label>
-                            <small class="spe-settings-note">Applies only to Story Engine semantic, tracker, Prose Guard, progression, and player setup calls. Main narration keeps its own profile settings.</small>
                         </div>
                     </section>
 
@@ -1324,10 +1356,6 @@ function renderSettingsPanel() {
     });
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
         settings.semanticConnectionProfile = String(event.target?.value || '');
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_disable_semantic_thinking')?.addEventListener('change', event => {
-        settings.disableSemanticThinking = Boolean(event.target?.checked);
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_post_tracker_enabled')?.addEventListener('change', event => {
@@ -1617,6 +1645,7 @@ function disableStoryEngineRuntime() {
         state.proseGuardChatObserver = null;
     }
     removeStreamingArtifactRegex();
+    clearThinkingDisableRuntimeState();
     state.runningSemanticPass = false;
     state.bypassPromptReady = false;
     state.activeRunId = null;
@@ -4967,7 +4996,7 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
     const context = getContext();
     state.bypassPromptReady = true;
     try {
-        return await withProgressionGenerationSettings(async settings => {
+        return await withStoryEngineModelRequest(() => withProgressionGenerationSettings(async settings => {
             if (settings?.semanticProfileId) {
                 return await sendSemanticProfileTextRequest(prompt, responseLength, settings, overridePayload);
             }
@@ -4978,7 +5007,7 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
             return await context.generateRawData({ prompt: textPrompt, responseLength });
-        });
+        }));
     } finally {
         state.bypassPromptReady = false;
     }
@@ -5319,7 +5348,7 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
     const context = getContext();
     state.bypassPromptReady = true;
     try {
-        return await withSemanticGenerationSettings(async settings => {
+        return await withStoryEngineModelRequest(() => withSemanticGenerationSettings(async settings => {
             if (settings?.semanticProfileId) {
                 return await sendSemanticProfileTextRequest(prompt, responseLength, settings, overridePayload);
             }
@@ -5330,7 +5359,7 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
             return await context.generateRawData({ prompt: textPrompt, responseLength });
-        });
+        }));
     } finally {
         state.bypassPromptReady = false;
     }
@@ -5688,7 +5717,7 @@ async function requestProseGuardCorrection(narrationText, latestUserText = '') {
     const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
     state.bypassPromptReady = true;
     try {
-        return await withProseGuardGenerationSettings(async settings => {
+        return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
             if (settings?.semanticProfileId) {
                 return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
                     temperature: 0,
@@ -5699,7 +5728,7 @@ async function requestProseGuardCorrection(narrationText, latestUserText = '') {
                 throw new Error('SillyTavern generateRawData API is unavailable for Prose Guard.');
             }
             return await context.generateRawData({ prompt, responseLength });
-        });
+        }));
     } finally {
         state.bypassPromptReady = false;
     }
@@ -5872,7 +5901,7 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
     const responseLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
     state.bypassPromptReady = true;
     try {
-        return await withTrackerGenerationSettings(async settings => {
+        return await withStoryEngineModelRequest(() => withTrackerGenerationSettings(async settings => {
             if (settings?.semanticProfileId) {
                 return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
                     temperature: 0,
@@ -5883,7 +5912,7 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
                 throw new Error('SillyTavern generateRawData API is unavailable for post-narration tracker update.');
             }
             return await context.generateRawData({ prompt, responseLength });
-        });
+        }));
     } finally {
         state.bypassPromptReady = false;
     }
@@ -6200,6 +6229,7 @@ function handleGenerationLifecycleEnd() {
     if (state.trackerUpdating) return;
     clearAllProgress();
     state.pendingGeneration = null;
+    state.narratorThinkingDisablePending = false;
     clearRuntimePrompts();
 
     if (!state.pendingRun) {
@@ -6240,6 +6270,8 @@ function subscribeMessageHandler() {
     if (context.eventTypes.GENERATION_STARTED) context.eventSource.on(context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
     if (context.eventTypes.GENERATION_ENDED) context.eventSource.on(context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
     if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
+    if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
+    if (context.eventTypes.TEXT_COMPLETION_SETTINGS_READY) context.eventSource.on(context.eventTypes.TEXT_COMPLETION_SETTINGS_READY, handleTextCompletionSettingsReady);
     if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
     state.subscribed = true;
 }
@@ -6372,6 +6404,7 @@ async function handleChatCompletionPromptReady(eventData) {
             });
             state.lastNarratorHandoff = '';
             state.pendingRun = null;
+            markNextNarratorRequestThinkingDisabled();
             clearAllProgress();
             return;
         }
@@ -6410,10 +6443,12 @@ async function handleChatCompletionPromptReady(eventData) {
         beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
         sanitizeFinalPromptHistory(eventData.chat);
         appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
+        markNextNarratorRequestThinkingDisabled();
         clearAllProgress();
     } catch (error) {
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
+        state.narratorThinkingDisablePending = false;
         releaseProseGuardDisplayIntercept({ restore: true });
         clearAllProgress();
         clearRuntimePrompts();
@@ -6431,17 +6466,16 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
     state.bypassPromptReady = true;
     try {
         addEphemeralStoppingString(SEMANTIC_PREFLIGHT_STOP_SENTINEL);
-        return await withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
+        return await withStoryEngineModelRequest(() => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
             playerTrackerSnapshot: state.pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             powerActorSnapshot: state.pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
-            disableSemanticThinking: settings?.disableSemanticThinking !== false,
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             nameStyle: getSettings().nameStyle,
             userInputMode: state.pendingGeneration?.mode || 'normal',
             proxyUserAction: state.pendingGeneration?.mode === 'proxy' ? state.pendingGeneration?.latestUserText : '',
-        }));
+        })));
     } finally {
         flushEphemeralStoppingStrings();
         state.bypassPromptReady = false;
@@ -6482,6 +6516,7 @@ export function onDisable() {
     const context = getContext();
     clearPostNarrationFinalizerTimers();
     clearAllProgress();
+    clearThinkingDisableRuntimeState();
     setChatInputLocked(false);
     removeStreamingArtifactRegex();
     if (context?.extensionPrompts) {
@@ -6501,6 +6536,8 @@ export function onDisable() {
         if (context.eventTypes.GENERATION_STARTED) removeEventHandler(context, context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
         if (context.eventTypes.GENERATION_ENDED) removeEventHandler(context, context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
         if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
+        if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
+        if (context.eventTypes.TEXT_COMPLETION_SETTINGS_READY) removeEventHandler(context, context.eventTypes.TEXT_COMPLETION_SETTINGS_READY, handleTextCompletionSettingsReady);
         if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
         state.subscribed = false;
     }

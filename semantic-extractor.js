@@ -270,7 +270,7 @@ async function generateSemanticToolCall(context, prompt, responseLength, options
     generateData.n = undefined;
     generateData.tools = [semanticTool];
     generateData.tool_choice = buildSemanticToolChoice(chatCompletionSource);
-    applySemanticThinkingPayload(generateData, options);
+    applySemanticThinkingPayload(generateData);
     generateData.enable_web_search = false;
     delete generateData.request_images;
     delete generateData.request_image_resolution;
@@ -378,8 +378,8 @@ export function extractGeneratedText(raw) {
     return candidates[0] || '';
 }
 
-function applySemanticThinkingPayload(payload, options = {}) {
-    if (options?.disableSemanticThinking === false) {
+export function applySemanticThinkingPayload(payload) {
+    if (!payload || typeof payload !== 'object') {
         return payload;
     }
     const source = String(payload.chat_completion_source || '').toLowerCase();
@@ -458,7 +458,6 @@ async function sendChatCompletionProfileRequest(prompt, responseLength, options 
             custom_prompt_post_processing: profile['prompt-post-processing'],
             ...overridePayload,
         },
-        options,
     );
 
     return await context.ChatCompletionService.processRequest(

@@ -7646,6 +7646,10 @@ const tests = [
       assert.match(source, /function ensureProseGuardDisplayInterceptor\(\)/);
       assert.match(source, /function beginProseGuardDisplayIntercept\(type, dryRun = false\) \{\s*ensureProseGuardDisplayInterceptor\(\);/);
       assert.match(source, /eventTypes\.GENERATION_STARTED\) context\.eventSource\.on\(context\.eventTypes\.GENERATION_STARTED, ensureProseGuardDisplayInterceptor\)/);
+      assert.match(source, /eventTypes\.CHAT_COMPLETION_SETTINGS_READY\) context\.eventSource\.on\(context\.eventTypes\.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady\)/);
+      assert.match(source, /eventTypes\.TEXT_COMPLETION_SETTINGS_READY\) context\.eventSource\.on\(context\.eventTypes\.TEXT_COMPLETION_SETTINGS_READY, handleTextCompletionSettingsReady\)/);
+      assert.match(source, /applySemanticThinkingPayload\(generateData\)/);
+      assert.match(source, /withStoryEngineModelRequest/);
       assert.match(source, /new MutationObserver\(mutations =>/);
       assert.match(source, /PROSE_GUARD_HIDDEN_MESSAGE_CLASS/);
       assert.match(source, /function hideProseGuardMessageElement/);
@@ -7845,7 +7849,6 @@ const tests = [
         'structured_preflight_use_separate_semantic_settings',
         'structured_preflight_semantic_profile',
         'structured_preflight_refresh_semantic_settings',
-        'structured_preflight_disable_semantic_thinking',
         'structured_preflight_post_tracker_enabled',
         'structured_preflight_tracker_profile',
         'structured_preflight_prose_guard_enabled',
@@ -7875,6 +7878,8 @@ const tests = [
         assert.equal(count, 1, `${id} should remain present exactly once in the settings markup.`);
       }
 
+      assert.doesNotMatch(renderSource, /id="structured_preflight_disable_semantic_thinking"/);
+      assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.disableSemanticThinking/);
       assert.doesNotMatch(renderSource, /<hr>/);
     },
   },
