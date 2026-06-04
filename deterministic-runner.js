@@ -1020,15 +1020,22 @@ function cleanPowerActorScalar(value, maxLength = 120) {
 
 function normalizeUserAbilityUseForHandoff(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
-    const used = bool(source.used ?? source.Used);
+    const rawUsed = bool(source.used ?? source.Used);
+    const attempted = bool(source.attempted ?? source.Attempted ?? rawUsed);
+    const available = bool(source.available ?? source.Available ?? rawUsed);
+    const used = attempted && available && rawUsed;
     const abilityName = String(source.abilityName ?? source.AbilityName ?? '').trim();
     const evidence = String(source.evidence ?? source.Evidence ?? '').trim();
     const narrativeEffect = String(source.narrativeEffect ?? source.NarrativeEffect ?? '').trim();
+    const noEffectReason = String(source.noEffectReason ?? source.NoEffectReason ?? '').trim();
     return {
         Used: used ? 'Y' : 'N',
-        AbilityName: used && isReal(abilityName) ? abilityName : NONE,
-        Evidence: used && isReal(evidence) ? evidence : NONE,
-        NarrativeEffect: used && isReal(narrativeEffect) ? narrativeEffect : NONE,
+        Attempted: attempted ? 'Y' : 'N',
+        Available: attempted && available ? 'Y' : 'N',
+        AbilityName: attempted && isReal(abilityName) ? abilityName : NONE,
+        Evidence: attempted && isReal(evidence) ? evidence : NONE,
+        NarrativeEffect: attempted && isReal(narrativeEffect) ? narrativeEffect : NONE,
+        NoEffectReason: attempted && !available && isReal(noEffectReason) ? noEffectReason : NONE,
         MechanicalScope: 'flavor_only_no_bonus',
     };
 }

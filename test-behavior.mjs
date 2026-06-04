@@ -105,9 +105,12 @@ function baseLedger(overrides = {}) {
       explicitMeans: 'ordinary conversation',
       userAbilityUse: {
         used: false,
+        attempted: false,
+        available: false,
         abilityName: '(none)',
         evidence: '(none)',
         narrativeEffect: '(none)',
+        noEffectReason: '(none)',
         mechanicalScope: 'flavor_only_no_bonus',
       },
       identifyTargets: {
@@ -6546,13 +6549,19 @@ const tests = [
       const preflightSource = fs.readFileSync(extensionFile('pre-flight.js'), 'utf8');
 
       assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.Used=N/);
+      assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.Attempted=N/);
+      assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.Available=N/);
+      assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.NoEffectReason=\(none\)/);
       assert.match(semanticSource, /compare the latest user input against active \{\{user\}\}\/persona abilities/i);
+      assert.match(semanticSource, /Mark Attempted=Y when the input explicitly names an ability\/spell or implicitly describes attempting one/i);
+      assert.match(semanticSource, /Mark Available=Y only if/i);
       assert.match(semanticSource, /MechanicalScope must always be flavor_only_no_bonus/i);
       assert.match(semanticSource, /never a bonus, never a dice modifier, never a separate roll/i);
       assert.match(semanticSource, /userAbilityUse:\s*normalizeUserAbilityUse/);
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /When ACTIVE_BRANCH_FACTS lists UserAbilityUse, preserve its NarrativeEffect/i);
+      assert.match(preflightSource, /When ACTIVE_BRANCH_FACTS lists an available UserAbilityUse, preserve its NarrativeEffect/i);
+      assert.match(preflightSource, /When it lists an unavailable ability\/spell attempt, no ability effect occurs/i);
       assert.match(preflightSource, /do not announce, name, activate, focus, channel, charge, or explain the ability/i);
 
       const report = runCase({
@@ -6567,9 +6576,12 @@ const tests = [
             explicitMeans: 'whisper under my breath meant only for Alice',
             userAbilityUse: {
               used: true,
+              attempted: true,
+              available: true,
               abilityName: 'Resonant Voice',
               evidence: 'meant only for Alice',
               narrativeEffect: 'Alice alone hears the whispered words',
+              noEffectReason: '(none)',
               mechanicalScope: 'flavor_only_no_bonus',
             },
             identifyTargets: {
@@ -6587,9 +6599,12 @@ const tests = [
       const packet = report.finalNarrativeHandoff.resolutionPacket;
       assert.deepEqual(packet.UserAbilityUse, {
         Used: 'Y',
+        Attempted: 'Y',
+        Available: 'Y',
         AbilityName: 'Resonant Voice',
         Evidence: 'meant only for Alice',
         NarrativeEffect: 'Alice alone hears the whispered words',
+        NoEffectReason: '(none)',
         MechanicalScope: 'flavor_only_no_bonus',
       });
       assert.equal(packet.STAKES, 'N');
@@ -6599,6 +6614,53 @@ const tests = [
       assert.match(prompt, /Preserve user ability effect as direct scene fact: Alice alone hears the whispered words/i);
       assert.match(prompt, /do not announce, name, activate, focus, channel, charge, or explain the ability/i);
       assert.match(prompt, /do not add bonuses, success, roll changes, extra landed actions, or bypassed stakes/i);
+
+      const unavailableReport = runCase({
+        userText: 'I extend my hand and picture a small ball of fire forming at my fingertip.',
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Attempt_Fire_Spell',
+            identifyChallenge: 'attempt to create a small ball of fire',
+            explicitMeans: 'picture a small ball of fire forming at fingertip',
+            userAbilityUse: {
+              used: false,
+              attempted: true,
+              available: false,
+              abilityName: 'fire spell',
+              evidence: 'small ball of fire forming at my fingertip',
+              narrativeEffect: 'a small ball of fire forms at the fingertip',
+              noEffectReason: 'not in known user abilities',
+              mechanicalScope: 'flavor_only_no_bonus',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+      });
+
+      const unavailablePacket = unavailableReport.finalNarrativeHandoff.resolutionPacket;
+      assert.deepEqual(unavailablePacket.UserAbilityUse, {
+        Used: 'N',
+        Attempted: 'Y',
+        Available: 'N',
+        AbilityName: 'fire spell',
+        Evidence: 'small ball of fire forming at my fingertip',
+        NarrativeEffect: 'a small ball of fire forms at the fingertip',
+        NoEffectReason: 'not in known user abilities',
+        MechanicalScope: 'flavor_only_no_bonus',
+      });
+      const unavailablePrompt = formatNarratorModelPromptContext(unavailableReport);
+      assert.match(unavailablePrompt, /unavailable ability\/spell attempt: fire spell/i);
+      assert.match(unavailablePrompt, /No ability effect occurs/i);
+      assert.match(unavailablePrompt, /Do not create the attempted effect: a small ball of fire forms at the fingertip/i);
+      assert.match(unavailablePrompt, /Render only the lack of effect and visible reactions/i);
+      assert.doesNotMatch(unavailablePrompt, /Preserve user ability effect as direct scene fact: a small ball of fire forms at the fingertip/i);
+      assert.doesNotMatch(unavailablePrompt, /\(none\)'s response|Use the listed NPC state naturally: none/i);
     },
   },
   {

@@ -569,7 +569,7 @@ Execute these private render stages in order. Each stage is mandatory.
 Smell and taste are banned unless {{user}} explicitly sniffs, smells, tastes, eats, or drinks, or a specific visible close-range source is physically overpowering and unavoidable. If allowed, use at most one specific smell/taste mention and never use smell or taste as atmospheric shorthand.
 
 2. abilityIntegration(response, context):
-Render abilities, magic, senses, and supernatural traits through directly perceivable effects only. When ACTIVE_BRANCH_FACTS lists UserAbilityUse, preserve its NarrativeEffect as fictional method/flavor only. Do not name, label, explain, activate, charge, focus, channel, or attribute abilities in narration unless the name is spoken aloud in dialogue. Never add bonuses, extra success, or bypassed stakes from ability use.
+Render abilities, magic, senses, and supernatural traits through directly perceivable effects only. When ACTIVE_BRANCH_FACTS lists an available UserAbilityUse, preserve its NarrativeEffect as fictional method/flavor only. When it lists an unavailable ability/spell attempt, no ability effect occurs. Do not echo or repeat setup, preparation, activation, channeling, focus, or declared action. Do not name, label, explain, activate, charge, focus, channel, or attribute abilities in narration unless the name is spoken aloud in dialogue. Never add bonuses, extra success, or bypassed stakes from ability use.
 
 3. epistemicRender(response, smellGate, context):
 Write only from direct in-scene evidence available from {{user}}'s physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unintroduced identities. Names and roles remain locked until revealed in-world.
@@ -1161,30 +1161,49 @@ function targetSummary(resolution) {
 
 function normalizeAbilityUseObject(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
-    const used = ['Y', 'YES', 'TRUE'].includes(String(source.Used ?? source.used ?? '').trim().toUpperCase())
+    const rawUsed = ['Y', 'YES', 'TRUE'].includes(String(source.Used ?? source.used ?? '').trim().toUpperCase())
         || source.Used === true
         || source.used === true;
+    const attempted = rawUsed
+        || ['Y', 'YES', 'TRUE'].includes(String(source.Attempted ?? source.attempted ?? '').trim().toUpperCase())
+        || source.Attempted === true
+        || source.attempted === true;
+    const available = rawUsed
+        || ['Y', 'YES', 'TRUE'].includes(String(source.Available ?? source.available ?? '').trim().toUpperCase())
+        || source.Available === true
+        || source.available === true;
+    const used = attempted && available && rawUsed;
     const abilityName = valueOrNone(source.AbilityName ?? source.abilityName);
     const evidence = valueOrNone(source.Evidence ?? source.evidence);
     const narrativeEffect = valueOrNone(source.NarrativeEffect ?? source.narrativeEffect);
+    const noEffectReason = valueOrNone(source.NoEffectReason ?? source.noEffectReason);
     return {
         used,
-        abilityName: used && !isNoneText(abilityName) ? abilityName : '(none)',
-        evidence: used && !isNoneText(evidence) ? evidence : '(none)',
-        narrativeEffect: used && !isNoneText(narrativeEffect) ? narrativeEffect : '(none)',
+        attempted,
+        available: attempted && available,
+        abilityName: attempted && !isNoneText(abilityName) ? abilityName : '(none)',
+        evidence: attempted && !isNoneText(evidence) ? evidence : '(none)',
+        narrativeEffect: attempted && !isNoneText(narrativeEffect) ? narrativeEffect : '(none)',
+        noEffectReason: attempted && !available && !isNoneText(noEffectReason) ? noEffectReason : '(none)',
         mechanicalScope: 'flavor_only_no_bonus',
     };
 }
 
 function userAbilityUseSummary(value = {}) {
     const ability = normalizeAbilityUseObject(value);
-    if (!ability.used) return 'none';
+    if (!ability.attempted) return 'none';
+    if (!ability.available) {
+        return `unavailable ability/spell attempt: ${ability.abilityName}; evidence:${ability.evidence}; attemptedEffect:${ability.narrativeEffect}; noEffectReason:${ability.noEffectReason}; scope:${ability.mechanicalScope}`;
+    }
     return `${ability.abilityName}; evidence:${ability.evidence}; effect:${ability.narrativeEffect}; scope:${ability.mechanicalScope}`;
 }
 
 function userAbilityUseGuide(value = {}) {
     const ability = normalizeAbilityUseObject(value);
-    if (!ability.used) return 'none';
+    if (!ability.attempted) return 'none';
+    if (!ability.available) {
+        return `Unavailable ability/spell attempt: ${ability.abilityName}. No ability effect occurs. Do not create the attempted effect: ${ability.narrativeEffect}. Render only the lack of effect and visible reactions. This is not a roll, denial, activation, fizzle, or backlash.`;
+    }
     return `Preserve user ability effect as direct scene fact: ${ability.narrativeEffect}. Ability=${ability.abilityName}; evidence=${ability.evidence}. Render only the effect/delivery; do not announce, name, activate, focus, channel, charge, or explain the ability. It is flavor_only_no_bonus: do not add bonuses, success, roll changes, extra landed actions, or bypassed stakes. If the broader goal has stakes, narrate the resolved outcome normally while preserving this ability method.`;
 }
 
@@ -1192,8 +1211,10 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const outcome = naturalOutcomeSummary(resolution);
     const partialActionInstruction = partialActionGuide(resolution);
     const primaryNpc = primaryNarrationNpc(handoff, resolution);
-    const npcName = primaryNpc?.NPC || list(resolution.ActionTargets) || 'the NPC';
-    const npcGuide = primaryNpc ? relationshipNarrationGuide(primaryNpc) : `Use the listed NPC state naturally: ${npcText}.`;
+    const actionTargetNames = list(resolution.ActionTargets);
+    const hasNpcGuidance = Boolean(primaryNpc) || !isNoneText(npcText);
+    const npcName = primaryNpc?.NPC || (!isNoneText(actionTargetNames) ? actionTargetNames : 'the NPC');
+    const npcGuide = primaryNpc ? relationshipNarrationGuide(primaryNpc) : (hasNpcGuidance ? `Use the listed NPC state naturally: ${npcText}.` : '');
     const intimacyBoundaryGuide = buildIntimacyBoundaryGuide(resolution, handoff);
     const chaosNote = chaosText !== 'none' ? ` ${chaosGuide}` : '';
     const powerEventNote = !isNoneText(powerActorEvent)
@@ -1252,6 +1273,9 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
         const chaosNote = chaosText !== 'none' ? ` ${chaosGuide}` : '';
         if (intimacyBoundaryGuide.mode === 'ALLOW') {
             return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
+        }
+        if (!hasNpcGuidance) {
+            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
         }
         return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.`;
     }
