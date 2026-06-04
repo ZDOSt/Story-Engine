@@ -1040,6 +1040,38 @@ function normalizeUserAbilityUseForHandoff(value = {}) {
     };
 }
 
+function normalizeItemUseForHandoff(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const attempted = bool(source.attempted ?? source.Attempted);
+    const rawAvailable = bool(source.available ?? source.Available);
+    const item = String(source.item ?? source.Item ?? '').trim();
+    const rawSource = String(source.source ?? source.Source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    let itemSource = normalizeItemUseSource(rawSource);
+    const evidence = String(source.evidence ?? source.Evidence ?? '').trim();
+    const noEffectReason = String(source.noEffectReason ?? source.NoEffectReason ?? '').trim();
+    if (!attempted) itemSource = 'none';
+    const available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
+    if (attempted && !available && itemSource !== 'contested') itemSource = 'unavailable';
+    return {
+        Attempted: attempted ? 'Y' : 'N',
+        Available: available ? 'Y' : 'N',
+        Item: attempted && isReal(item) ? item : NONE,
+        Source: itemSource,
+        Evidence: attempted && isReal(evidence) ? evidence : NONE,
+        NoEffectReason: attempted && !available && isReal(noEffectReason) ? noEffectReason : NONE,
+    };
+}
+
+function normalizeItemUseSource(value) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const allowed = ['none', 'gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance', 'unavailable', 'contested'];
+    return allowed.includes(text) ? text : 'unavailable';
+}
+
+function itemUseSourceIsAvailable(source) {
+    return ['gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance'].includes(source);
+}
+
 function normalizeClaimCheckForHandoff(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const present = bool(source.present ?? source.Present);
@@ -1341,6 +1373,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const packet = {
         GOAL: goal,
         UserAbilityUse: normalizeUserAbilityUseForHandoff(semantic.userAbilityUse),
+        ItemUse: normalizeItemUseForHandoff(semantic.itemUse),
         ClaimCheck: normalizeClaimCheckForHandoff(semantic.claimCheck),
         actions,
         intimacyAdvanceExplicit,
@@ -1376,7 +1409,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
 
     audit.push(`2.7q InflictedNpcInjuryEngine=${compact(inflictedInjuries)}`);
     audit.push(`2.7r UserAbilityUse=${compact(packet.UserAbilityUse)}`);
-    audit.push(`2.7s ClaimCheck=${compact(packet.ClaimCheck)}`);
+    audit.push(`2.7s ItemUse=${compact(packet.ItemUse)}`);
+    audit.push(`2.7t ClaimCheck=${compact(packet.ClaimCheck)}`);
     audit.push(`2.8 HANDOFF=${compact(packet)}`);
     audit.push('---');
 

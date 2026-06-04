@@ -113,6 +113,14 @@ function baseLedger(overrides = {}) {
         noEffectReason: '(none)',
         mechanicalScope: 'flavor_only_no_bonus',
       },
+      itemUse: {
+        attempted: false,
+        available: false,
+        item: '(none)',
+        source: 'none',
+        evidence: '(none)',
+        noEffectReason: '(none)',
+      },
       claimCheck: {
         present: false,
         claim: '(none)',
@@ -6673,6 +6681,190 @@ const tests = [
     },
   },
   {
+    name: '34c2 item use availability is semantic-only and carried into narrator handoff',
+    run() {
+      const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
+      const runnerSource = fs.readFileSync(extensionFile('deterministic-runner.js'), 'utf8');
+      const preflightSource = fs.readFileSync(extensionFile('pre-flight.js'), 'utf8');
+
+      assert.match(semanticSource, /ITEM_USE_SOURCES/);
+      assert.match(semanticSource, /ResolutionEngine\.itemUse\.Attempted=N/);
+      assert.match(semanticSource, /ResolutionEngine\.itemUse\.Available=N/);
+      assert.match(semanticSource, /ResolutionEngine\.itemUse\.NoEffectReason=\(none\)/);
+      assert.match(semanticSource, /setting_affordance/);
+      assert.match(semanticSource, /consequence_affordance/);
+      assert.match(semanticSource, /The latest user input cannot create the item as evidence of availability/i);
+      assert.match(runnerSource, /ItemUse:\s*normalizeItemUseForHandoff\(semantic\.itemUse\)/);
+      assert.doesNotMatch(runnerSource, /ItemUse[\s\S]{0,240}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
+      assert.match(preflightSource, /When ACTIVE_BRANCH_FACTS lists ItemUse, obey that availability exactly/i);
+      assert.match(preflightSource, /Unavailable item branch:/);
+      assert.match(preflightSource, /Contested item branch:/);
+
+      const unavailableReport = runCase({
+        userText: 'I smile at Alice, then draw my sword.',
+        tracker: {
+          Alice: trackerEntry({ currentDisposition: { B: 2, F: 2, H: 2 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Draw_Weapon',
+            identifyChallenge: 'draw a sword while facing Alice',
+            explicitMeans: 'draw my sword',
+            itemUse: {
+              attempted: true,
+              available: false,
+              item: 'sword',
+              source: 'unavailable',
+              evidence: 'draw my sword',
+              noEffectReason: 'not in user gear/inventory and not established in scene',
+            },
+            identifyTargets: {
+              ActionTargets: ['Alice'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Alice')],
+        }),
+      });
+
+      const unavailablePacket = unavailableReport.finalNarrativeHandoff.resolutionPacket;
+      assert.deepEqual(unavailablePacket.ItemUse, {
+        Attempted: 'Y',
+        Available: 'N',
+        Item: 'sword',
+        Source: 'unavailable',
+        Evidence: 'draw my sword',
+        NoEffectReason: 'not in user gear/inventory and not established in scene',
+      });
+      assert.equal(unavailablePacket.STAKES, 'N');
+      const unavailablePrompt = prompt(unavailableReport);
+      assert.match(unavailablePrompt, /ItemUse: unavailable\/contested item attempt: sword; source:unavailable; evidence:draw my sword; noEffectReason:not in user gear\/inventory and not established in scene/i);
+      assert.match(unavailablePrompt, /Unavailable item branch: sword is not available/i);
+      assert.match(unavailablePrompt, /Do not narrate the item appearing, being drawn, wielded, used/i);
+      assert.doesNotMatch(unavailablePrompt, /Item availability branch: sword is available from gear/i);
+
+      const gearReport = runCase({
+        userText: 'I draw the sword from my belt.',
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Draw_Weapon',
+            identifyChallenge: 'draw the sword from my belt',
+            explicitMeans: 'draw the sword from my belt',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'sword',
+              source: 'gear',
+              evidence: 'sword in user gear',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+      });
+      assert.equal(gearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(gearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'gear');
+      assert.match(prompt(gearReport), /ItemUse: sword; source:gear; evidence:sword in user gear/i);
+      assert.match(prompt(gearReport), /Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes/i);
+
+      const tavernReport = runCase({
+        userText: 'I grab a bottle from the tavern table.',
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Grab_Object',
+            identifyChallenge: 'grab a bottle from the tavern table',
+            explicitMeans: 'grab a bottle from the tavern table',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'bottle',
+              source: 'setting_affordance',
+              evidence: 'tavern table commonly has bottles within reach',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+      });
+      assert.equal(tavernReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'setting_affordance');
+      assert.match(prompt(tavernReport), /Item availability branch: bottle is available from setting_affordance/i);
+
+      const fallenSwordReport = runCase({
+        userText: 'I grab the fallen bandit\'s sword.',
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Grab_Object',
+            identifyChallenge: 'grab the fallen bandit\'s sword',
+            explicitMeans: 'grab the fallen bandit\'s sword',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'fallen bandit sword',
+              source: 'consequence_affordance',
+              evidence: 'a fallen bandit with ordinary weapon was established by resolved scene facts',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+      });
+      assert.equal(fallenSwordReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'consequence_affordance');
+      assert.match(prompt(fallenSwordReport), /Item availability branch: fallen bandit sword is available from consequence_affordance/i);
+
+      const contestedReport = runCase({
+        userText: 'I grab the bandit\'s sword from his hand.',
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Grab_Held_Object',
+            identifyChallenge: 'grab the bandit\'s sword from his hand',
+            explicitMeans: 'grab the bandit\'s sword from his hand',
+            itemUse: {
+              attempted: true,
+              available: false,
+              item: 'bandit sword',
+              source: 'contested',
+              evidence: 'the sword is held by the bandit',
+              noEffectReason: 'held by another character',
+            },
+            identifyTargets: {
+              ActionTargets: ['Bandit'],
+              OppTargets: { NPC: ['Bandit'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: true,
+          },
+          relationshipEngine: [relationship('Bandit')],
+        }),
+      });
+      assert.equal(contestedReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert.equal(contestedReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'contested');
+      assert.match(prompt(contestedReport), /Contested item branch: bandit sword exists but is not freely available/i);
+      assert.match(prompt(contestedReport), /Do not narrate free possession, drawing, wielding, use/i);
+    },
+  },
+  {
     name: '34d stake-bearing false or unsupported factual claim forces a belief contest',
     run() {
       const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
@@ -6798,6 +6990,20 @@ const tests = [
       const text = prompt(report);
       assert.doesNotMatch(text, /Claim branch:/);
       assert.doesNotMatch(text, /belief contest/i);
+    },
+  },
+  {
+    name: '34f semantic stakes require explicit user intent and direct NPC targeting',
+    run() {
+      const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
+      assert.match(semanticSource, /ResolutionEngine user intent is explicit-only/);
+      assert.match(semanticSource, /identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective/);
+      assert.match(semanticSource, /do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume/);
+      assert.match(semanticSource, /For NPC-targeted stakes and OppTargets\.NPC, the latest user input must directly target that NPC with a stakes-bearing action/);
+      assert.match(semanticSource, /Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that/);
+      assert.match(semanticSource, /Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself/);
+      assert.match(semanticSource, /classify it as stakes only when the user also declares a demand, threat, attack, aim\/pointing at a target/);
+      assert.match(semanticSource, /NPC fear, NPC hostility, likely NPC reaction, or an NPC merely being present should keep the NPC as ActionTarget only/);
     },
   },
   {

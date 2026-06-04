@@ -87,6 +87,7 @@ function buildReadableSemanticDebug(ledger) {
         'identifyChallenge=' + valueOrNone(resolution.identifyChallenge),
         'explicitMeans=' + valueOrNone(resolution.explicitMeans),
         'userAbilityUse=' + userAbilityUseSummary(resolution.userAbilityUse),
+        'itemUse=' + itemUseSummary(resolution.itemUse),
         'claimCheck=' + claimCheckSummary(resolution.claimCheck),
         'identifyTargets:',
         'hostilesInScene.NPC=' + list(targets.hostilesInScene?.NPC),
@@ -142,6 +143,7 @@ function buildReadableDeterministicDebug(handoff) {
     return [
         'resolutionPacket.GOAL=' + valueOrNone(resolution.GOAL),
         'resolutionPacket.UserAbilityUse=' + userAbilityUseSummary(resolution.UserAbilityUse),
+        'resolutionPacket.ItemUse=' + itemUseSummary(resolution.ItemUse),
         'resolutionPacket.ClaimCheck=' + claimCheckSummary(resolution.ClaimCheck),
         'resolutionPacket.intimacyAdvanceExplicit=' + valueOrNone(resolution.intimacyAdvanceExplicit),
         'resolutionPacket.boundaryViolationExplicit=' + valueOrNone(resolution.boundaryViolationExplicit),
@@ -227,6 +229,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['userAction', summary.userAction],
         ['resolution.GOAL', valueOrNone(resolution.GOAL)],
         ['resolution.UserAbilityUse', userAbilityUseSummary(resolution.UserAbilityUse)],
+        ['resolution.ItemUse', itemUseSummary(resolution.ItemUse)],
         ['resolution.ClaimCheck', claimCheckSummary(resolution.ClaimCheck)],
         ['resolution.STAKES', summary.stakes],
         ['resolution.actionCount', summary.actionCount],
@@ -417,6 +420,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
     const powerActorEventAudit = powerActorEventAuditSummary(handoff.powerActorPressure?.event);
     const userAbilityUse = userAbilityUseSummary(resolution.UserAbilityUse);
     const userAbilityGuide = userAbilityUseGuide(resolution.UserAbilityUse);
+    const itemUse = itemUseSummary(resolution.ItemUse);
+    const itemUseNarrationGuide = itemUseGuide(resolution.ItemUse);
     const userImpairment = userImpairmentSummary(resolution.UserImpairment);
     const npcImpairment = npcImpairmentSummary(resolution.NPCImpairment);
     const aggressionNpcInjury = inflictedAggressionNpcInjurySummary(handoff.aggressionResults ?? {});
@@ -430,7 +435,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
     const claimCheck = claimCheckSummary(resolution.ClaimCheck);
     const claimGuide = claimCheckGuide(resolution.ClaimCheck, resolution, rollAudit);
     const intimacyBoundary = intimacyBoundarySummary(handoff);
-    const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, claimGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
+    const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, itemUseGuide: itemUseNarrationGuide, claimGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
     const narratorAuthority = buildNarratorAuthority({ resolution, handoff, options });
     const renderContract = buildRenderContract();
     const narrationCraftDirective = buildNarrationCraftDirective();
@@ -449,6 +454,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         chaosGuide,
         userAbilityUse,
         userAbilityGuide,
+        itemUse,
+        itemUseGuide: itemUseNarrationGuide,
         claimCheck,
         claimGuide,
         powerActorEvent,
@@ -486,6 +493,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         chaosGuide,
         userAbilityUse,
         userAbilityGuide,
+        itemUse,
+        itemUseGuide: itemUseNarrationGuide,
         claimCheck,
         claimGuide,
         proactive: proactiveText,
@@ -579,6 +588,7 @@ Smell and taste are banned unless {{user}} explicitly sniffs, smells, tastes, ea
 
 2. abilityIntegration(response, context):
 Render abilities, magic, senses, and supernatural traits through directly perceivable effects only. When ACTIVE_BRANCH_FACTS lists an available UserAbilityUse, preserve its NarrativeEffect as fictional method/flavor only. When it lists an unavailable ability/spell attempt, no ability effect occurs. Do not echo or repeat setup, preparation, activation, channeling, focus, or declared action. Do not name, label, explain, activate, charge, focus, channel, or attribute abilities in narration unless the name is spoken aloud in dialogue. Never add bonuses, extra success, or bypassed stakes from ability use.
+When ACTIVE_BRANCH_FACTS lists ItemUse, obey that availability exactly. Available item use is only a scene fact, not a bonus or automatic success. For unavailable or contested ItemUse, do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocked with, or freely possessed unless another active branch explicitly resolves that access.
 
 3. epistemicRender(response, smellGate, context):
 Write only from direct in-scene evidence available from {{user}}'s physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unintroduced identities. Names and roles remain locked until revealed in-world.
@@ -638,12 +648,13 @@ Invalid responses must not be output.
 Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, ACTIVE_BRANCH_FACTS, RESOLVED_SCENE_FACTS, and NARRATION_CRAFT_DIRECTIVE are all satisfied.`;
 }
 
-function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, claimCheck, claimGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
+function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, itemUse, itemUseGuide, claimCheck, claimGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
     const facts = [];
     facts.push(`User action: ${valueOrNone(userAction)}.`);
     facts.push('Continuity branch: recent visible chat remains scene state for already-completed NPC/world actions, object positions, delivered items, current locations, and open/closed/removed/placed states. Do not replay the previous assistant beat or repeat an already-completed NPC/world action unless this handoff explicitly changes or reverses that state.');
     facts.push(currentSceneCastFact(resolution, handoff));
     if (!isNoneText(userAbilityUse)) facts.push(`UserAbilityUse: ${userAbilityUse}. ${userAbilityGuide}`);
+    if (!isNoneText(itemUse)) facts.push(`ItemUse: ${itemUse}. ${itemUseGuide}`);
     if (!isNoneText(claimGuide)) facts.push(`ClaimCheck: ${claimCheck}. ${claimGuide}`);
     if (resolution?.STAKES === 'N' || resolution?.Outcome === 'no_roll') {
         facts.push('Resolution branch: no roll; ordinary scene continuity unless another active branch constrains it.');
@@ -1217,6 +1228,54 @@ function userAbilityUseGuide(value = {}) {
     return `Preserve user ability effect as direct scene fact: ${ability.narrativeEffect}. Ability=${ability.abilityName}; evidence=${ability.evidence}. Render only the effect/delivery; do not announce, name, activate, focus, channel, charge, or explain the ability. It is flavor_only_no_bonus: do not add bonuses, success, roll changes, extra landed actions, or bypassed stakes. If the broader goal has stakes, narrate the resolved outcome normally while preserving this ability method.`;
 }
 
+function normalizeItemUseObject(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const attempted = ynBool(source.Attempted ?? source.attempted);
+    const rawAvailable = ynBool(source.Available ?? source.available);
+    const item = valueOrNone(source.Item ?? source.item);
+    const evidence = valueOrNone(source.Evidence ?? source.evidence);
+    const noEffectReason = valueOrNone(source.NoEffectReason ?? source.noEffectReason);
+    const rawSource = String(source.Source ?? source.source ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const allowed = ['none', 'gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance', 'unavailable', 'contested'];
+    let itemSource = allowed.includes(rawSource) ? rawSource : 'unavailable';
+    if (!attempted) itemSource = 'none';
+    const available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
+    if (attempted && !available && itemSource !== 'contested') itemSource = 'unavailable';
+    return {
+        attempted,
+        available,
+        item: attempted && !isNoneText(item) ? item : '(none)',
+        source: itemSource,
+        evidence: attempted && !isNoneText(evidence) ? evidence : '(none)',
+        noEffectReason: attempted && !available && !isNoneText(noEffectReason) ? noEffectReason : '(none)',
+    };
+}
+
+function itemUseSourceIsAvailable(source) {
+    return ['gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance'].includes(String(source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
+}
+
+function itemUseSummary(value = {}) {
+    const item = normalizeItemUseObject(value);
+    if (!item.attempted) return 'none';
+    if (!item.available) {
+        return `unavailable/contested item attempt: ${item.item}; source:${item.source}; evidence:${item.evidence}; noEffectReason:${item.noEffectReason}`;
+    }
+    return `${item.item}; source:${item.source}; evidence:${item.evidence}`;
+}
+
+function itemUseGuide(value = {}) {
+    const item = normalizeItemUseObject(value);
+    if (!item.attempted) return 'none';
+    if (item.available) {
+        return `Item availability branch: ${item.item} is available from ${item.source}. Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes from item use.`;
+    }
+    if (item.source === 'contested') {
+        return `Contested item branch: ${item.item} exists but is not freely available. Do not narrate free possession, drawing, wielding, use, consumption, spending, presentation, unlocking, or completed item effect. Render only the contest or lack of free access unless mechanics explicitly resolve access.`;
+    }
+    return `Unavailable item branch: ${item.item} is not available. No item effect occurs. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering {{user}} possession. Render only the lack of item/effect and visible reactions.`;
+}
+
 function normalizeClaimCheckObject(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const present = ynBool(source.present ?? source.Present);
@@ -1309,7 +1368,7 @@ function ynBool(value) {
     return text === 'y' || text === 'yes' || text === 'true' || text === '1';
 }
 
-function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, claimGuide, userImpairment, npcImpairment, options = {} }) {
+function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, itemUseGuide, claimGuide, userImpairment, npcImpairment, options = {} }) {
     const outcome = naturalOutcomeSummary(resolution);
     const partialActionInstruction = partialActionGuide(resolution);
     const primaryNpc = primaryNarrationNpc(handoff, resolution);
@@ -1344,9 +1403,10 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const aggressionTargetLock = aggressionTargetLockGuide(handoff.aggressionResults);
     const companionCommandInstruction = companionCommandGuide(resolution);
     const abilityInstruction = !isNoneText(userAbilityGuide) ? ` ${userAbilityGuide}` : '';
+    const itemInstruction = !isNoneText(itemUseGuide) ? ` ${itemUseGuide}` : '';
     const claimInstruction = !isNoneText(claimGuide) ? ` ${claimGuide}` : '';
 
-    const commonResultInstruction = `${companionCommandInstruction}${abilityInstruction}${claimInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
+    const commonResultInstruction = `${companionCommandInstruction}${abilityInstruction}${itemInstruction}${claimInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
     const stackedPressureInstruction = [
         boundaryViolationNote,
         boundaryNote,
@@ -1361,7 +1421,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (intimacyBoundaryGuide.mode === 'DENY' && resolution.boundaryViolationExplicit !== 'Y') {
-        return `The user action is ${userAction}; ${deniedIntimacyResolutionPhrase(resolution)}.${companionCommandInstruction}${abilityInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${naturalProactiveNote}${chaosNote}`;
+        return `The user action is ${userAction}; ${deniedIntimacyResolutionPhrase(resolution)}.${companionCommandInstruction}${abilityInstruction}${itemInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${naturalProactiveNote}${chaosNote}`;
     }
 
     if (proactiveText !== 'none') {
@@ -1369,29 +1429,29 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (resolution.boundaryViolationExplicit === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryViolationNote}${aggressionNote}${chaosNote}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryViolationNote}${aggressionNote}${chaosNote}`;
     }
 
     if (resolution.STAKES === 'N') {
         const chaosNote = chaosText !== 'none' ? ` ${chaosGuide}` : '';
         if (intimacyBoundaryGuide.mode === 'ALLOW') {
-            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
+            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
         }
         if (!hasNpcGuidance) {
-            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
+            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
         }
-        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.`;
+        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance with this behavior: ${npcGuide} Do not invent a landed attack.${chaosNote}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance with this behavior: ${npcGuide} Do not invent a landed attack.${chaosNote}`;
     }
 
     if (chaosText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}`;
     }
 
-    return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Narrate the NPC response with this behavior: ${npcGuide} Keep speaking and acting NPCs limited to the Current scene cast.`;
+    return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Narrate the NPC response with this behavior: ${npcGuide} Keep speaking and acting NPCs limited to the Current scene cast.`;
 }
 
 function deniedIntimacyResolutionPhrase(resolution) {
