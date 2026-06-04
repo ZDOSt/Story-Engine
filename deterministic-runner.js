@@ -1040,6 +1040,63 @@ function normalizeUserAbilityUseForHandoff(value = {}) {
     };
 }
 
+function normalizeClaimCheckForHandoff(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const present = bool(source.present ?? source.Present);
+    const stakesImpact = bool(source.stakesImpact ?? source.StakesImpact);
+    const claim = String(source.claim ?? source.Claim ?? '').trim();
+    const targetNPC = String(source.targetNPC ?? source.TargetNPC ?? '').trim();
+    const truthStatus = normalizeClaimTruthStatus(source.truthStatus ?? source.TruthStatus);
+    const npcAccess = normalizeClaimNpcAccess(source.npcAccess ?? source.NPCAccess);
+    const reason = String(source.reason ?? source.Reason ?? '').trim();
+    return {
+        Present: present ? 'Y' : 'N',
+        Claim: present && isReal(claim) ? claim : NONE,
+        TargetNPC: present && isReal(targetNPC) ? targetNPC : NONE,
+        TruthStatus: present ? truthStatus : 'none',
+        NPCAccess: present ? npcAccess : 'none',
+        StakesImpact: present && stakesImpact ? 'Y' : 'N',
+        Reason: present && isReal(reason) ? reason : NONE,
+    };
+}
+
+function normalizeClaimTruthStatus(value) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return ['none', 'known_true', 'known_false', 'unsupported', 'unknown'].includes(text) ? text : 'unknown';
+}
+
+function normalizeClaimNpcAccess(value) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return ['none', 'direct', 'partial', 'unknown'].includes(text) ? text : 'unknown';
+}
+
+function isStakeBearingUntrustedClaim(claimCheck) {
+    const normalized = normalizeClaimCheckForHandoff(claimCheck);
+    return normalized.Present === 'Y'
+        && normalized.StakesImpact === 'Y'
+        && ['known_false', 'unsupported'].includes(normalized.TruthStatus);
+}
+
+function getStakeBearingClaimStakesEvidence(semantic, semanticHasStakes) {
+    const claim = normalizeClaimCheckForHandoff(semantic?.claimCheck);
+    if (!isStakeBearingUntrustedClaim(claim)) return null;
+    if (semanticHasStakes === 'Y') return null;
+    return {
+        hasStakes: 'Y',
+        rule: 'hard_override_stake_bearing_claim_roll',
+        evidence: {
+            hardRule: 'ResolutionEngine.hasStakes: known-false or unsupported factual claim with material NPC stakes requires a belief contest',
+            from: 'N',
+            to: 'Y',
+            claim: claim.Claim,
+            targetNPC: claim.TargetNPC,
+            truthStatus: claim.TruthStatus,
+            npcAccess: claim.NPCAccess,
+            reason: claim.Reason,
+        },
+    };
+}
+
 function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext) {
     const semantic = ledger.resolutionEngine || {};
     const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, refereeContext);
@@ -1081,9 +1138,11 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     audit.push(`2.3a boundaryViolationExplicit=${boundaryViolationExplicit}`);
     const pureLoveDeclarationEvidence = getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext);
     const companionCommandNoRollEvidence = getDirectedCompanionCommandNoRollEvidence(semantic, identityTargets, trackerSnapshot, targetClassifier, context);
+    const stakeBearingClaimEvidence = getStakeBearingClaimStakesEvidence(semantic, semanticHasStakes);
     const stakesOverrideEvidence = companionCommandNoRollEvidence
         || pureLoveDeclarationEvidence
-        || getRomanceNoRollOverrideEvidence(semantic, semanticHasStakes, boundaryViolationExplicit, intimacyAdvanceExplicit);
+        || getRomanceNoRollOverrideEvidence(semantic, semanticHasStakes, boundaryViolationExplicit, intimacyAdvanceExplicit)
+        || stakeBearingClaimEvidence;
     const hasStakes = stakesOverrideEvidence?.hasStakes || semanticHasStakes;
     const stakesRule = stakesOverrideEvidence?.rule || 'semantic_final';
     audit.push(`2.4a semanticHasStakes=${semanticHasStakes}`);
@@ -1097,7 +1156,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         ? normalizeDirectedCompanionCommandTargets(identityTargets, targetClassifier, semantic, trackerSnapshot, context, audit)
         : identityTargets;
     const sanitizedTargets = sanitizeTargets(semanticTargetsForResolution, targetClassifier, { hasStakes, goal, boundaryViolationExplicit });
-    const directedCompanionTargets = repairDirectedCompanionAttackHostilePool(sanitizedTargets, ledger, trackerSnapshot, semantic, context, audit);
+    const claimTargets = repairStakeBearingClaimTargets(sanitizedTargets, targetClassifier, semantic, { hasStakes }, audit);
+    const directedCompanionTargets = repairDirectedCompanionAttackHostilePool(claimTargets, ledger, trackerSnapshot, semantic, context, audit);
     const targets = repairLivingOppositionTargets(directedCompanionTargets, targetClassifier, { hasStakes, semantic, goal, boundaryViolationExplicit, context }, audit);
     audit.push(`2.4d identifyTargets.final=${formatTargets(targets)}`);
     if (!sameTargets(rawTargets, targets)) {
@@ -1281,6 +1341,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const packet = {
         GOAL: goal,
         UserAbilityUse: normalizeUserAbilityUseForHandoff(semantic.userAbilityUse),
+        ClaimCheck: normalizeClaimCheckForHandoff(semantic.claimCheck),
         actions,
         intimacyAdvanceExplicit,
         boundaryViolationExplicit,
@@ -1315,6 +1376,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
 
     audit.push(`2.7q InflictedNpcInjuryEngine=${compact(inflictedInjuries)}`);
     audit.push(`2.7r UserAbilityUse=${compact(packet.UserAbilityUse)}`);
+    audit.push(`2.7s ClaimCheck=${compact(packet.ClaimCheck)}`);
     audit.push(`2.8 HANDOFF=${compact(packet)}`);
     audit.push('---');
 
@@ -2710,6 +2772,58 @@ function repairLivingOppositionTargets(targets, classifier, options = {}, audit)
         hardRule: 'stakes-bearing living ActionTarget cannot resolve against ENV; use that target as OppTargets.NPC when semantic omitted living opposition',
         target: livingActionTarget,
     })}`);
+    return repaired;
+}
+
+function repairStakeBearingClaimTargets(targets, classifier, semantic, options = {}, audit) {
+    const repaired = {
+        hostilesInScene: {
+            NPC: toRealArray(targets.hostilesInScene?.NPC),
+        },
+        ActionTargets: toRealArray(targets.ActionTargets),
+        OppTargets: {
+            NPC: toRealArray(targets.OppTargets?.NPC),
+            ENV: toRealArray(targets.OppTargets?.ENV),
+        },
+        BenefitedObservers: toRealArray(targets.BenefitedObservers),
+        HarmedObservers: toRealArray(targets.HarmedObservers),
+        PowerActors: toRealArray(targets.PowerActors),
+    };
+    if (options.hasStakes !== 'Y' || !isStakeBearingUntrustedClaim(semantic?.claimCheck)) return repaired;
+
+    const claim = normalizeClaimCheckForHandoff(semantic.claimCheck);
+    const target = claim.TargetNPC;
+    if (!isReal(target)) return repaired;
+    if (!classifier.isLiving(target)) {
+        audit?.push(`2.4f.1 stakeBearingClaimTargetRepairSkipped=${compact({
+            hardRule: 'ResolutionEngine.claimCheck target must be a living NPC to create living social opposition',
+            target,
+            claim: claim.Claim,
+        })}`);
+        return repaired;
+    }
+
+    let changed = false;
+    if (!repaired.ActionTargets.some(name => sameName(name, target))) {
+        repaired.ActionTargets.push(target);
+        changed = true;
+    }
+    if (!repaired.OppTargets.NPC.some(name => sameName(name, target))) {
+        repaired.OppTargets.NPC.push(target);
+        changed = true;
+    }
+    repaired.BenefitedObservers = repaired.BenefitedObservers.filter(name => !sameName(name, target));
+    repaired.HarmedObservers = repaired.HarmedObservers.filter(name => !sameName(name, target));
+    repaired.OppTargets.ENV = repaired.OppTargets.ENV.filter(name => !sameName(name, target));
+
+    if (changed) {
+        audit?.push(`2.4f.1 stakeBearingClaimTargetRepair=${compact({
+            hardRule: 'ResolutionEngine.claimCheck: stakes-bearing untrusted factual claim targets the NPC as living social opposition',
+            target,
+            truthStatus: claim.TruthStatus,
+            npcAccess: claim.NPCAccess,
+        })}`);
+    }
     return repaired;
 }
 

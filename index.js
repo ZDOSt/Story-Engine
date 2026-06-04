@@ -981,7 +981,6 @@ function refreshSettingsControls() {
         proseGuardEnabledCheckbox,
         progressionEnabledCheckbox,
         enabledCheckbox,
-        disableThinkingCheckbox,
         writingStyleEnabled,
         nameStyleSelect,
         refreshSemanticButton,

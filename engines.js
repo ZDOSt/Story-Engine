@@ -2054,6 +2054,12 @@ export function classifySocialMapStatsRule(semantic, targets) {
     if (!firstReal(targets.OppTargets?.NPC)) return null;
     if (bool(semantic.classifyHostilePhysicalIntent)) return null;
     if (isBodyAffectingMagic(semantic, semantic.identifyGoal, targets)) return null;
+    if (isStakeBearingUntrustedClaimForMapStats(semantic?.claimCheck)) {
+        return {
+            oppStat: 'MND',
+            hardRule: 'ResolutionEngine.mapStats: stakes-bearing known-false or unsupported factual claim is USER=CHA and OPP=MND',
+        };
+    }
     const source = [
         semantic.identifyGoal,
         semantic.identifyChallenge,
@@ -2077,6 +2083,17 @@ export function classifySocialMapStatsRule(semantic, targets) {
     }
 
     return null;
+}
+
+function isStakeBearingUntrustedClaimForMapStats(claimCheck) {
+    const source = claimCheck && typeof claimCheck === 'object' ? claimCheck : {};
+    const present = bool(source.present ?? source.Present);
+    const stakesImpact = bool(source.stakesImpact ?? source.StakesImpact);
+    const truthStatus = String(source.truthStatus ?? source.TruthStatus ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s-]+/g, '_');
+    return present && stakesImpact && ['known_false', 'unsupported'].includes(truthStatus);
 }
 
 export function isBodyAffectingMagic(semantic, goal, targets) {

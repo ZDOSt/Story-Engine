@@ -113,6 +113,15 @@ function baseLedger(overrides = {}) {
         noEffectReason: '(none)',
         mechanicalScope: 'flavor_only_no_bonus',
       },
+      claimCheck: {
+        present: false,
+        claim: '(none)',
+        targetNPC: '(none)',
+        truthStatus: 'none',
+        npcAccess: 'none',
+        stakesImpact: false,
+        reason: '(none)',
+      },
       identifyTargets: {
         hostilesInScene: { NPC: [] },
         ActionTargets: [],
@@ -6664,6 +6673,134 @@ const tests = [
     },
   },
   {
+    name: '34d stake-bearing false or unsupported factual claim forces a belief contest',
+    run() {
+      const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
+      const runnerSource = fs.readFileSync(extensionFile('deterministic-runner.js'), 'utf8');
+      const enginesSource = fs.readFileSync(extensionFile('engines.js'), 'utf8');
+      const preflightSource = fs.readFileSync(extensionFile('pre-flight.js'), 'utf8');
+
+      assert.match(semanticSource, /ResolutionEngine\.claimCheck\.Present=N/);
+      assert.match(semanticSource, /stakes-bearing claim check, not a truth engine/i);
+      assert.match(semanticSource, /known_false or unsupported claim has StakesImpact=Y/i);
+      assert.match(runnerSource, /ClaimCheck:\s*normalizeClaimCheckForHandoff\(semantic\.claimCheck\)/);
+      assert.match(runnerSource, /hard_override_stake_bearing_claim_roll/);
+      assert.match(enginesSource, /stakes-bearing known-false or unsupported factual claim is USER=CHA and OPP=MND/);
+      assert.match(preflightSource, /Claim branch:/);
+      assert.match(preflightSource, /NPC access is not direct; failed claim means doubt, distrust, inconsistency, proof demand, refusal, or testing, not omniscient certainty/);
+
+      const report = runCase({
+        userText: 'I tell Seraphina, "I am the queen\'s envoy. Open the sealed gate."',
+        dice: [15, 6, 10, 10, 10, 10],
+        tracker: {
+          Seraphina: trackerEntry({
+            currentDisposition: { B: 2, F: 2, H: 2 },
+            genStats: { Rank: 'Average', MainStat: 'Balanced', PHY: 5, MND: 5, CHA: 5 },
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Gain_Access',
+            identifyChallenge: 'convince Seraphina to open the sealed gate through claimed royal authority',
+            explicitMeans: 'claim to be the queen\'s envoy',
+            claimCheck: {
+              present: true,
+              claim: 'I am the queen\'s envoy',
+              targetNPC: 'Seraphina',
+              truthStatus: 'unsupported',
+              npcAccess: 'partial',
+              stakesImpact: true,
+              reason: 'Claimed royal authority would affect Seraphina opening the sealed gate',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: ['sealed gate access'] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+            mapStats: { USER: 'CHA', OPP: 'ENV' },
+          },
+          relationshipEngine: [relationship('Seraphina', {
+            genStats: { Rank: 'Average', MainStat: 'Balanced', PHY: 5, MND: 5, CHA: 5 },
+          })],
+        }),
+      });
+
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(packet.STAKES, 'Y');
+      assert.deepEqual(packet.ClaimCheck, {
+        Present: 'Y',
+        Claim: 'I am the queen\'s envoy',
+        TargetNPC: 'Seraphina',
+        TruthStatus: 'unsupported',
+        NPCAccess: 'partial',
+        StakesImpact: 'Y',
+        Reason: 'Claimed royal authority would affect Seraphina opening the sealed gate',
+      });
+      assert.ok(packet.ActionTargets.includes('Seraphina'));
+      assert.ok(packet.OppTargets.NPC.includes('Seraphina'));
+      assert.match(report.finalNarrativeHandoff.resultLine, /\+\s*CHA\(/);
+      assert.match(report.finalNarrativeHandoff.resultLine, /vs\s+1d20\(\d+\)\s*\+\s*MND\(/);
+      assert.ok(auditIncludes(report, 'hard_override_stake_bearing_claim_roll'));
+      assert.ok(auditIncludes(report, 'stakes-bearing known-false or unsupported factual claim is USER=CHA and OPP=MND'));
+
+      const text = prompt(report);
+      assert.match(text, /ClaimCheck: claim:"I am the queen's envoy"; target:Seraphina; truth:unsupported; access:partial; stakes:Y/i);
+      assert.match(text, /Claim branch:/);
+      assert.match(text, /belief contest/i);
+      assert.match(text, /NPC access is not direct/i);
+      assert.match(text, /not omniscient certainty/i);
+    },
+  },
+  {
+    name: '34e no-stakes factual claim does not force a roll or narrator claim branch',
+    run() {
+      const report = runCase({
+        userText: 'I tell Seraphina, "The rain followed me all morning."',
+        tracker: {
+          Seraphina: trackerEntry({ currentDisposition: { B: 2, F: 2, H: 2 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Small_Talk',
+            identifyChallenge: 'ordinary conversation about weather',
+            explicitMeans: 'mention the rain',
+            claimCheck: {
+              present: true,
+              claim: 'The rain followed me all morning',
+              targetNPC: 'Seraphina',
+              truthStatus: 'unsupported',
+              npcAccess: 'unknown',
+              stakesImpact: false,
+              reason: 'Harmless small talk with no material NPC stakes',
+            },
+            identifyTargets: {
+              ActionTargets: ['Seraphina'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+            mapStats: { USER: 'CHA', OPP: 'CHA' },
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      });
+
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(packet.STAKES, 'N');
+      assert.equal(packet.ClaimCheck.Present, 'Y');
+      assert.equal(packet.ClaimCheck.StakesImpact, 'N');
+      assert.equal(packet.ClaimCheck.TruthStatus, 'unsupported');
+      assert.equal(auditIncludes(report, 'hard_override_stake_bearing_claim_roll'), false);
+
+      const text = prompt(report);
+      assert.doesNotMatch(text, /Claim branch:/);
+      assert.doesNotMatch(text, /belief contest/i);
+    },
+  },
+  {
     name: '35 name promotion does not retire established named NPCs',
     run() {
       const text = 'Seraphina and I enter a ruined roadside shrine at dusk. A wounded merchant named Darai is pinned behind a broken pillar.';
@@ -7941,6 +8078,7 @@ const tests = [
       }
 
       assert.doesNotMatch(renderSource, /id="structured_preflight_disable_semantic_thinking"/);
+      assert.doesNotMatch(source, /\bdisableThinkingCheckbox\b/);
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.disableSemanticThinking/);
       assert.doesNotMatch(renderSource, /<hr>/);
     },

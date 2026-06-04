@@ -23,6 +23,8 @@ const POWER_ACTOR_ASSESSMENT_SCOPES = Object.freeze(['individual', 'organization
 const POWER_EVENT_TYPES = Object.freeze(['none', 'minor_obstruction', 'warning', 'ambush', 'frame_user', 'plant_contact', 'agent_mislead', 'agent_report', 'agent_sabotage']);
 const POWER_EVENT_FITS = Object.freeze(['none', 'use_now', 'defer', 'drop']);
 const POWER_EVENT_CONTACT_GENDERS = Object.freeze(['none', 'male', 'female', 'unknown']);
+const CLAIM_TRUTH_STATUSES = Object.freeze(['none', 'known_true', 'known_false', 'unsupported', 'unknown']);
+const CLAIM_NPC_ACCESS_LEVELS = Object.freeze(['none', 'direct', 'partial', 'unknown']);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -687,6 +689,34 @@ function buildSemanticPreflightSchema() {
         required: STAKE_OUTCOME_KEYS,
         properties: Object.fromEntries(STAKE_OUTCOME_KEYS.map(key => [key, { type: 'string', enum: ['benefit', 'harm', 'none'] }])),
     };
+    const claimCheckSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['present', 'claim', 'targetNPC', 'truthStatus', 'npcAccess', 'stakesImpact', 'reason'],
+        properties: {
+            present: {
+                type: 'boolean',
+                description: 'Y only when the latest user input makes a factual claim that could affect a specific NPC choice or stakes.',
+            },
+            claim: { type: 'string' },
+            targetNPC: { type: 'string' },
+            truthStatus: {
+                type: 'string',
+                enum: CLAIM_TRUTH_STATUSES,
+                description: 'known_true=explicitly supported; known_false=explicitly contradicted; unsupported=material claim not established; unknown=insufficient context; none=no relevant claim.',
+            },
+            npcAccess: {
+                type: 'string',
+                enum: CLAIM_NPC_ACCESS_LEVELS,
+                description: 'How much the target NPC can naturally verify or know the claim: direct, partial, none, or unknown.',
+            },
+            stakesImpact: {
+                type: 'boolean',
+                description: 'Y only if belief/disbelief could materially affect the NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes.',
+            },
+            reason: { type: 'string' },
+        },
+    };
 
     return {
         type: 'object',
@@ -720,6 +750,7 @@ function buildSemanticPreflightSchema() {
                     'identifyChallenge',
                     'explicitMeans',
                     'userAbilityUse',
+                    'claimCheck',
                     'identifyTargets',
                     'intimacyAdvanceExplicit',
                     'boundaryViolationExplicit',
@@ -764,6 +795,7 @@ function buildSemanticPreflightSchema() {
                             },
                         },
                     },
+                    claimCheck: claimCheckSchema,
                     identifyTargets: {
                         type: 'object',
                         additionalProperties: false,
@@ -1186,6 +1218,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- RelationshipEngine[index].checkThreshold override flags must use all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. CurrentInvitation=Y when this NPC clearly and directly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene, and has not withdrawn, refused, panicked, or been interrupted by danger. Mark CurrentInvitation=Y for irrefutable sexual invitation hints even when phrased as teasing questions, such as "I wonder how tight I would be for you. Want to find out?" Do not mark CurrentInvitation for ordinary flirting, suggestive banter, compliments, attraction, embarrassment, vague innuendo without an invitation, or a user-originated proposal the NPC has not accepted. Exploitation=Y when card/lore/context explicitly makes this NPC exploitable by {{user}} or the current situation: naive, easily led or persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, sheltered to an unsafe degree, or otherwise unable to safely judge/resist. Do not mark Exploitation for mere innocence, shyness, kindness, friendliness, attraction, low confidence, or normal inexperience without explicit vulnerability/suggestibility. Hedonist=Y only for explicitly sexually open, pleasure-seeking, casual, promiscuous, or eager intimacy context. Transactional=Y only for explicit willingness to exchange intimacy for money, goods, favors, protection, status, or services. Established=Y only for explicit prior/current intimate access with current or recent receptivity toward {{user}}, such as casual lovers, friends with benefits, an ongoing sexual arrangement, or explicit comfort/willingness with renewed intimacy. Do not mark Established for prior intimacy alone when current receptivity is absent, stale, unclear, refused, fearful, hostile, coerced, or boundary-limited. establishedRelationship remains its separate relationship-state mechanic.',
     '- RelationshipEngine[index].slowBondEvidence is scene-local semantic evidence for slow B3-to-B4 trust growth. Mark only categories explicitly shown in the latest scene/current immediate context. respectfulContact=welcome/respectful physical contact or physical help; cooperation=constructive cooperation toward a shared purpose; comfortInProximity=NPC remains or settles close without fear, duty, coercion, or forced circumstance; boundaryRespect={{user}} respects refusal, hesitation, privacy, space, limits, consent, or a stated boundary; sharedRoutine=repeated or mundane togetherness such as eating/traveling/working/resting/training/tending camp; playfulness=mutual light teasing, joking, banter, or relaxed warmth; teamwork=coordinated effort under pressure/danger/conflict/crisis; personalAttention=specific attention to NPC needs, preferences, wellbeing, vulnerability, history, comfort, or concerns. blockers include coercion, intimidation, betrayal, humiliation, unwanted intimacy pressure, boundary violation, unresolved harm, exploitation, active fear, active hostility, or trapped/dependent/powerless circumstances that make closeness unsafe to count.',
     '- ResolutionEngine.userAbilityUse is semantic-only ability/spell detection. Compare the latest user input against active {{user}}/persona abilities, including abilities described in character persona, sheet, lore, or prompt stack. Mark Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Mark Available=Y only if that attempted ability/spell exists in active {{user}} abilities. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect to preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: abilities can make fictional methods possible, but they never change hasStakes, actionCount, mapStats, rolls, bonuses, margins, landed actions, relationship state, injury severity, or outcome. If an available ability delivers a threat, persuasion, attack, escape, or other stakes-bearing goal, classify and roll the broader goal normally; do not roll the ability separately. If no ability/spell attempt exists, output Attempted=N, Available=N, Used=N, and (none) for name, evidence, effect, and reason.',
+    '- ResolutionEngine.claimCheck is a narrow stakes-bearing claim check, not a truth engine. Mark Present=Y only when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Claim examples include identity/status/authority, affiliation, ownership/access, possession/resources, orders/authorization, or claimed events/facts used as leverage. TruthStatus: known_true only if explicitly supported; known_false only if explicitly contradicted; unsupported if material but not established; unknown if context cannot judge; none when no relevant claim. NPCAccess describes how much the target NPC can naturally verify or know the claim: direct, partial, none, unknown. StakesImpact=Y only when belief/disbelief matters under DEF.STAKES. Do not mark Present for casual flavor, jokes, harmless small talk, opinions, compliments, vague emotional color, or claims that do not affect NPC stakes.',
     '- ResolutionEngine.identifyTargets.hostilesInScene.NPC is scene-level: list ALL established, present, living hostile entities currently threatening {{user}}, companions, protected NPCs, bystanders, or the scene generally. Identify this broad hostile pool before choosing OppTargets.NPC. Establishment must come from assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create a hostile from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated entities no longer posing danger, and non-living hazards/obstacles.',
     '- ResolutionEngine.identifyTargets.OppTargets.NPC is narrower: list only living entities directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}\'s current action/challenge. Do not put every enemy in OppTargets.NPC just because they are hostile; use hostilesInScene.NPC for the broader hostile pool.',
     '- ResolutionEngine.activeHostileThreat is strict. Return Y only if the current scene contains an immediate hostile danger from an NPC/entity: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster/hostile creature engagement, armed standoff, capture attempt, or imminent physical/supernatural harm. Return N for negotiation, refusal, bargaining, argument, social resistance, authority denial, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger.',
@@ -1233,6 +1266,13 @@ ResolutionEngine.userAbilityUse.Evidence=(none)
 ResolutionEngine.userAbilityUse.NarrativeEffect=(none)
 ResolutionEngine.userAbilityUse.NoEffectReason=(none)
 ResolutionEngine.userAbilityUse.MechanicalScope=flavor_only_no_bonus
+ResolutionEngine.claimCheck.Present=N
+ResolutionEngine.claimCheck.Claim=(none)
+ResolutionEngine.claimCheck.TargetNPC=(none)
+ResolutionEngine.claimCheck.TruthStatus=none
+ResolutionEngine.claimCheck.NPCAccess=none
+ResolutionEngine.claimCheck.StakesImpact=N
+ResolutionEngine.claimCheck.Reason=(none)
 ResolutionEngine.identifyTargets.hostilesInScene.NPC=(none)
 ResolutionEngine.identifyTargets.ActionTargets=(none)
 ResolutionEngine.identifyTargets.OppTargets.NPC=(none)
@@ -1443,8 +1483,9 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC core stat block from explicit portrayal and copy the same block into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
         'Do not leave a named portrayed NPC as Rank none or 1/1/1 unless the card, scene, and tracker give no explicit portrayal at all. ' +
         'Detect user ability/spell attempts before target/risk classification: compare the latest user input against active {{user}}/persona abilities in the assembled SillyTavern prompt stack, character persona/sheet, scenario, lore/world info, and chat context. Mark ResolutionEngine.userAbilityUse.Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Mark Available=Y only if the attempted ability/spell exists in active {{user}} abilities. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect the narrator must preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: ability use is fictional permission/method only, never a bonus, never a dice modifier, never a separate roll, and never a bypass for broader stakes or outcomes. If an available ability is used to deliver a threat, persuasion, attack, escape, or other contested goal, classify and roll the broader goal normally while keeping the ability as delivery/flavor. ' +
+        'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, hasStakes, actionCount, mapStats, getUserCoreStats, getCurrentCoreStats/genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, hasStakes, actionCount, mapStats, getUserCoreStats, getCurrentCoreStats/genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do NOT execute ResolutionEngine.resolveOutcome, dice, margins, landed actions, or counter potential; deterministic code handles those after your ledger. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
@@ -1688,6 +1729,11 @@ function validateRawLedgerContract(ledger, raw) {
     if (typeof ledger?.resolutionEngine?.userAbilityUse?.attempted !== 'boolean') missing.push('resolutionEngine.userAbilityUse.attempted:boolean');
     if (typeof ledger?.resolutionEngine?.userAbilityUse?.available !== 'boolean') missing.push('resolutionEngine.userAbilityUse.available:boolean');
     if (!ledger?.resolutionEngine?.userAbilityUse?.mechanicalScope) missing.push('resolutionEngine.userAbilityUse.mechanicalScope');
+    if (!ledger?.resolutionEngine?.claimCheck) missing.push('resolutionEngine.claimCheck');
+    if (typeof ledger?.resolutionEngine?.claimCheck?.present !== 'boolean') missing.push('resolutionEngine.claimCheck.present:boolean');
+    if (typeof ledger?.resolutionEngine?.claimCheck?.stakesImpact !== 'boolean') missing.push('resolutionEngine.claimCheck.stakesImpact:boolean');
+    if (!CLAIM_TRUTH_STATUSES.includes(ledger?.resolutionEngine?.claimCheck?.truthStatus)) missing.push('resolutionEngine.claimCheck.truthStatus');
+    if (!CLAIM_NPC_ACCESS_LEVELS.includes(ledger?.resolutionEngine?.claimCheck?.npcAccess)) missing.push('resolutionEngine.claimCheck.npcAccess');
     if (!ledger?.resolutionEngine?.identifyTargets) missing.push('resolutionEngine.identifyTargets');
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.hostilesInScene?.NPC)) missing.push('resolutionEngine.identifyTargets.hostilesInScene.NPC');
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.ActionTargets)) missing.push('resolutionEngine.identifyTargets.ActionTargets');
@@ -1782,6 +1828,13 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.userAbilityUse.NarrativeEffect',
         'ResolutionEngine.userAbilityUse.NoEffectReason',
         'ResolutionEngine.userAbilityUse.MechanicalScope',
+        'ResolutionEngine.claimCheck.Present',
+        'ResolutionEngine.claimCheck.Claim',
+        'ResolutionEngine.claimCheck.TargetNPC',
+        'ResolutionEngine.claimCheck.TruthStatus',
+        'ResolutionEngine.claimCheck.NPCAccess',
+        'ResolutionEngine.claimCheck.StakesImpact',
+        'ResolutionEngine.claimCheck.Reason',
         'ResolutionEngine.identifyTargets.hostilesInScene.NPC',
         'ResolutionEngine.identifyTargets.ActionTargets',
         'ResolutionEngine.identifyTargets.OppTargets.NPC',
@@ -2044,6 +2097,15 @@ function parseCompactLedger(text, trackerSnapshot) {
             narrativeEffect: cleanScalar(fields.get('ResolutionEngine.userAbilityUse.NarrativeEffect')) || '(none)',
             noEffectReason: cleanScalar(fields.get('ResolutionEngine.userAbilityUse.NoEffectReason')) || '(none)',
             mechanicalScope: cleanScalar(fields.get('ResolutionEngine.userAbilityUse.MechanicalScope')) || 'flavor_only_no_bonus',
+        }),
+        claimCheck: normalizeClaimCheck({
+            present: readBoolean(fields, 'ResolutionEngine.claimCheck.Present', false),
+            claim: cleanScalar(fields.get('ResolutionEngine.claimCheck.Claim')) || '(none)',
+            targetNPC: cleanScalar(fields.get('ResolutionEngine.claimCheck.TargetNPC')) || '(none)',
+            truthStatus: cleanScalar(fields.get('ResolutionEngine.claimCheck.TruthStatus')) || 'none',
+            npcAccess: cleanScalar(fields.get('ResolutionEngine.claimCheck.NPCAccess')) || 'none',
+            stakesImpact: readBoolean(fields, 'ResolutionEngine.claimCheck.StakesImpact', false),
+            reason: cleanScalar(fields.get('ResolutionEngine.claimCheck.Reason')) || '(none)',
         }),
         identifyTargets: {
             hostilesInScene: {
@@ -2843,6 +2905,7 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.actionCount = normalizeActionMarkers(ledger.resolutionEngine.actionCount);
     ledger.resolutionEngine.mapStats = ledger.resolutionEngine.mapStats || {};
     ledger.resolutionEngine.userAbilityUse = normalizeUserAbilityUse(ledger.resolutionEngine.userAbilityUse);
+    ledger.resolutionEngine.claimCheck = normalizeClaimCheck(ledger.resolutionEngine.claimCheck);
     ledger.resolutionEngine.hasStakes = toBoolean(ledger.resolutionEngine.hasStakes, false);
     ledger.resolutionEngine.intimacyAdvanceExplicit = toBoolean(ledger.resolutionEngine.intimacyAdvanceExplicit, false);
     ledger.resolutionEngine.boundaryViolationExplicit = toBoolean(ledger.resolutionEngine.boundaryViolationExplicit, false);
@@ -2958,6 +3021,29 @@ function normalizeUserAbilityUse(value) {
         narrativeEffect: attempted && !isNoneValue(narrativeEffect) ? narrativeEffect : '(none)',
         noEffectReason: attempted && !available && !isNoneValue(noEffectReason) ? noEffectReason : '(none)',
         mechanicalScope: 'flavor_only_no_bonus',
+    };
+}
+
+function normalizeClaimCheck(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const present = toBoolean(source.present ?? source.Present, false);
+    const stakesImpact = toBoolean(source.stakesImpact ?? source.StakesImpact, false);
+    const claim = cleanScalar(source.claim ?? source.Claim) || '(none)';
+    const targetNPC = cleanScalar(source.targetNPC ?? source.TargetNPC) || '(none)';
+    const rawTruthStatus = cleanScalar(source.truthStatus ?? source.TruthStatus).toLowerCase().replace(/[\s-]+/g, '_');
+    const rawNpcAccess = cleanScalar(source.npcAccess ?? source.NPCAccess).toLowerCase().replace(/[\s-]+/g, '_');
+    const truthStatus = CLAIM_TRUTH_STATUSES.includes(rawTruthStatus) ? rawTruthStatus : 'unknown';
+    const npcAccess = CLAIM_NPC_ACCESS_LEVELS.includes(rawNpcAccess) ? rawNpcAccess : 'unknown';
+    const reason = cleanScalar(source.reason ?? source.Reason) || '(none)';
+    const keepDetails = present && !isNoneValue(claim);
+    return {
+        present,
+        claim: keepDetails ? claim : '(none)',
+        targetNPC: present && !isNoneValue(targetNPC) ? targetNPC : '(none)',
+        truthStatus: present ? truthStatus : 'none',
+        npcAccess: present ? npcAccess : 'none',
+        stakesImpact: present && stakesImpact,
+        reason: present && !isNoneValue(reason) ? reason : '(none)',
     };
 }
 
@@ -3164,6 +3250,11 @@ function validateNormalizedLedger(ledger, raw) {
     if (typeof ledger.resolutionEngine?.userAbilityUse?.attempted !== 'boolean') missing.push('resolutionEngine.userAbilityUse.attempted:boolean');
     if (typeof ledger.resolutionEngine?.userAbilityUse?.available !== 'boolean') missing.push('resolutionEngine.userAbilityUse.available:boolean');
     if (ledger.resolutionEngine?.userAbilityUse?.mechanicalScope !== 'flavor_only_no_bonus') missing.push('resolutionEngine.userAbilityUse.mechanicalScope:flavor_only_no_bonus');
+    if (!ledger.resolutionEngine?.claimCheck) missing.push('resolutionEngine.claimCheck');
+    if (typeof ledger.resolutionEngine?.claimCheck?.present !== 'boolean') missing.push('resolutionEngine.claimCheck.present:boolean');
+    if (typeof ledger.resolutionEngine?.claimCheck?.stakesImpact !== 'boolean') missing.push('resolutionEngine.claimCheck.stakesImpact:boolean');
+    if (!CLAIM_TRUTH_STATUSES.includes(ledger.resolutionEngine?.claimCheck?.truthStatus)) missing.push('resolutionEngine.claimCheck.truthStatus');
+    if (!CLAIM_NPC_ACCESS_LEVELS.includes(ledger.resolutionEngine?.claimCheck?.npcAccess)) missing.push('resolutionEngine.claimCheck.npcAccess');
     if (!ledger.resolutionEngine?.identifyTargets) missing.push('resolutionEngine.identifyTargets');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.hostilesInScene?.NPC)) missing.push('resolutionEngine.identifyTargets.hostilesInScene.NPC');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.ActionTargets)) missing.push('resolutionEngine.identifyTargets.ActionTargets');

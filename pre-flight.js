@@ -87,6 +87,7 @@ function buildReadableSemanticDebug(ledger) {
         'identifyChallenge=' + valueOrNone(resolution.identifyChallenge),
         'explicitMeans=' + valueOrNone(resolution.explicitMeans),
         'userAbilityUse=' + userAbilityUseSummary(resolution.userAbilityUse),
+        'claimCheck=' + claimCheckSummary(resolution.claimCheck),
         'identifyTargets:',
         'hostilesInScene.NPC=' + list(targets.hostilesInScene?.NPC),
         'ActionTargets=' + list(targets.ActionTargets),
@@ -141,6 +142,7 @@ function buildReadableDeterministicDebug(handoff) {
     return [
         'resolutionPacket.GOAL=' + valueOrNone(resolution.GOAL),
         'resolutionPacket.UserAbilityUse=' + userAbilityUseSummary(resolution.UserAbilityUse),
+        'resolutionPacket.ClaimCheck=' + claimCheckSummary(resolution.ClaimCheck),
         'resolutionPacket.intimacyAdvanceExplicit=' + valueOrNone(resolution.intimacyAdvanceExplicit),
         'resolutionPacket.boundaryViolationExplicit=' + valueOrNone(resolution.boundaryViolationExplicit),
         'resolutionPacket.nonLethal=' + valueOrNone(resolution.nonLethal),
@@ -225,6 +227,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['userAction', summary.userAction],
         ['resolution.GOAL', valueOrNone(resolution.GOAL)],
         ['resolution.UserAbilityUse', userAbilityUseSummary(resolution.UserAbilityUse)],
+        ['resolution.ClaimCheck', claimCheckSummary(resolution.ClaimCheck)],
         ['resolution.STAKES', summary.stakes],
         ['resolution.actionCount', summary.actionCount],
         ['resolution.rollFull', summary.rollFull],
@@ -424,8 +427,10 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
 
     const result = naturalOutcomeSummary(resolution);
     const rollAudit = rollAuditFromResultLine(handoff.resultLine, resolution);
+    const claimCheck = claimCheckSummary(resolution.ClaimCheck);
+    const claimGuide = claimCheckGuide(resolution.ClaimCheck, resolution, rollAudit);
     const intimacyBoundary = intimacyBoundarySummary(handoff);
-    const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
+    const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, claimGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
     const narratorAuthority = buildNarratorAuthority({ resolution, handoff, options });
     const renderContract = buildRenderContract();
     const narrationCraftDirective = buildNarrationCraftDirective();
@@ -444,6 +449,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         chaosGuide,
         userAbilityUse,
         userAbilityGuide,
+        claimCheck,
+        claimGuide,
         powerActorEvent,
         powerActorEventAudit,
         userImpairment,
@@ -479,6 +486,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         chaosGuide,
         userAbilityUse,
         userAbilityGuide,
+        claimCheck,
+        claimGuide,
         proactive: proactiveText,
         proactivityGuide,
         aggression: aggressionText,
@@ -629,12 +638,13 @@ Invalid responses must not be output.
 Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, ACTIVE_BRANCH_FACTS, RESOLVED_SCENE_FACTS, and NARRATION_CRAFT_DIRECTIVE are all satisfied.`;
 }
 
-function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
+function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, claimCheck, claimGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
     const facts = [];
     facts.push(`User action: ${valueOrNone(userAction)}.`);
     facts.push('Continuity branch: recent visible chat remains scene state for already-completed NPC/world actions, object positions, delivered items, current locations, and open/closed/removed/placed states. Do not replay the previous assistant beat or repeat an already-completed NPC/world action unless this handoff explicitly changes or reverses that state.');
     facts.push(currentSceneCastFact(resolution, handoff));
     if (!isNoneText(userAbilityUse)) facts.push(`UserAbilityUse: ${userAbilityUse}. ${userAbilityGuide}`);
+    if (!isNoneText(claimGuide)) facts.push(`ClaimCheck: ${claimCheck}. ${claimGuide}`);
     if (resolution?.STAKES === 'N' || resolution?.Outcome === 'no_roll') {
         facts.push('Resolution branch: no roll; ordinary scene continuity unless another active branch constrains it.');
     } else {
@@ -1207,7 +1217,99 @@ function userAbilityUseGuide(value = {}) {
     return `Preserve user ability effect as direct scene fact: ${ability.narrativeEffect}. Ability=${ability.abilityName}; evidence=${ability.evidence}. Render only the effect/delivery; do not announce, name, activate, focus, channel, charge, or explain the ability. It is flavor_only_no_bonus: do not add bonuses, success, roll changes, extra landed actions, or bypassed stakes. If the broader goal has stakes, narrate the resolved outcome normally while preserving this ability method.`;
 }
 
-function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, userImpairment, npcImpairment, options = {} }) {
+function normalizeClaimCheckObject(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const present = ynBool(source.present ?? source.Present);
+    const stakesImpact = ynBool(source.stakesImpact ?? source.StakesImpact);
+    const claim = String(source.claim ?? source.Claim ?? '').trim();
+    const targetNPC = String(source.targetNPC ?? source.TargetNPC ?? '').trim();
+    const truthStatus = String(source.truthStatus ?? source.TruthStatus ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const npcAccess = String(source.npcAccess ?? source.NPCAccess ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const reason = String(source.reason ?? source.Reason ?? '').trim();
+    return {
+        present,
+        claim: present && !isNoneText(claim) ? claim : '(none)',
+        targetNPC: present && !isNoneText(targetNPC) ? targetNPC : '(none)',
+        truthStatus: present && ['known_true', 'known_false', 'unsupported', 'unknown'].includes(truthStatus) ? truthStatus : 'none',
+        npcAccess: present && ['direct', 'partial', 'unknown'].includes(npcAccess) ? npcAccess : 'none',
+        stakesImpact: present && stakesImpact,
+        reason: present && !isNoneText(reason) ? reason : '(none)',
+    };
+}
+
+function claimCheckSummary(value = {}) {
+    const claim = normalizeClaimCheckObject(value);
+    if (!claim.present) return 'none';
+    return [
+        `claim:"${quoteInline(claim.claim)}"`,
+        `target:${claim.targetNPC}`,
+        `truth:${claim.truthStatus}`,
+        `access:${claim.npcAccess}`,
+        `stakes:${claim.stakesImpact ? 'Y' : 'N'}`,
+        `reason:${claim.reason}`,
+    ].join('; ');
+}
+
+function claimCheckGuide(value = {}, resolution = {}, rollAudit = {}) {
+    const claim = normalizeClaimCheckObject(value);
+    if (!isStakeBearingUntrustedClaimForNarration(claim)) return 'none';
+    const target = claim.targetNPC;
+    const margin = Number(rollAudit?.margin);
+    const marginKnown = Number.isFinite(margin);
+    const outcome = String(resolution?.Outcome ?? '').toLowerCase();
+    const success = marginKnown
+        ? margin > 0
+        : ['success', 'light_impact', 'solid_impact', 'dominant_impact'].includes(outcome);
+    const failure = marginKnown
+        ? margin < 0
+        : ['failure', 'checked', 'deflected', 'avoided'].includes(outcome);
+    const accessCap = claim.npcAccess === 'direct'
+        ? 'NPC access is direct; a strong failed claim may be called out as false when scene evidence supports it.'
+        : 'NPC access is not direct; failed claim means doubt, distrust, inconsistency, proof demand, refusal, or testing, not omniscient certainty.';
+
+    let reaction = `${target} weighs the factual claim as a belief contest.`;
+    if (success) {
+        if (marginKnown && margin >= 8) {
+            reaction = `${target} believes the claim strongly enough to materially act on it, open access, change trust, or commit resources as context supports.`;
+        } else if (marginKnown && margin >= 4) {
+            reaction = `${target} believes the claim and adjusts choices, access, trust, or resources accordingly.`;
+        } else {
+            reaction = `${target} accepts the claim enough for the moment; keep belief provisional if the claim is unsupported or hard to verify.`;
+        }
+    } else if (failure) {
+        if (marginKnown && margin <= -8) {
+            reaction = claim.npcAccess === 'direct'
+                ? `${target} catches the contradiction and may call the claim false directly.`
+                : `${target} strongly disbelieves the claim and may refuse, test it, demand proof, or challenge the inconsistency.`;
+        } else if (marginKnown && margin <= -4) {
+            reaction = `${target} distrusts the claim and withholds the requested trust, access, resource, safety, authority, or emotional opening.`;
+        } else {
+            reaction = `${target} doubts the claim; render hesitation, a proof demand, a guarded question, or a limited refusal.`;
+        }
+    } else {
+        reaction = `${target} remains uncertain; render delay, a test, a proof demand, or partial guarded acceptance without full commitment.`;
+    }
+
+    return `Claim branch: treat this as a belief contest. ${reaction} ${accessCap} Do not narrate the claim itself as established truth unless TruthStatus=known_true; this branch is only NPC belief/disbelief guidance.`;
+}
+
+function isStakeBearingUntrustedClaimForNarration(claim) {
+    return claim?.present
+        && claim?.stakesImpact
+        && ['known_false', 'unsupported'].includes(claim.truthStatus);
+}
+
+function quoteInline(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim().replace(/"/g, "'");
+}
+
+function ynBool(value) {
+    if (typeof value === 'boolean') return value;
+    const text = String(value ?? '').trim().toLowerCase();
+    return text === 'y' || text === 'yes' || text === 'true' || text === '1';
+}
+
+function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, claimGuide, userImpairment, npcImpairment, options = {} }) {
     const outcome = naturalOutcomeSummary(resolution);
     const partialActionInstruction = partialActionGuide(resolution);
     const primaryNpc = primaryNarrationNpc(handoff, resolution);
@@ -1242,8 +1344,9 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const aggressionTargetLock = aggressionTargetLockGuide(handoff.aggressionResults);
     const companionCommandInstruction = companionCommandGuide(resolution);
     const abilityInstruction = !isNoneText(userAbilityGuide) ? ` ${userAbilityGuide}` : '';
+    const claimInstruction = !isNoneText(claimGuide) ? ` ${claimGuide}` : '';
 
-    const commonResultInstruction = `${companionCommandInstruction}${abilityInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
+    const commonResultInstruction = `${companionCommandInstruction}${abilityInstruction}${claimInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
     const stackedPressureInstruction = [
         boundaryViolationNote,
         boundaryNote,
