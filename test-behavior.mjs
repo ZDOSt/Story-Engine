@@ -144,6 +144,7 @@ function baseLedger(overrides = {}) {
       hasStakes: false,
       actionCount: ['a1'],
       mapStats: { USER: 'CHA', OPP: 'CHA' },
+      environmentDifficulty: 0,
       classifyHostilePhysicalIntent: false,
       activeHostileThreat: false,
       classifyPhysicalBoundaryPressure: false,
@@ -1738,6 +1739,8 @@ const tests = [
   {
     name: '12b per-NPC rapport cooldown expiry increases rapport on next qualifying interaction',
     run() {
+      const realDateNow = Date.now;
+      const now = 1700000000000;
       const tracker = {
         Seraphina: trackerEntry({
           currentDisposition: { B: 2, F: 2, H: 2 },
@@ -1745,61 +1748,73 @@ const tests = [
           lastRapportGainActiveMs: 30 * 60 * 1000,
         }),
       };
-      const report = runCase({
-        userText: 'I find Seraphina at the edge of camp and ask what she needs help with first.',
-        rapportClock: { activeMs: 60 * 60 * 1000, lastActivityAt: Date.now() },
-        tracker,
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Normal_Interaction',
-            identifyChallenge: 'ask what Seraphina needs help with first',
-            explicitMeans: 'ask what Seraphina needs help with first',
-            identifyTargets: {
-              ActionTargets: ['Seraphina'],
-              OppTargets: { NPC: [], ENV: [] },
-              BenefitedObservers: [],
-              HarmedObservers: [],
+      try {
+        Date.now = () => now;
+        const report = runCase({
+          userText: 'I find Seraphina at the edge of camp and ask what she needs help with first.',
+          rapportClock: { activeMs: 60 * 60 * 1000, lastActivityAt: now },
+          tracker,
+          ledger: baseLedger({
+            resolutionEngine: {
+              identifyGoal: 'Normal_Interaction',
+              identifyChallenge: 'ask what Seraphina needs help with first',
+              explicitMeans: 'ask what Seraphina needs help with first',
+              identifyTargets: {
+                ActionTargets: ['Seraphina'],
+                OppTargets: { NPC: [], ENV: [] },
+                BenefitedObservers: [],
+                HarmedObservers: [],
+              },
             },
-          },
-          relationshipEngine: [relationship('Seraphina', {
-            slowBondEvidence: {
-              cooperation: true,
-              boundaryRespect: true,
-              personalAttention: true,
-            },
-          })],
-        }),
-      });
-      assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 2);
-      assert.equal(auditIncludes(report, 'rapportEligible=Y'), true);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 60 * 60 * 1000);
+            relationshipEngine: [relationship('Seraphina', {
+              slowBondEvidence: {
+                cooperation: true,
+                boundaryRespect: true,
+                personalAttention: true,
+              },
+            })],
+          }),
+        });
+        assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 2);
+        assert.equal(auditIncludes(report, 'rapportEligible=Y'), true);
+        assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 60 * 60 * 1000);
+      } finally {
+        Date.now = realDateNow;
+      }
     },
   },
   {
     name: '12c first tracked encounter increases rapport and starts cooldown',
     run() {
-      const report = runCase({
-        userText: 'I step into the glade and greet Seraphina for the first time.',
-        rapportClock: { activeMs: 10 * 60 * 1000, lastActivityAt: Date.now() },
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Normal_Interaction',
-            identifyChallenge: 'greet Seraphina for the first time',
-            explicitMeans: 'greet Seraphina for the first time',
-            identifyTargets: {
-              ActionTargets: ['Seraphina'],
-              OppTargets: { NPC: [], ENV: [] },
-              BenefitedObservers: [],
-              HarmedObservers: [],
+      const realDateNow = Date.now;
+      const now = 1700000000000;
+      try {
+        Date.now = () => now;
+        const report = runCase({
+          userText: 'I step into the glade and greet Seraphina for the first time.',
+          rapportClock: { activeMs: 10 * 60 * 1000, lastActivityAt: now },
+          ledger: baseLedger({
+            resolutionEngine: {
+              identifyGoal: 'Normal_Interaction',
+              identifyChallenge: 'greet Seraphina for the first time',
+              explicitMeans: 'greet Seraphina for the first time',
+              identifyTargets: {
+                ActionTargets: ['Seraphina'],
+                OppTargets: { NPC: [], ENV: [] },
+                BenefitedObservers: [],
+                HarmedObservers: [],
+              },
             },
-          },
-          relationshipEngine: [relationship('Seraphina')],
-        }),
-      });
-      assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
-      assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 10 * 60 * 1000);
-      assert.equal(auditIncludes(report, 'firstTrackedEncounter=Y'), true);
-      assert.equal(auditIncludes(report, 'rapportEligible=Y'), true);
+            relationshipEngine: [relationship('Seraphina')],
+          }),
+        });
+        assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 1);
+        assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 10 * 60 * 1000);
+        assert.equal(auditIncludes(report, 'firstTrackedEncounter=Y'), true);
+        assert.equal(auditIncludes(report, 'rapportEligible=Y'), true);
+      } finally {
+        Date.now = realDateNow;
+      }
     },
   },
   {
@@ -2667,6 +2682,102 @@ const tests = [
       assert.equal(proactive.RomanceInitiativeTag, '(none)');
       assert.doesNotMatch(prompt(report), /focused romantic attention/);
       assert.doesNotMatch(prompt(report), /Romantic_Attention|Proactivity Guide/);
+    },
+  },
+  {
+    name: '12i.1 ENV difficulty adds to environmental opposition roll and narrator branch',
+    run() {
+      const report = runCase({
+        userText: 'I force open the reinforced sealed gate.',
+        dice: [10, 10, 1, 1, 1, 1],
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'OpenGate',
+            identifyChallenge: 'force open the reinforced sealed gate',
+            explicitMeans: 'force open the reinforced sealed gate',
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: ['reinforced sealed gate'] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: true,
+            mapStats: { USER: 'PHY', OPP: 'ENV' },
+            environmentDifficulty: 8,
+          },
+        }),
+      });
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(packet.EnvironmentDifficulty, 8);
+      assert.equal(packet.Outcome, 'failure');
+      assert.match(report.finalNarrativeHandoff.resultLine, /1d20\(10\) \+ PHY\(6\) = 16 vs 1d20\(10\) \+ ENV\(8\) = 18/);
+      assert.match(prompt(report), /Environment branch: OppTargets\.ENV=reinforced sealed gate; difficulty=Hard\/8/);
+      assert.match(auditPrompt(report), /resolution\.EnvironmentDifficulty: OppTargets\.ENV=reinforced sealed gate; difficulty=Hard\/8/);
+    },
+  },
+  {
+    name: '12i.2 ENV difficulty zero keeps ordinary environmental roll readable',
+    run() {
+      const report = runCase({
+        userText: 'I shove the loose gate open.',
+        dice: [10, 10, 1, 1, 1, 1],
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'OpenGate',
+            identifyChallenge: 'shove the loose gate open',
+            explicitMeans: 'shove the loose gate open',
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: ['loose gate'] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: true,
+            mapStats: { USER: 'PHY', OPP: 'ENV' },
+            environmentDifficulty: 0,
+          },
+        }),
+      });
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(packet.EnvironmentDifficulty, 0);
+      assert.equal(packet.Outcome, 'success');
+      assert.match(report.finalNarrativeHandoff.resultLine, /1d20\(10\) \+ PHY\(6\) = 16 vs 1d20\(10\) \+ ENV\(0\) = 10/);
+      assert.match(prompt(report), /Environment branch: OppTargets\.ENV=loose gate; difficulty=Easy\/0/);
+    },
+  },
+  {
+    name: '12i.3 ENV difficulty is ignored for living opposition rolls',
+    run() {
+      const report = runCase({
+        userText: 'I shove past the guard.',
+        dice: [10, 10, 1, 1, 1, 1],
+        tracker: {
+          Guard: trackerEntry({ currentCoreStats: { Rank: 'Average', MainStat: 'PHY', PHY: 5, MND: 3, CHA: 2 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'GetPastGuard',
+            identifyChallenge: 'shove past the guard',
+            explicitMeans: 'shove past the guard',
+            identifyTargets: {
+              ActionTargets: ['Guard'],
+              OppTargets: { NPC: ['Guard'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: true,
+            mapStats: { USER: 'PHY', OPP: 'PHY' },
+            environmentDifficulty: 12,
+            classifyHostilePhysicalIntent: true,
+          },
+          relationshipEngine: [relationship('Guard')],
+        }),
+      });
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(packet.EnvironmentDifficulty, 0);
+      assert.doesNotMatch(report.finalNarrativeHandoff.resultLine, /ENV\(12\)/);
+      assert.match(report.finalNarrativeHandoff.resultLine, /vs 1d20\(10\) \+ PHY\(5\) = 15/);
+      assert.doesNotMatch(prompt(report), /Environment branch:/);
     },
   },
   {

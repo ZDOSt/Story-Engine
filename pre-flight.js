@@ -104,6 +104,7 @@ function buildReadableSemanticDebug(ledger) {
         'hasStakes=' + String(Boolean(resolution.hasStakes)),
         'actionCount=' + list(resolution.actionCount),
         'mapStats=' + inline(resolution.mapStats ?? {}),
+        'environmentDifficulty=' + valueOrNone(resolution.environmentDifficulty),
         'classifyHostilePhysicalIntent=' + String(Boolean(resolution.classifyHostilePhysicalIntent)),
         'activeHostileThreat=' + String(Boolean(resolution.activeHostileThreat)),
         'classifyPhysicalBoundaryPressure=' + String(Boolean(resolution.classifyPhysicalBoundaryPressure)),
@@ -165,6 +166,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.ActionTargets=' + list(resolution.ActionTargets),
         'resolutionPacket.OppTargets.NPC=' + list(resolution.OppTargets?.NPC),
         'resolutionPacket.OppTargets.ENV=' + list(resolution.OppTargets?.ENV),
+        'resolutionPacket.EnvironmentDifficulty=' + environmentDifficultySummary(resolution),
         'resolutionPacket.BenefitedObservers=' + list(resolution.BenefitedObservers),
         'resolutionPacket.HarmedObservers=' + list(resolution.HarmedObservers),
         'resolutionPacket.NPCInScene=' + list(resolution.NPCInScene),
@@ -235,6 +237,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.ClaimCheck', claimCheckSummary(resolution.ClaimCheck)],
         ['userKnowledge.application', summary.userKnowledgeApplication],
         ['resolution.STAKES', summary.stakes],
+        ['resolution.EnvironmentDifficulty', summary.environmentDifficulty],
         ['resolution.actionCount', summary.actionCount],
         ['resolution.rollFull', summary.rollFull],
         ['resolution.nonLethal', valueOrNone(resolution.nonLethal)],
@@ -437,6 +440,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
 
     const result = naturalOutcomeSummary(resolution);
     const rollAudit = rollAuditFromResultLine(handoff.resultLine, resolution);
+    const environmentDifficulty = environmentDifficultySummary(resolution);
     const claimCheck = claimCheckSummary(resolution.ClaimCheck);
     const claimGuide = claimCheckGuide(resolution.ClaimCheck, resolution, rollAudit);
     const intimacyBoundary = intimacyBoundarySummary(handoff);
@@ -450,6 +454,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         handoff,
         result,
         rollAudit,
+        environmentDifficulty,
         intimacyBoundary,
         proactiveText,
         proactivityGuide,
@@ -480,6 +485,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         result,
         rollUsed: rollAudit.rollUsed,
         rollFull: rollAudit.rollFull,
+        environmentDifficulty,
         outcome: outcomeAuditLabel(resolution),
         margin: rollAudit.margin,
         actionCount: actionCountSummary(resolution.actions),
@@ -657,7 +663,7 @@ Invalid responses must not be output.
 Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, ACTIVE_BRANCH_FACTS, RESOLVED_SCENE_FACTS, and NARRATION_CRAFT_DIRECTIVE are all satisfied.`;
 }
 
-function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, itemUse, itemUseGuide, claimCheck, claimGuide, userKnowledgeApplication, userKnowledgeGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
+function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, environmentDifficulty, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, itemUse, itemUseGuide, claimCheck, claimGuide, userKnowledgeApplication, userKnowledgeGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
     const facts = [];
     facts.push(`User action: ${valueOrNone(userAction)}.`);
     facts.push('Continuity branch: recent visible chat remains scene state for already-completed NPC/world actions, object positions, delivered items, current locations, and open/closed/removed/placed states. Do not replay the previous assistant beat or repeat an already-completed NPC/world action unless this handoff explicitly changes or reverses that state.');
@@ -666,6 +672,7 @@ function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollA
     if (!isNoneText(itemUse)) facts.push(`ItemUse: ${itemUse}. ${itemUseGuide}`);
     if (!isNoneText(claimGuide)) facts.push(`ClaimCheck: ${claimCheck}. ${claimGuide}`);
     if (!isNoneText(userKnowledgeGuide)) facts.push(`User knowledge branch: ${userKnowledgeApplication}. ${userKnowledgeGuide}`);
+    if (!isNoneText(environmentDifficulty)) facts.push(`Environment branch: ${environmentDifficulty}.`);
     if (resolution?.STAKES === 'N' || resolution?.Outcome === 'no_roll') {
         facts.push('Resolution branch: no roll; ordinary scene continuity unless another active branch constrains it.');
     } else {
@@ -1188,6 +1195,20 @@ function targetSummary(resolution) {
     if (!isNoneText(harmed)) parts.push(`harms:${harmed}`);
     if (!isNoneText(powerActors)) parts.push(`power:${powerActors}`);
     return parts.join('; ') || 'none';
+}
+
+function environmentDifficultySummary(resolution = {}) {
+    const oppEnv = list(resolution.OppTargets?.ENV);
+    if (isNoneText(oppEnv) || resolution.STAKES === 'N' || resolution.Outcome === 'no_roll') return 'none';
+    const value = Number(resolution.EnvironmentDifficulty ?? resolution.environmentDifficulty ?? 0);
+    const labels = {
+        0: 'Easy',
+        4: 'Average',
+        8: 'Hard',
+        12: 'Extreme',
+    };
+    const normalized = Object.prototype.hasOwnProperty.call(labels, value) ? value : 0;
+    return `OppTargets.ENV=${oppEnv}; difficulty=${labels[normalized]}/${normalized}`;
 }
 
 function normalizeAbilityUseObject(value = {}) {

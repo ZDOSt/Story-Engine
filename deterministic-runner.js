@@ -75,6 +75,7 @@ const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 const USER_PROACTIVITY_TARGET = '{{user}}';
 const USER_KNOWLEDGE_LEDGER_VERSION = 1;
+const ENVIRONMENT_DIFFICULTIES = Object.freeze([0, 4, 8, 12]);
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
 const RAPPORT_COOLDOWN_MS = 30 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
@@ -96,6 +97,11 @@ const POWER_ACTOR_EVENT_COOLDOWN_MS = Object.freeze({
     agent_report: 3 * 60 * 60 * 1000,
     agent_sabotage: 4 * 60 * 60 * 1000,
 });
+
+function normalizeEnvironmentDifficultyForRoll(value) {
+    const number = Number(value);
+    return ENVIRONMENT_DIFFICULTIES.includes(number) ? number : 0;
+}
 
 const NAME_STYLE_PROFILES = Object.freeze({
     'Balanced Fantasy': {
@@ -1414,6 +1420,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let npcImpairment = noNpcImpairment();
     let userAttackDie = null;
     let primaryOppTarget = null;
+    let resolvedOppStat = 'ENV';
+    let environmentDifficulty = 0;
 
     if (hasStakes === 'N') {
         userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, null, hasStakes);
@@ -1457,12 +1465,17 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             }
         }
         oppTargetsNpcFirst = firstReal(targets.OppTargets.NPC);
+        resolvedOppStat = oppStat;
+        environmentDifficulty = oppStat === 'ENV' && firstReal(targets.OppTargets.ENV)
+            ? normalizeEnvironmentDifficultyForRoll(semantic.environmentDifficulty)
+            : 0;
         const currentTargetCore = oppTargetsNpcFirst ? trackerSnapshot[oppTargetsNpcFirst]?.currentCoreStats : null;
 
         audit.push('2.7 hasStakes=Y');
         audit.push(`2.7a actionCount=[${actions.join(',')}]`);
         audit.push(`2.7b actions=[${actions.join(',')}]`);
         audit.push(`2.7c mapStats={USER:${userStat},OPP:${oppStat}}`);
+        if (oppStat === 'ENV') audit.push(`2.7c.1 environmentDifficulty=${environmentDifficulty}`);
         audit.push(`2.7d getUserCoreStats=${compact(userCore)}`);
         audit.push('2.7e targetCore=(none)');
 
@@ -1502,7 +1515,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         const defDie = rollPool[1];
         const userStatValue = statValue(userCore, userStat);
         const atkTot = atkDie + userStatValue + impairmentPenalty;
-        const defTot = oppStat === 'ENV' ? defDie : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty;
+        const defTot = oppStat === 'ENV' ? defDie + environmentDifficulty : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty;
         const margin = atkTot - defTot;
         const hostileReferee = applyHostilePhysicalIntentHardRules(semantic, audit);
         const hostilePhysicalIntent = hostileReferee.value;
@@ -1530,7 +1543,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         audit.push(`2.7o resolveOutcome=atkDie:${atkDie}, atkTot:${atkTot}, defDie:${defDie}, defTot:${defTot}, margin:${margin}, classifyHostilePhysicalIntent:${hostilePhysical ? 'Y' : 'N'}, classifyCombatActionSequence:${combatActionSequence ? 'Y' : 'N'} -> ${compact(outcome)}`);
         const impairmentText = impairmentPenalty ? ` + impairment(${impairmentPenalty})` : '';
         const npcImpairmentText = npcImpairmentPenalty ? ` + impairment(${npcImpairmentPenalty})` : '';
-        const oppStatText = oppStat === 'ENV' ? ' + ENV(0)' : ` + ${oppStat}(${statValue(targetCore, oppStat)})${npcImpairmentText}`;
+        const oppStatText = oppStat === 'ENV' ? ` + ENV(${environmentDifficulty})` : ` + ${oppStat}(${statValue(targetCore, oppStat)})${npcImpairmentText}`;
         resultLine = `1d20(${atkDie}) + ${userStat}(${userStatValue})${impairmentText} = ${atkTot} vs 1d20(${defDie})${oppStatText} = ${defTot} (${margin} - ${outcome.OutcomeTier})`;
         primaryOppTarget = oppStat !== 'ENV' ? oppTargetsNpcFirst : null;
     }
@@ -1583,6 +1596,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         hostilesInScene: { NPC: showNone(targets.hostilesInScene?.NPC) },
         ActionTargets: showNone(targets.ActionTargets),
         OppTargets: { NPC: showNone(targets.OppTargets.NPC), ENV: showNone(targets.OppTargets.ENV) },
+        EnvironmentDifficulty: resolvedOppStat === 'ENV' ? environmentDifficulty : 0,
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
         PowerActors: showNone(targets.PowerActors),

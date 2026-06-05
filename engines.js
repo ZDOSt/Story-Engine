@@ -3,7 +3,7 @@ export const ENGINE_PROMPT_TEXT = String.raw`[STRUCTURED_PREFLIGHT_ENGINE_EXTENS
 function ResolutionEngine(input) {
   const DEF = Object.freeze({
     UNIVERSAL:
-'EXPLICIT-ONLY. MUST be stated in Character Card / Lore / Scene text / tracker. NO invention. Uncertain = N or default. FIRST-YES-WINS = first matching explicit rule becomes final. No reconsideration. NEVER invent stats, targets, actions, obstacles, or outcomes. MAX 3 ACTIONS. TIE = STALEMATE / STRUGGLE. ROLLS = 1d20 + relevant stat vs opposing 1d20 + relevant stat, or vs plain Environment 1d20.',
+'EXPLICIT-ONLY. MUST be stated in Character Card / Lore / Scene text / tracker. NO invention. Uncertain = N or default. FIRST-YES-WINS = first matching explicit rule becomes final. No reconsideration. NEVER invent stats, targets, actions, obstacles, or outcomes. MAX 3 ACTIONS. TIE = STALEMATE / STRUGGLE. ROLLS = 1d20 + relevant stat vs opposing 1d20 + relevant stat, or vs Environment 1d20 + environmentDifficulty.',
     STATS:
 'PHY = challenges that require physical effort, strength, agility, speed, coordination, endurance, stealth movement, combat skill, or bodily execution under risk. MND = challenges that require thought, memory, perception, focus, reasoning, knowledge, awareness, will, or deliberate mental/supernatural exertion. CHA = social challenges that require persuasion, deception, intimidation, negotiation, emotional influence, personal presence, or interpersonal skill. Map the stat from finalGoal or explicit challenge that carries stakes, not from incidental gestures, flavor, delivery method, or setup. Core stat scale is 1 to 10.',
     STAKES:
@@ -122,6 +122,18 @@ function ResolutionEngine(input) {
     rule: if OppTargets.NPC=[(none)] and OppTargets.ENV contains an obstacle, OPP=ENV
     return {USER, OPP}
 
+  environmentDifficulty(stats, targets, context):
+    policy: LOCKED, EXPLICIT-ONLY
+    rule: applies only when stats.OPP=ENV and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure
+    rule: 0 = easy/trivial/routine/weak/lightly obstructed; if no real stakes exist, use STAKES=N instead of a roll
+    rule: 4 = average meaningful obstacle a capable person could plausibly fail
+    rule: 8 = hard serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk
+    rule: 12 = extreme exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition
+    rule: classify from concrete scene facts: material, scale, complexity, danger, time pressure, visibility, footing, weather, magical strength, tool access, distance, and whether the environment is worsening
+    rule: do not raise difficulty because the story moment feels dramatic; do not lower difficulty because {{user}} has high stats
+    if stats.OPP!=ENV -> 0
+    return 0|4|8|12
+
   getUserCoreStats():
     policy: LOCKED, EXPLICIT-ONLY
     rule: read {{user}}'s character sheet/persona
@@ -161,7 +173,7 @@ function ResolutionEngine(input) {
     rule: save currentCoreStats to sceneTracker and never change unless explicitly altered
     return {Rank, MainStat, PHY, MND, CHA}
 
-  resolveOutcome(input, finalGoal, actions, stats, userCore, targetCore):
+  resolveOutcome(input, finalGoal, actions, stats, userCore, targetCore, envDifficulty):
     policy: LOCKED
     comment: LandedActions applies to all resolved actions.
     comment: Non-combat success has LandedActions:1; stalemate/failure has LandedActions:0.
@@ -171,7 +183,7 @@ function ResolutionEngine(input) {
     atkTot = atkDie + userCore[stats.USER]
     if stats.OPP=ENV:
       defDie = 1d20
-      defTot = defDie
+      defTot = defDie + envDifficulty
     else:
       defDie = 1d20
       defTot = defDie + targetCore[stats.OPP]
@@ -203,17 +215,19 @@ function ResolutionEngine(input) {
     nonLethal = nonLethal(input, finalGoal, challenge, targets, context)
     STAKES = hasStakes(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
     actions = actionCount(input, challenge)
+    envDifficulty = 0
     if STAKES=N:
       outcome = {OutcomeTier:NONE, LandedActions:(none), Outcome:no_roll, CounterPotential:none}
     else:
       stats = mapStats(input, finalGoal, challenge, targets, context)
+      envDifficulty = environmentDifficulty(stats, targets, context)
       userCore = getUserCoreStats()
       if stats.OPP!=ENV:
         targetCore = getCurrentCoreStats(first OppTargets.NPC)
         if missing -> targetCore = genStats(first OppTargets.NPC, context)
-      outcome = resolveOutcome(input, finalGoal, actions, stats, userCore, targetCore)
+      outcome = resolveOutcome(input, finalGoal, actions, stats, userCore, targetCore, envDifficulty)
     NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, actions:actions, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, STAKES:STAKES, LandedActions:outcome.LandedActions, OutcomeTier:outcome.OutcomeTier, Outcome:outcome.Outcome, CounterPotential:outcome.CounterPotential, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
+    return {GOAL:finalGoal, actions:actions, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, STAKES:STAKES, EnvironmentDifficulty:envDifficulty, LandedActions:outcome.LandedActions, OutcomeTier:outcome.OutcomeTier, Outcome:outcome.Outcome, CounterPotential:outcome.CounterPotential, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {
