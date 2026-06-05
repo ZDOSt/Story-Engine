@@ -7,7 +7,7 @@ import { setPersonaDescription, user_avatar } from '../../../../scripts/personas
 import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, mergeUserKnowledgeLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
 import { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import {
@@ -1746,6 +1746,7 @@ function getTrackerRoot(context = getContext()) {
     root.npcs = root.npcs || {};
     root.user = normalizeTrackerUserState(root.user || {});
     root.powerActors = root.powerActors && typeof root.powerActors === 'object' ? root.powerActors : {};
+    root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
     if (seededPlayerTracker && typeof context.saveMetadataDebounced === 'function') {
         context.saveMetadataDebounced();
@@ -2541,6 +2542,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         ...(pendingRun?.powerActorsBefore || {}),
         ...(pendingRun?.powerActorsAfter || {}),
     };
+    const userKnowledge = mergeUserKnowledgeLedger(pendingRun?.userKnowledgeBefore || {}, pendingRun?.userKnowledgeAfter || {});
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -2553,6 +2555,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         userCoreStats: pendingRun?.userCoreStats || report?.semanticLedger?.engineContext?.userCoreStats || null,
         user,
         powerActors,
+        userKnowledge,
         npcs: promotionResult.npcs,
     };
     const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
@@ -2642,6 +2645,7 @@ function buildTrackerUpdateForPersistence(displaySnapshot) {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
         user: normalizeTrackerUserState(displaySnapshot?.user || {}),
         powerActors: displaySnapshot?.powerActors || {},
+        userKnowledge: mergeUserKnowledgeLedger(displaySnapshot?.userKnowledge || {}, {}),
     };
 }
 
@@ -2649,6 +2653,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     if (!snapshot || !delta) return snapshot;
     const merged = clone(snapshot);
     merged.user = applyTrackerDeltaToUserState(merged.user || {}, delta.user || {});
+    merged.userKnowledge = mergeUserKnowledgeLedger(merged.userKnowledge || options.userKnowledgeBefore || {}, delta.userKnowledge || {});
     const npcs = normalizeDisplayTrackerNpcs(merged.npcs || {});
     for (const npcDelta of delta.npcs || []) {
         const rawName = String(npcDelta?.NPC || '').trim();
@@ -2678,8 +2683,13 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         updatedAt: Date.now(),
         userChanged: trackerDeltaHasChanges(delta.user, true),
         npcChanged: (delta.npcs || []).some(item => trackerDeltaHasChanges(item, false)),
+        userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
     };
     return merged;
+}
+
+function userKnowledgeDeltaHasChanges(delta) {
+    return Boolean((delta?.personal || []).length || (delta?.reputation || []).length);
 }
 
 function findExistingTrackerName(npcs, wantedName) {
@@ -2935,6 +2945,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
     root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
     root.powerActors = snapshot.powerActors || root.powerActors || {};
+    root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.rapportClock = rapportClock;
     return true;
 }
@@ -2948,6 +2959,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
     root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
     root.powerActors = snapshot.powerActors || root.powerActors || {};
+    root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.rapportClock = rapportClock;
     return true;
 }
@@ -5560,6 +5572,7 @@ function restoreTrackerForRegeneration(type) {
         root.npcs = normalizeDisplayTrackerNpcs(snapshot);
         root.user = normalizeTrackerUserState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUser || root.user || {});
         root.powerActors = root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforePowerActors || root.powerActors || {};
+        root.userKnowledge = mergeUserKnowledgeLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserKnowledge || root.userKnowledge || {}, {});
         root.rapportClock = rapportClock;
         root.snapshots[getMessageKey(targetMessageId, context)].restoredForRegeneration = Date.now();
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot before ${type} of message ${targetMessageId}`);
@@ -5775,10 +5788,12 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
     const previous = {
         user: pendingRun?.userBefore || {},
         npcs: pendingRun?.trackerBefore || {},
+        userKnowledge: pendingRun?.userKnowledgeBefore || {},
     };
     const mechanicalAfter = {
         user: pendingRun?.userAfter || {},
         npcs: pendingRun?.trackerAfter || {},
+        userKnowledge: pendingRun?.userKnowledgeBefore || {},
     };
     const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
     const authority = {
@@ -5836,6 +5851,9 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         '',
         '==PREVIOUS_TRACKER_SNAPSHOT==',
         JSON.stringify(previous),
+        '',
+        '==PREVIOUS_USER_KNOWLEDGE_LEDGER==',
+        JSON.stringify(previous.userKnowledge || {}),
         '',
         '==MECHANICAL_TRACKER_AFTER==',
         JSON.stringify(mechanicalAfter),
@@ -6053,6 +6071,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                         latestUserText: pendingRun.latestUserText,
                         assistantText: narrationText,
                         beforeNpcs: pendingRun.trackerBefore,
+                        userKnowledgeBefore: pendingRun.userKnowledgeBefore,
                     });
                 } catch (error) {
                     trackerDeltaWarning = error instanceof Error ? error.message : String(error);
@@ -6067,9 +6086,11 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 before: clone(pendingRun.trackerBefore),
                 beforeUser: clone(pendingRun.userBefore),
                 beforePowerActors: clone(pendingRun.powerActorsBefore),
+                beforeUserKnowledge: clone(pendingRun.userKnowledgeBefore || {}),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
                 afterPowerActors: clone(trackerDisplaySnapshot.powerActors || {}),
+                afterUserKnowledge: clone(trackerDisplaySnapshot.userKnowledge || {}),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
                 trackerDeltaWarning,
@@ -6146,7 +6167,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforePowerActors: snapshot.beforePowerActors };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge };
             }
             delete root.snapshots[key];
             removeProgressionRecordsForMessage(key, context);
@@ -6162,6 +6183,7 @@ async function handleMessageDeleted(newLength) {
         root.npcs = normalizeDisplayTrackerNpcs(restoreCandidate.before);
         root.user = normalizeTrackerUserState(restoreCandidate.beforeUser || root.user || {});
         root.powerActors = restoreCandidate.beforePowerActors || {};
+        root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         await persistMetadata(context);
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${Math.min(chatLength, firstAffectedIndex)}`);
     } else if (restoreTrackerFromLatestDisplaySnapshot(context)) {
@@ -6368,6 +6390,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         trackerSnapshot: buildTrackerSnapshot(context),
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
         powerActorSnapshot: buildPowerActorSnapshot(context),
+        userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         contextSize,
         createdAt: Date.now(),
     };
@@ -6431,6 +6454,8 @@ async function handleChatCompletionPromptReady(eventData) {
             userAfter: report.trackerUpdate?.user || {},
             powerActorsBefore: state.pendingGeneration.powerActorSnapshot || buildPowerActorSnapshot(context),
             powerActorsAfter: report.trackerUpdate?.powerActors || {},
+            userKnowledgeBefore: state.pendingGeneration.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
+            userKnowledgeAfter: report.trackerUpdate?.userKnowledge || {},
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
@@ -6469,6 +6494,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             assembledPrompt: true,
             playerTrackerSnapshot: state.pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             powerActorSnapshot: state.pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
+            userKnowledgeSnapshot: state.pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             nameStyle: getSettings().nameStyle,

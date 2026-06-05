@@ -1706,7 +1706,7 @@ export function normalizeTrackerEntry(value) {
 export function normalizeUserHistory(value) {
     const source = value && typeof value === 'object' ? value : {};
     const knowsUser = source.knowsUser === 'Y' ? 'Y' : 'N';
-    const standing = ['positive', 'neutral', 'negative'].includes(source.standing) ? source.standing : 'neutral';
+    const standing = ['positive', 'neutral', 'negative', 'fear'].includes(source.standing) ? source.standing : 'neutral';
     return { knowsUser, standing };
 }
 

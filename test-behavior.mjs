@@ -59,6 +59,7 @@ function relationship(NPC, extra = {}) {
       romanticOpen: false,
       userBadRep: false,
       priorUserGoodRep: false,
+      userFearRep: false,
       userNonHuman: false,
       fearImmunity: false,
       ...(extra.initPreset || {}),
@@ -153,6 +154,10 @@ function baseLedger(overrides = {}) {
     injuryEffectEngine: {
       effects: [],
       ...(overrides.injuryEffectEngine || {}),
+    },
+    userKnowledgeApplication: {
+      applications: [],
+      ...(overrides.userKnowledgeApplication || {}),
     },
     powerActorEnmity: {
       assessments: [],

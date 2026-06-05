@@ -61,6 +61,7 @@ function buildReadableSemanticDebug(ledger) {
     const chaos = ledger?.chaosSemantic ?? {};
     const nameSemantic = ledger?.nameSemantic ?? {};
     const tracker = ledger?.trackerUpdateEngine ?? {};
+    const userKnowledgeApplications = Array.isArray(ledger?.userKnowledgeApplication?.applications) ? ledger.userKnowledgeApplication.applications : [];
     const powerActorAssessments = Array.isArray(ledger?.powerActorEnmity?.assessments) ? ledger.powerActorEnmity.assessments : [];
     const powerActors = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
     const powerEventShapes = Array.isArray(ledger?.powerEventShape?.events) ? ledger.powerEventShape.events : [];
@@ -89,6 +90,7 @@ function buildReadableSemanticDebug(ledger) {
         'userAbilityUse=' + userAbilityUseSummary(resolution.userAbilityUse),
         'itemUse=' + itemUseSummary(resolution.itemUse),
         'claimCheck=' + claimCheckSummary(resolution.claimCheck),
+        'userKnowledgeApplication=' + userKnowledgeApplicationSummary(userKnowledgeApplications),
         'identifyTargets:',
         'hostilesInScene.NPC=' + list(targets.hostilesInScene?.NPC),
         'ActionTargets=' + list(targets.ActionTargets),
@@ -231,6 +233,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.UserAbilityUse', userAbilityUseSummary(resolution.UserAbilityUse)],
         ['resolution.ItemUse', itemUseSummary(resolution.ItemUse)],
         ['resolution.ClaimCheck', claimCheckSummary(resolution.ClaimCheck)],
+        ['userKnowledge.application', summary.userKnowledgeApplication],
         ['resolution.STAKES', summary.stakes],
         ['resolution.actionCount', summary.actionCount],
         ['resolution.rollFull', summary.rollFull],
@@ -418,6 +421,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
     const powerActorPressure = powerActorPressureNarratorSummary(handoff.powerActorPressure);
     const powerActorEvent = powerActorEventNarratorSummary(handoff.powerActorPressure?.event);
     const powerActorEventAudit = powerActorEventAuditSummary(handoff.powerActorPressure?.event);
+    const userKnowledgeApplication = userKnowledgeApplicationSummary(ledger?.userKnowledgeApplication?.applications);
+    const userKnowledgeGuide = userKnowledgeApplicationGuide(ledger?.userKnowledgeApplication?.applications);
     const userAbilityUse = userAbilityUseSummary(resolution.UserAbilityUse);
     const userAbilityGuide = userAbilityUseGuide(resolution.UserAbilityUse);
     const itemUse = itemUseSummary(resolution.ItemUse);
@@ -435,7 +440,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
     const claimCheck = claimCheckSummary(resolution.ClaimCheck);
     const claimGuide = claimCheckGuide(resolution.ClaimCheck, resolution, rollAudit);
     const intimacyBoundary = intimacyBoundarySummary(handoff);
-    const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, itemUseGuide: itemUseNarrationGuide, claimGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
+    const resolvedSceneFacts = cleanNarratorDirective(buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userKnowledgeGuide, userAbilityGuide, itemUseGuide: itemUseNarrationGuide, claimGuide, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury, options }));
     const narratorAuthority = buildNarratorAuthority({ resolution, handoff, options });
     const renderContract = buildRenderContract();
     const narrationCraftDirective = buildNarrationCraftDirective();
@@ -458,6 +463,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         itemUseGuide: itemUseNarrationGuide,
         claimCheck,
         claimGuide,
+        userKnowledgeApplication,
+        userKnowledgeGuide,
         powerActorEvent,
         powerActorEventAudit,
         userImpairment,
@@ -497,6 +504,8 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         itemUseGuide: itemUseNarrationGuide,
         claimCheck,
         claimGuide,
+        userKnowledgeApplication,
+        userKnowledgeGuide,
         proactive: proactiveText,
         proactivityGuide,
         aggression: aggressionText,
@@ -648,7 +657,7 @@ Invalid responses must not be output.
 Final narration may only be emitted after NARRATOR_AUTHORITY, RENDER_CONTRACT, ACTIVE_BRANCH_FACTS, RESOLVED_SCENE_FACTS, and NARRATION_CRAFT_DIRECTIVE are all satisfied.`;
 }
 
-function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, itemUse, itemUseGuide, claimCheck, claimGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
+function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollAudit, intimacyBoundary, proactiveText, proactivityGuide, aggressionText, aggressionGuide, chaosText, chaosGuide, userAbilityUse, userAbilityGuide, itemUse, itemUseGuide, claimCheck, claimGuide, userKnowledgeApplication, userKnowledgeGuide, powerActorEvent, userImpairment, npcImpairment, inflictedNpcInjury, inflictedUserInjury }) {
     const facts = [];
     facts.push(`User action: ${valueOrNone(userAction)}.`);
     facts.push('Continuity branch: recent visible chat remains scene state for already-completed NPC/world actions, object positions, delivered items, current locations, and open/closed/removed/placed states. Do not replay the previous assistant beat or repeat an already-completed NPC/world action unless this handoff explicitly changes or reverses that state.');
@@ -656,6 +665,7 @@ function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollA
     if (!isNoneText(userAbilityUse)) facts.push(`UserAbilityUse: ${userAbilityUse}. ${userAbilityGuide}`);
     if (!isNoneText(itemUse)) facts.push(`ItemUse: ${itemUse}. ${itemUseGuide}`);
     if (!isNoneText(claimGuide)) facts.push(`ClaimCheck: ${claimCheck}. ${claimGuide}`);
+    if (!isNoneText(userKnowledgeGuide)) facts.push(`User knowledge branch: ${userKnowledgeApplication}. ${userKnowledgeGuide}`);
     if (resolution?.STAKES === 'N' || resolution?.Outcome === 'no_roll') {
         facts.push('Resolution branch: no roll; ordinary scene continuity unless another active branch constrains it.');
     } else {
@@ -1358,6 +1368,73 @@ function isStakeBearingUntrustedClaimForNarration(claim) {
         && ['known_false', 'unsupported'].includes(claim.truthStatus);
 }
 
+function userKnowledgeApplicationSummary(applications = []) {
+    const items = normalizeUserKnowledgeApplications(applications);
+    if (!items.length) return 'none';
+    return items.map(item => [
+        `target:${item.target}`,
+        `effect:${item.effect}`,
+        `type:${item.type}`,
+        `scope:${item.scope}`,
+        `valence:${item.valence}`,
+        `line:${item.line}`,
+    ].join('/')).join('; ');
+}
+
+function userKnowledgeApplicationGuide(applications = []) {
+    const items = normalizeUserKnowledgeApplications(applications);
+    if (!items.length) return 'none';
+    const lines = items.map(item => `${item.target}: ${item.line} (${item.effect}/${item.scope}${item.valence !== 'none' ? `/${item.valence}` : ''})`);
+    return `Apply only these current-scene user knowledge/reputation facts as what the listed target plausibly knows or has heard: ${lines.join('; ')}. Do not reveal hidden ledger mechanics, IDs, spread logic, or offscreen sources. Use this for demeanor, caution, trust, suspicion, fear, recognition, questions, or context only when it naturally fits the visible scene.`;
+}
+
+function normalizeUserKnowledgeApplications(applications = []) {
+    return (Array.isArray(applications) ? applications : [])
+        .map(item => {
+            const source = item && typeof item === 'object' ? item : {};
+            const target = valueOrNone(source.target ?? source.Target);
+            const line = valueOrNone(source.line ?? source.Line);
+            const effect = normalizeKnowledgeEffect(source.effect ?? source.Effect);
+            if (isNoneText(target) || isNoneText(line) || effect === 'none') return null;
+            return {
+                target,
+                line,
+                effect,
+                type: normalizeKnowledgeType(source.type ?? source.Type),
+                scope: normalizeKnowledgeScope(source.scope ?? source.Scope),
+                valence: normalizeKnowledgeValence(source.valence ?? source.Valence),
+            };
+        })
+        .filter(Boolean)
+        .slice(0, 12);
+}
+
+function normalizeKnowledgeEffect(value) {
+    const text = String(value ?? '').trim().replace(/[\s-]+/g, '').toLowerCase();
+    if (text === 'priorusergoodrep') return 'priorUserGoodRep';
+    if (text === 'userbadrep') return 'userBadRep';
+    if (text === 'userfearrep') return 'userFearRep';
+    if (text === 'contextonly') return 'contextOnly';
+    return 'none';
+}
+
+function normalizeKnowledgeType(value) {
+    const text = String(value ?? '').trim().replace(/[\s-]+/g, '').toLowerCase();
+    if (text === 'reputation' || text === 'reputationknowledge') return 'reputationKnowledge';
+    return 'personalKnowledge';
+}
+
+function normalizeKnowledgeScope(value) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return ['private', 'local', 'route', 'faction', 'regional', 'legendary'].includes(text) ? text : 'private';
+}
+
+function normalizeKnowledgeValence(value) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (['good', 'bad', 'fear'].includes(text)) return text;
+    return 'none';
+}
+
 function quoteInline(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim().replace(/"/g, "'");
 }
@@ -1368,7 +1445,7 @@ function ynBool(value) {
     return text === 'y' || text === 'yes' || text === 'true' || text === '1';
 }
 
-function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userAbilityGuide, itemUseGuide, claimGuide, userImpairment, npcImpairment, options = {} }) {
+function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactiveText, proactivityGuide, chaosText, chaosGuide, aggressionText, aggressionGuide, powerActorEvent, userKnowledgeGuide, userAbilityGuide, itemUseGuide, claimGuide, userImpairment, npcImpairment, options = {} }) {
     const outcome = naturalOutcomeSummary(resolution);
     const partialActionInstruction = partialActionGuide(resolution);
     const primaryNpc = primaryNarrationNpc(handoff, resolution);
@@ -1405,8 +1482,9 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const abilityInstruction = !isNoneText(userAbilityGuide) ? ` ${userAbilityGuide}` : '';
     const itemInstruction = !isNoneText(itemUseGuide) ? ` ${itemUseGuide}` : '';
     const claimInstruction = !isNoneText(claimGuide) ? ` ${claimGuide}` : '';
+    const knowledgeInstruction = !isNoneText(userKnowledgeGuide) ? ` ${userKnowledgeGuide}` : '';
 
-    const commonResultInstruction = `${companionCommandInstruction}${abilityInstruction}${itemInstruction}${claimInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
+    const commonResultInstruction = `${companionCommandInstruction}${abilityInstruction}${itemInstruction}${claimInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
     const stackedPressureInstruction = [
         boundaryViolationNote,
         boundaryNote,
@@ -1421,7 +1499,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (intimacyBoundaryGuide.mode === 'DENY' && resolution.boundaryViolationExplicit !== 'Y') {
-        return `The user action is ${userAction}; ${deniedIntimacyResolutionPhrase(resolution)}.${companionCommandInstruction}${abilityInstruction}${itemInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${naturalProactiveNote}${chaosNote}`;
+        return `The user action is ${userAction}; ${deniedIntimacyResolutionPhrase(resolution)}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${naturalProactiveNote}${chaosNote}`;
     }
 
     if (proactiveText !== 'none') {
@@ -1429,29 +1507,29 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (resolution.boundaryViolationExplicit === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryViolationNote}${aggressionNote}${chaosNote}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryViolationNote}${aggressionNote}${chaosNote}`;
     }
 
     if (resolution.STAKES === 'N') {
         const chaosNote = chaosText !== 'none' ? ` ${chaosGuide}` : '';
         if (intimacyBoundaryGuide.mode === 'ALLOW') {
-            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
+            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
         }
         if (!hasNpcGuidance) {
-            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
+            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
         }
-        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.`;
+        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance with this behavior: ${npcGuide} Do not invent a landed attack.${chaosNote}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance with this behavior: ${npcGuide} Do not invent a landed attack.${chaosNote}`;
     }
 
     if (chaosText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}`;
     }
 
-    return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Narrate the NPC response with this behavior: ${npcGuide} Keep speaking and acting NPCs limited to the Current scene cast.`;
+    return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Narrate the NPC response with this behavior: ${npcGuide} Keep speaking and acting NPCs limited to the Current scene cast.`;
 }
 
 function deniedIntimacyResolutionPhrase(resolution) {

@@ -1,10 +1,10 @@
 import { ENGINE_PROMPT_TEXT } from './engines.js';
-import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START } from './tracker-delta-contract.js';
+import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import { getRequestHeaders } from '../../../../script.js';
 import { createGenerationParameters, getChatCompletionModel, oai_settings, proxies } from '../../../../scripts/openai.js';
 
 export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
-export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START };
+export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES };
 
 const SEMANTIC_RESPONSE_LENGTH_MIN = 4096;
 const SEMANTIC_RESPONSE_LENGTH_MAX = 16384;
@@ -26,6 +26,8 @@ const POWER_EVENT_CONTACT_GENDERS = Object.freeze(['none', 'male', 'female', 'un
 const CLAIM_TRUTH_STATUSES = Object.freeze(['none', 'known_true', 'known_false', 'unsupported', 'unknown']);
 const CLAIM_NPC_ACCESS_LEVELS = Object.freeze(['none', 'direct', 'partial', 'unknown']);
 const ITEM_USE_SOURCES = Object.freeze(['none', 'gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance', 'unavailable', 'contested']);
+const USER_KNOWLEDGE_TYPES = Object.freeze(['personalKnowledge', 'reputationKnowledge']);
+const USER_KNOWLEDGE_APPLICATION_EFFECTS = Object.freeze(['none', 'priorUserGoodRep', 'userBadRep', 'userFearRep', 'contextOnly']);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -741,11 +743,34 @@ function buildSemanticPreflightSchema() {
             reason: { type: 'string' },
         },
     };
+    const userKnowledgeApplicationSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['target', 'entryIds', 'type', 'knownBy', 'scope', 'valence', 'effect', 'line', 'reason'],
+        properties: {
+            target: {
+                type: 'string',
+                description: 'The present NPC/group this knowledge plausibly applies to, or (none).',
+            },
+            entryIds: stringListSchema,
+            type: { type: 'string', enum: USER_KNOWLEDGE_TYPES },
+            knownBy: { type: 'string' },
+            scope: { type: 'string', enum: USER_KNOWLEDGE_SCOPES },
+            valence: { type: 'string', enum: ['none', ...USER_REPUTATION_VALENCES] },
+            effect: {
+                type: 'string',
+                enum: USER_KNOWLEDGE_APPLICATION_EFFECTS,
+                description: 'How this knowledge should affect init/context: priorUserGoodRep, userBadRep, userFearRep, contextOnly, or none.',
+            },
+            line: { type: 'string' },
+            reason: { type: 'string' },
+        },
+    };
 
     return {
         type: 'object',
         additionalProperties: false,
-        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'powerActorEnmity', 'powerEventShape', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic'],
+        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'userKnowledgeApplication', 'powerActorEnmity', 'powerEventShape', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic'],
         properties: {
             engineContext: {
                 type: 'object',
@@ -895,7 +920,7 @@ function buildSemanticPreflightSchema() {
                         initPreset: {
                             type: 'object',
                             additionalProperties: false,
-                            required: ['romanticOpen', 'userBadRep', 'priorUserGoodRep', 'userNonHuman', 'fearImmunity'],
+                            required: ['romanticOpen', 'userBadRep', 'priorUserGoodRep', 'userFearRep', 'userNonHuman', 'fearImmunity'],
                             properties: {
                                 romanticOpen: {
                                     type: 'boolean',
@@ -908,6 +933,10 @@ function buildSemanticPreflightSchema() {
                                 priorUserGoodRep: {
                                     type: 'boolean',
                                     description: 'Y only for explicit established favorable prior history/reputation/trust/gratitude with this NPC; not kindness or good impressions only in this interaction.',
+                                },
+                                userFearRep: {
+                                    type: 'boolean',
+                                    description: 'Y only when this NPC plausibly knows an established fear reputation for user from UserKnowledgeLedger or prompt context; not ordinary caution, current-scene danger, rank, bravado, or visible nonhuman form alone.',
                                 },
                                 userNonHuman: {
                                     type: 'boolean',
@@ -979,6 +1008,17 @@ function buildSemanticPreflightSchema() {
                     effects: {
                         type: 'array',
                         items: injuryEffectSchema,
+                    },
+                },
+            },
+            userKnowledgeApplication: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['applications'],
+                properties: {
+                    applications: {
+                        type: 'array',
+                        items: userKnowledgeApplicationSchema,
                     },
                 },
             },
@@ -1239,7 +1279,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
     '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer lists.',
     '- If no living NPC is in those target/observer lists, output RelationshipEngine.count=0 and no RelationshipEngine[index] lines.',
-    '- RelationshipEngine[index].initPreset is only "how this NPC initially feels toward {{user}}" when currentDisposition is missing. Check all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. The semantic pass chooses only these Y/N tags; deterministic code assigns B/F/H stats. romanticOpen=Y only if this NPC is already romantically/intimately involved with {{user}}, already willing toward {{user}}, or explicitly in love with {{user}} in prior context. userBadRep=Y only if {{user}} is hated, distrusted, wanted, enemy-coded, or has a bad prior reputation with this NPC before the current first interaction. priorUserGoodRep=Y only if prior lore/card/scenario/tracker/history explicitly gives {{user}} an established favorable reputation with this NPC before the current scene; first-encounter kindness, rescue, courtesy, friendliness, praise, or warm first impression do not count. userNonHuman=Y only if {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like. fearImmunity=Y only if this NPC is the same kind/race category as that user form, a superior or peer supernatural/monstrous being, explicitly immune/naturally resistant to fear or mental fear, or card/lore/scenario explicitly portrays them as an ancient/powerful/non-ordinary being that has faced such horrors and is not meaningfully afraid of them. Title, rank, bravado, posturing, composure, courage, or pretending to be fearless do not count.',
+    '- RelationshipEngine[index].initPreset is only "how this NPC initially feels toward {{user}}" when currentDisposition is missing. Check all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. The semantic pass chooses only these Y/N tags; deterministic code assigns B/F/H stats. romanticOpen=Y only if this NPC is already romantically/intimately involved with {{user}}, already willing toward {{user}}, or explicitly in love with {{user}} in prior context. userBadRep=Y only if {{user}} is hated, distrusted, wanted, enemy-coded, or has a bad prior reputation with this NPC before the current first interaction. priorUserGoodRep=Y only if prior lore/card/scenario/tracker/history or UserKnowledgeApplication explicitly gives {{user}} an established favorable reputation with this NPC before the current scene; first-encounter kindness, rescue, courtesy, friendliness, praise, or warm first impression do not count. userFearRep=Y only if UserKnowledgeApplication or explicit prior context gives {{user}} an established fearsome/dangerous reputation known to this NPC; not ordinary caution, current-scene danger, rank, bravado, or visible nonhuman form alone. userNonHuman=Y only if {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like. fearImmunity=Y only if this NPC is the same kind/race category as that user form, a superior or peer supernatural/monstrous being, explicitly immune/naturally resistant to fear or mental fear, or card/lore/scenario explicitly portrays them as an ancient/powerful/non-ordinary being that has faced such horrors and is not meaningfully afraid of them. Title, rank, bravado, posturing, composure, courage, or pretending to be fearless do not count.',
     '- RelationshipEngine[index].establishedRelationship is true only if this NPC already has B4 relationship state and tracker establishedRelationship=Y, or the current explicit scene shows a direct romantic/love/relationship declaration or request from {{user}} accepted by that NPC, or from that NPC accepted by {{user}}. If the immediately previous NPC message contains a clear love/relationship confession or request, and the current user input accepts it verbally or through unmistakable romantic reciprocation such as kissing/embracing without refusal, return true. If the immediately previous user input contains a clear love/relationship confession or request, and the current NPC response accepted it, return true. It must establish an actual romantic relationship, partnership, lovers status, dating/courting bond, or equivalent committed romantic connection. Flirting, attraction, arousal, sex, prior intimacy, affection, kindness, trust, loyalty, closeness, friendship, gratitude, protectiveness, or B4 alone does not count.',
     '- RelationshipEngine[index].romanceStyle is for B4 pre-relationship initiative only. Return nervous if explicit card/lore/context portrays this NPC as shy, reserved, guarded, restrained, formal, awkward, timid, emotionally cautious, or likely to show romantic interest through hesitation. Return flirt if explicit card/lore/context portrays this NPC as bold, outgoing, playful, teasing, direct, seductive, socially confident, or likely to show romantic interest through open flirtation. Return auto if unclear or mixed.',
     '- RelationshipEngine[index].checkThreshold override flags must use all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. CurrentInvitation=Y when this NPC clearly and directly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene, and has not withdrawn, refused, panicked, or been interrupted by danger. Mark CurrentInvitation=Y for irrefutable sexual invitation hints even when phrased as teasing questions, such as "I wonder how tight I would be for you. Want to find out?" Do not mark CurrentInvitation for ordinary flirting, suggestive banter, compliments, attraction, embarrassment, vague innuendo without an invitation, or a user-originated proposal the NPC has not accepted. Exploitation=Y when card/lore/context explicitly makes this NPC exploitable by {{user}} or the current situation: naive, easily led or persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, sheltered to an unsafe degree, or otherwise unable to safely judge/resist. Do not mark Exploitation for mere innocence, shyness, kindness, friendliness, attraction, low confidence, or normal inexperience without explicit vulnerability/suggestibility. Hedonist=Y only for explicitly sexually open, pleasure-seeking, casual, promiscuous, or eager intimacy context. Transactional=Y only for explicit willingness to exchange intimacy for money, goods, favors, protection, status, or services. Established=Y only for explicit prior/current intimate access with current or recent receptivity toward {{user}}, such as casual lovers, friends with benefits, an ongoing sexual arrangement, or explicit comfort/willingness with renewed intimacy. Do not mark Established for prior intimacy alone when current receptivity is absent, stale, unclear, refused, fearful, hostile, coerced, or boundary-limited. establishedRelationship remains its separate relationship-state mechanic.',
@@ -1330,6 +1370,16 @@ ResolutionEngine.genStats.PHY=1
 ResolutionEngine.genStats.MND=1
 ResolutionEngine.genStats.CHA=1
 RelationshipEngine.count=0
+UserKnowledgeApplication.count=0
+UserKnowledgeApplication[0].target=(none)
+UserKnowledgeApplication[0].entryIds=(none)
+UserKnowledgeApplication[0].type=personalKnowledge
+UserKnowledgeApplication[0].knownBy=(none)
+UserKnowledgeApplication[0].scope=private
+UserKnowledgeApplication[0].valence=none
+UserKnowledgeApplication[0].effect=none
+UserKnowledgeApplication[0].line=(none)
+UserKnowledgeApplication[0].reason=(none)
 InjuryEffectEngine.count=0
 TrackerUpdateEngine.User.condition=unchanged
 TrackerUpdateEngine.User.woundsAdd=(none)
@@ -1497,8 +1547,10 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         ? String(options?.proxyUserAction || '').trim()
         : '';
     const powerActorSnapshot = sanitizePowerActorSnapshotForSemantic(options?.powerActorSnapshot || {});
+    const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nSelected name style=${nameStyle}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
         `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
+        `User knowledge snapshot JSON (hidden memory about what people may know about {{user}}; use only for UserKnowledgeApplication and initPreset reputation tags, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
         'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
@@ -1516,12 +1568,14 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'For each living NPC in relationshipEngine, stakeChangeByOutcome must describe that NPC stakes change for each outcome: benefit means their stakes improve, harm means their stakes worsen, none means no meaningful stake change. For explicit boundary violations toward a direct/opposing NPC target, successful or landed outcomes worsen that NPC boundary/autonomy/trust stakes, so use harm and not none. ' +
         'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC core stat block from explicit portrayal and copy the same block into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
         'Do not leave a named portrayed NPC as Rank none or 1/1/1 unless the card, scene, and tracker give no explicit portrayal at all. ' +
+        'Apply stored user knowledge before RelationshipEngine initPreset. Fill UserKnowledgeApplication from the hidden User knowledge snapshot only when a stored personal or reputation entry plausibly applies to a present NPC/group or to the current scene. Personal knowledge applies only to the named knownBy NPC/group or a direct institutional/group match. Reputation knowledge applies only when scope and context plausibly reach the present NPC/group: private is not public; local is current settlement/scene community; route follows a road/trade/travel corridor; faction follows that group/institution; regional is broad area; legendary is widely known. effect=priorUserGoodRep for favorable reputation that should initialize trust, userBadRep for hostile/distrusting reputation, userFearRep for fearsome reputation, contextOnly for knowledge that informs narration but should not initialize B/F/H, and none when no current application exists. Do not invent new reputation here; creation happens only in post-narration UserKnowledgeLedger. ' +
         'Detect user ability/spell attempts before target/risk classification: compare the latest user input against active {{user}}/persona abilities in the assembled SillyTavern prompt stack, character persona/sheet, scenario, lore/world info, and chat context. Mark ResolutionEngine.userAbilityUse.Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Mark Available=Y only if the attempted ability/spell exists in active {{user}} abilities. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect the narrator must preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: ability use is fictional permission/method only, never a bonus, never a dice modifier, never a separate roll, and never a bypass for broader stakes or outcomes. If an available ability is used to deliver a threat, persuasion, attack, escape, or other contested goal, classify and roll the broader goal normally while keeping the ability as delivery/flavor. ' +
         'Detect item/equipment/object attempts before target/risk classification. Fill ResolutionEngine.itemUse when {{user}} attempts to draw, use, grab, wield, throw, consume, spend, present, unlock with, attack with, defend with, or otherwise rely on a concrete item/object/equipment. Compare against {{user}} gear/inventory, held/worn/carried state, recent visible scene state, setting affordances, and consequence affordances. The latest user input cannot create the item as evidence of availability. Source=setting_affordance only for mundane, non-special, location-typical, immediately reachable objects that are not rare, magical, valuable, exact tools, keys/documents, or plot-solving. Source=consequence_affordance only for ordinary objects strongly implied by resolved scene facts, such as a dead/disarmed/incapacitated NPC\'s ordinary weapon or dropped/broken/spilled/fallen objects. Source=contested when the item exists but is actively held, worn, guarded, inside a container, behind an obstacle, out of reach, or requires search/crossing/forcing access. If Available=N, the item effect must not be treated as completed. ' +
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
         'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, hasStakes, actionCount, mapStats, getUserCoreStats, getCurrentCoreStats/genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do NOT execute ResolutionEngine.resolveOutcome, dice, margins, landed actions, or counter potential; deterministic code handles those after your ledger. ' +
+        'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, or rewrite stored knowledge in preflight. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. ' +
@@ -1795,6 +1849,8 @@ function validateRawLedgerContract(ledger, raw) {
     if (!Array.isArray(ledger?.relationshipEngine)) missing.push('relationshipEngine');
     if (!ledger?.injuryEffectEngine) missing.push('injuryEffectEngine');
     if (!Array.isArray(ledger?.injuryEffectEngine?.effects)) missing.push('injuryEffectEngine.effects');
+    if (!ledger?.userKnowledgeApplication) missing.push('userKnowledgeApplication');
+    if (!Array.isArray(ledger?.userKnowledgeApplication?.applications)) missing.push('userKnowledgeApplication.applications');
     if (!ledger?.powerActorEnmity) missing.push('powerActorEnmity');
     if (!Array.isArray(ledger?.powerActorEnmity?.assessments)) missing.push('powerActorEnmity.assessments');
     if (!Array.isArray(ledger?.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
@@ -1903,6 +1959,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.genStats.MND',
         'ResolutionEngine.genStats.CHA',
         'RelationshipEngine.count',
+        'UserKnowledgeApplication.count',
         'InjuryEffectEngine.count',
         'CHAOS_INTERRUPT.sceneSummary',
         'TrackerUpdateEngine.User.condition',
@@ -2038,6 +2095,28 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
+    const userKnowledgeApplicationCount = clampNumber(readNumber(fields, 'UserKnowledgeApplication.count', 0), 0, 20);
+    for (let index = 0; index < userKnowledgeApplicationCount; index += 1) {
+        const prefix = `UserKnowledgeApplication[${index}]`;
+        const userKnowledgeRequired = [
+            `${prefix}.target`,
+            `${prefix}.entryIds`,
+            `${prefix}.type`,
+            `${prefix}.knownBy`,
+            `${prefix}.scope`,
+            `${prefix}.valence`,
+            `${prefix}.effect`,
+            `${prefix}.line`,
+            `${prefix}.reason`,
+        ];
+        for (const key of userKnowledgeRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
     const relCount = clampNumber(readNumber(fields, 'RelationshipEngine.count', 0), 0, 20);
     for (let index = 0; index < relCount; index += 1) {
         const prefix = `RelationshipEngine[${index}]`;
@@ -2046,6 +2125,7 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.initPreset.romanticOpen`,
             `${prefix}.initPreset.userBadRep`,
             `${prefix}.initPreset.priorUserGoodRep`,
+            `${prefix}.initPreset.userFearRep`,
             `${prefix}.initPreset.userNonHuman`,
             `${prefix}.initPreset.fearImmunity`,
             `${prefix}.establishedRelationship`,
@@ -2083,6 +2163,23 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
+    const userKnowledgeApplication = { applications: [] };
+    for (let index = 0; index < userKnowledgeApplicationCount; index += 1) {
+        const prefix = `UserKnowledgeApplication[${index}]`;
+        const application = normalizeUserKnowledgeApplication({
+            target: fields.get(`${prefix}.target`),
+            entryIds: readList(fields, `${prefix}.entryIds`),
+            type: fields.get(`${prefix}.type`),
+            knownBy: fields.get(`${prefix}.knownBy`),
+            scope: fields.get(`${prefix}.scope`),
+            valence: fields.get(`${prefix}.valence`),
+            effect: fields.get(`${prefix}.effect`),
+            line: fields.get(`${prefix}.line`),
+            reason: fields.get(`${prefix}.reason`),
+        });
+        if (application) userKnowledgeApplication.applications.push(application);
+    }
+
     const relationshipEngine = [];
     for (let index = 0; index < relCount; index += 1) {
         const prefix = `RelationshipEngine[${index}]`;
@@ -2099,6 +2196,7 @@ function parseCompactLedger(text, trackerSnapshot) {
                 romanticOpen: readBoolean(fields, `${prefix}.initPreset.romanticOpen`, false),
                 userBadRep: readBoolean(fields, `${prefix}.initPreset.userBadRep`, false),
                 priorUserGoodRep: readBoolean(fields, `${prefix}.initPreset.priorUserGoodRep`, false),
+                userFearRep: readBoolean(fields, `${prefix}.initPreset.userFearRep`, false),
                 userNonHuman: readBoolean(fields, `${prefix}.initPreset.userNonHuman`, false),
                 fearImmunity: readBoolean(fields, `${prefix}.initPreset.fearImmunity`, false),
             },
@@ -2295,6 +2393,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         resolutionEngine,
         relationshipEngine,
         injuryEffectEngine,
+        userKnowledgeApplication,
         powerActorEnmity,
         powerEventShape,
         chaosSemantic: {
@@ -2345,6 +2444,8 @@ function parseNarratorTrackerDeltaText(text) {
         'TrackerUpdateEngine.User.commitmentsAdd',
         'TrackerUpdateEngine.User.commitmentsRemove',
         'TrackerUpdateEngine.NPC.count',
+        'UserKnowledgeLedger.personal.count',
+        'UserKnowledgeLedger.reputation.count',
     ];
     const missing = required.filter(key => !fields.has(key));
     if (missing.length) throw new Error(`tracker delta block missing required lines: ${missing.join(', ')}`);
@@ -2385,7 +2486,38 @@ function parseNarratorTrackerDeltaText(text) {
         });
     }
 
-    return { user, npcs };
+    const userKnowledge = { personal: [], reputation: [] };
+    const personalCount = clampNumber(readNumber(fields, 'UserKnowledgeLedger.personal.count', 0), 0, 20);
+    for (let index = 0; index < personalCount; index += 1) {
+        const prefix = `UserKnowledgeLedger.personal[${index}]`;
+        const entry = normalizePersonalKnowledgeDeltaEntry({
+            knownBy: fields.get(`${prefix}.knownBy`),
+            scope: fields.get(`${prefix}.scope`),
+            topic: fields.get(`${prefix}.topic`),
+            truth: fields.get(`${prefix}.truth`),
+            confidence: fields.get(`${prefix}.confidence`),
+            line: fields.get(`${prefix}.line`),
+            reason: fields.get(`${prefix}.reason`),
+        });
+        if (entry) userKnowledge.personal.push(entry);
+    }
+    const reputationCount = clampNumber(readNumber(fields, 'UserKnowledgeLedger.reputation.count', 0), 0, 20);
+    for (let index = 0; index < reputationCount; index += 1) {
+        const prefix = `UserKnowledgeLedger.reputation[${index}]`;
+        const entry = normalizeReputationKnowledgeDeltaEntry({
+            scope: fields.get(`${prefix}.scope`),
+            valence: fields.get(`${prefix}.valence`),
+            topic: fields.get(`${prefix}.topic`),
+            truth: fields.get(`${prefix}.truth`),
+            confidence: fields.get(`${prefix}.confidence`),
+            line: fields.get(`${prefix}.line`),
+            origin: fields.get(`${prefix}.origin`),
+            reason: fields.get(`${prefix}.reason`),
+        });
+        if (entry) userKnowledge.reputation.push(entry);
+    }
+
+    return { user, npcs, userKnowledge };
 }
 
 function sanitizeNarratorTrackerDelta(delta, narration) {
@@ -2398,6 +2530,7 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
                 NPC: item?.NPC,
             }))
             : [],
+        userKnowledge: normalizeUserKnowledgeDelta(delta?.userKnowledge),
     };
     cleanDelta.npcs = cleanDelta.npcs.filter(item =>
         item?.NPC
@@ -2429,6 +2562,54 @@ function sanitizeNarratorTrackerActorDelta(delta, narration, actorName = '') {
         statusAdd: sanitizedStatusAdd,
         woundsRemove: sanitizedWoundsRemove,
         statusRemove: sanitizedStatusRemove,
+    };
+}
+
+function normalizeUserKnowledgeDelta(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        personal: Array.isArray(source.personal)
+            ? source.personal.map(normalizePersonalKnowledgeDeltaEntry).filter(Boolean).slice(0, 20)
+            : [],
+        reputation: Array.isArray(source.reputation)
+            ? source.reputation.map(normalizeReputationKnowledgeDeltaEntry).filter(Boolean).slice(0, 20)
+            : [],
+    };
+}
+
+function normalizePersonalKnowledgeDeltaEntry(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const knownBy = cleanScalar(source.knownBy ?? source.KnownBy).replace(/\s+/g, ' ').slice(0, 140);
+    const line = cleanScalar(source.line ?? source.Line).replace(/\s+/g, ' ').slice(0, 220);
+    if (!knownBy || isNoneValue(knownBy) || !line || isNoneValue(line)) return null;
+    const topic = cleanScalar(source.topic ?? source.Topic).replace(/\s+/g, ' ').slice(0, 140) || '(none)';
+    return {
+        type: 'personalKnowledge',
+        knownBy,
+        scope: normalizeUserKnowledgeScope(source.scope ?? source.Scope),
+        topic,
+        truth: normalizeUserKnowledgeTruth(source.truth ?? source.Truth),
+        confidence: normalizeUserKnowledgeConfidence(source.confidence ?? source.Confidence),
+        line,
+        reason: cleanScalar(source.reason ?? source.Reason).replace(/\s+/g, ' ').slice(0, 220) || '(none)',
+    };
+}
+
+function normalizeReputationKnowledgeDeltaEntry(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const line = cleanScalar(source.line ?? source.Line).replace(/\s+/g, ' ').slice(0, 220);
+    if (!line || isNoneValue(line)) return null;
+    const topic = cleanScalar(source.topic ?? source.Topic).replace(/\s+/g, ' ').slice(0, 140) || '(none)';
+    return {
+        type: 'reputationKnowledge',
+        scope: normalizeUserKnowledgeScope(source.scope ?? source.Scope),
+        valence: normalizeUserKnowledgeValence(source.valence ?? source.Valence),
+        topic,
+        truth: normalizeUserKnowledgeTruth(source.truth ?? source.Truth),
+        confidence: normalizeUserKnowledgeConfidence(source.confidence ?? source.Confidence),
+        line,
+        origin: cleanScalar(source.origin ?? source.Origin).replace(/\s+/g, ' ').slice(0, 160) || '(none)',
+        reason: cleanScalar(source.reason ?? source.Reason).replace(/\s+/g, ' ').slice(0, 220) || '(none)',
     };
 }
 
@@ -2665,6 +2846,7 @@ function createFallbackRelationshipEntry(NPC, genStats) {
             romanticOpen: false,
             userBadRep: false,
             priorUserGoodRep: false,
+            userFearRep: false,
             userNonHuman: false,
             fearImmunity: false,
         },
@@ -3021,6 +3203,11 @@ function normalizeLedger(ledger) {
             };
         }).filter(Boolean)
         : [];
+    ledger.userKnowledgeApplication = ledger.userKnowledgeApplication || {};
+    ledger.userKnowledgeApplication.applications = Array.isArray(ledger.userKnowledgeApplication.applications)
+        ? ledger.userKnowledgeApplication.applications.map(normalizeUserKnowledgeApplication).filter(Boolean)
+        : [];
+    applyUserKnowledgeApplicationsToInitPresets(ledger.relationshipEngine, ledger.userKnowledgeApplication.applications);
     ledger.powerActorEnmity = ledger.powerActorEnmity || {};
     ledger.powerActorEnmity.assessments = Array.isArray(ledger.powerActorEnmity.assessments)
         ? ledger.powerActorEnmity.assessments.map(normalizePowerActorAssessment).filter(Boolean)
@@ -3122,6 +3309,87 @@ function normalizeClaimCheck(value) {
         stakesImpact: present && stakesImpact,
         reason: present && !isNoneValue(reason) ? reason : '(none)',
     };
+}
+
+function normalizeUserKnowledgeApplication(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const target = cleanScalar(source.target ?? source.Target).replace(/\s+/g, ' ').slice(0, 100) || '(none)';
+    const entryIds = readPlainArray(source.entryIds ?? source.EntryIds ?? source.entryId ?? source.EntryId).slice(0, 12);
+    const type = normalizeUserKnowledgeType(source.type ?? source.Type);
+    const knownBy = cleanScalar(source.knownBy ?? source.KnownBy).replace(/\s+/g, ' ').slice(0, 140) || '(none)';
+    const scope = normalizeUserKnowledgeScope(source.scope ?? source.Scope);
+    const valence = normalizeUserKnowledgeValence(source.valence ?? source.Valence, true);
+    const effect = normalizeUserKnowledgeApplicationEffect(source.effect ?? source.Effect);
+    const line = cleanScalar(source.line ?? source.Line).replace(/\s+/g, ' ').slice(0, 220) || '(none)';
+    const reason = cleanScalar(source.reason ?? source.Reason).replace(/\s+/g, ' ').slice(0, 220) || '(none)';
+    if (isNoneValue(target) || isNoneValue(line) || effect === 'none') return null;
+    return {
+        target,
+        entryIds,
+        type,
+        knownBy,
+        scope,
+        valence,
+        effect,
+        line,
+        reason,
+    };
+}
+
+function normalizeUserKnowledgeType(value) {
+    const text = cleanScalar(value).replace(/[\s-]+/g, '');
+    if (/^personal(?:knowledge)?$/i.test(text)) return 'personalKnowledge';
+    if (/^reputation(?:knowledge)?$/i.test(text)) return 'reputationKnowledge';
+    return 'personalKnowledge';
+}
+
+function normalizeUserKnowledgeScope(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return USER_KNOWLEDGE_SCOPES.includes(text) ? text : 'private';
+}
+
+function normalizeUserKnowledgeValence(value, allowNone = false) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    if (allowNone && (text === 'none' || isNoneValue(text))) return 'none';
+    return USER_REPUTATION_VALENCES.includes(text) ? text : (allowNone ? 'none' : 'good');
+}
+
+function normalizeUserKnowledgeTruth(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return USER_KNOWLEDGE_TRUTH.includes(text) ? text : 'true';
+}
+
+function normalizeUserKnowledgeConfidence(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return USER_KNOWLEDGE_CONFIDENCE.includes(text) ? text : 'certain';
+}
+
+function normalizeUserKnowledgeApplicationEffect(value) {
+    const text = cleanScalar(value).replace(/[\s-]+/g, '');
+    const match = USER_KNOWLEDGE_APPLICATION_EFFECTS.find(effect => effect.toLowerCase() === text.toLowerCase());
+    return match || 'none';
+}
+
+function applyUserKnowledgeApplicationsToInitPresets(relationshipEngine = [], applications = []) {
+    if (!Array.isArray(relationshipEngine) || !Array.isArray(applications) || !applications.length) return;
+    const byTarget = new Map();
+    for (const application of applications) {
+        const target = normalizeNameKey(application?.target);
+        if (!target || isNoneValue(target)) continue;
+        const list = byTarget.get(target) || [];
+        list.push(application);
+        byTarget.set(target, list);
+    }
+    for (const relationship of relationshipEngine) {
+        const targetApplications = byTarget.get(normalizeNameKey(relationship?.NPC)) || [];
+        if (!targetApplications.length) continue;
+        relationship.initPreset = normalizeInitPresetFlags(relationship.initPreset);
+        for (const application of targetApplications) {
+            if (application.effect === 'priorUserGoodRep') relationship.initPreset.priorUserGoodRep = true;
+            if (application.effect === 'userBadRep') relationship.initPreset.userBadRep = true;
+            if (application.effect === 'userFearRep') relationship.initPreset.userFearRep = true;
+        }
+    }
 }
 
 function normalizePowerActorAssessment(value) {
@@ -3272,6 +3540,54 @@ function sanitizePowerActorSnapshotForSemantic(value = {}) {
     return result;
 }
 
+function sanitizeUserKnowledgeSnapshotForSemantic(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const personal = Array.isArray(source.personal) ? source.personal : [];
+    const reputation = Array.isArray(source.reputation) ? source.reputation : [];
+    return {
+        personal: personal.map(entry => sanitizePersonalKnowledgeEntry(entry)).filter(Boolean).slice(-60),
+        reputation: reputation.map(entry => sanitizeReputationKnowledgeEntry(entry)).filter(Boolean).slice(-60),
+    };
+}
+
+function sanitizePersonalKnowledgeEntry(entry) {
+    const source = entry && typeof entry === 'object' ? entry : {};
+    const id = cleanScalar(source.id ?? source.entryId).replace(/\s+/g, ' ').slice(0, 80);
+    const knownBy = cleanScalar(source.knownBy).replace(/\s+/g, ' ').slice(0, 140);
+    const topic = cleanScalar(source.topic).replace(/\s+/g, ' ').slice(0, 140);
+    const line = cleanScalar(source.line).replace(/\s+/g, ' ').slice(0, 220);
+    if (!id || !knownBy || isNoneValue(knownBy) || !line || isNoneValue(line)) return null;
+    return {
+        id,
+        type: 'personalKnowledge',
+        knownBy,
+        scope: normalizeUserKnowledgeScope(source.scope),
+        topic: topic && !isNoneValue(topic) ? topic : '(none)',
+        truth: normalizeUserKnowledgeTruth(source.truth),
+        confidence: normalizeUserKnowledgeConfidence(source.confidence),
+        line,
+    };
+}
+
+function sanitizeReputationKnowledgeEntry(entry) {
+    const source = entry && typeof entry === 'object' ? entry : {};
+    const id = cleanScalar(source.id ?? source.entryId).replace(/\s+/g, ' ').slice(0, 80);
+    const topic = cleanScalar(source.topic).replace(/\s+/g, ' ').slice(0, 140);
+    const line = cleanScalar(source.line).replace(/\s+/g, ' ').slice(0, 220);
+    if (!id || !line || isNoneValue(line)) return null;
+    return {
+        id,
+        type: 'reputationKnowledge',
+        scope: normalizeUserKnowledgeScope(source.scope),
+        valence: normalizeUserKnowledgeValence(source.valence),
+        topic: topic && !isNoneValue(topic) ? topic : '(none)',
+        truth: normalizeUserKnowledgeTruth(source.truth),
+        confidence: normalizeUserKnowledgeConfidence(source.confidence),
+        line,
+        origin: cleanScalar(source.origin).replace(/\s+/g, ' ').slice(0, 160) || '(none)',
+    };
+}
+
 function normalizeCore(core) {
     return {
         Rank: core?.Rank ?? 'none',
@@ -3304,6 +3620,7 @@ function normalizeInitPresetFlags(value) {
         romanticOpen: toBoolean(source.romanticOpen, false),
         userBadRep: toBoolean(source.userBadRep, false),
         priorUserGoodRep: toBoolean(source.priorUserGoodRep ?? source.userGoodRep, false),
+        userFearRep: toBoolean(source.userFearRep, false),
         userNonHuman: toBoolean(source.userNonHuman, false),
         fearImmunity: toBoolean(source.fearImmunity ?? source.fearImmune, false),
     };
@@ -3359,6 +3676,8 @@ function validateNormalizedLedger(ledger, raw) {
     if (!Array.isArray(ledger.relationshipEngine)) missing.push('relationshipEngine');
     if (!ledger.injuryEffectEngine) missing.push('injuryEffectEngine');
     if (!Array.isArray(ledger.injuryEffectEngine?.effects)) missing.push('injuryEffectEngine.effects');
+    if (!ledger.userKnowledgeApplication) missing.push('userKnowledgeApplication');
+    if (!Array.isArray(ledger.userKnowledgeApplication?.applications)) missing.push('userKnowledgeApplication.applications');
     if (!ledger.powerActorEnmity) missing.push('powerActorEnmity');
     if (!Array.isArray(ledger.powerActorEnmity?.assessments)) missing.push('powerActorEnmity.assessments');
     if (!Array.isArray(ledger.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');

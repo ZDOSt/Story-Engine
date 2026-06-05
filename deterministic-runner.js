@@ -69,10 +69,12 @@ import {
     compact,
     stableStringify,
 } from './engines.js';
+import { USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 
 const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 const USER_PROACTIVITY_TARGET = '{{user}}';
+const USER_KNOWLEDGE_LEDGER_VERSION = 1;
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
 const RAPPORT_COOLDOWN_MS = 30 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
@@ -267,6 +269,10 @@ export function buildPowerActorSnapshot(context) {
     return normalizePowerActors(context?.chatMetadata?.structuredPreflightTracker?.powerActors || {});
 }
 
+export function buildUserKnowledgeSnapshot(context) {
+    return normalizeUserKnowledgeLedger(context?.chatMetadata?.structuredPreflightTracker?.userKnowledge || {});
+}
+
 export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (!context?.chatMetadata || !trackerUpdate) return;
 
@@ -274,6 +280,7 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.npcs = root.npcs || {};
     root.user = normalizeTrackerUserState(root.user || {});
     root.powerActors = normalizePowerActors(root.powerActors || {});
+    root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
 
     for (const [name, value] of Object.entries(trackerUpdate.npcs || {})) {
@@ -293,6 +300,9 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
             ...root.powerActors,
             ...trackerUpdate.powerActors,
         });
+    }
+    if (trackerUpdate.userKnowledge) {
+        root.userKnowledge = normalizeUserKnowledgeLedger(trackerUpdate.userKnowledge);
     }
 
     context.chatMetadata.structuredPreflightTracker = root;
@@ -1016,6 +1026,181 @@ function cleanPowerActorScalar(value, maxLength = 120) {
         .trim();
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
     return text.slice(0, maxLength);
+}
+
+export function mergeUserKnowledgeLedger(before = {}, delta = {}) {
+    const base = normalizeUserKnowledgeLedger(before);
+    const incoming = normalizeUserKnowledgeDelta(delta);
+    return normalizeUserKnowledgeLedger({
+        version: USER_KNOWLEDGE_LEDGER_VERSION,
+        personal: mergeUserKnowledgeBucket(base.personal, incoming.personal, 'personal'),
+        reputation: mergeUserKnowledgeBucket(base.reputation, incoming.reputation, 'reputation'),
+    });
+}
+
+function normalizeUserKnowledgeLedger(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        version: USER_KNOWLEDGE_LEDGER_VERSION,
+        personal: Array.isArray(source.personal)
+            ? source.personal.map(normalizePersonalKnowledgeEntry).filter(Boolean).slice(-80)
+            : [],
+        reputation: Array.isArray(source.reputation)
+            ? source.reputation.map(normalizeReputationKnowledgeEntry).filter(Boolean).slice(-80)
+            : [],
+    };
+}
+
+function normalizeUserKnowledgeDelta(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        personal: Array.isArray(source.personal)
+            ? source.personal.map(normalizePersonalKnowledgeEntry).filter(Boolean)
+            : [],
+        reputation: Array.isArray(source.reputation)
+            ? source.reputation.map(normalizeReputationKnowledgeEntry).filter(Boolean)
+            : [],
+    };
+}
+
+function normalizePersonalKnowledgeEntry(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const knownBy = cleanKnowledgeScalar(source.knownBy, 140);
+    const line = cleanKnowledgeScalar(source.line, 220);
+    if (!knownBy || !line) return null;
+    const topic = cleanKnowledgeScalar(source.topic, 140) || NONE;
+    const scope = normalizeUserKnowledgeScope(source.scope);
+    const truth = normalizeUserKnowledgeTruth(source.truth);
+    const confidence = normalizeUserKnowledgeConfidence(source.confidence);
+    const id = cleanKnowledgeId(source.id) || makeKnowledgeId('pk', [knownBy, scope, topic, truth, confidence, line]);
+    return {
+        id,
+        type: 'personalKnowledge',
+        knownBy,
+        scope,
+        topic,
+        truth,
+        confidence,
+        line,
+        reason: cleanKnowledgeScalar(source.reason, 220) || NONE,
+        createdAt: normalizeKnowledgeTimestamp(source.createdAt),
+        updatedAt: normalizeKnowledgeTimestamp(source.updatedAt),
+    };
+}
+
+function normalizeReputationKnowledgeEntry(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const line = cleanKnowledgeScalar(source.line, 220);
+    if (!line) return null;
+    const scope = normalizeUserKnowledgeScope(source.scope);
+    const valence = normalizeUserKnowledgeValence(source.valence);
+    const topic = cleanKnowledgeScalar(source.topic, 140) || NONE;
+    const truth = normalizeUserKnowledgeTruth(source.truth);
+    const confidence = normalizeUserKnowledgeConfidence(source.confidence);
+    const origin = cleanKnowledgeScalar(source.origin, 160) || NONE;
+    const id = cleanKnowledgeId(source.id) || makeKnowledgeId('rk', [scope, valence, topic, truth, confidence, line, origin]);
+    return {
+        id,
+        type: 'reputationKnowledge',
+        scope,
+        valence,
+        topic,
+        truth,
+        confidence,
+        line,
+        origin,
+        reason: cleanKnowledgeScalar(source.reason, 220) || NONE,
+        createdAt: normalizeKnowledgeTimestamp(source.createdAt),
+        updatedAt: normalizeKnowledgeTimestamp(source.updatedAt),
+    };
+}
+
+function mergeUserKnowledgeBucket(before = [], incoming = [], bucket) {
+    const byKey = new Map();
+    for (const entry of before || []) {
+        const normalized = bucket === 'reputation'
+            ? normalizeReputationKnowledgeEntry(entry)
+            : normalizePersonalKnowledgeEntry(entry);
+        if (!normalized) continue;
+        byKey.set(userKnowledgeMergeKey(normalized), normalized);
+    }
+    const now = Date.now();
+    for (const entry of incoming || []) {
+        const normalized = bucket === 'reputation'
+            ? normalizeReputationKnowledgeEntry(entry)
+            : normalizePersonalKnowledgeEntry(entry);
+        if (!normalized) continue;
+        const key = userKnowledgeMergeKey(normalized);
+        const previous = byKey.get(key);
+        byKey.set(key, {
+            ...(previous || {}),
+            ...normalized,
+            id: previous?.id || normalized.id,
+            createdAt: previous?.createdAt || now,
+            updatedAt: now,
+        });
+    }
+    return Array.from(byKey.values()).slice(-80);
+}
+
+function userKnowledgeMergeKey(entry) {
+    if (entry.type === 'reputationKnowledge') {
+        return ['reputation', entry.scope, entry.valence, entry.topic, entry.truth, normalizeKnowledgeLineKey(entry.line)].join('|');
+    }
+    return ['personal', entry.knownBy, entry.scope, entry.topic, entry.truth, normalizeKnowledgeLineKey(entry.line)].join('|');
+}
+
+function normalizeUserKnowledgeScope(value) {
+    const text = cleanKnowledgeScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return USER_KNOWLEDGE_SCOPES.includes(text) ? text : 'private';
+}
+
+function normalizeUserKnowledgeValence(value) {
+    const text = cleanKnowledgeScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return USER_REPUTATION_VALENCES.includes(text) ? text : 'good';
+}
+
+function normalizeUserKnowledgeTruth(value) {
+    const text = cleanKnowledgeScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return USER_KNOWLEDGE_TRUTH.includes(text) ? text : 'true';
+}
+
+function normalizeUserKnowledgeConfidence(value) {
+    const text = cleanKnowledgeScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return USER_KNOWLEDGE_CONFIDENCE.includes(text) ? text : 'certain';
+}
+
+function cleanKnowledgeScalar(value, maxLength = 160) {
+    const text = String(value ?? '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/^["']|["']$/g, '')
+        .trim();
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
+    return text.slice(0, maxLength);
+}
+
+function cleanKnowledgeId(value) {
+    return cleanKnowledgeScalar(value, 80).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+}
+
+function normalizeKnowledgeLineKey(value) {
+    return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+}
+
+function makeKnowledgeId(prefix, parts) {
+    const raw = parts.map(part => String(part ?? '').trim().toLowerCase()).join('|');
+    let hash = 2166136261;
+    for (let index = 0; index < raw.length; index += 1) {
+        hash ^= raw.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return `${prefix}_${(hash >>> 0).toString(36)}`;
+}
+
+function normalizeKnowledgeTimestamp(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
 }
 
 function normalizeUserAbilityUseForHandoff(value = {}) {
@@ -5324,6 +5509,8 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
         base = { label: 'userBadRep', disposition: { B: 1, F: 2, H: 3 } };
     } else if (flags.priorUserGoodRep) {
         base = { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 1 } };
+    } else if (flags.userFearRep && !flags.fearImmunity) {
+        base = { label: 'userFearRep', disposition: { B: 1, F: 3, H: 2 } };
     } else if (flags.userNonHuman && !flags.fearImmunity) {
         base = { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
     }
@@ -5335,6 +5522,7 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
             romanticOpen: yn(flags.romanticOpen),
             userBadRep: yn(flags.userBadRep),
             priorUserGoodRep: yn(flags.priorUserGoodRep),
+            userFearRep: yn(flags.userFearRep),
             userNonHuman: yn(flags.userNonHuman),
             fearImmunity: yn(flags.fearImmunity),
         },
@@ -5354,6 +5542,7 @@ function normalizeSemanticInitPresetFlags(value) {
         romanticOpen: bool(source.romanticOpen),
         userBadRep: bool(source.userBadRep),
         priorUserGoodRep: bool(source.priorUserGoodRep || source.userGoodRep),
+        userFearRep: bool(source.userFearRep),
         userNonHuman: bool(source.userNonHuman),
         fearImmunity: bool(source.fearImmunity || source.fearImmune),
     };
@@ -5363,6 +5552,7 @@ function initUserHistoryFromFlags(flags, stored) {
     const normalized = normalizeInitUserHistory(stored);
     if (flags.userBadRep) return { knowsUser: 'Y', standing: 'negative' };
     if (flags.romanticOpen || flags.priorUserGoodRep) return { knowsUser: 'Y', standing: 'positive' };
+    if (flags.userFearRep) return { knowsUser: 'Y', standing: 'fear' };
     if (normalized.knowsUser === 'Y' || normalized.standing !== 'neutral') return normalized;
     return { knowsUser: 'N', standing: 'neutral' };
 }
@@ -5370,7 +5560,7 @@ function initUserHistoryFromFlags(flags, stored) {
 function normalizeInitUserHistory(value) {
     const source = value && typeof value === 'object' ? value : {};
     const knowsUser = source.knowsUser === 'Y' ? 'Y' : 'N';
-    const standing = ['positive', 'neutral', 'negative'].includes(source.standing) ? source.standing : 'neutral';
+    const standing = ['positive', 'neutral', 'negative', 'fear'].includes(source.standing) ? source.standing : 'neutral';
     return { knowsUser, standing };
 }
 

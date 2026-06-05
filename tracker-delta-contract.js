@@ -5,6 +5,11 @@ export const TRACKER_DELTA_WRAPPER_END = 'STORY_ENGINE_TRACKER_DELTA_END -->';
 export const TRACKER_DELTA_FENCE = '```story_engine_tracker_delta';
 export const TRACKER_DELTA_FENCE_END = '```';
 
+export const USER_KNOWLEDGE_SCOPES = Object.freeze(['private', 'local', 'route', 'faction', 'regional', 'legendary']);
+export const USER_REPUTATION_VALENCES = Object.freeze(['good', 'bad', 'fear']);
+export const USER_KNOWLEDGE_TRUTH = Object.freeze(['true', 'distorted', 'false', 'claimed']);
+export const USER_KNOWLEDGE_CONFIDENCE = Object.freeze(['certain', 'likely', 'uncertain']);
+
 export const PERSONALITY_ARCHETYPE_GLOSSARY = [
     'deredere: openly warm, affectionate, cheerful, direct with care or admiration.',
     'tsundere: guarded or sharp outwardly, softens through action, hides concern behind criticism.',
@@ -62,6 +67,18 @@ export const TRACKER_DELTA_CONTRACT = [
     '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- If uncertain, output (none).',
     '- Inside the fenced tracker block, output exactly the compact tracker lines. No prose. No JSON. No extra labels.',
+    '',
+    'USER_KNOWLEDGE_LEDGER:',
+    '- Also output UserKnowledgeLedger lines. This hidden ledger tracks only persistent facts about {{user}}.',
+    '- Use personalKnowledge for a specific NPC/group that directly saw, heard, experienced, was told, or can personally remember a concrete fact about {{user}}.',
+    '- Use reputationKnowledge for spreadable reputation or achievement facts about {{user}}. Reputation may start private when the achievement happened but is not yet known; it becomes public only when witnessed, reported, proven, discovered, or visibly consequential.',
+    '- Reputation valence is only good, bad, or fear. Do not create ridicule or mixed reputation. If different audiences would react differently, create separate scoped entries.',
+    '- Create entries only for resolved, persistent, socially meaningful facts. Do not store ordinary conversation, temporary mood, trivial actions, private facts with no future relevance, or comedy/flavor unless it materially affects future NPC behavior.',
+    '- Knowledge must be access-limited. NPCs/groups know only what they plausibly had access to; public reputation spreads only through scope, witnesses, institutions, reports, proof, visible aftermath, or ordinary rumor channels.',
+    '- Good reputation: rescue, mercy, honored promises, respected achievements, protecting people, defeating public threats, or helping a respected group.',
+    '- Bad reputation: crimes, betrayal, exposed lies, coercion, harm to innocents, theft, cruelty, dishonor, or helping an audience enemy.',
+    '- Fear reputation: dangerous power, killing feared threats, brutal public dominance, surviving impossible danger, or deeds that make strangers cautious rather than admiring.',
+    '- If no relevant knowledge or reputation is created, output both counts as 0.',
 ].join('\n');
 
 export const TRACKER_DELTA_TEMPLATE = `${TRACKER_DELTA_FENCE}
@@ -90,5 +107,22 @@ TrackerUpdateEngine.NPC[0].statusAdd=(none)
 TrackerUpdateEngine.NPC[0].statusRemove=(none)
 TrackerUpdateEngine.NPC[0].gearAdd=(none)
 TrackerUpdateEngine.NPC[0].gearRemove=(none)
+UserKnowledgeLedger.personal.count=0
+UserKnowledgeLedger.personal[0].knownBy=(none)
+UserKnowledgeLedger.personal[0].scope=private
+UserKnowledgeLedger.personal[0].topic=(none)
+UserKnowledgeLedger.personal[0].truth=true
+UserKnowledgeLedger.personal[0].confidence=certain
+UserKnowledgeLedger.personal[0].line=(none)
+UserKnowledgeLedger.personal[0].reason=(none)
+UserKnowledgeLedger.reputation.count=0
+UserKnowledgeLedger.reputation[0].scope=private
+UserKnowledgeLedger.reputation[0].valence=good
+UserKnowledgeLedger.reputation[0].topic=(none)
+UserKnowledgeLedger.reputation[0].truth=true
+UserKnowledgeLedger.reputation[0].confidence=certain
+UserKnowledgeLedger.reputation[0].line=(none)
+UserKnowledgeLedger.reputation[0].origin=(none)
+UserKnowledgeLedger.reputation[0].reason=(none)
 ${TRACKER_DELTA_END}
 ${TRACKER_DELTA_FENCE_END}`;
