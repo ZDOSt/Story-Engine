@@ -417,13 +417,14 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
     const before = buildPowerActorSnapshot(context);
     const trackerUpdate = {};
     const handoffEntries = [];
-    const effects = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
+    const semanticEffects = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
     const eventShapes = Array.isArray(ledger?.powerEventShape?.events) ? ledger.powerEventShape.events : [];
     let shapedEventHandoff = null;
 
     audit.push(`STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER`);
     audit.push(`3P.0 currentPowerActors=${powerActorSummary(before)}`);
-    audit.push(`3P.1 semanticPowerActorEffects=${effects.length ? compact(effects) : 'none'}`);
+    audit.push(`3P.1 semanticPowerActorEffects=${semanticEffects.length ? compact(semanticEffects) : 'none'}`);
+    const effects = semanticEffects;
     audit.push(`3P.1a semanticPowerEventShapes=${eventShapes.length ? compact(eventShapes) : 'none'}`);
 
     for (const rawShape of eventShapes) {
@@ -453,19 +454,30 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
     }
 
     for (const rawEffect of effects) {
-        const effect = normalizePowerActorEffect(rawEffect);
+        let effect = normalizePowerActorEffect(rawEffect);
         if (!effect) {
             audit.push(`3P.2 ignoredPowerActorEffect=${compact({ reason: 'invalid/no reach/no known actor/no enmity effect', rawEffect })}`);
             continue;
         }
 
-        const previousName = findExistingPowerActorName(before, effect.actor)
-            || findExistingPowerActorName(trackerUpdate, effect.actor)
+        effect = reroutePowerActorEffectToCurrentCandidate(effect, ledger, before, trackerUpdate, audit);
+        const previousName = findExistingPowerActorName(trackerUpdate, effect.actor)
+            || findExistingPowerActorName(before, effect.actor)
             || effect.actor;
         const previous = normalizePowerActorState(trackerUpdate[previousName] || before[previousName] || {});
         const delta = powerActorEnmityDelta(effect.severity);
         if (delta <= 0) {
             audit.push(`3P.3 ignoredPowerActorEffect=${compact({ actor: effect.actor, reason: 'zero delta', severity: effect.severity })}`);
+            continue;
+        }
+        if (isDuplicatePowerActorEffect(effect, previous)) {
+            audit.push(`3P.3a ignoredPowerActorEffect=${compact({
+                actor: previousName,
+                reason: 'duplicate historical/stored power actor effect',
+                effect: effect.effect,
+                severity: effect.severity,
+                effectReason: effect.reason,
+            })}`);
             continue;
         }
 
@@ -518,6 +530,99 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
     audit.push(`3P.5 powerActorPressureHandoff=${handoff.entries.length ? compact(handoff.entries) : 'none'}`);
     audit.push(`3P.6 powerEventHandoff=${handoff.event ? compact(handoff.event) : 'none'}`);
     return { trackerUpdate, handoff };
+}
+
+function isDuplicatePowerActorEffect(effect, previousState) {
+    const previous = normalizePowerActorState(previousState || {});
+    const reasonKey = normalizeNameKey(effect.reason);
+    if (!reasonKey) return false;
+    if (previous.reasons.some(reason => normalizeNameKey(reason) === reasonKey)) return true;
+    const last = previous.lastEffect || {};
+    return last.effect === effect.effect
+        && last.severity === effect.severity
+        && normalizeNameKey(last.reason) === reasonKey;
+}
+
+function reroutePowerActorEffectToCurrentCandidate(effect, ledger, before, trackerUpdate, audit) {
+    const candidates = currentPowerActorCandidates(ledger).filter(candidate => candidate.isPowerActor && candidate.hasReach);
+    if (!candidates.length) return effect;
+    if (candidates.some(candidate => sameName(candidate.actor, effect.actor))) return effect;
+
+    const source = powerActorLatestActionSource(ledger, null, effect);
+    const mentioned = candidates.filter(candidate => sourceMentionsPowerActor(candidate.actor, source));
+    const preferred = mentioned.length === 1 ? mentioned[0] : null;
+    if (!preferred) return effect;
+
+    const retargeted = {
+        ...effect,
+        actor: preferred.actor,
+        actorType: preferred.actorType || effect.actorType,
+    };
+    audit?.push(`3P.2a powerActorEffectRetargeted=${compact({
+        hardRule: 'current action power actor candidate owns latest enmity effect over older snapshot actor',
+        from: effect.actor,
+        to: retargeted.actor,
+        reason: effect.reason,
+    })}`);
+    return retargeted;
+}
+
+function currentPowerActorCandidates(ledger) {
+    const currentNames = unique([
+        ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.PowerActors),
+        ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.ActionTargets),
+        ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.OppTargets?.NPC),
+        ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.BenefitedObservers),
+        ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.HarmedObservers),
+    ]);
+    const currentKeys = new Set(currentNames.map(normalizeNameKey).filter(Boolean));
+    return (Array.isArray(ledger?.powerActorEnmity?.assessments) ? ledger.powerActorEnmity.assessments : [])
+        .map(normalizePowerActorAssessmentForRunner)
+        .filter(candidate => candidate.actor && (currentKeys.has(normalizeNameKey(candidate.actor)) || currentKeys.size === 0));
+}
+
+function normalizePowerActorAssessmentForRunner(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const actor = cleanPowerActorScalar(source.actor ?? source.Actor, 100);
+    const reach = Array.isArray(source.reach ?? source.Reach)
+        ? (source.reach ?? source.Reach).map(item => cleanPowerActorScalar(item, 80)).filter(Boolean)
+        : String(source.reach ?? source.Reach ?? '')
+            .split(',')
+            .map(item => cleanPowerActorScalar(item, 80))
+            .filter(Boolean);
+    return {
+        actor,
+        isPowerActor: bool(source.isPowerActor ?? source.IsPowerActor),
+        hasReach: reach.length > 0 || bool(source.isPowerActor ?? source.IsPowerActor),
+        actorType: cleanPowerActorScalar(source.actorType ?? source.ActorType, 80) || 'power actor',
+        evidence: cleanPowerActorScalar(source.evidence ?? source.Evidence, 180),
+        assessmentReason: cleanPowerActorScalar(source.assessmentReason ?? source.AssessmentReason ?? source.reason ?? source.Reason, 180),
+    };
+}
+
+function powerActorLatestActionSource(ledger, context, effect = null) {
+    const semantic = ledger?.resolutionEngine || {};
+    const itemUse = normalizeItemUseForHandoff(semantic.itemUse);
+    return [
+        context ? getLatestUserTextFromContext(context) : '',
+        semantic.identifyGoal,
+        semantic.identifyChallenge,
+        semantic.explicitMeans,
+        itemUse.Item,
+        itemUse.Evidence,
+        itemUse.NoEffectReason,
+        ...toRealArray(semantic.identifyTargets?.PowerActors),
+        ...toRealArray(semantic.identifyTargets?.ActionTargets),
+        ...toRealArray(semantic.identifyTargets?.HarmedObservers),
+        effect?.actor,
+        effect?.reason,
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function sourceMentionsPowerActor(actor, source) {
+    const key = normalizeNameKey(actor);
+    if (!key) return false;
+    return String(source || '').toLowerCase().includes(key);
 }
 
 function normalizePowerActorEffect(value) {

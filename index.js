@@ -4970,7 +4970,7 @@ function buildProgressionAccomplishmentRecord(pendingRun, messageKey) {
         userText: String(pendingRun?.latestUserText || '').trim(),
         goal: String(packet.GOAL || 'unknown'),
         stat: parseUserStatFromResultLine(resultLine),
-        targets: unique([
+        targets: uniqueNames([
             ...toRealNameArray(packet.ActionTargets),
             ...toRealNameArray(packet.OppTargets?.NPC),
             ...toRealNameArray(packet.OppTargets?.ENV),

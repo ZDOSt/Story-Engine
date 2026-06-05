@@ -707,8 +707,6 @@ function buildActiveBranchFacts({ userAction, resolution, handoff, result, rollA
     if (!isNoneText(inflictedUserInjury)) facts.push(`User injury branch: ${inflictedUserInjury}.`);
     if (resolution?.CompanionCommand?.Mode === 'REQUEST_ONLY') facts.push(`Companion command branch: request-only command to ${list(resolution.CompanionCommand.NPCs)}; no obedience or companion hit is resolved unless proactivity/aggression says so.`);
     if (!isNoneText(powerActorEvent)) facts.push(`World pressure event: ${powerActorEvent}. Render only the visible surface event. Do not add why it happens, who benefits, unseen causes, or extra pressure beyond this instruction.`);
-    const namePoolFact = closedWorldNamePoolFact(handoff?.nameGeneration);
-    if (namePoolFact) facts.push(namePoolFact);
     return facts.map(fact => `- ${fact}`).join('\n') || '- none';
 }
 
@@ -756,21 +754,6 @@ function uniqueSceneCastNames(values) {
 function isSceneNpcName(value) {
     const text = String(value ?? '').trim().toLowerCase();
     return !['{{user}}', 'user', 'you', 'the user'].includes(text);
-}
-
-function closedWorldNamePoolFact(nameGeneration) {
-    const pool = nameGeneration?.namePool;
-    if (!pool) return '';
-    const maleNames = (pool.male || [])
-        .map(name => String(name ?? '').trim())
-        .filter(name => name && !isNoneText(name));
-    const femaleNames = (pool.female || [])
-        .map(name => String(name ?? '').trim())
-        .filter(name => name && !isNoneText(name));
-    const locationNames = (pool.location || [])
-        .map(name => String(name ?? '').trim())
-        .filter(name => name && !isNoneText(name));
-    return `Name branch: approved generated name pool is mandatory and closed-world. Male person/entity names allowed only for newly revealed male, masculine, boy/man, or he/him people/entities: ${list(maleNames)}. Female person/entity names allowed only for newly revealed female, feminine, girl/woman, or she/her people/entities: ${list(femaleNames)}. Location/place names allowed for newly revealed places: ${list(locationNames)}. If a new proper name is revealed this turn, it must be one unused name from the matching approved pool and matching gender/presentation bucket when known. A girl, woman, female, or she/her NPC must never receive a male-list name; a boy, man, male, or he/him NPC must never receive a female-list name. If gender/presentation is unknown, choose an unused person/entity name without contradicting established or immediately narrated pronouns. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. If no appropriate unused approved name exists, keep the person/place unnamed or use a role/description.`;
 }
 
 function hasLandedPhysicalResult(resolution) {
@@ -1479,9 +1462,12 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const powerEventNote = !isNoneText(powerActorEvent)
         ? ` Include this visible world-pressure event only as surface scene fact: ${powerActorEvent}. Do not explain why it happens, who benefits, or any unseen cause.`
         : '';
-    const aggressionNote = aggressionText !== 'none'
+    const noAggressionInstruction = aggressionText === 'none' && !isNoneText(aggressionGuide)
         ? ` ${aggressionGuide}`
         : '';
+    const aggressionNote = aggressionText !== 'none'
+        ? ` ${aggressionGuide}`
+        : noAggressionInstruction;
     const compatibleProactivityGuide = buildBoundaryCompatibleProactivityGuide(handoff.proactivityResults ?? {}, handoff.aggressionResults ?? {}, handoff);
     const naturalProactiveNote = compatibleProactivityGuide !== 'none' && aggressionText === 'none'
         ? ` In the same beat, include this NPC initiative: ${compatibleProactivityGuide} Render it naturally through personality, visible behavior, speech, and setting. If no attack result is listed, do not invent a resolved NPC hit.`
@@ -1505,7 +1491,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     const claimInstruction = !isNoneText(claimGuide) ? ` ${claimGuide}` : '';
     const knowledgeInstruction = !isNoneText(userKnowledgeGuide) ? ` ${userKnowledgeGuide}` : '';
 
-    const commonResultInstruction = `${companionCommandInstruction}${abilityInstruction}${itemInstruction}${claimInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}`;
+    const commonResultInstruction = `${companionCommandInstruction}${abilityInstruction}${itemInstruction}${claimInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${noAggressionInstruction}`;
     const stackedPressureInstruction = [
         boundaryViolationNote,
         boundaryNote,
@@ -1520,7 +1506,7 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (intimacyBoundaryGuide.mode === 'DENY' && resolution.boundaryViolationExplicit !== 'Y') {
-        return `The user action is ${userAction}; ${deniedIntimacyResolutionPhrase(resolution)}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${naturalProactiveNote}${chaosNote}`;
+        return `The user action is ${userAction}; ${deniedIntimacyResolutionPhrase(resolution)}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${noAggressionInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${naturalProactiveNote}${chaosNote}`;
     }
 
     if (proactiveText !== 'none') {
@@ -1534,12 +1520,12 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     if (resolution.STAKES === 'N') {
         const chaosNote = chaosText !== 'none' ? ` ${chaosGuide}` : '';
         if (intimacyBoundaryGuide.mode === 'ALLOW') {
-            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
+            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${noAggressionInstruction} ${intimacyBoundaryGuide.text}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
         }
         if (!hasNpcGuidance) {
-            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
+            return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${noAggressionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote}${chaosNote}`;
         }
-        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.`;
+        return `The user action is ${userAction}; no roll is needed.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${noAggressionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${powerEventNote} Keep ${npcName}'s response aligned with this behavior: ${npcGuide} Do not invent hostility, refusal, or extra mechanics unless a boundary is actually violated or the NPC state supports it${chaosNote}.`;
     }
 
     if (resolution.classifyPhysicalBoundaryPressure === 'Y') {
@@ -1547,10 +1533,10 @@ function buildNaturalGuide({ userAction, resolution, handoff, npcText, proactive
     }
 
     if (chaosText !== 'none') {
-        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}`;
+        return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${noAggressionInstruction}${boundaryNote}${powerEventNote} Keep NPC behavior anchored to this guidance: ${npcGuide}. ${chaosGuide}`;
     }
 
-    return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${boundaryNote}${powerEventNote} Narrate the NPC response with this behavior: ${npcGuide} Keep speaking and acting NPCs limited to the Current scene cast.`;
+    return `The user action is ${userAction}; resolve it as ${outcome}.${companionCommandInstruction}${abilityInstruction}${itemInstruction}${knowledgeInstruction}${partialActionInstruction}${impairmentInstruction}${npcImpairmentInstruction}${injuryInstruction}${noAggressionInstruction}${boundaryNote}${powerEventNote} Narrate the NPC response with this behavior: ${npcGuide} Keep speaking and acting NPCs limited to the Current scene cast.`;
 }
 
 function deniedIntimacyResolutionPhrase(resolution) {
@@ -1673,8 +1659,18 @@ function intimacyRefusalGuide(npc) {
 }
 
 function nameGenerationGuide(nameGeneration) {
-    if (!nameGeneration?.namePool) return '';
-    return ` Name pool use is mandatory and obeys fogOfWar(). Already revealed names from chat, character card, lore, or tracker may continue unchanged. Any newly revealed proper name in this response must come only from the approved generated name pool in ACTIVE_BRANCH_FACTS. A new name may appear only after the scene has explicitly revealed that specific person, entity, or place through speech, readable text, self-introduction, direct in-world reference, signage, documents, or clear recognition. Once revealed, use one unused approved person/entity name from the matching gender/presentation bucket for that already-identified person/entity, or one unused approved location/place name for that already-identified place. Female/girl/woman/she-her NPCs must use the female list only; male/boy/man/he-him NPCs must use the male list only. If gender/presentation is unknown, choose without contradicting established or immediately narrated pronouns. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. Do not assign names to background, incidental, or unnamed figures, and do not introduce a name as an appositive unless the scene has already revealed it first. If no such reveal occurred, or no appropriate unused approved name exists, keep the character or place unnamed or use a role/description.`;
+    const pool = nameGeneration?.namePool;
+    if (!pool) return '';
+    const femaleNames = (pool.female || [])
+        .map(name => String(name ?? '').trim())
+        .filter(name => name && !isNoneText(name));
+    const maleNames = (pool.male || [])
+        .map(name => String(name ?? '').trim())
+        .filter(name => name && !isNoneText(name));
+    const locationNames = (pool.location || [])
+        .map(name => String(name ?? '').trim())
+        .filter(name => name && !isNoneText(name));
+    return ` Name pool use is mandatory and obeys fogOfWar(). Any newly revealed proper name in this response MUST use one unused name from this approved pool: Female: ${list(femaleNames)}. Male: ${list(maleNames)}. Location: ${list(locationNames)}. Already revealed names from chat, character card, lore, or tracker may continue unchanged. A new name may appear only after the scene has explicitly revealed that specific person, entity, or place through speech, readable text, self-introduction, direct in-world reference, signage, documents, or clear recognition. Use the matching gender/presentation bucket when known: female/girl/woman/she-her NPCs must use Female names only; male/boy/man/he-him NPCs must use Male names only. If gender/presentation is unknown, choose a person/entity name without contradicting established or immediately narrated pronouns. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. Do not assign names to background, incidental, or unnamed figures, and do not introduce a name as an appositive unless the scene has already revealed it first. If no such reveal occurred, or no appropriate unused approved name exists, keep the character or place unnamed or use a role/description.`;
 }
 
 function namePoolText(pool = {}) {
@@ -2137,13 +2133,27 @@ function buildNoAggressionGuide(resolution, handoff) {
         value?.Proactive === 'Y'
         && (value?.RomanceInitiativeTag === 'Companion_Attack' || value?.PartnerInitiativeTag === 'Companion_Attack' || value?.CompanionInitiativeTag === 'Companion_Attack'));
 
-    if (!hasAggressiveProactivity) return 'none';
-    if (hasCompanionAttack) return 'Companion attack was selected but no Aggression result was produced; show positioning, preparation, cover, or interrupted motion only. Do not narrate a landed companion hit.';
+    const sceneNpcs = uniqueSceneCastNames([
+        resolution?.NPCInScene,
+        resolution?.ActionTargets,
+        resolution?.OppTargets?.NPC,
+        resolution?.hostilesInScene?.NPC,
+        (handoff?.npcHandoffs ?? []).map(npc => npc?.NPC),
+        Object.entries(handoff?.proactivityResults ?? {})
+            .filter(([, value]) => value?.Proactive === 'Y')
+            .map(([name]) => name),
+    ]);
+    if (!sceneNpcs.length && !hasAggressiveProactivity && !hasCompanionAttack) return 'none';
+    const subject = sceneNpcs.length ? list(sceneNpcs) : 'the NPC';
+    const base = `No Aggression result is listed for ${subject} this beat. Render hostility as speech, refusal, obstruction, threat posture, guarded movement, blocking, preparation, or distance control only. Do not narrate ${subject} landing a hit, shove, restraint, injury, counterattack, companion strike, or completed forceful effect unless an Aggression result explicitly lists it.`;
+
+    if (hasCompanionAttack) return `${base} Companion attack was selected but no Aggression result was produced; show positioning, preparation, cover, or interrupted motion only.`;
+    if (!hasAggressiveProactivity) return base;
     if (resolution.OutcomeTier === 'Critical_Success') {
-        return 'The user result is strong enough that no immediate NPC attack is resolved. Show only survival, pain, guard, stagger, retreat, or failed preparation.';
+        return `${base} The user result is strong enough that no immediate NPC attack is resolved. Show only survival, pain, guard, stagger, retreat, or failed preparation.`;
     }
 
-    return 'No aggression result was produced; do not invent a resolved NPC hit.';
+    return base;
 }
 
 function inline(value) {

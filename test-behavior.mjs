@@ -5378,8 +5378,13 @@ const tests = [
       }
       const modelPrompt = prompt(report);
       assert.match(modelPrompt, /Name pool use is mandatory and obeys fogOfWar\(\)\./);
-      assert.match(modelPrompt, /approved generated name pool is mandatory and closed-world/);
+      assert.match(modelPrompt, /Any newly revealed proper name in this response MUST use one unused name from this approved pool/);
+      assert.match(modelPrompt, /Female: /);
+      assert.match(modelPrompt, /Male: /);
+      assert.match(modelPrompt, /Location: /);
       assert.match(modelPrompt, /Do not invent, modify, translate, combine, suffix, add surnames to, or derive names/);
+      assert.doesNotMatch(modelPrompt, /Name branch:/);
+      assert.doesNotMatch(modelPrompt, /approved generated name pool in ACTIVE_BRANCH_FACTS/);
       for (const name of [...pool.male, ...pool.female, ...pool.location]) {
         assert.equal(modelPrompt.includes(name), true);
       }
@@ -5410,13 +5415,15 @@ const tests = [
       });
       const text = prompt(report);
       assert.match(text, /Name pool use is mandatory and obeys fogOfWar\(\)\./);
-      assert.match(text, /Male person\/entity names allowed only for newly revealed male/);
-      assert.match(text, /Female person\/entity names allowed only for newly revealed female/);
-      assert.match(text, /Location\/place names allowed for newly revealed places:/);
-      assert.match(text, /Any newly revealed proper name in this response must come only from the approved generated name pool in ACTIVE_BRANCH_FACTS/);
-      assert.match(text, /Female\/girl\/woman\/she-her NPCs must use the female list only/);
-      assert.match(text, /A girl, woman, female, or she\/her NPC must never receive a male-list name/);
+      assert.match(text, /Any newly revealed proper name in this response MUST use one unused name from this approved pool/);
+      assert.match(text, /Female: [A-Z]/);
+      assert.match(text, /Male: [A-Z]/);
+      assert.match(text, /Location: [A-Z]/);
+      assert.match(text, /female\/girl\/woman\/she-her NPCs must use Female names only/);
+      assert.match(text, /male\/boy\/man\/he-him NPCs must use Male names only/);
       assert.match(text, /Do not assign names to background, incidental, or unnamed figures/);
+      assert.doesNotMatch(text, /Name branch:/);
+      assert.doesNotMatch(text, /approved generated name pool in ACTIVE_BRANCH_FACTS/);
       assert.doesNotMatch(text, /semanticCandidates|rejected:|replacements:/);
     },
   },
@@ -6248,6 +6255,156 @@ const tests = [
     },
   },
   {
+    name: '33c.0 duplicate historical power actor effect is ignored',
+    run() {
+      const report = runCase({
+        userText: 'I keep walking through the market.',
+        powerActors: {
+          'Red Glass Syndicate': {
+            name: 'Red Glass Syndicate',
+            type: 'criminal syndicate',
+            enmity: 2,
+            reasons: ['User destroyed their smuggling ledger'],
+            responseHistory: [],
+            lastEffect: {
+              effect: 'disrupt_operation',
+              severity: 'meaningful',
+              reason: 'User destroyed their smuggling ledger',
+              delta: 2,
+              at: 100,
+            },
+          },
+        },
+        ledger: baseLedger({
+          powerActorEnmity: {
+            effects: [{
+              actor: 'Red Glass Syndicate',
+              actorType: 'criminal syndicate',
+              hasReach: true,
+              effect: 'disrupt_operation',
+              severity: 'meaningful',
+              reason: 'User destroyed their smuggling ledger',
+              knownToActor: true,
+            }],
+          },
+        }),
+      });
+      assert.equal(report.trackerUpdate.powerActors['Red Glass Syndicate'], undefined);
+      const entry = report.finalNarrativeHandoff.powerActorPressure.entries.find(item => item.Actor === 'Red Glass Syndicate');
+      assert.equal(entry.Enmity, 2);
+      assert.deepEqual(entry.Reasons, ['User destroyed their smuggling ledger']);
+      assert.equal(auditIncludes(report, 'duplicate historical/stored power actor effect'), true);
+    },
+  },
+  {
+    name: '33c.0a current-scene power actor candidate overrides stale actor ownership',
+    run() {
+      const report = runCase({
+        userText: 'I expose the prominent merchant\'s false books to the crowd.',
+        tracker: {
+          shopkeeper: trackerEntry({ currentDisposition: { B: 2, F: 2, H: 2 } }),
+        },
+        powerActors: {
+          'City Watch': {
+            name: 'City Watch',
+            type: 'city guard institution',
+            enmity: 1,
+            reasons: ['User embarrassed a patrol captain'],
+            responseHistory: [],
+          },
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Expose_Fraud',
+            identifyChallenge: 'expose the merchant ledger fraud in public',
+            explicitMeans: 'show the merchant ledger to the crowd',
+            identifyTargets: {
+              ActionTargets: ['shopkeeper'],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: ['shopkeeper'],
+              PowerActors: ['shopkeeper'],
+            },
+            hasStakes: true,
+          },
+          relationshipEngine: [relationship('shopkeeper', {
+            stakeChangeByOutcome: emptyStakeMap('harm'),
+          })],
+          powerActorEnmity: {
+            assessments: [{
+              actor: 'shopkeeper',
+              scope: 'individual',
+              isPowerActor: true,
+              actorType: 'prominent merchant',
+              reach: ['money', 'capital trade contacts'],
+              evidence: 'character card says prominent merchant in the capital',
+              assessmentReason: 'merchant has influence and resources beyond personal reaction',
+            }],
+            effects: [{
+              actor: 'City Watch',
+              actorType: 'city guard institution',
+              hasReach: true,
+              effect: 'damage_reputation_or_income',
+              severity: 'meaningful',
+              reason: 'User exposed the merchant ledger fraud',
+              knownToActor: true,
+            }],
+          },
+        }),
+      });
+      const merchant = report.trackerUpdate.powerActors.shopkeeper;
+      assert.equal(merchant.enmity, 2);
+      assert.equal(merchant.type, 'prominent merchant');
+      assert.equal(auditIncludes(report, 'powerActorEffectRetargeted='), true);
+      assert.equal(report.finalNarrativeHandoff.powerActorPressure.entries.some(entry => entry.Actor === 'shopkeeper'), true);
+    },
+  },
+  {
+    name: '33c.0b power actor asset harm fallback creates effect when semantic misses it',
+    run() {
+      const report = runCase({
+        userText: 'I burn the Red Glass Syndicate payment ledger in front of their dock crew.',
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Destroy_Ledger',
+            identifyChallenge: 'burn the syndicate payment ledger',
+            explicitMeans: 'burn the Red Glass Syndicate payment ledger',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'payment ledger',
+              source: 'held',
+              evidence: 'the payment ledger is already in hand',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+              PowerActors: ['Red Glass Syndicate'],
+            },
+            hasStakes: true,
+          },
+          powerActorEnmity: {
+            assessments: [{
+              actor: 'Red Glass Syndicate',
+              scope: 'organization',
+              isPowerActor: true,
+              actorType: 'criminal syndicate',
+              reach: ['dock crew', 'smuggling network'],
+              evidence: 'payment ledger belongs to their operation',
+              assessmentReason: 'organization has recurring reach and assets',
+            }],
+            effects: [],
+          },
+        }),
+      });
+      assert.equal(report.trackerUpdate.powerActors['Red Glass Syndicate'], undefined);
+      assert.equal(auditIncludes(report, 'powerActorAssetFallbackEffect='), false);
+    },
+  },
+  {
     name: '33c.1 visible tracker uses compact grouped display and hides inactive NPC section',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
@@ -6348,6 +6505,8 @@ const tests = [
       assert.match(semanticSource, /the active character\/card actor when relevant/);
       assert.match(semanticSource, /Do this even when PowerActorEnmity\.effects count is 0/);
       assert.match(semanticSource, /A prominent local figure should be assessed as a potential power actor/);
+      assert.match(semanticSource, /concrete ordinary discovery\/attribution path to \{\{user\}\}/);
+      assert.match(semanticSource, /Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn/);
       assert.match(semanticSource, /PowerActors and PowerActorEnmity never replace RelationshipEngine/);
       assert.match(semanticSource, /PowerActors and PowerActorEnmity never replace RelationshipEngine/);
       assert.match(semanticSource, /powerActorEnmity/);
@@ -6361,6 +6520,8 @@ const tests = [
       assert.match(deterministicSource, /powerActorTier\(enmity\)/);
       assert.match(deterministicSource, /runPowerActorProactivity/);
       assert.match(deterministicSource, /isSafePowerEventVisibleInstruction/);
+      assert.doesNotMatch(deterministicSource, /powerActorAssetFallbackEffect=/);
+      assert.match(deterministicSource, /powerActorEffectRetargeted=/);
       assert.match(preflightSource, /World pressure event: /);
       assert.match(preflightSource, /Render only the visible surface event/);
       assert.match(indexSource, /beforePowerActors/);
@@ -6687,6 +6848,8 @@ const tests = [
       assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.NoEffectReason=\(none\)/);
       assert.match(semanticSource, /compare the latest user input against active \{\{user\}\}\/persona abilities/i);
       assert.match(semanticSource, /Mark Attempted=Y when the input explicitly names an ability\/spell or implicitly describes attempting one/i);
+      assert.match(semanticSource, /meant only for X/);
+      assert.match(semanticSource, /only X can hear/);
       assert.match(semanticSource, /Mark Available=Y only if/i);
       assert.match(semanticSource, /MechanicalScope must always be flavor_only_no_bonus/i);
       assert.match(semanticSource, /never a bonus, never a dice modifier, never a separate roll/i);
@@ -8304,6 +8467,7 @@ const tests = [
       assert.match(source, /sourceRecords = unspent\.slice\(0, PROGRESSION_REQUIRED_ACCOMPLISHMENTS\)/);
       assert.match(source, /maybeRecordProgressionAccomplishment\(\{ pendingRun, messageKey, context \}\)/);
       assert.match(source, /removeProgressionRecordsForMessage\(key, context\)/);
+      assert.match(source, /targets:\s*uniqueNames\(\[/);
       assert.doesNotMatch(source, /choose-gain-ability/);
       assert.doesNotMatch(source, /Gain Ability/);
       assert.doesNotMatch(source, /gainAbility/);
