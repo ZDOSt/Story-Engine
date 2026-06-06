@@ -208,7 +208,9 @@ function buildReadableDeterministicDebug(handoff) {
 export function formatNarratorPromptContext(report, options = {}) {
     const handoff = report?.finalNarrativeHandoff ?? {};
     const resolution = handoff.resolutionPacket ?? {};
-    const summary = buildNarratorSummary(handoff, resolution, report?.semanticLedger ?? {}, options);
+    const ledger = report?.semanticLedger ?? {};
+    const summary = buildNarratorSummary(handoff, resolution, ledger, options);
+    const narratorModelHandoff = formatNarrativeContract({ summary, handoff, resolution, ledger, options });
 
     const lines = [
         '[STORY_ENGINE_MECHANICS_AUDIT v0.9]',
@@ -216,6 +218,11 @@ export function formatNarratorPromptContext(report, options = {}) {
         '',
         '==MECHANICS_RESULTS==',
         ...formatMechanicsResultList(summary, resolution, handoff),
+        '',
+        '==NARRATOR_MODEL_HANDOFF==',
+        'This is the exact narrator-facing handoff appended to the narrator model prompt for this response.',
+        '',
+        narratorModelHandoff,
     ];
 
     return lines.join('\n');
