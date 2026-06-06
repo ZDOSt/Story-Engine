@@ -411,7 +411,7 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.Outcome, 'no_roll');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
       assert.match(prompt(report), /Intimacy is not permitted for Valerie/);
-      assert.match(prompt(report), /This denial alone is not a dice roll or relationship penalty/);
+      assert.match(prompt(report), /This denial is a boundary for later turns, not a relationship punishment by itself/);
       assert.equal(auditIncludes(report, 'hard_override_romance_conversation_no_roll'), true);
     },
   },
@@ -473,7 +473,7 @@ const tests = [
       assert.equal(handoff.IntimacyBoundary, 'SKIP');
       assert.equal(report.finalNarrativeHandoff.proactivityResults.Seraphina.Proactive, 'N');
       assert.match(modelPrompt, /conversation alone is not permission for intimate escalation/);
-      assert.match(modelPrompt, /Unless IntimacyBoundary explicitly permits it/);
+      assert.match(modelPrompt, /No intimacy permission is active for Seraphina/);
       assert.match(modelPrompt, /inn room, a private room/);
       assert.match(modelPrompt, /secluded intimacy/);
     },
@@ -542,7 +542,7 @@ const tests = [
       };
       const modelPrompt = prompt(report);
       assert.match(modelPrompt, /include this NPC initiative/i);
-      assert.match(modelPrompt, /Universal intimacy guard: no intimacy permission is active for Naomi/);
+      assert.match(modelPrompt, /No intimacy permission is active for Naomi/);
       assert.match(modelPrompt, /conversation alone is not permission for intimate escalation/);
       assert.match(modelPrompt, /bra or panties display/);
       assert.match(modelPrompt, /offering or showing their body/);
@@ -1035,7 +1035,7 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].EstablishedRelationship, 'N');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
       assert.match(prompt(report), /Intimacy is not permitted for Mira/);
-      assert.match(prompt(report), /no intimacy permission is active for Mira/);
+      assert.match(prompt(report), /This denial is a boundary for later turns/);
     },
   },
   {
@@ -1062,7 +1062,7 @@ const tests = [
       assert.equal(handoff.Override, 'NONE');
       assert.equal(handoff.IntimacyBoundary, 'DENY');
       assert.match(prompt(report), /Intimacy is not permitted for Naomi/);
-      assert.match(prompt(report), /no intimacy permission is active for Naomi/);
+      assert.match(prompt(report), /This denial is a boundary for later turns/);
     },
   },
   {
@@ -2711,7 +2711,7 @@ const tests = [
       assert.equal(packet.EnvironmentDifficulty, 8);
       assert.equal(packet.Outcome, 'failure');
       assert.match(report.finalNarrativeHandoff.resultLine, /1d20\(10\) \+ PHY\(6\) = 16 vs 1d20\(10\) \+ ENV\(8\) = 18/);
-      assert.match(prompt(report), /Environment branch: OppTargets\.ENV=reinforced sealed gate; difficulty=Hard\/8/);
+      assert.match(prompt(report), /The relevant environmental obstacle is reinforced sealed gate\. Treat it as a hard obstacle/);
       assert.match(auditPrompt(report), /resolution\.EnvironmentDifficulty: OppTargets\.ENV=reinforced sealed gate; difficulty=Hard\/8/);
     },
   },
@@ -2742,7 +2742,7 @@ const tests = [
       assert.equal(packet.EnvironmentDifficulty, 0);
       assert.equal(packet.Outcome, 'success');
       assert.match(report.finalNarrativeHandoff.resultLine, /1d20\(10\) \+ PHY\(6\) = 16 vs 1d20\(10\) \+ ENV\(0\) = 10/);
-      assert.match(prompt(report), /Environment branch: OppTargets\.ENV=loose gate; difficulty=Easy\/0/);
+      assert.match(prompt(report), /The relevant environmental obstacle is loose gate\. Treat it as a simple or low-resistance obstacle/);
     },
   },
   {
@@ -2835,7 +2835,7 @@ const tests = [
       assert.equal(Boolean(companionInjury), true);
       assert.equal(companionInjury.InjuryDetailMode, 'narrator_contextual');
       assert.equal(companionInjury.woundsAdd.length, 0);
-      assert.match(prompt(report), /choose the concrete wound and affected body area from the NPC attack context/i);
+      assert.match(prompt(report), /choose the concrete wound and affected body area from the attack context/i);
       assert.match(auditPrompt(report), /detailMode:narrator_contextual/i);
       assert.match(prompt(report), /spoken tactical input only/i);
       assert.match(prompt(report), /Seraphina/);
@@ -2995,7 +2995,7 @@ const tests = [
       assert.match(prompt(report), /spoken tactical input only/i);
       assert.match(prompt(report), /Seraphina/);
       assert.match(prompt(report), /companion attack against Ogre/);
-      assert.match(prompt(report), /Seraphina's only resolved attack target this beat is Ogre/i);
+      assert.match(prompt(report), /This force targets only Ogre/i);
     },
   },
   {
@@ -3119,7 +3119,7 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.CompanionCommand.Mode, 'REQUEST_ONLY');
       assert.match(prompt(report), /Seraphina: companion attack against Raider2/);
-      assert.match(prompt(report), /Seraphina's only resolved attack target this beat is Raider2/i);
+      assert.match(prompt(report), /This force targets only Raider2/i);
       assert.equal(auditIncludes(report, 'directedCompanionAttackHostilePoolRepair'), true);
     },
   },
@@ -4063,7 +4063,7 @@ const tests = [
       assert.equal(Boolean(ogreCounter.InflictedTargetInjury), true);
       assert.equal(ogreCounter.InflictedTargetInjury.InjuryDetailMode, 'narrator_contextual');
       assert.equal(ogreCounter.InflictedTargetInjury.woundsAdd.length, 0);
-      assert.match(prompt(report), /choose the concrete wound and affected body area from the NPC attack context/i);
+      assert.match(prompt(report), /choose the concrete wound and affected body area from the attack context/i);
       assert.match(auditPrompt(report), /detailMode:narrator_contextual/i);
       assert.equal(report.trackerUpdate.npcs.Seraphina.condition, 'healthy');
       assert.match(prompt(report), /companion attack against Ogre/i);
@@ -4685,7 +4685,7 @@ const tests = [
       assert.equal(resolution.InflictedInjuries.length, 1);
       assert.equal(report.trackerUpdate.npcs.Val.wounds.length, 1);
       const text = prompt(report);
-      assert.match(text, /Only 1 of 3 attempted actions lands/);
+      assert.match(text, /Only 1 of 3 attempted actions takes effect/);
       assert.doesNotMatch(text, /knee strike to the stomach.*headbutt to the head/s);
     },
   },
@@ -4910,7 +4910,7 @@ const tests = [
       assert.match(auditPrompt(report), /Witch\/CounterAttack\/.*attackStat:MND\/defenseStat:MND\/style:magical\/mental\/supernatural/);
       assert.match(auditPrompt(report), /- resolution\.nonLethal: N/);
       assert.match(auditPrompt(report), /- aggression\.roll\.Witch:/);
-      assert.match(prompt(report), /used MND vs MND/);
+      assert.match(prompt(report), /context-appropriate magic, mental force, supernatural pressure, will, focus, or other non-social power/);
       assert.match(prompt(report), /magic, mental force, supernatural pressure/);
     },
   },
@@ -5178,8 +5178,8 @@ const tests = [
       assert.equal(injuries[0].FatalityTrigger, 'nat20_critical_success');
       assert.equal(report.trackerUpdate.npcs.Guard.condition, 'dead');
       assert.match(auditPrompt(report), /injury\.inflictedNpc: npc:Guard\/condition:dead/);
-      assert.match(prompt(report), /natural 20 plus Critical Success kills the target/);
-      assert.match(prompt(report), /Guard receives dead condition/);
+      assert.match(prompt(report), /fatal finish against Guard/);
+      assert.match(prompt(report), /Guard dies/);
     },
   },
   {
@@ -5258,7 +5258,7 @@ const tests = [
       assert.equal(injuries[0].condition, 'dead');
       assert.equal(injuries[0].FatalityTrigger, 'finish_off_badly_wounded');
       assert.equal(report.trackerUpdate.npcs.Guard.condition, 'dead');
-      assert.match(prompt(report), /fatal finish against an already badly wounded or critical target/);
+      assert.match(prompt(report), /fatal finish against Guard/);
     },
   },
   {
@@ -5298,7 +5298,7 @@ const tests = [
       assert.equal(injuries[0].condition, 'dead');
       assert.equal(injuries[0].FatalityTrigger, 'finish_off_critical');
       assert.equal(report.trackerUpdate.npcs.Raider.condition, 'dead');
-      assert.match(prompt(report), /Raider receives dead condition/);
+      assert.match(prompt(report), /Raider dies/);
     },
   },
   {
@@ -5377,8 +5377,8 @@ const tests = [
         assert.doesNotMatch(name, /(?:Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
       }
       const modelPrompt = prompt(report);
-      assert.match(modelPrompt, /Name pool use is mandatory and obeys fogOfWar\(\)\./);
-      assert.match(modelPrompt, /Any newly revealed proper name in this response MUST use one unused name from this approved pool/);
+      assert.match(modelPrompt, /Name pool use is mandatory and obeys fog of war\./);
+      assert.match(modelPrompt, /If a new proper name is revealed, use only one unused approved name from this pool/);
       assert.match(modelPrompt, /Female: /);
       assert.match(modelPrompt, /Male: /);
       assert.match(modelPrompt, /Location: /);
@@ -5414,14 +5414,13 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /Name pool use is mandatory and obeys fogOfWar\(\)\./);
-      assert.match(text, /Any newly revealed proper name in this response MUST use one unused name from this approved pool/);
+      assert.match(text, /Name pool use is mandatory and obeys fog of war\./);
+      assert.match(text, /If a new proper name is revealed, use only one unused approved name from this pool/);
       assert.match(text, /Female: [A-Z]/);
       assert.match(text, /Male: [A-Z]/);
       assert.match(text, /Location: [A-Z]/);
-      assert.match(text, /female\/girl\/woman\/she-her NPCs must use Female names only/);
-      assert.match(text, /male\/boy\/man\/he-him NPCs must use Male names only/);
-      assert.match(text, /Do not assign names to background, incidental, or unnamed figures/);
+      assert.match(text, /Use the matching gender\/presentation bucket when known/);
+      assert.match(text, /Do not name background, incidental, or unnamed figures/);
       assert.doesNotMatch(text, /Name branch:/);
       assert.doesNotMatch(text, /approved generated name pool in ACTIVE_BRANCH_FACTS/);
       assert.doesNotMatch(text, /semanticCandidates|rejected:|replacements:/);
@@ -5769,7 +5768,7 @@ const tests = [
       assert.match(text, /Make it noticeable but brief/);
       assert.match(text, /information, evidence, a sign, or an overheard detail/);
       assert.match(text, /Choose the concrete implementation freely/);
-      assert.match(text, /do not override the main outcome, consent limits, attacks, injuries, or relationship results/);
+      assert.match(text, /do not override the main result, consent limits, attacks, injuries, or relationship facts/);
       assert.doesNotMatch(text, /Chaos Guide|BENEFICIAL|MODERATE|CLUE|ENVIRONMENT/);
     },
   },
@@ -6522,8 +6521,8 @@ const tests = [
       assert.match(deterministicSource, /isSafePowerEventVisibleInstruction/);
       assert.doesNotMatch(deterministicSource, /powerActorAssetFallbackEffect=/);
       assert.match(deterministicSource, /powerActorEffectRetargeted=/);
-      assert.match(preflightSource, /World pressure event: /);
-      assert.match(preflightSource, /Render only the visible surface event/);
+      assert.match(preflightSource, /visible surface event only/);
+      assert.match(preflightSource, /Do not explain why it happens, who benefits, unseen causes, or hidden pressure behind it/);
       assert.match(indexSource, /beforePowerActors/);
       assert.match(indexSource, /afterPowerActors/);
       assert.match(indexSource, /root\.powerActors/);
@@ -6609,8 +6608,8 @@ const tests = [
       assert.equal(actor.activeAgent.coverRole, 'caravan clerk');
       assert.equal(report.finalNarrativeHandoff.powerActorPressure.event.VisibleInstruction, 'Introduce Torven as a caravan clerk offering paid unloading work at the west gate.');
       const modelPrompt = prompt(report);
-      const eventLines = modelPrompt.split('\n').filter(line => /World pressure event|visible world-pressure event/i.test(line)).join('\n');
-      assert.match(eventLines, /World pressure event: Introduce Torven as a caravan clerk offering paid unloading work at the west gate/);
+      const eventLines = modelPrompt.split('\n').filter(line => /visible surface event/i.test(line)).join('\n');
+      assert.match(eventLines, /visible surface event only: Introduce Torven as a caravan clerk offering paid unloading work at the west gate/);
       assert.doesNotMatch(eventLines, /Red Glass Syndicate|criminal syndicate|plant_contact/i);
       assert.doesNotMatch(eventLines, /(?:\bspy\b|\bagent\b|infiltrat|sponsor|betray)/i);
       assert.match(auditPrompt(report), /- powerActor\.event: plant_contact\/contact:Torven\/role:caravan clerk\/visible:Introduce Torven/);
@@ -6829,9 +6828,9 @@ const tests = [
         mode: 'proxy',
         latestUserText: 'I walk to Mira and offer her the sealed letter.',
       });
-      assert.match(text, /PROXY USER ACTION MODE/);
+      assert.match(text, /Proxy user action mode is active/);
       assert.match(text, /double square brackets/);
-      assert.match(text, /NARRATOR_HANDOFF|RESOLVED_SCENE_FACTS/);
+      assert.match(text, /narrativeFacts\(input\)/);
       assert.match(text, /sealed letter/);
     },
   },
@@ -6856,9 +6855,9 @@ const tests = [
       assert.match(semanticSource, /userAbilityUse:\s*normalizeUserAbilityUse/);
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /When ACTIVE_BRANCH_FACTS lists an available UserAbilityUse, preserve its NarrativeEffect/i);
-      assert.match(preflightSource, /When it lists an unavailable ability\/spell attempt, no ability effect occurs/i);
-      assert.match(preflightSource, /do not announce, name, activate, focus, channel, charge, or explain the ability/i);
+      assert.match(preflightSource, /If an available ability is listed, preserve its described effect as fictional method\/flavor only/i);
+      assert.match(preflightSource, /If an unavailable ability\/spell attempt is listed, no ability effect occurs/i);
+      assert.match(preflightSource, /Do not name, label, explain, activate, charge, focus, channel, or attribute abilities/i);
 
       const report = runCase({
         userText: 'I whisper under my breath, meant only for Alice: "Leave him alone."',
@@ -6906,10 +6905,10 @@ const tests = [
       assert.equal(packet.STAKES, 'N');
 
       const prompt = formatNarratorModelPromptContext(report);
-      assert.match(prompt, /UserAbilityUse: Resonant Voice; evidence:meant only for Alice; effect:Alice alone hears the whispered words; scope:flavor_only_no_bonus/i);
-      assert.match(prompt, /Preserve user ability effect as direct scene fact: Alice alone hears the whispered words/i);
-      assert.match(prompt, /do not announce, name, activate, focus, channel, charge, or explain the ability/i);
-      assert.match(prompt, /do not add bonuses, success, roll changes, extra landed actions, or bypassed stakes/i);
+      assert.match(prompt, /The user's ability can produce this direct scene effect: Alice alone hears the whispered words/i);
+      assert.match(prompt, /Do not announce, label, explain, activate, focus, channel, charge, or name the ability/i);
+      assert.match(prompt, /Do not add extra success, extra impact, or bypassed consequences/i);
+      assert.doesNotMatch(prompt, /UserAbilityUse:/);
 
       const unavailableReport = runCase({
         userText: 'I extend my hand and picture a small ball of fire forming at my fingertip.',
@@ -6951,11 +6950,11 @@ const tests = [
         MechanicalScope: 'flavor_only_no_bonus',
       });
       const unavailablePrompt = formatNarratorModelPromptContext(unavailableReport);
-      assert.match(unavailablePrompt, /unavailable ability\/spell attempt: fire spell/i);
-      assert.match(unavailablePrompt, /No ability effect occurs/i);
+      assert.match(unavailablePrompt, /unavailable supernatural or special ability: fire spell/i);
+      assert.match(unavailablePrompt, /The attempted effect does not occur/i);
       assert.match(unavailablePrompt, /Do not create the attempted effect: a small ball of fire forms at the fingertip/i);
       assert.match(unavailablePrompt, /Render only the lack of effect and visible reactions/i);
-      assert.doesNotMatch(unavailablePrompt, /Preserve user ability effect as direct scene fact: a small ball of fire forms at the fingertip/i);
+      assert.doesNotMatch(unavailablePrompt, /can produce this direct scene effect: a small ball of fire forms at the fingertip/i);
       assert.doesNotMatch(unavailablePrompt, /\(none\)'s response|Use the listed NPC state naturally: none/i);
     },
   },
@@ -6975,9 +6974,9 @@ const tests = [
       assert.match(semanticSource, /The latest user input cannot create the item as evidence of availability/i);
       assert.match(runnerSource, /ItemUse:\s*normalizeItemUseForHandoff\(semantic\.itemUse\)/);
       assert.doesNotMatch(runnerSource, /ItemUse[\s\S]{0,240}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /When ACTIVE_BRANCH_FACTS lists ItemUse, obey that availability exactly/i);
-      assert.match(preflightSource, /Unavailable item branch:/);
-      assert.match(preflightSource, /Contested item branch:/);
+      assert.match(preflightSource, /If item use is listed, obey the listed availability exactly/i);
+      assert.match(preflightSource, /Unavailable or contested item use must not appear as freely possessed/i);
+      assert.match(preflightSource, /No item effect occurs/i);
 
       const unavailableReport = runCase({
         userText: 'I smile at Alice, then draw my sword.',
@@ -7020,10 +7019,10 @@ const tests = [
       });
       assert.equal(unavailablePacket.STAKES, 'N');
       const unavailablePrompt = prompt(unavailableReport);
-      assert.match(unavailablePrompt, /ItemUse: unavailable\/contested item attempt: sword; source:unavailable; evidence:draw my sword; noEffectReason:not in user gear\/inventory and not established in scene/i);
-      assert.match(unavailablePrompt, /Unavailable item branch: sword is not available/i);
+      assert.match(unavailablePrompt, /sword is not available to the user/i);
       assert.match(unavailablePrompt, /Do not narrate the item appearing, being drawn, wielded, used/i);
-      assert.doesNotMatch(unavailablePrompt, /Item availability branch: sword is available from gear/i);
+      assert.doesNotMatch(unavailablePrompt, /sword is available to the user in the scene from gear/i);
+      assert.doesNotMatch(unavailablePrompt, /ItemUse:/);
 
       const gearReport = runCase({
         userText: 'I draw the sword from my belt.',
@@ -7052,8 +7051,8 @@ const tests = [
       });
       assert.equal(gearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
       assert.equal(gearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'gear');
-      assert.match(prompt(gearReport), /ItemUse: sword; source:gear; evidence:sword in user gear/i);
-      assert.match(prompt(gearReport), /Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes/i);
+      assert.match(prompt(gearReport), /sword is available to the user in the scene from gear/i);
+      assert.match(prompt(gearReport), /Preserve access as scene fact only; do not turn item availability into automatic success/i);
 
       const tavernReport = runCase({
         userText: 'I grab a bottle from the tavern table.',
@@ -7081,7 +7080,7 @@ const tests = [
         }),
       });
       assert.equal(tavernReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'setting_affordance');
-      assert.match(prompt(tavernReport), /Item availability branch: bottle is available from setting_affordance/i);
+      assert.match(prompt(tavernReport), /bottle is available to the user in the scene from setting_affordance/i);
 
       const fallenSwordReport = runCase({
         userText: 'I grab the fallen bandit\'s sword.',
@@ -7109,7 +7108,7 @@ const tests = [
         }),
       });
       assert.equal(fallenSwordReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'consequence_affordance');
-      assert.match(prompt(fallenSwordReport), /Item availability branch: fallen bandit sword is available from consequence_affordance/i);
+      assert.match(prompt(fallenSwordReport), /fallen bandit sword is available to the user in the scene from consequence_affordance/i);
 
       const contestedReport = runCase({
         userText: 'I grab the bandit\'s sword from his hand.',
@@ -7139,7 +7138,7 @@ const tests = [
       });
       assert.equal(contestedReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
       assert.equal(contestedReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'contested');
-      assert.match(prompt(contestedReport), /Contested item branch: bandit sword exists but is not freely available/i);
+      assert.match(prompt(contestedReport), /bandit sword exists but is not freely available/i);
       assert.match(prompt(contestedReport), /Do not narrate free possession, drawing, wielding, use/i);
     },
   },
@@ -7217,10 +7216,9 @@ const tests = [
       assert.ok(auditIncludes(report, 'stakes-bearing known-false or unsupported factual claim is USER=CHA and OPP=MND'));
 
       const text = prompt(report);
-      assert.match(text, /ClaimCheck: claim:"I am the queen's envoy"; target:Seraphina; truth:unsupported; access:partial; stakes:Y/i);
-      assert.match(text, /Claim branch:/);
+      assert.match(text, /belief contest for Seraphina: "I am the queen's envoy"/i);
       assert.match(text, /belief contest/i);
-      assert.match(text, /NPC access is not direct/i);
+      assert.match(text, /Seraphina has partial access to judge the claim/i);
       assert.match(text, /not omniscient certainty/i);
     },
   },
@@ -7585,8 +7583,8 @@ const tests = [
           sceneTrackerUpdate: {},
         },
       };
-      assert.match(prompt(report), /Universal intimacy guard: no intimacy permission is active for Naomi/);
-      assert.match(prompt(report), /Unless IntimacyBoundary explicitly permits it for that exact NPC/);
+      assert.match(prompt(report), /No intimacy permission is active for Naomi/);
+      assert.match(prompt(report), /conversation alone is not permission for intimate escalation/);
     },
   },
   {
@@ -7631,7 +7629,7 @@ const tests = [
       const castLine = text.split('\n').find(line => line.includes('Current scene cast:')) || '';
       assert.match(castLine, /Current scene cast: Chandra,T'Sha,Medli,Marianne,Kefka/);
       assert.doesNotMatch(castLine, /Rem|Harmony|Jessie|Lady Void/);
-      assert.match(text, /closed-world for physical participation/);
+      assert.match(text, /Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn/);
       assert.match(text, /Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn/);
       assert.match(text, /Known\/lore\/example\/tracker\/card characters not listed are offscreen and must not participate/);
     },
@@ -7855,8 +7853,8 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /landed user action\/effect/i);
-      assert.match(text, /lasting restraint from the landed user action/i);
+      assert.match(text, /Duelist receives .* condition/i);
+      assert.match(text, /restrained/i);
       assert.doesNotMatch(text, /landed user attack/i);
     },
   },
@@ -8156,7 +8154,7 @@ const tests = [
       assert.match(indexSource, /open-close-open mouth beats/);
       assert.match(indexSource, /tighten-loosen-tighten grip beats/);
       assert.match(indexSource, /body-cue pileups/);
-      assert.match(handoffSource, /equivalent rephrasing as shorthand/);
+      assert.match(handoffSource, /equivalent shorthand/);
       assert.match(handoffSource, /localized reddening\/paling\/whitening/);
       assert.match(handoffSource, /Dialogue delivery may describe lowered voice, trembling/);
       assert.match(handoffSource, /barely above a whisper/);
@@ -8198,46 +8196,53 @@ const tests = [
       assert.match(indexSource, /separator lines used to append ambient\/actionless cleanup/);
       assert.match(indexSource, /fake response cue endings/);
       assert.match(indexSource, /mood-only silence/);
-      assert.match(handoffSource, /==NARRATOR_AUTHORITY==/);
-      assert.match(handoffSource, /==RENDER_CONTRACT==/);
-      assert.match(handoffSource, /==NARRATION_CRAFT_DIRECTIVE==/);
-      assert.match(handoffSource, /function buildNarrationCraftDirective/);
-      assert.match(handoffSource, /Create variety through sentence function, sentence length, syntax, and precise physical wording/);
-      assert.match(handoffSource, /Avoid repeating the same beat, verb, noun phrase, or sentence shape/);
-      assert.match(handoffSource, /Advance from established scene state/);
-      assert.match(handoffSource, /NARRATION_CRAFT_DIRECTIVE are all satisfied/);
-      assert.match(handoffSource, /Execute these private render stages in order/);
+      assert.match(handoffSource, /narrativeContract\(input\)/);
+      assert.match(handoffSource, /renderControlEngine\(input\)/);
+      assert.match(handoffSource, /narrativeFacts\(input\)/);
+      assert.match(handoffSource, /PART 1:/);
+      assert.match(handoffSource, /PART 2:/);
+      assert.match(handoffSource, /This contract defines the resolved current-beat narrative facts/);
+      assert.match(handoffSource, /When writing the final in-character response, you MUST apply renderControlEngine\(input\)/);
+      assert.match(handoffSource, /When writing the final in-character response, you MUST follow narrativeFacts\(input\)/);
+      assert.match(handoffSource, /Prefer concrete, materially relevant physical detail/);
+      assert.match(handoffSource, /Each sentence should advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice/);
       assert.doesNotMatch(handoffSource, /Required internal calls/);
+      assert.doesNotMatch(handoffSource, /==NARRATOR_AUTHORITY==/);
+      assert.doesNotMatch(handoffSource, /==RENDER_CONTRACT==/);
+      assert.doesNotMatch(handoffSource, /==NARRATION_CRAFT_DIRECTIVE==/);
+      assert.doesNotMatch(handoffSource, /==RESOLVED_SCENE_FACTS==/);
+      assert.doesNotMatch(handoffSource, /==NARRATOR_HANDOFF==/);
+      assert.doesNotMatch(handoffSource, /==MODEL_INSTRUCTION==/);
       assert.ok(
-        handoffSource.indexOf('==NARRATION_CRAFT_DIRECTIVE==') > handoffSource.indexOf('==RESOLVED_SCENE_FACTS=='),
-        'NARRATION_CRAFT_DIRECTIVE should appear after RESOLVED_SCENE_FACTS.',
+        handoffSource.indexOf('PART 1:') < handoffSource.indexOf('PART 2:'),
+        'renderControlEngine should appear before narrativeFacts.',
       );
-      assert.match(handoffSource, /1\. smellGate = olfactoryGate\(input, context\)/);
-      assert.match(handoffSource, /3\. epistemicRender\(response, smellGate, context\)/);
-      assert.match(handoffSource, /chronologyControl\(response, input, context\)/);
-      assert.match(handoffSource, /userAgencyControl\(response, input, context\)/);
-      assert.match(handoffSource, /turnStructureControl\(response, context\)/);
-      assert.match(handoffSource, /responseEndpointControl\(response, context\)/);
-      assert.match(handoffSource, /Begin at T\+1 from \{\{user\}\} input/);
+      assert.match(handoffSource, /smellGate:/);
+      assert.match(handoffSource, /epistemicRender:/);
+      assert.match(handoffSource, /chronologyControl:/);
+      assert.match(handoffSource, /userAgencyControl:/);
+      assert.match(handoffSource, /turnStructureControl:/);
+      assert.match(handoffSource, /responseEndpointControl:/);
+      assert.match(handoffSource, /Begin at T\+1 from the user input/);
       assert.match(handoffSource, /Do not echo, restage, re-perform, summarize, paraphrase/);
-      assert.match(handoffSource, /Recent visible chat remains authoritative only for already-established visible scene state/);
-      assert.match(handoffSource, /Do not replay, restage, or re-complete those prior actions/);
-      assert.match(handoffSource, /Continuity branch: recent visible chat remains scene state/);
+      assert.match(handoffSource, /Use recent visible chat only for continuity of already-established visible scene state/);
+      assert.match(handoffSource, /Preserve visible continuity from recent chat/);
+      assert.match(handoffSource, /Do not repeat the immediately previous assistant beat or replay an already-completed NPC\/world action/);
       assert.match(handoffSource, /Do not repeat the immediately previous assistant beat/);
       assert.match(handoffSource, /Render NPCs and the world as active and independent/);
       assert.match(handoffSource, /NPCs may speak, move, leave, approach, block, offer, refuse, attack, retreat, reveal, hide, interrupt, or change the scene/);
-      assert.match(handoffSource, /\{\{user\}\} takes no voluntary action unless the latest user input explicitly declares that action/);
-      assert.match(handoffSource, /If \{\{user\}\} did not explicitly declare a voluntary action in the latest input, that action did not happen/);
-      assert.match(handoffSource, /Never assume, infer, imply, bridge, complete, or narrate undeclared \{\{user\}\} actions/);
+      assert.match(handoffSource, /The user takes no voluntary action unless the latest user input explicitly declares that action/);
+      assert.match(handoffSource, /If the user did not explicitly declare a voluntary action in the latest input, that action did not happen/);
+      assert.match(handoffSource, /Never assume, infer, imply, bridge, complete, or narrate undeclared user actions/);
       assert.match(handoffSource, /Voluntary actions are never involuntary reactions/);
-      assert.match(handoffSource, /If an NPC gives, returns, drops, slides, or places an object or note for \{\{user\}\}/);
-      assert.match(handoffSource, /End where the scene naturally returns control to \{\{user\}\}/);
+      assert.match(handoffSource, /If an NPC gives, returns, drops, slides, or places an object or note for the user/);
+      assert.match(handoffSource, /End where the scene naturally returns control to the user/);
       assert.match(handoffSource, /natural user-centered response beat/);
-      assert.match(handoffSource, /Continue NPC\/world action only while it remains independent of any new \{\{user\}\} choice or action/);
-      assert.match(handoffSource, /If an NPC speaks or acts toward \{\{user\}\}/);
+      assert.match(handoffSource, /Continue NPC\/world action only while it remains independent of any new user choice or action/);
+      assert.match(handoffSource, /If an NPC speaks or acts toward the user/);
       assert.match(handoffSource, /If no NPC is driving the beat/);
       assert.match(handoffSource, /Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat/);
-      assert.match(handoffSource, /Never end by prompting \{\{user\}\} to act/);
+      assert.match(handoffSource, /Never end by prompting the user to act/);
       assert.match(handoffSource, /HARD STOP: after the response beat/);
       assert.match(handoffSource, /mood-only silence/);
     },

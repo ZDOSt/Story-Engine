@@ -1,6 +1,6 @@
 const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
 const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
-const RENDER_CONTROL_STAGE = '(?:olfactoryGate|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|chronologyControl|userAgencyControl|turnStructureControl|responseEndpointControl|turnBoundaryControl)';
+const RENDER_CONTROL_STAGE = '(?:smellGate|olfactoryGate|abilityAndItemRender|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|chronologyControl|userAgencyControl|turnStructureControl|responseEndpointControl|turnBoundaryControl)';
 
 export function stripComputedDebugPrefix(text) {
     return stripNarratorMetaPrefix(stripStructuredArtifacts(text)).trimStart();
@@ -52,6 +52,7 @@ export function stripStructuredArtifacts(text) {
         .replace(/&lt;trackers&gt;[\s\S]*?&lt;\/trackers&gt;\s*/gi, '')
         .replace(/BEGIN_TRACKER_DELTA[\s\S]*?END_TRACKER_DELTA\s*/gi, '')
         .replace(/BEGIN_TRACKER_DELTA[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
+        .replace(/^\s*narrativeContract\(input\)[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
         .replace(/\[STORY_ENGINE_NARRATOR_HANDOFF[\s\S]*?==BINDING_NARRATION_DIRECTIVE==[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
         .replace(/\[STORY_ENGINE_NARRATOR_DIRECTIVE[\s\S]*?==PROMPT==\s*/gi, '')
         .replace(/\[STORY_ENGINE_NARRATOR_DIRECTIVE[\s\S]*?==NARRATOR_HANDOFF==\s*/gi, '')
@@ -128,7 +129,7 @@ export function stripNarratorMetaPrefix(text) {
     }
 
     const prefix = source.slice(0, 2500);
-    if (!/\b(preflight|pre-flight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules|The user action|draft narration|scratchpad)\b/i.test(prefix)) {
+    if (!/\b(preflight|pre-flight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|renderControlEngine|narrativeFacts|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules|The user action|draft narration|scratchpad)\b/i.test(prefix)) {
         return source;
     }
 
@@ -140,7 +141,7 @@ export function stripNarratorMetaPrefix(text) {
             !line
             || /^[-*]\s+/.test(line)
             || new RegExp(`^\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\b`, 'i').test(line)
-            || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|PRIVATE_MECHANICS_AUDIT|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary)\b/i.test(line)
+            || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|renderControlEngine|narrativeFacts|MANDATE|STRICT RULES|PART 1|PART 2|PRIVATE_MECHANICS_AUDIT|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary)\b/i.test(line)
             || /\b(preflight|pre-flight|mechanics|formatting rules|Length target|Hard maximum|PRIVATE HANDOFF|should be|Let me|scratchpad|stage order|RenderControlEngine)\b/i.test(line)
         ) {
             cut = index + 1;
@@ -210,8 +211,8 @@ function isNarratorArtifactLine(line) {
     if (new RegExp(`^(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\s*(?:[*_~]{1,3})?\\s*:`, 'i').test(text)) return true;
     if (/^(?:[*_~]{1,3})?\s*(?:CONCLUSION|VALIDATION CONCLUSION|FINAL CHECK|RENDER CHECK)\s*:/i.test(text)) return true;
     if (/^(?:Valid to proceed|All checks pass|All good|Proceed with narration)\b/i.test(text)) return true;
-    if (/^(?:STORY_ENGINE_NARRATOR_DIRECTIVE|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary|AUTHORITY|CONTROLLING AUTHORITY|CLOSED-WORLD RESOLUTION|MECHANICS LOCK|UNRESOLVED INPUT RULE|SOURCE OF TRUTH|BRANCH PRIORITY|CONFLICT RULE|OUTPUT CONTRACT|VALIDITY CONTRACT|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|NARRATOR_HANDOFF|MODEL_INSTRUCTION|PROMPT)\b/i.test(text)) return true;
-    if (/^(?:You are the final scene narrator|Use only the NARRATOR_HANDOFF|The NARRATOR_HANDOFF sections|Use ACTIVE_BRANCH_FACTS|If an action, hit, injury|If sections conflict|LandedActions, Outcome|A command to an ally|Do not upgrade requests|Do not output|Return only final|Final narration may only|EXECUTE RenderControlEngine|Execute RenderControlEngine|Required internal calls|Required internal stage order|Required stage order)\b/i.test(text)) return true;
+    if (/^(?:STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|renderControlEngine|narrativeFacts|MANDATE|STRICT RULES|PART 1|PART 2|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary|AUTHORITY|CONTROLLING AUTHORITY|CLOSED-WORLD RESOLUTION|MECHANICS LOCK|UNRESOLVED INPUT RULE|SOURCE OF TRUTH|BRANCH PRIORITY|CONFLICT RULE|OUTPUT CONTRACT|VALIDITY CONTRACT|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|NARRATOR_HANDOFF|MODEL_INSTRUCTION|PROMPT)\b/i.test(text)) return true;
+    if (/^(?:You are the final scene narrator|You must narrate the next scene beat|Use only the NARRATOR_HANDOFF|The NARRATOR_HANDOFF sections|Use ACTIVE_BRANCH_FACTS|If an action, hit, injury|If a completed action, hit, injury|If sections conflict|LandedActions, Outcome|A command to an ally|Do not upgrade requests|Do not output|Return only final|Final narration may only|When writing the final in-character response|EXECUTE RenderControlEngine|Execute RenderControlEngine|Required internal calls|Required internal stage order|Required stage order)\b/i.test(text)) return true;
     return false;
 }
 
