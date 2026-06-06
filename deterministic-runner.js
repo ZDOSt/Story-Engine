@@ -97,6 +97,8 @@ const POWER_ACTOR_EVENT_COOLDOWN_MS = Object.freeze({
     agent_report: 3 * 60 * 60 * 1000,
     agent_sabotage: 4 * 60 * 60 * 1000,
 });
+const USER_OWNED_ITEM_SOURCES = Object.freeze(['gear', 'inventory']);
+const USER_ITEM_UNAVAILABLE_REASON = 'not in saved user gear/inventory';
 
 function normalizeEnvironmentDifficultyForRoll(value) {
     const number = Number(value);
@@ -602,7 +604,7 @@ function normalizePowerActorAssessmentForRunner(value) {
 
 function powerActorLatestActionSource(ledger, context, effect = null) {
     const semantic = ledger?.resolutionEngine || {};
-    const itemUse = normalizeItemUseForHandoff(semantic.itemUse);
+    const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context);
     return [
         context ? getLatestUserTextFromContext(context) : '',
         semantic.identifyGoal,
@@ -1336,7 +1338,7 @@ function normalizeUserAbilityUseForHandoff(value = {}) {
     };
 }
 
-function normalizeItemUseForHandoff(value = {}) {
+function normalizeItemUseForHandoff(value = {}, context = null, audit = null) {
     const source = value && typeof value === 'object' ? value : {};
     const attempted = bool(source.attempted ?? source.Attempted);
     const rawAvailable = bool(source.available ?? source.Available);
@@ -1344,10 +1346,25 @@ function normalizeItemUseForHandoff(value = {}) {
     const rawSource = String(source.source ?? source.Source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
     let itemSource = normalizeItemUseSource(rawSource);
     const evidence = String(source.evidence ?? source.Evidence ?? '').trim();
-    const noEffectReason = String(source.noEffectReason ?? source.NoEffectReason ?? '').trim();
+    let noEffectReason = String(source.noEffectReason ?? source.NoEffectReason ?? '').trim();
     if (!attempted) itemSource = 'none';
-    const available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
-    if (attempted && !available && itemSource !== 'contested') itemSource = 'unavailable';
+    let available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
+    if (available && itemUseRequiresPlayerTrackerItem(itemSource, item, evidence, context) && !playerTrackerHasItem(context, item)) {
+        audit?.push(`2.7s.1 deterministicItemAvailability=${compact({
+            hardRule: 'user-owned item sources require saved user gear/inventory; latest user wording cannot create possession',
+            item,
+            source: itemSource,
+            evidence,
+            correctedTo: 'unavailable',
+        })}`);
+        available = false;
+        itemSource = 'unavailable';
+        noEffectReason = USER_ITEM_UNAVAILABLE_REASON;
+    }
+    if (attempted && !available) itemSource = 'unavailable';
+    if (attempted && !available && latestUserInputClaimsItemPossession(item, evidence, context)) {
+        noEffectReason = USER_ITEM_UNAVAILABLE_REASON;
+    }
     return {
         Attempted: attempted ? 'Y' : 'N',
         Available: available ? 'Y' : 'N',
@@ -1358,14 +1375,89 @@ function normalizeItemUseForHandoff(value = {}) {
     };
 }
 
+function itemUseRequiresPlayerTrackerItem(source, item, evidence, context) {
+    return USER_OWNED_ITEM_SOURCES.includes(source)
+        || latestUserInputClaimsItemPossession(item, evidence, context);
+}
+
+function latestUserInputClaimsItemPossession(item, evidence, context) {
+    const itemText = normalizeItemMatchText(item);
+    if (!itemText) return false;
+    const source = normalizeItemPossessionClaimText([
+        evidence,
+        getLatestUserTextFromContext(context),
+    ].filter(Boolean).join(' '));
+    if (!source) return false;
+    const words = itemText.split(/\s+/).filter(Boolean);
+    const tail = words[words.length - 1];
+    const itemPattern = words.length > 1
+        ? words.map(escapeRegex).join('\\s+')
+        : escapeRegex(tail);
+    const carriedPlaces = '(?:belt|hip|waist|hand|hands|pocket|bag|pack|pouch|sheath|holster|back|shoulder|side)';
+    return new RegExp(`\\bmy\\s+${itemPattern}\\b`).test(source)
+        || new RegExp(`\\b${itemPattern}\\s+(?:at|on|in|from)\\s+my\\s+${carriedPlaces}\\b`).test(source)
+        || new RegExp(`\\b(?:draw|pull|take|retrieve|produce|unsheathe)\\b.{0,60}\\b${itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source)
+        || new RegExp(`\\b${tail ? escapeRegex(tail) : itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source);
+}
+
+function playerTrackerHasItem(context, item) {
+    const requested = String(item ?? '').trim();
+    if (!isReal(requested)) return false;
+    const user = buildPlayerTrackerSnapshot(context);
+    return [
+        ...toRealArray(user.gear),
+        ...toRealArray(user.inventory),
+    ].some(tracked => itemNamesMatch(tracked, requested));
+}
+
+function itemNamesMatch(owned, requested) {
+    const ownedText = normalizeItemMatchText(owned);
+    const requestedText = normalizeItemMatchText(requested);
+    if (!ownedText || !requestedText) return false;
+    if (ownedText === requestedText) return true;
+    if (itemPhraseEndsWith(ownedText, requestedText)) return true;
+    const ownedCompact = ownedText.replace(/\s+/g, '');
+    const requestedCompact = requestedText.replace(/\s+/g, '');
+    return ownedCompact === requestedCompact || ownedCompact.endsWith(requestedCompact);
+}
+
+function itemPhraseEndsWith(value, suffix) {
+    return value.endsWith(` ${suffix}`);
+}
+
+function normalizeItemMatchText(value) {
+    const stopWords = new Set(['a', 'an', 'the', 'my', 'your', 'his', 'her', 'their', 'our', 'at', 'from', 'in', 'on', 'of', 'with', 'to']);
+    return String(value ?? '')
+        .toLowerCase()
+        .replace(/['\u2019]s\b/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(word => word && !stopWords.has(word))
+        .join(' ');
+}
+
+function normalizeItemPossessionClaimText(value) {
+    return String(value ?? '')
+        .toLowerCase()
+        .replace(/['\u2019]s\b/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function escapeRegex(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function normalizeItemUseSource(value) {
     const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    const allowed = ['none', 'gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance', 'unavailable', 'contested'];
+    const allowed = ['none', 'gear', 'inventory', 'unavailable'];
     return allowed.includes(text) ? text : 'unavailable';
 }
 
 function itemUseSourceIsAvailable(source) {
-    return ['gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance'].includes(source);
+    return ['gear', 'inventory'].includes(source);
 }
 
 function normalizeClaimCheckForHandoff(value = {}) {
@@ -1676,7 +1768,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const packet = {
         GOAL: goal,
         UserAbilityUse: normalizeUserAbilityUseForHandoff(semantic.userAbilityUse),
-        ItemUse: normalizeItemUseForHandoff(semantic.itemUse),
+        ItemUse: normalizeItemUseForHandoff(semantic.itemUse, context, audit),
         ClaimCheck: normalizeClaimCheckForHandoff(semantic.claimCheck),
         actions,
         intimacyAdvanceExplicit,

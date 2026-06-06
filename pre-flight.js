@@ -395,7 +395,7 @@ If an available ability is listed, preserve its described effect as fictional me
 If an unavailable ability/spell attempt is listed, no ability effect occurs.
 Do not echo or repeat setup, preparation, activation, channeling, focus, or the declared action.
 Do not name, label, explain, activate, charge, focus, channel, or attribute abilities unless the name is spoken aloud in dialogue.
-If item use is listed, obey the listed availability exactly. Available item use is scene fact only, not automatic success. Unavailable or contested item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
+If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
 
 epistemicRender:
 Write only from direct in-scene evidence available from the user's physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unrevealed identities. Names and roles remain locked until revealed in-world.
@@ -757,12 +757,9 @@ function narrativeAbilityFact(value = {}) {
 
 function narrativeItemFact(value = {}) {
     const item = normalizeItemUseObject(value);
-    if (!item.attempted) return 'No item access or item effect is active.';
+    if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by userAttempt and environment facts.';
     if (item.available) {
-        return `${item.item} is available to the user in the scene from ${item.source}. Preserve access as scene fact only; do not turn item availability into automatic success, extra impact, or bypassed consequences.`;
-    }
-    if (item.source === 'contested') {
-        return `${item.item} exists but is not freely available. Do not narrate free possession, drawing, wielding, use, consumption, spending, presentation, unlocking, or completed item effect. Render only the contest or lack of free access unless another narrative fact resolves access.`;
+        return `${item.item} is available to the user from ${item.source}. Preserve access as scene fact only; do not turn item availability into automatic success, extra impact, or bypassed consequences.`;
     }
     return `${item.item} is not available to the user. No item effect occurs. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering user possession. Render only the lack of item/effect and visible reactions.`;
 }
@@ -1569,11 +1566,11 @@ function normalizeItemUseObject(value = {}) {
     const evidence = valueOrNone(source.Evidence ?? source.evidence);
     const noEffectReason = valueOrNone(source.NoEffectReason ?? source.noEffectReason);
     const rawSource = String(source.Source ?? source.source ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    const allowed = ['none', 'gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance', 'unavailable', 'contested'];
+    const allowed = ['none', 'gear', 'inventory', 'unavailable'];
     let itemSource = allowed.includes(rawSource) ? rawSource : 'unavailable';
     if (!attempted) itemSource = 'none';
     const available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
-    if (attempted && !available && itemSource !== 'contested') itemSource = 'unavailable';
+    if (attempted && !available) itemSource = 'unavailable';
     return {
         attempted,
         available,
@@ -1585,14 +1582,14 @@ function normalizeItemUseObject(value = {}) {
 }
 
 function itemUseSourceIsAvailable(source) {
-    return ['gear', 'inventory', 'held', 'worn', 'carried', 'established_scene', 'setting_affordance', 'consequence_affordance'].includes(String(source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
+    return ['gear', 'inventory'].includes(String(source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
 }
 
 function itemUseSummary(value = {}) {
     const item = normalizeItemUseObject(value);
     if (!item.attempted) return 'none';
     if (!item.available) {
-        return `unavailable/contested item attempt: ${item.item}; source:${item.source}; evidence:${item.evidence}; noEffectReason:${item.noEffectReason}`;
+        return `unavailable personal item attempt: ${item.item}; source:${item.source}; evidence:${item.evidence}; noEffectReason:${item.noEffectReason}`;
     }
     return `${item.item}; source:${item.source}; evidence:${item.evidence}`;
 }
@@ -1601,12 +1598,9 @@ function itemUseGuide(value = {}) {
     const item = normalizeItemUseObject(value);
     if (!item.attempted) return 'none';
     if (item.available) {
-        return `Item availability branch: ${item.item} is available from ${item.source}. Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes from item use.`;
+        return `Personal item branch: ${item.item} is available from user ${item.source}. Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes from item use.`;
     }
-    if (item.source === 'contested') {
-        return `Contested item branch: ${item.item} exists but is not freely available. Do not narrate free possession, drawing, wielding, use, consumption, spending, presentation, unlocking, or completed item effect. Render only the contest or lack of free access unless mechanics explicitly resolve access.`;
-    }
-    return `Unavailable item branch: ${item.item} is not available. No item effect occurs. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering {{user}} possession. Render only the lack of item/effect and visible reactions.`;
+    return `Unavailable personal item branch: ${item.item} is not in user gear/inventory. No item effect occurs. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering {{user}} possession. Render only the lack of item/effect and visible reactions.`;
 }
 
 function normalizeClaimCheckObject(value = {}) {

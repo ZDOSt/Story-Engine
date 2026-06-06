@@ -6369,11 +6369,11 @@ const tests = [
             identifyChallenge: 'burn the syndicate payment ledger',
             explicitMeans: 'burn the Red Glass Syndicate payment ledger',
             itemUse: {
-              attempted: true,
-              available: true,
-              item: 'payment ledger',
-              source: 'held',
-              evidence: 'the payment ledger is already in hand',
+              attempted: false,
+              available: false,
+              item: '(none)',
+              source: 'none',
+              evidence: '(none)',
               noEffectReason: '(none)',
             },
             identifyTargets: {
@@ -6969,14 +6969,20 @@ const tests = [
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.Attempted=N/);
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.Available=N/);
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.NoEffectReason=\(none\)/);
-      assert.match(semanticSource, /setting_affordance/);
-      assert.match(semanticSource, /consequence_affordance/);
-      assert.match(semanticSource, /The latest user input cannot create the item as evidence of availability/i);
-      assert.match(runnerSource, /ItemUse:\s*normalizeItemUseForHandoff\(semantic\.itemUse\)/);
+      assert.match(semanticSource, /strict semantic-only personal gear\/inventory verification/i);
+      assert.match(semanticSource, /Mark Attempted=N for ordinary interaction with environmental or scene objects/i);
+      assert.match(semanticSource, /The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability/i);
+      assert.match(semanticSource, /Personal possession signals include "my X", "from my belt"/i);
+      assert.doesNotMatch(semanticSource, /setting_affordance/);
+      assert.doesNotMatch(semanticSource, /consequence_affordance/);
+      assert.match(runnerSource, /USER_OWNED_ITEM_SOURCES/);
+      assert.match(runnerSource, /user-owned item sources require saved user gear\/inventory/i);
+      assert.match(runnerSource, /ItemUse:\s*normalizeItemUseForHandoff\(semantic\.itemUse,\s*context,\s*audit\)/);
       assert.doesNotMatch(runnerSource, /ItemUse[\s\S]{0,240}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /If item use is listed, obey the listed availability exactly/i);
-      assert.match(preflightSource, /Unavailable or contested item use must not appear as freely possessed/i);
+      assert.match(preflightSource, /If personal item use is listed, obey the listed gear\/inventory availability exactly/i);
+      assert.match(preflightSource, /Unavailable personal item use must not appear as freely possessed/i);
       assert.match(preflightSource, /No item effect occurs/i);
+      assert.doesNotMatch(preflightSource, /setting_affordance|consequence_affordance|Contested item branch/);
 
       const unavailableReport = runCase({
         userText: 'I smile at Alice, then draw my sword.',
@@ -6994,7 +7000,7 @@ const tests = [
               item: 'sword',
               source: 'unavailable',
               evidence: 'draw my sword',
-              noEffectReason: 'not in user gear/inventory and not established in scene',
+              noEffectReason: 'not in saved user gear/inventory',
             },
             identifyTargets: {
               ActionTargets: ['Alice'],
@@ -7015,7 +7021,7 @@ const tests = [
         Item: 'sword',
         Source: 'unavailable',
         Evidence: 'draw my sword',
-        NoEffectReason: 'not in user gear/inventory and not established in scene',
+        NoEffectReason: 'not in saved user gear/inventory',
       });
       assert.equal(unavailablePacket.STAKES, 'N');
       const unavailablePrompt = prompt(unavailableReport);
@@ -7024,8 +7030,83 @@ const tests = [
       assert.doesNotMatch(unavailablePrompt, /sword is available to the user in the scene from gear/i);
       assert.doesNotMatch(unavailablePrompt, /ItemUse:/);
 
+      const falseWornReport = runCase({
+        userText: 'I draw the sword at my belt.',
+        userState: { gear: [], inventory: [] },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Draw_Weapon',
+            identifyChallenge: 'draw the sword at my belt',
+            explicitMeans: 'draw the sword at my belt',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'sword',
+              source: 'gear',
+              evidence: 'at my belt',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+      });
+      assert.deepEqual(falseWornReport.finalNarrativeHandoff.resolutionPacket.ItemUse, {
+        Attempted: 'Y',
+        Available: 'N',
+        Item: 'sword',
+        Source: 'unavailable',
+        Evidence: 'at my belt',
+        NoEffectReason: 'not in saved user gear/inventory',
+      });
+      assert.match(prompt(falseWornReport), /sword is not available to the user/i);
+      assert.match(falseWornReport.auditLines.join('\n'), /deterministicItemAvailability/);
+      assert.match(falseWornReport.auditLines.join('\n'), /latest user wording cannot create possession/);
+
+      const falseCarriedReport = runCase({
+        userText: 'I pull the waterskin from my pack and drink.',
+        userState: { gear: [], inventory: [] },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Drink_Water',
+            identifyChallenge: 'drink from a waterskin',
+            explicitMeans: 'pull the waterskin from my pack',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'waterskin',
+              source: 'inventory',
+              evidence: 'from my pack',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+      });
+      assert.deepEqual(falseCarriedReport.finalNarrativeHandoff.resolutionPacket.ItemUse, {
+        Attempted: 'Y',
+        Available: 'N',
+        Item: 'waterskin',
+        Source: 'unavailable',
+        Evidence: 'from my pack',
+        NoEffectReason: 'not in saved user gear/inventory',
+      });
+      assert.match(prompt(falseCarriedReport), /waterskin is not available to the user/i);
+
       const gearReport = runCase({
         userText: 'I draw the sword from my belt.',
+        userState: { gear: ['sword'], inventory: [] },
         ledger: baseLedger({
           resolutionEngine: {
             identifyGoal: 'Draw_Weapon',
@@ -7051,10 +7132,73 @@ const tests = [
       });
       assert.equal(gearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
       assert.equal(gearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'gear');
-      assert.match(prompt(gearReport), /sword is available to the user in the scene from gear/i);
+      assert.match(prompt(gearReport), /sword is available to the user from gear/i);
       assert.match(prompt(gearReport), /Preserve access as scene fact only; do not turn item availability into automatic success/i);
 
-      const tavernReport = runCase({
+      const inventoryReport = runCase({
+        userText: 'I unlock the door with my small iron key.',
+        userState: { gear: [], inventory: ['small iron key'] },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Unlock_Door',
+            identifyChallenge: 'unlock the door with the small iron key',
+            explicitMeans: 'use small iron key',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'iron key',
+              source: 'inventory',
+              evidence: 'small iron key in inventory',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: ['locked door'] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: true,
+            mapStats: { USER: 'MND', OPP: 'ENV' },
+            environmentDifficulty: 4,
+          },
+        }),
+      });
+      assert.equal(inventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(inventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'inventory');
+
+      const tooSpecificReport = runCase({
+        userText: 'I unlock the vault with my vault key.',
+        userState: { gear: [], inventory: ['key'] },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Unlock_Vault',
+            identifyChallenge: 'unlock the vault with the vault key',
+            explicitMeans: 'use vault key',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'vault key',
+              source: 'inventory',
+              evidence: 'my vault key',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: ['vault door'] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: true,
+            mapStats: { USER: 'MND', OPP: 'ENV' },
+            environmentDifficulty: 8,
+          },
+        }),
+      });
+      assert.equal(tooSpecificReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert.equal(tooSpecificReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+      assert.match(prompt(tooSpecificReport), /vault key is not available to the user/i);
+
+      const environmentalReport = runCase({
         userText: 'I grab a bottle from the tavern table.',
         ledger: baseLedger({
           resolutionEngine: {
@@ -7062,11 +7206,11 @@ const tests = [
             identifyChallenge: 'grab a bottle from the tavern table',
             explicitMeans: 'grab a bottle from the tavern table',
             itemUse: {
-              attempted: true,
-              available: true,
-              item: 'bottle',
-              source: 'setting_affordance',
-              evidence: 'tavern table commonly has bottles within reach',
+              attempted: false,
+              available: false,
+              item: '(none)',
+              source: 'none',
+              evidence: '(none)',
               noEffectReason: '(none)',
             },
             identifyTargets: {
@@ -7079,10 +7223,17 @@ const tests = [
           },
         }),
       });
-      assert.equal(tavernReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'setting_affordance');
-      assert.match(prompt(tavernReport), /bottle is available to the user in the scene from setting_affordance/i);
+      assert.deepEqual(environmentalReport.finalNarrativeHandoff.resolutionPacket.ItemUse, {
+        Attempted: 'N',
+        Available: 'N',
+        Item: '(none)',
+        Source: 'none',
+        Evidence: '(none)',
+        NoEffectReason: '(none)',
+      });
+      assert.doesNotMatch(prompt(environmentalReport), /bottle is available to the user/i);
 
-      const fallenSwordReport = runCase({
+      const consequenceObjectReport = runCase({
         userText: 'I grab the fallen bandit\'s sword.',
         ledger: baseLedger({
           resolutionEngine: {
@@ -7090,11 +7241,11 @@ const tests = [
             identifyChallenge: 'grab the fallen bandit\'s sword',
             explicitMeans: 'grab the fallen bandit\'s sword',
             itemUse: {
-              attempted: true,
-              available: true,
-              item: 'fallen bandit sword',
-              source: 'consequence_affordance',
-              evidence: 'a fallen bandit with ordinary weapon was established by resolved scene facts',
+              attempted: false,
+              available: false,
+              item: '(none)',
+              source: 'none',
+              evidence: '(none)',
               noEffectReason: '(none)',
             },
             identifyTargets: {
@@ -7107,39 +7258,8 @@ const tests = [
           },
         }),
       });
-      assert.equal(fallenSwordReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'consequence_affordance');
-      assert.match(prompt(fallenSwordReport), /fallen bandit sword is available to the user in the scene from consequence_affordance/i);
-
-      const contestedReport = runCase({
-        userText: 'I grab the bandit\'s sword from his hand.',
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Grab_Held_Object',
-            identifyChallenge: 'grab the bandit\'s sword from his hand',
-            explicitMeans: 'grab the bandit\'s sword from his hand',
-            itemUse: {
-              attempted: true,
-              available: false,
-              item: 'bandit sword',
-              source: 'contested',
-              evidence: 'the sword is held by the bandit',
-              noEffectReason: 'held by another character',
-            },
-            identifyTargets: {
-              ActionTargets: ['Bandit'],
-              OppTargets: { NPC: ['Bandit'], ENV: [] },
-              BenefitedObservers: [],
-              HarmedObservers: [],
-            },
-            hasStakes: true,
-          },
-          relationshipEngine: [relationship('Bandit')],
-        }),
-      });
-      assert.equal(contestedReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
-      assert.equal(contestedReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'contested');
-      assert.match(prompt(contestedReport), /bandit sword exists but is not freely available/i);
-      assert.match(prompt(contestedReport), /Do not narrate free possession, drawing, wielding, use/i);
+      assert.equal(consequenceObjectReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'N');
+      assert.doesNotMatch(prompt(consequenceObjectReport), /fallen bandit sword is available to the user/i);
     },
   },
   {
