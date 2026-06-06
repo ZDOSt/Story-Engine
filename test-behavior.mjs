@@ -6977,7 +6977,8 @@ const tests = [
       assert.doesNotMatch(semanticSource, /consequence_affordance/);
       assert.match(runnerSource, /USER_OWNED_ITEM_SOURCES/);
       assert.match(runnerSource, /user-owned item sources require saved user gear\/inventory/i);
-      assert.match(runnerSource, /ItemUse:\s*normalizeItemUseForHandoff\(semantic\.itemUse,\s*context,\s*audit\)/);
+      assert.match(runnerSource, /ItemUse:\s*normalizeItemUseForHandoff\(semantic\.itemUse,\s*context,\s*audit,\s*playerTrackerSnapshot\)/);
+      assert.match(runnerSource, /saved user gear\/inventory overrides semantic false unavailable result/i);
       assert.doesNotMatch(runnerSource, /ItemUse[\s\S]{0,240}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
       assert.match(preflightSource, /If personal item use is listed, obey the listed gear\/inventory availability exactly/i);
       assert.match(preflightSource, /Unavailable personal item use must not appear as freely possessed/i);
@@ -7027,6 +7028,7 @@ const tests = [
       const unavailablePrompt = prompt(unavailableReport);
       assert.match(unavailablePrompt, /sword is not available to the user/i);
       assert.match(unavailablePrompt, /Do not narrate the item appearing, being drawn, wielded, used/i);
+      assert.match(unavailablePrompt, /immediate absence or failed access/i);
       assert.doesNotMatch(unavailablePrompt, /sword is available to the user in the scene from gear/i);
       assert.doesNotMatch(unavailablePrompt, /ItemUse:/);
 
@@ -7104,6 +7106,79 @@ const tests = [
       });
       assert.match(prompt(falseCarriedReport), /waterskin is not available to the user/i);
 
+      const repairedInventoryReport = withDice([10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(
+        baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Drink_Water',
+            identifyChallenge: 'drink from waterskin',
+            explicitMeans: 'take a swig off of my waterskin',
+            itemUse: {
+              attempted: true,
+              available: false,
+              item: 'waterskin',
+              source: 'unavailable',
+              evidence: 'take a swig off of my waterskin',
+              noEffectReason: 'not in saved user gear/inventory',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+        {},
+        context('I smile and take a swig off of my waterskin.', {}, {}),
+        'normal',
+        { playerTrackerSnapshot: { gear: [], inventory: ['waterskin'] } },
+      ));
+      assert.deepEqual(repairedInventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse, {
+        Attempted: 'Y',
+        Available: 'Y',
+        Item: 'waterskin',
+        Source: 'inventory',
+        Evidence: 'take a swig off of my waterskin',
+        NoEffectReason: '(none)',
+      });
+      assert.match(prompt(repairedInventoryReport), /waterskin is available to the user from inventory/i);
+      assert.match(repairedInventoryReport.auditLines.join('\n'), /deterministicItemAvailabilityRepair/);
+
+      const describedInventoryReport = withDice([10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(
+        baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Drink_Water',
+            identifyChallenge: 'drink from waterskin',
+            explicitMeans: 'take a swig off of my waterskin',
+            itemUse: {
+              attempted: true,
+              available: false,
+              item: 'waterskin',
+              source: 'unavailable',
+              evidence: 'take a swig off of my waterskin',
+              noEffectReason: 'not in saved user gear/inventory',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+        {},
+        context('I smile and take a swig off of my waterskin.', {}, {}),
+        'normal',
+        { playerTrackerSnapshot: { gear: [], inventory: ['Waterskin (empty)'] } },
+      ));
+      assert.equal(describedInventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(describedInventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'inventory');
+      assert.equal(describedInventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.SavedItem, 'Waterskin (empty)');
+      assert.match(prompt(describedInventoryReport), /Saved item state: Waterskin \(empty\)/i);
+      assert.match(prompt(describedInventoryReport), /Preserve any concrete limitation in that saved state/i);
+
       const gearReport = runCase({
         userText: 'I draw the sword from my belt.',
         userState: { gear: ['sword'], inventory: [] },
@@ -7165,6 +7240,36 @@ const tests = [
       });
       assert.equal(inventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
       assert.equal(inventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'inventory');
+
+      const describedKnifeReport = runCase({
+        userText: 'I draw my knife.',
+        userState: { gear: [], inventory: ['Small belt knife (utility, not combat)'] },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Draw_Knife',
+            identifyChallenge: 'draw a knife',
+            explicitMeans: 'draw my knife',
+            itemUse: {
+              attempted: true,
+              available: true,
+              item: 'knife',
+              source: 'inventory',
+              evidence: 'small belt knife in inventory',
+              noEffectReason: '(none)',
+            },
+            identifyTargets: {
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            hasStakes: false,
+          },
+        }),
+      });
+      assert.equal(describedKnifeReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(describedKnifeReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'inventory');
+      assert.equal(describedKnifeReport.finalNarrativeHandoff.resolutionPacket.ItemUse.SavedItem, 'Small belt knife (utility, not combat)');
 
       const tooSpecificReport = runCase({
         userText: 'I unlock the vault with my vault key.',

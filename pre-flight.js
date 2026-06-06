@@ -395,7 +395,7 @@ If an available ability is listed, preserve its described effect as fictional me
 If an unavailable ability/spell attempt is listed, no ability effect occurs.
 Do not echo or repeat setup, preparation, activation, channeling, focus, or the declared action.
 Do not name, label, explain, activate, charge, focus, channel, or attribute abilities unless the name is spoken aloud in dialogue.
-If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
+If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use has no item effect; narrate attempted access from T+1 as absence or failed access, not possession. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
 
 epistemicRender:
 Write only from direct in-scene evidence available from the user's physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unrevealed identities. Names and roles remain locked until revealed in-world.
@@ -759,9 +759,10 @@ function narrativeItemFact(value = {}) {
     const item = normalizeItemUseObject(value);
     if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by userAttempt and environment facts.';
     if (item.available) {
-        return `${item.item} is available to the user from ${item.source}. Preserve access as scene fact only; do not turn item availability into automatic success, extra impact, or bypassed consequences.`;
+        const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}. Preserve any concrete limitation in that saved state, such as empty, broken, sealed, damaged, dull, noncombat, locked, spent, or unusable.` : '';
+        return `${item.item} is available to the user from ${item.source}.${state} Preserve access as scene fact only; do not turn item availability into automatic success, extra impact, or bypassed consequences.`;
     }
-    return `${item.item} is not available to the user. No item effect occurs. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering user possession. Render only the lack of item/effect and visible reactions.`;
+    return `${item.item} is not available to the user. No item effect occurs. Narrate the attempt from T+1 as an immediate absence or failed access: the hand reaches an empty place, the belt/sheath/pack/pocket lacks the item, the claimed item is not there, or the intended use produces no item effect. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering user possession. Visible reactions may follow from the failed access.`;
 }
 
 function narrativeClaimFact(value = {}, resolution = {}, summary = {}) {
@@ -1565,6 +1566,7 @@ function normalizeItemUseObject(value = {}) {
     const item = valueOrNone(source.Item ?? source.item);
     const evidence = valueOrNone(source.Evidence ?? source.evidence);
     const noEffectReason = valueOrNone(source.NoEffectReason ?? source.noEffectReason);
+    const savedItem = valueOrNone(source.SavedItem ?? source.savedItem);
     const rawSource = String(source.Source ?? source.source ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
     const allowed = ['none', 'gear', 'inventory', 'unavailable'];
     let itemSource = allowed.includes(rawSource) ? rawSource : 'unavailable';
@@ -1578,6 +1580,7 @@ function normalizeItemUseObject(value = {}) {
         source: itemSource,
         evidence: attempted && !isNoneText(evidence) ? evidence : '(none)',
         noEffectReason: attempted && !available && !isNoneText(noEffectReason) ? noEffectReason : '(none)',
+        savedItem: attempted && available && !isNoneText(savedItem) ? savedItem : '(none)',
     };
 }
 
@@ -1591,16 +1594,18 @@ function itemUseSummary(value = {}) {
     if (!item.available) {
         return `unavailable personal item attempt: ${item.item}; source:${item.source}; evidence:${item.evidence}; noEffectReason:${item.noEffectReason}`;
     }
-    return `${item.item}; source:${item.source}; evidence:${item.evidence}`;
+    const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? `; savedItem:${item.savedItem}` : '';
+    return `${item.item}; source:${item.source}; evidence:${item.evidence}${state}`;
 }
 
 function itemUseGuide(value = {}) {
     const item = normalizeItemUseObject(value);
     if (!item.attempted) return 'none';
     if (item.available) {
-        return `Personal item branch: ${item.item} is available from user ${item.source}. Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes from item use.`;
+        const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}; preserve concrete limitations in that saved state.` : '';
+        return `Personal item branch: ${item.item} is available from user ${item.source}.${state} Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes from item use.`;
     }
-    return `Unavailable personal item branch: ${item.item} is not in user gear/inventory. No item effect occurs. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering {{user}} possession. Render only the lack of item/effect and visible reactions.`;
+    return `Unavailable personal item branch: ${item.item} is not in user gear/inventory. No item effect occurs. Narrate the attempt from T+1 as immediate absence or failed access: empty belt/sheath/pack/pocket, no item under the hand, or no item effect. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering {{user}} possession. Visible reactions may follow from the failed access.`;
 }
 
 function normalizeClaimCheckObject(value = {}) {

@@ -6441,7 +6441,9 @@ async function handleChatCompletionPromptReady(eventData) {
         );
         applyPlayerCoreStatsOverride(semanticLedger, context);
         context.structuredPreflightSettings = getSettings();
-        const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, state.pendingGeneration.type);
+        const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, state.pendingGeneration.type, {
+            playerTrackerSnapshot: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+        });
 
         const narratorContext = formatNarratorPromptContext(report, state.pendingGeneration);
         const narratorModelContext = formatNarratorModelPromptContext(report, state.pendingGeneration);

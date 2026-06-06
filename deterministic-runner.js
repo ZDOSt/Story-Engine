@@ -328,12 +328,13 @@ export function normalizeRapportClockState(value = {}) {
     return normalizeRapportClock(value);
 }
 
-export function runDeterministicEngines(ledger, trackerSnapshot, context, type) {
+export function runDeterministicEngines(ledger, trackerSnapshot, context, type, options = {}) {
     const audit = [];
     const dice = createDice();
     const refereeContext = buildRefereeContext(context);
+    const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
     const rapportClock = advanceRapportClock(context, audit);
-    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext);
+    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot);
     const relationships = runRelationships(ledger, trackerSnapshot, resolution.packet, audit, refereeContext, context, rapportClock);
     const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
     const name = runNameGeneration(ledger, audit, context, type);
@@ -342,7 +343,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type) 
     applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit, rapportClock);
     const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext);
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas);
-    const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name);
+    const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name, playerTrackerSnapshot);
 
     const trackerUpdate = {
         npcs: trackerDeltas.npcs,
@@ -415,7 +416,7 @@ function advanceRapportClock(context, audit) {
     return clock;
 }
 
-function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null) {
+function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null, playerTrackerSnapshot = null) {
     const before = buildPowerActorSnapshot(context);
     const trackerUpdate = {};
     const handoffEntries = [];
@@ -462,7 +463,7 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
             continue;
         }
 
-        effect = reroutePowerActorEffectToCurrentCandidate(effect, ledger, before, trackerUpdate, audit);
+        effect = reroutePowerActorEffectToCurrentCandidate(effect, ledger, before, trackerUpdate, audit, playerTrackerSnapshot);
         const previousName = findExistingPowerActorName(trackerUpdate, effect.actor)
             || findExistingPowerActorName(before, effect.actor)
             || effect.actor;
@@ -545,12 +546,12 @@ function isDuplicatePowerActorEffect(effect, previousState) {
         && normalizeNameKey(last.reason) === reasonKey;
 }
 
-function reroutePowerActorEffectToCurrentCandidate(effect, ledger, before, trackerUpdate, audit) {
+function reroutePowerActorEffectToCurrentCandidate(effect, ledger, before, trackerUpdate, audit, playerTrackerSnapshot = null) {
     const candidates = currentPowerActorCandidates(ledger).filter(candidate => candidate.isPowerActor && candidate.hasReach);
     if (!candidates.length) return effect;
     if (candidates.some(candidate => sameName(candidate.actor, effect.actor))) return effect;
 
-    const source = powerActorLatestActionSource(ledger, null, effect);
+    const source = powerActorLatestActionSource(ledger, null, effect, playerTrackerSnapshot);
     const mentioned = candidates.filter(candidate => sourceMentionsPowerActor(candidate.actor, source));
     const preferred = mentioned.length === 1 ? mentioned[0] : null;
     if (!preferred) return effect;
@@ -602,9 +603,9 @@ function normalizePowerActorAssessmentForRunner(value) {
     };
 }
 
-function powerActorLatestActionSource(ledger, context, effect = null) {
+function powerActorLatestActionSource(ledger, context, effect = null, playerTrackerSnapshot = null) {
     const semantic = ledger?.resolutionEngine || {};
-    const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context);
+    const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, null, playerTrackerSnapshot);
     return [
         context ? getLatestUserTextFromContext(context) : '',
         semantic.identifyGoal,
@@ -1338,7 +1339,7 @@ function normalizeUserAbilityUseForHandoff(value = {}) {
     };
 }
 
-function normalizeItemUseForHandoff(value = {}, context = null, audit = null) {
+function normalizeItemUseForHandoff(value = {}, context = null, audit = null, playerTrackerSnapshot = null) {
     const source = value && typeof value === 'object' ? value : {};
     const attempted = bool(source.attempted ?? source.Attempted);
     const rawAvailable = bool(source.available ?? source.Available);
@@ -1349,7 +1350,29 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null) {
     let noEffectReason = String(source.noEffectReason ?? source.NoEffectReason ?? '').trim();
     if (!attempted) itemSource = 'none';
     let available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
-    if (available && itemUseRequiresPlayerTrackerItem(itemSource, item, evidence, context) && !playerTrackerHasItem(context, item)) {
+    const savedItemMatch = attempted ? playerTrackerItemMatch(context, item, playerTrackerSnapshot) : null;
+    const savedItemSource = savedItemMatch?.source || null;
+    if (attempted && !available && savedItemSource) {
+        audit?.push(`2.7s.0 deterministicItemAvailabilityRepair=${compact({
+            hardRule: 'saved user gear/inventory overrides semantic false unavailable result',
+            item,
+            semanticSource: itemSource,
+            correctedTo: savedItemSource,
+        })}`);
+        available = true;
+        itemSource = savedItemSource;
+        noEffectReason = NONE;
+    }
+    if (available && savedItemSource && USER_OWNED_ITEM_SOURCES.includes(itemSource) && itemSource !== savedItemSource) {
+        audit?.push(`2.7s.0a deterministicItemSourceRepair=${compact({
+            hardRule: 'item source must match saved user gear/inventory',
+            item,
+            semanticSource: itemSource,
+            correctedTo: savedItemSource,
+        })}`);
+        itemSource = savedItemSource;
+    }
+    if (available && itemUseRequiresPlayerTrackerItem(itemSource, item, evidence, context) && !playerTrackerHasItem(context, item, playerTrackerSnapshot)) {
         audit?.push(`2.7s.1 deterministicItemAvailability=${compact({
             hardRule: 'user-owned item sources require saved user gear/inventory; latest user wording cannot create possession',
             item,
@@ -1365,7 +1388,7 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null) {
     if (attempted && !available && latestUserInputClaimsItemPossession(item, evidence, context)) {
         noEffectReason = USER_ITEM_UNAVAILABLE_REASON;
     }
-    return {
+    const packet = {
         Attempted: attempted ? 'Y' : 'N',
         Available: available ? 'Y' : 'N',
         Item: attempted && isReal(item) ? item : NONE,
@@ -1373,6 +1396,10 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null) {
         Evidence: attempted && isReal(evidence) ? evidence : NONE,
         NoEffectReason: attempted && !available && isReal(noEffectReason) ? noEffectReason : NONE,
     };
+    if (attempted && available && savedItemMatch?.item && savedItemMatch.item !== item) {
+        packet.SavedItem = savedItemMatch.item;
+    }
+    return packet;
 }
 
 function itemUseRequiresPlayerTrackerItem(source, item, evidence, context) {
@@ -1400,25 +1427,51 @@ function latestUserInputClaimsItemPossession(item, evidence, context) {
         || new RegExp(`\\b${tail ? escapeRegex(tail) : itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source);
 }
 
-function playerTrackerHasItem(context, item) {
+function playerTrackerHasItem(context, item, playerTrackerSnapshot = null) {
+    return Boolean(playerTrackerItemMatch(context, item, playerTrackerSnapshot));
+}
+
+function playerTrackerItemSource(context, item, playerTrackerSnapshot = null) {
+    return playerTrackerItemMatch(context, item, playerTrackerSnapshot)?.source || null;
+}
+
+function playerTrackerItemMatch(context, item, playerTrackerSnapshot = null) {
     const requested = String(item ?? '').trim();
-    if (!isReal(requested)) return false;
-    const user = buildPlayerTrackerSnapshot(context);
-    return [
-        ...toRealArray(user.gear),
-        ...toRealArray(user.inventory),
-    ].some(tracked => itemNamesMatch(tracked, requested));
+    if (!isReal(requested)) return null;
+    const user = playerTrackerSnapshot
+        ? normalizeTrackerUserState(playerTrackerSnapshot)
+        : buildPlayerTrackerSnapshot(context);
+    const gearItem = toRealArray(user.gear).find(tracked => itemNamesMatch(tracked, requested));
+    if (gearItem) return { source: 'gear', item: gearItem };
+    const inventoryItem = toRealArray(user.inventory).find(tracked => itemNamesMatch(tracked, requested));
+    if (inventoryItem) return { source: 'inventory', item: inventoryItem };
+    return null;
 }
 
 function itemNamesMatch(owned, requested) {
-    const ownedText = normalizeItemMatchText(owned);
     const requestedText = normalizeItemMatchText(requested);
+    if (!requestedText) return false;
+    const ownedVariants = itemMatchTextVariants(owned);
+    return ownedVariants.some(ownedText => normalizedItemNamesMatch(ownedText, requestedText));
+}
+
+function normalizedItemNamesMatch(ownedText, requestedText) {
     if (!ownedText || !requestedText) return false;
     if (ownedText === requestedText) return true;
     if (itemPhraseEndsWith(ownedText, requestedText)) return true;
     const ownedCompact = ownedText.replace(/\s+/g, '');
     const requestedCompact = requestedText.replace(/\s+/g, '');
     return ownedCompact === requestedCompact || ownedCompact.endsWith(requestedCompact);
+}
+
+function itemMatchTextVariants(value) {
+    const raw = String(value ?? '');
+    return Array.from(new Set([
+        normalizeItemMatchText(raw),
+        normalizeItemMatchText(raw.replace(/\([^)]*\)/g, ' ')),
+        normalizeItemMatchText(raw.split(/[;,]/)[0]),
+        normalizeItemMatchText(raw.replace(/\([^)]*\)/g, ' ').split(/[;,]/)[0]),
+    ].filter(Boolean)));
 }
 
 function itemPhraseEndsWith(value, suffix) {
@@ -1517,7 +1570,7 @@ function getStakeBearingClaimStakesEvidence(semantic, semanticHasStakes) {
     };
 }
 
-function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext) {
+function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot = null) {
     const semantic = ledger.resolutionEngine || {};
     const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, refereeContext);
     const rawTargets = normalizeTargets(semantic.identifyTargets);
@@ -1768,7 +1821,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const packet = {
         GOAL: goal,
         UserAbilityUse: normalizeUserAbilityUseForHandoff(semantic.userAbilityUse),
-        ItemUse: normalizeItemUseForHandoff(semantic.itemUse, context, audit),
+        ItemUse: normalizeItemUseForHandoff(semantic.itemUse, context, audit, playerTrackerSnapshot),
         ClaimCheck: normalizeClaimCheckForHandoff(semantic.claimCheck),
         actions,
         intimacyAdvanceExplicit,
