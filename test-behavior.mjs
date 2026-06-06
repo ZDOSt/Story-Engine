@@ -7026,9 +7026,10 @@ const tests = [
       });
       assert.equal(unavailablePacket.STAKES, 'N');
       const unavailablePrompt = prompt(unavailableReport);
-      assert.match(unavailablePrompt, /sword is not available to the user/i);
-      assert.match(unavailablePrompt, /Do not narrate the item appearing, being drawn, wielded, used/i);
-      assert.match(unavailablePrompt, /immediate absence or failed access/i);
+      assert.match(unavailablePrompt, /The user attempts to use\/draw\/produce\/consume: sword/i);
+      assert.match(unavailablePrompt, /Availability: unavailable/i);
+      assert.match(unavailablePrompt, /The item must not appear, be drawn, be wielded, be consumed/i);
+      assert.match(unavailablePrompt, /Do not skip, gloss over, or replace the attempt/i);
       assert.doesNotMatch(unavailablePrompt, /sword is available to the user in the scene from gear/i);
       assert.doesNotMatch(unavailablePrompt, /ItemUse:/);
 
@@ -7066,7 +7067,7 @@ const tests = [
         Evidence: 'at my belt',
         NoEffectReason: 'not in saved user gear/inventory',
       });
-      assert.match(prompt(falseWornReport), /sword is not available to the user/i);
+      assert.match(prompt(falseWornReport), /Availability: unavailable/i);
       assert.match(falseWornReport.auditLines.join('\n'), /deterministicItemAvailability/);
       assert.match(falseWornReport.auditLines.join('\n'), /latest user wording cannot create possession/);
 
@@ -7104,7 +7105,7 @@ const tests = [
         Evidence: 'from my pack',
         NoEffectReason: 'not in saved user gear/inventory',
       });
-      assert.match(prompt(falseCarriedReport), /waterskin is not available to the user/i);
+      assert.match(prompt(falseCarriedReport), /Availability: unavailable/i);
 
       const repairedInventoryReport = withDice([10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(
         baseLedger({
@@ -7142,7 +7143,7 @@ const tests = [
         Evidence: 'take a swig off of my waterskin',
         NoEffectReason: '(none)',
       });
-      assert.match(prompt(repairedInventoryReport), /waterskin is available to the user from inventory/i);
+      assert.match(prompt(repairedInventoryReport), /Availability: available from inventory/i);
       assert.match(repairedInventoryReport.auditLines.join('\n'), /deterministicItemAvailabilityRepair/);
 
       const describedInventoryReport = withDice([10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(
@@ -7177,7 +7178,8 @@ const tests = [
       assert.equal(describedInventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'inventory');
       assert.equal(describedInventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.SavedItem, 'Waterskin (empty)');
       assert.match(prompt(describedInventoryReport), /Saved item state: Waterskin \(empty\)/i);
-      assert.match(prompt(describedInventoryReport), /Preserve any concrete limitation in that saved state/i);
+      assert.match(prompt(describedInventoryReport), /if it limits use, the limitation must affect the scene/i);
+      assert.match(prompt(describedInventoryReport), /Narrate the attempt and its immediate result/i);
 
       const gearReport = runCase({
         userText: 'I draw the sword from my belt.',
@@ -7207,8 +7209,8 @@ const tests = [
       });
       assert.equal(gearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
       assert.equal(gearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'gear');
-      assert.match(prompt(gearReport), /sword is available to the user from gear/i);
-      assert.match(prompt(gearReport), /Preserve access as scene fact only; do not turn item availability into automatic success/i);
+      assert.match(prompt(gearReport), /Availability: available from gear/i);
+      assert.match(prompt(gearReport), /Item availability is not automatic success, extra impact, or bypassed consequence/i);
 
       const inventoryReport = runCase({
         userText: 'I unlock the door with my small iron key.',
@@ -7301,7 +7303,7 @@ const tests = [
       });
       assert.equal(tooSpecificReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
       assert.equal(tooSpecificReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
-      assert.match(prompt(tooSpecificReport), /vault key is not available to the user/i);
+      assert.match(prompt(tooSpecificReport), /Availability: unavailable/i);
 
       const environmentalReport = runCase({
         userText: 'I grab a bottle from the tavern table.',
@@ -8425,10 +8427,11 @@ const tests = [
       assert.match(handoffSource, /renderControlEngine\(input\)/);
       assert.match(handoffSource, /narrativeFacts\(input\)/);
       assert.match(handoffSource, /PART 1:/);
-      assert.match(handoffSource, /PART 2:/);
+      assert.match(handoffSource, /PART 2: narrativeFacts\(input\):/);
       assert.match(handoffSource, /This contract defines the resolved current-beat narrative facts/);
       assert.match(handoffSource, /When writing the final in-character response, you MUST apply renderControlEngine\(input\)/);
-      assert.match(handoffSource, /When writing the final in-character response, you MUST follow narrativeFacts\(input\)/);
+      assert.match(handoffSource, /When writing the final in-character response, you MUST use and integrate the following resolved scene facts exactly/);
+      assert.match(handoffSource, /Do not override, re-decide, omit, contradict, or add resolved outcomes not listed here/);
       assert.match(handoffSource, /Prefer concrete, materially relevant physical detail/);
       assert.match(handoffSource, /Each sentence should advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice/);
       assert.doesNotMatch(handoffSource, /Required internal calls/);

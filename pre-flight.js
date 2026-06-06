@@ -370,9 +370,6 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '',
         renderControlEngineNarrativeContract(),
         '',
-        'PART 2:',
-        'When writing the final in-character response, you MUST follow narrativeFacts(input).',
-        '',
         formatNarrativeFacts({ summary, handoff, resolution, ledger, options }),
         '',
         'OUTPUT:',
@@ -474,7 +471,9 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
     ].filter(([, value]) => !isNoneText(value));
 
     return [
-        'narrativeFacts(input):',
+        'PART 2: narrativeFacts(input):',
+        'When writing the final in-character response, you MUST use and integrate the following resolved scene facts exactly.',
+        'Do not override, re-decide, omit, contradict, or add resolved outcomes not listed here.',
         '',
         ...facts.flatMap(([key, value]) => [key + ':', value, '']),
     ].join('\n').trimEnd();
@@ -758,11 +757,12 @@ function narrativeAbilityFact(value = {}) {
 function narrativeItemFact(value = {}) {
     const item = normalizeItemUseObject(value);
     if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by userAttempt and environment facts.';
+    const attemptedItem = `The user attempts to use/draw/produce/consume: ${item.item}.`;
     if (item.available) {
-        const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}. Preserve any concrete limitation in that saved state, such as empty, broken, sealed, damaged, dull, noncombat, locked, spent, or unusable.` : '';
-        return `${item.item} is available to the user from ${item.source}.${state} Preserve access as scene fact only; do not turn item availability into automatic success, extra impact, or bypassed consequences.`;
+        const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}. Preserve the saved item state exactly: if it limits use, the limitation must affect the scene.` : '';
+        return `${attemptedItem} Availability: available from ${item.source}.${state} Narrate the attempt and its immediate result. Do not skip, gloss over, or replace the attempt. Item availability is not automatic success, extra impact, or bypassed consequence.`;
     }
-    return `${item.item} is not available to the user. No item effect occurs. Narrate the attempt from T+1 as an immediate absence or failed access: the hand reaches an empty place, the belt/sheath/pack/pocket lacks the item, the claimed item is not there, or the intended use produces no item effect. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering user possession. Visible reactions may follow from the failed access.`;
+    return `${attemptedItem} Availability: unavailable. No item effect occurs. Narrate the attempt and its immediate result: the item is absent, unreachable, or not in the claimed place. Do not skip, gloss over, or replace the attempt. The item must not appear, be drawn, be wielded, be consumed, unlock anything, or enter user possession. Visible reactions may follow naturally.`;
 }
 
 function narrativeClaimFact(value = {}, resolution = {}, summary = {}) {
