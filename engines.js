@@ -267,7 +267,10 @@ function RelationshipEngine(npc, resolutionPacket) {
     rule: establishedRelationship is a separate relationship-state mechanic, not an initPreset label
     rule: NPC has explicit fear immunity only if same or superior kind/nature, peer/superior supernatural or monstrous being, explicit natural fear/mental immunity, or the card/lore/scenario explicitly shows the NPC is an ancient, powerful, non-ordinary being who has faced horrors, monsters, curses, eldritch forces, or other supernatural threats and is portrayed as not meaningfully fearing them
     rule: title, rank, bravado, posturing, composure, courage, or pretending to be fearless do NOT count as fear immunity
-    if NPC is already romantically/intimately involved with {{user}}, willing toward {{user}}, or in love -> {Label:romanticOpen,B:4,F:1,H:1}
+    if prior card/lore/scenario/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward {{user}} -> {Label:romanticOpen,B:4,F:1,H:1}
+    rule: romanticOpen can be stated directly or shown through clearly romantic behavior, gestures, plans, keepsakes, letters, gifts, jealousy, longing, attempts to be noticed, attempts to spend time alone, or other evidence that the NPC interest in {{user}} is romantic rather than merely friendly
+    rule: generic friendliness, politeness, casual flirting, shallow physical attraction, ordinary embarrassment, first impressions, vague chemistry, gratitude, or non-romantic loyalty do NOT count as romanticOpen
+    rule: if romanticOpen and userNonHuman are both explicit, set both semantic flags; deterministic precedence keeps romanticOpen as the initial disposition
     if {{user}} is hated, distrusted, wanted, enemy-coded, or bad-reputation with this NPC before the current first interaction -> {Label:userBadRep,B:1,F:2,H:3}
     rule: first encounter kindness, opening-scene rescue, courtesy, friendliness, praise, or a warm first impression do NOT count as prior favorable reputation
     if {{user}} is explicitly shown by prior lore, card, scenario, tracker, or chat history to have an established favorable reputation with this NPC that predates the current scene -> {Label:priorUserGoodRep,B:3,F:1,H:1}

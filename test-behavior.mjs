@@ -4552,6 +4552,32 @@ const tests = [
     },
   },
   {
+    name: '09d.0 romanticOpen overrides visible nonhuman fear init',
+    run() {
+      const tracker = {
+        Hyacinthe: trackerEntry({ currentDisposition: null }),
+      };
+      const report = runCase({
+        userText: 'I approach Hyacinthe and say hello.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Talk',
+            identifyChallenge: 'talk to Hyacinthe',
+            explicitMeans: 'say hello',
+            identifyTargets: { ActionTargets: ['Hyacinthe'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            hasStakes: false,
+          },
+          relationshipEngine: [relationship('Hyacinthe', { initPreset: { romanticOpen: true, userNonHuman: true }, establishedRelationship: false })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Hyacinthe.currentDisposition, { B: 4, F: 1, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.Hyacinthe.establishedRelationship, 'N');
+      assert.equal(auditIncludes(report, 'initPreset=romanticOpen'), true);
+      assert.equal(auditIncludes(report, 'userNonHuman":"Y'), true);
+    },
+  },
+  {
     name: '09d.1 establishedRelationship semantic flag remains separate from initPreset',
     run() {
       const tracker = {
