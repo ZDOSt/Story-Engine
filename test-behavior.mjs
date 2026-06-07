@@ -8755,6 +8755,37 @@ const tests = [
     },
   },
   {
+    name: '49a player creator exposes genre-aware start adventure after approval',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const genreBlock = source.match(/const PLAYER_GENRE_CHOICES = Object\.freeze\(\[\n([\s\S]*?)\n\]\);/)?.[1] || '';
+      const genres = [...genreBlock.matchAll(/'([^']+)'/g)].map(match => match[1]);
+      const frameBlock = source.match(/const PLAYER_ADVENTURE_GENRE_FRAMES = Object\.freeze\(\{\n([\s\S]*?)\n\}\);/)?.[1] || '';
+      assert.ok(genres.length > 5, 'Genre choices should be present.');
+      for (const genre of genres) {
+        assert.match(frameBlock, new RegExp(`${genre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:|'${genre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':`));
+      }
+      assert.match(source, /function playerAdventureStartPending/);
+      assert.match(source, /root\?\.ready && root\?\.adventureStartPending && !root\?\.adventureStarted/);
+      assert.match(source, /stage === 'approved'\s*\?\s*buildPlayerAdventureStartHtml\(root\)/);
+      assert.match(source, /data-spe-player-action="start-adventure"/);
+      assert.match(source, /data-spe-player-action="dismiss-adventure-start"/);
+      assert.match(source, /function buildPlayerAdventureStartPrompt/);
+      assert.match(source, /Begin the adventure for this character in the selected genre/);
+      assert.match(source, /Do not decide \{\{user\}\}\\?'s dialogue, choices, goals, actions, or internal thoughts/);
+      assert.match(source, /before transition, \{\{user\}\} was human in their previous life/);
+      assert.match(source, /retains previous-life memories/);
+      assert.match(source, /MUST include both the final moments of that human previous life and the arrival/);
+      assert.match(source, /const genre = creator\.flow === 'new'/);
+      assert.match(source, /root\.adventureStartPending = true/);
+      assert.match(source, /root\.creator = \{ stage: 'approved' \}/);
+      assert.match(source, /function submitPlayerAdventureStartPrompt/);
+      assert.match(source, /document\.getElementById\('send_textarea'\)/);
+      assert.match(source, /document\.getElementById\('send_but'\)/);
+      assert.match(source, /sendButton\.click\(\)/);
+    },
+  },
+  {
     name: '50 character progression settings, gating, and persona edits are wired',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');

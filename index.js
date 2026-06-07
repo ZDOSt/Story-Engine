@@ -127,6 +127,22 @@ const PLAYER_GENRE_CHOICES = Object.freeze([
     'Historical',
     'Wuxia / Xianxia',
 ]);
+const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
+    Fantasy: 'Frame the opening through grounded fantasy: magic, myth, monsters, kingdoms, villages, wilds, ruins, guilds, temples, courts, roads, or local trouble may matter. Make the setting concrete and immediately playable.',
+    'Sci-fi': 'Frame the opening through science fiction: advanced technology, space, colonies, research, aliens, artificial intelligence, corporate systems, future society, exploration, or technical danger may matter. Make the situation concrete and immediately playable.',
+    Modern: 'Frame the opening through a contemporary real-world or near-real-world setting. Use ordinary modern places, technology, work, school, travel, family, crime, community, or social pressure as appropriate to the character sheet.',
+    'Slice of Life': 'Frame the opening through an everyday situation. Focus on a concrete place, routine, social contact, obligation, inconvenience, opportunity, or small personal pressure that gives the character something to respond to.',
+    Isekai: 'Isekai requirement: before transition, {{user}} was human in their previous life, regardless of their approved new race/body. After transition, {{user}} retains previous-life memories. The opening MUST include both the final moments of that human previous life and the arrival, awakening, summoning, reincarnation, transfer, or appearance in the new world. You may decide the final moment, transition method, arrival location, immediate circumstances, and first playable hook.',
+    'Urban Fantasy': 'Frame the opening through a modern or near-modern world where supernatural forces, creatures, magic, curses, occult politics, hidden societies, or open paranormal realities exist beside ordinary life.',
+    Cyberpunk: 'Frame the opening through cyberpunk pressure: dense urban life, corporate power, street survival, surveillance, cybernetics, data, gangs, debt, black markets, neon commerce, or technological control may matter.',
+    'Post-Apocalyptic': 'Frame the opening through life after collapse. Scarcity, shelter, travel, ruins, weather, radiation, infection, raiders, fragile communities, lost infrastructure, or moral pressure may matter.',
+    Horror: 'Frame the opening through horror: begin from a believable concrete situation and introduce dread, threat, mystery, isolation, wrongness, pursuit, taboo, or danger through visible details. Do not explain everything immediately.',
+    Supernatural: 'Frame the opening through supernatural pressure: spirits, hauntings, curses, omens, possession, occult investigation, strange powers, liminal places, or unseen forces may matter.',
+    Superhero: 'Frame the opening through superhero fiction: powers, public danger, rescue, reputation, secrecy, villains, institutions, media pressure, collateral risk, or a call to act may matter.',
+    Steampunk: 'Frame the opening through steampunk texture: steam industry, brass machinery, airships, workshops, factories, class pressure, empire, invention, exploration, or mechanical danger may matter.',
+    Historical: 'Frame the opening through a plausible historical period or historically inspired setting. Use material conditions, travel, class, law, custom, labor, conflict, technology limits, and social expectations that fit the chosen era.',
+    'Wuxia / Xianxia': 'Frame the opening through martial or cultivation fiction: sects, clans, wandering heroes, spiritual pressure, training, rivalry, manuals, beasts, duels, honor, debt, realms, breakthroughs, or immortal politics may matter.',
+});
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
@@ -2015,6 +2031,11 @@ function playerSetupNeeded(context = getContext()) {
     if (root.forceCreator) return true;
     if (root.ready) return false;
     return !getPersonaCoreStats(context);
+}
+
+function playerAdventureStartPending(context = getContext()) {
+    const root = getPlayerRoot(context);
+    return Boolean(root?.ready && root?.adventureStartPending && !root?.adventureStarted);
 }
 
 function applyPlayerCoreStatsOverride(semanticLedger, context = getContext()) {
@@ -4283,7 +4304,7 @@ function renderPlayerSetupCard(context = getContext()) {
         existing?.remove();
         return;
     }
-    if (!playerSetupNeeded(context)) {
+    if (!playerSetupNeeded(context) && !playerAdventureStartPending(context)) {
         existing?.remove();
         return;
     }
@@ -4338,11 +4359,14 @@ function buildPlayerSetupCardHtml(root) {
                     ? buildPlayerReviewHtml(creator)
                     : stage === 'persona-sheet'
                         ? buildPlayerPersonaSheetHtml(creator)
-                    : buildPlayerOfferHtml();
+                        : stage === 'approved'
+                            ? buildPlayerAdventureStartHtml(root)
+                            : buildPlayerOfferHtml();
+    const ready = stage === 'approved';
 
     return `
-        <div class="spe-player-title">Player Setup</div>
-        <div class="spe-player-muted">This chat has no valid PHY/MND/CHA player stats yet. Complete setup once, then the creator stays out of the way for this story.</div>
+        <div class="spe-player-title">${ready ? 'Adventure Ready' : 'Player Setup'}</div>
+        <div class="spe-player-muted">${ready ? 'Player setup is complete. Start the first scene now, or dismiss this card and begin manually.' : 'This chat has no valid PHY/MND/CHA player stats yet. Complete setup once, then the creator stays out of the way for this story.'}</div>
         ${busyLine}
         ${body}
         ${error}
@@ -4564,6 +4588,34 @@ function buildPlayerReviewHtml(creator) {
     `;
 }
 
+function buildPlayerAdventureStartHtml(root) {
+    const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
+    return `
+        <div class="spe-player-muted">Opening genre: <code>${escapeHtml(genre)}</code></div>
+        <div class="spe-player-actions">
+            <button class="menu_button" data-spe-player-action="start-adventure">Start Adventure</button>
+            <button class="menu_button" data-spe-player-action="dismiss-adventure-start">Hide</button>
+        </div>
+    `;
+}
+
+function normalizePlayerAdventureGenre(value) {
+    const genre = String(value || '').trim();
+    return PLAYER_GENRE_CHOICES.includes(genre) ? genre : 'Fantasy';
+}
+
+function buildPlayerAdventureStartPrompt(root = {}) {
+    const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
+    const genreFrame = PLAYER_ADVENTURE_GENRE_FRAMES[genre] || PLAYER_ADVENTURE_GENRE_FRAMES.Fantasy;
+    return [
+        `Begin the adventure for this character in the selected genre: ${genre}.`,
+        '',
+        'Create an opening scene that fits this genre and the approved character sheet. You may decide the location, circumstances, tone, immediate situation, first visible conflict, opportunity, danger, or point of interest.',
+        genreFrame,
+        'Establish the immediate setting, present situation, and first playable hook. Do not decide {{user}}\'s dialogue, choices, goals, actions, or internal thoughts. End at a moment where {{user}} can act.',
+    ].join('\n');
+}
+
 function buildPlayerPersonaSheetHtml(creator) {
     const analysis = creator.personaAnalysis || {};
     return `
@@ -4750,6 +4802,16 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
             root.creator.stage = root.creator.flow === 'new' ? 'identity' : 'swap';
         } else if (action === 'approve-sheet') {
             await approvePlayerSheet(root, context);
+        } else if (action === 'start-adventure') {
+            const prompt = buildPlayerAdventureStartPrompt(root);
+            if (submitPlayerAdventureStartPrompt(prompt)) {
+                root.adventureStarted = true;
+                root.adventureStartPending = false;
+                root.adventureStartedAt = Date.now();
+            }
+        } else if (action === 'dismiss-adventure-start') {
+            root.adventureStartPending = false;
+            root.adventureStartDismissedAt = Date.now();
         }
         await persistMetadata(context);
     } catch (error) {
@@ -4817,6 +4879,21 @@ function syncIdentityInputs(creator) {
     delete creator.identity.appearance;
 }
 
+function submitPlayerAdventureStartPrompt(prompt) {
+    if (typeof document === 'undefined') return false;
+    const text = String(prompt || '').trim();
+    const textarea = document.getElementById('send_textarea');
+    const sendButton = document.getElementById('send_but');
+    if (!text || !textarea || !sendButton) {
+        globalThis.toastr?.error?.('Could not find SillyTavern chat input to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
+        return false;
+    }
+    textarea.value = text;
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    setTimeout(() => sendButton.click(), 0);
+    return true;
+}
+
 async function approvePlayerSheet(root, context = getContext()) {
     const creator = root.creator || {};
     const sheetText = String(creator.sheetText || buildPersonaStatsSheet(creator)).trim();
@@ -4829,9 +4906,16 @@ async function approvePlayerSheet(root, context = getContext()) {
     root.forceCreator = false;
     root.stats = normalizeCoreStats(creator.stats);
     root.personaBeforeSetup = root.personaBeforeSetup || personaWrite.previous || '';
+    const genre = creator.flow === 'new'
+        ? normalizePlayerAdventureGenre(creator.identity?.genre || 'Fantasy')
+        : 'Fantasy';
+    root.adventureGenre = genre;
+    root.adventureStartPending = true;
+    root.adventureStarted = false;
     root.sheet = {
         text: sheetText,
         source: creator.flow === 'persona' ? 'existing_persona_conversion' : 'generated_character',
+        genre,
         approvedAt: Date.now(),
     };
     const trackerRoot = getTrackerRoot(context);
@@ -5236,11 +5320,11 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
                 'Required sections:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
-                '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
+                '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
-                '# TRAITS (ALWAYS ACTIVE): exactly one passive trait. The trait must be unique, impactful, permanent, and inherent to the character race, body, origin, or nature. It is always true and applies automatically when relevant. If something is passive and always-on, it belongs here. It must not be a learned skill, chosen action, trigger-based power, or disguised ability. It must create concrete fictional consequences: what the character can perceive, physically be, naturally endure, naturally recover from, be vulnerable to, or do by nature. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic success, immunity to consequences, vague expertise, or conditional mini-abilities.\n' +
-                `# ABILITIES / SKILLS: exactly ${PROGRESSION_REQUIRED_ABILITIES} usable abilities, powers, techniques, or special methods. Each ability must be directly usable in narration as a concrete action, perception, movement, communication, conjuration, transformation, attack method, utility method, or special technique. If something requires a deliberate trigger, use, gesture, focus, exertion, target, transformation, attack, conjuration, message, or other described attempt, it belongs here. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that kind of action, but it does not grant mechanical advantage or guaranteed success. Utility use may simply work in narration only when it is unopposed, low-stakes, outside active danger, and has no immediate harmful, contested, stealth, escape, security-bypass, control, ambush, trap, or unwilling-target consequence. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, or any meaningful consequence, normal scene resolution decides the result. Limits must be fictional constraints, not numerical values, measured ranges, distances, radii, durations, cooldown timers, or usage counts. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, or measurements like feet/meters/yards.\n` +
-                '# INVENTORY: setting-appropriate starting gear only. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
+                '# TRAITS (ALWAYS ACTIVE): exactly one passive trait. The trait must be unique, impactful, permanent, and inherent to the character race, body, origin, or nature. It is always true and applies automatically when relevant. If something is passive and always-on, it belongs here. It must not be a learned skill, chosen action, trigger-based power, or disguised ability. It must create concrete fictional consequences: what the character can perceive, physically be, naturally endure, naturally recover from, be vulnerable to, or do by nature. If the race, species, anatomy, or body concept plausibly includes built-in offensive anatomy, include it here as a fixed body/racial fact: claws, fangs, horns, talons, tusks, tail spikes, stingers, barbs, crushing jaws, or similar natural weapons when appropriate. Do not force natural weapons onto bodies where they do not fit. Natural weapons are body facts, not gear, inventory, equipment, held objects, or separate items; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, or special damage rule. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic success, immunity to consequences, vague expertise, or conditional mini-abilities.\n' +
+                `# ABILITIES / SKILLS: exactly ${PROGRESSION_REQUIRED_ABILITIES} usable abilities, powers, techniques, or special methods. Each ability must be directly usable in narration as a concrete action, perception, movement, communication, conjuration, transformation, attack method, utility method, or special technique. If something requires a deliberate trigger, use, gesture, focus, exertion, target, transformation, attack, conjuration, message, or other described attempt, it belongs here. A special activated natural-weapon effect belongs here, such as venom, paralysis, extending bone blades, electrified bite, supernatural claws, or any effect beyond ordinary bodily use. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that kind of action, but it does not grant mechanical advantage or guaranteed success. Utility use may simply work in narration only when it is unopposed, low-stakes, outside active danger, and has no immediate harmful, contested, stealth, escape, security-bypass, control, ambush, trap, or unwilling-target consequence. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, or any meaningful consequence, normal scene resolution decides the result. Limits must be fictional constraints, not numerical values, measured ranges, distances, radii, durations, cooldown timers, or usage counts. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, or measurements like feet/meters/yards.\n` +
+                '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
                 '# FLAVOR / FIXED FACTS: concise fixed background flavor, origin facts, prior role, prior training, immutable constraints, ability/trait limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Do not include personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, emotional reactions, or statements about what the character will/may/usually/tends to do.',
         },
     ];
@@ -5387,11 +5471,11 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 `USER NON-HUMAN IF KNOWN: ${analysis.UserNonHuman || 'unknown'}\n\n` +
                 'Template requirements:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and origin/mind notes. Use explicit persona facts only; otherwise write Not specified.\n' +
-                '# APPEARANCE: preserve explicit appearance facts only; otherwise write Not specified.\n' +
+                '# APPEARANCE: preserve explicit appearance facts only, including explicit visible natural weapons/body armaments; otherwise write Not specified.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
-                '# RACIAL TRAITS (ALWAYS ACTIVE): preserve explicit passive traits only. If none are explicit, write Not specified.\n' +
-                '# ABILITIES (REQUIRE ACTIVATION): preserve explicit active abilities only. If none are explicit, write Not specified.\n' +
-                '# INVENTORY: preserve explicit gear/inventory only. If none is explicit, write Not specified.\n' +
+                '# RACIAL TRAITS (ALWAYS ACTIVE): preserve explicit passive traits only. Preserve explicitly stated natural weapons or built-in offensive anatomy here as body/racial traits. Do not invent missing natural weapons. If none are explicit, write Not specified.\n' +
+                '# ABILITIES (REQUIRE ACTIVATION): preserve explicit active abilities only. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. If none are explicit, write Not specified.\n' +
+                '# INVENTORY: preserve explicit gear/inventory only. Do not list natural weapons or body armaments as inventory, gear, equipment, or held items. If none is explicit, write Not specified.\n' +
                 '# NOTES: preserve all important persona notes, origin facts, limits, fighting style, and secrecy rules.\n\n' +
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
         },
