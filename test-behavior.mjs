@@ -5454,6 +5454,56 @@ const tests = [
     },
   },
   {
+    name: '22a.2 modern name style accepts contemporary single-token names',
+    run() {
+      const baseResolution = {
+        identifyGoal: 'LearnModernNames',
+        identifyChallenge: 'the new neighbors introduce themselves near the apartment lobby',
+        explicitMeans: 'new neighbors introduce themselves',
+        identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+        hasStakes: false,
+      };
+      const modern = runCase({
+        userText: 'The new neighbors introduce themselves near the apartment lobby.',
+        cardFields: {
+          structuredPreflightSettings: { nameStyle: 'Modern' },
+        },
+        ledger: baseLedger({
+          resolutionEngine: baseResolution,
+          nameSemantic: {
+            selectedStyle: 'Modern',
+            maleCandidates: ['Michael', 'David', 'Robert'],
+            femaleCandidates: ['Sarah', 'Alice', 'Eleanor'],
+            locationCandidates: ['Westbridge', 'Riverton', 'Brookfield'],
+          },
+        }),
+      });
+      const fantasy = runCase({
+        userText: 'The new neighbors introduce themselves near the apartment lobby.',
+        ledger: baseLedger({
+          resolutionEngine: baseResolution,
+          nameSemantic: {
+            selectedStyle: 'Balanced Fantasy',
+            maleCandidates: ['Michael', 'David', 'Robert'],
+            femaleCandidates: ['Sarah', 'Alice', 'Eleanor'],
+            locationCandidates: ['Westbridge', 'Riverton', 'Brookfield'],
+          },
+        }),
+      });
+      const modernPool = modern.finalNarrativeHandoff.nameGeneration.namePool;
+      assert.equal(modern.finalNarrativeHandoff.nameGeneration.style, 'Modern');
+      assert.deepEqual(modernPool.male, ['Michael', 'David', 'Robert']);
+      assert.deepEqual(modernPool.female, ['Sarah', 'Alice', 'Eleanor']);
+      assert.deepEqual(modernPool.location, ['Westbridge', 'Riverton', 'Brookfield']);
+      assert.equal(modern.finalNarrativeHandoff.nameGeneration.semanticRejected.length, 0);
+      assert.match(auditPrompt(modern), /nameGeneration\.result: style: Modern;/);
+      assert.equal(fantasy.finalNarrativeHandoff.nameGeneration.semanticRejected.some(item => item.name === 'Michael'), true);
+      assert.equal(fantasy.finalNarrativeHandoff.nameGeneration.semanticRejected.some(item => item.name === 'Sarah'), true);
+      assert.equal(fantasy.finalNarrativeHandoff.nameGeneration.namePool.male.includes('Michael'), false);
+      assert.equal(fantasy.finalNarrativeHandoff.nameGeneration.namePool.female.includes('Sarah'), false);
+    },
+  },
+  {
     name: '22b non-coercive social opposition success does not damage relationship',
     run() {
       const report = runCase({

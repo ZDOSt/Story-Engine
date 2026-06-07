@@ -582,7 +582,7 @@ function NameGenerationEngine(context) {
     SEED:
 'Seed is hidden deterministic fallback entropy derived from fixed pool slots and context. It does NOT have to appear at the start of a fallback name.',
     STYLE:
-'Invent creative, pronounceable, real-but-unplaceable names matching the selected style. Avoid pure Western-European stock fantasy drift, Tolkien-esque elvish unless that style is selected, JRPG-generic naming, famous names, joke names, and overly ordinary modern-Western names.',
+'Invent creative, pronounceable names matching the selected style. Fantasy styles should be real-but-unplaceable and avoid pure Western-European stock fantasy drift, Tolkien-esque elvish unless that style is selected, JRPG-generic naming, famous names, joke names, and overly ordinary modern-Western names. Modern style should use plausible contemporary single-token person names and modern place/neighborhood names while still avoiding famous names, jokes, and fantasy drift.',
     SHAPE:
 'Append only pronounceable syllables. NO 3+ consecutive vowels. NO 3+ consecutive consonants. PERSON total length 5-10. LOCATION total length 7-14. LOCATION must feel geographic / compound / place-like and must not read like a person name.'
   });
@@ -613,7 +613,7 @@ function NameGenerationEngine(context) {
     if name has 3+ consecutive vowels -> Y
     if name has 3+ consecutive consonants -> Y
     if name reads as stock fantasy / elvish / Tolkien-like / JRPG-generic -> Y
-    if name reads as too ordinary / modern-Western / overly familiar -> Y
+    if selectedStyle is not Modern and name reads as too ordinary / modern-Western / overly familiar -> Y
     if name strongly resembles a famous fictional or real-world place/person name -> Y
     if mode=LOCATION and name reads more like a person name than a place -> Y
     if name already exists in current chat name registry or tracker -> Y

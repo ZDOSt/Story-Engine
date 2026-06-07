@@ -124,6 +124,29 @@ const NAME_STYLE_PROFILES = Object.freeze({
             locationSuffixes: ['ara', 'ora', 'ira', 'en', 'al', 'um'],
         },
     },
+    'Modern': {
+        key: 'modern',
+        label: 'Modern',
+        modern: true,
+        sounds: {
+            onsets: ['', 'b', 'c', 'd', 'f', 'h', 'j', 'l', 'm', 'n', 'r', 's', 't', 'v', 'w'],
+            clusters: ['br', 'cl', 'gr', 'st', 'tr'],
+            vowels: ['a', 'e', 'i', 'o', 'u'],
+            codas: ['', 'n', 'r', 'l', 's', 't', 'd'],
+        },
+        rules: {
+            person: { min: 1, max: 1, maxLength: 10, clusterChance: 0, codaChance: 0, endingChance: 0 },
+            location: { min: 1, max: 1, maxLength: 14, clusterChance: 0, codaChance: 0, suffixChance: 0 },
+            maleNames: ['Adrian', 'Marcus', 'Victor', 'Nolan', 'Ethan', 'Kevin', 'Brian', 'Simon', 'Lucas', 'Caleb', 'Julian', 'Martin', 'Wesley', 'Carter', 'David', 'James', 'Robert', 'Michael'],
+            femaleNames: ['Olivia', 'Sophia', 'Amelia', 'Elena', 'Rachel', 'Hannah', 'Megan', 'Julia', 'Carmen', 'Monica', 'Isabel', 'Vanessa', 'Serena', 'Denise', 'Sarah', 'Alice', 'Eleanor', 'Natalie'],
+            neutralNames: ['Adrian', 'Morgan', 'Taylor', 'Jordan', 'Casey', 'Robin', 'Riley', 'Avery', 'Cameron', 'Quinn'],
+            locationNames: ['Riverton', 'Riverside', 'Brookfield', 'Fairview', 'Westbridge', 'Oakmont', 'Hillcrest', 'Pinecrest', 'Lakewood', 'Redford', 'Ashfield', 'Eastvale', 'Millhaven', 'Briarwood', 'Clearwater', 'Northgate', 'Westhaven', 'Kingsport'],
+            maleEndings: [''],
+            femaleEndings: [''],
+            neutralEndings: [''],
+            locationSuffixes: [''],
+        },
+    },
     'Tolkienic / Lyrical': {
         key: 'lyrical',
         label: 'Tolkienic / Lyrical',
@@ -2871,7 +2894,7 @@ function buildNamePool({ profile, registry, contextText, style, styleProfile, se
     for (const [bucket, mode] of specs) {
         for (const name of semanticCandidates?.[bucket] || []) {
             if (pool[bucket].length >= NAME_POOL_SIZE) break;
-            const reason = nameRejectionReason(name, mode, used);
+            const reason = nameRejectionReason(name, mode, used, styleProfile);
             if (reason) {
                 semanticRejected.push({ bucket, name, reason });
                 continue;
@@ -2927,22 +2950,24 @@ function buildDeterministicName({ mode, profile, gender, seed, registry, context
 
     for (let attempt = 0; attempt < 96; attempt += 1) {
         const candidate = buildNameCandidate({ mode, profile, gender, rng, attempt, styleProfile });
-        if (rejectName(candidate, mode, used)) continue;
+        if (rejectName(candidate, mode, used, styleProfile)) continue;
         return candidate;
     }
 
     for (let attempt = 0; attempt < 96; attempt += 1) {
         const fallbackProfile = ['BALANCED', 'SOFT', 'HARD'][attempt % 3];
         const candidate = buildNameCandidate({ mode, profile: fallbackProfile, gender, rng, attempt, styleProfile });
-        if (rejectName(candidate, mode, used)) continue;
+        if (rejectName(candidate, mode, used, styleProfile)) continue;
         return candidate;
     }
 
-    return buildUniqueFallbackName(mode, used);
+    return buildUniqueFallbackName(mode, used, styleProfile);
 }
 
 function buildNameCandidate({ mode, profile, gender, rng, attempt, styleProfile }) {
     const safeStyle = styleProfile || NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE];
+    const listed = pickStyleListName({ mode, gender, rng, attempt, styleProfile: safeStyle });
+    if (listed) return titleName(listed);
     const rule = mode === 'LOCATION' ? safeStyle.rules.location : safeStyle.rules.person;
     const syllableCount = randomInt(rng, rule.min, rule.max);
     const syllables = [];
@@ -2952,6 +2977,23 @@ function buildNameCandidate({ mode, profile, gender, rng, attempt, styleProfile 
     const ending = pickStyledEnding(rng, safeStyle, mode, gender, rule);
     const raw = `${syllables.join('')}${ending}`;
     return titleName(smoothName(raw, mode));
+}
+
+function pickStyleListName({ mode, gender, rng, attempt, styleProfile }) {
+    const rules = styleProfile?.rules || {};
+    let list = [];
+    if (mode === 'LOCATION') {
+        list = rules.locationNames;
+    } else if (gender === 'MALE') {
+        list = rules.maleNames;
+    } else if (gender === 'FEMALE') {
+        list = rules.femaleNames;
+    } else {
+        list = rules.neutralNames || [...(rules.maleNames || []), ...(rules.femaleNames || [])];
+    }
+    if (!Array.isArray(list) || !list.length) return '';
+    const offset = Math.floor(rng() * list.length);
+    return list[(offset + attempt) % list.length];
 }
 
 function styledSyllable(rng, styleProfile, rule, index, count) {
@@ -3008,31 +3050,40 @@ function pickWeighted(rng, list) {
     return values[Math.floor(rng() * values.length) % values.length];
 }
 
-function rejectName(name, mode, used) {
-    return Boolean(nameRejectionReason(name, mode, used));
+function rejectName(name, mode, used, styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE]) {
+    return Boolean(nameRejectionReason(name, mode, used, styleProfile));
 }
 
-function nameRejectionReason(name, mode, used) {
+function nameRejectionReason(name, mode, used, styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE]) {
     const text = String(name || '').trim();
     const lower = text.toLowerCase();
     const vowels = (lower.match(/[aeiou]/g) || []).length;
     const consonants = (lower.match(/[bcdfghjklmnpqrstvwxyz]/g) || []).length;
+    const modern = isModernNameStyle(styleProfile);
+    const personMin = modern ? 4 : 5;
+    const personMax = modern ? 10 : 9;
     if (!text) return 'empty';
-    if (mode === 'PERSON' && (text.length < 5 || text.length > 9)) return 'person_length';
+    if (mode === 'PERSON' && (text.length < personMin || text.length > personMax)) return 'person_length';
     if (mode === 'LOCATION' && (text.length < 7 || text.length > 14)) return 'location_length';
     if (/[aeiou]{3,}/i.test(text)) return 'too_many_vowels_in_row';
-    if (/[^aeiou\s-]{3,}/i.test(text)) return 'too_many_consonants_in_row';
+    if ((!modern && /[^aeiou\s-]{3,}/i.test(text)) || (modern && /[^aeiou\s-]{5,}/i.test(text))) return 'too_many_consonants_in_row';
     if (/(.)\1\1/i.test(text)) return 'triple_repeated_letter';
-    if (vowels < 2) return 'too_few_vowels';
-    if (consonants > vowels + 4) return 'consonant_heavy';
-    if (hasBadVowelTexture(lower, mode)) return 'bad_vowel_texture';
-    if (hasAwkwardNameTexture(lower, mode)) return 'awkward_texture';
+    if ((!modern && vowels < 2) || (modern && vowels < 1)) return 'too_few_vowels';
+    if (!modern && consonants > vowels + 4) return 'consonant_heavy';
+    if (!modern && hasBadVowelTexture(lower, mode)) return 'bad_vowel_texture';
+    if (!modern && hasAwkwardNameTexture(lower, mode)) return 'awkward_texture';
     if (used.has(normalizeNameKey(text))) return 'duplicate_or_reserved';
     if (mode === 'PERSON' && ROLE_NAME_PREFIXES.some(prefix => lower.startsWith(prefix))) return 'role_prefix';
-    if (/\b(?:aragorn|legolas|gandalf|frodo|sauron|elden|hyrule|zelda|cloud|sephiroth|john|michael|david|james|mary|sarah|anna|london|paris|tokyo|rome|arthur|edward|william|robert|albert|alice|elizabeth|eleanor|aldric|borin|eldarion)\b/i.test(lower)) return 'famous_or_stock_name';
-    if (/(?:mirror|river|stone|storm|shadow|silver|golden|crystal|dragon|demon|angel|dark|light|black|white|red|blue|green|wolf|rose|luna|nova)/i.test(lower)) return 'stock_word';
+    if (/\b(?:aragorn|legolas|gandalf|frodo|sauron|elden|hyrule|zelda|cloud|sephiroth|london|paris|tokyo|rome|aldric|borin|eldarion)\b/i.test(lower)) return 'famous_or_stock_name';
+    if (!modern && /\b(?:john|michael|david|james|mary|sarah|anna|arthur|edward|william|robert|albert|alice|elizabeth|eleanor)\b/i.test(lower)) return 'famous_or_stock_name';
+    if (!modern && /(?:mirror|river|stone|storm|shadow|silver|golden|crystal|dragon|demon|angel|dark|light|black|white|red|blue|green|wolf|rose|luna|nova)/i.test(lower)) return 'stock_word';
+    if (modern && mode === 'PERSON' && /(?:dragon|demon|shadow|crystal|wolf|sauron|hyrule|zelda|sephiroth)/i.test(lower)) return 'stock_word';
     if (mode === 'LOCATION' && /\b(?:rin|len|taro|mira|naya|emi|dan|vek|iro)$/i.test(text)) return 'location_reads_like_person';
     return '';
+}
+
+function isModernNameStyle(styleProfile) {
+    return Boolean(styleProfile?.modern || styleProfile?.key === 'modern');
 }
 
 function hasBadVowelTexture(lower, mode) {
@@ -3062,12 +3113,17 @@ function hasAwkwardNameTexture(lower, mode) {
     return false;
 }
 
-function buildUniqueFallbackName(mode, used) {
-    const bases = mode === 'LOCATION'
+function buildUniqueFallbackName(mode, used, styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE]) {
+    const modern = isModernNameStyle(styleProfile);
+    const bases = modern
+        ? (mode === 'LOCATION'
+            ? ['Riverton', 'Riverside', 'Fairview', 'Pinecrest', 'Redford', 'Eastvale', 'Northgate', 'Westhaven', 'Kingsport']
+            : ['Marcus', 'Victor', 'Nolan', 'Ethan', 'Megan', 'Julia', 'Carmen', 'Monica', 'Sarah', 'Alice'])
+        : mode === 'LOCATION'
         ? ['Morakora', 'Navarech', 'Suraesh', 'Tavahold', 'Koravale', 'Zanawatch', 'Davaresh', 'Ishmora', 'Navasai', 'Vorahold', 'Talanor', 'Kazhara']
         : ['Ruvan', 'Kano', 'Mavi', 'Sena', 'Tavo', 'Vira', 'Dara', 'Niro', 'Zani', 'Aruen', 'Luma', 'Ivo'];
     for (const base of bases) {
-        if (!rejectName(base, mode, used)) return base;
+        if (!rejectName(base, mode, used, styleProfile)) return base;
     }
     const syllables = ['ka', 'na', 'ra', 'shi', 'vo', 'li', 'ma', 'ru', 'ta', 'zen', 'ko', 'sa', 'mi', 'yor', 'ven', 'alo'];
     for (const first of syllables) {
@@ -3075,10 +3131,10 @@ function buildUniqueFallbackName(mode, used) {
             const candidate = mode === 'LOCATION'
                 ? titleName(`mora${first}${second}`)
                 : titleName(`ruv${first}${second}`);
-            if (!used.has(normalizeNameKey(candidate)) && !rejectName(candidate, mode, used)) return candidate;
+            if (!used.has(normalizeNameKey(candidate)) && !rejectName(candidate, mode, used, styleProfile)) return candidate;
         }
     }
-    return mode === 'LOCATION' ? 'Morakora' : 'Ruvan';
+    return modern ? (mode === 'LOCATION' ? 'Riverton' : 'Marcus') : (mode === 'LOCATION' ? 'Morakora' : 'Ruvan');
 }
 
 function titleName(value) {

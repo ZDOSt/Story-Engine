@@ -131,6 +131,7 @@ const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
     'Balanced Fantasy',
+    'Modern',
     'Tolkienic / Lyrical',
     'Celtic-Inspired Fantasy',
     'Norse / Old Germanic Fantasy',
