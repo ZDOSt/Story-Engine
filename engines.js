@@ -533,7 +533,7 @@ function CHAOS_INTERRUPT(resolutionPacket, npcHandoffList, sceneSummary, diceLis
 
   classifyBand(O):
     if O <= 5 -> HOSTILE
-    else if O <= 14 -> COMPLICATION
+    else if O <= 15 -> COMPLICATION
     else -> BENEFICIAL
 
   classifyMagnitude(O):
@@ -558,7 +558,7 @@ function CHAOS_INTERRUPT(resolutionPacket, npcHandoffList, sceneSummary, diceLis
     I = NEXT(diceList)
     ctx = getCtx(npcHandoffList, sceneSummary)
 
-    if A < 17 ->
+    if A < 19 ->
       return {CHAOS:{triggered:false, band:None, magnitude:None, anchor:None, vector:None, personVector:false, fullText:null}}
 
     band = classifyBand(O)
@@ -1441,7 +1441,7 @@ export function getChaosContext(handoffs, sceneSummary) {
 
 export function classifyBand(o) {
     if (o <= 5) return 'HOSTILE';
-    if (o <= 14) return 'COMPLICATION';
+    if (o <= 15) return 'COMPLICATION';
     return 'BENEFICIAL';
 }
 

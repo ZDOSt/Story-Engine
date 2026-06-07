@@ -2693,9 +2693,9 @@ function runChaos(ledger, handoffs, resolutionPacket, dice, audit) {
     audit.push(`4.2 getCtx=${ctx}`);
 
     let handoff;
-    if (diceList.A < 17) {
+    if (diceList.A < 19) {
         handoff = { CHAOS: { triggered: false, band: 'None', magnitude: 'None', anchor: 'None', vector: 'None', personVector: false, fullText: null } };
-        audit.push(`4.2b A=${diceList.A}<17 -> CHAOS_HANDOFF=${compact(handoff)}`);
+        audit.push(`4.2b A=${diceList.A}<19 -> CHAOS_HANDOFF=${compact(handoff)}`);
     } else {
         const band = classifyBand(diceList.O);
         const magnitude = classifyMagnitude(diceList.O);
