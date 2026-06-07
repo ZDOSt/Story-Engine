@@ -474,6 +474,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
+    modelCallDelayEnabled: false,
+    modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
     trackerConnectionProfile: TRACKER_PROFILE_CURRENT,
     postNarrationProseGuardEnabled: true,
@@ -523,6 +525,7 @@ const state = {
     pendingGeneration: null,
     progressToast: null,
     progressToasts: new Set(),
+    lastStoryEngineModelCallEndedAt: 0,
     pendingRunCleanupTimer: null,
     playerSetupBusy: false,
     progressionBusy: false,
@@ -735,12 +738,44 @@ async function withProgressionGenerationSettings(callback) {
     return await withSemanticGenerationSettings(callback);
 }
 
+function getModelCallDelayMs() {
+    const settings = getSettings();
+    if (settings.modelCallDelayEnabled !== true) return 0;
+    return normalizeModelCallDelaySeconds(settings.modelCallDelaySeconds) * 1000;
+}
+
+function normalizeModelCallDelaySeconds(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    return Math.min(300, Math.round(seconds * 10) / 10);
+}
+
+async function waitForStoryEngineModelCallSpacing(label = 'next model call') {
+    const delayMs = getModelCallDelayMs();
+    const lastEndedAt = Number(state.lastStoryEngineModelCallEndedAt) || 0;
+    if (delayMs <= 0 || lastEndedAt <= 0) return;
+
+    const remainingMs = delayMs - (Date.now() - lastEndedAt);
+    if (remainingMs <= 0) return;
+
+    const seconds = Math.ceil(remainingMs / 1000);
+    const message = `Waiting ${seconds}s before ${label}...`;
+    const toast = showProgress(message);
+    try {
+        await new Promise(resolve => setTimeout(resolve, remainingMs));
+    } finally {
+        clearProgress(toast);
+    }
+}
+
 async function withStoryEngineModelRequest(callback) {
+    await waitForStoryEngineModelCallSpacing('Story Engine model call');
     state.storyEngineModelRequestDepth += 1;
     try {
         return await callback();
     } finally {
         state.storyEngineModelRequestDepth = Math.max(0, state.storyEngineModelRequestDepth - 1);
+        state.lastStoryEngineModelCallEndedAt = Date.now();
     }
 }
 
@@ -904,6 +939,8 @@ function refreshSettingsControls() {
     const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
     const progressionProfileSelect = document.getElementById('structured_preflight_progression_profile');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
+    const modelCallDelayEnabledCheckbox = document.getElementById('structured_preflight_model_call_delay_enabled');
+    const modelCallDelaySecondsInput = document.getElementById('structured_preflight_model_call_delay_seconds');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
     const writingStyleDrawer = document.getElementById('structured_preflight_writing_style_drawer');
     const writingStylePrompt = document.getElementById('structured_preflight_writing_style_prompt');
@@ -921,6 +958,8 @@ function refreshSettingsControls() {
         proseGuardFormattingPrompt.value = String(settings.proseGuardFormattingPrompt ?? DEFAULT_PROSE_GUARD_FORMATTING_PROMPT);
     }
     if (progressionEnabledCheckbox) progressionEnabledCheckbox.checked = settings.characterProgressionEnabled !== false;
+    if (modelCallDelayEnabledCheckbox) modelCallDelayEnabledCheckbox.checked = settings.modelCallDelayEnabled === true;
+    if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.value = String(normalizeModelCallDelaySeconds(settings.modelCallDelaySeconds));
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
     if (writingStylePrompt && writingStylePrompt.value !== settings.writingStylePrompt) {
         writingStylePrompt.value = String(settings.writingStylePrompt ?? DEFAULT_WRITING_STYLE_PROMPT);
@@ -963,6 +1002,7 @@ function refreshSettingsControls() {
     );
 
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
+    if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
     if (trackerProfileSelect) trackerProfileSelect.disabled = !engineEnabled || settings.postNarrationTrackerEnabled === false;
     if (proseGuardProfileSelect) proseGuardProfileSelect.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
     if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
@@ -982,6 +1022,7 @@ function refreshSettingsControls() {
         proseGuardEnabledCheckbox,
         progressionEnabledCheckbox,
         enabledCheckbox,
+        modelCallDelayEnabledCheckbox,
         writingStyleEnabled,
         nameStyleSelect,
         refreshSemanticButton,
@@ -1203,6 +1244,23 @@ function renderSettingsPanel() {
                         </div>
                     </section>
 
+                    <section class="spe-settings-section" data-spe-settings-step="call-delay">
+                        <span class="spe-settings-kicker">1b. Call spacing</span>
+                        <h4 class="spe-settings-title">Model Call Delay</h4>
+                        <small class="spe-settings-description">Optionally waits between Story Engine model calls for APIs with request spacing limits.</small>
+                        <div class="spe-settings-body">
+                            <label class="checkbox_label flexNoGap">
+                                <input id="structured_preflight_model_call_delay_enabled" type="checkbox">
+                                <span>Enable model call delay</span>
+                            </label>
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_model_call_delay_seconds">Delay seconds</label>
+                                <input id="structured_preflight_model_call_delay_seconds" class="text_pole widthNatural" type="number" min="0" max="300" step="0.1">
+                            </div>
+                            <small class="spe-settings-note">Applies between semantic preflight, narrator generation, Prose Guard, tracker update, and progression calls. Disabled by default.</small>
+                        </div>
+                    </section>
+
                     <section class="spe-settings-section" data-spe-settings-step="narrator-inputs">
                         <span class="spe-settings-kicker">2. Narrator inputs</span>
                         <h4 class="spe-settings-title">Narrator Context</h4>
@@ -1356,6 +1414,15 @@ function renderSettingsPanel() {
     });
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
         settings.semanticConnectionProfile = String(event.target?.value || '');
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_model_call_delay_enabled')?.addEventListener('change', event => {
+        settings.modelCallDelayEnabled = Boolean(event.target?.checked);
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_model_call_delay_seconds')?.addEventListener('input', event => {
+        settings.modelCallDelaySeconds = normalizeModelCallDelaySeconds(event.target?.value);
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_post_tracker_enabled')?.addEventListener('change', event => {
@@ -5957,6 +6024,7 @@ function prependComputedDebug(messageId, type) {
         clearRuntimePrompts();
         return;
     }
+    state.lastStoryEngineModelCallEndedAt = Date.now();
 
     const proseGuardEnabled = getSettings().postNarrationProseGuardEnabled !== false;
     if (state.postNarrationFinalizers.has(messageKey)) return;
@@ -6471,6 +6539,7 @@ async function handleChatCompletionPromptReady(eventData) {
         sanitizeFinalPromptHistory(eventData.chat);
         appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
         markNextNarratorRequestThinkingDisabled();
+        await waitForStoryEngineModelCallSpacing('narrator model call');
         clearAllProgress();
     } catch (error) {
         state.lastNarratorHandoff = '';
