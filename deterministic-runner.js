@@ -1573,6 +1573,23 @@ function isStakeBearingUntrustedClaim(claimCheck) {
         && ['known_false', 'unsupported'].includes(normalized.TruthStatus);
 }
 
+function normalizeStakesDecisionForAudit(value, fallbackRollRequired = false) {
+    const source = value && typeof value === 'object' ? value : {};
+    const materialStakes = bool(source.materialStakes ?? source.MaterialStakes ?? fallbackRollRequired);
+    const newUnresolvedContest = bool(source.newUnresolvedContest ?? source.NewUnresolvedContest ?? fallbackRollRequired);
+    const preDecidedByDisposition = bool(source.preDecidedByDisposition ?? source.PreDecidedByDisposition);
+    const rawRollRequired = bool(source.rollRequired ?? source.RollRequired ?? fallbackRollRequired);
+    const rollRequired = materialStakes && newUnresolvedContest && !preDecidedByDisposition && rawRollRequired;
+    const reason = String(source.reason ?? source.Reason ?? NONE).trim() || NONE;
+    return {
+        MaterialStakes: materialStakes ? 'Y' : 'N',
+        NewUnresolvedContest: newUnresolvedContest ? 'Y' : 'N',
+        PreDecidedByDisposition: preDecidedByDisposition ? 'Y' : 'N',
+        RollRequired: rollRequired ? 'Y' : 'N',
+        Reason: reason || NONE,
+    };
+}
+
 function getStakeBearingClaimStakesEvidence(semantic, semanticHasStakes) {
     const claim = normalizeClaimCheckForHandoff(semantic?.claimCheck);
     if (!isStakeBearingUntrustedClaim(claim)) return null;
@@ -1599,6 +1616,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const rawTargets = normalizeTargets(semantic.identifyTargets);
     const identityTargets = removeUserReferencesFromTargets(rawTargets, refereeContext);
     const goal = String(semantic.identifyGoal || 'Normal_Interaction');
+    const semanticStakesDecision = normalizeStakesDecisionForAudit(semantic.stakesDecision, bool(semantic.hasStakes));
     const semanticHasStakes = bool(semantic.hasStakes) ? 'Y' : 'N';
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
     const boundaryViolationExplicit = bool(semantic.boundaryViolationExplicit) ? 'Y' : 'N';
@@ -1642,6 +1660,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const hasStakes = stakesOverrideEvidence?.hasStakes || semanticHasStakes;
     const stakesRule = stakesOverrideEvidence?.rule || 'semantic_final';
     audit.push(`2.4a semanticHasStakes=${semanticHasStakes}`);
+    audit.push(`2.4a.1 semanticStakesDecision=${compact(semanticStakesDecision)}`);
     audit.push(`2.4b deterministicStakesRule=${stakesRule}`);
     if (stakesOverrideEvidence) {
         audit.push(`2.4c deterministicStakesEvidence=${compact(stakesOverrideEvidence.evidence)}`);
@@ -1850,6 +1869,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         intimacyAdvanceExplicit,
         boundaryViolationExplicit,
         nonLethal: bool(semantic.nonLethal) ? 'Y' : 'N',
+        StakesDecision: semanticStakesDecision,
         STAKES: hasStakes,
         LandedActions: outcome.LandedActions,
         OutcomeTier: outcome.OutcomeTier,
@@ -1942,6 +1962,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         let pressureMode = state.pressureMode;
         let slowBondEvidence = state.slowBondEvidence;
         let proactivityMemory = beginProactivityMemoryTurn(state.proactivityMemory);
+        let intimacyState = state.intimacyState;
         let initMetadata = null;
 
         audit.push(`3.3 getCurrentRelationalState=${compact(state)}`);
@@ -2121,8 +2142,11 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             context,
             refereeContext,
             state,
+            previousIntimacyState: intimacyState,
         });
+        intimacyState = nextIntimacyState(intimacyBoundary, intimacyState);
         audit.push(`3.6b intimacyBoundary=${compact(intimacyBoundary)}`);
+        audit.push(`3.6c intimacyState=${compact(intimacyState)}`);
 
         const handoff = {
             NPC: npc,
@@ -2167,6 +2191,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             currentRapport,
             lastRapportGainActiveMs,
             establishedRelationship,
+            intimacyState,
             userHistory: initMetadata?.userHistory || state.userHistory,
             raceProfile: initMetadata?.raceProfile || state.raceProfile,
             slowBondEvidence,
@@ -2608,7 +2633,7 @@ function consumesRapportCooldown(target, mode = 'normal') {
     return ['Bond', 'No Change'].includes(target);
 }
 
-function resolveIntimacyBoundary({ npc, currentDisposition, threshold, establishedRelationship, resolutionPacket, context, refereeContext, state }) {
+function resolveIntimacyBoundary({ npc, currentDisposition, threshold, establishedRelationship, resolutionPacket, context, refereeContext, state, previousIntimacyState }) {
     if (resolutionPacket?.intimacyAdvanceExplicit !== 'Y') {
         return { boundary: 'SKIP', source: 'NONE', refusalStyle: 'NONE' };
     }
@@ -2620,17 +2645,60 @@ function resolveIntimacyBoundary({ npc, currentDisposition, threshold, establish
     if (establishedRelationship === 'Y') {
         return { boundary: 'ALLOW', source: 'ESTABLISHED_RELATIONSHIP', refusalStyle: 'NONE' };
     }
-    if (threshold?.Override && threshold.Override !== 'NONE') {
-        return { boundary: 'ALLOW', source: `OVERRIDE:${threshold.Override}`, refusalStyle: 'NONE' };
-    }
     const initiated = detectNpcInitiatedIntimacy(npc, context, refereeContext, toRealArray(resolutionPacket.ActionTargets).filter(isReal).length === 1);
     if (initiated.accepted) {
         return { boundary: 'ALLOW', source: 'NPC_INITIATED', refusalStyle: 'NONE' };
+    }
+    const previous = normalizeIntimacyStateLocal(previousIntimacyState);
+    if (previous.boundary === 'ALLOW') {
+        return { boundary: 'ALLOW', source: persistedIntimacySource(previous.source, 'ALLOW'), refusalStyle: 'NONE' };
+    }
+    if (previous.boundary === 'DENY') {
+        return {
+            boundary: 'DENY',
+            source: persistedIntimacySource(previous.source, 'DENY'),
+            refusalStyle: previous.refusalStyle !== 'NONE' ? previous.refusalStyle : intimacyRefusalStyle(currentDisposition, state),
+        };
+    }
+    if (threshold?.Override && threshold.Override !== 'NONE') {
+        return { boundary: 'ALLOW', source: `OVERRIDE:${threshold.Override}`, refusalStyle: 'NONE' };
     }
     return {
         boundary: 'DENY',
         source: 'NONE',
         refusalStyle: intimacyRefusalStyle(currentDisposition, state),
+    };
+}
+
+function nextIntimacyState(boundary, previous) {
+    const normalized = normalizeIntimacyStateLocal(previous);
+    if (boundary?.boundary === 'ALLOW') {
+        return { boundary: 'ALLOW', source: boundary.source || 'ALLOW', refusalStyle: 'NONE' };
+    }
+    if (boundary?.boundary === 'DENY') {
+        return { boundary: 'DENY', source: boundary.source || 'DENY', refusalStyle: boundary.refusalStyle || 'CLEAR' };
+    }
+    return normalized;
+}
+
+function persistedIntimacySource(source, fallback) {
+    const text = String(source || 'NONE');
+    if (text === 'PERSISTED') return `PERSISTED_${fallback}`;
+    if (text !== 'NONE' && text.startsWith('PERSISTED')) return text;
+    if (text === 'NONE') return `PERSISTED_${fallback}`;
+    return `PERSISTED:${text}`;
+}
+
+function normalizeIntimacyStateLocal(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const boundary = ['ALLOW', 'DENY'].includes(source.boundary) ? source.boundary : 'NONE';
+    const refusalStyle = ['NONE', 'PANIC', 'HOSTILE', 'FEARFUL', 'SOFT', 'CLEAR'].includes(source.refusalStyle)
+        ? source.refusalStyle
+        : 'NONE';
+    return {
+        boundary,
+        source: boundary === 'NONE' ? 'NONE' : String(source.source || 'PERSISTED'),
+        refusalStyle: boundary === 'DENY' ? refusalStyle : 'NONE',
     };
 }
 

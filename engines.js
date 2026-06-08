@@ -7,7 +7,7 @@ function ResolutionEngine(input) {
     STATS:
 'PHY = challenges that require physical effort, strength, agility, speed, coordination, endurance, stealth movement, combat skill, or bodily execution under risk. MND = challenges that require thought, memory, perception, focus, reasoning, knowledge, awareness, will, or deliberate mental/supernatural exertion. CHA = social challenges that require persuasion, deception, intimidation, negotiation, emotional influence, personal presence, or interpersonal skill. Map the stat from finalGoal or explicit challenge that carries stakes, not from incidental gestures, flavor, delivery method, or setup. Core stat scale is 1 to 10.',
     STAKES:
-'Stakes are meaningful possible consequences tied to success or failure. Stakes include physical risk, harm, danger, detection, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. If success or failure would not materially change the outcome, no roll is needed.'
+'Stakes are meaningful possible consequences tied to success or failure. Stakes include physical risk, harm, danger, detection, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. Only new unresolved stakes require a roll. If success/failure would not materially change the outcome, or the relevant NPC reaction is already decided by saved disposition/intimacy state, no roll is needed.'
   });
 
   identifyGoal(input):
@@ -95,8 +95,18 @@ function ResolutionEngine(input) {
     policy: LOCKED, EXPLICIT-ONLY
     rule: romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/proposals/contact are not stakes by themselves.
     rule: if boundaryViolationExplicit=Y, evaluate stakes normally under DEF.STAKES; boundary violation usually affects autonomy, trust, safety, or social standing.
-    rule: return Y if success or failure of finalGoal or explicit challenge could affect {{user}} or NPC's stakes, as per DEF.STAKES
+    rule: return Y only if success or failure of finalGoal or explicit challenge creates new unresolved stakes for {{user}} or a living entity, as per DEF.STAKES
+    rule: return N if the only relevant NPC reaction is already decided by saved fear/terror, hostility/hatred, or persisted intimacy boundary
+    rule: saved disposition never suppresses separate combat, pursuit, restraint, theft, bargaining, deception, access, resources, secrets, or environmental obstacles
     else -> N
+
+  stakesDecision(input, finalGoal, challenge, targets, boundaryViolationExplicit, context):
+    MaterialStakes = whether success/failure could materially matter under DEF.STAKES before disposition continuity
+    NewUnresolvedContest = whether the latest user action creates a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle
+    PreDecidedByDisposition = whether saved fear/terror, hostility/hatred, or persisted intimacy boundary already decides the relevant NPC reaction and the current input merely asks that state to express itself
+    RollRequired = MaterialStakes=Y AND NewUnresolvedContest=Y AND PreDecidedByDisposition=N
+    Reason = short explanation
+    return {MaterialStakes, NewUnresolvedContest, PreDecidedByDisposition, RollRequired, Reason}
 
   actionCount(input, challenge):
     policy: LOCKED, EXPLICIT-ONLY, MAX 3 ACTIONS
@@ -213,7 +223,8 @@ function ResolutionEngine(input) {
     intimacyAdvanceExplicit = intimacyAdvanceExplicit(input, finalGoal, challenge, targets, context)
     boundaryViolationExplicit = boundaryViolationExplicit(input, finalGoal, challenge, targets, context)
     nonLethal = nonLethal(input, finalGoal, challenge, targets, context)
-    STAKES = hasStakes(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
+    stakesDecision = stakesDecision(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
+    STAKES = stakesDecision.RollRequired
     actions = actionCount(input, challenge)
     envDifficulty = 0
     if STAKES=N:
@@ -1582,7 +1593,7 @@ export function buildNarrationGuidance(resolution, handoffs, chaos, proactivity,
 export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
-        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'userHistory', 'raceProfile', 'personalitySummary', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
+        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'STAKES', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
@@ -1606,6 +1617,7 @@ export function trackerSummary(trackerUpdate) {
             `life:${value?.lifecycle ?? 'Active'}`,
             `rapport:${value?.currentRapport ?? 0}`,
             `lastRapportGainActive:${value?.lastRapportGainActiveMs ?? -1}`,
+            `intimacy:${value?.intimacyState?.boundary ?? 'NONE'}/${value?.intimacyState?.source ?? 'NONE'}`,
             `history:${value?.userHistory?.knowsUser ?? 'N'}/${value?.userHistory?.standing ?? 'neutral'}`,
             `race:${value?.raceProfile?.category ?? 'unknown'}/${value?.raceProfile?.fearProfile ?? 'normal'}`,
             `personality:${value?.personalitySummary ? 'Y' : 'N'}`,
@@ -1702,6 +1714,7 @@ export function normalizeTrackerEntry(value) {
             ? Math.max(-1, Math.floor(Number(value.lastRapportGainActiveMs)))
             : -1,
         establishedRelationship: value?.establishedRelationship === 'Y' ? 'Y' : 'N',
+        intimacyState: normalizeIntimacyState(value?.intimacyState),
         userHistory: normalizeUserHistory(value?.userHistory),
         raceProfile: normalizeNpcRaceProfile(value?.raceProfile),
         personalitySummary: normalizePersonalitySummary(value?.personalitySummary),
@@ -1717,6 +1730,20 @@ export function normalizeTrackerEntry(value) {
         wounds: normalizeTrackerStringList(value?.wounds),
         statusEffects: normalizeTrackerStringList(value?.statusEffects),
         gear: normalizeTrackerStringList(value?.gear),
+    };
+}
+
+export function normalizeIntimacyState(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const boundary = ['ALLOW', 'DENY'].includes(source.boundary) ? source.boundary : 'NONE';
+    const rawSource = cleanTrackerScalar(source.source);
+    const refusalStyle = ['NONE', 'PANIC', 'HOSTILE', 'FEARFUL', 'SOFT', 'CLEAR'].includes(source.refusalStyle)
+        ? source.refusalStyle
+        : 'NONE';
+    return {
+        boundary,
+        source: boundary === 'NONE' ? 'NONE' : (rawSource || 'PERSISTED'),
+        refusalStyle: boundary === 'DENY' ? refusalStyle : 'NONE',
     };
 }
 

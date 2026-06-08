@@ -101,6 +101,7 @@ function buildReadableSemanticDebug(ledger) {
         'PowerActors=' + list(targets.PowerActors),
         'intimacyAdvanceExplicit=' + String(Boolean(resolution.intimacyAdvanceExplicit)),
         'boundaryViolationExplicit=' + String(Boolean(resolution.boundaryViolationExplicit)),
+        'stakesDecision=' + stakesDecisionSummary(resolution.stakesDecision),
         'hasStakes=' + String(Boolean(resolution.hasStakes)),
         'actionCount=' + list(resolution.actionCount),
         'mapStats=' + inline(resolution.mapStats ?? {}),
@@ -237,6 +238,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.ItemUse', itemUseSummary(resolution.ItemUse)],
         ['resolution.ClaimCheck', claimCheckSummary(resolution.ClaimCheck)],
         ['userKnowledge.application', summary.userKnowledgeApplication],
+        ['resolution.StakesDecision', stakesDecisionSummary(resolution.StakesDecision)],
         ['resolution.STAKES', summary.stakes],
         ['resolution.EnvironmentDifficulty', summary.environmentDifficulty],
         ['resolution.actionCount', summary.actionCount],
@@ -1641,6 +1643,17 @@ function claimCheckSummary(value = {}) {
     ].join('; ');
 }
 
+function stakesDecisionSummary(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const material = ynBool(source.MaterialStakes ?? source.materialStakes) ? 'Y' : 'N';
+    const unresolved = ynBool(source.NewUnresolvedContest ?? source.newUnresolvedContest) ? 'Y' : 'N';
+    const preDecided = ynBool(source.PreDecidedByDisposition ?? source.preDecidedByDisposition) ? 'Y' : 'N';
+    const roll = ynBool(source.RollRequired ?? source.rollRequired) ? 'Y' : 'N';
+    const reason = valueOrNone(source.Reason ?? source.reason);
+    if (material === 'N' && unresolved === 'N' && preDecided === 'N' && roll === 'N' && isNoneText(reason)) return 'none';
+    return `material:${material}; newUnresolved:${unresolved}; preDecidedByDisposition:${preDecided}; rollRequired:${roll}; reason:${reason}`;
+}
+
 function claimCheckGuide(value = {}, resolution = {}, rollAudit = {}) {
     const claim = normalizeClaimCheckObject(value);
     if (!isStakeBearingUntrustedClaimForNarration(claim)) return 'none';
@@ -1792,6 +1805,8 @@ function intimacyBoundarySourceText(source) {
     const text = String(source ?? 'NONE');
     if (text === 'ESTABLISHED_RELATIONSHIP') return 'an established relationship exists';
     if (text === 'NPC_INITIATED') return 'the NPC initiated or invited this intimacy and {{user}} is accepting';
+    if (text === 'PERSISTED' || text === 'PERSISTED_ALLOW' || text.startsWith('PERSISTED:')) return 'intimacy permission was already established and no new boundary change revoked it';
+    if (text === 'PERSISTED_DENY') return 'a prior intimacy boundary remains active';
     if (text === 'OVERRIDE:CurrentInvitation') return 'the NPC clearly offered, requested, invited, strongly implied, or physically initiated this intimacy in the current or immediately recent scene';
     if (text.startsWith('OVERRIDE:')) return `the NPC has the ${text.slice('OVERRIDE:'.length)} override`;
     return 'the intimacy boundary allows it';

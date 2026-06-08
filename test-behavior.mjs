@@ -94,6 +94,16 @@ function relationship(NPC, extra = {}) {
 }
 
 function baseLedger(overrides = {}) {
+  const resolutionOverrides = overrides.resolutionEngine || {};
+  const fixtureHasStakes = Boolean(resolutionOverrides.hasStakes);
+  const defaultStakesDecision = {
+    materialStakes: fixtureHasStakes,
+    newUnresolvedContest: fixtureHasStakes,
+    preDecidedByDisposition: false,
+    rollRequired: fixtureHasStakes,
+    reason: fixtureHasStakes ? 'legacy hasStakes fixture' : '(none)',
+    ...(resolutionOverrides.stakesDecision || {}),
+  };
   return {
     engineContext: {
       userCoreStats: { Rank: 'Average', MainStat: 'Balanced', PHY: 6, MND: 6, CHA: 6 },
@@ -149,7 +159,8 @@ function baseLedger(overrides = {}) {
       activeHostileThreat: false,
       classifyPhysicalBoundaryPressure: false,
       genStats: { Rank: 'Average', MainStat: 'Balanced', PHY: 5, MND: 5, CHA: 5 },
-      ...(overrides.resolutionEngine || {}),
+      ...resolutionOverrides,
+      stakesDecision: defaultStakesDecision,
     },
     relationshipEngine: overrides.relationshipEngine || [],
     injuryEffectEngine: {
@@ -230,6 +241,7 @@ function trackerEntry(overrides = {}) {
     hostileLandedPressure: 0,
     dominantLock: 'None',
     pressureMode: 'none',
+    intimacyState: { boundary: 'NONE', source: 'NONE', refusalStyle: 'NONE' },
     lifecycle: 'Active',
     condition: 'healthy',
     wounds: [],
@@ -1123,7 +1135,76 @@ const tests = [
     },
   },
   {
-    name: '07a.4c persona name in target list is removed as player not NPC',
+    name: '07a.4c stored intimacy allow persists until a material boundary change',
+    run() {
+      const tracker = {
+        Mira: trackerEntry({
+          currentDisposition: { B: 3, F: 1, H: 1 },
+          intimacyState: { boundary: 'ALLOW', source: 'NPC_INITIATED', refusalStyle: 'NONE' },
+        }),
+      };
+      const report = runCase({
+        userText: 'I kiss Mira again.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'kiss Mira again',
+            identifyChallenge: 'kiss Mira again',
+            explicitMeans: 'kiss Mira again',
+            identifyTargets: { ActionTargets: ['Mira'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: true,
+            boundaryViolationExplicit: false,
+            hasStakes: true,
+          },
+          relationshipEngine: [relationship('Mira')],
+        }),
+      });
+      const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(handoff.IntimacyBoundary, 'ALLOW');
+      assert.equal(handoff.IntimacyBoundarySource, 'PERSISTED:NPC_INITIATED');
+      assert.deepEqual(report.trackerUpdate.npcs.Mira.intimacyState, { boundary: 'ALLOW', source: 'PERSISTED:NPC_INITIATED', refusalStyle: 'NONE' });
+      assert.match(prompt(report), /intimacy permission was already established/);
+    },
+  },
+  {
+    name: '07a.4d stored intimacy denial persists without active NPC change',
+    run() {
+      const tracker = {
+        Mira: trackerEntry({
+          currentDisposition: { B: 3, F: 1, H: 1 },
+          intimacyState: { boundary: 'DENY', source: 'NONE', refusalStyle: 'SOFT' },
+        }),
+      };
+      const report = runCase({
+        userText: 'I ask Mira if I can kiss her again.',
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'ask Mira for a kiss again',
+            identifyChallenge: 'ask Mira for a kiss again',
+            explicitMeans: 'ask Mira if I can kiss her again',
+            identifyTargets: { ActionTargets: ['Mira'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            intimacyAdvanceExplicit: true,
+            boundaryViolationExplicit: false,
+            hasStakes: true,
+          },
+          relationshipEngine: [relationship('Mira', {
+            overrideFlags: { Hedonist: true },
+          })],
+        }),
+      });
+      const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(handoff.IntimacyBoundary, 'DENY');
+      assert.equal(handoff.IntimacyBoundarySource, 'PERSISTED_DENY');
+      assert.equal(handoff.IntimacyRefusalStyle, 'SOFT');
+      assert.deepEqual(report.trackerUpdate.npcs.Mira.intimacyState, { boundary: 'DENY', source: 'PERSISTED_DENY', refusalStyle: 'SOFT' });
+      assert.match(prompt(report), /This denial is a boundary for later turns/);
+    },
+  },
+  {
+    name: '07a.4e persona name in target list is removed as player not NPC',
     run() {
       const tracker = { Seraphina: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 } }) };
       const report = runCase({
@@ -2029,6 +2110,103 @@ const tests = [
       assert.deepEqual(report.trackerUpdate.npcs.Seraphina.currentDisposition, { B: 1, F: 4, H: 2 });
       assert.equal(auditIncludes(report, '3.4c routeDispositionTarget=No Change'), true);
       assert.equal(auditIncludes(report, '3.5 deriveDirection={"b":0,"f":0,"h":0}'), true);
+    },
+  },
+  {
+    name: '12g.1 F4 compliance request is state continuity not a rerolled intimidation contest',
+    run() {
+      const tracker = {
+        Bandit: trackerEntry({
+          currentDisposition: { B: 1, F: 4, H: 2 },
+          currentRapport: 0,
+          dominantLock: 'FEAR',
+          pressureMode: 'none',
+        }),
+      };
+      const report = runCase({
+        userText: '"Leave now and let the caravan pass," I tell the terrified bandit.',
+        dice: [2, 18, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'get the bandit to leave and let the caravan pass',
+            identifyChallenge: 'tell the terrified bandit to leave and let the caravan pass',
+            explicitMeans: '"Leave now and let the caravan pass"',
+            identifyTargets: {
+              ActionTargets: ['Bandit'],
+              OppTargets: { NPC: ['Bandit'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            stakesDecision: {
+              materialStakes: true,
+              newUnresolvedContest: false,
+              preDecidedByDisposition: true,
+              rollRequired: false,
+              reason: 'Bandit is already terrified; leaving/passage follows saved fear state.',
+            },
+            hasStakes: false,
+            mapStats: { USER: 'CHA', OPP: 'MND' },
+          },
+          relationshipEngine: [relationship('Bandit', {
+            explicitIntimidationOrCoercion: true,
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.Outcome, 'no_roll');
+      assert.equal(report.finalNarrativeHandoff.resultLine, 'No roll');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].FinalState, 'B1/F4/H2');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.StakesDecision.PreDecidedByDisposition, 'Y');
+      assert.equal(auditIncludes(report, 'semanticStakesDecision'), true);
+      assert.equal(auditIncludes(report, 'hard_override_disposition_continuity_no_roll'), false);
+    },
+  },
+  {
+    name: '12g.2 F4 pursuit or cornering remains stakes-bearing pressure',
+    run() {
+      const tracker = {
+        Bandit: trackerEntry({
+          currentDisposition: { B: 1, F: 4, H: 2 },
+          currentRapport: 0,
+          dominantLock: 'FEAR',
+          pressureMode: 'none',
+        }),
+      };
+      const report = runCase({
+        userText: 'I chase the terrified bandit down and cut off his escape so he cannot leave.',
+        dice: [2, 18, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'corner the terrified bandit',
+            identifyChallenge: 'chase the terrified bandit and cut off his escape',
+            explicitMeans: 'chase the terrified bandit down and cut off his escape',
+            identifyTargets: {
+              ActionTargets: ['Bandit'],
+              OppTargets: { NPC: ['Bandit'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            stakesDecision: {
+              materialStakes: true,
+              newUnresolvedContest: true,
+              preDecidedByDisposition: false,
+              rollRequired: true,
+              reason: 'Pursuit and blocking escape are new pressure.',
+            },
+            hasStakes: true,
+            classifyPhysicalBoundaryPressure: true,
+            mapStats: { USER: 'PHY', OPP: 'PHY' },
+          },
+          relationshipEngine: [relationship('Bandit')],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'Y');
+      assert.match(report.finalNarrativeHandoff.resolutionPacket.OutcomeTier, /Failure/);
+      assert.notEqual(report.finalNarrativeHandoff.resultLine, 'No roll');
+      assert.equal(auditIncludes(report, 'hard_override_disposition_continuity_no_roll'), false);
     },
   },
   {
@@ -7585,7 +7763,8 @@ const tests = [
       assert.match(semanticSource, /Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that/);
       assert.match(semanticSource, /Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself/);
       assert.match(semanticSource, /classify it as stakes only when the user also declares a demand, threat, attack, aim\/pointing at a target/);
-      assert.match(semanticSource, /NPC fear, NPC hostility, likely NPC reaction, or an NPC merely being present should keep the NPC as ActionTarget only/);
+      assert.match(semanticSource, /Use stakesDecision for the roll gate/);
+      assert.match(semanticSource, /Do not roll the same settled disposition reaction again/);
     },
   },
   {
