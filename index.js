@@ -62,6 +62,9 @@ const PROGRESSION_REQUIRED_ACCOMPLISHMENTS = 3;
 const PROGRESSION_REQUIRED_ABILITIES = 2;
 const PROGRESSION_MAX_STAT = 10;
 const PROGRESSION_ABILITY_OPTIONS = 3;
+const PROGRESSION_SPELL_OPTIONS = 3;
+const PROGRESSION_MAX_SPELLS = 5;
+const PLAYER_CREATION_MAX_STARTING_SPELLS = 1;
 const PLAYER_STATS = Object.freeze(['PHY', 'MND', 'CHA']);
 const PLAYER_RACE_CHOICES = Object.freeze([
     'Aasimar',
@@ -2236,7 +2239,6 @@ function buildNewCharacterRollState() {
         rerollSkipped: false,
         swapApplied: null,
         identity: {
-            characterName: '',
             sex: '',
             genre: 'Fantasy',
             raceMode: 'random',
@@ -2357,6 +2359,11 @@ function isAbilitiesSectionHeading(line) {
     return /\babilities\b/.test(heading) || /\bskills\b/.test(heading);
 }
 
+function isSpellsSectionHeading(line) {
+    const heading = normalizedPersonaHeading(line);
+    return /\bspells?\b/.test(heading);
+}
+
 function parseAbilityStartLine(line) {
     const text = String(line ?? '').trim();
     if (!text) return null;
@@ -2392,6 +2399,15 @@ function isEmptyAbilityPlaceholder(value) {
 
 function extractPersonaAbilities(personaText) {
     const section = findPersonaSection(personaText, isAbilitiesSectionHeading);
+    return extractPersonaEntriesFromSection(section, 'Ability');
+}
+
+function extractPersonaSpells(personaText) {
+    const section = findPersonaSection(personaText, isSpellsSectionHeading);
+    return extractPersonaEntriesFromSection(section, 'Spell');
+}
+
+function extractPersonaEntriesFromSection(section, fallbackLabel = 'Entry') {
     if (section.start < 0) return [];
     const bodyText = section.lines.slice(section.start + 1, section.end).join('\n').trim();
     if (isEmptyAbilityPlaceholder(bodyText)) return [];
@@ -2400,7 +2416,7 @@ function extractPersonaAbilities(personaText) {
         const start = parseAbilityStartLine(section.lines[index]);
         if (!start) continue;
         entries.push({
-            name: start.name || `Ability ${entries.length + 1}`,
+            name: start.name || `${fallbackLabel} ${entries.length + 1}`,
             start,
             lineStart: index,
             lineEnd: section.end,
@@ -2411,7 +2427,7 @@ function extractPersonaAbilities(personaText) {
         const last = findLastNonBlankLine(section.lines, section.start + 1, section.end);
         if (first >= 0 && last >= first) {
             return [{
-                name: 'Existing Ability',
+                name: `Existing ${fallbackLabel}`,
                 text: section.lines.slice(first, last + 1).join('\n').trim(),
                 lineStart: first,
                 lineEnd: last + 1,
@@ -2451,6 +2467,13 @@ function formatProgressionAbility(option) {
     return `**${name}** - ${description}`;
 }
 
+function formatProgressionSpell(option) {
+    const name = cleanAbilityName(option?.name);
+    const description = String(option?.description || '').replace(/\s+/g, ' ').trim();
+    if (!name || !description) throw new Error('Generated spell option is incomplete.');
+    return `**${name}** - ${description}`;
+}
+
 function replaceAbilityInPersona(personaText, abilityIndex, option) {
     const section = findPersonaSection(personaText, isAbilitiesSectionHeading);
     const entries = extractPersonaAbilities(personaText);
@@ -2461,6 +2484,27 @@ function replaceAbilityInPersona(personaText, abilityIndex, option) {
     }
     const lines = [...section.lines];
     lines.splice(entry.lineStart, Math.max(1, entry.lineEnd - entry.lineStart), formatProgressionAbility(option));
+    return lines.join('\n').trim();
+}
+
+function appendSpellToPersona(personaText, option) {
+    const section = findPersonaSection(personaText, isSpellsSectionHeading);
+    const formatted = formatProgressionSpell(option);
+    if (section.start < 0) {
+        const trimmed = String(personaText || '').trim();
+        return `${trimmed}${trimmed ? '\n\n' : ''}# SPELLS\n- ${formatted}`.trim();
+    }
+
+    const lines = [...section.lines];
+    const existing = extractPersonaEntriesFromSection(section, 'Spell');
+    if (!existing.length) {
+        const start = section.start + 1;
+        const end = section.end;
+        lines.splice(start, Math.max(0, end - start), `- ${formatted}`);
+        return lines.join('\n').trim();
+    }
+
+    lines.splice(section.end, 0, `- ${formatted}`);
     return lines.join('\n').trim();
 }
 
@@ -4403,10 +4447,14 @@ function buildPlayerOfferHtml() {
 function buildProgressionCardHtml(root, context = getContext()) {
     const pending = root?.pendingAdvancement || {};
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || { PHY: 1, MND: 1, CHA: 1 };
-    const abilities = extractPersonaAbilities(getPersonaText(context));
+    const persona = getPersonaText(context);
+    const abilities = extractPersonaAbilities(persona);
+    const spells = extractPersonaSpells(persona);
     const abilityCount = abilities.length;
+    const spellCount = spells.length;
     const canRaiseStat = PLAYER_STATS.some(stat => Number(stats?.[stat] || 0) < PROGRESSION_MAX_STAT);
     const canSwapAbility = abilityCount >= 1;
+    const canLearnSpell = Number(stats?.MND || 0) >= 7 && spellCount < PROGRESSION_MAX_SPELLS;
     const choice = pending.choice || 'choose';
     const error = root?.ui?.error ? `<div class="spe-progression-error">${escapeHtml(root.ui.error)}</div>` : '';
     const busy = state.progressionBusy ? '<div class="spe-progression-muted">Working...</div>' : '';
@@ -4437,7 +4485,7 @@ function buildProgressionCardHtml(root, context = getContext()) {
             ${swapSelect}
             <div class="spe-progression-actions">
                 ${options.length ? '' : '<button class="menu_button" data-spe-progression-action="generate-abilities">Generate Ability Options</button>'}
-                ${options.length ? '' : '<button class="menu_button" data-spe-progression-action="back">Back</button>'}
+                <button class="menu_button" data-spe-progression-action="back">Back</button>
             </div>
             ${options.map((option, index) => `
                 <div class="spe-progression-option">
@@ -4448,12 +4496,30 @@ function buildProgressionCardHtml(root, context = getContext()) {
                     </div>
                 </div>
             `).join('')}`;
+    } else if (choice === 'learnSpell') {
+        const options = Array.isArray(pending.spellOptions) ? pending.spellOptions : [];
+        body = `
+            <div class="spe-progression-muted">Choose one generated spell to learn. Spells require MND 7+ and cannot exceed ${PROGRESSION_MAX_SPELLS}. Spell options cannot be rerolled.</div>
+            <div class="spe-progression-actions">
+                ${options.length ? '' : '<button class="menu_button" data-spe-progression-action="generate-spells">Generate Spell Options</button>'}
+                <button class="menu_button" data-spe-progression-action="back">Back</button>
+            </div>
+            ${options.map((option, index) => `
+                <div class="spe-progression-option">
+                    <b>${escapeHtml(option.name || `Spell ${index + 1}`)}</b>
+                    <div>${escapeHtml(option.description || '')}</div>
+                    <div class="spe-progression-actions">
+                        <button class="menu_button" data-spe-progression-action="choose-spell" data-option-index="${index}">Learn This Spell</button>
+                    </div>
+                </div>
+            `).join('')}`;
     } else {
         body = `
             <div class="spe-progression-muted">${PROGRESSION_REQUIRED_ACCOMPLISHMENTS} critical accomplishments reached. Choose how the character advances.</div>
             <div class="spe-progression-actions">
                 ${canRaiseStat ? '<button class="menu_button" data-spe-progression-action="choose-stat">Raise Stat</button>' : ''}
                 ${canSwapAbility ? '<button class="menu_button" data-spe-progression-action="choose-swap-ability">Swap Ability</button>' : ''}
+                ${canLearnSpell ? '<button class="menu_button" data-spe-progression-action="choose-learn-spell">Learn Spell</button>' : ''}
             </div>`;
     }
 
@@ -4528,12 +4594,11 @@ function buildPlayerIdentityHtml(creator) {
     const additionalDetails = String(identity.additionalDetails || identity.appearance || '').trim();
     const hasStoredAdditionalDetailsMode = Object.prototype.hasOwnProperty.call(identity, 'additionalDetailsMode');
     const additionalDetailsMode = identity.additionalDetailsMode === 'user' || (!hasStoredAdditionalDetailsMode && additionalDetails) ? 'user' : 'system';
+    const personaName = getPlayerSetupPersonaName();
     return `
         ${buildStatsGridHtml(creator)}
+        <div class="spe-player-muted">Character name: <code>${escapeHtml(personaName)}</code> from the current SillyTavern persona.</div>
         <div class="spe-player-row">
-            <label class="flex1">Name
-                <input id="spe_player_character_name" class="text_pole" value="${escapeHtml(identity.characterName || '')}" placeholder="Optional. Leave blank to generate.">
-            </label>
             <label class="flex1">Sex
                 <input id="spe_player_sex" class="text_pole" value="${escapeHtml(identity.sex || '')}" placeholder="Optional. Leave blank to generate.">
             </label>
@@ -4713,16 +4778,16 @@ async function handleProgressionAction(action, details = {}, context = getContex
             root.pendingAdvancement.choice = 'stat';
         } else if (action === 'choose-swap-ability') {
             root.pendingAdvancement.choice = 'swapAbility';
-            root.pendingAdvancement.abilityOptions = [];
-            delete root.pendingAdvancement.generatedAt;
+            root.pendingAdvancement.abilityOptions = Array.isArray(root.pendingAdvancement.abilityOptions) ? root.pendingAdvancement.abilityOptions : [];
+        } else if (action === 'choose-learn-spell') {
+            const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
+            const spells = extractPersonaSpells(getPersonaText(context));
+            if (Number(stats?.MND || 0) < 7) throw new Error('Learning spells requires MND 7 or higher.');
+            if (spells.length >= PROGRESSION_MAX_SPELLS) throw new Error(`Spell list is already at the maximum of ${PROGRESSION_MAX_SPELLS}.`);
+            root.pendingAdvancement.choice = 'learnSpell';
+            root.pendingAdvancement.spellOptions = Array.isArray(root.pendingAdvancement.spellOptions) ? root.pendingAdvancement.spellOptions : [];
         } else if (action === 'back') {
-            if (Array.isArray(root.pendingAdvancement.abilityOptions) && root.pendingAdvancement.abilityOptions.length) {
-                throw new Error('Ability options are already generated. Choose one of the presented abilities.');
-            }
             root.pendingAdvancement.choice = 'choose';
-            root.pendingAdvancement.abilityOptions = [];
-            delete root.pendingAdvancement.generatedAt;
-            delete root.pendingAdvancement.swapAbilityIndex;
         } else if (action === 'apply-stat') {
             await applyProgressionStatChoice(root, details.stat, context);
         } else if (action === 'generate-abilities') {
@@ -4730,12 +4795,19 @@ async function handleProgressionAction(action, details = {}, context = getContex
             root.pendingAdvancement.swapAbilityIndex = getSelectedProgressionSwapAbilityIndex(context);
             renderProgressionCard(context);
             root.pendingAdvancement.abilityOptions = await requestProgressionAbilityOptions(root.pendingAdvancement, context);
-            root.pendingAdvancement.generatedAt = Date.now();
+            root.pendingAdvancement.abilityOptionsGeneratedAt = root.pendingAdvancement.abilityOptionsGeneratedAt || Date.now();
+        } else if (action === 'generate-spells') {
+            state.progressionBusy = true;
+            renderProgressionCard(context);
+            root.pendingAdvancement.spellOptions = await requestProgressionSpellOptions(root.pendingAdvancement, context);
+            root.pendingAdvancement.spellOptionsGeneratedAt = root.pendingAdvancement.spellOptionsGeneratedAt || Date.now();
         } else if (action === 'choose-ability') {
             if (!Array.isArray(root.pendingAdvancement.abilityOptions) || !root.pendingAdvancement.abilityOptions.length) {
                 root.pendingAdvancement.swapAbilityIndex = getSelectedProgressionSwapAbilityIndex(context);
             }
             await applyProgressionAbilityChoice(root, Number(details.optionIndex), context);
+        } else if (action === 'choose-spell') {
+            await applyProgressionSpellChoice(root, Number(details.optionIndex), context);
         }
         await persistMetadata(context);
     } catch (error) {
@@ -4820,9 +4892,11 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
         } else if (action === 'start-adventure') {
             const prompt = buildPlayerAdventureStartPrompt(root);
             if (submitPlayerAdventureStartPrompt(prompt)) {
+                root.adventureStartPrompt = prompt;
                 root.adventureStarted = true;
                 root.adventureStartPending = false;
                 root.adventureStartedAt = Date.now();
+                root.adventureStartPromptCreatedAt = root.adventureStartedAt;
             }
         } else if (action === 'dismiss-adventure-start') {
             root.adventureStartPending = false;
@@ -4872,7 +4946,7 @@ function advanceAfterSwap(creator) {
 
 function syncIdentityInputs(creator) {
     creator.identity = creator.identity || {};
-    creator.identity.characterName = String(document.getElementById('spe_player_character_name')?.value || creator.identity.characterName || '').trim();
+    delete creator.identity.characterName;
     creator.identity.sex = String(document.getElementById('spe_player_sex')?.value || creator.identity.sex || '').trim();
     const genre = document.getElementById('spe_player_genre')?.value || creator.identity.genre || 'Fantasy';
     creator.identity.genre = PLAYER_GENRE_CHOICES.includes(genre) ? genre : 'Fantasy';
@@ -4932,6 +5006,8 @@ async function approvePlayerSheet(root, context = getContext()) {
     root.adventureGenre = genre;
     root.adventureStartPending = true;
     root.adventureStarted = false;
+    delete root.adventureStartPrompt;
+    delete root.adventureStartPromptCreatedAt;
     root.sheet = {
         text: sheetText,
         source: creator.flow === 'persona' ? 'existing_persona_conversion' : 'generated_character',
@@ -4995,6 +5071,32 @@ async function applyProgressionAbilityChoice(root, optionIndex, context = getCon
     });
 }
 
+async function applyProgressionSpellChoice(root, optionIndex, context = getContext()) {
+    const pending = root?.pendingAdvancement;
+    const options = Array.isArray(pending?.spellOptions) ? pending.spellOptions : [];
+    const index = Math.max(0, Math.floor(Number(optionIndex)));
+    const option = options[index];
+    if (!option) throw new Error('Choose one of the generated spell options.');
+    if (pending.choice !== 'learnSpell') {
+        throw new Error('Choose spell progression mode first.');
+    }
+
+    const persona = getPersonaText(context);
+    const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
+    const spells = extractPersonaSpells(persona);
+    if (Number(stats?.MND || 0) < 7) throw new Error('Learning spells requires MND 7 or higher.');
+    if (spells.length >= PROGRESSION_MAX_SPELLS) throw new Error(`Spell list is already at the maximum of ${PROGRESSION_MAX_SPELLS}.`);
+    const nextText = appendSpellToPersona(persona, option);
+
+    await writePlayerSheetToPersona(nextText, context);
+    syncPlayerRootAfterPersonaEdit(context, nextText, stats);
+    completeProgressionAdvancement(root, {
+        type: 'learnSpell',
+        spell: option,
+        spellCount: spells.length + 1,
+    });
+}
+
 function completeProgressionAdvancement(root, reward) {
     const pending = root?.pendingAdvancement;
     if (!root || !pending) return;
@@ -5040,9 +5142,27 @@ async function requestProgressionAbilityOptions(pending, context = getContext())
     return parseProgressionAbilityOptions(raw);
 }
 
+async function requestProgressionSpellOptions(pending, context = getContext()) {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
+    if (Array.isArray(pending?.spellOptions) && pending.spellOptions.length === PROGRESSION_SPELL_OPTIONS) {
+        return pending.spellOptions;
+    }
+    const prompt = buildProgressionSpellPrompt(pending, context);
+    const raw = await requestProgressionText(prompt, 1700, {
+        temperature: 0.45,
+        stop: ['END_PROGRESSION_SPELLS'],
+        stopping_strings: ['END_PROGRESSION_SPELLS'],
+        stop_sequence: ['END_PROGRESSION_SPELLS'],
+    });
+    return parseProgressionSpellOptions(raw);
+}
+
 function buildProgressionAbilityPrompt(pending, context = getContext()) {
     const persona = getPersonaText(context);
     const abilities = extractPersonaAbilities(persona);
+    const spells = extractPersonaSpells(persona);
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || {};
     const recent = getProgressionRecentAccomplishments(getProgressionRoot(context), pending);
     const replacing = pending?.choice === 'swapAbility'
@@ -5053,11 +5173,13 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
             role: 'system',
             content:
                 'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
-                'Abilities are fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing trait/abilities, genre, stats, and recent critical accomplishments. ' +
-                'Each option must be directly usable in narration as a concrete action, perception, movement, communication, conjuration, transformation, attack method, utility method, or special technique. Do not return passive traits, vague expertise, personality flavor, lore labels, or background-only qualities. ' +
-                'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed escape, guaranteed control, or automatic solutions. ' +
+                'Abilities are activated non-spell fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing racial/body traits, abilities, spells, genre, stats, and recent critical accomplishments. ' +
+                'Each option must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, perception, communication, traversal, transformation, environmental interaction, or supernatural body use. ' +
+                'Good ability shapes include Shadow Step, Voice Projection, Telepathy, Wall Cling, Heat Sight, Mist Form, Amphibious Shift, or a special activated natural-weapon effect beyond ordinary anatomy. ' +
+                'Do not return spells, passive traits, racial/body facts, mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, intimidation aura, surgery skill, toughness, resistance, immunity, personality flavor, lore labels, or background-only qualities. ' +
+                'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed escape, guaranteed control, automatic protection, or automatic solutions. ' +
                 'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, or dangerous use still requires normal scene resolution. ' +
-                'Do not duplicate existing abilities. Return exactly three usable replacement ability options.',
+                'Do not duplicate existing abilities or spells. Return exactly three usable replacement ability options.',
         },
         {
             role: 'user',
@@ -5065,16 +5187,56 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
                 'Return only this compact block. No markdown before or after it.\n' +
                 'BEGIN_PROGRESSION_ABILITIES\n' +
                 'Option1Name=short ability name\n' +
-                'Option1Description=one or two sentences, directly usable fictional permission only, with fictional limits and no mechanics or measurements\n' +
+                'Option1Description=one or two sentences, activated non-spell utility permission only, with fictional limits and no mechanics or measurements\n' +
                 'Option2Name=short ability name\n' +
-                'Option2Description=one or two sentences, directly usable fictional permission only, with fictional limits and no mechanics or measurements\n' +
+                'Option2Description=one or two sentences, activated non-spell utility permission only, with fictional limits and no mechanics or measurements\n' +
                 'Option3Name=short ability name\n' +
-                'Option3Description=one or two sentences, directly usable fictional permission only, with fictional limits and no mechanics or measurements\n' +
+                'Option3Description=one or two sentences, activated non-spell utility permission only, with fictional limits and no mechanics or measurements\n' +
                 'END_PROGRESSION_ABILITIES\n\n' +
                 'MODE: SWAP_ABILITY\n' +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `EXISTING ABILITIES:\n${abilities.length ? abilities.map((ability, index) => `${index + 1}. ${ability.text}`).join('\n') : 'none'}\n\n` +
+                `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
                 `${replacing ? `ABILITY BEING REPLACED:\n${replacing.text}\n\n` : ''}` +
+                `RECENT CRITICAL ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
+                `PERSONA SHEET:\n${clipText(persona, 5000)}`,
+        },
+    ];
+}
+
+function buildProgressionSpellPrompt(pending, context = getContext()) {
+    const persona = getPersonaText(context);
+    const spells = extractPersonaSpells(persona);
+    const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || {};
+    const recent = getProgressionRecentAccomplishments(getProgressionRoot(context), pending);
+    return [
+        {
+            role: 'system',
+            content:
+                'You generate concise RPG spell options for a deterministic SillyTavern extension. ' +
+                'Spells are activated magical permissions with one concrete effect. They must fit the character race/body/origin, genre, stats, existing spells, and recent critical accomplishments. ' +
+                'Allowed spell categories: offensive magic, practical utility magic, traversal, environmental manipulation, and healing or restoration short of resurrection. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. ' +
+                'Do not return passive traits, mundane expertise, personality flavor, lore labels, broad spell schools, magic mastery, resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, or automatic solutions. ' +
+                'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed healing, guaranteed escape, guaranteed control, or automatic solutions. ' +
+                'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, healing, or dangerous use still requires normal scene resolution. ' +
+                'Do not duplicate existing spells. Return exactly three learnable spell options.',
+        },
+        {
+            role: 'user',
+            content:
+                'Return only this compact block. No markdown before or after it.\n' +
+                'BEGIN_PROGRESSION_SPELLS\n' +
+                'Option1Name=short spell name\n' +
+                'Option1Description=one or two sentences, activated magical permission only, with fictional limits and no mechanics or measurements\n' +
+                'Option2Name=short spell name\n' +
+                'Option2Description=one or two sentences, activated magical permission only, with fictional limits and no mechanics or measurements\n' +
+                'Option3Name=short spell name\n' +
+                'Option3Description=one or two sentences, activated magical permission only, with fictional limits and no mechanics or measurements\n' +
+                'END_PROGRESSION_SPELLS\n\n' +
+                'MODE: LEARN_SPELL\n' +
+                `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
+                `SPELL LIMIT: current ${spells.length}; maximum ${PROGRESSION_MAX_SPELLS}\n` +
+                `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
                 `RECENT CRITICAL ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
                 `PERSONA SHEET:\n${clipText(persona, 5000)}`,
         },
@@ -5120,6 +5282,7 @@ function maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context 
             choice: 'choose',
             sourceRecordIds: sourceRecords.map(item => item.id),
             abilityOptions: [],
+            spellOptions: [],
         };
         root.ui = {};
     }
@@ -5184,7 +5347,7 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
                 return await sendSemanticProfileTextRequest(prompt, responseLength, settings, overridePayload);
             }
             if (!context?.generateRawData) {
-                throw new Error('SillyTavern generateRawData API is unavailable for progression ability generation.');
+                throw new Error('SillyTavern generateRawData API is unavailable for progression generation.');
             }
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
@@ -5220,6 +5383,30 @@ function parseProgressionAbilityOptions(raw) {
     return options;
 }
 
+function parseProgressionSpellOptions(raw) {
+    const text = extractGeneratedText(raw);
+    const fields = {};
+    for (const line of text.split(/\r?\n/)) {
+        const match = /^Option([123])(Name|Description|Text)\s*=\s*(.+)$/i.exec(line.trim());
+        if (!match) continue;
+        const index = Number(match[1]) - 1;
+        fields[index] = fields[index] || {};
+        const key = match[2].toLowerCase() === 'name' ? 'name' : 'description';
+        fields[index][key] = String(match[3] || '').trim();
+    }
+    const options = [0, 1, 2].map(index => sanitizeProgressionSpellOption(fields[index]));
+    if (options.some(option => !option)) {
+        throw new Error('Progression spell generation did not return three valid options.');
+    }
+    const names = new Set();
+    for (const option of options) {
+        const key = option.name.toLowerCase();
+        if (names.has(key)) throw new Error('Progression spell generation returned duplicate options.');
+        names.add(key);
+    }
+    return options;
+}
+
 function sanitizeProgressionAbilityOption(option) {
     const name = cleanAbilityName(option?.name);
     const description = String(option?.description || '')
@@ -5228,6 +5415,18 @@ function sanitizeProgressionAbilityOption(option) {
     if (!name || !description) return null;
     if (hasProgressionMechanicalLanguage(description)) {
         throw new Error(`Generated ability "${name}" included mechanical language.`);
+    }
+    return { name, description: clipText(description, 520) };
+}
+
+function sanitizeProgressionSpellOption(option) {
+    const name = cleanAbilityName(option?.name);
+    const description = String(option?.description || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!name || !description) return null;
+    if (hasProgressionMechanicalLanguage(description)) {
+        throw new Error(`Generated spell "${name}" included mechanical language.`);
     }
     return { name, description: clipText(description, 520) };
 }
@@ -5319,7 +5518,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
     const statInstruction = buildNewCharacterStatInstruction(stats);
     const genreInstruction = buildNewCharacterGenreInstruction(identity);
     const raceInstruction = buildNewCharacterRaceInstruction(identity);
-    const nameInstruction = buildNewCharacterNameInstruction(identity);
+    const nameInstruction = buildNewCharacterNameInstruction();
     const sexInstruction = buildNewCharacterSexInstruction(identity);
     const additionalDetailsInstruction = buildNewCharacterAdditionalDetailsInstruction(identity);
     const prompt = [
@@ -5342,8 +5541,9 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
-                '# TRAITS (ALWAYS ACTIVE): exactly one passive trait. The trait must be unique, impactful, permanent, and inherent to the character race, body, origin, or nature. It is always true and applies automatically when relevant. If something is passive and always-on, it belongs here. It must not be a learned skill, chosen action, trigger-based power, or disguised ability. It must create concrete fictional consequences: what the character can perceive, physically be, naturally endure, naturally recover from, be vulnerable to, or do by nature. If the race, species, anatomy, or body concept plausibly includes built-in offensive anatomy, include it here as a fixed body/racial fact: claws, fangs, horns, talons, tusks, tail spikes, stingers, barbs, crushing jaws, or similar natural weapons when appropriate. Do not force natural weapons onto bodies where they do not fit. Natural weapons are body facts, not gear, inventory, equipment, held objects, or separate items; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, or special damage rule. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic success, immunity to consequences, vague expertise, or conditional mini-abilities.\n' +
-                `# ABILITIES / SKILLS: exactly ${PROGRESSION_REQUIRED_ABILITIES} usable abilities, powers, techniques, or special methods. Each ability must be directly usable in narration as a concrete action, perception, movement, communication, conjuration, transformation, attack method, utility method, or special technique. If something requires a deliberate trigger, use, gesture, focus, exertion, target, transformation, attack, conjuration, message, or other described attempt, it belongs here. A special activated natural-weapon effect belongs here, such as venom, paralysis, extending bone blades, electrified bite, supernatural claws, or any effect beyond ordinary bodily use. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that kind of action, but it does not grant mechanical advantage or guaranteed success. Utility use may simply work in narration only when it is unopposed, low-stakes, outside active danger, and has no immediate harmful, contested, stealth, escape, security-bypass, control, ambush, trap, or unwilling-target consequence. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, or any meaningful consequence, normal scene resolution decides the result. Limits must be fictional constraints, not numerical values, measured ranges, distances, radii, durations, cooldown timers, or usage counts. Do not write numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, or measurements like feet/meters/yards.\n` +
+                '# RACIAL TRAITS (ALWAYS ACTIVE): exactly one fixed race/body trait. This section describes what the character physically or inherently is, not what the mechanics reward. Good traits are concrete body/origin facts: claws, fangs, horns, tail, wings, gills, night-adapted eyes, extra arms, stone-like skin as body texture, amphibious anatomy, natural weapons, or other permanent anatomy/senses/vulnerabilities. Natural weapons are body facts, not gear, inventory, equipment, held objects, or separate items; they permit physically plausible ordinary bodily actions but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
+                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell abilities. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, perception, communication, traversal, transformation, environmental interaction, or supernatural body use. Good ability shapes include Shadow Step, Voice Projection, Telepathy, Wall Cling, Heat Sight, Mist Form, Amphibious Shift, or a special activated natural-weapon effect beyond ordinary anatomy such as venom, paralysis, extending bone blades, electrified bite, or supernatural claws. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
+                `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Allowed spell categories are offensive magic, practical utility magic, traversal, environmental manipulation, and healing or restoration short of resurrection. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
                 '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
                 '# FLAVOR / FIXED FACTS: concise fixed background flavor, origin facts, prior role, prior training, immutable constraints, ability/trait limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Do not include personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, emotional reactions, or statements about what the character will/may/usually/tends to do.',
         },
@@ -5353,12 +5553,12 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
     }));
 }
 
-function buildNewCharacterNameInstruction(identity = {}) {
-    const name = String(identity.characterName || '').trim();
-    if (name) {
-        return `Use this character name exactly: ${name}.`;
-    }
-    return 'Generate a fitting character name.';
+function getPlayerSetupPersonaName() {
+    return '{{user}}';
+}
+
+function buildNewCharacterNameInstruction() {
+    return `Use {{user}} exactly as the character name. {{user}} resolves to the current SillyTavern persona name. Do not generate, rename, translate, or embellish the character name.`;
 }
 
 function buildNewCharacterSexInstruction(identity = {}) {
@@ -5493,8 +5693,9 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and origin/mind notes. Use explicit persona facts only; otherwise write Not specified.\n' +
                 '# APPEARANCE: preserve explicit appearance facts only, including explicit visible natural weapons/body armaments; otherwise write Not specified.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
-                '# RACIAL TRAITS (ALWAYS ACTIVE): preserve explicit passive traits only. Preserve explicitly stated natural weapons or built-in offensive anatomy here as body/racial traits. Do not invent missing natural weapons. If none are explicit, write Not specified.\n' +
-                '# ABILITIES (REQUIRE ACTIVATION): preserve explicit active abilities only. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. If none are explicit, write Not specified.\n' +
+                '# RACIAL TRAITS (ALWAYS ACTIVE): preserve explicit fixed race/body facts only: natural weapons, anatomy, senses, body texture, vulnerabilities, or other inherent physical facts. Preserve explicitly stated natural weapons or built-in offensive anatomy here as body/racial traits. Do not invent missing natural weapons. Do not convert vague toughness, resistance, immunity, skill boosts, better-at wording, or mechanical advantages into traits. If none are explicit, write Not specified.\n' +
+                '# ABILITIES: preserve explicit activated non-spell abilities only. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. Do not preserve mundane expertise, combat techniques, hidden bonuses, passive traits, or broad skill competence as abilities. If none are explicit, write Not specified.\n' +
+                '# SPELLS: preserve explicit spells only, maximum 5. If none are explicit, write None. Preserve healing spells, but do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
                 '# INVENTORY: preserve explicit gear/inventory only. Do not list natural weapons or body armaments as inventory, gear, equipment, or held items. If none is explicit, write Not specified.\n' +
                 '# NOTES: preserve all important persona notes, origin facts, limits, fighting style, and secrecy rules.\n\n' +
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
@@ -5589,6 +5790,22 @@ function getLatestUserTextFromContext(context = getContext()) {
         if (text) return text;
     }
     return '';
+}
+
+function hasVisibleUserMessage(context = getContext()) {
+    if (!Array.isArray(context?.chat)) return false;
+    return context.chat.some(message => {
+        if (!message?.is_user && message?.role !== 'user') return false;
+        return Boolean(String(message?.mes ?? message?.content ?? '').trim());
+    });
+}
+
+function getBeginningAdventureStartPrompt(context = getContext(), type = '') {
+    if (!['swipe', 'regenerate'].includes(String(type || ''))) return '';
+    if (hasVisibleUserMessage(context)) return '';
+    const root = getPlayerRoot(context);
+    if (!root?.adventureStarted) return '';
+    return String(root.adventureStartPrompt || '').trim();
 }
 
 function detectStructuredUserInputMode(text) {
@@ -6564,6 +6781,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
         powerActorSnapshot: buildPowerActorSnapshot(context),
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
+        adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
         contextSize,
         createdAt: Date.now(),
     };
@@ -6641,6 +6859,7 @@ async function handleChatCompletionPromptReady(eventData) {
 
         beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
         sanitizeFinalPromptHistory(eventData.chat);
+        appendAdventureStartPromptToNarratorPrompt(eventData.chat, state.pendingGeneration.adventureStartPrompt);
         appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
         markNextNarratorRequestThinkingDisabled();
         await waitForStoryEngineModelCallSpacing('narrator model call');
@@ -6687,6 +6906,15 @@ function appendNarratorContextToPrompt(chat, narratorContext) {
     chat.push({
         role: 'system',
         content: buildFinalNarrationPrompt(narratorContext),
+    });
+}
+
+function appendAdventureStartPromptToNarratorPrompt(chat, prompt) {
+    const text = String(prompt || '').trim();
+    if (!Array.isArray(chat) || !text) return;
+    chat.push({
+        role: 'system',
+        content: text,
     });
 }
 
