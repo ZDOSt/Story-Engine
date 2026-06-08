@@ -839,15 +839,6 @@ function handleChatCompletionSettingsReady(generateData) {
     consumeNarratorThinkingDisableIfNeeded();
 }
 
-function handleTextCompletionSettingsReady(generateData) {
-    if (!shouldDisableThinkingForCurrentRequest()) return;
-    if (generateData && typeof generateData === 'object') {
-        generateData.include_reasoning = false;
-        delete generateData.reasoning_effort;
-    }
-    consumeNarratorThinkingDisableIfNeeded();
-}
-
 function setSelectOptions(select, values, placeholder, selectedValue, missingLabel = 'Missing') {
     if (!select) return;
     select.innerHTML = '';
@@ -6682,7 +6673,6 @@ function subscribeMessageHandler() {
     if (context.eventTypes.GENERATION_ENDED) context.eventSource.on(context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
     if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
     if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
-    if (context.eventTypes.TEXT_COMPLETION_SETTINGS_READY) context.eventSource.on(context.eventTypes.TEXT_COMPLETION_SETTINGS_READY, handleTextCompletionSettingsReady);
     if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
     state.subscribed = true;
 }
@@ -6966,7 +6956,6 @@ export function onDisable() {
         if (context.eventTypes.GENERATION_ENDED) removeEventHandler(context, context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
         if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
         if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
-        if (context.eventTypes.TEXT_COMPLETION_SETTINGS_READY) removeEventHandler(context, context.eventTypes.TEXT_COMPLETION_SETTINGS_READY, handleTextCompletionSettingsReady);
         if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
         state.subscribed = false;
     }

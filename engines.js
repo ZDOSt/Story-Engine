@@ -7,7 +7,7 @@ function ResolutionEngine(input) {
     STATS:
 'PHY = challenges that require physical effort, strength, agility, speed, coordination, endurance, stealth movement, combat skill, or bodily execution under risk. MND = challenges that require thought, memory, perception, focus, reasoning, knowledge, awareness, will, or deliberate mental/supernatural exertion. CHA = social challenges that require persuasion, deception, intimidation, negotiation, emotional influence, personal presence, or interpersonal skill. Map the stat from finalGoal or explicit challenge that carries stakes, not from incidental gestures, flavor, delivery method, or setup. Core stat scale is 1 to 10.',
     STAKES:
-'Stakes are meaningful possible consequences tied to success or failure. Stakes include physical risk, harm, danger, detection, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. Only new unresolved stakes require a roll. If success/failure would not materially change the outcome, or the relevant NPC reaction is already decided by saved disposition/intimacy state, no roll is needed.'
+'Stakes are meaningful possible consequences tied to success or failure. Stakes include physical risk, harm, danger, detection, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. Only new unresolved stakes require a roll. If success/failure would not materially change the outcome, the relevant NPC reaction is already decided by saved disposition/intimacy state, or a failed negative social attempt is merely being repeated against the same target for the same goal in the same scene, no roll is needed.'
   });
 
   identifyGoal(input):
@@ -97,12 +97,13 @@ function ResolutionEngine(input) {
     rule: if boundaryViolationExplicit=Y, evaluate stakes normally under DEF.STAKES; boundary violation usually affects autonomy, trust, safety, or social standing.
     rule: return Y only if success or failure of finalGoal or explicit challenge creates new unresolved stakes for {{user}} or a living entity, as per DEF.STAKES
     rule: return N if the only relevant NPC reaction is already decided by saved fear/terror, hostility/hatred, or persisted intimacy boundary
+    rule: return N for repeated/rephrased/intensified negative social attempts after a resolved failure or refusal against the same target for the same goal in the current scene
     rule: saved disposition never suppresses separate combat, pursuit, restraint, theft, bargaining, deception, access, resources, secrets, or environmental obstacles
     else -> N
 
   stakesDecision(input, finalGoal, challenge, targets, boundaryViolationExplicit, context):
     MaterialStakes = whether success/failure could materially matter under DEF.STAKES before disposition continuity
-    NewUnresolvedContest = whether the latest user action creates a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle
+    NewUnresolvedContest = whether the latest user action creates a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle; repeated/rephrased/intensified negative social pressure after a resolved failed attempt against the same target/goal is not fresh
     PreDecidedByDisposition = whether saved fear/terror, hostility/hatred, or persisted intimacy boundary already decides the relevant NPC reaction and the current input merely asks that state to express itself
     RollRequired = MaterialStakes=Y AND NewUnresolvedContest=Y AND PreDecidedByDisposition=N
     Reason = short explanation
@@ -526,59 +527,6 @@ function CHAOS_INTERRUPT(resolutionPacket, npcHandoffList, sceneSummary, diceLis
 
     return {CHAOS:{triggered:true, band:band, magnitude:magnitude, anchor:anchor, vector:vector, personVector:personVector, fullText:null}}
 }
-----------------
-function NameGenerationEngine(context) {
-  const DEF = Object.freeze({
-    EO:
-'DETERMINISTIC. Build names locally from the selected style profile, scene context, and current chat name registry. The semantic pass does not create name candidates.',
-    FYW:
-'FIRST-YES-WINS. In ordered rule ladders, the first matching rule becomes final.',
-    UNIVERSAL:
-'SINGLE-PASS. Produce a hidden approved pool of proper names: 3 male person/entity names, 3 female person/entity names, and 3 location names. The narrator may use them only after fogOfWar already permits a specific name reveal for that person, entity, or place.',
-    PURPOSE:
-'Prevent improvised model names from drifting by supplying a style-aware approved name pool. Use the pool only after fogOfWar already permits a specific name reveal. Do not force a new person or location into the scene.',
-    SEED:
-'Seed is hidden deterministic fallback entropy derived from fixed pool slots and context. It does NOT have to appear at the start of a fallback name.',
-    STYLE:
-'Generate creative, pronounceable names matching the selected style. Fantasy styles should be real-but-unplaceable and avoid pure Western-European stock fantasy drift, Tolkien-esque elvish unless that style is selected, JRPG-generic naming, famous names, joke names, and overly ordinary modern-Western names. Modern style should use plausible contemporary single-token person names and modern place/neighborhood names while still avoiding famous names, jokes, and fantasy drift.',
-    SHAPE:
-'Append only pronounceable syllables using style-aware texture rules. Avoid 3+ consecutive vowels, famous/stock names, joke names, duplicates, and person/location mismatch. Consonant clusters and vowel pairs are allowed when the selected style supports them. Modern names should come from curated contemporary lists instead of fantasy syllable assembly.'
-  });
-
-  profileFromContext(context):
-    policy: FYW
-    if context contains any [harsh,hard,stone,iron,ash,cold,desert,steppe,war,border,fortress,raid,scar,volcanic] -> HARD
-    if context contains any [soft,coast,island,harbor,reef,jungle,garden,ritual,temple,court,silk,trade,festival,rain] -> SOFT
-    else -> BALANCED
-
-  buildFallbackName(mode, profile, gender, context, slotSeed):
-    if mode=PERSON:
-      generate one fallback person/entity name from deterministic syllable pools using slotSeed as hidden entropy
-      use compact call-name shape; gender affects weighting only, never hard stereotype
-    else:
-      generate one fallback location name from deterministic syllable pools using slotSeed as hidden entropy
-      use geographic / compound / place-like syllable shape
-
-  reject(name, mode):
-    policy: FYW
-    if mode=PERSON and length falls outside selected style person length -> Y
-    if mode=LOCATION and (length(name)<7 || length(name)>14) -> Y
-    if name has 3+ consecutive vowels -> Y
-    if name has consonant cluster unsupported by selected style -> Y
-    if name reads as stock fantasy / elvish / Tolkien-like / JRPG-generic -> Y
-    if selectedStyle is not Modern and name reads as too ordinary / modern-Western / overly familiar -> Y
-    if name strongly resembles a famous fictional or real-world place/person name -> Y
-    if mode=LOCATION and name reads more like a person name than a place -> Y
-    if name already exists in current chat name registry or tracker -> Y
-    else -> N
-
-  execution:
-    P = profileFromContext(context)
-    build exactly 3 male person/entity names, 3 female person/entity names, and 3 location names from selectedStyle profile
-    reject/regenerate each final candidate until valid and unused within the current chat registry, tracker names, and this pool
-    return {male, female, location}
-}
-----------------
 function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, diceBudget) {
   const DEF = Object.freeze({
     EO:

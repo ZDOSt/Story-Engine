@@ -2829,7 +2829,7 @@ function runNameGeneration(ledger, audit, context, type) {
         generatedName: NONE,
         namePool: pool,
     };
-    audit.push('STEP 5: EXECUTE NameGenerationEngine');
+    audit.push('STEP 5: BUILD DETERMINISTIC NAME POOL');
     audit.push('5.1 nameRequired=POOL');
     audit.push('5.1a namePoolMode=deterministicStyleProfile');
     audit.push('5.1b isLocation=N/A');

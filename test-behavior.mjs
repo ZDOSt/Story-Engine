@@ -5590,12 +5590,20 @@ const tests = [
       assert.doesNotMatch(modelPrompt, /Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Staistu|Vaisailnok/);
       assert.match(auditPrompt(report), /nameGeneration\.result: style: Balanced Fantasy; final: Male:/);
       assert.equal(auditIncludes(report, 'namePoolMode=deterministicStyleProfile'), true);
+      assert.equal(auditIncludes(report, 'STEP 5: BUILD DETERMINISTIC NAME POOL'), true);
+      assert.equal(auditIncludes(report, 'STEP 5: EXECUTE NameGenerationEngine'), false);
       assert.doesNotMatch(auditPrompt(report), /semanticCandidates|rejected:|replacements:|Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Staistu|Vaisailnok/);
       assert.match(auditPrompt(report), /final: Male:/);
       const reserved = ctx.chatMetadata.structuredPreflightNameRegistry?.used || [];
       assert.equal(pool.male.every(name => reserved.includes(name)), true);
       assert.equal(pool.female.every(name => reserved.includes(name)), true);
       assert.equal(pool.location.every(name => reserved.includes(name)), true);
+      const engineSource = fs.readFileSync(extensionFile('engines.js'), 'utf8');
+      const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
+      const archiveSource = fs.readFileSync(extensionFile('archived-name-generation-engine.md'), 'utf8');
+      assert.doesNotMatch(engineSource, /function NameGenerationEngine/);
+      assert.doesNotMatch(semanticSource, /NameGenerationEngine/);
+      assert.match(archiveSource, /function NameGenerationEngine/);
     },
   },
   {
@@ -7752,6 +7760,10 @@ const tests = [
       assert.match(semanticSource, /classify it as stakes only when the user also declares a demand, threat, attack, aim\/pointing at a target/);
       assert.match(semanticSource, /Use stakesDecision for the roll gate/);
       assert.match(semanticSource, /Do not roll the same settled disposition reaction again/);
+      assert.match(semanticSource, /A failed negative social roll such as intimidation, coercion, bluffing, deception, manipulation, blackmail, or forced submission cannot be immediately retried/);
+      assert.match(semanticSource, /Do not carry forward a prior social goal as the current goal after it already failed or resolved/);
+      assert.match(semanticSource, /post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath\/escalation/);
+      assert.match(semanticSource, /do not immediately retry a failed negative social attempt against the same target for the same goal/);
     },
   },
   {
@@ -8808,7 +8820,8 @@ const tests = [
       assert.match(source, /function beginProseGuardDisplayIntercept\(type, dryRun = false\) \{\s*ensureProseGuardDisplayInterceptor\(\);/);
       assert.match(source, /eventTypes\.GENERATION_STARTED\) context\.eventSource\.on\(context\.eventTypes\.GENERATION_STARTED, ensureProseGuardDisplayInterceptor\)/);
       assert.match(source, /eventTypes\.CHAT_COMPLETION_SETTINGS_READY\) context\.eventSource\.on\(context\.eventTypes\.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady\)/);
-      assert.match(source, /eventTypes\.TEXT_COMPLETION_SETTINGS_READY\) context\.eventSource\.on\(context\.eventTypes\.TEXT_COMPLETION_SETTINGS_READY, handleTextCompletionSettingsReady\)/);
+      assert.doesNotMatch(source, /TEXT_COMPLETION_SETTINGS_READY/);
+      assert.doesNotMatch(source, /handleTextCompletionSettingsReady/);
       assert.match(source, /applySemanticThinkingPayload\(generateData\)/);
       assert.match(source, /withStoryEngineModelRequest/);
       assert.match(source, /new MutationObserver\(mutations =>/);
@@ -8842,6 +8855,16 @@ const tests = [
       assert.match(source, /using direct tracker connection profile request/);
       assert.match(source, /using direct Prose Guard connection profile request/);
       assert.match(source, /using direct Progression connection profile request/);
+    },
+  },
+  {
+    name: '48b legacy text completion hook is removed',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.doesNotMatch(source, /TEXT_COMPLETION_SETTINGS_READY/);
+      assert.doesNotMatch(source, /handleTextCompletionSettingsReady/);
+      assert.doesNotMatch(source, /generateData\.include_reasoning\s*=\s*false/);
+      assert.doesNotMatch(source, /delete generateData\.reasoning_effort/);
     },
   },
   {
