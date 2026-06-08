@@ -4,7 +4,6 @@ import {
     nonHostileOutcome,
     counterBonusFromPotential,
     aggressionReactionOutcome,
-    isDefaultGeneratedCore,
     routeDispositionTarget,
     resolveStakeChangeByOutcome,
     applyMeaningfulBenefitReferee,
@@ -75,7 +74,21 @@ const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 const USER_PROACTIVITY_TARGET = '{{user}}';
 const USER_KNOWLEDGE_LEDGER_VERSION = 1;
-const ENVIRONMENT_DIFFICULTIES = Object.freeze([0, 4, 8, 12]);
+const ENVIRONMENT_DIFFICULTY_BONUSES = Object.freeze({
+    none: 0,
+    easy: 0,
+    average: 4,
+    hard: 8,
+    extreme: 12,
+});
+const GENERATED_CORE_RANGES = Object.freeze({
+    Weak: [1, 1],
+    Average: [1, 3],
+    Trained: [2, 4],
+    Elite: [3, 6],
+    Boss: [6, 10],
+    none: [1, 1],
+});
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
 const RAPPORT_COOLDOWN_MS = 30 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
@@ -101,8 +114,12 @@ const USER_OWNED_ITEM_SOURCES = Object.freeze(['gear', 'inventory']);
 const USER_ITEM_UNAVAILABLE_REASON = 'not in saved user gear/inventory';
 
 function normalizeEnvironmentDifficultyForRoll(value) {
+    const tier = String(value ?? '').trim().toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(ENVIRONMENT_DIFFICULTY_BONUSES, tier)) {
+        return ENVIRONMENT_DIFFICULTY_BONUSES[tier];
+    }
     const number = Number(value);
-    return ENVIRONMENT_DIFFICULTIES.includes(number) ? number : 0;
+    return [0, 4, 8, 12].includes(number) ? number : 0;
 }
 
 const NAME_STYLE_PROFILES = Object.freeze({
@@ -358,7 +375,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
     const rapportClock = advanceRapportClock(context, audit);
     const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot);
-    const relationships = runRelationships(ledger, trackerSnapshot, resolution.packet, audit, refereeContext, context, rapportClock);
+    const relationships = runRelationships(ledger, trackerSnapshot, resolution.packet, audit, refereeContext, context, rapportClock, dice);
     const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
     const name = runNameGeneration(ledger, audit, context, type);
     const injuryTrackerUpdate = applyInflictedNpcInjuriesToTrackerUpdate(resolution.packet, relationships.trackerUpdate, trackerSnapshot, audit);
@@ -1759,7 +1776,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         oppTargetsNpcFirst = firstReal(targets.OppTargets.NPC);
         resolvedOppStat = oppStat;
         environmentDifficulty = oppStat === 'ENV' && firstReal(targets.OppTargets.ENV)
-            ? normalizeEnvironmentDifficultyForRoll(semantic.environmentDifficulty)
+            ? normalizeEnvironmentDifficultyForRoll(semantic.environmentDifficultyTier ?? semantic.environmentDifficulty)
             : 0;
         const currentTargetCore = oppTargetsNpcFirst ? trackerSnapshot[oppTargetsNpcFirst]?.currentCoreStats : null;
 
@@ -1767,7 +1784,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         audit.push(`2.7a actionCount=[${actions.join(',')}]`);
         audit.push(`2.7b actions=[${actions.join(',')}]`);
         audit.push(`2.7c mapStats={USER:${userStat},OPP:${oppStat}}`);
-        if (oppStat === 'ENV') audit.push(`2.7c.1 environmentDifficulty=${environmentDifficulty}`);
+        if (oppStat === 'ENV') audit.push(`2.7c.1 environmentDifficulty=${environmentDifficulty} (${semantic.environmentDifficultyTier || 'none'})`);
         audit.push(`2.7d getUserCoreStats=${compact(userCore)}`);
         audit.push('2.7e targetCore=(none)');
 
@@ -1779,19 +1796,19 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
                 audit.push(`2.7h getCurrentCoreStats(${oppTargetsNpcFirst})=${compact(targetCore)}`);
                 audit.push(`2.7n targetCore=${compact(targetCore)}`);
             } else {
-                const generatedCoreSource = chooseGeneratedCore(ledger, semantic, oppTargetsNpcFirst);
+                const generatedCoreSource = chooseGeneratedCore(ledger, semantic, oppTargetsNpcFirst, dice);
                 targetCore = normalizeCore(generatedCoreSource.core, { PHY: 1, MND: 1, CHA: 1 });
                 audit.push(`2.7h getCurrentCoreStats(${oppTargetsNpcFirst || NONE})=missing`);
-                audit.push('2.7i missing -> genStats');
+                audit.push('2.7i missing -> deterministicAssignStats(genStats seed)');
                 if (generatedCoreSource.source !== 'resolutionEngine.genStats') {
                     audit.push(`2.7i.1 genStats source=${generatedCoreSource.source}`);
                 }
-                audit.push(`2.7j genStats.Rank=${generatedCoreSource.core?.Rank || 'none'}`);
-                audit.push(`2.7k genStats.MainStat=${generatedCoreSource.core?.MainStat || 'none'}`);
+                audit.push(`2.7j genStats.Rank=${generatedCoreSource.seed?.Rank || generatedCoreSource.core?.Rank || 'none'}`);
+                audit.push(`2.7k genStats.MainStat=${generatedCoreSource.seed?.MainStat || generatedCoreSource.core?.MainStat || 'none'}`);
                 audit.push(`2.7l genStats=${compact(targetCore)}`);
                 audit.push(`2.7m targetCore=${compact(targetCore)}`);
                 if (generatedCoreSource.defaultFallback) {
-                audit.push('2.7m.1 genStatsDefaultFallback=not persisted as explicit NPC stats');
+                    audit.push('2.7m.1 genStatsDefaultFallback=not persisted as explicit NPC stats');
                 }
             }
         }
@@ -1889,6 +1906,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         hostilesInScene: { NPC: showNone(targets.hostilesInScene?.NPC) },
         ActionTargets: showNone(targets.ActionTargets),
         OppTargets: { NPC: showNone(targets.OppTargets.NPC), ENV: showNone(targets.OppTargets.ENV) },
+        EnvironmentDifficultyTier: resolvedOppStat === 'ENV' ? (semantic.environmentDifficultyTier || 'none') : 'none',
         EnvironmentDifficulty: resolvedOppStat === 'ENV' ? environmentDifficulty : 0,
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
@@ -1909,7 +1927,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     return { packet, resultLine };
 }
 
-function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refereeContext, context, rapportClock = normalizeRapportClock()) {
+function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refereeContext, context, rapportClock = normalizeRapportClock(), dice = null) {
     const resolutionSemantic = ledger.resolutionEngine || {};
     const semanticMap = new Map((ledger.relationshipEngine || []).filter(x => x?.NPC).map(x => [x.NPC, x]));
     const npcList = unique(toRealArray(resolutionPacket.NPCInScene));
@@ -2180,10 +2198,14 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         };
         handoffs.push(handoff);
 
-        const generatedCore = normalizeCore(sem.genStats, { PHY: 1, MND: 1, CHA: 1 });
-        const coreStats = state.currentCoreStats || (isDefaultGeneratedCore(generatedCore) ? null : generatedCore);
+        const generatedCoreSource = state.currentCoreStats
+            ? null
+            : chooseGeneratedCore(ledger, resolutionSemantic, npc, dice, { preferRelationshipSeed: true, relationshipOnly: true });
+        const coreStats = state.currentCoreStats || (generatedCoreSource?.defaultFallback ? null : generatedCoreSource?.core);
         if (!state.currentCoreStats && !coreStats) {
-            audit.push(`3.7a currentCoreStats not persisted for ${npc}: semantic genStats was default 1/1/1`);
+            audit.push(`3.7a currentCoreStats not persisted for ${npc}: no semantic Rank/MainStat seed`);
+        } else if (!state.currentCoreStats && generatedCoreSource) {
+            audit.push(`3.7a currentCoreStats assigned for ${npc} from ${generatedCoreSource.source}: seed=${compact(generatedCoreSource.seed)} core=${compact(coreStats)}`);
         }
         trackerUpdate[npc] = {
             ...state,
@@ -2789,10 +2811,9 @@ function runNameGeneration(ledger, audit, context, type) {
     const style = resolveNameStyle(context);
     const styleProfile = NAME_STYLE_PROFILES[style] || NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE];
     const registry = getNameRegistry(context);
-    const semanticCandidates = normalizeSemanticNameCandidates(ledger.nameSemantic);
-    const poolResult = buildNamePool({ profile, registry, contextText, style, styleProfile, semanticCandidates });
+    const poolResult = buildNamePool({ profile, registry, contextText, style, styleProfile });
     const pool = poolResult.pool;
-    registerGeneratedNamePool(context, pool, { profile, style, styleKey: styleProfile.key, source: 'validatedNamePool' });
+    registerGeneratedNamePool(context, pool, { profile, style, styleKey: styleProfile.key, source: 'deterministicNamePool' });
 
     const result = {
         nameRequired: 'POOL',
@@ -2804,17 +2825,13 @@ function runNameGeneration(ledger, audit, context, type) {
         style,
         styleKey: styleProfile.key,
         gender: 'POOL',
-        deterministicCue: 'semantic candidates with deterministic validation',
+        deterministicCue: 'deterministic style profile',
         generatedName: NONE,
-        semanticCandidates: poolResult.semanticCandidates,
-        semanticAccepted: poolResult.semanticAccepted,
-        semanticRejected: poolResult.semanticRejected,
-        replacements: poolResult.replacements,
         namePool: pool,
     };
     audit.push('STEP 5: EXECUTE NameGenerationEngine');
     audit.push('5.1 nameRequired=POOL');
-    audit.push('5.1a namePoolMode=semanticCandidates+deterministicValidation');
+    audit.push('5.1a namePoolMode=deterministicStyleProfile');
     audit.push('5.1b isLocation=N/A');
     audit.push('5.1c seed=pool');
     audit.push('5.1d normalizeSeed=pool');
@@ -2822,11 +2839,7 @@ function runNameGeneration(ledger, audit, context, type) {
     audit.push(`5.1f profile=${result.profile}`);
     audit.push('5.1g gender=POOL');
     audit.push(`5.1h style=${style}`);
-    audit.push(`5.1i semanticCandidates=${compact(result.semanticCandidates)}`);
-    audit.push(`5.1j semanticAccepted=${compact(result.semanticAccepted)}`);
-    audit.push(`5.1k semanticRejected=${compact(result.semanticRejected)}`);
-    audit.push(`5.1l replacements=${compact(result.replacements)}`);
-    audit.push(`5.1m namePool=${compact(pool)}`);
+    audit.push(`5.1i namePool=${compact(pool)}`);
     audit.push('---');
     return result;
 }
@@ -2837,7 +2850,6 @@ function resolveNameStyle(context) {
 }
 
 function buildNameContext(ledger, context) {
-    const sem = ledger.nameSemantic || {};
     const resolution = ledger.resolutionEngine || {};
     return [
         getLatestUserTextFromContext(context),
@@ -2917,61 +2929,17 @@ function detectNameGender(contextText) {
     return 'NEUTRAL';
 }
 
-function normalizeSemanticNameCandidates(nameSemantic) {
-    return {
-        male: normalizeSemanticNameCandidateList(nameSemantic?.maleCandidates),
-        female: normalizeSemanticNameCandidateList(nameSemantic?.femaleCandidates),
-        location: normalizeSemanticNameCandidateList(nameSemantic?.locationCandidates),
-        selectedStyle: isReal(nameSemantic?.selectedStyle) ? String(nameSemantic.selectedStyle).trim() : DEFAULT_NAME_STYLE,
-    };
-}
-
-function normalizeSemanticNameCandidateList(value) {
-    const raw = Array.isArray(value) ? value : [];
-    const result = [];
-    const seen = new Set();
-    for (const item of raw) {
-        const rawText = String(item ?? '').trim();
-        if (!rawText || /^\(?none\)?$/i.test(rawText)) continue;
-        const title = titleName(item);
-        if (!isReal(title)) continue;
-        const key = normalizeNameKey(title);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        result.push(title);
-        if (result.length >= NAME_POOL_SIZE) break;
-    }
-    return result;
-}
-
-function buildNamePool({ profile, registry, contextText, style, styleProfile, semanticCandidates }) {
+function buildNamePool({ profile, registry, contextText, style, styleProfile }) {
     const used = new Set([
         ...Array.from(registry.used || []),
         ...extractExistingProperNames(contextText),
     ].map(normalizeNameKey).filter(Boolean));
     const pool = { male: [], female: [], location: [] };
-    const semanticAccepted = { male: [], female: [], location: [] };
-    const semanticRejected = [];
-    const replacements = [];
     const specs = [
         ['male', 'PERSON', 'MALE'],
         ['female', 'PERSON', 'FEMALE'],
         ['location', 'LOCATION', 'NEUTRAL'],
     ];
-
-    for (const [bucket, mode] of specs) {
-        for (const name of semanticCandidates?.[bucket] || []) {
-            if (pool[bucket].length >= NAME_POOL_SIZE) break;
-            const reason = nameRejectionReason(name, mode, used, styleProfile);
-            if (reason) {
-                semanticRejected.push({ bucket, name, reason });
-                continue;
-            }
-            pool[bucket].push(name);
-            semanticAccepted[bucket].push(name);
-            used.add(normalizeNameKey(name));
-        }
-    }
 
     for (const [bucket, mode, gender] of specs) {
         while (pool[bucket].length < NAME_POOL_SIZE) {
@@ -2990,22 +2958,10 @@ function buildNamePool({ profile, registry, contextText, style, styleProfile, se
             if (name === NONE) break;
             pool[bucket].push(name);
             used.add(normalizeNameKey(name));
-            replacements.push({ bucket, name, slot });
         }
     }
 
-    return {
-        pool,
-        semanticCandidates: {
-            male: semanticCandidates?.male || [],
-            female: semanticCandidates?.female || [],
-            location: semanticCandidates?.location || [],
-            selectedStyle: semanticCandidates?.selectedStyle || DEFAULT_NAME_STYLE,
-        },
-        semanticAccepted,
-        semanticRejected,
-        replacements,
-    };
+    return { pool };
 }
 
 function buildDeterministicName({ mode, profile, gender, seed, registry, contextText, style = DEFAULT_NAME_STYLE, styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE] }) {
@@ -3125,21 +3081,20 @@ function rejectName(name, mode, used, styleProfile = NAME_STYLE_PROFILES[DEFAULT
 function nameRejectionReason(name, mode, used, styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE]) {
     const text = String(name || '').trim();
     const lower = text.toLowerCase();
-    const vowels = (lower.match(/[aeiou]/g) || []).length;
-    const consonants = (lower.match(/[bcdfghjklmnpqrstvwxyz]/g) || []).length;
+    const texture = nameTextureRules(styleProfile, mode);
+    const vowels = countTextureVowels(lower, texture);
+    const consonants = countTextureConsonants(lower, texture);
     const modern = isModernNameStyle(styleProfile);
-    const personMin = modern ? 4 : 5;
-    const personMax = modern ? 10 : 9;
     if (!text) return 'empty';
-    if (mode === 'PERSON' && (text.length < personMin || text.length > personMax)) return 'person_length';
-    if (mode === 'LOCATION' && (text.length < 7 || text.length > 14)) return 'location_length';
+    if (mode === 'PERSON' && (text.length < texture.minLength || text.length > texture.maxLength)) return 'person_length';
+    if (mode === 'LOCATION' && (text.length < texture.minLength || text.length > texture.maxLength)) return 'location_length';
     if (/[aeiou]{3,}/i.test(text)) return 'too_many_vowels_in_row';
-    if ((!modern && /[^aeiou\s-]{3,}/i.test(text)) || (modern && /[^aeiou\s-]{5,}/i.test(text))) return 'too_many_consonants_in_row';
+    if (hasConsonantRun(lower, texture)) return 'too_many_consonants_in_row';
     if (/(.)\1\1/i.test(text)) return 'triple_repeated_letter';
     if ((!modern && vowels < 2) || (modern && vowels < 1)) return 'too_few_vowels';
     if (!modern && consonants > vowels + 4) return 'consonant_heavy';
-    if (!modern && hasBadVowelTexture(lower, mode)) return 'bad_vowel_texture';
-    if (!modern && hasAwkwardNameTexture(lower, mode)) return 'awkward_texture';
+    if (!modern && hasBadVowelTexture(lower, texture)) return 'bad_vowel_texture';
+    if (!modern && hasAwkwardNameTexture(lower, mode, styleProfile)) return 'awkward_texture';
     if (used.has(normalizeNameKey(text))) return 'duplicate_or_reserved';
     if (mode === 'PERSON' && ROLE_NAME_PREFIXES.some(prefix => lower.startsWith(prefix))) return 'role_prefix';
     if (/\b(?:aragorn|legolas|gandalf|frodo|sauron|elden|hyrule|zelda|cloud|sephiroth|london|paris|tokyo|rome|aldric|borin|eldarion)\b/i.test(lower)) return 'famous_or_stock_name';
@@ -3154,18 +3109,77 @@ function isModernNameStyle(styleProfile) {
     return Boolean(styleProfile?.modern || styleProfile?.key === 'modern');
 }
 
-function hasBadVowelTexture(lower, mode) {
+function nameTextureRules(styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE], mode = 'PERSON') {
+    const key = String(styleProfile?.key || 'balanced');
+    const modern = isModernNameStyle(styleProfile);
+    const profileRule = mode === 'LOCATION' ? styleProfile?.rules?.location : styleProfile?.rules?.person;
+    const styleVowels = new Set(['a', 'e', 'i', 'o', 'u']);
+    if (['norse', 'celtic'].includes(key)) styleVowels.add('y');
+    const roughStyles = new Set(['norse', 'slavic', 'celtic', 'dark-low']);
+    const fluidStyles = new Set(['lyrical', 'persian-byzantine', 'classical-romance', 'celtic']);
+    const personMin = modern ? 4 : roughStyles.has(key) ? 4 : 5;
+    const locationMin = 7;
+    const allowedPairsByStyle = {
+        balanced: mode === 'LOCATION' ? ['ai', 'ia', 'ei'] : ['ia'],
+        lyrical: ['ae', 'ei', 'ia'],
+        celtic: ['ae', 'ei'],
+        norse: [],
+        'persian-byzantine': ['aa', 'ei', 'ia'],
+        slavic: [],
+        'classical-romance': ['ia', 'io'],
+        'dark-low': [],
+    };
+    return {
+        key,
+        vowels: styleVowels,
+        minLength: mode === 'LOCATION' ? locationMin : personMin,
+        maxLength: Number(profileRule?.maxLength || (mode === 'LOCATION' ? 14 : modern ? 10 : 10)),
+        maxConsonantRun: modern ? 5 : roughStyles.has(key) ? (mode === 'LOCATION' ? 5 : 4) : 3,
+        allowedVowelPairs: new Set(allowedPairsByStyle[key] || allowedPairsByStyle.balanced),
+        maxVowelPairs: fluidStyles.has(key) ? 2 : 1,
+    };
+}
+
+function isTextureVowel(char, texture) {
+    return texture.vowels.has(String(char || '').toLowerCase());
+}
+
+function countTextureVowels(lower, texture) {
+    return Array.from(String(lower || '')).filter(char => isTextureVowel(char, texture)).length;
+}
+
+function countTextureConsonants(lower, texture) {
+    return Array.from(String(lower || '')).filter(char => /[a-z]/.test(char) && !isTextureVowel(char, texture)).length;
+}
+
+function hasConsonantRun(lower, texture) {
+    let run = 0;
+    for (const char of String(lower || '')) {
+        if (/[a-z]/.test(char) && !isTextureVowel(char, texture)) {
+            run += 1;
+            if (run > texture.maxConsonantRun) return true;
+        } else {
+            run = 0;
+        }
+    }
+    return false;
+}
+
+function hasBadVowelTexture(lower, texture) {
     const pairs = Array.from(lower.matchAll(/[aeiou]{2}/g)).map(match => match[0]);
     if (!pairs.length) return false;
-    const allowed = mode === 'LOCATION' ? new Set(['ai', 'ia', 'ei']) : new Set(['ia']);
-    if (pairs.length > 1) return true;
-    if (!allowed.has(pairs[0])) return true;
+    if (pairs.length > texture.maxVowelPairs) return true;
+    if (pairs.some(pair => !texture.allowedVowelPairs.has(pair))) return true;
     if (/y[aeiou]{2}/.test(lower)) return true;
     return false;
 }
 
-function hasAwkwardNameTexture(lower, mode) {
-    if (/(?:stai|biv|bom|sailn|lnok|ivun|aistu|rsob|vr|kk|kg|gk|dt|td|bp|pb|sz|zs|zx|xz|q)/.test(lower)) return true;
+function hasAwkwardNameTexture(lower, mode, styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE]) {
+    const key = String(styleProfile?.key || 'balanced');
+    const universalAwkward = key === 'norse' || key === 'dark-low'
+        ? /(?:stai|biv|bom|sailn|lnok|ivun|aistu|rsob|kk|kg|gk|dt|td|bp|pb|sz|zs|zx|xz|q)/
+        : /(?:stai|biv|bom|sailn|lnok|ivun|aistu|rsob|vr|kk|kg|gk|dt|td|bp|pb|sz|zs|zx|xz|q)/;
+    if (universalAwkward.test(lower)) return true;
     if (/(?:sros|rler|lrer|nrer|mrer|rl|lr|sr|rsr|srs|rnr|nln|mnm|dmd|bmb)/.test(lower)) return true;
     if (/(?:ua|uo|oi|iu|ui|ao|ea|eo|oe|ou).*(?:ua|uo|oi|iu|ui|ao|ea|eo|oe|ou)/.test(lower)) return true;
     if (mode === 'PERSON' && /(?:uar|uara|oira|oire|eira|aira|zuar|loira|tunen)$/.test(lower)) return true;
@@ -5850,21 +5864,124 @@ function uniqueAggressionEntries(entries) {
 
 
 
-function chooseGeneratedCore(ledger, resolutionEngine, oppTargetsNpcFirst) {
-    const resolutionCore = resolutionEngine?.genStats;
-    if (!isDefaultGeneratedCore(resolutionCore)) {
-        return { core: resolutionCore, source: 'resolutionEngine.genStats' };
+function chooseGeneratedCore(ledger, resolutionEngine, oppTargetsNpcFirst, dice = null, options = {}) {
+    const npcKey = normalizeNameKey(oppTargetsNpcFirst);
+    const cached = getGeneratedCoreCache(ledger)[npcKey];
+    if (cached?.core) {
+        return { ...cached, source: `${cached.source} (cached)` };
     }
 
-    const relationshipCore = (ledger.relationshipEngine || [])
+    const resolutionSeed = normalizeGeneratedStatsSeed(resolutionEngine?.genStats);
+    const relationshipSeed = normalizeGeneratedStatsSeed((ledger.relationshipEngine || [])
         .find(item => sameName(item?.NPC, oppTargetsNpcFirst))
-        ?.genStats;
+        ?.genStats);
+    const candidates = options.relationshipOnly
+        ? [
+            { seed: relationshipSeed, source: `relationshipEngine[${oppTargetsNpcFirst}].genStats` },
+        ]
+        : options.preferRelationshipSeed
+        ? [
+            { seed: relationshipSeed, source: `relationshipEngine[${oppTargetsNpcFirst}].genStats` },
+            { seed: resolutionSeed, source: 'resolutionEngine.genStats' },
+        ]
+        : [
+            { seed: resolutionSeed, source: 'resolutionEngine.genStats' },
+            { seed: relationshipSeed, source: `relationshipEngine[${oppTargetsNpcFirst}].genStats` },
+        ];
+    const selected = candidates.find(item => hasGeneratedStatsSeed(item.seed));
 
-    if (!isDefaultGeneratedCore(relationshipCore)) {
-        return { core: relationshipCore, source: `relationshipEngine[${oppTargetsNpcFirst}].genStats` };
+    if (!selected) {
+        return {
+            core: { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 },
+            seed: { Rank: 'none', MainStat: 'none' },
+            source: 'engine default core fallback',
+            defaultFallback: true,
+        };
     }
 
-    return { core: { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 }, source: 'engine default core fallback', defaultFallback: true };
+    const core = assignGeneratedCoreStats(selected.seed, dice);
+    const generated = { core, seed: selected.seed, source: selected.source, defaultFallback: false };
+    if (npcKey) {
+        getGeneratedCoreCache(ledger)[npcKey] = generated;
+    }
+    return generated;
+}
+
+function getGeneratedCoreCache(ledger) {
+    ledger.deterministicOverrides = ledger.deterministicOverrides || {};
+    ledger.deterministicOverrides.generatedCoreStatsByNpc = ledger.deterministicOverrides.generatedCoreStatsByNpc || {};
+    return ledger.deterministicOverrides.generatedCoreStatsByNpc;
+}
+
+function normalizeGeneratedStatsSeed(value) {
+    return {
+        Rank: normalizeGeneratedRank(value?.Rank),
+        MainStat: normalizeGeneratedMainStat(value?.MainStat),
+    };
+}
+
+function hasGeneratedStatsSeed(seed) {
+    return seed?.Rank !== 'none' || seed?.MainStat !== 'none';
+}
+
+function normalizeGeneratedRank(value) {
+    const text = String(value ?? '').trim().toLowerCase();
+    const map = { weak: 'Weak', average: 'Average', trained: 'Trained', elite: 'Elite', boss: 'Boss', none: 'none' };
+    return map[text] || 'none';
+}
+
+function normalizeGeneratedMainStat(value) {
+    const text = String(value ?? '').trim().toLowerCase();
+    const map = { phy: 'PHY', mnd: 'MND', cha: 'CHA', balanced: 'Balanced', none: 'none' };
+    return map[text] || 'none';
+}
+
+function assignGeneratedCoreStats(seed, dice = null) {
+    const normalized = normalizeGeneratedStatsSeed(seed);
+    const range = GENERATED_CORE_RANGES[normalized.Rank] || GENERATED_CORE_RANGES.none;
+    const [min, max] = range;
+    const stats = {
+        PHY: rollGeneratedStat(min, max, dice),
+        MND: rollGeneratedStat(min, max, dice),
+        CHA: rollGeneratedStat(min, max, dice),
+    };
+
+    if (normalized.MainStat === 'Balanced') {
+        const center = rollGeneratedStat(min, max, dice);
+        for (const stat of ['PHY', 'MND', 'CHA']) {
+            stats[stat] = clamp(center + rollGeneratedStat(-1, 1, dice), min, max);
+        }
+    } else if (['PHY', 'MND', 'CHA'].includes(normalized.MainStat)) {
+        const others = ['PHY', 'MND', 'CHA'].filter(stat => stat !== normalized.MainStat);
+        const otherMax = Math.max(...others.map(stat => stats[stat]));
+        stats[normalized.MainStat] = Math.max(stats[normalized.MainStat], otherMax);
+        if (max > min && stats[normalized.MainStat] <= otherMax) {
+            stats[normalized.MainStat] = Math.min(max, otherMax + 1);
+        }
+        if (max > min) {
+            for (const stat of others) {
+                if (stats[stat] >= stats[normalized.MainStat]) {
+                    stats[stat] = Math.max(min, stats[normalized.MainStat] - 1);
+                }
+            }
+        }
+    }
+
+    return normalizeCore({
+        Rank: normalized.Rank,
+        MainStat: normalized.MainStat,
+        ...stats,
+    }, { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 });
+}
+
+function rollGeneratedStat(min, max, dice = null) {
+    const low = Number(min);
+    const high = Number(max);
+    if (!Number.isFinite(low) || !Number.isFinite(high)) return 1;
+    if (high <= low) return low;
+    const span = high - low + 1;
+    const die = typeof dice?.d20 === 'function' ? dice.d20() : Math.floor(Math.random() * 20) + 1;
+    return low + ((die - 1) % span);
 }
 
 function buildRefereeContext(context) {

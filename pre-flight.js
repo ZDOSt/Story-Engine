@@ -59,7 +59,6 @@ function buildReadableSemanticDebug(ledger) {
     const oppTargets = targets.OppTargets ?? {};
     const relationships = Array.isArray(ledger?.relationshipEngine) ? ledger.relationshipEngine : [];
     const chaos = ledger?.chaosSemantic ?? {};
-    const nameSemantic = ledger?.nameSemantic ?? {};
     const tracker = ledger?.trackerUpdateEngine ?? {};
     const userKnowledgeApplications = Array.isArray(ledger?.userKnowledgeApplication?.applications) ? ledger.userKnowledgeApplication.applications : [];
     const powerActorAssessments = Array.isArray(ledger?.powerActorEnmity?.assessments) ? ledger.powerActorEnmity.assessments : [];
@@ -105,7 +104,8 @@ function buildReadableSemanticDebug(ledger) {
         'hasStakes=' + String(Boolean(resolution.hasStakes)),
         'actionCount=' + list(resolution.actionCount),
         'mapStats=' + inline(resolution.mapStats ?? {}),
-        'environmentDifficulty=' + valueOrNone(resolution.environmentDifficulty),
+        'environmentDifficultyTier=' + valueOrNone(resolution.environmentDifficultyTier),
+        'environmentDifficultyBonus=' + valueOrNone(resolution.environmentDifficulty),
         'classifyHostilePhysicalIntent=' + String(Boolean(resolution.classifyHostilePhysicalIntent)),
         'activeHostileThreat=' + String(Boolean(resolution.activeHostileThreat)),
         'classifyPhysicalBoundaryPressure=' + String(Boolean(resolution.classifyPhysicalBoundaryPressure)),
@@ -127,8 +127,7 @@ function buildReadableSemanticDebug(ledger) {
         'powerActorEnmity.assessments=' + (powerActorAssessments.length ? inline(powerActorAssessments) : 'none'),
         'powerActorEnmity.effects=' + (powerActors.length ? inline(powerActors) : 'none'),
         'powerEventShape.events=' + (powerEventShapes.length ? inline(powerEventShapes) : 'none'),
-        'nameSemantic.selectedStyle=' + valueOrNone(nameSemantic.selectedStyle),
-        'nameSemantic.candidates=hidden; final approved pool shown in deterministic nameGeneration',
+        'nameGeneration=deterministic style-aware pool; final approved pool shown in deterministic nameGeneration',
         'proactivitySemantic=deterministic cap 3',
     ];
 
@@ -1016,7 +1015,7 @@ function narrativeNameRevealFact(nameGeneration = {}) {
     const femaleNames = (pool.female || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const maleNames = (pool.male || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
-    return `Name pool use is mandatory and obeys fog of war. If a new proper name is revealed, use only one unused approved name from this pool: Female: ${list(femaleNames)}. Male: ${list(maleNames)}. Location: ${list(locationNames)}. Already revealed names from chat, character card, lore, or tracker may continue unchanged. A new name may appear only after the scene reveals that specific person, entity, or place in-world through speech, readable text, self-introduction, direct reference, signage, documents, or clear recognition. Use the matching gender/presentation bucket when known. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not use rejected semantic candidates. Do not name background, incidental, or unnamed figures unless the scene actually reveals the name.`;
+    return `Name pool use is mandatory and obeys fog of war. If a new proper name is revealed, use only one unused approved name from this pool: Female: ${list(femaleNames)}. Male: ${list(maleNames)}. Location: ${list(locationNames)}. Already revealed names from chat, character card, lore, or tracker may continue unchanged. A new name may appear only after the scene reveals that specific person, entity, or place in-world through speech, readable text, self-introduction, direct reference, signage, documents, or clear recognition. Use the matching gender/presentation bucket when known. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not name background, incidental, or unnamed figures unless the scene actually reveals the name.`;
 }
 
 function narrativeProxyUserActionFact(options = {}) {

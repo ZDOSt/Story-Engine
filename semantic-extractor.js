@@ -16,7 +16,6 @@ const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wo
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
 const DISABLE_THINKING_INCLUDE_BODY = 'thinking:\n  type: disabled';
-const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
 const POWER_ACTOR_SEVERITIES = Object.freeze(['none', 'minor', 'meaningful', 'major']);
 const POWER_ACTOR_ASSESSMENT_SCOPES = Object.freeze(['individual', 'organization', 'institution', 'group', 'unknown']);
@@ -28,6 +27,7 @@ const CLAIM_NPC_ACCESS_LEVELS = Object.freeze(['none', 'direct', 'partial', 'unk
 const ITEM_USE_SOURCES = Object.freeze(['none', 'gear', 'inventory', 'unavailable']);
 const USER_KNOWLEDGE_TYPES = Object.freeze(['personalKnowledge', 'reputationKnowledge']);
 const USER_KNOWLEDGE_APPLICATION_EFFECTS = Object.freeze(['none', 'priorUserGoodRep', 'userBadRep', 'userFearRep', 'contextOnly']);
+const ENVIRONMENT_DIFFICULTY_TIERS = Object.freeze(['none', 'easy', 'average', 'hard', 'extreme']);
 
 const DEFAULT_STAKES_DECISION = Object.freeze({
     materialStakes: false,
@@ -504,7 +504,7 @@ function buildSemanticToolPrompt(prompt) {
         `MANDATORY OUTPUT CONTRACT: Call the function tool ${SEMANTIC_TOOL_NAME} exactly once.`,
         'Do not output narration, prose, markdown, visible JSON, or a compact text ledger.',
         'Fill every required tool argument from the semantic/contextual engine outputs.',
-        'The tool argument paths mirror the engine function names: resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.mapStats = ResolutionEngine.mapStats, relationshipEngine[index].initPreset = RelationshipEngine.initPreset semantic tags, relationshipEngine[index] = RelationshipEngine(npc), chaosSemantic = CHAOS_INTERRUPT, and nameSemantic = NameGenerationEngine candidates.',
+        'The tool argument paths mirror the engine function names: resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.mapStats = ResolutionEngine.mapStats, relationshipEngine[index].initPreset = RelationshipEngine.initPreset semantic tags, relationshipEngine[index] = RelationshipEngine(npc), and chaosSemantic = CHAOS_INTERRUPT.',
         'Use empty arrays for no targets/obstacles/observers. Use "none" string values only for enum/string fields that require none.',
         'engineContext.trackerRelevantNPCs may be an empty array; the extension already has the canonical tracker snapshot locally.',
         'The compact ledger wording elsewhere in the prompt is the fallback representation of the same fields; for this request, the forced tool call is the only valid output.',
@@ -570,16 +570,13 @@ function removeStrictOnlySchemaKeywords(schema) {
 }
 
 function buildSemanticPreflightSchema() {
-    const coreStatsSchema = {
+    const generatedStatsSeedSchema = {
         type: 'object',
         additionalProperties: false,
-        required: ['Rank', 'MainStat', 'PHY', 'MND', 'CHA'],
+        required: ['Rank', 'MainStat'],
         properties: {
             Rank: { type: 'string', enum: ['none', 'Weak', 'Average', 'Trained', 'Elite', 'Boss'] },
             MainStat: { type: 'string', enum: ['none', 'PHY', 'MND', 'CHA', 'Balanced'] },
-            PHY: { type: 'integer' },
-            MND: { type: 'integer' },
-            CHA: { type: 'integer' },
         },
     };
     const stringListSchema = {
@@ -802,14 +799,13 @@ function buildSemanticPreflightSchema() {
     return {
         type: 'object',
         additionalProperties: false,
-        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'userKnowledgeApplication', 'powerActorEnmity', 'powerEventShape', 'trackerUpdateEngine', 'chaosSemantic', 'nameSemantic'],
+        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'userKnowledgeApplication', 'powerActorEnmity', 'powerEventShape', 'trackerUpdateEngine', 'chaosSemantic'],
         properties: {
             engineContext: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['userCoreStats', 'trackerRelevantNPCs'],
+                required: ['trackerRelevantNPCs'],
                 properties: {
-                    userCoreStats: coreStatsSchema,
                     trackerRelevantNPCs: {
                         type: 'array',
                         items: {
@@ -841,7 +837,7 @@ function buildSemanticPreflightSchema() {
                     'hasStakes',
                     'actionCount',
                     'mapStats',
-                    'environmentDifficulty',
+                    'environmentDifficultyTier',
                     'classifyHostilePhysicalIntent',
                     'activeHostileThreat',
                     'classifyPhysicalBoundaryPressure',
@@ -927,15 +923,15 @@ function buildSemanticPreflightSchema() {
                             OPP: { type: 'string', enum: ['PHY', 'MND', 'CHA', 'ENV'] },
                         },
                     },
-                    environmentDifficulty: {
-                        type: 'integer',
-                        enum: [0, 4, 8, 12],
-                        description: 'Environmental opposition difficulty only when mapStats.OPP=ENV and OppTargets.ENV has a real obstacle/hazard. 0 easy/trivial, 4 average, 8 hard, 12 extreme. Set 0 when OPP is not ENV.',
+                    environmentDifficultyTier: {
+                        type: 'string',
+                        enum: ENVIRONMENT_DIFFICULTY_TIERS,
+                        description: 'Semantic environmental opposition tier only when mapStats.OPP=ENV and OppTargets.ENV has a real obstacle/hazard. Use easy/trivial, average, hard, or extreme; set none when OPP is not ENV or no ENV roll exists.',
                     },
                     classifyHostilePhysicalIntent: { type: 'boolean' },
                     activeHostileThreat: { type: 'boolean' },
                     classifyPhysicalBoundaryPressure: { type: 'boolean' },
-                    genStats: coreStatsSchema,
+                    genStats: generatedStatsSeedSchema,
                 },
             },
             relationshipEngine: {
@@ -1036,7 +1032,7 @@ function buildSemanticPreflightSchema() {
                                 },
                             },
                         },
-                        genStats: coreStatsSchema,
+                        genStats: generatedStatsSeedSchema,
                     },
                 },
             },
@@ -1106,17 +1102,6 @@ function buildSemanticPreflightSchema() {
                 required: ['sceneSummary'],
                 properties: {
                     sceneSummary: { type: 'string' },
-                },
-            },
-            nameSemantic: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['selectedStyle', 'maleCandidates', 'femaleCandidates', 'locationCandidates'],
-                properties: {
-                    selectedStyle: { type: 'string' },
-                    maleCandidates: { type: 'array', items: { type: 'string' } },
-                    femaleCandidates: { type: 'array', items: { type: 'string' } },
-                    locationCandidates: { type: 'array', items: { type: 'string' } },
                 },
             },
         },
@@ -1328,14 +1313,14 @@ const COMPACT_LEDGER_CONTRACT = [
     '- ResolutionEngine.userAbilityUse is semantic-only ability/spell detection. Compare the latest user input against active {{user}}/persona abilities and spells, including the # ABILITIES and # SPELLS character sheet sections, character persona, lore, or prompt stack. Mark Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Private delivery phrasing such as "meant only for X", "only X can hear", "whisper so only X hears", "send the words directly/private to X", or "speak into X alone" should match a persona ability/spell whose effect privately carries speech, sound, thought, or message to a target, even if the ability/spell name is not said. Mark Available=Y only if that attempted ability/spell exists in active {{user}} abilities or spells. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability/spell name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect to preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: abilities and spells can make fictional methods possible, but they never change hasStakes, actionCount, mapStats, rolls, bonuses, margins, landed actions, relationship state, injury severity, or outcome. If an available ability/spell delivers a threat, persuasion, attack, escape, healing, or other stakes-bearing goal, classify and roll the broader goal normally; do not roll the ability/spell separately. If no ability/spell attempt exists, output Attempted=N, Available=N, Used=N, and (none) for name, evidence, effect, and reason.',
     '- ResolutionEngine.itemUse is strict semantic-only personal gear/inventory verification, not environmental object discovery. Mark Attempted=Y only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory. Personal possession signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or any equivalent claim that {{user}} already has the item. Mark Available=Y only if that exact attempted item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental or scene objects, including grabbing, picking up, finding, searching for, using, breaking, burning, throwing, or moving an object described or implied by the scene; those are normal narration/stakes/ENV context, not itemUse. Mark Attempted=N for body parts and natural weapons such as hands, fists, claws, fangs, teeth, horns, talons, tusks, tails, stingers, barbs, jaws, or similar anatomy; using them is normal bodily action/attack/stakes context, not gear or inventory verification. Do not infer item availability from setting likelihood. If no personal gear/inventory item attempt exists, output Attempted=N, Available=N, Source=none, and (none) for item, evidence, and reason.',
     '- ResolutionEngine.claimCheck is a narrow stakes-bearing claim check, not a truth engine. Mark Present=Y only when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Claim examples include identity/status/authority, affiliation, ownership/access, possession/resources, orders/authorization, or claimed events/facts used as leverage. TruthStatus: known_true only if explicitly supported; known_false only if explicitly contradicted; unsupported if material but not established; unknown if context cannot judge; none when no relevant claim. NPCAccess describes how much the target NPC can naturally verify or know the claim: direct, partial, none, unknown. StakesImpact=Y only when belief/disbelief matters under DEF.STAKES. Do not mark Present for casual flavor, jokes, harmless small talk, opinions, compliments, vague emotional color, or claims that do not affect NPC stakes.',
-    '- ResolutionEngine.environmentDifficulty applies only when mapStats.OPP=ENV and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure. Allowed values: 0 easy/trivial/routine/weak/lightly obstructed; 4 average meaningful obstacle a capable person could plausibly fail; 8 hard serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk; 12 extreme exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition. Classify from concrete scene facts: material, scale, complexity, danger, time pressure, visibility, footing, weather, magical strength, tool access, distance, and whether the environment is worsening. Do not raise difficulty because the story moment feels dramatic. Do not lower difficulty because {{user}} has high stats. If there are no real stakes, set hasStakes=N instead of using ENV difficulty. If mapStats.OPP is not ENV, set environmentDifficulty=0.',
+    '- ResolutionEngine.environmentDifficultyTier applies only when mapStats.OPP=ENV and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure. Allowed values: none, easy, average, hard, extreme. easy means easy/trivial/routine/weak/lightly obstructed; average means a meaningful obstacle a capable person could plausibly fail; hard means a serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk; extreme means exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition. Classify from concrete scene facts: material, scale, complexity, danger, time pressure, visibility, footing, weather, magical strength, tool access, distance, and whether the environment is worsening. Do not raise difficulty because the story moment feels dramatic. Do not lower difficulty because {{user}} has high stats. If there are no real stakes, set hasStakes=N instead of using an ENV tier. If mapStats.OPP is not ENV, set environmentDifficultyTier=none. Deterministic code maps this tier to the numeric ENV bonus.',
     '- ResolutionEngine.identifyTargets.hostilesInScene.NPC is scene-level: list ALL established, present, living hostile entities currently threatening {{user}}, companions, protected NPCs, bystanders, or the scene generally. Identify this broad hostile pool before choosing OppTargets.NPC. Establishment must come from assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create a hostile from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated entities no longer posing danger, and non-living hazards/obstacles.',
     '- ResolutionEngine.identifyTargets.OppTargets.NPC is narrower: list only living entities directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}\'s current action/challenge. Do not put every enemy in OppTargets.NPC just because they are hostile; use hostilesInScene.NPC for the broader hostile pool.',
     '- ResolutionEngine.activeHostileThreat is strict. Return Y only if the current scene contains an immediate hostile danger from an NPC/entity: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster/hostile creature engagement, armed standoff, capture attempt, or imminent physical/supernatural harm. Return N for negotiation, refusal, bargaining, argument, social resistance, authority denial, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger.',
     '- ResolutionEngine.intimacyAdvanceExplicit is strict. Return Y only if {{user}} explicitly attempts, requests, accepts, or reciprocates actual intimate escalation with a specific NPC: kissing, making out, sexual touch, undressing toward intimacy, asking to sleep together, asking for sex, moving to bed, or clearly initiating romantic/sexual physical closeness. Return Y for accepting or reciprocating a prior explicit NPC-initiated intimacy invitation or action. Return N for flirting, teasing, compliments, romantic banter, suggestive jokes, vague innuendo, "what did you have in mind", declarations of love, asking for a date, emotional confession, hand-holding, casual proximity, or ordinary affection that does not clearly escalate into kissing or sexual/intimate contact. This is only an intimacy permission/boundary signal and does not create stakes, rolls, landed actions, Bond loss, Fear, or Hostility by itself.',
     '- ResolutionEngine.boundaryViolationExplicit is strict. Return Y only if the current user input explicitly violates, ignores, or pressures past a clear refusal, stated boundary, withdrawal, fear, incapacitation, explicitly established lack of consent, or prior denial from this specific NPC. Return Y for coercion, threats, force, unwanted restraint/contact after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no. Return N for flirting, teasing, romantic talk, asking permission, accepting or reciprocating NPC-initiated flirtation/intimacy, backing off/respecting a boundary, or ordinary romantic/sexual ambiguity where no refusal/boundary/incapacity has been explicitly established.',
     '- ResolutionEngine.nonLethal is strict. Return Y only for explicitly nonlethal violence or contests: sparring, training, practice combat, fistfights, barehanded brawls, wrestling/grappling without lethal force, restraint-only takedowns, capture-only attempts, or stated intent to avoid serious/fatal harm. Return Y when scene rules, an instructor, an arena, duel terms, or {{user}} explicitly frame the current physical conflict as nonlethal. Return N for weapons, blades, arrows, spears, axes, clubs, improvised weapons, claws, teeth, horns, natural weapons, lethal magic, body-damaging supernatural effects, or any uncertain attack.',
-    '- All genStats groups must include Rank, MainStat, PHY, MND, CHA.',
+    '- All genStats groups must include only Rank and MainStat. Use genStats only when the relevant NPC currentCoreStats are missing in the tracker snapshot. The semantic pass identifies Rank and MainStat from explicit portrayal; deterministic code assigns numeric PHY/MND/CHA values within the Rank range and saves them once.',
     '- InjuryEffectEngine is semantic-only candidate extraction for effects the user action would cause if deterministic mechanics say the action lands. It does not roll and does not decide success. Include physical injuries and impairing magical/status effects regardless of source: burns, poison, paralysis, sickness, blindness, fear/panic, restraint, curses, lightning/electrical effects, exhaustion, mental effects, or other ongoing impairing states. Exclude purely emotional/social harm, mere witnessing, momentary pain, intended/requested future injuries, or effects that would not persist or impair later action.',
     '- InjuryEffectEngine target must be the entity actually receiving the impairing effect. HarmedObservers may appear only if they are directly affected by the injury/status effect, not merely emotionally harmed by seeing or caring about another target. Use persistence=lasting and affectsAction=Y only for effects that should impair later action if applied.',
     '- TrackerUpdateEngine is explicit-only visual state tracking. Output deltas only from the latest user input and immediate visible context. Use condition=unchanged, personalitySummary=unchanged, and (none) lists unless a change is explicitly stated.',
@@ -1353,18 +1338,12 @@ const COMPACT_LEDGER_CONTRACT = [
     '- PowerActorEnmity effects are only for the latest user input and immediate visible context. Add an entry only if the user meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. If the affected party lacks reach, hasReach=N and severity=none. If the actor cannot plausibly know or discover it, knownToActor=N and deterministic code will not increase enmity.',
     '- PowerActorEnmity severity: minor=small obstruction or insult; meaningful=real setback, exposure, loss, asset harm, or operation disruption; major=severe public exposure, major defeat, major theft, death/capture of members, ruined operation, or serious reputation/income damage. If none, output count=0.',
     '- PowerEventShape is hidden pending pressure shaping. Use it only when the Power actor snapshot contains a pendingEvent. If no pending event exists, output PowerEventShape.count=0. For each pending event, decide if it fits the current scene now. fit=use_now only when it can enter naturally through visible scene logic without forcing {{user}} action or revealing hidden motives. fit=defer when the current scene cannot naturally support it yet. fit=drop only if it is impossible or would contradict visible facts. visibleInstruction must be narrator-safe surface instruction only: describe what visibly happens or what an ordinary NPC/contact does, not why. Never include the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative in visibleInstruction. For plant_contact, use the provided contactName when available and describe only an ordinary plausible introduction, role, offer, request, trade, work, travel, help, rumor, or social contact. For agent_* events, use the activeAgent name as an ordinary established NPC and describe only the visible action/suggestion/setback.',
-    '- NameGenerationEngine semantic lines are candidate generation only. Generate exactly 3 male person/entity names, 3 female person/entity names, and 3 location names matching the selected style line. Make them creative, readable, pronounceable, and real-but-unplaceable. Avoid Western stock fantasy, Tolkien/JRPG drift, ordinary modern names, famous names, joke names, and letter soup. These are candidates only; deterministic validation may reject, repair, or replace them before narration.',
     '- Companion/ally commands are tactical requests only. They can address the companion as an ActionTarget and can refer to an established hostile by name for later companion crisis targeting, but they must not be treated as {{user}} making the companion act, must not force a companion attack, and must not create a user-resolved success/failure roll for companion obedience. The named hostile must still be established through assistant narration/tracker/card/scenario/lore/initial test setup and belongs in hostilesInScene.NPC unless it directly opposes {{user}}\'s current action. If several hostiles exist and no specific one is named, do not guess a target.',
     '- Do not output primaryOppTarget or primaryOpposition. The only opposing living target list is identifyTargets.OppTargets.NPC; the separate broad hostile pool is identifyTargets.hostilesInScene.NPC.',
     '- If you cannot find explicit evidence, use the engine default for that line; never invent missing facts.',
 ].join('\n');
 
 const COMPACT_LEDGER_TEMPLATE = `BEGIN_SEMANTIC_PREFLIGHT
-engineContext.getUserCoreStats.Rank=none
-engineContext.getUserCoreStats.MainStat=none
-engineContext.getUserCoreStats.PHY=1
-engineContext.getUserCoreStats.MND=1
-engineContext.getUserCoreStats.CHA=1
 ResolutionEngine.identifyGoal=Normal_Interaction
 ResolutionEngine.identifyChallenge=Normal_Interaction
 ResolutionEngine.explicitMeans=(none)
@@ -1408,15 +1387,12 @@ ResolutionEngine.hasStakes=N
 ResolutionEngine.actionCount=a1
 ResolutionEngine.mapStats.USER=PHY
 ResolutionEngine.mapStats.OPP=ENV
-ResolutionEngine.environmentDifficulty=0
+ResolutionEngine.environmentDifficultyTier=none
 ResolutionEngine.classifyHostilePhysicalIntent=N
 ResolutionEngine.activeHostileThreat=N
 ResolutionEngine.classifyPhysicalBoundaryPressure=N
 ResolutionEngine.genStats.Rank=none
 ResolutionEngine.genStats.MainStat=none
-ResolutionEngine.genStats.PHY=1
-ResolutionEngine.genStats.MND=1
-ResolutionEngine.genStats.CHA=1
 RelationshipEngine.count=0
 UserKnowledgeApplication.count=0
 UserKnowledgeApplication[0].target=(none)
@@ -1480,10 +1456,6 @@ PowerEventShape[0].contactGender=none
 PowerEventShape[0].surfaceRole=(none)
 PowerEventShape[0].deferReason=(none)
 CHAOS_INTERRUPT.sceneSummary=short scene summary
-NameGenerationEngine.selectedStyle=Balanced Fantasy
-NameGenerationEngine.maleCandidates=(none)
-NameGenerationEngine.femaleCandidates=(none)
-NameGenerationEngine.locationCandidates=(none)
 END_SEMANTIC_PREFLIGHT
 ${SEMANTIC_PREFLIGHT_STOP_SENTINEL}`;
 
@@ -1585,22 +1557,17 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
 }
 
 function semanticCompactTemplateForOptions(options = {}) {
-    const nameStyle = normalizeNameStyleOption(options?.nameStyle || DEFAULT_NAME_STYLE);
-    return COMPACT_LEDGER_TEMPLATE.replace('NameGenerationEngine.selectedStyle=Balanced Fantasy', `NameGenerationEngine.selectedStyle=${nameStyle}`);
+    return COMPACT_LEDGER_TEMPLATE;
 }
 
 function buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot = {}, options = {}) {
-    const nameStyle = normalizeNameStyleOption(options?.nameStyle || DEFAULT_NAME_STYLE);
-    const nameStyleCandidateGuidance = nameStyle === 'Modern'
-        ? 'Use plausible contemporary single-token person/entity names and modern place/neighborhood names. Do not use famous names, jokes, fantasy names, or letter soup.'
-        : 'Avoid ordinary modern-Western names, famous names, jokes, letter soup, and style drift.';
     const proxyAction = options?.userInputMode === 'proxy'
         ? String(options?.proxyUserAction || '').trim()
         : '';
     const powerActorSnapshot = sanitizePowerActorSnapshotForSemantic(options?.powerActorSnapshot || {});
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const dispositionContinuityContext = buildDispositionContinuityContext(trackerSnapshot);
-    return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nSelected name style=${nameStyle}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
+    return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
         `Disposition continuity context (plain-language tracker state for stakesDecision; use this to decide whether a current NPC reaction is already settled):\n${dispositionContinuityContext}\n\n` +
         `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
         `User knowledge snapshot JSON (hidden memory about what people may know about {{user}}; use only for UserKnowledgeApplication and initPreset reputation tags, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
@@ -1619,20 +1586,19 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Identify ResolutionEngine.identifyTargets.PowerActors during target discovery: include any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Assess semantically, not by keywords or titles. A living NPC can appear in HarmedObservers/BenefitedObservers/ActionTargets/OppTargets.NPC for personal B/F/H and also appear in PowerActors for hidden strategic consequences. PowerActors never replace normal target/observer placement. ' +
         'Create one relationshipEngine entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. This coverage is mandatory even when that same NPC is also in PowerActors or assessed as a PowerActorEnmity power actor. PowerActors and PowerActorEnmity never replace RelationshipEngine. Do not create entries for bystanders, hostilesInScene-only NPCs, PowerActors-only entities, or inferred scene participants outside those target/observer lists. ' +
         'For each living NPC in relationshipEngine, stakeChangeByOutcome must describe that NPC stakes change for each outcome: benefit means their stakes improve, harm means their stakes worsen, none means no meaningful stake change. For explicit boundary violations toward a direct/opposing NPC target, successful or landed outcomes worsen that NPC boundary/autonomy/trust stakes, so use harm and not none. ' +
-        'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC core stat block from explicit portrayal and copy the same block into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
-        'Do not leave a named portrayed NPC as Rank none or 1/1/1 unless the card, scene, and tracker give no explicit portrayal at all. ' +
+        'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC stat seed from explicit portrayal and copy the same Rank/MainStat seed into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
+        'Do not leave a named portrayed NPC as Rank none/MainStat none unless the card, scene, and tracker give no explicit portrayal at all. ' +
         'Apply stored user knowledge before RelationshipEngine initPreset. Fill UserKnowledgeApplication from the hidden User knowledge snapshot only when a stored personal or reputation entry plausibly applies to a present NPC/group or to the current scene. Personal knowledge applies only to the named knownBy NPC/group or a direct institutional/group match. Reputation knowledge applies only when scope and context plausibly reach the present NPC/group: private is not public; local is current settlement/scene community; route follows a road/trade/travel corridor; faction follows that group/institution; regional is broad area; legendary is widely known. effect=priorUserGoodRep for favorable reputation that should initialize trust, userBadRep for hostile/distrusting reputation, userFearRep for fearsome reputation, contextOnly for knowledge that informs narration but should not initialize B/F/H, and none when no current application exists. Do not invent new reputation here; creation happens only in post-narration UserKnowledgeLedger. ' +
         'Detect user ability/spell attempts before target/risk classification: compare the latest user input against active {{user}}/persona abilities and spells, including the # ABILITIES and # SPELLS character sheet sections, assembled SillyTavern prompt stack, character persona/sheet, scenario, lore/world info, and chat context. Mark ResolutionEngine.userAbilityUse.Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Private delivery phrasing such as "meant only for X", "only X can hear", "whisper so only X hears", "send the words directly/private to X", or "speak into X alone" should match a persona ability/spell whose effect privately carries speech, sound, thought, or message to a target, even if the ability/spell name is not said. Mark Available=Y only if the attempted ability/spell exists in active {{user}} abilities or spells. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability/spell name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect the narrator must preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: ability/spell use is fictional permission/method only, never a bonus, never a dice modifier, never a separate roll, and never a bypass for broader stakes or outcomes. If an available ability/spell is used to deliver a threat, persuasion, attack, escape, healing, or other contested goal, classify and roll the broader goal normally while keeping the ability/spell as delivery/flavor. ' +
         'Detect personal gear/inventory item attempts before target/risk classification. Fill ResolutionEngine.itemUse only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory. Personal possession signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or equivalent wording that claims {{user}} already has the item. Mark Available=Y only when that exact attempted item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental or scene objects, including grabbing, picking up, finding, searching for, using, breaking, burning, throwing, or moving an object described or implied by the scene; those actions remain normal narration/stakes/ENV context, not itemUse. Do not infer item availability from setting likelihood. If Available=N, the personal item effect must not be treated as completed. ' +
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, stakesDecision, hasStakes, actionCount, mapStats, environmentDifficulty, getUserCoreStats, getCurrentCoreStats/genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
-        'Do NOT execute ResolutionEngine.resolveOutcome, dice, margins, landed actions, or counter potential; deterministic code handles those after your ledger. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, stakesDecision, hasStakes, actionCount, mapStats, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
         'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, or rewrite stored knowledge in preflight. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
-        'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. ' +
-        `Execute NameGenerationEngine as semantic candidate generation only: selectedStyle must be "${nameStyle}", maleCandidates must contain exactly 3 male person/entity names, femaleCandidates exactly 3 female person/entity names, and locationCandidates exactly 3 location names. Follow the selected style and naming rules in the engine reference. ${nameStyleCandidateGuidance} Deterministic code will validate and expose only the approved final pool. ` +
+        'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. NameGenerationEngine is fully deterministic and not part of this semantic pass; do not generate name candidates or output name fields. ' +
         'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. Mark knownToActor=Y only for that concrete knowledge path. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
         'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
@@ -1862,7 +1828,6 @@ function hasLedgerShape(value) {
 function validateRawLedgerContract(ledger, raw) {
     const missing = [];
     if (!ledger?.engineContext) missing.push('engineContext');
-    if (!ledger?.engineContext?.userCoreStats) missing.push('engineContext.userCoreStats');
     if (!Array.isArray(ledger?.engineContext?.trackerRelevantNPCs)) missing.push('engineContext.trackerRelevantNPCs');
     if (!ledger?.resolutionEngine) missing.push('resolutionEngine');
     if (!ledger?.resolutionEngine?.identifyGoal) missing.push('resolutionEngine.identifyGoal');
@@ -1900,7 +1865,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!Array.isArray(ledger?.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
     if (!ledger?.resolutionEngine?.mapStats?.USER) missing.push('resolutionEngine.mapStats.USER');
     if (!ledger?.resolutionEngine?.mapStats?.OPP) missing.push('resolutionEngine.mapStats.OPP');
-    if (ledger?.resolutionEngine?.environmentDifficulty === undefined) missing.push('resolutionEngine.environmentDifficulty');
+    if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger?.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (typeof ledger?.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');
     if (typeof ledger?.resolutionEngine?.activeHostileThreat !== 'boolean') missing.push('resolutionEngine.activeHostileThreat:boolean');
     if (typeof ledger?.resolutionEngine?.classifyPhysicalBoundaryPressure !== 'boolean') missing.push('resolutionEngine.classifyPhysicalBoundaryPressure:boolean');
@@ -1921,10 +1886,6 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger?.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
     if (!ledger?.chaosSemantic) missing.push('chaosSemantic');
-    if (!ledger?.nameSemantic) missing.push('nameSemantic');
-    if (!Array.isArray(ledger?.nameSemantic?.maleCandidates)) missing.push('nameSemantic.maleCandidates');
-    if (!Array.isArray(ledger?.nameSemantic?.femaleCandidates)) missing.push('nameSemantic.femaleCandidates');
-    if (!Array.isArray(ledger?.nameSemantic?.locationCandidates)) missing.push('nameSemantic.locationCandidates');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
     }
@@ -1968,11 +1929,6 @@ function parseCompactLedger(text, trackerSnapshot) {
     }
 
     const required = [
-        'engineContext.getUserCoreStats.Rank',
-        'engineContext.getUserCoreStats.MainStat',
-        'engineContext.getUserCoreStats.PHY',
-        'engineContext.getUserCoreStats.MND',
-        'engineContext.getUserCoreStats.CHA',
         'ResolutionEngine.identifyGoal',
         'ResolutionEngine.identifyChallenge',
         'ResolutionEngine.explicitMeans',
@@ -2016,15 +1972,12 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.actionCount',
         'ResolutionEngine.mapStats.USER',
         'ResolutionEngine.mapStats.OPP',
-        'ResolutionEngine.environmentDifficulty',
+        'ResolutionEngine.environmentDifficultyTier',
         'ResolutionEngine.classifyHostilePhysicalIntent',
         'ResolutionEngine.activeHostileThreat',
         'ResolutionEngine.classifyPhysicalBoundaryPressure',
         'ResolutionEngine.genStats.Rank',
         'ResolutionEngine.genStats.MainStat',
-        'ResolutionEngine.genStats.PHY',
-        'ResolutionEngine.genStats.MND',
-        'ResolutionEngine.genStats.CHA',
         'RelationshipEngine.count',
         'UserKnowledgeApplication.count',
         'InjuryEffectEngine.count',
@@ -2046,10 +1999,6 @@ function parseCompactLedger(text, trackerSnapshot) {
         'PowerActorAssessment.count',
         'PowerActorEnmity.count',
         'PowerEventShape.count',
-        'NameGenerationEngine.selectedStyle',
-        'NameGenerationEngine.maleCandidates',
-        'NameGenerationEngine.femaleCandidates',
-        'NameGenerationEngine.locationCandidates',
     ];
     const missing = required.filter(key => !fields.has(key));
     if (missing.length) {
@@ -2215,9 +2164,6 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.checkThreshold.Established`,
             `${prefix}.genStats.Rank`,
             `${prefix}.genStats.MainStat`,
-            `${prefix}.genStats.PHY`,
-            `${prefix}.genStats.MND`,
-            `${prefix}.genStats.CHA`,
         ];
         for (const outcomeKey of STAKE_OUTCOME_KEYS) {
             relRequired.push(`${prefix}.stakeChangeByOutcome.${outcomeKey}`);
@@ -2290,7 +2236,7 @@ function parseCompactLedger(text, trackerSnapshot) {
                 Transactional: readBoolean(fields, `${prefix}.checkThreshold.Transactional`, false),
                 Established: readBoolean(fields, `${prefix}.checkThreshold.Established`, false),
             },
-            genStats: readCoreGroup(fields, `${prefix}.genStats`),
+            genStats: readGeneratedStatsSeed(fields, `${prefix}.genStats`),
         });
     }
 
@@ -2354,12 +2300,19 @@ function parseCompactLedger(text, trackerSnapshot) {
             USER: normalizeUserStat(fields.get('ResolutionEngine.mapStats.USER')),
             OPP: normalizeOppStat(fields.get('ResolutionEngine.mapStats.OPP')),
         },
-        environmentDifficulty: normalizeEnvironmentDifficulty(fields.get('ResolutionEngine.environmentDifficulty'), fields.get('ResolutionEngine.mapStats.OPP')),
+        environmentDifficultyTier: normalizeEnvironmentDifficultyTier(
+            fields.get('ResolutionEngine.environmentDifficultyTier') ?? fields.get('ResolutionEngine.environmentDifficulty'),
+            fields.get('ResolutionEngine.mapStats.OPP'),
+        ),
         classifyHostilePhysicalIntent: readBoolean(fields, 'ResolutionEngine.classifyHostilePhysicalIntent', false),
         activeHostileThreat: readBoolean(fields, 'ResolutionEngine.activeHostileThreat', false),
         classifyPhysicalBoundaryPressure: readBoolean(fields, 'ResolutionEngine.classifyPhysicalBoundaryPressure', false),
-        genStats: readCoreGroup(fields, 'ResolutionEngine.genStats'),
+        genStats: readGeneratedStatsSeed(fields, 'ResolutionEngine.genStats'),
     };
+    resolutionEngine.environmentDifficulty = environmentDifficultyFromTier(
+        resolutionEngine.environmentDifficultyTier,
+        resolutionEngine.mapStats.OPP,
+    );
     const relationshipRepair = repairRelationshipCoverage(resolutionEngine, relationshipEngine, 'compact_ledger_parse');
 
     const injuryEffectEngine = { effects: [] };
@@ -2462,7 +2415,7 @@ function parseCompactLedger(text, trackerSnapshot) {
 
     return {
         engineContext: {
-            userCoreStats: readCoreGroup(fields, 'engineContext.getUserCoreStats'),
+            userCoreStats: { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 },
             trackerRelevantNPCs: trackerSnapshotToLedgerEntries(trackerSnapshot),
         },
         resolutionEngine,
@@ -2475,12 +2428,6 @@ function parseCompactLedger(text, trackerSnapshot) {
             sceneSummary: cleanScalar(fields.get('CHAOS_INTERRUPT.sceneSummary')) || '',
         },
         trackerUpdateEngine,
-        nameSemantic: {
-            selectedStyle: cleanScalar(fields.get('NameGenerationEngine.selectedStyle')) || DEFAULT_NAME_STYLE,
-            maleCandidates: readList(fields, 'NameGenerationEngine.maleCandidates'),
-            femaleCandidates: readList(fields, 'NameGenerationEngine.femaleCandidates'),
-            locationCandidates: readList(fields, 'NameGenerationEngine.locationCandidates'),
-        },
         proactivitySemantic: {},
         deterministicOverrides: relationshipRepair
             ? { semanticLedgerRepair: relationshipRepair }
@@ -2994,15 +2941,12 @@ function createFallbackRelationshipEntry(NPC, genStats) {
 }
 
 function fallbackRelationshipCoreStats(genStats) {
-    const stats = normalizeCore(genStats);
+    const stats = normalizeGeneratedStatsSeed(genStats);
     const hasUsableStats = stats.Rank !== 'none'
-        || stats.MainStat !== 'none'
-        || stats.PHY > 1
-        || stats.MND > 1
-        || stats.CHA > 1;
+        || stats.MainStat !== 'none';
     return hasUsableStats
         ? stats
-        : { Rank: 'Average', MainStat: 'Balanced', PHY: 5, MND: 5, CHA: 5 };
+        : { Rank: 'Average', MainStat: 'Balanced' };
 }
 
 function mergeSemanticLedgerRepair(previous, next) {
@@ -3038,6 +2982,13 @@ function readCoreGroup(fields, prefix) {
         PHY: clampNumber(readNumber(fields, `${prefix}.PHY`, 1), 1, 10),
         MND: clampNumber(readNumber(fields, `${prefix}.MND`, 1), 1, 10),
         CHA: clampNumber(readNumber(fields, `${prefix}.CHA`, 1), 1, 10),
+    };
+}
+
+function readGeneratedStatsSeed(fields, prefix) {
+    return {
+        Rank: normalizeRank(fields.get(`${prefix}.Rank`)),
+        MainStat: normalizeMainStat(fields.get(`${prefix}.MainStat`)),
     };
 }
 
@@ -3111,6 +3062,37 @@ function normalizeEnvironmentDifficulty(value, oppStat = 'ENV') {
     if (normalizeOppStat(oppStat) !== 'ENV') return 0;
     const number = Number(cleanScalar(value));
     return [0, 4, 8, 12].includes(number) ? number : 0;
+}
+
+function normalizeEnvironmentDifficultyTier(value, oppStat = 'ENV') {
+    if (normalizeOppStat(oppStat) !== 'ENV') return 'none';
+    const text = cleanScalar(value).toLowerCase();
+    if (ENVIRONMENT_DIFFICULTY_TIERS.includes(text)) return text;
+    const legacy = normalizeEnvironmentDifficulty(value, 'ENV');
+    if (legacy >= 12) return 'extreme';
+    if (legacy >= 8) return 'hard';
+    if (legacy >= 4) return 'average';
+    return 'none';
+}
+
+function environmentDifficultyFromTier(value, oppStat = 'ENV') {
+    if (normalizeOppStat(oppStat) !== 'ENV') return 0;
+    switch (normalizeEnvironmentDifficultyTier(value, 'ENV')) {
+        case 'average': return 4;
+        case 'hard': return 8;
+        case 'extreme': return 12;
+        case 'easy':
+        case 'none':
+        default:
+            return 0;
+    }
+}
+
+function normalizeGeneratedStatsSeed(value) {
+    return {
+        Rank: normalizeRank(value?.Rank),
+        MainStat: normalizeMainStat(value?.MainStat),
+    };
 }
 
 function normalizeStakeChangeValue(value) {
@@ -3212,27 +3194,6 @@ function normalizeRevealedName(value) {
         .slice(0, 60);
 }
 
-function normalizeNameStyleOption(value) {
-    const text = cleanScalar(value);
-    return text || DEFAULT_NAME_STYLE;
-}
-
-function normalizeNameCandidateList(value) {
-    const raw = Array.isArray(value) ? value : [];
-    const result = [];
-    const seen = new Set();
-    for (const item of raw) {
-        const text = cleanScalar(item).replace(/\s+/g, ' ');
-        if (!text || isNoneValue(text)) continue;
-        const key = text.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        result.push(text.slice(0, 40));
-        if (result.length >= 3) break;
-    }
-    return result;
-}
-
 function normalizeTrackerDelta(value, fields) {
     const source = value && typeof value === 'object' ? value : {};
     return {
@@ -3280,8 +3241,12 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.mapStats = ledger.resolutionEngine.mapStats || {};
     ledger.resolutionEngine.mapStats.USER = normalizeUserStat(ledger.resolutionEngine.mapStats.USER);
     ledger.resolutionEngine.mapStats.OPP = normalizeOppStat(ledger.resolutionEngine.mapStats.OPP);
-    ledger.resolutionEngine.environmentDifficulty = normalizeEnvironmentDifficulty(
-        ledger.resolutionEngine.environmentDifficulty,
+    ledger.resolutionEngine.environmentDifficultyTier = normalizeEnvironmentDifficultyTier(
+        ledger.resolutionEngine.environmentDifficultyTier ?? ledger.resolutionEngine.environmentDifficulty,
+        ledger.resolutionEngine.mapStats.OPP,
+    );
+    ledger.resolutionEngine.environmentDifficulty = environmentDifficultyFromTier(
+        ledger.resolutionEngine.environmentDifficultyTier,
         ledger.resolutionEngine.mapStats.OPP,
     );
     ledger.resolutionEngine.userAbilityUse = normalizeUserAbilityUse(ledger.resolutionEngine.userAbilityUse);
@@ -3299,7 +3264,7 @@ function normalizeLedger(ledger) {
     delete ledger.resolutionEngine.hostilePhysicalIntent;
     delete ledger.resolutionEngine.primaryOppTarget;
     delete ledger.resolutionEngine.primaryOpposition;
-    ledger.resolutionEngine.genStats = normalizeCore(ledger.resolutionEngine.genStats);
+    ledger.resolutionEngine.genStats = normalizeGeneratedStatsSeed(ledger.resolutionEngine.genStats);
     ledger.relationshipEngine = Array.isArray(ledger.relationshipEngine) ? ledger.relationshipEngine : [];
     ledger.relationshipEngine.forEach(item => {
         item.initPreset = normalizeInitPresetFlags(item.initPreset);
@@ -3321,7 +3286,7 @@ function normalizeLedger(ledger) {
         item.slowBondEvidence.teamwork = toBoolean(item.slowBondEvidence.teamwork, false);
         item.slowBondEvidence.personalAttention = toBoolean(item.slowBondEvidence.personalAttention, false);
         item.slowBondEvidence.blockers = readPlainArray(item.slowBondEvidence.blockers);
-        item.genStats = normalizeCore(item.genStats);
+        item.genStats = normalizeGeneratedStatsSeed(item.genStats);
     });
     const relationshipRepair = repairRelationshipCoverage(ledger.resolutionEngine, ledger.relationshipEngine, 'normalized_ledger');
     if (relationshipRepair) {
@@ -3379,12 +3344,6 @@ function normalizeLedger(ledger) {
         }).filter(Boolean)
         : [];
     ledger.chaosSemantic = ledger.chaosSemantic || { sceneSummary: '' };
-    ledger.nameSemantic = {
-        selectedStyle: normalizeNameStyleOption(ledger.nameSemantic?.selectedStyle),
-        maleCandidates: normalizeNameCandidateList(ledger.nameSemantic?.maleCandidates),
-        femaleCandidates: normalizeNameCandidateList(ledger.nameSemantic?.femaleCandidates),
-        locationCandidates: normalizeNameCandidateList(ledger.nameSemantic?.locationCandidates),
-    };
     ledger.proactivitySemantic = {};
     return ledger;
 }
@@ -3824,6 +3783,7 @@ function validateNormalizedLedger(ledger, raw) {
     if (!Array.isArray(ledger.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
     if (!ledger.resolutionEngine?.mapStats?.USER) missing.push('resolutionEngine.mapStats.USER');
     if (!ledger.resolutionEngine?.mapStats?.OPP) missing.push('resolutionEngine.mapStats.OPP');
+    if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (![0, 4, 8, 12].includes(ledger.resolutionEngine?.environmentDifficulty)) missing.push('resolutionEngine.environmentDifficulty');
     if (typeof ledger.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');
     if (typeof ledger.resolutionEngine?.activeHostileThreat !== 'boolean') missing.push('resolutionEngine.activeHostileThreat:boolean');
@@ -3845,10 +3805,6 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
     if (!ledger.chaosSemantic) missing.push('chaosSemantic');
-    if (!ledger.nameSemantic) missing.push('nameSemantic');
-    if (!Array.isArray(ledger.nameSemantic?.maleCandidates)) missing.push('nameSemantic.maleCandidates');
-    if (!Array.isArray(ledger.nameSemantic?.femaleCandidates)) missing.push('nameSemantic.femaleCandidates');
-    if (!Array.isArray(ledger.nameSemantic?.locationCandidates)) missing.push('nameSemantic.locationCandidates');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
     }

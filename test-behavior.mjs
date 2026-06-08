@@ -186,13 +186,7 @@ function baseLedger(overrides = {}) {
       ...(overrides.trackerUpdateEngine || {}),
     },
     chaosSemantic: { sceneSummary: overrides.sceneSummary || '' },
-    nameSemantic: {
-      selectedStyle: 'Balanced Fantasy',
-      maleCandidates: [],
-      femaleCandidates: [],
-      locationCandidates: [],
-      ...(overrides.nameSemantic || {}),
-    },
+    ...(overrides.nameSemantic ? { nameSemantic: overrides.nameSemantic } : {}),
     proactivitySemantic: {},
   };
 }
@@ -5543,7 +5537,7 @@ const tests = [
     },
   },
   {
-    name: '22 name generation validates semantic candidates and prompt offers approved pool',
+    name: '22 name generation is deterministic and prompt offers approved pool',
     run() {
       const ctx = context('The butcher smiles and says his name is...');
       const report = withDice([10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(
@@ -5571,14 +5565,14 @@ const tests = [
       assert.equal(pool.male.length, 3);
       assert.equal(pool.female.length, 3);
       assert.equal(pool.location.length, 3);
-      assert.equal(pool.male.includes('Ravon'), true);
-      assert.equal(pool.female.includes('Nulira'), true);
-      assert.equal(pool.location.includes('Koravalen'), true);
-      assert.equal(report.finalNarrativeHandoff.nameGeneration.semanticRejected.some(item => item.name === 'Versobom'), true);
-      assert.equal(report.finalNarrativeHandoff.nameGeneration.semanticRejected.some(item => item.name === 'Staistu'), true);
-      assert.match(pool.male[0], /^[A-Z][a-z]{3,8}$/);
+      assert.equal('semanticCandidates' in report.finalNarrativeHandoff.nameGeneration, false);
+      assert.equal('semanticAccepted' in report.finalNarrativeHandoff.nameGeneration, false);
+      assert.equal('semanticRejected' in report.finalNarrativeHandoff.nameGeneration, false);
+      assert.equal('replacements' in report.finalNarrativeHandoff.nameGeneration, false);
+      assert.equal(report.finalNarrativeHandoff.nameGeneration.deterministicCue, 'deterministic style profile');
       for (const name of [...pool.male, ...pool.female, ...pool.location]) {
-        assert.doesNotMatch(name, /(?:Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
+        assert.match(name, /^[A-Z][a-z]{4,13}$/);
+        assert.doesNotMatch(name, /(?:Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
       }
       const modelPrompt = prompt(report);
       assert.match(modelPrompt, /Name pool use is mandatory and obeys fog of war\./);
@@ -5587,14 +5581,16 @@ const tests = [
       assert.match(modelPrompt, /Male: /);
       assert.match(modelPrompt, /Location: /);
       assert.match(modelPrompt, /Do not invent, modify, translate, combine, suffix, add surnames to, or derive names/);
+      assert.doesNotMatch(modelPrompt, /rejected semantic candidates/i);
       assert.doesNotMatch(modelPrompt, /Name branch:/);
       assert.doesNotMatch(modelPrompt, /approved generated name pool in ACTIVE_BRANCH_FACTS/);
       for (const name of [...pool.male, ...pool.female, ...pool.location]) {
         assert.equal(modelPrompt.includes(name), true);
       }
-      assert.doesNotMatch(modelPrompt, /Versobom|Staistu|Vaisailnok/);
+      assert.doesNotMatch(modelPrompt, /Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Staistu|Vaisailnok/);
       assert.match(auditPrompt(report), /nameGeneration\.result: style: Balanced Fantasy; final: Male:/);
-      assert.doesNotMatch(auditPrompt(report), /semanticCandidates|rejected:|replacements:|Versobom|Staistu|Vaisailnok/);
+      assert.equal(auditIncludes(report, 'namePoolMode=deterministicStyleProfile'), true);
+      assert.doesNotMatch(auditPrompt(report), /semanticCandidates|rejected:|replacements:|Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Staistu|Vaisailnok/);
       assert.match(auditPrompt(report), /final: Male:/);
       const reserved = ctx.chatMetadata.structuredPreflightNameRegistry?.used || [];
       assert.equal(pool.male.every(name => reserved.includes(name)), true);
@@ -5627,7 +5623,7 @@ const tests = [
       assert.match(text, /Do not name background, incidental, or unnamed figures/);
       assert.doesNotMatch(text, /Name branch:/);
       assert.doesNotMatch(text, /approved generated name pool in ACTIVE_BRANCH_FACTS/);
-      assert.doesNotMatch(text, /semanticCandidates|rejected:|replacements:/);
+      assert.doesNotMatch(text, /semanticCandidates|rejected:|replacements:|rejected semantic candidates/i);
     },
   },
   {
@@ -5658,7 +5654,7 @@ const tests = [
     },
   },
   {
-    name: '22a.2 modern name style accepts contemporary single-token names',
+    name: '22a.2 modern name style deterministically uses contemporary single-token names',
     run() {
       const baseResolution = {
         identifyGoal: 'LearnModernNames',
@@ -5674,37 +5670,28 @@ const tests = [
         },
         ledger: baseLedger({
           resolutionEngine: baseResolution,
-          nameSemantic: {
-            selectedStyle: 'Modern',
-            maleCandidates: ['Michael', 'David', 'Robert'],
-            femaleCandidates: ['Sarah', 'Alice', 'Eleanor'],
-            locationCandidates: ['Westbridge', 'Riverton', 'Brookfield'],
-          },
         }),
       });
       const fantasy = runCase({
         userText: 'The new neighbors introduce themselves near the apartment lobby.',
         ledger: baseLedger({
           resolutionEngine: baseResolution,
-          nameSemantic: {
-            selectedStyle: 'Balanced Fantasy',
-            maleCandidates: ['Michael', 'David', 'Robert'],
-            femaleCandidates: ['Sarah', 'Alice', 'Eleanor'],
-            locationCandidates: ['Westbridge', 'Riverton', 'Brookfield'],
-          },
         }),
       });
       const modernPool = modern.finalNarrativeHandoff.nameGeneration.namePool;
       assert.equal(modern.finalNarrativeHandoff.nameGeneration.style, 'Modern');
-      assert.deepEqual(modernPool.male, ['Michael', 'David', 'Robert']);
-      assert.deepEqual(modernPool.female, ['Sarah', 'Alice', 'Eleanor']);
-      assert.deepEqual(modernPool.location, ['Westbridge', 'Riverton', 'Brookfield']);
-      assert.equal(modern.finalNarrativeHandoff.nameGeneration.semanticRejected.length, 0);
+      assert.equal(modernPool.male.length, 3);
+      assert.equal(modernPool.female.length, 3);
+      assert.equal(modernPool.location.length, 3);
+      assert.equal(modern.finalNarrativeHandoff.nameGeneration.deterministicCue, 'deterministic style profile');
+      const modernMale = ['Adrian', 'Marcus', 'Victor', 'Nolan', 'Ethan', 'Kevin', 'Brian', 'Simon', 'Lucas', 'Caleb', 'Julian', 'Martin', 'Wesley', 'Carter', 'David', 'James', 'Robert', 'Michael'];
+      const modernFemale = ['Olivia', 'Sophia', 'Amelia', 'Elena', 'Rachel', 'Hannah', 'Megan', 'Julia', 'Carmen', 'Monica', 'Isabel', 'Vanessa', 'Serena', 'Denise', 'Sarah', 'Alice', 'Eleanor', 'Natalie'];
+      const modernLocations = ['Riverton', 'Riverside', 'Brookfield', 'Fairview', 'Westbridge', 'Oakmont', 'Hillcrest', 'Pinecrest', 'Lakewood', 'Redford', 'Ashfield', 'Eastvale', 'Millhaven', 'Briarwood', 'Clearwater', 'Northgate', 'Westhaven', 'Kingsport'];
+      assert.equal(modernPool.male.every(name => modernMale.includes(name)), true);
+      assert.equal(modernPool.female.every(name => modernFemale.includes(name)), true);
+      assert.equal(modernPool.location.every(name => modernLocations.includes(name)), true);
       assert.match(auditPrompt(modern), /nameGeneration\.result: style: Modern;/);
-      assert.equal(fantasy.finalNarrativeHandoff.nameGeneration.semanticRejected.some(item => item.name === 'Michael'), true);
-      assert.equal(fantasy.finalNarrativeHandoff.nameGeneration.semanticRejected.some(item => item.name === 'Sarah'), true);
-      assert.equal(fantasy.finalNarrativeHandoff.nameGeneration.namePool.male.includes('Michael'), false);
-      assert.equal(fantasy.finalNarrativeHandoff.nameGeneration.namePool.female.includes('Sarah'), false);
+      assert.notDeepEqual(fantasy.finalNarrativeHandoff.nameGeneration.namePool, modernPool);
     },
   },
   {

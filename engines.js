@@ -3,7 +3,7 @@ export const ENGINE_PROMPT_TEXT = String.raw`[STRUCTURED_PREFLIGHT_ENGINE_EXTENS
 function ResolutionEngine(input) {
   const DEF = Object.freeze({
     UNIVERSAL:
-'EXPLICIT-ONLY. MUST be stated in Character Card / Lore / Scene text / tracker. NO invention. Uncertain = N or default. FIRST-YES-WINS = first matching explicit rule becomes final. No reconsideration. NEVER invent stats, targets, actions, obstacles, or outcomes. MAX 3 ACTIONS. TIE = STALEMATE / STRUGGLE. ROLLS = 1d20 + relevant stat vs opposing 1d20 + relevant stat, or vs Environment 1d20 + environmentDifficulty.',
+'EXPLICIT-ONLY. MUST be stated in Character Card / Lore / Scene text / tracker. NO invention. Uncertain = N or default. FIRST-YES-WINS = first matching explicit rule becomes final. No reconsideration. NEVER invent targets, actions, obstacles, or outcomes. MAX 3 ACTIONS. The semantic pass classifies context only; deterministic code rolls dice, assigns numeric generated stats, calculates margins, landed actions, counter potential, and final outcomes.',
     STATS:
 'PHY = challenges that require physical effort, strength, agility, speed, coordination, endurance, stealth movement, combat skill, or bodily execution under risk. MND = challenges that require thought, memory, perception, focus, reasoning, knowledge, awareness, will, or deliberate mental/supernatural exertion. CHA = social challenges that require persuasion, deception, intimidation, negotiation, emotional influence, personal presence, or interpersonal skill. Map the stat from finalGoal or explicit challenge that carries stakes, not from incidental gestures, flavor, delivery method, or setup. Core stat scale is 1 to 10.',
     STAKES:
@@ -132,32 +132,21 @@ function ResolutionEngine(input) {
     rule: if OppTargets.NPC=[(none)] and OppTargets.ENV contains an obstacle, OPP=ENV
     return {USER, OPP}
 
-  environmentDifficulty(stats, targets, context):
+  environmentDifficultyTier(stats, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: applies only when stats.OPP=ENV and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure
-    rule: 0 = easy/trivial/routine/weak/lightly obstructed; if no real stakes exist, use STAKES=N instead of a roll
-    rule: 4 = average meaningful obstacle a capable person could plausibly fail
-    rule: 8 = hard serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk
-    rule: 12 = extreme exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition
+    rule: easy = easy/trivial/routine/weak/lightly obstructed; if no real stakes exist, use STAKES=N instead of an ENV tier
+    rule: average = meaningful obstacle a capable person could plausibly fail
+    rule: hard = serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk
+    rule: extreme = exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition
     rule: classify from concrete scene facts: material, scale, complexity, danger, time pressure, visibility, footing, weather, magical strength, tool access, distance, and whether the environment is worsening
     rule: do not raise difficulty because the story moment feels dramatic; do not lower difficulty because {{user}} has high stats
-    if stats.OPP!=ENV -> 0
-    return 0|4|8|12
-
-  getUserCoreStats():
-    policy: LOCKED, EXPLICIT-ONLY
-    rule: read {{user}}'s character sheet/persona
-    return {PHY, MND, CHA}
-
-  getCurrentCoreStats(target):
-    policy: LOCKED, EXPLICIT-ONLY
-    rule: read most recent sceneTracker under exact target NPC entry, currentCoreStats
-    if found -> return {PHY, MND, CHA}
-    else -> missing
+    if stats.OPP!=ENV -> none
+    return none|easy|average|hard|extreme
 
   genStats(target, context):
     policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
-    output: {Rank, MainStat, PHY, MND, CHA}
+    output: {Rank, MainStat}
     rule: use only if target currentCoreStats missing
     rule: determine Rank from explicit portrayal only by comparing the target to narrative baselines
     rankGuide:
@@ -169,51 +158,8 @@ function ResolutionEngine(input) {
     mainStat:
       rule: identify the target's clearest proficiency from explicit portrayal in scene/context/backstory, referring to DEF.STATS, and assign a primary stat
       rule: MainStat must be PHY, MND, CHA, or Balanced
-    assignStats:
-      rule: assign stats only within the allowed range for the chosen Rank
-      rule: do not assign any stat outside the allowed range for the chosen Rank
-      rule: if MainStat is PHY, MND, or CHA, that stat must be highest
-      rule: if MainStat=Balanced, no single stat should be clearly dominant
-      ranges:
-        Weak = 1
-        Average = 1 to 3
-        Trained = 2 to 4
-        Elite = 3 to 6
-        Boss = 6 to 10
-    rule: save currentCoreStats to sceneTracker and never change unless explicitly altered
-    return {Rank, MainStat, PHY, MND, CHA}
-
-  resolveOutcome(input, finalGoal, actions, stats, userCore, targetCore, envDifficulty):
-    policy: LOCKED
-    comment: LandedActions applies to all resolved actions.
-    comment: Non-combat success has LandedActions:1; stalemate/failure has LandedActions:0.
-    comment: Combat sequences can have LandedActions up to 3, capped by actionCount.
-    comment: CounterPotential = how open {{user}} is to a counter after failing a combat action.
-    atkDie = 1d20
-    atkTot = atkDie + userCore[stats.USER]
-    if stats.OPP=ENV:
-      defDie = 1d20
-      defTot = defDie + envDifficulty
-    else:
-      defDie = 1d20
-      defTot = defDie + targetCore[stats.OPP]
-    margin = atkTot - defTot
-    if classifyCombatActionSequence=true:
-      tierTable:
-        margin >= 8 -> OutcomeTier:Critical_Success LandedActions:3 Outcome:dominant_impact CounterPotential:none
-        margin >= 5 -> OutcomeTier:Moderate_Success LandedActions:2 Outcome:solid_impact CounterPotential:none
-        margin >= 1 -> OutcomeTier:Minor_Success LandedActions:1 Outcome:light_impact CounterPotential:none
-        margin = 0 -> OutcomeTier:Stalemate LandedActions:0 Outcome:struggle CounterPotential:none
-        margin >= -3 -> OutcomeTier:Minor_Failure LandedActions:0 Outcome:checked CounterPotential:light
-        margin >= -7 -> OutcomeTier:Moderate_Failure LandedActions:0 Outcome:deflected CounterPotential:medium
-        else -> OutcomeTier:Critical_Failure LandedActions:0 Outcome:avoided CounterPotential:severe
-      LandedActions = min(LandedActions, actions.length)
-      return {OutcomeTier, LandedActions, Outcome, CounterPotential}
-    else:
-      if margin >= 1 -> OutcomeTier:Success LandedActions:1 Outcome:success CounterPotential:none
-      if margin = 0 -> OutcomeTier:Stalemate LandedActions:0 Outcome:struggle CounterPotential:none
-      else -> OutcomeTier:Failure LandedActions:0 Outcome:failure CounterPotential:none
-      return {OutcomeTier, LandedActions, Outcome, CounterPotential}
+    rule: deterministic code assigns numeric PHY/MND/CHA within the Rank range, gives MainStat the highest value when applicable, saves currentCoreStats to sceneTracker, and never changes them unless explicitly altered
+    return {Rank, MainStat}
 
   execution:
     finalGoal = identifyGoal(input)
@@ -231,14 +177,12 @@ function ResolutionEngine(input) {
       outcome = {OutcomeTier:NONE, LandedActions:(none), Outcome:no_roll, CounterPotential:none}
     else:
       stats = mapStats(input, finalGoal, challenge, targets, context)
-      envDifficulty = environmentDifficulty(stats, targets, context)
-      userCore = getUserCoreStats()
-      if stats.OPP!=ENV:
-        targetCore = getCurrentCoreStats(first OppTargets.NPC)
-        if missing -> targetCore = genStats(first OppTargets.NPC, context)
-      outcome = resolveOutcome(input, finalGoal, actions, stats, userCore, targetCore, envDifficulty)
+      envDifficultyTier = environmentDifficultyTier(stats, targets, context)
+      if stats.OPP!=ENV and first OppTargets.NPC currentCoreStats missing:
+        generatedStatsSeed = genStats(first OppTargets.NPC, context)
+      deterministic code resolves dice, numeric stats, margins, landed actions, counter potential, and outcome after semantic extraction
     NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, actions:actions, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, STAKES:STAKES, EnvironmentDifficulty:envDifficulty, LandedActions:outcome.LandedActions, OutcomeTier:outcome.OutcomeTier, Outcome:outcome.Outcome, CounterPotential:outcome.CounterPotential, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
+    return {GOAL:finalGoal, actions:actions, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, STAKES:STAKES, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {
@@ -586,7 +530,7 @@ function CHAOS_INTERRUPT(resolutionPacket, npcHandoffList, sceneSummary, diceLis
 function NameGenerationEngine(context) {
   const DEF = Object.freeze({
     EO:
-'HYBRID. The semantic pass proposes names by selected style; deterministic validation uses context and the current chat name registry as truth.',
+'DETERMINISTIC. Build names locally from the selected style profile, scene context, and current chat name registry. The semantic pass does not create name candidates.',
     FYW:
 'FIRST-YES-WINS. In ordered rule ladders, the first matching rule becomes final.',
     UNIVERSAL:
@@ -596,9 +540,9 @@ function NameGenerationEngine(context) {
     SEED:
 'Seed is hidden deterministic fallback entropy derived from fixed pool slots and context. It does NOT have to appear at the start of a fallback name.',
     STYLE:
-'Invent creative, pronounceable names matching the selected style. Fantasy styles should be real-but-unplaceable and avoid pure Western-European stock fantasy drift, Tolkien-esque elvish unless that style is selected, JRPG-generic naming, famous names, joke names, and overly ordinary modern-Western names. Modern style should use plausible contemporary single-token person names and modern place/neighborhood names while still avoiding famous names, jokes, and fantasy drift.',
+'Generate creative, pronounceable names matching the selected style. Fantasy styles should be real-but-unplaceable and avoid pure Western-European stock fantasy drift, Tolkien-esque elvish unless that style is selected, JRPG-generic naming, famous names, joke names, and overly ordinary modern-Western names. Modern style should use plausible contemporary single-token person names and modern place/neighborhood names while still avoiding famous names, jokes, and fantasy drift.',
     SHAPE:
-'Append only pronounceable syllables. NO 3+ consecutive vowels. NO 3+ consecutive consonants. PERSON total length 5-10. LOCATION total length 7-14. LOCATION must feel geographic / compound / place-like and must not read like a person name.'
+'Append only pronounceable syllables using style-aware texture rules. Avoid 3+ consecutive vowels, famous/stock names, joke names, duplicates, and person/location mismatch. Consonant clusters and vowel pairs are allowed when the selected style supports them. Modern names should come from curated contemporary lists instead of fantasy syllable assembly.'
   });
 
   profileFromContext(context):
@@ -606,11 +550,6 @@ function NameGenerationEngine(context) {
     if context contains any [harsh,hard,stone,iron,ash,cold,desert,steppe,war,border,fortress,raid,scar,volcanic] -> HARD
     if context contains any [soft,coast,island,harbor,reef,jungle,garden,ritual,temple,court,silk,trade,festival,rain] -> SOFT
     else -> BALANCED
-
-  generateSemanticCandidates(selectedStyle):
-    produce exactly 3 male person/entity names, 3 female person/entity names, and 3 location names
-    use selectedStyle as taste/style guidance
-    do not output fixed stock examples or famous names
 
   buildFallbackName(mode, profile, gender, context, slotSeed):
     if mode=PERSON:
@@ -622,10 +561,10 @@ function NameGenerationEngine(context) {
 
   reject(name, mode):
     policy: FYW
-    if mode=PERSON and (length(name)<5 || length(name)>10) -> Y
+    if mode=PERSON and length falls outside selected style person length -> Y
     if mode=LOCATION and (length(name)<7 || length(name)>14) -> Y
     if name has 3+ consecutive vowels -> Y
-    if name has 3+ consecutive consonants -> Y
+    if name has consonant cluster unsupported by selected style -> Y
     if name reads as stock fantasy / elvish / Tolkien-like / JRPG-generic -> Y
     if selectedStyle is not Modern and name reads as too ordinary / modern-Western / overly familiar -> Y
     if name strongly resembles a famous fictional or real-world place/person name -> Y
@@ -635,9 +574,7 @@ function NameGenerationEngine(context) {
 
   execution:
     P = profileFromContext(context)
-    semanticCandidates = generateSemanticCandidates(selectedStyle)
-    accept semanticCandidates that pass reject(name, mode)
-    replace rejected/missing candidates with buildFallbackName(...)
+    build exactly 3 male person/entity names, 3 female person/entity names, and 3 location names from selectedStyle profile
     reject/regenerate each final candidate until valid and unused within the current chat registry, tracker names, and this pool
     return {male, female, location}
 }
@@ -919,8 +856,8 @@ function NPCAggressionResolution(proactivityResults, resolutionPacket, trackerSn
       counterRecipient = reactiveCounterRecipient(counterTarget, proactivityResults)
       if counterTarget exists and not already aggressive -> force counterTarget as {Proactive:Y,Intent:BOUNDARY_PHYSICAL,Impulse:ANGER,ProactivityTarget:counterRecipient,TargetsUser:Y only if counterRecipient={{user}},ProactivityTier:FORCED,ProactivityDie:20,Threshold:AUTO}
     FOR EACH aggressive NPC:
-      npcCore = getCurrentCoreStats(NPC) from trackerUpdate or trackerSnapshot
-      targetCore = getUserCoreStats() if target={{user}} else target NPC currentCoreStats
+      npcCore = deterministic runtime currentCoreStats for NPC from trackerUpdate or trackerSnapshot
+      targetCore = deterministic runtime user core stats if target={{user}} else target NPC currentCoreStats
       npcDie = 1d20
       targetDie = 1d20
       attackStat = highest of npcCore.PHY/MND only; ignore CHA for aggression
