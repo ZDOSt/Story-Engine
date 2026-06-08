@@ -8772,17 +8772,24 @@ const tests = [
       assert.match(source, /data-spe-player-action="dismiss-adventure-start"/);
       assert.match(source, /function buildPlayerAdventureStartPrompt/);
       assert.match(source, /Begin the adventure for this character in the selected genre/);
-      assert.match(source, /Do not decide \{\{user\}\}\\?'s dialogue, choices, goals, actions, or internal thoughts/);
-      assert.match(source, /before transition, \{\{user\}\} was human in their previous life/);
+      assert.match(source, /PLAYER_ADVENTURE_OPENING_CONTRACT/);
+      assert.match(source, /Keep the opening short: 180-350 words/);
+      assert.match(source, /Narrate only what surrounds \{\{user\}\}/);
+      assert.match(source, /\{\{user\}\}'s body, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection/);
+      assert.match(source, /Do not summarize the character sheet, biography, skills, past, goals, personality, inventory, powers, or private history/);
+      assert.match(source, /Do not explain the world\. Do not summarize lore/);
+      assert.match(source, /before transition, \{\{user\}\} was human in their previous life|was human in their previous life/);
       assert.match(source, /retains previous-life memories/);
-      assert.match(source, /MUST include both the final moments of that human previous life and the arrival/);
+      assert.match(source, /Begin with \{\{user\}\}\\?'s final moments on Earth, then their arrival in the new world/);
+      assert.match(source, /Avoid overused openings: being alone in a forest as the opening beat; being chased or hunted immediately/);
+      assert.doesNotMatch(source, /goddess|deity|hooded figures chanting|throne room with exposition|white void/i);
       assert.match(source, /const genre = creator\.flow === 'new'/);
       assert.match(source, /root\.adventureStartPending = true/);
       assert.match(source, /root\.creator = \{ stage: 'approved' \}/);
       assert.match(source, /function submitPlayerAdventureStartPrompt/);
-      assert.match(source, /document\.getElementById\('send_textarea'\)/);
-      assert.match(source, /document\.getElementById\('send_but'\)/);
-      assert.match(source, /sendButton\.click\(\)/);
+      assert.match(source, /quiet_prompt: text/);
+      assert.match(source, /quietToLoud: true/);
+      assert.doesNotMatch(source, /sendButton\.click\(\)/);
     },
   },
   {

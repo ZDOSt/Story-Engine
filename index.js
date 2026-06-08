@@ -128,21 +128,36 @@ const PLAYER_GENRE_CHOICES = Object.freeze([
     'Wuxia / Xianxia',
 ]);
 const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
-    Fantasy: 'Frame the opening through grounded fantasy: magic, myth, monsters, kingdoms, villages, wilds, ruins, guilds, temples, courts, roads, or local trouble may matter. Make the setting concrete and immediately playable.',
-    'Sci-fi': 'Frame the opening through science fiction: advanced technology, space, colonies, research, aliens, artificial intelligence, corporate systems, future society, exploration, or technical danger may matter. Make the situation concrete and immediately playable.',
-    Modern: 'Frame the opening through a contemporary real-world or near-real-world setting. Use ordinary modern places, technology, work, school, travel, family, crime, community, or social pressure as appropriate to the character sheet.',
-    'Slice of Life': 'Frame the opening through an everyday situation. Focus on a concrete place, routine, social contact, obligation, inconvenience, opportunity, or small personal pressure that gives the character something to respond to.',
-    Isekai: 'Isekai requirement: before transition, {{user}} was human in their previous life, regardless of their approved new race/body. After transition, {{user}} retains previous-life memories. The opening MUST include both the final moments of that human previous life and the arrival, awakening, summoning, reincarnation, transfer, or appearance in the new world. You may decide the final moment, transition method, arrival location, immediate circumstances, and first playable hook.',
-    'Urban Fantasy': 'Frame the opening through a modern or near-modern world where supernatural forces, creatures, magic, curses, occult politics, hidden societies, or open paranormal realities exist beside ordinary life.',
-    Cyberpunk: 'Frame the opening through cyberpunk pressure: dense urban life, corporate power, street survival, surveillance, cybernetics, data, gangs, debt, black markets, neon commerce, or technological control may matter.',
-    'Post-Apocalyptic': 'Frame the opening through life after collapse. Scarcity, shelter, travel, ruins, weather, radiation, infection, raiders, fragile communities, lost infrastructure, or moral pressure may matter.',
-    Horror: 'Frame the opening through horror: begin from a believable concrete situation and introduce dread, threat, mystery, isolation, wrongness, pursuit, taboo, or danger through visible details. Do not explain everything immediately.',
-    Supernatural: 'Frame the opening through supernatural pressure: spirits, hauntings, curses, omens, possession, occult investigation, strange powers, liminal places, or unseen forces may matter.',
-    Superhero: 'Frame the opening through superhero fiction: powers, public danger, rescue, reputation, secrecy, villains, institutions, media pressure, collateral risk, or a call to act may matter.',
-    Steampunk: 'Frame the opening through steampunk texture: steam industry, brass machinery, airships, workshops, factories, class pressure, empire, invention, exploration, or mechanical danger may matter.',
-    Historical: 'Frame the opening through a plausible historical period or historically inspired setting. Use material conditions, travel, class, law, custom, labor, conflict, technology limits, and social expectations that fit the chosen era.',
-    'Wuxia / Xianxia': 'Frame the opening through martial or cultivation fiction: sects, clans, wandering heroes, spiritual pressure, training, rivalry, manuals, beasts, duels, honor, debt, realms, breakthroughs, or immortal politics may matter.',
+    Fantasy: 'Start with a short playable opening scene that clearly belongs to fantasy. Let the genre show through concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, or other immediate scene evidence.',
+    'Sci-fi': 'Start with a short playable opening scene that clearly belongs to science fiction. Let the genre show through concrete surroundings, visible pressure, technology, alien or future context, artificial intelligence, corporate or institutional systems, exploration, technical danger, or other immediate scene evidence.',
+    Modern: 'Start with a short playable opening scene that clearly belongs to a contemporary real-world or near-real-world setting. Let the genre show through concrete surroundings, visible pressure, ordinary technology, public life, work, school, travel, money, crime, family, community, or other immediate scene evidence.',
+    'Slice of Life': 'Start with a short playable opening scene that clearly belongs to slice of life. Let the genre show through concrete surroundings, routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or other immediate scene evidence.',
+    Isekai: 'Start with a short playable opening scene that clearly belongs to isekai. Begin with {{user}}\'s final moments on Earth, then their arrival in the new world. The final Earth moment must be brief, concrete, external, and no more than one short paragraph. {{user}} was human in their previous life and retains previous-life memories, regardless of their approved new race/body. Do not summarize {{user}}\'s life, memories, personality, skills, inventory, or biography. Move quickly to the first playable moment in the new world. Avoid overused openings: being alone in a forest as the opening beat; being chased or hunted immediately.',
+    'Urban Fantasy': 'Start with a short playable opening scene that clearly belongs to urban fantasy. Let the genre show through concrete surroundings where ordinary life and supernatural pressure occupy the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or other immediate scene evidence.',
+    Cyberpunk: 'Start with a short playable opening scene that clearly belongs to cyberpunk. Let the genre show through concrete surroundings, visible pressure, technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity.',
+    'Post-Apocalyptic': 'Start with a short playable opening scene that clearly belongs to life after collapse. Let the genre show through concrete surroundings, visible pressure, scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, moral pressure, or other immediate scene evidence.',
+    Horror: 'Start with a short playable opening scene that clearly belongs to horror. Let the genre show through concrete surroundings, visible wrongness, damage, sound, absence, distance, blocked access, strange behavior, darkness, threat, mystery, or other immediate scene evidence.',
+    Supernatural: 'Start with a short playable opening scene that clearly belongs to the supernatural. Let the genre show through concrete surroundings, visible pressure, spirits, hauntings, curses, omens, possession, occult evidence, strange powers, liminal places, unseen forces, or other immediate scene evidence.',
+    Superhero: 'Start with a short playable opening scene that clearly belongs to superhero fiction. Let the genre show through concrete surroundings, visible pressure, powers, public danger, secrecy, reputation, law, media, villains, institutions, bystanders, collateral risk, or other immediate scene evidence. Do not narrate {{user}} using powers unless {{user}} chooses to.',
+    Steampunk: 'Start with a short playable opening scene that clearly belongs to steampunk. Let the genre show through concrete surroundings, visible pressure, steam industry, brass machinery, smoke, class, empire, invention, mechanical danger, expedition pressure, or other immediate scene evidence.',
+    Historical: 'Start with a short playable opening scene that clearly belongs to a plausible historical or historically inspired setting. Let the genre show through concrete surroundings, visible pressure, tools, law, custom, class, labor, travel, conflict, technology limits, public life, or other immediate scene evidence.',
+    'Wuxia / Xianxia': 'Start with a short playable opening scene that clearly belongs to martial or cultivation fiction. Let the genre show through concrete surroundings, visible pressure, honor, danger, rivalry, spiritual pressure, sect or clan influence, debt, beasts, duels, cultivation, immortal politics, or other immediate scene evidence.',
 });
+const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`OPENING CONTRACT:
+Keep the opening short: 180-350 words.
+
+Narrate only what surrounds {{user}}:
+environment, light, weather, sound, visible movement, nearby people, immediate pressure, danger, opportunity, or point of interest.
+
+Do not narrate or describe:
+{{user}}'s body, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.
+
+Do not summarize the character sheet, biography, skills, past, goals, personality, inventory, powers, or private history.
+
+Do not explain the world. Do not summarize lore. Let the scene imply the genre.
+
+End at the first concrete moment where {{user}} can act.
+The scene is set. {{user}} discovers themselves through play.`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
@@ -4610,9 +4625,9 @@ function buildPlayerAdventureStartPrompt(root = {}) {
     return [
         `Begin the adventure for this character in the selected genre: ${genre}.`,
         '',
-        'Create an opening scene that fits this genre and the approved character sheet. You may decide the location, circumstances, tone, immediate situation, first visible conflict, opportunity, danger, or point of interest.',
         genreFrame,
-        'Establish the immediate setting, present situation, and first playable hook. Do not decide {{user}}\'s dialogue, choices, goals, actions, or internal thoughts. End at a moment where {{user}} can act.',
+        '',
+        PLAYER_ADVENTURE_OPENING_CONTRACT,
     ].join('\n');
 }
 
@@ -4879,18 +4894,23 @@ function syncIdentityInputs(creator) {
     delete creator.identity.appearance;
 }
 
-function submitPlayerAdventureStartPrompt(prompt) {
-    if (typeof document === 'undefined') return false;
+function submitPlayerAdventureStartPrompt(prompt, context = getContext()) {
     const text = String(prompt || '').trim();
-    const textarea = document.getElementById('send_textarea');
-    const sendButton = document.getElementById('send_but');
-    if (!text || !textarea || !sendButton) {
-        globalThis.toastr?.error?.('Could not find SillyTavern chat input to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
+    if (!text || typeof context?.generate !== 'function') {
+        globalThis.toastr?.error?.('Could not find SillyTavern generation API to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
         return false;
     }
-    textarea.value = text;
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    setTimeout(() => sendButton.click(), 0);
+    setTimeout(() => {
+        context.generate('normal', {
+            automatic_trigger: true,
+            quiet_prompt: text,
+            quietToLoud: true,
+        }).catch(error => {
+            console.error(`[${EXTENSION_NAME}] adventure start failed`, error);
+            const message = error instanceof Error ? error.message : String(error);
+            globalThis.toastr?.error?.(`Could not start adventure: ${message}`, EXTENSION_NAME, { timeOut: 7000 });
+        });
+    }, 0);
     return true;
 }
 
