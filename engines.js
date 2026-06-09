@@ -4,8 +4,8 @@ function ResolutionEngine(input) {
   const DEF = Object.freeze({
     UNIVERSAL:
 'EXPLICIT-ONLY. MUST be stated in Character Card / Lore / Scene text / tracker. NO invention. Uncertain = N or default. FIRST-YES-WINS = first matching explicit rule becomes final. No reconsideration. NEVER invent targets, actions, obstacles, or outcomes. MAX 3 ACTIONS. The semantic pass classifies context only; deterministic code rolls dice, assigns numeric generated stats, calculates margins, landed actions, counter potential, and final outcomes.',
-    STATS:
-'PHY = challenges that require physical effort, strength, agility, speed, coordination, endurance, stealth movement, combat skill, or bodily execution under risk. MND = challenges that require thought, memory, perception, focus, reasoning, knowledge, awareness, will, or deliberate mental/supernatural exertion. CHA = social challenges that require persuasion, deception, intimidation, negotiation, emotional influence, personal presence, or interpersonal skill. Map the stat from finalGoal or explicit challenge that carries stakes, not from incidental gestures, flavor, delivery method, or setup. Core stat scale is 1 to 10.',
+    BUCKETS:
+'Roll buckets are semantic action shapes only. None = ordinary/no-roll scene continuity. Social = NPC-facing social pressure, split into Diplomacy, Bluff, or Intimidate. Combat = direct violence or harmful supernatural attack, split into Mundane or SpellOrSupernatural by the primary attack. Challenge = physical/environmental obstacles, stealth, pursuit, locks, traps, terrain, weather, barriers, or hazards. Deterministic code maps buckets to stats and rolls.',
     STAKES:
 'Stakes are meaningful possible consequences tied to success or failure. Stakes include physical risk, harm, danger, detection, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. Only new unresolved stakes require a roll. If success/failure would not materially change the outcome, the relevant NPC reaction is already decided by saved disposition/intimacy state, or a failed negative social attempt is merely being repeated against the same target for the same goal in the same scene, no roll is needed.'
   });
@@ -76,7 +76,7 @@ function ResolutionEngine(input) {
     rule: hostilesInScene.NPC may include hostile enemies threatening {{user}}, companions, protected NPCs, bystanders, or the scene generally, as long as they are established and present
     rule: hostilesInScene.NPC must be established by assistant narration, tracker, character/scenario/lore context, or initial test setup; do not create a hostile from the latest user input alone
     rule: hostilesInScene.NPC excludes neutral/friendly NPCs, absent/offscreen entities, defeated/incapacitated entities no longer posing danger, and non-living hazards or obstacles
-    rule: if hasStakes=N, OppTargets.NPC must be [(none)]
+    rule: if rollNeeded=N, OppTargets.NPC must be [(none)]
     rule: a direct ActionTarget can also be OppTargets.NPC only when that target's stakes are meaningfully contested or resisted
     rule: protective/rescue movement of an ally does not make that ally ActionTargets unless {{user}} contests their will, harms them, restrains them, or makes them the main opposed challenge
     rule: ActionTargets, OppTargets.NPC, BenefitedObservers, and HarmedObservers are mutually exclusive observer categories except that direct ActionTargets may also be OppTargets.NPC when they are the resisting/opposing party
@@ -91,7 +91,7 @@ function ResolutionEngine(input) {
     rule: return N when consent/refusal is merely uncertain, unstated, or left to ordinary scene interpretation. Do not turn ordinary flirting, teasing, kissing, embracing, or romantic/sexual proposals into mechanics without an explicit boundary violation.
     else -> N
 
-  hasStakes(input, finalGoal, challenge, targets, boundaryViolationExplicit, context):
+  rollNeeded(input, finalGoal, challenge, targets, boundaryViolationExplicit, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/proposals/contact are not stakes by themselves.
     rule: if boundaryViolationExplicit=Y, evaluate stakes normally under DEF.STAKES; boundary violation usually affects autonomy, trust, safety, or social standing.
@@ -105,9 +105,33 @@ function ResolutionEngine(input) {
     MaterialStakes = whether success/failure could materially matter under DEF.STAKES before disposition continuity
     NewUnresolvedContest = whether the latest user action creates a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle; repeated/rephrased/intensified negative social pressure after a resolved failed attempt against the same target/goal is not fresh
     PreDecidedByDisposition = whether saved fear/terror, hostility/hatred, or persisted intimacy boundary already decides the relevant NPC reaction and the current input merely asks that state to express itself
-    RollRequired = MaterialStakes=Y AND NewUnresolvedContest=Y AND PreDecidedByDisposition=N
+    RollRequired = MaterialStakes=Y AND NewUnresolvedContest=Y AND PreDecidedByDisposition=N; must equal rollNeeded
     Reason = short explanation
     return {MaterialStakes, NewUnresolvedContest, PreDecidedByDisposition, RollRequired, Reason}
+
+  actionBucket(input, finalGoal, challenge, targets, context):
+    policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
+    rule: None for ordinary roleplay, flavor, conversation, scene state, already-decided disposition reactions, harmless utility ability/spell use outside combat, or any action where rollNeeded=N
+    rule: Social when the fresh unresolved challenge is convincing, bargaining, persuading, deceiving, misleading, bluffing, intimidating, threatening, coercing, or otherwise socially pressuring a living NPC
+    rule: Combat when {{user}} directly attacks, harms, restrains violently, or uses a harmful spell/supernatural effect as the primary contested action against a living target
+    rule: Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition
+    return None|Social|Combat|Challenge
+
+  socialBucket(input, finalGoal, challenge, targets, context):
+    policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
+    rule: Diplomacy for good-faith persuasion, negotiation, bargaining, reassurance, appeal, reconciliation, or cooperation against living social opposition
+    rule: Bluff for deception, lying, false claims, misleading, tricking, disguise claims, forged authority, or concealed truth that materially affects living social opposition
+    rule: Intimidate for threats, coercion, blackmail, forced submission, interrogation pressure, menacing, or fear-based demands
+    if actionBucket!=Social -> None
+    return None|Diplomacy|Bluff|Intimidate
+
+  combatType(input, finalGoal, challenge, targets, context):
+    policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
+    rule: SpellOrSupernatural when the primary combat attack is a spell, supernatural power, magical bodily effect, curse, elemental blast, psychic attack, or similar non-mundane force
+    rule: Mundane when the primary combat attack is bodily, weapon, natural weapon, thrown object, firearm, tool, or ordinary physical force
+    rule: if a turn mixes mundane and supernatural attacks, classify by the initial/main attack
+    if actionBucket!=Combat -> None
+    return None|Mundane|SpellOrSupernatural
 
   actionCount(input, challenge):
     policy: LOCKED, EXPLICIT-ONLY, MAX 3 ACTIONS
@@ -118,31 +142,16 @@ function ResolutionEngine(input) {
     rule: each individual combat attack/effect within a sequence counts as one action, including physical attacks, spells, status effects, or mixed sequences
     rule: return one action marker per attack: [a1], [a1,a2], or [a1,a2,a3]
 
-  mapStats(input, finalGoal, challenge, targets, context):
-    policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
-    rule: determine USER stat by applying DEF.STATS to identifyChallenge when identifyChallenge is distinct from finalGoal
-    rule: use finalGoal only if no distinct stakes-bearing challenge exists
-    rule: if finalGoal relies heavily on a specific enabling action (e.g., a physical feat to intimidate, or clearing an obstacle to dodge), determine USER stat based strictly on that enabling challenge
-    rule: if {{user}} uses deliberate mental/supernatural exertion to affect a living target's bodily functions or physical state (paralysis, poison, blindness, forced sleep, pain, muscle lock, disease, transmutation, bodily binding), USER=MND and OPP=PHY
-    rule: if magic or a substance creates a non-living environmental hazard/obstacle instead of directly contesting a living target, put the hazard/obstacle in OppTargets.ENV and use OPP=ENV unless a living target explicitly resists the effect
-    rule: if explicit means is positive social interaction such as persuasion, negotiation, diplomacy, bargaining, reconciliation, reassurance, or good-faith appeal against a living opposing target, USER=CHA and OPP=CHA
-    rule: if explicit means is negative social interaction such as bluff, deception, intimidation, coercion, threat, blackmail, manipulation, interrogation, humiliation, or forced submission against a living opposing target, USER=CHA and OPP=MND
-    rule: if OppTargets.NPC contains an opposing entity, determine opposing stat by applying DEF.STATS to that first OppTargets.NPC entity's resistance to {{user}}'s explicit means or finalGoal
-    rule: OPP=ENV is valid only for NON-LIVING opposition in OppTargets.ENV
-    rule: if a living ActionTarget is the stakes-bearing resisting/contested target, include that target in OppTargets.NPC and use a living opposing stat, never ENV
-    rule: if OppTargets.NPC=[(none)] and OppTargets.ENV contains an obstacle, OPP=ENV
-    return {USER, OPP}
-
-  environmentDifficultyTier(stats, targets, context):
+  environmentDifficultyTier(actionBucket, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
-    rule: applies only when stats.OPP=ENV and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure
+    rule: applies only when actionBucket=Challenge and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure
     rule: easy = easy/trivial/routine/weak/lightly obstructed; if no real stakes exist, use STAKES=N instead of an ENV tier
     rule: average = meaningful obstacle a capable person could plausibly fail
     rule: hard = serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk
     rule: extreme = exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition
     rule: classify from concrete scene facts: material, scale, complexity, danger, time pressure, visibility, footing, weather, magical strength, tool access, distance, and whether the environment is worsening
     rule: do not raise difficulty because the story moment feels dramatic; do not lower difficulty because {{user}} has high stats
-    if stats.OPP!=ENV -> none
+    if actionBucket!=Challenge -> none
     return none|easy|average|hard|extreme
 
   genStats(target, context):
@@ -157,7 +166,7 @@ function ResolutionEngine(input) {
       Elite = clearly beyond ordinary trained professionals or lesser threats; examples include a veteran knight, master duelist, powerful mage, apex predator, elder beast, or major supernatural threat
       Boss = overwhelmingly beyond elite; examples include a legendary hero, warlord, ancient guardian, archmage, dragon, titan, ancient horror, or mythic apex entity
     mainStat:
-      rule: identify the target's clearest proficiency from explicit portrayal in scene/context/backstory, referring to DEF.STATS, and assign a primary stat
+      rule: identify the target's clearest proficiency from explicit portrayal in scene/context/backstory and assign MainStat as PHY, MND, CHA, or Balanced
       rule: MainStat must be PHY, MND, CHA, or Balanced
     rule: deterministic code assigns numeric PHY/MND/CHA within the Rank range, gives MainStat the highest value when applicable, saves currentCoreStats to sceneTracker, and never changes them unless explicitly altered
     return {Rank, MainStat}
@@ -171,19 +180,22 @@ function ResolutionEngine(input) {
     boundaryViolationExplicit = boundaryViolationExplicit(input, finalGoal, challenge, targets, context)
     nonLethal = nonLethal(input, finalGoal, challenge, targets, context)
     stakesDecision = stakesDecision(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
-    STAKES = stakesDecision.RollRequired
+    rollNeeded = rollNeeded(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
+    actionBucket = actionBucket(input, finalGoal, challenge, targets, context)
+    socialBucket = socialBucket(input, finalGoal, challenge, targets, context)
+    combatType = combatType(input, finalGoal, challenge, targets, context)
     actions = actionCount(input, challenge)
     envDifficulty = 0
-    if STAKES=N:
+    if rollNeeded=N:
       outcome = {OutcomeTier:NONE, LandedActions:(none), Outcome:no_roll, CounterPotential:none}
     else:
-      stats = mapStats(input, finalGoal, challenge, targets, context)
-      envDifficultyTier = environmentDifficultyTier(stats, targets, context)
-      if stats.OPP!=ENV and first OppTargets.NPC currentCoreStats missing:
+      envDifficultyTier = environmentDifficultyTier(actionBucket, targets, context)
+      deterministic code maps bucket to stats: Diplomacy=CHA vs CHA; Bluff/Intimidate=CHA vs MND; Combat/Mundane=PHY vs PHY; Combat/SpellOrSupernatural=MND vs PHY; Challenge=PHY vs ENV
+      if deterministic OPP!=ENV and first OppTargets.NPC currentCoreStats missing:
         generatedStatsSeed = genStats(first OppTargets.NPC, context)
       deterministic code resolves dice, numeric stats, margins, landed actions, counter potential, and outcome after semantic extraction
     NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, actions:actions, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, STAKES:STAKES, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
+    return {GOAL:finalGoal, actions:actions, actionBucket:actionBucket, socialBucket:socialBucket, combatType:combatType, rollNeeded:rollNeeded, rollReason:stakesDecision.Reason, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {
@@ -1478,7 +1490,7 @@ export function buildNarrationGuidance(resolution, handoffs, chaos, proactivity,
 export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
-        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
+        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'STAKES', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
@@ -1504,6 +1516,7 @@ export function trackerSummary(trackerUpdate) {
             `lastRapportGainActive:${value?.lastRapportGainActiveMs ?? -1}`,
             `intimacy:${value?.intimacyState?.boundary ?? 'NONE'}/${value?.intimacyState?.source ?? 'NONE'}`,
             `history:${value?.userHistory?.knowsUser ?? 'N'}/${value?.userHistory?.standing ?? 'neutral'}`,
+            `social:${socialResolutionMemorySummary(value?.socialResolutionMemory)}`,
             `race:${value?.raceProfile?.category ?? 'unknown'}/${value?.raceProfile?.fearProfile ?? 'normal'}`,
             `personality:${value?.personalitySummary ? 'Y' : 'N'}`,
             stats,
@@ -1603,6 +1616,7 @@ export function normalizeTrackerEntry(value) {
         userHistory: normalizeUserHistory(value?.userHistory),
         raceProfile: normalizeNpcRaceProfile(value?.raceProfile),
         personalitySummary: normalizePersonalitySummary(value?.personalitySummary),
+        socialResolutionMemory: normalizeSocialResolutionMemory(value?.socialResolutionMemory),
         slowBondEvidence: normalizeSlowBondEvidence(value?.slowBondEvidence),
         proactivityMemory: normalizeProactivityMemory(value?.proactivityMemory),
         currentCoreStats: value?.currentCoreStats ? normalizeCore(value.currentCoreStats, { PHY: 1, MND: 1, CHA: 1 }) : null,
@@ -1917,128 +1931,121 @@ export function statValue(core, stat) {
     return normalizeCore(core, { PHY: 1, MND: 1, CHA: 1 })[stat] || 1;
 }
 
-export function normalizeStat(value, fallback) {
-    return ['PHY', 'MND', 'CHA'].includes(value) ? value : fallback;
+export function normalizeActionBucket(value, rollNeeded = 'Y') {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    const map = {
+        none: 'None',
+        noroll: 'None',
+        social: 'Social',
+        combat: 'Combat',
+        challenge: 'Challenge',
+        physical: 'Challenge',
+        env: 'Challenge',
+        environment: 'Challenge',
+        environmental: 'Challenge',
+    };
+    const bucket = map[text] || 'None';
+    return yn(rollNeeded) === 'N' ? 'None' : bucket;
 }
 
-export function normalizeOppStat(value) {
-    return ['PHY', 'MND', 'CHA', 'ENV'].includes(value) ? value : 'ENV';
+export function normalizeSocialBucket(value, actionBucket = 'None') {
+    if (actionBucket !== 'Social') return 'None';
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    const map = {
+        none: 'None',
+        diplomacy: 'Diplomacy',
+        persuade: 'Diplomacy',
+        persuasion: 'Diplomacy',
+        negotiation: 'Diplomacy',
+        negotiate: 'Diplomacy',
+        bargain: 'Diplomacy',
+        bluff: 'Bluff',
+        deception: 'Bluff',
+        deceive: 'Bluff',
+        lie: 'Bluff',
+        lying: 'Bluff',
+        misleading: 'Bluff',
+        mislead: 'Bluff',
+        trick: 'Bluff',
+        intimidate: 'Intimidate',
+        intimidation: 'Intimidate',
+        threat: 'Intimidate',
+        threaten: 'Intimidate',
+        coercion: 'Intimidate',
+        coerce: 'Intimidate',
+        blackmail: 'Intimidate',
+    };
+    return map[text] && map[text] !== 'None' ? map[text] : 'Diplomacy';
 }
 
-export function normalizeMapStats(value) {
+export function normalizeCombatType(value, actionBucket = 'None') {
+    if (actionBucket !== 'Combat') return 'None';
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    const map = {
+        none: 'None',
+        mundane: 'Mundane',
+        physical: 'Mundane',
+        weapon: 'Mundane',
+        spellorsupernatural: 'SpellOrSupernatural',
+        supernatural: 'SpellOrSupernatural',
+        spell: 'SpellOrSupernatural',
+        magic: 'SpellOrSupernatural',
+        magical: 'SpellOrSupernatural',
+    };
+    return map[text] && map[text] !== 'None' ? map[text] : 'Mundane';
+}
+
+export function deterministicStatsForBucket(actionBucket, socialBucket = 'None', combatType = 'None') {
+    if (actionBucket === 'Social') {
+        return socialBucket === 'Diplomacy'
+            ? { userStat: 'CHA', oppStat: 'CHA' }
+            : { userStat: 'CHA', oppStat: 'MND' };
+    }
+    if (actionBucket === 'Combat') {
+        return combatType === 'SpellOrSupernatural'
+            ? { userStat: 'MND', oppStat: 'PHY' }
+            : { userStat: 'PHY', oppStat: 'PHY' };
+    }
+    if (actionBucket === 'Challenge') {
+        return { userStat: 'PHY', oppStat: 'ENV' };
+    }
+    return { userStat: null, oppStat: 'ENV' };
+}
+
+export function dispositionMemoryKey(disposition) {
+    const fin = normalizeDisposition(disposition);
+    return fin ? formatDisposition(fin) : 'UNINITIALIZED';
+}
+
+export function normalizeSocialResolutionMemory(value) {
+    const source = value && typeof value === 'object' ? value : {};
     return {
-        userStat: normalizeStat(value?.USER, 'PHY'),
-        oppStat: normalizeOppStat(value?.OPP),
+        Bluff: normalizeSocialResolutionMemoryEntry(source.Bluff ?? source.bluff),
+        Intimidate: normalizeSocialResolutionMemoryEntry(source.Intimidate ?? source.intimidate),
     };
 }
 
-export function applyMapStatsHardRules(semantic, goal, targets, mapStats, audit, options = {}) {
-    let { userStat, oppStat } = mapStats;
-    const evidence = [];
-
-    if (isBodyAffectingMagic(semantic, goal, targets)) {
-        if (userStat !== 'MND' || oppStat !== 'PHY') {
-            evidence.push({
-                hardRule: 'ResolutionEngine.mapStats: body-affecting magic against a living target is USER=MND and OPP=PHY',
-                from: { USER: userStat, OPP: oppStat },
-                to: { USER: 'MND', OPP: 'PHY' },
-            });
-        }
-        userStat = 'MND';
-        oppStat = 'PHY';
-    }
-
-    const socialRule = classifySocialMapStatsRule(semantic, targets);
-    if (socialRule) {
-        if (userStat !== 'CHA' || oppStat !== socialRule.oppStat) {
-            evidence.push({
-                hardRule: socialRule.hardRule,
-                from: { USER: userStat, OPP: oppStat },
-                to: { USER: 'CHA', OPP: socialRule.oppStat },
-            });
-        }
-        userStat = 'CHA';
-        oppStat = socialRule.oppStat;
-    }
-
-    const hasLivingOpposition = toRealArray(targets.OppTargets?.NPC).length > 0;
-    const hasEnvironmentalOpposition = toRealArray(targets.OppTargets?.ENV).length > 0;
-    if (!hasLivingOpposition && hasEnvironmentalOpposition && oppStat !== 'ENV') {
-        evidence.push({
-            hardRule: 'ResolutionEngine.mapStats: non-living environmental opposition means OPP=ENV only when no living opposing target exists',
-            from: { USER: userStat, OPP: oppStat },
-            to: { USER: userStat, OPP: 'ENV' },
-        });
-        oppStat = 'ENV';
-    }
-
-    if (evidence.length) {
-        audit.push(`2.7c.1 deterministicMapStatsReferee=${compact(evidence)}`);
-    }
-
-    return { userStat, oppStat };
+function normalizeSocialResolutionMemoryEntry(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const rawOutcome = String(source.outcome ?? source.Outcome ?? 'none').trim().toLowerCase();
+    const outcome = ['success', 'failure'].includes(rawOutcome) ? rawOutcome : 'none';
+    const resolved = source.resolved === 'Y' || source.resolved === true || outcome !== 'none' ? 'Y' : 'N';
+    const disposition = cleanTrackerScalar(source.disposition ?? source.Disposition ?? source.dispositionKey ?? source.DispositionKey);
+    const goal = cleanTrackerScalar(source.goal ?? source.Goal);
+    return {
+        resolved,
+        outcome: resolved === 'Y' ? outcome : 'none',
+        disposition: disposition || 'UNINITIALIZED',
+        goal: goal || '',
+    };
 }
 
-export function classifySocialMapStatsRule(semantic, targets) {
-    if (!firstReal(targets.OppTargets?.NPC)) return null;
-    if (bool(semantic.classifyHostilePhysicalIntent)) return null;
-    if (isBodyAffectingMagic(semantic, semantic.identifyGoal, targets)) return null;
-    if (isStakeBearingUntrustedClaimForMapStats(semantic?.claimCheck)) {
-        return {
-            oppStat: 'MND',
-            hardRule: 'ResolutionEngine.mapStats: stakes-bearing known-false or unsupported factual claim is USER=CHA and OPP=MND',
-        };
-    }
-    const source = [
-        semantic.identifyGoal,
-        semantic.identifyChallenge,
-        semantic.explicitMeans,
-    ].filter(Boolean).join(' ').toLowerCase();
-
-    const negative = /\b(bluff(?:s|ed|ing)?|lie|lying|lied|deceiv\w*|deception|trick(?:s|ed|ing)?|mislead\w*|intimidat\w*|coerc\w*|threat\w*|blackmail\w*|manipulat\w*|interrogat\w*|humiliat\w*|terroriz\w*|menac\w*|force(?:d)? submission|forced submission)\b/.test(source);
-    if (negative) {
-        return {
-            oppStat: 'MND',
-            hardRule: 'ResolutionEngine.mapStats: negative social opposition is USER=CHA and OPP=MND',
-        };
-    }
-
-    const positive = /\b(persuad\w*|persuasion|negotiat\w*|negotiation|diplomac\w*|diplomacy|bargain\w*|reassur\w*|reconciliation|reconcile\w*|good-faith|appeal\w*|convinc\w*|reason with|mediat\w*)\b/.test(source);
-    if (positive) {
-        return {
-            oppStat: 'CHA',
-            hardRule: 'ResolutionEngine.mapStats: positive social opposition is USER=CHA and OPP=CHA',
-        };
-    }
-
-    return null;
-}
-
-function isStakeBearingUntrustedClaimForMapStats(claimCheck) {
-    const source = claimCheck && typeof claimCheck === 'object' ? claimCheck : {};
-    const present = bool(source.present ?? source.Present);
-    const stakesImpact = bool(source.stakesImpact ?? source.StakesImpact);
-    const truthStatus = String(source.truthStatus ?? source.TruthStatus ?? '')
-        .trim()
-        .toLowerCase()
-        .replace(/[\s-]+/g, '_');
-    return present && stakesImpact && ['known_false', 'unsupported'].includes(truthStatus);
-}
-
-export function isBodyAffectingMagic(semantic, goal, targets) {
-    if (!firstReal(targets.OppTargets?.NPC) && !firstReal(targets.ActionTargets)) return false;
-    if (bool(semantic.classifyHostilePhysicalIntent)) return false;
-
-    const source = [
-        semantic.identifyGoal,
-        goal,
-        semantic.identifyChallenge,
-        semantic.explicitMeans,
-    ].filter(Boolean).join(' ').toLowerCase();
-
-    const hasMagic = /\b(magic|magical|spell|arcane|hex|curse|supernatural|enchant|enchantment|sorcery|power)\b/.test(source);
-    const affectsBody = /\b(paraly[sz]e|paralysis|poison|venom|blind|blindness|deafen|numb|sleep|pain|muscle|blood|breath|choke|disease|sicken|transmut|petrif|bind|bodily|body|immobiliz|lock|freeze|stun)\b/.test(source);
-    return hasMagic && affectsBody;
+function socialResolutionMemorySummary(value) {
+    const memory = normalizeSocialResolutionMemory(value);
+    return ['Bluff', 'Intimidate']
+        .filter(bucket => memory[bucket].resolved === 'Y')
+        .map(bucket => `${bucket}:${memory[bucket].outcome}@${memory[bucket].disposition}`)
+        .join('|') || 'none';
 }
 
 export function parseFinalState(value) {

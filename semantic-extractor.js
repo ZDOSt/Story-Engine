@@ -28,6 +28,9 @@ const ITEM_USE_SOURCES = Object.freeze(['none', 'gear', 'inventory', 'unavailabl
 const USER_KNOWLEDGE_TYPES = Object.freeze(['personalKnowledge', 'reputationKnowledge']);
 const USER_KNOWLEDGE_APPLICATION_EFFECTS = Object.freeze(['none', 'priorUserGoodRep', 'userBadRep', 'userFearRep', 'contextOnly']);
 const ENVIRONMENT_DIFFICULTY_TIERS = Object.freeze(['none', 'easy', 'average', 'hard', 'extreme']);
+const ACTION_BUCKETS = Object.freeze(['None', 'Social', 'Combat', 'Challenge']);
+const SOCIAL_BUCKETS = Object.freeze(['None', 'Diplomacy', 'Bluff', 'Intimidate']);
+const COMBAT_TYPES = Object.freeze(['None', 'Mundane', 'SpellOrSupernatural']);
 
 const DEFAULT_STAKES_DECISION = Object.freeze({
     materialStakes: false,
@@ -504,7 +507,7 @@ function buildSemanticToolPrompt(prompt) {
         `MANDATORY OUTPUT CONTRACT: Call the function tool ${SEMANTIC_TOOL_NAME} exactly once.`,
         'Do not output narration, prose, markdown, visible JSON, or a compact text ledger.',
         'Fill every required tool argument from the semantic/contextual engine outputs.',
-        'The tool argument paths mirror the engine function names: resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.mapStats = ResolutionEngine.mapStats, relationshipEngine[index].initPreset = RelationshipEngine.initPreset semantic tags, relationshipEngine[index] = RelationshipEngine(npc), and chaosSemantic = CHAOS_INTERRUPT.',
+        'The tool argument paths mirror the engine function names: resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.actionBucket = ResolutionEngine.actionBucket, relationshipEngine[index].initPreset = RelationshipEngine.initPreset semantic tags, relationshipEngine[index] = RelationshipEngine(npc), and chaosSemantic = CHAOS_INTERRUPT.',
         'Use empty arrays for no targets/obstacles/observers. Use "none" string values only for enum/string fields that require none.',
         'engineContext.trackerRelevantNPCs may be an empty array; the extension already has the canonical tracker snapshot locally.',
         'The compact ledger wording elsewhere in the prompt is the fallback representation of the same fields; for this request, the forced tool call is the only valid output.',
@@ -790,7 +793,7 @@ function buildSemanticPreflightSchema() {
             },
             rollRequired: {
                 type: 'boolean',
-                description: 'Y only when materialStakes=Y, newUnresolvedContest=Y, and preDecidedByDisposition=N. This must match hasStakes.',
+                description: 'Y only when materialStakes=Y, newUnresolvedContest=Y, and preDecidedByDisposition=N. This must match rollNeeded.',
             },
             reason: { type: 'string' },
         },
@@ -834,9 +837,12 @@ function buildSemanticPreflightSchema() {
                     'boundaryViolationExplicit',
                     'nonLethal',
                     'stakesDecision',
-                    'hasStakes',
+                    'rollNeeded',
+                    'rollReason',
+                    'actionBucket',
+                    'socialBucket',
+                    'combatType',
                     'actionCount',
-                    'mapStats',
                     'environmentDifficultyTier',
                     'classifyHostilePhysicalIntent',
                     'activeHostileThreat',
@@ -912,21 +918,31 @@ function buildSemanticPreflightSchema() {
                         description: 'Y only for explicitly nonlethal violence or contests: sparring, training, practice combat, fistfights, barehanded brawls, nonlethal grappling/restraint, capture-only attempts, or stated intent to avoid serious/fatal harm. N for weapons, improvised weapons, claws, teeth, horns, natural weapons, lethal magic, body-damaging supernatural effects, or uncertain cases.',
                     },
                     stakesDecision: stakesDecisionSchema,
-                    hasStakes: { type: 'boolean' },
-                    actionCount: stringListSchema,
-                    mapStats: {
-                        type: 'object',
-                        additionalProperties: false,
-                        required: ['USER', 'OPP'],
-                        properties: {
-                            USER: { type: 'string', enum: ['PHY', 'MND', 'CHA'] },
-                            OPP: { type: 'string', enum: ['PHY', 'MND', 'CHA', 'ENV'] },
-                        },
+                    rollNeeded: {
+                        type: 'boolean',
+                        description: 'Y only for fresh unresolved stakes requiring a roll. This must match stakesDecision.rollRequired.',
                     },
+                    rollReason: { type: 'string' },
+                    actionBucket: {
+                        type: 'string',
+                        enum: ACTION_BUCKETS,
+                        description: 'None, Social, Combat, or Challenge. Use None when rollNeeded=N.',
+                    },
+                    socialBucket: {
+                        type: 'string',
+                        enum: SOCIAL_BUCKETS,
+                        description: 'Diplomacy, Bluff, or Intimidate only when actionBucket=Social; otherwise None.',
+                    },
+                    combatType: {
+                        type: 'string',
+                        enum: COMBAT_TYPES,
+                        description: 'Mundane or SpellOrSupernatural only when actionBucket=Combat; otherwise None.',
+                    },
+                    actionCount: stringListSchema,
                     environmentDifficultyTier: {
                         type: 'string',
                         enum: ENVIRONMENT_DIFFICULTY_TIERS,
-                        description: 'Semantic environmental opposition tier only when mapStats.OPP=ENV and OppTargets.ENV has a real obstacle/hazard. Use easy/trivial, average, hard, or extreme; set none when OPP is not ENV or no ENV roll exists.',
+                        description: 'Semantic environmental opposition tier only when actionBucket=Challenge and OppTargets.ENV has a real obstacle/hazard. Use easy/trivial, average, hard, or extreme; set none for non-Challenge buckets or no ENV roll.',
                     },
                     classifyHostilePhysicalIntent: { type: 'boolean' },
                     activeHostileThreat: { type: 'boolean' },
@@ -1301,7 +1317,8 @@ const COMPACT_LEDGER_CONTRACT = [
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
     '- Use comma-separated names or (none) for lists. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest, speed contest, or another explicit stakes-bearing objective.',
-    '- ResolutionEngine.stakesDecision is the detailed roll gate. MaterialStakes=Y when success/failure could matter under DEF.STAKES before disposition continuity. NewUnresolvedContest=Y only for a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle. A failed negative social roll such as intimidation, coercion, bluffing, deception, manipulation, blackmail, or forced submission cannot be immediately retried in the current scene against the same target for the same goal; repeated wording, stronger insults, renewed threats, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. PreDecidedByDisposition=Y only when saved fear/terror, hostility/hatred, or persisted intimacy boundary already decides the relevant NPC reaction and the current input merely asks that state to express itself. RollRequired=Y only when MaterialStakes=Y, NewUnresolvedContest=Y, and PreDecidedByDisposition=N. ResolutionEngine.hasStakes must equal RollRequired.',
+    '- ResolutionEngine.stakesDecision is the detailed roll gate. MaterialStakes=Y when success/failure could matter under DEF.STAKES before disposition continuity. NewUnresolvedContest=Y only for a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle. A failed negative social roll such as intimidation, coercion, bluffing, deception, manipulation, blackmail, or forced submission cannot be immediately retried in the current scene against the same target for the same goal; repeated wording, stronger insults, renewed threats, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. PreDecidedByDisposition=Y only when saved fear/terror, hostility/hatred, or persisted intimacy boundary already decides the relevant NPC reaction and the current input merely asks that state to express itself. RollRequired=Y only when MaterialStakes=Y, NewUnresolvedContest=Y, and PreDecidedByDisposition=N. ResolutionEngine.rollNeeded must equal RollRequired. ResolutionEngine.rollReason must be the same short reason or a stricter concise summary.',
+    '- ResolutionEngine.actionBucket is the roll shape, not a stat choice. Use None when rollNeeded=N. Use Social only for fresh unresolved NPC-facing social pressure, with socialBucket=Diplomacy for good-faith persuasion/negotiation/reassurance, Bluff for deception/lying/misleading/material false claims, and Intimidate for threats/coercion/blackmail/fear-based demands. Use Combat for direct violence or harmful supernatural attacks; combatType=Mundane for bodily/weapon/natural-weapon/ordinary force, and SpellOrSupernatural for the primary attack being a spell, power, curse, elemental blast, psychic attack, or similar. Use Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. If not Social, socialBucket=None. If not Combat, combatType=None.',
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
     '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer lists.',
     '- If no living NPC is in those target/observer lists, output RelationshipEngine.count=0 and no RelationshipEngine[index] lines.',
@@ -1310,10 +1327,10 @@ const COMPACT_LEDGER_CONTRACT = [
     '- RelationshipEngine[index].romanceStyle is for B4 pre-relationship initiative only. Return nervous if explicit card/lore/context portrays this NPC as shy, reserved, guarded, restrained, formal, awkward, timid, emotionally cautious, or likely to show romantic interest through hesitation. Return flirt if explicit card/lore/context portrays this NPC as bold, outgoing, playful, teasing, direct, seductive, socially confident, or likely to show romantic interest through open flirtation. Return auto if unclear or mixed.',
     '- RelationshipEngine[index].checkThreshold override flags must use all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. CurrentInvitation=Y when this NPC clearly and directly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene, and has not withdrawn, refused, panicked, or been interrupted by danger. Mark CurrentInvitation=Y for irrefutable sexual invitation hints even when phrased as teasing questions, such as "I wonder how tight I would be for you. Want to find out?" Do not mark CurrentInvitation for ordinary flirting, suggestive banter, compliments, attraction, embarrassment, vague innuendo without an invitation, or a user-originated proposal the NPC has not accepted. Exploitation=Y when card/lore/context explicitly makes this NPC exploitable by {{user}} or the current situation: naive, easily led or persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, sheltered to an unsafe degree, or otherwise unable to safely judge/resist. Do not mark Exploitation for mere innocence, shyness, kindness, friendliness, attraction, low confidence, or normal inexperience without explicit vulnerability/suggestibility. Hedonist=Y only for explicitly sexually open, pleasure-seeking, casual, promiscuous, or eager intimacy context. Transactional=Y only for explicit willingness to exchange intimacy for money, goods, favors, protection, status, or services. Established=Y only for explicit prior/current intimate access with current or recent receptivity toward {{user}}, such as casual lovers, friends with benefits, an ongoing sexual arrangement, or explicit comfort/willingness with renewed intimacy. Do not mark Established for prior intimacy alone when current receptivity is absent, stale, unclear, refused, fearful, hostile, coerced, or boundary-limited. establishedRelationship remains its separate relationship-state mechanic.',
     '- RelationshipEngine[index].slowBondEvidence is scene-local semantic evidence for slow B3-to-B4 trust growth. Mark only categories explicitly shown in the latest scene/current immediate context. respectfulContact=welcome/respectful physical contact or physical help; cooperation=constructive cooperation toward a shared purpose; comfortInProximity=NPC remains or settles close without fear, duty, coercion, or forced circumstance; boundaryRespect={{user}} respects refusal, hesitation, privacy, space, limits, consent, or a stated boundary; sharedRoutine=repeated or mundane togetherness such as eating/traveling/working/resting/training/tending camp; playfulness=mutual light teasing, joking, banter, or relaxed warmth; teamwork=coordinated effort under pressure/danger/conflict/crisis; personalAttention=specific attention to NPC needs, preferences, wellbeing, vulnerability, history, comfort, or concerns. blockers include coercion, intimidation, betrayal, humiliation, unwanted intimacy pressure, boundary violation, unresolved harm, exploitation, active fear, active hostility, or trapped/dependent/powerless circumstances that make closeness unsafe to count.',
-    '- ResolutionEngine.userAbilityUse is semantic-only ability/spell detection. Compare the latest user input against active {{user}}/persona abilities and spells, including the # ABILITIES and # SPELLS character sheet sections, character persona, lore, or prompt stack. Mark Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Private delivery phrasing such as "meant only for X", "only X can hear", "whisper so only X hears", "send the words directly/private to X", or "speak into X alone" should match a persona ability/spell whose effect privately carries speech, sound, thought, or message to a target, even if the ability/spell name is not said. Mark Available=Y only if that attempted ability/spell exists in active {{user}} abilities or spells. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability/spell name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect to preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: abilities and spells can make fictional methods possible, but they never change hasStakes, actionCount, mapStats, rolls, bonuses, margins, landed actions, relationship state, injury severity, or outcome. If an available ability/spell delivers a threat, persuasion, attack, escape, healing, or other stakes-bearing goal, classify and roll the broader goal normally; do not roll the ability/spell separately. If no ability/spell attempt exists, output Attempted=N, Available=N, Used=N, and (none) for name, evidence, effect, and reason.',
+    '- ResolutionEngine.userAbilityUse is semantic-only ability/spell detection. Compare the latest user input against active {{user}}/persona abilities and spells, including the # ABILITIES and # SPELLS character sheet sections, character persona, lore, or prompt stack. Mark Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Private delivery phrasing such as "meant only for X", "only X can hear", "whisper so only X hears", "send the words directly/private to X", or "speak into X alone" should match a persona ability/spell whose effect privately carries speech, sound, thought, or message to a target, even if the ability/spell name is not said. Mark Available=Y only if that attempted ability/spell exists in active {{user}} abilities or spells. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability/spell name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect to preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: abilities and spells can make fictional methods possible, but they never change rollNeeded, actionCount, actionBucket, rolls, bonuses, margins, landed actions, relationship state, injury severity, or outcome. If an available ability/spell delivers a threat, persuasion, attack, escape, healing, or other stakes-bearing goal, classify and roll the broader goal normally; do not roll the ability/spell separately. Noncombat utility magic succeeds if available and does not create a roll by itself. If no ability/spell attempt exists, output Attempted=N, Available=N, Used=N, and (none) for name, evidence, effect, and reason.',
     '- ResolutionEngine.itemUse is strict semantic-only personal gear/inventory verification, not environmental object discovery. Mark Attempted=Y only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory. Personal possession signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or any equivalent claim that {{user}} already has the item. Mark Available=Y only if that exact attempted item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental or scene objects, including grabbing, picking up, finding, searching for, using, breaking, burning, throwing, or moving an object described or implied by the scene; those are normal narration/stakes/ENV context, not itemUse. Mark Attempted=N for body parts and natural weapons such as hands, fists, claws, fangs, teeth, horns, talons, tusks, tails, stingers, barbs, jaws, or similar anatomy; using them is normal bodily action/attack/stakes context, not gear or inventory verification. Do not infer item availability from setting likelihood. If no personal gear/inventory item attempt exists, output Attempted=N, Available=N, Source=none, and (none) for item, evidence, and reason.',
     '- ResolutionEngine.claimCheck is a narrow stakes-bearing claim check, not a truth engine. Mark Present=Y only when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Claim examples include identity/status/authority, affiliation, ownership/access, possession/resources, orders/authorization, or claimed events/facts used as leverage. TruthStatus: known_true only if explicitly supported; known_false only if explicitly contradicted; unsupported if material but not established; unknown if context cannot judge; none when no relevant claim. NPCAccess describes how much the target NPC can naturally verify or know the claim: direct, partial, none, unknown. StakesImpact=Y only when belief/disbelief matters under DEF.STAKES. Do not mark Present for casual flavor, jokes, harmless small talk, opinions, compliments, vague emotional color, or claims that do not affect NPC stakes.',
-    '- ResolutionEngine.environmentDifficultyTier applies only when mapStats.OPP=ENV and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure. Allowed values: none, easy, average, hard, extreme. easy means easy/trivial/routine/weak/lightly obstructed; average means a meaningful obstacle a capable person could plausibly fail; hard means a serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk; extreme means exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition. Classify from concrete scene facts: material, scale, complexity, danger, time pressure, visibility, footing, weather, magical strength, tool access, distance, and whether the environment is worsening. Do not raise difficulty because the story moment feels dramatic. Do not lower difficulty because {{user}} has high stats. If there are no real stakes, set hasStakes=N instead of using an ENV tier. If mapStats.OPP is not ENV, set environmentDifficultyTier=none. Deterministic code maps this tier to the numeric ENV bonus.',
+    '- ResolutionEngine.environmentDifficultyTier applies only when actionBucket=Challenge and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure. Allowed values: none, easy, average, hard, extreme. easy means easy/trivial/routine/weak/lightly obstructed; average means a meaningful obstacle a capable person could plausibly fail; hard means a serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk; extreme means exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition. Classify from concrete scene facts: material, scale, complexity, danger, time pressure, visibility, footing, weather, magical strength, tool access, distance, and whether the environment is worsening. Do not raise difficulty because the story moment feels dramatic. Do not lower difficulty because {{user}} has high stats. If there are no real stakes, set rollNeeded=N instead of using an ENV tier. If actionBucket is not Challenge, set environmentDifficultyTier=none. Deterministic code maps this tier to the numeric ENV bonus.',
     '- ResolutionEngine.identifyTargets.hostilesInScene.NPC is scene-level: list ALL established, present, living hostile entities currently threatening {{user}}, companions, protected NPCs, bystanders, or the scene generally. Identify this broad hostile pool before choosing OppTargets.NPC. Establishment must come from assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create a hostile from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated entities no longer posing danger, and non-living hazards/obstacles.',
     '- ResolutionEngine.identifyTargets.OppTargets.NPC is narrower: list only living entities directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}\'s current action/challenge. Do not put every enemy in OppTargets.NPC just because they are hostile; use hostilesInScene.NPC for the broader hostile pool.',
     '- ResolutionEngine.activeHostileThreat is strict. Return Y only if the current scene contains an immediate hostile danger from an NPC/entity: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster/hostile creature engagement, armed standoff, capture attempt, or imminent physical/supernatural harm. Return N for negotiation, refusal, bargaining, argument, social resistance, authority denial, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger.',
@@ -1383,10 +1400,12 @@ ResolutionEngine.stakesDecision.NewUnresolvedContest=N
 ResolutionEngine.stakesDecision.PreDecidedByDisposition=N
 ResolutionEngine.stakesDecision.RollRequired=N
 ResolutionEngine.stakesDecision.Reason=(none)
-ResolutionEngine.hasStakes=N
+ResolutionEngine.rollNeeded=N
+ResolutionEngine.rollReason=(none)
+ResolutionEngine.actionBucket=None
+ResolutionEngine.socialBucket=None
+ResolutionEngine.combatType=None
 ResolutionEngine.actionCount=a1
-ResolutionEngine.mapStats.USER=PHY
-ResolutionEngine.mapStats.OPP=ENV
 ResolutionEngine.environmentDifficultyTier=none
 ResolutionEngine.classifyHostilePhysicalIntent=N
 ResolutionEngine.activeHostileThreat=N
@@ -1578,10 +1597,10 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         (proxyAction ? `The latest user message used double square brackets for proxy action mode. Treat the inner instruction as {{user}}'s actual attempted action for semantic classification: "${clip(proxyAction, 800)}". Ignore the wrapper brackets themselves. ` : '') +
         'Classify only contextual/semantic predicates needed by the engines. Use EXPLICIT-ONLY and FIRST-YES-WINS from the engine reference. ' +
         'The semantic/contextual fields you return are authoritative; the deterministic runner should not reinterpret them. ' +
-        'stakesDecision is contextual and FINAL. hasStakes is the legacy roll switch and must equal stakesDecision.rollRequired. Return rollRequired=true only for NEW unresolved stakes: materialStakes=true, newUnresolvedContest=true, and preDecidedByDisposition=false. Return rollRequired=false when the only relevant NPC reaction is already settled by saved fear/terror, hostility/hatred, or persisted intimacy boundary; still return true for separate combat, pursuit, restraint, theft, bargaining, deception, access, resources, secrets, environmental obstacles, or new material pressure. A resolved negative social attempt cannot be immediately retried in the current scene against the same target for the same goal: do not treat repeated threats, stronger insults, rephrased bluffs, renewed coercion, or dramatic display after refusal/failure as a fresh social contest. ' +
+        'stakesDecision is contextual and FINAL. rollNeeded must equal stakesDecision.rollRequired. Return rollRequired=true only for NEW unresolved stakes: materialStakes=true, newUnresolvedContest=true, and preDecidedByDisposition=false. Return rollRequired=false when the only relevant NPC reaction is already settled by saved fear/terror, hostility/hatred, or persisted intimacy boundary; still return true for separate combat, pursuit, restraint, theft, bargaining, deception, access, resources, secrets, environmental obstacles, or new material pressure. A resolved negative social attempt cannot be immediately retried in the current scene against the same target for the same goal: do not treat repeated threats, stronger insults, rephrased bluffs, renewed coercion, or dramatic display after refusal/failure as a fresh social contest. ' +
         'Living/non-living target separation is mandatory: hostilesInScene.NPC, ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, RelationshipEngine NPC entries, and NPCInScene candidates are living entities only. OppTargets.ENV is only for a non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure that directly obstructs or resists {{user}}\'s current stakes-bearing action. A non-living object merely being acted on, damaged, taken, read, or moved is not a scene target by itself. PowerActors is strategic-only and can contain organizations/groups/institutions or potential power figures with credible means to affect {{user}} beyond acting alone in the moment; it never creates immediate rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by itself. ' +
         'Execute target identification in this order: first identify hostilesInScene.NPC as ALL established, present, living hostile entities in scene; then identify which targets, if any, directly oppose {{user}}\'s current action as OppTargets.NPC. hostilesInScene.NPC is a broad hostile pool and does not itself create relationship changes, rolls, NPCInScene entries, or OppTargets.NPC. A hostile is established only if present in assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create hostiles from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated enemies no longer posing danger, and non-living hazards/obstacles. Companion/ally commands are tactical requests only: they may address the companion as an ActionTarget and may name an established hostile for later companion crisis targeting, but do not treat the command as {{user}} making the companion act, do not force a companion attack, and do not create a user-resolved success/failure roll for companion obedience. If several hostiles exist and no specific hostile is named, do not guess. ' +
-        'OppTargets.NPC is only for stakes-bearing living opposition/resistance/contest against {{user}}\'s current action/challenge: directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}. If hasStakes=false, OppTargets.NPC must be ["(none)"]. If a living ActionTarget meaningfully resists/opposes a stakes-bearing action, that same NPC may also appear in OppTargets.NPC. Do not put every enemy in OppTargets.NPC merely because they are hostile; use hostilesInScene.NPC for the broader hostile pool. ' +
+        'OppTargets.NPC is only for rollNeeded=true living opposition/resistance/contest against {{user}}\'s current action/challenge: directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}. If rollNeeded=false, OppTargets.NPC must be ["(none)"]. If a living ActionTarget meaningfully resists/opposes a rollNeeded action, that same NPC may also appear in OppTargets.NPC. Do not put every enemy in OppTargets.NPC merely because they are hostile; use hostilesInScene.NPC for the broader hostile pool. ' +
         'BenefitedObservers and HarmedObservers are living entities present in scene who are NOT already in ActionTargets or OppTargets.NPC. Do not put a direct target or opposing NPC in observer lists. ' +
         'Identify ResolutionEngine.identifyTargets.PowerActors during target discovery: include any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Assess semantically, not by keywords or titles. A living NPC can appear in HarmedObservers/BenefitedObservers/ActionTargets/OppTargets.NPC for personal B/F/H and also appear in PowerActors for hidden strategic consequences. PowerActors never replace normal target/observer placement. ' +
         'Create one relationshipEngine entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. This coverage is mandatory even when that same NPC is also in PowerActors or assessed as a PowerActorEnmity power actor. PowerActors and PowerActorEnmity never replace RelationshipEngine. Do not create entries for bystanders, hostilesInScene-only NPCs, PowerActors-only entities, or inferred scene participants outside those target/observer lists. ' +
@@ -1593,7 +1612,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Detect personal gear/inventory item attempts before target/risk classification. Fill ResolutionEngine.itemUse only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory. Personal possession signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or equivalent wording that claims {{user}} already has the item. Mark Available=Y only when that exact attempted item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental or scene objects, including grabbing, picking up, finding, searching for, using, breaking, burning, throwing, or moving an object described or implied by the scene; those actions remain normal narration/stakes/ENV context, not itemUse. Do not infer item availability from setting likelihood. If Available=N, the personal item effect must not be treated as completed. ' +
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, stakesDecision, hasStakes, actionCount, mapStats, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, stakesDecision, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
         'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, or rewrite stored knowledge in preflight. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
@@ -1612,7 +1631,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Tie rule override: exact roll ties are cinematic stalemates/struggles, not defender wins; include stakeChangeByOutcome.struggle accordingly. ' +
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
         'itemUse is only for personal gear/inventory objects; body parts and natural weapons such as claws, fangs, teeth, horns, talons, tusks, tails, stingers, barbs, or jaws are bodily actions/attacks, not itemUse, not inventory, and not equipment. ' +
-        'Important classification reminders: Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/contact is not a special roll category and does not create stakes by itself. intimacyAdvanceExplicit is strict permission/boundary classification for actual intimate escalation only: mark it true for explicit kissing, sexual touch, undressing toward intimacy, asking to sleep together/have sex, or accepting a prior explicit NPC intimacy invitation; keep it false for flirting, teasing, vague innuendo, compliments, declarations of love, dates, hand-holding, ordinary affection, or "what did you have in mind" style banter. boundaryViolationExplicit is the romance/boundary trigger for mechanics: mark it true only for clear coercion, threats, force, unwanted contact/restraint after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no. User intent is explicit-only: identifyGoal and identifyChallenge must use only the latest user-declared action, request, target, and explicit objective; do not infer unstated goals from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. Do not carry forward a prior social goal as the current goal after it already failed or resolved; post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath/escalation unless the latest input explicitly creates a new non-social contest or a materially different tactic. classifyHostilePhysicalIntent is true only for direct bodily aggression/control against a living entity; object/space/departure/body-adjacent contests without bodily harm are classifyPhysicalBoundaryPressure, not combat. OppTargets.NPC requires a direct stakes-bearing target, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. Use stakesDecision for the roll gate: materialStakes records whether DEF.STAKES could matter, newUnresolvedContest records whether the latest input creates fresh unresolved stakes, preDecidedByDisposition records whether saved fear/terror, hostility/hatred, or persisted intimacy already decides the relevant reaction, and hasStakes must equal rollRequired. Do not roll the same settled disposition reaction again, and do not immediately retry a failed negative social attempt against the same target for the same goal, but do roll separate combat, pursuit, restraint, theft, bargaining, new deception, access, resources, secrets, environmental obstacles, or new leverage. For mapStats, map the stat from the final goal or explicit challenge that carries new unresolved stakes, not incidental gestures, flavor, delivery method, or setup. For each living NPC, mark stakeChangeByOutcome for each possible outcome strictly by DEF.STAKES: benefit only if that outcome significantly and concretely improves their stakes; harm if it materially worsens their stakes; otherwise none. Do not mark benefit for compliments, flirting, mood improvement, politeness, ordinary conversation, user self-advancement, successful negotiation for the user, choosing not to harm the NPC, failing to harm the NPC, de-escalation without a concrete NPC gain, or the NPC merely surviving/remaining safe.\n\n' +
+        'Important classification reminders: Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/contact is not a special roll category and does not create stakes by itself. intimacyAdvanceExplicit is strict permission/boundary classification for actual intimate escalation only: mark it true for explicit kissing, sexual touch, undressing toward intimacy, asking to sleep together/have sex, or accepting a prior explicit NPC intimacy invitation; keep it false for flirting, teasing, vague innuendo, compliments, declarations of love, dates, hand-holding, ordinary affection, or "what did you have in mind" style banter. boundaryViolationExplicit is the romance/boundary trigger for mechanics: mark it true only for clear coercion, threats, force, unwanted contact/restraint after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no. User intent is explicit-only: identifyGoal and identifyChallenge must use only the latest user-declared action, request, target, and explicit objective; do not infer unstated goals from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. Do not carry forward a prior social goal as the current goal after it already failed or resolved; post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath/escalation unless the latest input explicitly creates a new non-social contest or a materially different tactic. classifyHostilePhysicalIntent is true only for direct bodily aggression/control against a living entity; object/space/departure/body-adjacent contests without bodily harm are classifyPhysicalBoundaryPressure, not combat. OppTargets.NPC requires a direct rollNeeded target, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. Use stakesDecision for the roll gate: materialStakes records whether DEF.STAKES could matter, newUnresolvedContest records whether the latest input creates fresh unresolved stakes, preDecidedByDisposition records whether saved fear/terror, hostility/hatred, or persisted intimacy already decides the relevant reaction, and rollNeeded must equal rollRequired. Do not roll the same settled disposition reaction again, and do not immediately retry a failed negative social attempt against the same target for the same goal, but do roll separate combat, pursuit, restraint, theft, bargaining, new deception, access, resources, secrets, environmental obstacles, or new leverage. actionBucket is classification only: Social/Diplomacy for good-faith persuasion or negotiation, Social/Bluff for deception or material false claims, Social/Intimidate for threats/coercion/fear demands, Combat/Mundane for bodily/weapon/natural-weapon attacks, Combat/SpellOrSupernatural for primary spell/power attacks, Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. Do not choose stats, dice, bonuses, margins, or outcomes. For each living NPC, mark stakeChangeByOutcome for each possible outcome strictly by DEF.STAKES: benefit only if that outcome significantly and concretely improves their stakes; harm if it materially worsens their stakes; otherwise none. Do not mark benefit for compliments, flirting, mood improvement, politeness, ordinary conversation, user self-advancement, successful negotiation for the user, choosing not to harm the NPC, failing to harm the NPC, de-escalation without a concrete NPC gain, or the NPC merely surviving/remaining safe.\n\n' +
         COMPACT_LEDGER_CONTRACT;
 }
 
@@ -1860,11 +1879,13 @@ function validateRawLedgerContract(ledger, raw) {
     if (typeof ledger?.resolutionEngine?.stakesDecision?.preDecidedByDisposition !== 'boolean') missing.push('resolutionEngine.stakesDecision.preDecidedByDisposition:boolean');
     if (typeof ledger?.resolutionEngine?.stakesDecision?.rollRequired !== 'boolean') missing.push('resolutionEngine.stakesDecision.rollRequired:boolean');
     if (!ledger?.resolutionEngine?.stakesDecision?.reason) missing.push('resolutionEngine.stakesDecision.reason');
-    if (typeof ledger?.resolutionEngine?.hasStakes !== 'boolean') missing.push('resolutionEngine.hasStakes:boolean');
+    if (typeof ledger?.resolutionEngine?.rollNeeded !== 'boolean') missing.push('resolutionEngine.rollNeeded:boolean');
+    if (!ledger?.resolutionEngine?.rollReason) missing.push('resolutionEngine.rollReason');
+    if (!ACTION_BUCKETS.includes(ledger?.resolutionEngine?.actionBucket)) missing.push('resolutionEngine.actionBucket');
+    if (!SOCIAL_BUCKETS.includes(ledger?.resolutionEngine?.socialBucket)) missing.push('resolutionEngine.socialBucket');
+    if (!COMBAT_TYPES.includes(ledger?.resolutionEngine?.combatType)) missing.push('resolutionEngine.combatType');
     if (typeof ledger?.resolutionEngine?.nonLethal !== 'boolean') missing.push('resolutionEngine.nonLethal:boolean');
     if (!Array.isArray(ledger?.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
-    if (!ledger?.resolutionEngine?.mapStats?.USER) missing.push('resolutionEngine.mapStats.USER');
-    if (!ledger?.resolutionEngine?.mapStats?.OPP) missing.push('resolutionEngine.mapStats.OPP');
     if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger?.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (typeof ledger?.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');
     if (typeof ledger?.resolutionEngine?.activeHostileThreat !== 'boolean') missing.push('resolutionEngine.activeHostileThreat:boolean');
@@ -1968,10 +1989,12 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.stakesDecision.PreDecidedByDisposition',
         'ResolutionEngine.stakesDecision.RollRequired',
         'ResolutionEngine.stakesDecision.Reason',
-        'ResolutionEngine.hasStakes',
+        'ResolutionEngine.rollNeeded',
+        'ResolutionEngine.rollReason',
+        'ResolutionEngine.actionBucket',
+        'ResolutionEngine.socialBucket',
+        'ResolutionEngine.combatType',
         'ResolutionEngine.actionCount',
-        'ResolutionEngine.mapStats.USER',
-        'ResolutionEngine.mapStats.OPP',
         'ResolutionEngine.environmentDifficultyTier',
         'ResolutionEngine.classifyHostilePhysicalIntent',
         'ResolutionEngine.activeHostileThreat',
@@ -2240,6 +2263,11 @@ function parseCompactLedger(text, trackerSnapshot) {
         });
     }
 
+    const rollNeeded = readBoolean(fields, 'ResolutionEngine.rollNeeded', false);
+    const actionBucket = normalizeActionBucket(fields.get('ResolutionEngine.actionBucket'), rollNeeded);
+    const socialBucket = normalizeSocialBucket(fields.get('ResolutionEngine.socialBucket'), actionBucket);
+    const combatType = normalizeCombatType(fields.get('ResolutionEngine.combatType'), actionBucket);
+
     const resolutionEngine = {
         identifyGoal: cleanScalar(fields.get('ResolutionEngine.identifyGoal')) || 'Normal_Interaction',
         identifyChallenge: cleanScalar(fields.get('ResolutionEngine.identifyChallenge')) || cleanScalar(fields.get('ResolutionEngine.identifyGoal')) || 'Normal_Interaction',
@@ -2294,15 +2322,15 @@ function parseCompactLedger(text, trackerSnapshot) {
             rollRequired: readBoolean(fields, 'ResolutionEngine.stakesDecision.RollRequired', false),
             reason: cleanScalar(fields.get('ResolutionEngine.stakesDecision.Reason')) || '(none)',
         }),
-        hasStakes: readBoolean(fields, 'ResolutionEngine.hasStakes', false),
+        rollNeeded,
+        rollReason: cleanScalar(fields.get('ResolutionEngine.rollReason')) || '(none)',
+        actionBucket,
+        socialBucket,
+        combatType,
         actionCount: readList(fields, 'ResolutionEngine.actionCount', ['a1']),
-        mapStats: {
-            USER: normalizeUserStat(fields.get('ResolutionEngine.mapStats.USER')),
-            OPP: normalizeOppStat(fields.get('ResolutionEngine.mapStats.OPP')),
-        },
         environmentDifficultyTier: normalizeEnvironmentDifficultyTier(
             fields.get('ResolutionEngine.environmentDifficultyTier') ?? fields.get('ResolutionEngine.environmentDifficulty'),
-            fields.get('ResolutionEngine.mapStats.OPP'),
+            fields.get('ResolutionEngine.actionBucket'),
         ),
         classifyHostilePhysicalIntent: readBoolean(fields, 'ResolutionEngine.classifyHostilePhysicalIntent', false),
         activeHostileThreat: readBoolean(fields, 'ResolutionEngine.activeHostileThreat', false),
@@ -2311,7 +2339,7 @@ function parseCompactLedger(text, trackerSnapshot) {
     };
     resolutionEngine.environmentDifficulty = environmentDifficultyFromTier(
         resolutionEngine.environmentDifficultyTier,
-        resolutionEngine.mapStats.OPP,
+        resolutionEngine.actionBucket,
     );
     const relationshipRepair = repairRelationshipCoverage(resolutionEngine, relationshipEngine, 'compact_ledger_parse');
 
@@ -3048,36 +3076,52 @@ function normalizeMainStat(value) {
     return map[text] || 'none';
 }
 
-function normalizeUserStat(value) {
-    const text = cleanScalar(value).toUpperCase();
-    return ['PHY', 'MND', 'CHA'].includes(text) ? text : 'PHY';
+function normalizeActionBucket(value, rollNeeded = true) {
+    if (!toBoolean(rollNeeded, false)) return 'None';
+    const text = cleanScalar(value).toLowerCase().replace(/[\s_-]+/g, '');
+    if (text === 'social') return 'Social';
+    if (text === 'combat') return 'Combat';
+    if (['challenge', 'physical', 'environment', 'environmental', 'env'].includes(text)) return 'Challenge';
+    return 'None';
 }
 
-function normalizeOppStat(value) {
-    const text = cleanScalar(value).toUpperCase();
-    return ['PHY', 'MND', 'CHA', 'ENV'].includes(text) ? text : 'ENV';
+function normalizeSocialBucket(value, actionBucket = 'None') {
+    if (actionBucket !== 'Social') return 'None';
+    const text = cleanScalar(value).toLowerCase().replace(/[\s_-]+/g, '');
+    if (['diplomacy', 'persuasion', 'persuade', 'negotiate', 'negotiation', 'reassure', 'reassurance'].includes(text)) return 'Diplomacy';
+    if (['bluff', 'deception', 'deceive', 'lie', 'lying', 'mislead', 'trick'].includes(text)) return 'Bluff';
+    if (['intimidate', 'intimidation', 'threat', 'threaten', 'coerce', 'coercion', 'blackmail'].includes(text)) return 'Intimidate';
+    return 'None';
 }
 
-function normalizeEnvironmentDifficulty(value, oppStat = 'ENV') {
-    if (normalizeOppStat(oppStat) !== 'ENV') return 0;
+function normalizeCombatType(value, actionBucket = 'None') {
+    if (actionBucket !== 'Combat') return 'None';
+    const text = cleanScalar(value).toLowerCase().replace(/[\s_-]+/g, '');
+    if (['spellorsupernatural', 'spell', 'supernatural', 'magic', 'magical', 'power', 'ability'].includes(text)) return 'SpellOrSupernatural';
+    if (['mundane', 'physical', 'weapon', 'bodily', 'naturalweapon', 'naturalweapons'].includes(text)) return 'Mundane';
+    return 'Mundane';
+}
+
+function normalizeEnvironmentDifficulty(value, actionBucket = 'Challenge') {
+    if (actionBucket !== 'Challenge') return 0;
     const number = Number(cleanScalar(value));
     return [0, 4, 8, 12].includes(number) ? number : 0;
 }
 
-function normalizeEnvironmentDifficultyTier(value, oppStat = 'ENV') {
-    if (normalizeOppStat(oppStat) !== 'ENV') return 'none';
+function normalizeEnvironmentDifficultyTier(value, actionBucket = 'Challenge') {
+    if (actionBucket !== 'Challenge') return 'none';
     const text = cleanScalar(value).toLowerCase();
     if (ENVIRONMENT_DIFFICULTY_TIERS.includes(text)) return text;
-    const legacy = normalizeEnvironmentDifficulty(value, 'ENV');
+    const legacy = normalizeEnvironmentDifficulty(value, 'Challenge');
     if (legacy >= 12) return 'extreme';
     if (legacy >= 8) return 'hard';
     if (legacy >= 4) return 'average';
     return 'none';
 }
 
-function environmentDifficultyFromTier(value, oppStat = 'ENV') {
-    if (normalizeOppStat(oppStat) !== 'ENV') return 0;
-    switch (normalizeEnvironmentDifficultyTier(value, 'ENV')) {
+function environmentDifficultyFromTier(value, actionBucket = 'Challenge') {
+    if (actionBucket !== 'Challenge') return 0;
+    switch (normalizeEnvironmentDifficultyTier(value, 'Challenge')) {
         case 'average': return 4;
         case 'hard': return 8;
         case 'extreme': return 12;
@@ -3238,29 +3282,32 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.identifyTargets.HarmedObservers = readPlainArray(ledger.resolutionEngine.identifyTargets.HarmedObservers);
     ledger.resolutionEngine.identifyTargets.PowerActors = readPlainArray(ledger.resolutionEngine.identifyTargets.PowerActors);
     ledger.resolutionEngine.actionCount = normalizeActionMarkers(ledger.resolutionEngine.actionCount);
-    ledger.resolutionEngine.mapStats = ledger.resolutionEngine.mapStats || {};
-    ledger.resolutionEngine.mapStats.USER = normalizeUserStat(ledger.resolutionEngine.mapStats.USER);
-    ledger.resolutionEngine.mapStats.OPP = normalizeOppStat(ledger.resolutionEngine.mapStats.OPP);
-    ledger.resolutionEngine.environmentDifficultyTier = normalizeEnvironmentDifficultyTier(
-        ledger.resolutionEngine.environmentDifficultyTier ?? ledger.resolutionEngine.environmentDifficulty,
-        ledger.resolutionEngine.mapStats.OPP,
-    );
-    ledger.resolutionEngine.environmentDifficulty = environmentDifficultyFromTier(
-        ledger.resolutionEngine.environmentDifficultyTier,
-        ledger.resolutionEngine.mapStats.OPP,
-    );
     ledger.resolutionEngine.userAbilityUse = normalizeUserAbilityUse(ledger.resolutionEngine.userAbilityUse);
     ledger.resolutionEngine.itemUse = normalizeItemUse(ledger.resolutionEngine.itemUse);
     ledger.resolutionEngine.claimCheck = normalizeClaimCheck(ledger.resolutionEngine.claimCheck);
-    const legacyHasStakes = toBoolean(ledger.resolutionEngine.hasStakes, false);
-    ledger.resolutionEngine.stakesDecision = normalizeStakesDecision(ledger.resolutionEngine.stakesDecision, legacyHasStakes);
-    ledger.resolutionEngine.hasStakes = ledger.resolutionEngine.stakesDecision.rollRequired;
+    const fallbackRollNeeded = toBoolean(ledger.resolutionEngine.rollNeeded, false);
+    ledger.resolutionEngine.stakesDecision = normalizeStakesDecision(ledger.resolutionEngine.stakesDecision, fallbackRollNeeded);
+    ledger.resolutionEngine.rollNeeded = ledger.resolutionEngine.stakesDecision.rollRequired;
+    ledger.resolutionEngine.rollReason = cleanScalar(ledger.resolutionEngine.rollReason) || ledger.resolutionEngine.stakesDecision.reason || '(none)';
+    ledger.resolutionEngine.actionBucket = normalizeActionBucket(ledger.resolutionEngine.actionBucket, ledger.resolutionEngine.rollNeeded);
+    ledger.resolutionEngine.socialBucket = normalizeSocialBucket(ledger.resolutionEngine.socialBucket, ledger.resolutionEngine.actionBucket);
+    ledger.resolutionEngine.combatType = normalizeCombatType(ledger.resolutionEngine.combatType, ledger.resolutionEngine.actionBucket);
+    ledger.resolutionEngine.environmentDifficultyTier = normalizeEnvironmentDifficultyTier(
+        ledger.resolutionEngine.environmentDifficultyTier ?? ledger.resolutionEngine.environmentDifficulty,
+        ledger.resolutionEngine.actionBucket,
+    );
+    ledger.resolutionEngine.environmentDifficulty = environmentDifficultyFromTier(
+        ledger.resolutionEngine.environmentDifficultyTier,
+        ledger.resolutionEngine.actionBucket,
+    );
     ledger.resolutionEngine.intimacyAdvanceExplicit = toBoolean(ledger.resolutionEngine.intimacyAdvanceExplicit, false);
     ledger.resolutionEngine.boundaryViolationExplicit = toBoolean(ledger.resolutionEngine.boundaryViolationExplicit, false);
     ledger.resolutionEngine.nonLethal = toBoolean(ledger.resolutionEngine.nonLethal, false);
     ledger.resolutionEngine.classifyHostilePhysicalIntent = toBoolean(ledger.resolutionEngine.classifyHostilePhysicalIntent, false);
     ledger.resolutionEngine.activeHostileThreat = toBoolean(ledger.resolutionEngine.activeHostileThreat, false);
     ledger.resolutionEngine.classifyPhysicalBoundaryPressure = toBoolean(ledger.resolutionEngine.classifyPhysicalBoundaryPressure, false);
+    delete ledger.resolutionEngine.hasStakes;
+    delete ledger.resolutionEngine.mapStats;
     delete ledger.resolutionEngine.hostilePhysicalIntent;
     delete ledger.resolutionEngine.primaryOppTarget;
     delete ledger.resolutionEngine.primaryOpposition;
@@ -3777,12 +3824,14 @@ function validateNormalizedLedger(ledger, raw) {
     if (typeof ledger.resolutionEngine?.stakesDecision?.preDecidedByDisposition !== 'boolean') missing.push('resolutionEngine.stakesDecision.preDecidedByDisposition:boolean');
     if (typeof ledger.resolutionEngine?.stakesDecision?.rollRequired !== 'boolean') missing.push('resolutionEngine.stakesDecision.rollRequired:boolean');
     if (!ledger.resolutionEngine?.stakesDecision?.reason) missing.push('resolutionEngine.stakesDecision.reason');
-    if (typeof ledger.resolutionEngine?.hasStakes !== 'boolean') missing.push('resolutionEngine.hasStakes:boolean');
+    if (typeof ledger.resolutionEngine?.rollNeeded !== 'boolean') missing.push('resolutionEngine.rollNeeded:boolean');
+    if (!ledger.resolutionEngine?.rollReason) missing.push('resolutionEngine.rollReason');
+    if (!ACTION_BUCKETS.includes(ledger.resolutionEngine?.actionBucket)) missing.push('resolutionEngine.actionBucket');
+    if (!SOCIAL_BUCKETS.includes(ledger.resolutionEngine?.socialBucket)) missing.push('resolutionEngine.socialBucket');
+    if (!COMBAT_TYPES.includes(ledger.resolutionEngine?.combatType)) missing.push('resolutionEngine.combatType');
     if (typeof ledger.resolutionEngine?.intimacyAdvanceExplicit !== 'boolean') missing.push('resolutionEngine.intimacyAdvanceExplicit:boolean');
     if (typeof ledger.resolutionEngine?.boundaryViolationExplicit !== 'boolean') missing.push('resolutionEngine.boundaryViolationExplicit:boolean');
     if (!Array.isArray(ledger.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
-    if (!ledger.resolutionEngine?.mapStats?.USER) missing.push('resolutionEngine.mapStats.USER');
-    if (!ledger.resolutionEngine?.mapStats?.OPP) missing.push('resolutionEngine.mapStats.OPP');
     if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (![0, 4, 8, 12].includes(ledger.resolutionEngine?.environmentDifficulty)) missing.push('resolutionEngine.environmentDifficulty');
     if (typeof ledger.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');
