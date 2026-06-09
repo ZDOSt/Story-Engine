@@ -5799,6 +5799,16 @@ function getBeginningAdventureStartPrompt(context = getContext(), type = '') {
     return String(root.adventureStartPrompt || '').trim();
 }
 
+function isBeginningAdventureIntroGeneration(pendingGeneration = state.pendingGeneration, context = getContext()) {
+    if (!pendingGeneration) return false;
+    const type = String(pendingGeneration.type || 'normal');
+    if (!['normal', 'swipe', 'regenerate'].includes(type)) return false;
+    if (hasVisibleUserMessage(context)) return false;
+    const root = getPlayerRoot(context);
+    if (!root?.adventureStarted) return false;
+    return Boolean(String(pendingGeneration.adventureStartPrompt || root.adventureStartPrompt || '').trim());
+}
+
 function detectStructuredUserInputMode(text) {
     const trimmed = String(text ?? '').trim();
     if (!trimmed) return { mode: 'normal', innerText: '' };
@@ -6795,6 +6805,17 @@ async function handleChatCompletionPromptReady(eventData) {
             state.lastNarratorHandoff = '';
             state.pendingRun = null;
             markNextNarratorRequestThinkingDisabled();
+            clearAllProgress();
+            return;
+        }
+
+        if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
+            state.lastNarratorHandoff = '';
+            state.pendingRun = null;
+            sanitizeFinalPromptHistory(eventData.chat);
+            appendAdventureStartPromptToNarratorPrompt(eventData.chat, state.pendingGeneration.adventureStartPrompt);
+            markNextNarratorRequestThinkingDisabled();
+            await waitForStoryEngineModelCallSpacing('adventure intro model call');
             clearAllProgress();
             return;
         }

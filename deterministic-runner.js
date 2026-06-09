@@ -2744,6 +2744,13 @@ function resolveIntimacyBoundary({ npc, currentDisposition, threshold, establish
     if (!directTarget && !opposingTarget) {
         return { boundary: 'SKIP', source: 'NONE', refusalStyle: 'NONE' };
     }
+    if (currentDisposition?.F >= 3 || currentDisposition?.H >= 3) {
+        return {
+            boundary: 'DENY',
+            source: 'LOCKED_DISPOSITION',
+            refusalStyle: intimacyRefusalStyle(currentDisposition, state),
+        };
+    }
     if (establishedRelationship === 'Y') {
         return { boundary: 'ALLOW', source: 'ESTABLISHED_RELATIONSHIP', refusalStyle: 'NONE' };
     }

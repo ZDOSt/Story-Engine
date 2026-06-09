@@ -642,6 +642,38 @@ const tests = [
     },
   },
   {
+    name: '04a fear or hostility lock denies intimacy despite established relationship',
+    run() {
+      for (const [label, disposition, style] of [
+        ['fear', { B: 1, F: 3, H: 1 }, 'FEARFUL'],
+        ['hostility', { B: 1, F: 1, H: 3 }, 'HOSTILE'],
+      ]) {
+        const tracker = { Seraphina: trackerEntry({ currentDisposition: disposition, establishedRelationship: 'Y' }) };
+        const report = runCase({
+          userText: `I try to kiss Seraphina despite the ${label} between us.`,
+          tracker,
+          ledger: baseLedger({
+            resolutionEngine: {
+              identifyGoal: 'kiss Seraphina',
+              identifyChallenge: 'kiss Seraphina',
+              explicitMeans: 'try to kiss Seraphina',
+              identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+              intimacyAdvanceExplicit: true,
+              boundaryViolationExplicit: false,
+              rollNeeded: false,
+            },
+            relationshipEngine: [relationship('Seraphina')],
+          }),
+        });
+        assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].EstablishedRelationship, 'Y');
+        assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
+        assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundarySource, 'LOCKED_DISPOSITION');
+        assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyRefusalStyle, style);
+        assert.match(prompt(report), /Existing relationship history does not grant intimacy while the NPC is currently fear-led or hostility-led/);
+      }
+    },
+  },
+  {
     name: '05 NPC confession accepted by user establishes relationship at B4',
     run() {
       const tracker = { Seraphina: trackerEntry({ currentDisposition: { B: 4, F: 1, H: 1 } }) };
@@ -6131,6 +6163,32 @@ const tests = [
     },
   },
   {
+    name: '28a narrator omits worldEvent when no chaos or power event fires',
+    run() {
+      const report = runCase({
+        userText: 'I greet Seraphina at the campfire.',
+        tracker: {
+          Seraphina: trackerEntry({
+            currentDisposition: { B: 3, F: 1, H: 1 },
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'greet Seraphina',
+            identifyChallenge: 'greet Seraphina at the campfire',
+            explicitMeans: 'greet Seraphina',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      });
+      const text = prompt(report);
+      assert.doesNotMatch(text, /\nworldEvent:\n/);
+      assert.doesNotMatch(text, /No extra world event is required/);
+    },
+  },
+  {
     name: '29 NPC personality summary persists and informs narration softly',
     run() {
       const report = runCase({
@@ -9111,6 +9169,9 @@ const tests = [
       assert.match(source, /function getBeginningAdventureStartPrompt/);
       assert.match(source, /'swipe', 'regenerate'/);
       assert.match(source, /if \(hasVisibleUserMessage\(context\)\) return ''/);
+      assert.match(source, /function isBeginningAdventureIntroGeneration/);
+      assert.match(source, /if \(!\['normal', 'swipe', 'regenerate'\]\.includes\(type\)\) return false/);
+      assert.match(source, /return Boolean\(String\(pendingGeneration\.adventureStartPrompt \|\| root\.adventureStartPrompt \|\| ''\)\.trim\(\)\)/);
       assert.match(source, /adventureStartPrompt: getBeginningAdventureStartPrompt\(context, type\)/);
       assert.match(source, /function appendAdventureStartPromptToNarratorPrompt/);
       assert.ok(
@@ -9118,6 +9179,22 @@ const tests = [
         source.indexOf('appendNarratorContextToPrompt(eventData.chat, narratorModelContext)'),
         'Saved adventure prompt should be restored before the narrator contract on beginning-only regenerate/swipe.',
       );
+      const promptReadySource = source.slice(
+        source.indexOf('async function handleChatCompletionPromptReady'),
+        source.indexOf('async function runSemanticPassWithPromptReadyBypass'),
+      );
+      const introBypassSource = promptReadySource.slice(
+        promptReadySource.indexOf('if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context))'),
+        promptReadySource.indexOf('state.runningSemanticPass = true'),
+      );
+      assert.ok(introBypassSource.length > 0, 'Adventure intro bypass should happen before the semantic pass.');
+      assert.match(introBypassSource, /state\.lastNarratorHandoff = ''/);
+      assert.match(introBypassSource, /state\.pendingRun = null/);
+      assert.match(introBypassSource, /sanitizeFinalPromptHistory\(eventData\.chat\)/);
+      assert.match(introBypassSource, /appendAdventureStartPromptToNarratorPrompt\(eventData\.chat, state\.pendingGeneration\.adventureStartPrompt\)/);
+      assert.match(introBypassSource, /markNextNarratorRequestThinkingDisabled\(\)/);
+      assert.match(introBypassSource, /waitForStoryEngineModelCallSpacing\('adventure intro model call'\)/);
+      assert.doesNotMatch(introBypassSource, /runSemanticPassWithPromptReadyBypass|runDeterministicEngines|formatNarratorModelPromptContext|appendNarratorContextToPrompt|beginProseGuardDisplayIntercept/);
     },
   },
   {

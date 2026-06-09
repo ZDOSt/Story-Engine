@@ -831,7 +831,10 @@ function narrativeIntimacyEntry(npc = {}) {
         return `Intimacy is permitted for ${name} because ${intimacyBoundarySourceText(npc.IntimacyBoundarySource)}. Narrate the NPC response naturally according to context, privacy, safety, mood, and personality. Do not reverse, withdraw, panic, or stop at the moment of follow-through unless new danger, interruption, explicit withdrawal, or established characterization makes that reversal concrete in-scene. Do not force explicit intimacy if the scene makes it implausible.`;
     }
     if (npc.IntimacyBoundary === 'DENY') {
-        return `Intimacy is not permitted for ${name}. Render the denial as a real boundary, not coyness, teasing, hesitation, or a conditional delay. Include a clear refusal and an active boundary action: moving hands away, blocking contact, covering or protecting the touched area, stepping back, creating distance, or otherwise stopping the intimate advance. If the attempted intimacy is physical, the boundary must be physical. Do not imply intimacy would be accepted under different timing, privacy, location, or mood. Do not narrate reciprocation, compliance, arousal, escalating intimacy, or a successful intimate result. This denial is a boundary for later turns, not a relationship punishment by itself. Tune the refusal as ${intimacyRefusalGuide(npc)}`;
+        const reason = npc.IntimacyBoundarySource === 'LOCKED_DISPOSITION'
+            ? ' Existing relationship history does not grant intimacy while the NPC is currently fear-led or hostility-led.'
+            : '';
+        return `Intimacy is not permitted for ${name}.${reason} Render the denial as a real boundary, not coyness, teasing, hesitation, or a conditional delay. Include a clear refusal and an active boundary action: moving hands away, blocking contact, covering or protecting the touched area, stepping back, creating distance, or otherwise stopping the intimate advance. If the attempted intimacy is physical, the boundary must be physical. Do not imply intimacy would be accepted under different timing, privacy, location, or mood. Do not narrate reciprocation, compliance, arousal, escalating intimacy, or a successful intimate result. This denial is a boundary for later turns, not a relationship punishment by itself. Tune the refusal as ${intimacyRefusalGuide(npc)}`;
     }
     return `Intimacy is not permitted for ${name} in this beat.`;
 }
@@ -1096,7 +1099,7 @@ function narrativeWorldEventFact(handoff = {}) {
     if (!isNoneText(event)) {
         parts.push(`Include this visible surface event only: ${event}. Do not explain why it happens, who benefits, unseen causes, or hidden pressure behind it.`);
     }
-    return parts.length ? parts.join(' ') : 'No extra world event is required.';
+    return parts.length ? parts.join(' ') : '';
 }
 
 function narrativeNameRevealFact(nameGeneration = {}) {
