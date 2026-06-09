@@ -154,7 +154,6 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.intimacyAdvanceExplicit=' + valueOrNone(resolution.intimacyAdvanceExplicit),
         'resolutionPacket.boundaryViolationExplicit=' + valueOrNone(resolution.boundaryViolationExplicit),
         'resolutionPacket.nonLethal=' + valueOrNone(resolution.nonLethal),
-        'resolutionPacket.STAKES=' + valueOrNone(resolution.STAKES),
         'resolutionPacket.RollNeeded=' + valueOrNone(resolution.RollNeeded),
         'resolutionPacket.RollReason=' + valueOrNone(resolution.RollReason),
         'resolutionPacket.ActionBucket=' + valueOrNone(resolution.ActionBucket),
@@ -247,7 +246,6 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.ClaimCheck', claimCheckSummary(resolution.ClaimCheck)],
         ['userKnowledge.application', summary.userKnowledgeApplication],
         ['resolution.StakesDecision', stakesDecisionSummary(resolution.StakesDecision)],
-        ['resolution.STAKES', summary.stakes],
         ['resolution.RollNeeded', valueOrNone(resolution.RollNeeded)],
         ['resolution.RollReason', valueOrNone(resolution.RollReason)],
         ['resolution.ActionBucket', valueOrNone(resolution.ActionBucket)],
@@ -514,7 +512,7 @@ function narrativeAttemptResult(resolution = {}) {
     if (fatalInjury) {
         return `The user's completed action produces a fatal finish against ${valueOrNone(fatalInjury.NPC)}. Narrate the death clearly and do not soften it into another nonfatal wound.${suffix}`;
     }
-    if (resolution?.STAKES === 'N' || tier === 'NONE' || outcome === 'no_roll') {
+    if (resolution?.RollNeeded === 'N' || tier === 'NONE' || outcome === 'no_roll') {
         return `No special success or failure needs to be narrated beyond the immediate scene response.${suffix}`;
     }
     switch (outcome) {
@@ -1116,7 +1114,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         intimacyBoundary,
         relationshipResult: relationshipResultSummary(handoff, resolution),
         actions: list(resolution.actions),
-        stakes: resolution.STAKES ?? 'N',
+        RollNeeded: resolution.RollNeeded ?? 'N',
         targets: targetSummary(resolution),
         counter: resolution.CounterPotential ?? 'none',
         userImpairment,
@@ -1166,7 +1164,7 @@ function isSceneNpcName(value) {
 }
 
 function rollAuditFromResultLine(resultLine, resolution) {
-    if (resolution?.STAKES === 'N') return { rollUsed: 'none', rollFull: 'none', margin: 'none' };
+    if (resolution?.RollNeeded === 'N') return { rollUsed: 'none', rollFull: 'none', margin: 'none' };
     const text = String(resultLine ?? '').trim();
     const marginMatch = text.match(/\((-?\d+)\s*-\s*[^)]+\)\s*$/)
         || text.match(/=\s*(-?\d+)\s*vs\s*1d20\(\d+\)(?:\s*\+\s*(?:PHY|MND|CHA|ENV)\(\d+\))?(?:\s*\+\s*impairment\(-?\d+\))?\s*=\s*(-?\d+)/i);
@@ -1191,7 +1189,7 @@ function actionCountSummary(actions) {
 }
 
 function outcomeAuditLabel(resolution) {
-    if (resolution?.STAKES === 'N' || resolution?.Outcome === 'no_roll') return 'No Roll';
+    if (resolution?.RollNeeded === 'N' || resolution?.Outcome === 'no_roll') return 'No Roll';
     const tier = String(resolution?.OutcomeTier ?? '').replace(/_/g, ' ').trim();
     const outcome = String(resolution?.Outcome ?? '').replace(/_/g, ' ').trim();
     return tier || outcome || 'Computed Outcome';
@@ -1515,7 +1513,7 @@ function targetSummary(resolution) {
 
 function environmentDifficultySummary(resolution = {}) {
     const oppEnv = list(resolution.OppTargets?.ENV);
-    if (isNoneText(oppEnv) || resolution.STAKES === 'N' || resolution.Outcome === 'no_roll') return 'none';
+    if (isNoneText(oppEnv) || resolution.RollNeeded === 'N' || resolution.Outcome === 'no_roll') return 'none';
     const value = Number(resolution.EnvironmentDifficulty ?? resolution.environmentDifficulty ?? 0);
     const labels = {
         0: 'Easy',
@@ -1888,7 +1886,7 @@ function naturalOutcomeSummary(resolution) {
             ? 'an exceptional user-favoring fatal result: natural 20 plus Critical Success kills the target'
             : 'a user-favoring fatal finish against an already badly wounded or critical target';
     }
-    if (resolution?.STAKES === 'N' || tier === 'NONE' || outcome === 'no_roll') return 'no roll; ordinary scene continuity';
+    if (resolution?.RollNeeded === 'N' || tier === 'NONE' || outcome === 'no_roll') return 'no roll; ordinary scene continuity';
     if (outcome === 'dominant_impact') return 'a decisive user-favoring result with strong visible impact';
     if (outcome === 'solid_impact') return 'a clear user-favoring result with solid visible impact';
     if (outcome === 'light_impact') return 'a narrow user-favoring result with limited visible impact';

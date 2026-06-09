@@ -356,7 +356,7 @@ const tests = [
         }),
       });
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.GOAL, 'Normal_Interaction');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
     },
   },
@@ -387,7 +387,7 @@ const tests = [
           })],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.Outcome, 'no_roll');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.LandedActions, '(none)');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].FinalState, 'B4/F1/H1');
@@ -418,7 +418,7 @@ const tests = [
           relationshipEngine: [relationship('Valerie')],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.intimacyAdvanceExplicit, 'Y');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyRefusalStyle, 'SOFT');
@@ -452,7 +452,7 @@ const tests = [
           relationshipEngine: [relationship('Seraphina')],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'SKIP');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].FinalState, 'B3/F1/H1');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
@@ -483,7 +483,7 @@ const tests = [
       ]);
       const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
       const modelPrompt = prompt(report);
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.intimacyAdvanceExplicit, 'N');
       assert.equal(handoff.EstablishedRelationship, 'N');
       assert.equal(handoff.IntimacyBoundary, 'SKIP');
@@ -510,7 +510,7 @@ const tests = [
             actions: ['a1'],
             intimacyAdvanceExplicit: 'N',
             boundaryViolationExplicit: 'N',
-            STAKES: 'N',
+            RollNeeded: 'N',
             LandedActions: '(none)',
             OutcomeTier: 'No_Roll',
             Outcome: 'no_roll',
@@ -588,7 +588,7 @@ const tests = [
           relationshipEngine: [relationship('Valerie')],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.Outcome, 'no_roll');
       assert.equal(auditIncludes(report, 'hard_override_pure_love_declaration_no_roll'), true);
     },
@@ -616,7 +616,7 @@ const tests = [
           relationshipEngine: [relationship('Seraphina')],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.LandedActions, '(none)');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyRefusalStyle, 'SOFT');
@@ -644,7 +644,7 @@ const tests = [
           relationshipEngine: [relationship('Seraphina')],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].EstablishedRelationship, 'Y');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'ALLOW');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundarySource, 'ESTABLISHED_RELATIONSHIP');
@@ -679,7 +679,7 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'ALLOW');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundarySource, 'ESTABLISHED_RELATIONSHIP');
       assert.equal(report.trackerUpdate.npcs.Seraphina.establishedRelationship, 'Y');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
     },
   },
   {
@@ -796,7 +796,7 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].EstablishedRelationship, 'N');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
       assert.equal(report.trackerUpdate.npcs.Seraphina.establishedRelationship, 'N');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
     },
   },
   {
@@ -831,7 +831,7 @@ const tests = [
         }),
       });
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.boundaryViolationExplicit, 'Y');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'Y');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'Y');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Hostility');
       assert.deepEqual(report.trackerUpdate.npcs.Seraphina.currentDisposition, { B: 3, F: 1, H: 2 });
     },
@@ -859,7 +859,7 @@ const tests = [
           relationshipEngine: [relationship('Mira')],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyBoundary, 'DENY');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].IntimacyRefusalStyle, 'CLEAR');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
@@ -1172,7 +1172,7 @@ const tests = [
         }),
       });
       const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(handoff.IntimacyBoundary, 'ALLOW');
       assert.equal(handoff.IntimacyBoundarySource, 'PERSISTED:NPC_INITIATED');
       assert.deepEqual(report.trackerUpdate.npcs.Mira.intimacyState, { boundary: 'ALLOW', source: 'PERSISTED:NPC_INITIATED', refusalStyle: 'NONE' });
@@ -1207,7 +1207,7 @@ const tests = [
         }),
       });
       const handoff = report.finalNarrativeHandoff.npcHandoffs[0];
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(handoff.IntimacyBoundary, 'DENY');
       assert.equal(handoff.IntimacyBoundarySource, 'PERSISTED_DENY');
       assert.equal(handoff.IntimacyRefusalStyle, 'SOFT');
@@ -2171,7 +2171,7 @@ const tests = [
           })],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.Outcome, 'no_roll');
       assert.equal(report.finalNarrativeHandoff.resultLine, 'No roll');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].FinalState, 'B1/F4/H2');
@@ -2223,7 +2223,7 @@ const tests = [
           relationshipEngine: [relationship('Bandit')],
         }),
       });
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'Y');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'Y');
       assert.match(report.finalNarrativeHandoff.resolutionPacket.OutcomeTier, /Failure/);
       assert.notEqual(report.finalNarrativeHandoff.resultLine, 'No roll');
       assert.equal(auditIncludes(report, 'hard_override_disposition_continuity_no_roll'), false);
@@ -3034,7 +3034,7 @@ const tests = [
       assert.equal(proactive.Proactive, 'Y');
       assert.equal(proactive.CompanionInitiativeTag, 'Companion_Attack');
       assert.equal(proactive.ProactivityTarget, 'Ogre');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.CompanionCommand.Mode, 'REQUEST_ONLY');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.AttackType, 'CompanionAttack');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.ProactivityTarget, 'Ogre');
@@ -3196,7 +3196,7 @@ const tests = [
       assert.equal(proactive.Proactive, 'Y');
       assert.equal(proactive.CompanionInitiativeTag, 'Companion_Attack');
       assert.equal(proactive.ProactivityTarget, 'Ogre');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.CompanionCommand.Mode, 'REQUEST_ONLY');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.AttackType, 'CompanionAttack');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.ProactivityTarget, 'Ogre');
@@ -3259,7 +3259,7 @@ const tests = [
       assert.equal(proactive.Proactive, 'Y');
       assert.equal(proactive.CompanionInitiativeTag, 'Companion_Attack');
       assert.equal(proactive.ProactivityTarget, 'Raider2');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.CompanionCommand.Mode, 'REQUEST_ONLY');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.AttackType, 'CompanionAttack');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.ProactivityTarget, 'Raider2');
@@ -3328,7 +3328,7 @@ const tests = [
       assert.equal(proactive.ProactivityTarget, 'Raider2');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.AttackType, 'CompanionAttack');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.ProactivityTarget, 'Raider2');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.CompanionCommand.Mode, 'REQUEST_ONLY');
       assert.match(prompt(report), /Seraphina: companion attack against Raider2/);
       assert.match(prompt(report), /This force targets only Raider2/i);
@@ -3384,7 +3384,7 @@ const tests = [
       ]);
       assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.hostilesInScene.NPC, ['Raider2']);
       assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.OppTargets.NPC, ['(none)']);
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.CompanionCommand.Mode, 'REQUEST_ONLY');
       assert.equal(report.finalNarrativeHandoff.proactivityResults.Seraphina.ProactivityTarget, 'Raider2');
       assert.equal(report.finalNarrativeHandoff.aggressionResults.Seraphina.ProactivityTarget, 'Raider2');
@@ -6102,7 +6102,7 @@ const tests = [
           generationType: 'normal',
           resolutionPacket: {
             GOAL: 'SearchShrine',
-            STAKES: 'Y',
+            RollNeeded: 'Y',
             OutcomeTier: 'Success',
             Outcome: 'solid_impact',
             LandedActions: 1,
@@ -7283,7 +7283,7 @@ const tests = [
         NoEffectReason: '(none)',
         MechanicalScope: 'flavor_only_no_bonus',
       });
-      assert.equal(packet.STAKES, 'N');
+      assert.equal(packet.RollNeeded, 'N');
 
       const prompt = formatNarratorModelPromptContext(report);
       assert.match(prompt, /The user's ability can produce this direct scene effect: Alice alone hears the whispered words/i);
@@ -7405,7 +7405,7 @@ const tests = [
         Evidence: 'draw my sword',
         NoEffectReason: 'not in saved user gear/inventory',
       });
-      assert.equal(unavailablePacket.STAKES, 'N');
+      assert.equal(unavailablePacket.RollNeeded, 'N');
       const unavailablePrompt = prompt(unavailableReport);
       assert.match(unavailablePrompt, /The user attempts to use\/draw\/produce\/consume: sword/i);
       assert.match(unavailablePrompt, /Availability: unavailable/i);
@@ -7813,7 +7813,7 @@ const tests = [
       });
 
       const packet = report.finalNarrativeHandoff.resolutionPacket;
-      assert.equal(packet.STAKES, 'Y');
+      assert.equal(packet.RollNeeded, 'Y');
       assert.deepEqual(packet.ClaimCheck, {
         Present: 'Y',
         Claim: 'I am the queen\'s envoy',
@@ -7875,7 +7875,7 @@ const tests = [
       });
 
       const packet = report.finalNarrativeHandoff.resolutionPacket;
-      assert.equal(packet.STAKES, 'N');
+      assert.equal(packet.RollNeeded, 'N');
       assert.equal(packet.ClaimCheck.Present, 'Y');
       assert.equal(packet.ClaimCheck.StakesImpact, 'N');
       assert.equal(packet.ClaimCheck.TruthStatus, 'unsupported');
@@ -8029,7 +8029,7 @@ const tests = [
       const packet = report.finalNarrativeHandoff.resolutionPacket;
       assert.deepEqual(packet.hostilesInScene.NPC, ['axe raider', 'knife raider']);
       assert.deepEqual(packet.OppTargets.NPC, ['(none)']);
-      assert.equal(packet.STAKES, 'N');
+      assert.equal(packet.RollNeeded, 'N');
       assert.equal(packet.CompanionCommand.Mode, 'REQUEST_ONLY');
       assert.equal(report.finalNarrativeHandoff.proactivityResults.Seraphina.ProactivityTarget, 'axe raider');
       assert.equal(report.finalNarrativeHandoff.proactivityResults.Seraphina.CompanionInitiativeTag, 'Companion_Attack');
@@ -8070,7 +8070,7 @@ const tests = [
         }),
       });
       assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.OppTargets.NPC, ['(none)']);
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.STAKES, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
       assert.equal(report.finalNarrativeHandoff.resolutionPacket.CompanionCommand.Mode, 'REQUEST_ONLY');
       assert.notEqual(report.finalNarrativeHandoff.proactivityResults.Seraphina.ProactivityTarget, 'axe raider');
       assert.notEqual(report.finalNarrativeHandoff.proactivityResults.Seraphina.ProactivityTarget, 'knife raider');
@@ -8093,7 +8093,7 @@ const tests = [
             actions: ['a1'],
             intimacyAdvanceExplicit: 'N',
             boundaryViolationExplicit: 'N',
-            STAKES: 'Y',
+            RollNeeded: 'Y',
             LandedActions: 1,
             OutcomeTier: 'Success',
             Outcome: 'success',
@@ -8166,7 +8166,7 @@ const tests = [
             actions: ['a1'],
             intimacyAdvanceExplicit: 'N',
             boundaryViolationExplicit: 'N',
-            STAKES: 'N',
+            RollNeeded: 'N',
             LandedActions: '(none)',
             OutcomeTier: 'No_Roll',
             Outcome: 'no_roll',
@@ -8271,7 +8271,7 @@ const tests = [
             actions: ['a1'],
             intimacyAdvanceExplicit: 'N',
             boundaryViolationExplicit: 'N',
-            STAKES: 'Y',
+            RollNeeded: 'Y',
             LandedActions: 0,
             OutcomeTier: 'Critical_Failure',
             Outcome: 'avoided',
@@ -8369,7 +8369,7 @@ const tests = [
             actions: ['a1'],
             intimacyAdvanceExplicit: 'N',
             boundaryViolationExplicit: 'N',
-            STAKES: 'N',
+            RollNeeded: 'N',
             LandedActions: '(none)',
             OutcomeTier: 'NONE',
             Outcome: 'no_roll',
@@ -8497,7 +8497,7 @@ const tests = [
             actions: ['a1'],
             intimacyAdvanceExplicit: 'N',
             boundaryViolationExplicit: 'N',
-            STAKES: 'Y',
+            RollNeeded: 'Y',
             LandedActions: 0,
             OutcomeTier: 'Failure',
             Outcome: 'failure',
@@ -8578,7 +8578,7 @@ const tests = [
             actions: ['a1'],
             intimacyAdvanceExplicit: 'N',
             boundaryViolationExplicit: 'N',
-            STAKES: 'Y',
+            RollNeeded: 'Y',
             LandedActions: 0,
             OutcomeTier: 'Stalemate',
             Outcome: 'struggle',
@@ -8660,7 +8660,7 @@ const tests = [
             actions: ['a1'],
             intimacyAdvanceExplicit: 'N',
             boundaryViolationExplicit: 'Y',
-            STAKES: 'Y',
+            RollNeeded: 'Y',
             LandedActions: 0,
             OutcomeTier: 'Critical_Failure',
             Outcome: 'avoided',
@@ -8993,7 +8993,7 @@ const tests = [
     },
   },
   {
-    name: '48b legacy text completion hook is removed',
+    name: '48b old text completion hook is removed',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       assert.doesNotMatch(source, /TEXT_COMPLETION_SETTINGS_READY/);
@@ -9160,7 +9160,7 @@ const tests = [
       assert.match(source, /renderProgressionCard\(context\)/);
       assert.match(source, /Complete Character Progression before roleplay generation can continue/);
       assert.match(source, /function maybeRecordProgressionAccomplishment/);
-      assert.match(source, /packet\.STAKES === 'Y' && packet\.OutcomeTier === 'Critical_Success'/);
+      assert.match(source, /packet\.RollNeeded === 'Y' && packet\.OutcomeTier === 'Critical_Success'/);
       assert.match(source, /root\.accomplishments\.some\(record => record\.messageKey === messageKey\)/);
       assert.match(source, /sourceRecords = unspent\.slice\(0, PROGRESSION_REQUIRED_ACCOMPLISHMENTS\)/);
       assert.match(source, /spellOptions: \[\]/);
@@ -9314,7 +9314,7 @@ const tests = [
       assert.match(settingsSource, /settings\.storyEngineEnabled = Boolean\(event\.target\?\.checked\)/);
       assert.match(settingsSource, /if \(settings\.storyEngineEnabled === false\) \{\s*disableStoryEngineRuntime\(\);/);
       assert.match(settingsSource, /else \{\s*const context = getContext\(\);\s*ensureStreamingArtifactRegex\(\);\s*injectPromptOptionPrompts\(\);/);
-      assert.match(settingsSource, /restoreTrackerFromLatestDisplaySnapshot\(context\);\s*migrateVisibleHandoffDisplays\(context\);\s*renderAllTrackerDisplayBlocks\(context\);/);
+      assert.match(settingsSource, /restoreTrackerFromLatestDisplaySnapshot\(context\);\s*cleanVisibleDebugDisplays\(context\);\s*renderAllTrackerDisplayBlocks\(context\);/);
       assert.match(source, /if \(storyEngineCheckbox\) storyEngineCheckbox\.checked = engineEnabled/);
       assert.match(source, /if \(control\) control\.disabled = !engineEnabled/);
       assert.match(source, /Story Engine disabled\./);

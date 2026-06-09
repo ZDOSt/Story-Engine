@@ -1424,7 +1424,7 @@ function renderSettingsPanel() {
             injectPromptOptionPrompts();
             getPlayerRoot(context);
             restoreTrackerFromLatestDisplaySnapshot(context);
-            migrateVisibleHandoffDisplays(context);
+            cleanVisibleDebugDisplays(context);
             renderAllTrackerDisplayBlocks(context);
             renderPlayerSetupCard(context);
             renderProgressionCard(context);
@@ -5282,7 +5282,7 @@ function maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context 
 
 function isEligibleCriticalAccomplishment(pendingRun) {
     const packet = pendingRun?.resolutionPacket || pendingRun?.report?.finalNarrativeHandoff?.resolutionPacket || {};
-    return packet.STAKES === 'Y' && packet.OutcomeTier === 'Critical_Success';
+    return packet.RollNeeded === 'Y' && packet.OutcomeTier === 'Critical_Success';
 }
 
 function buildProgressionAccomplishmentRecord(pendingRun, messageKey) {
@@ -5842,14 +5842,7 @@ function firstChangedIndex(before, after) {
     return max;
 }
 
-function extractLegacyNarratorHandoff(text) {
-    const source = String(text ?? '');
-    const match = source.match(/<narrator_prompt_context_echo>\s*([\s\S]*?)\s*<\/narrator_prompt_context_echo>/i)
-        || source.match(/&lt;narrator_prompt_context_echo&gt;\s*([\s\S]*?)\s*&lt;\/narrator_prompt_context_echo&gt;/i);
-    return match?.[1]?.trim() || '';
-}
-
-function migrateVisibleHandoffDisplays(context = getContext()) {
+function cleanVisibleDebugDisplays(context = getContext()) {
     if (!Array.isArray(context?.chat)) return false;
     let changed = false;
 
@@ -5857,12 +5850,6 @@ function migrateVisibleHandoffDisplays(context = getContext()) {
         if (!message || message.is_user) return;
         message.extra = message.extra || {};
         const displayText = typeof message.extra.display_text === 'string' ? message.extra.display_text : '';
-        const visibleText = displayText || String(message.mes ?? '');
-        const legacyHandoff = extractLegacyNarratorHandoff(visibleText);
-        if (legacyHandoff && !getMessageNarratorHandoff(message)) {
-            setMessageNarratorHandoff(message, legacyHandoff);
-            changed = true;
-        }
         const cleanedDisplay = stripComputedDebugPrefix(displayText);
         if (displayText && cleanedDisplay !== displayText) {
             message.extra.display_text = cleanedDisplay;
@@ -6610,7 +6597,7 @@ function handleChatChanged() {
     injectPromptOptionPrompts();
     getPlayerRoot(context);
     restoreTrackerFromLatestDisplaySnapshot(context);
-    migrateVisibleHandoffDisplays(context);
+    cleanVisibleDebugDisplays(context);
     state.lastNarratorHandoffKey = null;
     state.lastNarratorHandoff = '';
     state.pendingRun = null;
@@ -6994,7 +6981,7 @@ if (typeof jQuery === 'function') {
             }
             getPlayerRoot();
             restoreTrackerFromLatestDisplaySnapshot();
-            migrateVisibleHandoffDisplays();
+            cleanVisibleDebugDisplays();
             renderAllTrackerDisplayBlocks();
             renderPlayerSetupCard();
             renderProgressionCard();
@@ -7016,7 +7003,7 @@ if (typeof jQuery === 'function') {
         }
         getPlayerRoot();
         restoreTrackerFromLatestDisplaySnapshot();
-        migrateVisibleHandoffDisplays();
+        cleanVisibleDebugDisplays();
         renderAllTrackerDisplayBlocks();
         renderPlayerSetupCard();
         renderProgressionCard();

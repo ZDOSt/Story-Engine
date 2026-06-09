@@ -145,7 +145,7 @@ function ResolutionEngine(input) {
   environmentDifficultyTier(actionBucket, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: applies only when actionBucket=Challenge and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure
-    rule: easy = easy/trivial/routine/weak/lightly obstructed; if no real stakes exist, use STAKES=N instead of an ENV tier
+    rule: easy = easy/trivial/routine/weak/lightly obstructed; if no real stakes exist, use rollNeeded=N instead of an ENV tier
     rule: average = meaningful obstacle a capable person could plausibly fail
     rule: hard = serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk
     rule: extreme = exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition
@@ -291,7 +291,7 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   applyPhysicalBoundaryPressure(npc, resolutionPacket, state):
     policy: LOCKED, FYW
-    rule: use only when resolutionPacket.classifyPhysicalBoundaryPressure=Y, resolutionPacket.classifyHostilePhysicalIntent!=Y, and resolutionPacket.STAKES=Y
+    rule: use only when resolutionPacket.classifyPhysicalBoundaryPressure=Y, resolutionPacket.classifyHostilePhysicalIntent!=Y, and resolutionPacket.RollNeeded=Y
     isDirect = resolutionPacket.ActionTargets.includes(npc.name)
     isOpp = resolutionPacket.OppTargets.NPC.includes(npc.name)
     isHarmed = resolutionPacket.HarmedObservers.includes(npc.name)
@@ -305,7 +305,7 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   applyHostilePhysicalPressure(npc, resolutionPacket, state):
     policy: LOCKED, FYW
-    rule: use only when resolutionPacket.classifyHostilePhysicalIntent=Y and resolutionPacket.STAKES=Y
+    rule: use only when resolutionPacket.classifyHostilePhysicalIntent=Y and resolutionPacket.RollNeeded=Y
     isDirect = resolutionPacket.ActionTargets.includes(npc.name)
     isOpp = resolutionPacket.OppTargets.NPC.includes(npc.name)
     isHarmed = resolutionPacket.HarmedObservers.includes(npc.name)
@@ -563,7 +563,7 @@ function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, di
   classifyAction(resolutionPacket):
     policy: EO, FYW
     g = resolutionPacket.GOAL
-    if resolutionPacket.STAKES=N -> Normal_Interaction
+    if resolutionPacket.RollNeeded=N -> Normal_Interaction
     if resolutionPacket.classifyCombatActionSequence=Y -> Combat
     if resolutionPacket.ActionTargets contains >=1 living entity -> Social
     if resolutionPacket.OppTargets.ENV != [(none)] -> Skill
@@ -916,14 +916,14 @@ export function routeDispositionTarget(npc, packet, auditInteraction, sem) {
     const isHarmed = includesName(packet.HarmedObservers, npc);
     const landed = landedBool(packet.LandedActions);
     const out = packet.Outcome;
-    const hasStakes = packet.STAKES === 'Y';
+    const rollNeeded = packet.RollNeeded === 'Y';
     const benefitAllowedForDirect = auditInteraction === 'Y'
         && (isDirect || isOpp)
         && !isHarmed
         && directOrOpposedBenefitAllowed(npc, packet, sem);
 
     if (!isDirect && !isOpp && !isBenefited && !isHarmed) return 'No Change';
-    if (!hasStakes) return softBondAllowedForNoStakes(npc, packet, sem) ? 'Bond' : 'No Change';
+    if (!rollNeeded) return softBondAllowedForNoStakes(npc, packet, sem) ? 'Bond' : 'No Change';
     if (packet.boundaryViolationExplicit === 'Y' && (isDirect || isOpp)) {
         return bool(sem.explicitIntimidationOrCoercion) || packet.classifyHostilePhysicalIntent === 'Y'
             ? 'FearHostility'
@@ -976,7 +976,7 @@ function directOrOpposedBenefitAllowed(npc, packet, sem) {
 export function resolveStakeChangeByOutcome(npc, sem, packet) {
     const outcomeKey = String(packet.Outcome || 'no_roll');
     const semanticValue = normalizeStakeChange(sem.stakeChangeByOutcome?.[outcomeKey]);
-    if (packet.STAKES !== 'Y') return { value: semanticValue };
+    if (packet.RollNeeded !== 'Y') return { value: semanticValue };
 
     const hardValue = hardStakeChangeFromTargetRole(npc, packet);
     if (!hardValue || semanticValue === hardValue) return { value: semanticValue };
@@ -1129,7 +1129,7 @@ export function updateRapport(currentRapport, target, rapportEligible = false, m
 export function applyPhysicalBoundaryPressure(npc, packet, state) {
     if (packet.classifyPhysicalBoundaryPressure !== 'Y') return null;
     if (packet.classifyHostilePhysicalIntent === 'Y') return null;
-    if (packet.STAKES !== 'Y') return null;
+    if (packet.RollNeeded !== 'Y') return null;
 
     const isDirect = includesName(packet.ActionTargets, npc);
     const isOpp = includesName(packet.OppTargets?.NPC, npc);
@@ -1150,7 +1150,7 @@ export function applyPhysicalBoundaryPressure(npc, packet, state) {
 
 export function applyHostilePhysicalPressure(npc, packet, state) {
     if (packet.classifyHostilePhysicalIntent !== 'Y') return null;
-    if (packet.STAKES !== 'Y') return null;
+    if (packet.RollNeeded !== 'Y') return null;
 
     const isDirect = includesName(packet.ActionTargets, npc);
     const isOpp = includesName(packet.OppTargets?.NPC, npc);
@@ -1374,7 +1374,7 @@ export function pickVector(ctx, i, index) {
 }
 
 export function classifyAction(packet) {
-    if (packet.STAKES === 'N') return 'Normal_Interaction';
+    if (packet.RollNeeded === 'N') return 'Normal_Interaction';
     if (packet.classifyCombatActionSequence === 'Y') return 'Combat';
     if (toRealArray(packet.ActionTargets).length >= 1) return 'Social';
     if (toRealArray(packet.OppTargets?.ENV).length >= 1) return 'Skill';
@@ -1493,7 +1493,7 @@ export function buildPersistencePolicy() {
         npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
-        perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'STAKES', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
+        perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
 }
 
@@ -1842,7 +1842,7 @@ export function sanitizeTargets(targets, classifier, options = {}) {
     }
     for (const name of targets.OppTargets.NPC) {
         if (classifier.isLiving(name)) {
-            if (options.hasStakes === 'N') actionTargets.push(name);
+            if (options.rollNeeded === 'N') actionTargets.push(name);
             else oppNpc.push(name);
         }
         else oppEnv.push(name);

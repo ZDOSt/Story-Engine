@@ -3112,10 +3112,10 @@ function normalizeEnvironmentDifficultyTier(value, actionBucket = 'Challenge') {
     if (actionBucket !== 'Challenge') return 'none';
     const text = cleanScalar(value).toLowerCase();
     if (ENVIRONMENT_DIFFICULTY_TIERS.includes(text)) return text;
-    const legacy = normalizeEnvironmentDifficulty(value, 'Challenge');
-    if (legacy >= 12) return 'extreme';
-    if (legacy >= 8) return 'hard';
-    if (legacy >= 4) return 'average';
+    const numericFallback = normalizeEnvironmentDifficulty(value, 'Challenge');
+    if (numericFallback >= 12) return 'extreme';
+    if (numericFallback >= 8) return 'hard';
+    if (numericFallback >= 4) return 'average';
     return 'none';
 }
 
@@ -3306,8 +3306,6 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.classifyHostilePhysicalIntent = toBoolean(ledger.resolutionEngine.classifyHostilePhysicalIntent, false);
     ledger.resolutionEngine.activeHostileThreat = toBoolean(ledger.resolutionEngine.activeHostileThreat, false);
     ledger.resolutionEngine.classifyPhysicalBoundaryPressure = toBoolean(ledger.resolutionEngine.classifyPhysicalBoundaryPressure, false);
-    delete ledger.resolutionEngine.hasStakes;
-    delete ledger.resolutionEngine.mapStats;
     delete ledger.resolutionEngine.hostilePhysicalIntent;
     delete ledger.resolutionEngine.primaryOppTarget;
     delete ledger.resolutionEngine.primaryOpposition;

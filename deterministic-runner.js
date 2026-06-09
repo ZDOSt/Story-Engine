@@ -1622,7 +1622,7 @@ function getStakeBearingClaimStakesEvidence(semantic, semanticRollNeeded) {
     if (!isStakeBearingUntrustedClaim(claim)) return null;
     if (semanticRollNeeded === 'Y') return null;
     return {
-        hasStakes: 'Y',
+        rollNeeded: 'Y',
         rule: 'hard_override_stake_bearing_claim_roll',
         evidence: {
             hardRule: 'ResolutionEngine.rollNeeded: known-false or unsupported factual claim with material NPC stakes requires a belief contest',
@@ -1642,8 +1642,8 @@ function normalizeRollReason(value, fallback = NONE) {
     return isReal(text) ? text.slice(0, 240) : fallback;
 }
 
-function getNegativeSocialRepeatNoRollEvidence({ hasStakes, actionBucket, socialBucket, targets, trackerSnapshot }) {
-    if (hasStakes !== 'Y') return null;
+function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socialBucket, targets, trackerSnapshot }) {
+    if (rollNeeded !== 'Y') return null;
     if (actionBucket !== 'Social' || !['Bluff', 'Intimidate'].includes(socialBucket)) return null;
     const blocked = [];
     for (const npc of toRealArray(targets?.OppTargets?.NPC)) {
@@ -1662,7 +1662,7 @@ function getNegativeSocialRepeatNoRollEvidence({ hasStakes, actionBucket, social
     }
     if (!blocked.length) return null;
     return {
-        hasStakes: 'N',
+        rollNeeded: 'N',
         rule: 'deterministic_negative_social_already_resolved',
         evidence: {
             hardRule: 'Resolved Bluff/Intimidate cannot be rerolled against the same NPC while their saved disposition is unchanged; treat the latest line as continuation, aftermath, or escalation rather than a fresh social contest.',
@@ -1724,7 +1724,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         || pureLoveDeclarationEvidence
         || getRomanceNoRollOverrideEvidence(semantic, semanticRollNeeded, boundaryViolationExplicit, intimacyAdvanceExplicit)
         || stakeBearingClaimEvidence;
-    let hasStakes = stakesOverrideEvidence?.hasStakes || semanticRollNeeded;
+    let rollNeeded = stakesOverrideEvidence?.rollNeeded || semanticRollNeeded;
     let stakesRule = stakesOverrideEvidence?.rule || 'semantic_final';
     if (stakeBearingClaimEvidence && actionBucket === 'None') {
         actionBucket = 'Social';
@@ -1732,7 +1732,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         combatType = 'None';
         rollReason = normalizeRollReason(rollReason, 'stakes-bearing factual claim');
     }
-    if (hasStakes === 'N') {
+    if (rollNeeded === 'N') {
         actionBucket = 'None';
         socialBucket = 'None';
         combatType = 'None';
@@ -1745,30 +1745,30 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     if (stakesOverrideEvidence) {
         audit.push(`2.4c deterministicStakesEvidence=${compact(stakesOverrideEvidence.evidence)}`);
     }
-    audit.push(`2.4 rollNeeded=${hasStakes}`);
+    audit.push(`2.4 rollNeeded=${rollNeeded}`);
 
     const semanticTargetsForResolution = companionCommandNoRollEvidence
         ? normalizeDirectedCompanionCommandTargets(identityTargets, targetClassifier, semantic, trackerSnapshot, context, audit)
         : identityTargets;
-    const sanitizedTargets = sanitizeTargets(semanticTargetsForResolution, targetClassifier, { hasStakes, goal, boundaryViolationExplicit });
-    const claimTargets = repairStakeBearingClaimTargets(sanitizedTargets, targetClassifier, semantic, { hasStakes }, audit);
+    const sanitizedTargets = sanitizeTargets(semanticTargetsForResolution, targetClassifier, { rollNeeded, goal, boundaryViolationExplicit });
+    const claimTargets = repairStakeBearingClaimTargets(sanitizedTargets, targetClassifier, semantic, { rollNeeded }, audit);
     const directedCompanionTargets = repairDirectedCompanionAttackHostilePool(claimTargets, ledger, trackerSnapshot, semantic, context, audit);
-    let targets = repairLivingOppositionTargets(directedCompanionTargets, targetClassifier, { hasStakes, semantic, goal, boundaryViolationExplicit, context }, audit);
-    const negativeSocialRepeatEvidence = getNegativeSocialRepeatNoRollEvidence({ hasStakes, actionBucket, socialBucket, targets, trackerSnapshot });
+    let targets = repairLivingOppositionTargets(directedCompanionTargets, targetClassifier, { rollNeeded, semantic, goal, boundaryViolationExplicit, context }, audit);
+    const negativeSocialRepeatEvidence = getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socialBucket, targets, trackerSnapshot });
     if (negativeSocialRepeatEvidence) {
-        hasStakes = negativeSocialRepeatEvidence.hasStakes;
+        rollNeeded = negativeSocialRepeatEvidence.rollNeeded;
         stakesRule = negativeSocialRepeatEvidence.rule;
         rollReason = 'repeated negative social attempt already resolved for current disposition';
         actionBucket = 'None';
         socialBucket = 'None';
         combatType = 'None';
-        targets = sanitizeTargets(targets, targetClassifier, { hasStakes, goal, boundaryViolationExplicit });
+        targets = sanitizeTargets(targets, targetClassifier, { rollNeeded, goal, boundaryViolationExplicit });
         audit.push(`2.4c.1 deterministicNegativeSocialRepeat=${compact(negativeSocialRepeatEvidence.evidence)}`);
     }
     audit.push(`2.4d identifyTargets.final=${formatTargets(targets)}`);
     if (!sameTargets(rawTargets, targets)) {
         audit.push(`2.4e deterministicTargetSanitizer=${compact({
-            reason: hasStakes === 'N'
+            reason: rollNeeded === 'N'
                 ? 'living targets only; non-living blockers moved to ENV; no-stakes living opposition converted to ActionTargets'
                 : 'living targets only; non-living blockers moved to ENV; direct targets removed from observer lists',
             from: targetSummary(rawTargets),
@@ -1807,8 +1807,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let resolvedUserStat = null;
     let environmentDifficulty = 0;
 
-    if (hasStakes === 'N') {
-        userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, null, hasStakes);
+    if (rollNeeded === 'N') {
+        userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, null, rollNeeded);
         audit.push('2.6 rollNeeded=N');
         audit.push('2.6a actions=[a1]');
         audit.push(`2.6a.1 UserImpairmentEngine=${compact(userImpairment)}`);
@@ -1880,10 +1880,10 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             }
         }
 
-        userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, userStat, hasStakes);
+        userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded);
         const impairmentPenalty = Number(userImpairment?.AppliedToRoll === 'Y' ? userImpairment.RollPenalty : 0);
         npcImpairment = oppStat !== 'ENV' && oppTargetsNpcFirst
-            ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, hasStakes)
+            ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, rollNeeded)
             : noNpcImpairment('no opposing NPC roll');
         const npcImpairmentPenalty = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
         const atkDie = rollPool[0];
@@ -1916,7 +1916,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     }
 
     const boundaryReferee = applyPhysicalBoundaryPressureHardRules(semantic, targets, {
-        hasStakes,
+        rollNeeded,
         hostilePhysical,
         goal,
     }, audit);
@@ -1926,7 +1926,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         injuryEffectEngine: ledger.injuryEffectEngine,
         targets,
         outcome,
-        hasStakes,
+        rollNeeded,
         combatActionSequence,
         userAttackDie,
         nonLethal: bool(semantic.nonLethal) ? 'Y' : 'N',
@@ -1945,8 +1945,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         boundaryViolationExplicit,
         nonLethal: bool(semantic.nonLethal) ? 'Y' : 'N',
         StakesDecision: semanticStakesDecision,
-        STAKES: hasStakes,
-        RollNeeded: hasStakes,
+        RollNeeded: rollNeeded,
         RollReason: rollReason,
         ActionBucket: actionBucket,
         SocialBucket: socialBucket,
@@ -2086,7 +2085,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const stakeReferee = resolveStakeChangeByOutcome(npc, relationshipContext, resolutionPacket);
         const benefitReferee = applyMeaningfulBenefitReferee(npc, resolutionPacket, stakeReferee.value, relationshipContext);
         const stakeChange = benefitReferee.value;
-        const npcStakes = resolutionPacket.STAKES === 'Y' && ['benefit', 'harm'].includes(stakeChange) ? 'Y' : 'N';
+        const npcStakes = resolutionPacket.RollNeeded === 'Y' && ['benefit', 'harm'].includes(stakeChange) ? 'Y' : 'N';
         const auditInteraction = npcStakes === 'Y' && stakeChange === 'benefit' ? 'Y' : 'N';
         const routedTarget = routeDispositionTarget(npc, resolutionPacket, auditInteraction, relationshipContext);
         const relation = relationToUserAction(npc, resolutionPacket);
@@ -2322,7 +2321,7 @@ function buildSlowBondSceneKey(resolutionPacket, npc) {
 function recordNegativeSocialResolutionMemory(memory, npc, resolutionPacket, currentDisposition) {
     const normalized = normalizeSocialResolutionMemory(memory);
     const bucket = String(resolutionPacket?.SocialBucket || 'None');
-    if (resolutionPacket?.STAKES !== 'Y' || !['Bluff', 'Intimidate'].includes(bucket)) {
+    if (resolutionPacket?.RollNeeded !== 'Y' || !['Bluff', 'Intimidate'].includes(bucket)) {
         return { memory: normalized, changed: 'N', entry: null };
     }
     const isTarget = toRealArray(resolutionPacket?.OppTargets?.NPC).some(name => sameName(name, npc));
@@ -3378,8 +3377,8 @@ function registerGeneratedName(context, name, meta) {
     if (typeof context.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
 }
 
-function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, hasStakes, combatActionSequence = false, userAttackDie = null, nonLethal = 'N', primaryTarget = null, trackerSnapshot = {}, audit = null }) {
-    if (hasStakes !== 'Y') return [];
+function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, nonLethal = 'N', primaryTarget = null, trackerSnapshot = {}, audit = null }) {
+    if (rollNeeded !== 'Y') return [];
     if (!effectOutcomeLanded(outcome)) return [];
 
     const fatalInjury = deriveUserAttackFatalInjury({
@@ -3454,7 +3453,7 @@ function repairLivingOppositionTargets(targets, classifier, options = {}, audit)
         HarmedObservers: toRealArray(targets.HarmedObservers),
         PowerActors: toRealArray(targets.PowerActors),
     };
-    if (options.hasStakes !== 'Y') return repaired;
+    if (options.rollNeeded !== 'Y') return repaired;
     if (firstReal(repaired.OppTargets.NPC)) return repaired;
     if (firstReal(repaired.OppTargets.ENV)) return repaired;
 
@@ -3497,7 +3496,7 @@ function repairStakeBearingClaimTargets(targets, classifier, semantic, options =
         HarmedObservers: toRealArray(targets.HarmedObservers),
         PowerActors: toRealArray(targets.PowerActors),
     };
-    if (options.hasStakes !== 'Y' || !isStakeBearingUntrustedClaim(semantic?.claimCheck)) return repaired;
+    if (options.rollNeeded !== 'Y' || !isStakeBearingUntrustedClaim(semantic?.claimCheck)) return repaired;
 
     const claim = normalizeClaimCheckForHandoff(semantic.claimCheck);
     const target = claim.TargetNPC;
@@ -3572,7 +3571,7 @@ function getDirectedCompanionCommandNoRollEvidence(semantic, targets, trackerSna
     }
 
     return {
-        hasStakes: 'N',
+        rollNeeded: 'N',
         rule: 'hard_override_companion_command_request_only',
         companions: commands.map(item => item.name),
         commands: commands.map(item => item.command),
@@ -4265,7 +4264,7 @@ function noNpcImpairment(reason = 'no relevant tracked NPC condition, wound, or 
     };
 }
 
-function evaluateUserImpairment(ledger, context, semantic, goal, userStat, hasStakes) {
+function evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded) {
     const user = getEffectiveUserImpairmentState(ledger, context);
     const sources = collectImpairmentSources(user, true);
     if (!sources.length) return noUserImpairment();
@@ -4291,7 +4290,7 @@ function evaluateUserImpairment(ledger, context, semantic, goal, userStat, hasSt
     matches.sort((a, b) => USER_IMPAIRMENT_STAGE[b.source.stage].rank - USER_IMPAIRMENT_STAGE[a.source.stage].rank);
     const best = matches[0];
     const penalty = USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
-    const applied = hasStakes === 'Y' && penalty < 0 ? 'Y' : 'N';
+    const applied = rollNeeded === 'Y' && penalty < 0 ? 'Y' : 'N';
     const matchedText = unique(best.matched).join(', ');
     const affectedText = unique(best.source.functions).join(', ');
 
@@ -4309,7 +4308,7 @@ function evaluateUserImpairment(ledger, context, semantic, goal, userStat, hasSt
     };
 }
 
-function evaluateNpcImpairment(npcName, ledger, trackerSnapshot, semantic, goal, npcStat, hasStakes) {
+function evaluateNpcImpairment(npcName, ledger, trackerSnapshot, semantic, goal, npcStat, rollNeeded) {
     if (!isReal(npcName)) return noNpcImpairment('no NPC named');
     const npc = getEffectiveNpcImpairmentState(npcName, ledger, trackerSnapshot);
     const sources = collectImpairmentSources(npc, false);
@@ -4339,7 +4338,7 @@ function evaluateNpcImpairment(npcName, ledger, trackerSnapshot, semantic, goal,
     matches.sort((a, b) => USER_IMPAIRMENT_STAGE[b.source.stage].rank - USER_IMPAIRMENT_STAGE[a.source.stage].rank);
     const best = matches[0];
     const penalty = USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
-    const applied = hasStakes === 'Y' && penalty < 0 ? 'Y' : 'N';
+    const applied = rollNeeded === 'Y' && penalty < 0 ? 'Y' : 'N';
     const matchedText = unique(best.matched).join(', ');
     const affectedText = unique(best.source.functions).join(', ');
 
@@ -5443,9 +5442,9 @@ function isDireCompanionCrisis(context = {}) {
     const packet = context.resolutionPacket || {};
     if (context.counterPotential === 'severe') return true;
     if (packet.OutcomeTier === 'Critical_Failure') return true;
-    if (packet.STAKES === 'Y' && packet.classifyCombatActionSequence === 'Y' && environmentThreatLooksUrgent(packet)) return true;
-    if (packet.STAKES === 'Y' && packet.classifyCombatActionSequence === 'Y' && firstReal(packet.OppTargets?.NPC) && context.counterPotential && context.counterPotential !== 'none') return true;
-    if (packet.STAKES === 'Y' && firstReal(packet.OppTargets?.ENV) && environmentThreatLooksUrgent(packet)) return true;
+    if (packet.RollNeeded === 'Y' && packet.classifyCombatActionSequence === 'Y' && environmentThreatLooksUrgent(packet)) return true;
+    if (packet.RollNeeded === 'Y' && packet.classifyCombatActionSequence === 'Y' && firstReal(packet.OppTargets?.NPC) && context.counterPotential && context.counterPotential !== 'none') return true;
+    if (packet.RollNeeded === 'Y' && firstReal(packet.OppTargets?.ENV) && environmentThreatLooksUrgent(packet)) return true;
     return false;
 }
 
@@ -5476,8 +5475,8 @@ function classifyCompanionInitiativeContext(context = {}) {
         return 'crisis';
     }
     if (context.chaosBand && context.chaosBand !== 'None') return 'active';
-    if (packet.STAKES === 'Y' && firstReal(packet.OppTargets?.ENV) && environmentThreatLooksUrgent(packet)) return 'crisis';
-    if (packet.STAKES === 'Y') return context.kind === 'Skill' || context.kind === 'Social' ? 'active' : 'crisis';
+    if (packet.RollNeeded === 'Y' && firstReal(packet.OppTargets?.ENV) && environmentThreatLooksUrgent(packet)) return 'crisis';
+    if (packet.RollNeeded === 'Y') return context.kind === 'Skill' || context.kind === 'Social' ? 'active' : 'crisis';
     if (['Combat', 'Intimacy_Physical'].includes(context.kind)) return 'crisis';
     return 'calm';
 }
@@ -6248,18 +6247,18 @@ function applyPhysicalBoundaryPressureHardRules(semantic, targets, options, audi
     const source = semanticSourceText(semantic);
     const hasLivingOpposition = firstReal(targets.OppTargets?.NPC);
     let value = bool(semantic.classifyPhysicalBoundaryPressure);
-    const hardBoundary = options.hasStakes === 'Y'
+    const hardBoundary = options.rollNeeded === 'Y'
         && !options.hostilePhysical
         && hasLivingOpposition
         && (isObjectBoundaryContest(source) || isBodyBoundaryPressure(source))
         && !hasDirectBodilyAggression(source);
 
-    if (value && (options.hasStakes !== 'Y' || options.hostilePhysical || !hasLivingOpposition)) {
+    if (value && (options.rollNeeded !== 'Y' || options.hostilePhysical || !hasLivingOpposition)) {
         audit.push(`2.7p deterministicPhysicalBoundaryPressureReferee=${compact({
             hardRule: 'ResolutionEngine.classifyPhysicalBoundaryPressure requires stakes-bearing living opposition and no hostilePhysicalIntent',
             from: 'Y',
             to: 'N',
-            hasStakes: options.hasStakes,
+            rollNeeded: options.rollNeeded,
             hostilePhysical: options.hostilePhysical ? 'Y' : 'N',
             hasLivingOpposition: hasLivingOpposition ? 'Y' : 'N',
         })}`);
@@ -6281,7 +6280,7 @@ function getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext = n
     const source = semanticSourceText(semantic);
     if (!isPureLoveDeclarationOrReciprocation(source, refereeContext)) return null;
     return {
-        hasStakes: 'N',
+        rollNeeded: 'N',
         rule: 'hard_override_pure_love_declaration_no_roll',
         evidence: {
             hardRule: 'ResolutionEngine.rollNeeded: pure love declarations, confessions, or reciprocations are disposition responses, not dice challenges',
@@ -6299,7 +6298,7 @@ function getRomanceNoRollOverrideEvidence(semantic, semanticRollNeeded, boundary
     if (!isRomanticOrIntimateConversation(source)) return null;
     if (hasBoundaryViolationLanguage(source)) return null;
     return {
-        hasStakes: 'N',
+        rollNeeded: 'N',
         rule: 'hard_override_romance_conversation_no_roll',
         evidence: {
             hardRule: 'ResolutionEngine.rollNeeded: flirting, teasing, romantic talk, intimacy proposals, permission asks, or reciprocation are not stakes unless boundaryViolationExplicit=Y or ordinary non-romantic stakes apply; intimacyAdvanceExplicit is handled by IntimacyBoundary without a roll',
