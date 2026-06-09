@@ -95,15 +95,6 @@ function relationship(NPC, extra = {}) {
 
 function baseLedger(overrides = {}) {
   const resolutionOverrides = overrides.resolutionEngine || {};
-  const fixtureRollNeeded = Boolean(resolutionOverrides.rollNeeded);
-  const defaultStakesDecision = {
-    materialStakes: fixtureRollNeeded,
-    newUnresolvedContest: fixtureRollNeeded,
-    preDecidedByDisposition: false,
-    rollRequired: fixtureRollNeeded,
-    reason: fixtureRollNeeded ? 'rollNeeded fixture' : '(none)',
-    ...(resolutionOverrides.stakesDecision || {}),
-  };
   return {
     engineContext: {
       userCoreStats: { Rank: 'Average', MainStat: 'Balanced', PHY: 6, MND: 6, CHA: 6 },
@@ -164,7 +155,6 @@ function baseLedger(overrides = {}) {
       classifyPhysicalBoundaryPressure: false,
       genStats: { Rank: 'Average', MainStat: 'Balanced', PHY: 5, MND: 5, CHA: 5 },
       ...resolutionOverrides,
-      stakesDecision: defaultStakesDecision,
     },
     relationshipEngine: overrides.relationshipEngine || [],
     injuryEffectEngine: {
@@ -2154,14 +2144,8 @@ const tests = [
               BenefitedObservers: [],
               HarmedObservers: [],
             },
-            stakesDecision: {
-              materialStakes: true,
-              newUnresolvedContest: false,
-              preDecidedByDisposition: true,
-              rollRequired: false,
-              reason: 'Bandit is already terrified; leaving/passage follows saved fear state.',
-            },
             rollNeeded: false,
+            rollReason: 'Bandit is already terrified; leaving/passage follows saved fear state.',
             actionBucket: 'Social',
             socialBucket: 'Intimidate',
             combatType: 'None',
@@ -2176,8 +2160,9 @@ const tests = [
       assert.equal(report.finalNarrativeHandoff.resultLine, 'No roll');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].FinalState, 'B1/F4/H2');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
-      assert.equal(report.finalNarrativeHandoff.resolutionPacket.StakesDecision.PreDecidedByDisposition, 'Y');
-      assert.equal(auditIncludes(report, 'semanticStakesDecision'), true);
+      assert.equal(Object.prototype.hasOwnProperty.call(report.finalNarrativeHandoff.resolutionPacket, 'Stakes' + 'Decision'), false);
+      assert.equal(auditIncludes(report, 'semanticRollNeeded=N'), true);
+      assert.equal(auditIncludes(report, 'semanticRollReason=Bandit is already terrified'), true);
       assert.equal(auditIncludes(report, 'hard_override_disposition_continuity_no_roll'), false);
     },
   },
@@ -2207,14 +2192,8 @@ const tests = [
               BenefitedObservers: [],
               HarmedObservers: [],
             },
-            stakesDecision: {
-              materialStakes: true,
-              newUnresolvedContest: true,
-              preDecidedByDisposition: false,
-              rollRequired: true,
-              reason: 'Pursuit and blocking escape are new pressure.',
-            },
             rollNeeded: true,
+            rollReason: 'Pursuit and blocking escape are new pressure.',
             classifyPhysicalBoundaryPressure: true,
             actionBucket: 'Combat',
             socialBucket: 'None',
@@ -7897,12 +7876,12 @@ const tests = [
       assert.match(semanticSource, /Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that/);
       assert.match(semanticSource, /Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself/);
       assert.match(semanticSource, /classify it as stakes only when the user also declares a demand, threat, attack, aim\/pointing at a target/);
-      assert.match(semanticSource, /Use stakesDecision for the roll gate/);
-      assert.match(semanticSource, /Do not roll the same settled disposition reaction again/);
-      assert.match(semanticSource, /A failed negative social roll such as intimidation, coercion, bluffing, deception, manipulation, blackmail, or forced submission cannot be immediately retried/);
+      assert.match(semanticSource, /rollNeeded is the sole semantic roll gate/);
+      assert.match(semanticSource, /do not roll the same settled disposition reaction again/);
+      assert.match(semanticSource, /A failed or resolved negative social roll such as intimidation, coercion, bluffing, deception, manipulation, blackmail, or forced submission cannot be immediately retried/);
       assert.match(semanticSource, /Do not carry forward a prior social goal as the current goal after it already failed or resolved/);
       assert.match(semanticSource, /post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath\/escalation/);
-      assert.match(semanticSource, /do not immediately retry a failed negative social attempt against the same target for the same goal/);
+      assert.match(semanticSource, /do not immediately retry a failed or resolved negative social attempt against the same target for the same goal/);
     },
   },
   {

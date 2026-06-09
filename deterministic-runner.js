@@ -1600,23 +1600,6 @@ function isStakeBearingUntrustedClaim(claimCheck) {
         && ['known_false', 'unsupported'].includes(normalized.TruthStatus);
 }
 
-function normalizeStakesDecisionForAudit(value, fallbackRollRequired = false) {
-    const source = value && typeof value === 'object' ? value : {};
-    const materialStakes = bool(source.materialStakes ?? source.MaterialStakes ?? fallbackRollRequired);
-    const newUnresolvedContest = bool(source.newUnresolvedContest ?? source.NewUnresolvedContest ?? fallbackRollRequired);
-    const preDecidedByDisposition = bool(source.preDecidedByDisposition ?? source.PreDecidedByDisposition);
-    const rawRollRequired = bool(source.rollRequired ?? source.RollRequired ?? fallbackRollRequired);
-    const rollRequired = materialStakes && newUnresolvedContest && !preDecidedByDisposition && rawRollRequired;
-    const reason = String(source.reason ?? source.Reason ?? NONE).trim() || NONE;
-    return {
-        MaterialStakes: materialStakes ? 'Y' : 'N',
-        NewUnresolvedContest: newUnresolvedContest ? 'Y' : 'N',
-        PreDecidedByDisposition: preDecidedByDisposition ? 'Y' : 'N',
-        RollRequired: rollRequired ? 'Y' : 'N',
-        Reason: reason || NONE,
-    };
-}
-
 function getStakeBearingClaimStakesEvidence(semantic, semanticRollNeeded) {
     const claim = normalizeClaimCheckForHandoff(semantic?.claimCheck);
     if (!isStakeBearingUntrustedClaim(claim)) return null;
@@ -1679,12 +1662,11 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const rawTargets = normalizeTargets(semantic.identifyTargets);
     const identityTargets = removeUserReferencesFromTargets(rawTargets, refereeContext);
     const goal = String(semantic.identifyGoal || 'Normal_Interaction');
-    const semanticStakesDecision = normalizeStakesDecisionForAudit(semantic.stakesDecision, bool(semantic.rollNeeded));
     const semanticRollNeeded = bool(semantic.rollNeeded) ? 'Y' : 'N';
     let actionBucket = normalizeActionBucket(semantic.actionBucket, semanticRollNeeded);
     let socialBucket = normalizeSocialBucket(semantic.socialBucket, actionBucket);
     let combatType = normalizeCombatType(semantic.combatType, actionBucket);
-    let rollReason = normalizeRollReason(semantic.rollReason, semanticStakesDecision.Reason);
+    let rollReason = normalizeRollReason(semantic.rollReason);
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
     const boundaryViolationExplicit = bool(semantic.boundaryViolationExplicit) ? 'Y' : 'N';
 
@@ -1738,7 +1720,6 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         combatType = 'None';
     }
     audit.push(`2.4a semanticRollNeeded=${semanticRollNeeded}`);
-    audit.push(`2.4a.1 semanticStakesDecision=${compact(semanticStakesDecision)}`);
     audit.push(`2.4a.2 semanticActionBucket=${actionBucket}/${socialBucket}/${combatType}`);
     audit.push(`2.4a.3 semanticRollReason=${rollReason}`);
     audit.push(`2.4b deterministicStakesRule=${stakesRule}`);
@@ -1944,7 +1925,6 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         intimacyAdvanceExplicit,
         boundaryViolationExplicit,
         nonLethal: bool(semantic.nonLethal) ? 'Y' : 'N',
-        StakesDecision: semanticStakesDecision,
         RollNeeded: rollNeeded,
         RollReason: rollReason,
         ActionBucket: actionBucket,

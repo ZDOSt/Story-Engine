@@ -101,14 +101,6 @@ function ResolutionEngine(input) {
     rule: saved disposition never suppresses separate combat, pursuit, restraint, theft, bargaining, deception, access, resources, secrets, or environmental obstacles
     else -> N
 
-  stakesDecision(input, finalGoal, challenge, targets, boundaryViolationExplicit, context):
-    MaterialStakes = whether success/failure could materially matter under DEF.STAKES before disposition continuity
-    NewUnresolvedContest = whether the latest user action creates a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle; repeated/rephrased/intensified negative social pressure after a resolved failed attempt against the same target/goal is not fresh
-    PreDecidedByDisposition = whether saved fear/terror, hostility/hatred, or persisted intimacy boundary already decides the relevant NPC reaction and the current input merely asks that state to express itself
-    RollRequired = MaterialStakes=Y AND NewUnresolvedContest=Y AND PreDecidedByDisposition=N; must equal rollNeeded
-    Reason = short explanation
-    return {MaterialStakes, NewUnresolvedContest, PreDecidedByDisposition, RollRequired, Reason}
-
   actionBucket(input, finalGoal, challenge, targets, context):
     policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
     rule: None for ordinary roleplay, flavor, conversation, scene state, already-decided disposition reactions, harmless utility ability/spell use outside combat, or any action where rollNeeded=N
@@ -179,8 +171,8 @@ function ResolutionEngine(input) {
     intimacyAdvanceExplicit = intimacyAdvanceExplicit(input, finalGoal, challenge, targets, context)
     boundaryViolationExplicit = boundaryViolationExplicit(input, finalGoal, challenge, targets, context)
     nonLethal = nonLethal(input, finalGoal, challenge, targets, context)
-    stakesDecision = stakesDecision(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
     rollNeeded = rollNeeded(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
+    rollReason = short explanation for rollNeeded
     actionBucket = actionBucket(input, finalGoal, challenge, targets, context)
     socialBucket = socialBucket(input, finalGoal, challenge, targets, context)
     combatType = combatType(input, finalGoal, challenge, targets, context)
@@ -195,7 +187,7 @@ function ResolutionEngine(input) {
         generatedStatsSeed = genStats(first OppTargets.NPC, context)
       deterministic code resolves dice, numeric stats, margins, landed actions, counter potential, and outcome after semantic extraction
     NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, actions:actions, actionBucket:actionBucket, socialBucket:socialBucket, combatType:combatType, rollNeeded:rollNeeded, rollReason:stakesDecision.Reason, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
+    return {GOAL:finalGoal, actions:actions, actionBucket:actionBucket, socialBucket:socialBucket, combatType:combatType, rollNeeded:rollNeeded, rollReason:rollReason, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {

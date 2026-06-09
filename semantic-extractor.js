@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT } from './engines.js';
+import { ENGINE_PROMPT_TEXT, normalizeSocialResolutionMemory } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import { getRequestHeaders } from '../../../../script.js';
 import { createGenerationParameters, getChatCompletionModel, oai_settings, proxies } from '../../../../scripts/openai.js';
@@ -31,14 +31,6 @@ const ENVIRONMENT_DIFFICULTY_TIERS = Object.freeze(['none', 'easy', 'average', '
 const ACTION_BUCKETS = Object.freeze(['None', 'Social', 'Combat', 'Challenge']);
 const SOCIAL_BUCKETS = Object.freeze(['None', 'Diplomacy', 'Bluff', 'Intimidate']);
 const COMBAT_TYPES = Object.freeze(['None', 'Mundane', 'SpellOrSupernatural']);
-
-const DEFAULT_STAKES_DECISION = Object.freeze({
-    materialStakes: false,
-    newUnresolvedContest: false,
-    preDecidedByDisposition: false,
-    rollRequired: false,
-    reason: '(none)',
-});
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -774,31 +766,6 @@ function buildSemanticPreflightSchema() {
             reason: { type: 'string' },
         },
     };
-    const stakesDecisionSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['materialStakes', 'newUnresolvedContest', 'preDecidedByDisposition', 'rollRequired', 'reason'],
-        properties: {
-            materialStakes: {
-                type: 'boolean',
-                description: 'Y only when success/failure could materially matter under DEF.STAKES before disposition continuity is considered.',
-            },
-            newUnresolvedContest: {
-                type: 'boolean',
-                description: 'Y only when the latest user action creates a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle. Repeating, rephrasing, intensifying, insulting, threatening again, or adding theatrical display after a resolved negative social attempt against the same target for the same goal is not fresh social stakes.',
-            },
-            preDecidedByDisposition: {
-                type: 'boolean',
-                description: 'Y only when the relevant NPC reaction is already settled by saved fear/terror, hostility/hatred, or persisted intimacy boundary and the latest action merely asks that state to express itself.',
-            },
-            rollRequired: {
-                type: 'boolean',
-                description: 'Y only when materialStakes=Y, newUnresolvedContest=Y, and preDecidedByDisposition=N. This must match rollNeeded.',
-            },
-            reason: { type: 'string' },
-        },
-    };
-
     return {
         type: 'object',
         additionalProperties: false,
@@ -836,7 +803,6 @@ function buildSemanticPreflightSchema() {
                     'intimacyAdvanceExplicit',
                     'boundaryViolationExplicit',
                     'nonLethal',
-                    'stakesDecision',
                     'rollNeeded',
                     'rollReason',
                     'actionBucket',
@@ -917,10 +883,9 @@ function buildSemanticPreflightSchema() {
                         type: 'boolean',
                         description: 'Y only for explicitly nonlethal violence or contests: sparring, training, practice combat, fistfights, barehanded brawls, nonlethal grappling/restraint, capture-only attempts, or stated intent to avoid serious/fatal harm. N for weapons, improvised weapons, claws, teeth, horns, natural weapons, lethal magic, body-damaging supernatural effects, or uncertain cases.',
                     },
-                    stakesDecision: stakesDecisionSchema,
                     rollNeeded: {
                         type: 'boolean',
-                        description: 'Y only for fresh unresolved stakes requiring a roll. This must match stakesDecision.rollRequired.',
+                        description: 'The sole semantic roll gate. Y only for fresh unresolved stakes under DEF.STAKES. N for ordinary continuity, already-decided disposition/intimacy reactions, or repeated resolved negative social pressure under unchanged disposition.',
                     },
                     rollReason: { type: 'string' },
                     actionBucket: {
@@ -1317,7 +1282,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
     '- Use comma-separated names or (none) for lists. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest, speed contest, or another explicit stakes-bearing objective.',
-    '- ResolutionEngine.stakesDecision is the detailed roll gate. MaterialStakes=Y when success/failure could matter under DEF.STAKES before disposition continuity. NewUnresolvedContest=Y only for a fresh unresolved contest, risk, demand, transaction, resource/secret/access issue, combat, pursuit, restraint, deception, or obstacle. A failed negative social roll such as intimidation, coercion, bluffing, deception, manipulation, blackmail, or forced submission cannot be immediately retried in the current scene against the same target for the same goal; repeated wording, stronger insults, renewed threats, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. PreDecidedByDisposition=Y only when saved fear/terror, hostility/hatred, or persisted intimacy boundary already decides the relevant NPC reaction and the current input merely asks that state to express itself. RollRequired=Y only when MaterialStakes=Y, NewUnresolvedContest=Y, and PreDecidedByDisposition=N. ResolutionEngine.rollNeeded must equal RollRequired. ResolutionEngine.rollReason must be the same short reason or a stricter concise summary.',
+    '- ResolutionEngine.rollNeeded is the sole semantic roll gate and directly applies DEF.STAKES. Return Y only when success/failure of the latest explicit user goal or challenge creates fresh unresolved stakes: physical risk, harm, danger, detection, material gain/loss, significant trust/status/authority shift, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacle resolution, or explicit goal advancement/failure. Return N for ordinary continuity, no material stakes, a reaction already decided by saved fear/terror, hostility/hatred, persisted intimacy boundary, or a repeated resolved negative social attempt against the same NPC/goal under unchanged disposition. A failed or resolved negative social roll such as intimidation, coercion, bluffing, deception, manipulation, blackmail, or forced submission cannot be immediately retried in the current scene against the same target for the same goal; repeated wording, stronger insults, renewed threats, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. ResolutionEngine.rollReason must briefly explain why rollNeeded is Y or N.',
     '- ResolutionEngine.actionBucket is the roll shape, not a stat choice. Use None when rollNeeded=N. Use Social only for fresh unresolved NPC-facing social pressure, with socialBucket=Diplomacy for good-faith persuasion/negotiation/reassurance, Bluff for deception/lying/misleading/material false claims, and Intimidate for threats/coercion/blackmail/fear-based demands. Use Combat for direct violence or harmful supernatural attacks; combatType=Mundane for bodily/weapon/natural-weapon/ordinary force, and SpellOrSupernatural for the primary attack being a spell, power, curse, elemental blast, psychic attack, or similar. Use Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. If not Social, socialBucket=None. If not Combat, combatType=None.',
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
     '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer lists.',
@@ -1395,11 +1360,6 @@ ResolutionEngine.identifyTargets.PowerActors=(none)
 ResolutionEngine.intimacyAdvanceExplicit=N
 ResolutionEngine.boundaryViolationExplicit=N
 ResolutionEngine.nonLethal=N
-ResolutionEngine.stakesDecision.MaterialStakes=N
-ResolutionEngine.stakesDecision.NewUnresolvedContest=N
-ResolutionEngine.stakesDecision.PreDecidedByDisposition=N
-ResolutionEngine.stakesDecision.RollRequired=N
-ResolutionEngine.stakesDecision.Reason=(none)
 ResolutionEngine.rollNeeded=N
 ResolutionEngine.rollReason=(none)
 ResolutionEngine.actionBucket=None
@@ -1587,7 +1547,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const dispositionContinuityContext = buildDispositionContinuityContext(trackerSnapshot);
     return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
-        `Disposition continuity context (plain-language tracker state for stakesDecision; use this to decide whether a current NPC reaction is already settled):\n${dispositionContinuityContext}\n\n` +
+        `Disposition continuity context (plain-language tracker state for rollNeeded and social buckets; use this to decide whether a current NPC reaction or negative social contest is already settled):\n${dispositionContinuityContext}\n\n` +
         `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
         `User knowledge snapshot JSON (hidden memory about what people may know about {{user}}; use only for UserKnowledgeApplication and initPreset reputation tags, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
@@ -1597,7 +1557,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         (proxyAction ? `The latest user message used double square brackets for proxy action mode. Treat the inner instruction as {{user}}'s actual attempted action for semantic classification: "${clip(proxyAction, 800)}". Ignore the wrapper brackets themselves. ` : '') +
         'Classify only contextual/semantic predicates needed by the engines. Use EXPLICIT-ONLY and FIRST-YES-WINS from the engine reference. ' +
         'The semantic/contextual fields you return are authoritative; the deterministic runner should not reinterpret them. ' +
-        'stakesDecision is contextual and FINAL. rollNeeded must equal stakesDecision.rollRequired. Return rollRequired=true only for NEW unresolved stakes: materialStakes=true, newUnresolvedContest=true, and preDecidedByDisposition=false. Return rollRequired=false when the only relevant NPC reaction is already settled by saved fear/terror, hostility/hatred, or persisted intimacy boundary; still return true for separate combat, pursuit, restraint, theft, bargaining, deception, access, resources, secrets, environmental obstacles, or new material pressure. A resolved negative social attempt cannot be immediately retried in the current scene against the same target for the same goal: do not treat repeated threats, stronger insults, rephrased bluffs, renewed coercion, or dramatic display after refusal/failure as a fresh social contest. ' +
+        'rollNeeded is the sole semantic roll gate and directly applies DEF.STAKES. Return rollNeeded=true only for fresh unresolved stakes: success/failure would materially change risk, harm, danger, detection, resources, trust/status/authority, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacles, or explicit goal advancement. Return rollNeeded=false when there are no material stakes, when the only relevant NPC reaction is already settled by saved fear/terror, hostility/hatred, or persisted intimacy boundary, or when the latest input repeats a resolved negative social attempt against the same NPC/goal under unchanged disposition. Still return true for separate combat, pursuit, restraint, theft, bargaining, new deception, access, resources, secrets, environmental obstacles, or new material pressure. A resolved negative social attempt cannot be immediately retried in the current scene against the same target for the same goal: do not treat repeated threats, stronger insults, rephrased bluffs, renewed coercion, or dramatic display after refusal/failure as a fresh social contest. rollReason must be a concise explanation for rollNeeded. ' +
         'Living/non-living target separation is mandatory: hostilesInScene.NPC, ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, RelationshipEngine NPC entries, and NPCInScene candidates are living entities only. OppTargets.ENV is only for a non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure that directly obstructs or resists {{user}}\'s current stakes-bearing action. A non-living object merely being acted on, damaged, taken, read, or moved is not a scene target by itself. PowerActors is strategic-only and can contain organizations/groups/institutions or potential power figures with credible means to affect {{user}} beyond acting alone in the moment; it never creates immediate rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by itself. ' +
         'Execute target identification in this order: first identify hostilesInScene.NPC as ALL established, present, living hostile entities in scene; then identify which targets, if any, directly oppose {{user}}\'s current action as OppTargets.NPC. hostilesInScene.NPC is a broad hostile pool and does not itself create relationship changes, rolls, NPCInScene entries, or OppTargets.NPC. A hostile is established only if present in assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create hostiles from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated enemies no longer posing danger, and non-living hazards/obstacles. Companion/ally commands are tactical requests only: they may address the companion as an ActionTarget and may name an established hostile for later companion crisis targeting, but do not treat the command as {{user}} making the companion act, do not force a companion attack, and do not create a user-resolved success/failure roll for companion obedience. If several hostiles exist and no specific hostile is named, do not guess. ' +
         'OppTargets.NPC is only for rollNeeded=true living opposition/resistance/contest against {{user}}\'s current action/challenge: directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}. If rollNeeded=false, OppTargets.NPC must be ["(none)"]. If a living ActionTarget meaningfully resists/opposes a rollNeeded action, that same NPC may also appear in OppTargets.NPC. Do not put every enemy in OppTargets.NPC merely because they are hostile; use hostilesInScene.NPC for the broader hostile pool. ' +
@@ -1612,7 +1572,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Detect personal gear/inventory item attempts before target/risk classification. Fill ResolutionEngine.itemUse only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory. Personal possession signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or equivalent wording that claims {{user}} already has the item. Mark Available=Y only when that exact attempted item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental or scene objects, including grabbing, picking up, finding, searching for, using, breaking, burning, throwing, or moving an object described or implied by the scene; those actions remain normal narration/stakes/ENV context, not itemUse. Do not infer item availability from setting likelihood. If Available=N, the personal item effect must not be treated as completed. ' +
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, stakesDecision, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
         'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, or rewrite stored knowledge in preflight. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
@@ -1631,7 +1591,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Tie rule override: exact roll ties are cinematic stalemates/struggles, not defender wins; include stakeChangeByOutcome.struggle accordingly. ' +
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
         'itemUse is only for personal gear/inventory objects; body parts and natural weapons such as claws, fangs, teeth, horns, talons, tusks, tails, stingers, barbs, or jaws are bodily actions/attacks, not itemUse, not inventory, and not equipment. ' +
-        'Important classification reminders: Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/contact is not a special roll category and does not create stakes by itself. intimacyAdvanceExplicit is strict permission/boundary classification for actual intimate escalation only: mark it true for explicit kissing, sexual touch, undressing toward intimacy, asking to sleep together/have sex, or accepting a prior explicit NPC intimacy invitation; keep it false for flirting, teasing, vague innuendo, compliments, declarations of love, dates, hand-holding, ordinary affection, or "what did you have in mind" style banter. boundaryViolationExplicit is the romance/boundary trigger for mechanics: mark it true only for clear coercion, threats, force, unwanted contact/restraint after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no. User intent is explicit-only: identifyGoal and identifyChallenge must use only the latest user-declared action, request, target, and explicit objective; do not infer unstated goals from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. Do not carry forward a prior social goal as the current goal after it already failed or resolved; post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath/escalation unless the latest input explicitly creates a new non-social contest or a materially different tactic. classifyHostilePhysicalIntent is true only for direct bodily aggression/control against a living entity; object/space/departure/body-adjacent contests without bodily harm are classifyPhysicalBoundaryPressure, not combat. OppTargets.NPC requires a direct rollNeeded target, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. Use stakesDecision for the roll gate: materialStakes records whether DEF.STAKES could matter, newUnresolvedContest records whether the latest input creates fresh unresolved stakes, preDecidedByDisposition records whether saved fear/terror, hostility/hatred, or persisted intimacy already decides the relevant reaction, and rollNeeded must equal rollRequired. Do not roll the same settled disposition reaction again, and do not immediately retry a failed negative social attempt against the same target for the same goal, but do roll separate combat, pursuit, restraint, theft, bargaining, new deception, access, resources, secrets, environmental obstacles, or new leverage. actionBucket is classification only: Social/Diplomacy for good-faith persuasion or negotiation, Social/Bluff for deception or material false claims, Social/Intimidate for threats/coercion/fear demands, Combat/Mundane for bodily/weapon/natural-weapon attacks, Combat/SpellOrSupernatural for primary spell/power attacks, Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. Do not choose stats, dice, bonuses, margins, or outcomes. For each living NPC, mark stakeChangeByOutcome for each possible outcome strictly by DEF.STAKES: benefit only if that outcome significantly and concretely improves their stakes; harm if it materially worsens their stakes; otherwise none. Do not mark benefit for compliments, flirting, mood improvement, politeness, ordinary conversation, user self-advancement, successful negotiation for the user, choosing not to harm the NPC, failing to harm the NPC, de-escalation without a concrete NPC gain, or the NPC merely surviving/remaining safe.\n\n' +
+        'Important classification reminders: Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/contact is not a special roll category and does not create stakes by itself. intimacyAdvanceExplicit is strict permission/boundary classification for actual intimate escalation only: mark it true for explicit kissing, sexual touch, undressing toward intimacy, asking to sleep together/have sex, or accepting a prior explicit NPC intimacy invitation; keep it false for flirting, teasing, vague innuendo, compliments, declarations of love, dates, hand-holding, ordinary affection, or "what did you have in mind" style banter. boundaryViolationExplicit is the romance/boundary trigger for mechanics: mark it true only for clear coercion, threats, force, unwanted contact/restraint after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no. User intent is explicit-only: identifyGoal and identifyChallenge must use only the latest user-declared action, request, target, and explicit objective; do not infer unstated goals from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. Do not carry forward a prior social goal as the current goal after it already failed or resolved; post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath/escalation unless the latest input explicitly creates a new non-social contest or a materially different tactic. classifyHostilePhysicalIntent is true only for direct bodily aggression/control against a living entity; object/space/departure/body-adjacent contests without bodily harm are classifyPhysicalBoundaryPressure, not combat. OppTargets.NPC requires a direct rollNeeded target, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. rollNeeded is the roll gate: use DEF.STAKES directly, do not roll the same settled disposition reaction again, and do not immediately retry a failed or resolved negative social attempt against the same target for the same goal, but do roll separate combat, pursuit, restraint, theft, bargaining, new deception, access, resources, secrets, environmental obstacles, or new leverage. actionBucket is classification only: Social/Diplomacy for good-faith persuasion or negotiation, Social/Bluff for deception or material false claims, Social/Intimidate for threats/coercion/fear demands, Combat/Mundane for bodily/weapon/natural-weapon attacks, Combat/SpellOrSupernatural for primary spell/power attacks, Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. Do not choose stats, dice, bonuses, margins, or outcomes. For each living NPC, mark stakeChangeByOutcome for each possible outcome strictly by DEF.STAKES: benefit only if that outcome significantly and concretely improves their stakes; harm if it materially worsens their stakes; otherwise none. Do not mark benefit for compliments, flirting, mood improvement, politeness, ordinary conversation, user self-advancement, successful negotiation for the user, choosing not to harm the NPC, failing to harm the NPC, de-escalation without a concrete NPC gain, or the NPC merely surviving/remaining safe.\n\n' +
         COMPACT_LEDGER_CONTRACT;
 }
 
@@ -1873,12 +1833,6 @@ function validateRawLedgerContract(ledger, raw) {
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.BenefitedObservers)) missing.push('resolutionEngine.identifyTargets.BenefitedObservers');
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.HarmedObservers)) missing.push('resolutionEngine.identifyTargets.HarmedObservers');
     if (ledger?.resolutionEngine?.identifyTargets?.PowerActors != null && !Array.isArray(ledger.resolutionEngine.identifyTargets.PowerActors)) missing.push('resolutionEngine.identifyTargets.PowerActors');
-    if (!ledger?.resolutionEngine?.stakesDecision) missing.push('resolutionEngine.stakesDecision');
-    if (typeof ledger?.resolutionEngine?.stakesDecision?.materialStakes !== 'boolean') missing.push('resolutionEngine.stakesDecision.materialStakes:boolean');
-    if (typeof ledger?.resolutionEngine?.stakesDecision?.newUnresolvedContest !== 'boolean') missing.push('resolutionEngine.stakesDecision.newUnresolvedContest:boolean');
-    if (typeof ledger?.resolutionEngine?.stakesDecision?.preDecidedByDisposition !== 'boolean') missing.push('resolutionEngine.stakesDecision.preDecidedByDisposition:boolean');
-    if (typeof ledger?.resolutionEngine?.stakesDecision?.rollRequired !== 'boolean') missing.push('resolutionEngine.stakesDecision.rollRequired:boolean');
-    if (!ledger?.resolutionEngine?.stakesDecision?.reason) missing.push('resolutionEngine.stakesDecision.reason');
     if (typeof ledger?.resolutionEngine?.rollNeeded !== 'boolean') missing.push('resolutionEngine.rollNeeded:boolean');
     if (!ledger?.resolutionEngine?.rollReason) missing.push('resolutionEngine.rollReason');
     if (!ACTION_BUCKETS.includes(ledger?.resolutionEngine?.actionBucket)) missing.push('resolutionEngine.actionBucket');
@@ -1984,11 +1938,6 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.intimacyAdvanceExplicit',
         'ResolutionEngine.boundaryViolationExplicit',
         'ResolutionEngine.nonLethal',
-        'ResolutionEngine.stakesDecision.MaterialStakes',
-        'ResolutionEngine.stakesDecision.NewUnresolvedContest',
-        'ResolutionEngine.stakesDecision.PreDecidedByDisposition',
-        'ResolutionEngine.stakesDecision.RollRequired',
-        'ResolutionEngine.stakesDecision.Reason',
         'ResolutionEngine.rollNeeded',
         'ResolutionEngine.rollReason',
         'ResolutionEngine.actionBucket',
@@ -2315,13 +2264,6 @@ function parseCompactLedger(text, trackerSnapshot) {
         intimacyAdvanceExplicit: readBoolean(fields, 'ResolutionEngine.intimacyAdvanceExplicit', false),
         boundaryViolationExplicit: readBoolean(fields, 'ResolutionEngine.boundaryViolationExplicit', false),
         nonLethal: readBoolean(fields, 'ResolutionEngine.nonLethal', false),
-        stakesDecision: normalizeStakesDecision({
-            materialStakes: readBoolean(fields, 'ResolutionEngine.stakesDecision.MaterialStakes', false),
-            newUnresolvedContest: readBoolean(fields, 'ResolutionEngine.stakesDecision.NewUnresolvedContest', false),
-            preDecidedByDisposition: readBoolean(fields, 'ResolutionEngine.stakesDecision.PreDecidedByDisposition', false),
-            rollRequired: readBoolean(fields, 'ResolutionEngine.stakesDecision.RollRequired', false),
-            reason: cleanScalar(fields.get('ResolutionEngine.stakesDecision.Reason')) || '(none)',
-        }),
         rollNeeded,
         rollReason: cleanScalar(fields.get('ResolutionEngine.rollReason')) || '(none)',
         actionBucket,
@@ -2862,7 +2804,8 @@ function dispositionContinuityLine(NPC, entry = {}) {
     const fin = entry?.currentDisposition;
     const parts = [];
     if (!fin) return `${NPC}: no saved disposition; do not assume continuity.`;
-    parts.push(`${NPC}: saved disposition B${fin.B}/F${fin.F}/H${fin.H}.`);
+    const currentDisposition = `B${fin.B}/F${fin.F}/H${fin.H}`;
+    parts.push(`${NPC}: saved disposition ${currentDisposition}.`);
     if (Number(fin.F || 0) >= 4) {
         parts.push('Terror is already established toward {{user}}; withdrawal, surrender, distance, escape, standing down, or allowing passage may be pre-decided by disposition instead of a new roll.');
     } else if (Number(fin.F || 0) >= 3) {
@@ -2876,6 +2819,15 @@ function dispositionContinuityLine(NPC, entry = {}) {
     const intimacy = entry?.intimacyState || {};
     if (['ALLOW', 'DENY'].includes(String(intimacy.boundary || '').toUpperCase())) {
         parts.push(`Persisted intimacy boundary is ${String(intimacy.boundary).toUpperCase()}; do not re-check that boundary unless the latest input creates a material boundary change, violation, or new escalation.`);
+    }
+    const socialMemory = normalizeSocialResolutionMemory(entry?.socialResolutionMemory);
+    for (const bucket of ['Bluff', 'Intimidate']) {
+        const memory = socialMemory[bucket];
+        if (memory?.resolved === 'Y' && memory.disposition === currentDisposition) {
+            const label = bucket === 'Bluff' ? 'Bluff/deception' : 'Intimidate/coercion';
+            const goalText = memory.goal ? ` for goal "${memory.goal}"` : '';
+            parts.push(`${label} already resolved as ${memory.outcome}${goalText} under this current disposition; repeated wording, stronger pressure, insults, theatrical display, or renewed demands against this same NPC/goal are not a fresh Social/${bucket} contest.`);
+        }
     }
     if (entry?.pressureMode === 'cornered') {
         parts.push('Pressure mode is cornered; pursuit, restraint, blocking escape, or forced compliance remains new pressure and may roll.');
@@ -3144,23 +3096,6 @@ function normalizeStakeChangeValue(value) {
     return ['benefit', 'harm', 'none'].includes(text) ? text : 'none';
 }
 
-function normalizeStakesDecision(value, fallbackRollRequired = false) {
-    const source = value && typeof value === 'object' ? value : {};
-    const materialStakes = toBoolean(source.materialStakes ?? source.MaterialStakes, fallbackRollRequired);
-    const newUnresolvedContest = toBoolean(source.newUnresolvedContest ?? source.NewUnresolvedContest, fallbackRollRequired);
-    const preDecidedByDisposition = toBoolean(source.preDecidedByDisposition ?? source.PreDecidedByDisposition, false);
-    const rawRollRequired = toBoolean(source.rollRequired ?? source.RollRequired, fallbackRollRequired);
-    const rollRequired = materialStakes && newUnresolvedContest && !preDecidedByDisposition && rawRollRequired;
-    const reason = cleanScalar(source.reason ?? source.Reason) || '(none)';
-    return {
-        materialStakes,
-        newUnresolvedContest,
-        preDecidedByDisposition,
-        rollRequired,
-        reason: !isNoneValue(reason) ? reason.slice(0, 240) : '(none)',
-    };
-}
-
 function normalizeRomanceStyle(value) {
     const text = cleanScalar(value).toLowerCase();
     return ['auto', 'nervous', 'flirt'].includes(text) ? text : 'auto';
@@ -3285,10 +3220,8 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.userAbilityUse = normalizeUserAbilityUse(ledger.resolutionEngine.userAbilityUse);
     ledger.resolutionEngine.itemUse = normalizeItemUse(ledger.resolutionEngine.itemUse);
     ledger.resolutionEngine.claimCheck = normalizeClaimCheck(ledger.resolutionEngine.claimCheck);
-    const fallbackRollNeeded = toBoolean(ledger.resolutionEngine.rollNeeded, false);
-    ledger.resolutionEngine.stakesDecision = normalizeStakesDecision(ledger.resolutionEngine.stakesDecision, fallbackRollNeeded);
-    ledger.resolutionEngine.rollNeeded = ledger.resolutionEngine.stakesDecision.rollRequired;
-    ledger.resolutionEngine.rollReason = cleanScalar(ledger.resolutionEngine.rollReason) || ledger.resolutionEngine.stakesDecision.reason || '(none)';
+    ledger.resolutionEngine.rollNeeded = toBoolean(ledger.resolutionEngine.rollNeeded, false);
+    ledger.resolutionEngine.rollReason = cleanScalar(ledger.resolutionEngine.rollReason) || '(none)';
     ledger.resolutionEngine.actionBucket = normalizeActionBucket(ledger.resolutionEngine.actionBucket, ledger.resolutionEngine.rollNeeded);
     ledger.resolutionEngine.socialBucket = normalizeSocialBucket(ledger.resolutionEngine.socialBucket, ledger.resolutionEngine.actionBucket);
     ledger.resolutionEngine.combatType = normalizeCombatType(ledger.resolutionEngine.combatType, ledger.resolutionEngine.actionBucket);
@@ -3816,12 +3749,6 @@ function validateNormalizedLedger(ledger, raw) {
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.BenefitedObservers)) missing.push('resolutionEngine.identifyTargets.BenefitedObservers');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.HarmedObservers)) missing.push('resolutionEngine.identifyTargets.HarmedObservers');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.PowerActors)) missing.push('resolutionEngine.identifyTargets.PowerActors');
-    if (!ledger.resolutionEngine?.stakesDecision) missing.push('resolutionEngine.stakesDecision');
-    if (typeof ledger.resolutionEngine?.stakesDecision?.materialStakes !== 'boolean') missing.push('resolutionEngine.stakesDecision.materialStakes:boolean');
-    if (typeof ledger.resolutionEngine?.stakesDecision?.newUnresolvedContest !== 'boolean') missing.push('resolutionEngine.stakesDecision.newUnresolvedContest:boolean');
-    if (typeof ledger.resolutionEngine?.stakesDecision?.preDecidedByDisposition !== 'boolean') missing.push('resolutionEngine.stakesDecision.preDecidedByDisposition:boolean');
-    if (typeof ledger.resolutionEngine?.stakesDecision?.rollRequired !== 'boolean') missing.push('resolutionEngine.stakesDecision.rollRequired:boolean');
-    if (!ledger.resolutionEngine?.stakesDecision?.reason) missing.push('resolutionEngine.stakesDecision.reason');
     if (typeof ledger.resolutionEngine?.rollNeeded !== 'boolean') missing.push('resolutionEngine.rollNeeded:boolean');
     if (!ledger.resolutionEngine?.rollReason) missing.push('resolutionEngine.rollReason');
     if (!ACTION_BUCKETS.includes(ledger.resolutionEngine?.actionBucket)) missing.push('resolutionEngine.actionBucket');
