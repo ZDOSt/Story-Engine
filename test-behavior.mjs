@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { runDeterministicEngines } from './deterministic-runner.js';
 import { aggressionReactionOutcome, deriveDirection, normalizeDisposition, updateDisposition } from './engines.js';
 import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
-import { TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
+import { deterministicPersonalitySummaryForName, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
@@ -6215,6 +6215,45 @@ const tests = [
       assert.equal(report.trackerUpdate.npcs.Seraphina.personalitySummary, 'Gentle, observant, and cautious with new trust.');
       assert.match(prompt(report), /stable personality note as expression guidance/);
       assert.match(prompt(report), /Gentle, observant, and cautious with new trust/);
+    },
+  },
+  {
+    name: '29b unprofiled active NPC receives deterministic grounded personality fallback',
+    run() {
+      const report = runCase({
+        userText: 'I ask the gate guard for directions.',
+        tracker: {
+          'Gate Guard': trackerEntry({
+            currentDisposition: { B: 2, F: 1, H: 1 },
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'ask the gate guard for directions',
+            identifyChallenge: 'ask the gate guard for directions',
+            explicitMeans: 'ask directions',
+            identifyTargets: { ActionTargets: ['Gate Guard'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Gate Guard')],
+        }),
+      });
+      const expected = deterministicPersonalitySummaryForName('Gate Guard', 'deterministic-runner');
+      assert.equal(report.trackerUpdate.npcs['Gate Guard'].personalitySummary, expected);
+      assert.match(expected, /^temperament: /);
+      assert.match(expected, /speech: /);
+      assert.match(expected, /interaction: /);
+      assert.match(expected, /mannerisms: /);
+      assert.doesNotMatch(expected, /tsundere|kuudere|deredere|yandere|dandere/i);
+      assert.match(prompt(report), /Mannerisms are optional recurring tendencies, not required beats/i);
+    },
+  },
+  {
+    name: '29c personality contract keeps internal archetype labels out of visible summaries',
+    run() {
+      assert.match(TRACKER_DELTA_CONTRACT, /Do not output raw internal labels/i);
+      assert.match(TRACKER_DELTA_CONTRACT, /Preferred format: "temperament:/);
+      assert.doesNotMatch(TRACKER_DELTA_CONTRACT, /e\.g\. "tsundere/);
     },
   },
   {

@@ -660,7 +660,7 @@ function relationshipNarrativeGuide(npc = {}) {
     const behavior = behaviorNarrationGuide(npc?.Behavior);
     const target = relationshipTargetNarrativeGuide(npc?.Target);
     const personality = npc?.PersonalitySummary && !isNoneText(npc.PersonalitySummary)
-        ? ` Use this stable personality note as expression guidance, not a hard script: ${npc.PersonalitySummary}. It may shape speech style, posture, refusal style, affection style, pressure, and initiative flavor, but it never overrides the listed facts.`
+        ? ` Use this stable personality note as expression guidance, not a hard script: ${npc.PersonalitySummary}. It may shape speech style, posture, refusal style, affection style, pressure, initiative flavor, and occasional mannerisms, but it never overrides the listed facts. Mannerisms are optional recurring tendencies, not required beats; do not repeat them every response.`
         : '';
     const boundary = npc?.BoundaryPressure === 'Y'
         ? ' Respect active boundary pressure through physical space, refusal, guarded movement, or physical protection.'

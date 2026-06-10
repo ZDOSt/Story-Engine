@@ -71,7 +71,7 @@ import {
     compact,
     stableStringify,
 } from './engines.js';
-import { USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
+import { deterministicPersonalitySummaryForName, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 
 const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
@@ -2014,6 +2014,9 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const rawState = trackerSnapshot[npc] || {};
         const firstTrackedEncounter = !rawState.currentDisposition;
         const state = normalizeTrackerEntry(rawState);
+        if (!cleanPersonalitySummary(state.personalitySummary)) {
+            state.personalitySummary = deterministicPersonalitySummaryForName(npc, 'deterministic-runner');
+        }
         const globalActiveMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
         let lastRapportGainActiveMs = state.lastRapportGainActiveMs;
         const rapportElapsedActiveMs = lastRapportGainActiveMs >= 0 ? Math.max(0, globalActiveMs - lastRapportGainActiveMs) : 0;
@@ -4626,6 +4629,8 @@ function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, c
         npcs[name] = normalizeTrackerEntry(value);
     }
 
+    assignMissingNpcPersonalitySummaries(npcs, Object.keys(relationshipTrackerUpdate || {}), 'deterministic-runner');
+
     for (const delta of semantic.npcs || []) {
         const name = delta?.NPC;
         if (!isReal(name)) continue;
@@ -4635,6 +4640,7 @@ function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, c
             ...applyTrackerDeltaToState(before, delta, false),
         });
     }
+    assignMissingNpcPersonalitySummaries(npcs, (semantic.npcs || []).map(delta => delta?.NPC), 'deterministic-runner');
     applyInflictedNpcInjuriesToNpcMap(npcs, trackerSnapshot, relationshipTrackerUpdate?.__inflictedInjuries || []);
     for (const item of npcResultDeltas || []) {
         if (!shouldApplyDeterministicResultInjury(item?.injury)) continue;
@@ -4649,6 +4655,22 @@ function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, c
     audit.push('---');
 
     return { user, npcs };
+}
+
+function assignMissingNpcPersonalitySummaries(npcs, names = [], salt = '') {
+    if (!npcs || typeof npcs !== 'object') return;
+    const wanted = new Set((names || []).map(name => String(name || '').trim()).filter(isReal));
+    for (const name of wanted) {
+        const value = npcs[name];
+        if (!isReal(name)) continue;
+        const entry = normalizeTrackerEntry(value);
+        if (cleanPersonalitySummary(entry.personalitySummary)) {
+            npcs[name] = entry;
+            continue;
+        }
+        entry.personalitySummary = deterministicPersonalitySummaryForName(name, salt);
+        npcs[name] = normalizeTrackerEntry(entry);
+    }
 }
 
 function shouldApplyDeterministicResultInjury(injury) {
@@ -4740,7 +4762,7 @@ function cleanTrackerText(value) {
 function cleanPersonalitySummary(value) {
     const text = String(value ?? '').trim().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '').trim();
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
-    return text.slice(0, 160);
+    return text.slice(0, 320);
 }
 
 function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, audit, refereeContext, context = {}, rapportClock = normalizeRapportClock()) {

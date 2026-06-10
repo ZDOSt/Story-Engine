@@ -1781,7 +1781,7 @@ export function normalizePersonalitySummary(value) {
         .replace(/^["']|["']$/g, '')
         .trim();
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
-    return text.slice(0, 160);
+    return text.slice(0, 320);
 }
 
 export function normalizeLifecycle(value) {

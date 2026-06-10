@@ -9,7 +9,7 @@ import { formatNarratorModelPromptContext, formatNarratorPromptContext } from '.
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, mergeUserKnowledgeLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
-import { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
+import { deterministicPersonalitySummaryForName, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import {
     STREAMING_ARTIFACT_REGEX_SCRIPT_ID,
     STREAMING_ARTIFACT_REGEX_SCRIPT_NAME,
@@ -2808,7 +2808,9 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
             promoteTrackerEntry(npcs, name, revealedName);
         }
     }
+    assignMissingDisplayNpcPersonalitySummaries(npcs, 'post-narration');
     merged.npcs = reconcileNamedNpcDuplicates(applyExplicitNamePromotions(npcs, options).npcs, options.beforeNpcs, delta);
+    assignMissingDisplayNpcPersonalitySummaries(merged.npcs, 'post-narration');
     const deltaActiveNames = new Set();
     for (const npcDelta of delta.npcs || []) {
         addActiveDisplayNpcName(deltaActiveNames, merged.npcs, npcDelta?.NPC);
@@ -2825,6 +2827,18 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
     };
     return merged;
+}
+
+function assignMissingDisplayNpcPersonalitySummaries(npcs, salt = '') {
+    if (!npcs || typeof npcs !== 'object') return;
+    for (const [name, value] of Object.entries(npcs)) {
+        if (!isRealName(name)) continue;
+        const entry = normalizeTrackerEntry(value || {});
+        if (!cleanPersonalitySummary(entry.personalitySummary)) {
+            entry.personalitySummary = deterministicPersonalitySummaryForName(name, salt);
+        }
+        npcs[name] = normalizeTrackerEntry(entry);
+    }
 }
 
 function userKnowledgeDeltaHasChanges(delta) {
@@ -2934,7 +2948,7 @@ function cleanTrackerDeltaText(value) {
 function cleanPersonalitySummary(value) {
     const text = String(value ?? '').trim().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '').trim();
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
-    return text.slice(0, 160);
+    return text.slice(0, 320);
 }
 
 function cleanRevealedTrackerName(value) {

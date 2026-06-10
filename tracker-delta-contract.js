@@ -11,28 +11,62 @@ export const USER_KNOWLEDGE_TRUTH = Object.freeze(['true', 'distorted', 'false',
 export const USER_KNOWLEDGE_CONFIDENCE = Object.freeze(['certain', 'likely', 'uncertain']);
 
 export const PERSONALITY_ARCHETYPE_GLOSSARY = [
-    'deredere: openly warm, affectionate, cheerful, direct with care or admiration.',
-    'tsundere: guarded or sharp outwardly, softens through action, hides concern behind criticism.',
-    'yandere: possessive, obsessive, intensely attached, affection can become controlling or dangerous.',
-    'kuudere: cool, composed, restrained, emotionally contained, shows care through calm action.',
-    'dandere: quiet, shy, withdrawn, opens slowly when trust or safety grows.',
-    'himedere: expects special treatment, proud, imperious, princess-like entitlement.',
-    'oujidere: princely, commanding, polished, expects deference through confidence or rank.',
-    'kamidere: superiority complex, godlike self-regard, controlling or judgmental certainty.',
-    'mayadere: starts antagonistic or dangerous, may soften into loyalty or affection.',
-    'sadodere: teasing, cruel, dominant, enjoys provoking discomfort or submission.',
-    'hiyakasudere: flirtatious tease, playful provocation, enjoys making others react.',
-    'hajidere: easily embarrassed by affection, bashful, visibly struggles with romantic attention.',
-    'bakadere: foolish, impulsive, naive, sincere or comic lack of judgment.',
-    'erodere: openly sensual or provocative while retaining emotional selectiveness or restraint.',
-    'dorodere: sweet or harmless surface masking darker instability, bitterness, or hidden malice.',
-    'shundere: gloomy, sad, self-effacing, melancholy baseline.',
-    'undere: agreeable, eager to please, readily follows another person lead.',
-    'goudere: overzealous devotion, extreme helpfulness, acts too aggressively for someone good.',
-    'kanedere: money/status motivated, transactional, values wealth or advantage.',
-    'byoukidere: frail, sickly, vulnerable, shaped by illness or physical fragility.',
-    'none/custom: no listed archetype clearly fits; use concrete stable traits instead.',
+    'deredere internal pattern: openly warm, affectionate, cheerful, direct with care or admiration.',
+    'tsundere internal pattern: guarded or sharp outwardly, softens through action, hides concern behind criticism.',
+    'yandere internal pattern: possessive, obsessive, intensely attached, affection can become controlling or dangerous.',
+    'kuudere internal pattern: cool, composed, restrained, emotionally contained, shows care through calm action.',
+    'dandere internal pattern: quiet, shy, withdrawn, opens slowly when trust or safety grows.',
+    'himedere internal pattern: expects special treatment, proud, imperious, entitled.',
+    'oujidere internal pattern: princely, commanding, polished, expects deference through confidence or rank.',
+    'kamidere internal pattern: superiority complex, godlike self-regard, controlling or judgmental certainty.',
+    'mayadere internal pattern: starts antagonistic or dangerous, may soften into loyalty or affection.',
+    'sadodere internal pattern: teasing, cruel, dominant, enjoys provoking discomfort or submission.',
+    'hiyakasudere internal pattern: flirtatious tease, playful provocation, enjoys making others react.',
+    'hajidere internal pattern: easily embarrassed by affection, bashful, visibly struggles with romantic attention.',
+    'bakadere internal pattern: foolish, impulsive, naive, sincere or comic lack of judgment.',
+    'erodere internal pattern: openly sensual or provocative while retaining emotional selectiveness or restraint.',
+    'dorodere internal pattern: sweet or harmless surface masking darker instability, bitterness, or hidden malice.',
+    'shundere internal pattern: gloomy, sad, self-effacing, melancholy baseline.',
+    'undere internal pattern: agreeable, eager to please, readily follows another person lead.',
+    'goudere internal pattern: overzealous devotion, extreme helpfulness, acts too aggressively for someone good.',
+    'kanedere internal pattern: money/status motivated, transactional, values wealth or advantage.',
+    'byoukidere internal pattern: frail, sickly, vulnerable, shaped by illness or physical fragility.',
+    'general/custom: no internal pattern clearly fits; use grounded stable traits instead.',
 ].join('\n');
+
+export const GENERAL_PERSONALITY_PROFILES = Object.freeze([
+    'temperament: guarded, suspicious, practical; speech: short direct questions, few pleasantries; interaction: tests claims and controls access; mannerisms: uses titles, checks details, keeps exchanges brief; intensity:medium',
+    'temperament: formal, procedural, dutiful; speech: precise rule-bound phrasing; interaction: follows rank, process, and documented authority; mannerisms: cites protocol, asks for names, keeps posture official; intensity:medium',
+    'temperament: warm, direct, hospitable; speech: open invitations and plain reassurance; interaction: offers practical help and expects honest answers; mannerisms: names concrete comforts, makes space, checks needs; intensity:medium',
+    'temperament: dry, observant, sardonic; speech: clipped understatement and quiet irony; interaction: watches before committing, points out practical flaws; mannerisms: answers with edged humor, notices contradictions; intensity:medium',
+    'temperament: nervous, appeasing, conflict-avoidant; speech: cautious qualifiers and quick concessions; interaction: seeks safety, permission, and reassurance; mannerisms: offers alternatives, checks exits, softens refusals; intensity:medium',
+    'temperament: proud, imperious, status-conscious; speech: polished commands and cool corrections; interaction: expects deference and protects reputation; mannerisms: uses rank, frames favors as privilege, dislikes public challenge; intensity:medium',
+    'temperament: playful, teasing, socially bold; speech: light provocation and quick banter; interaction: tests reactions through humor without committing too soon; mannerisms: gives nicknames, turns tension into games, dodges direct answers; intensity:medium',
+    'temperament: cold, practical, unsentimental; speech: concise assessments and hard tradeoffs; interaction: values efficiency, leverage, and results; mannerisms: counts costs aloud, cuts off sentiment, moves to decisions; intensity:medium',
+    'temperament: patient, scholarly, analytical; speech: careful distinctions and measured explanations; interaction: asks clarifying questions before acting; mannerisms: references notes, compares evidence, corrects imprecision gently; intensity:medium',
+    'temperament: mercantile, opportunistic, personable; speech: friendly negotiation and price-aware framing; interaction: looks for advantage while preserving goodwill; mannerisms: names terms, offers bundles, asks what something is worth; intensity:medium',
+    'temperament: devout, solemn, duty-led; speech: moral framing and restrained conviction; interaction: weighs actions against vows, signs, or obligations; mannerisms: invokes duties, marks small rituals, pauses before judgment; intensity:medium',
+    'temperament: blunt, physical, action-first; speech: plain statements and impatient challenges; interaction: trusts visible competence over explanation; mannerisms: points to tools, scars, routes, or tasks instead of debating; intensity:medium',
+    'temperament: cautious, observant, quietly protective; speech: low-risk suggestions and practical warnings; interaction: shields others without dramatics; mannerisms: positions near exits, notices hazards, offers cover or supplies; intensity:medium',
+    'temperament: curious, bright, easily engaged; speech: quick questions and eager connections; interaction: follows novelty and shares discoveries; mannerisms: points out details, asks how things work, changes topics quickly; intensity:medium',
+    'temperament: bitter, weary, distrustful; speech: hard-earned warnings and skeptical replies; interaction: expects disappointment but respects proof; mannerisms: names past costs, refuses easy optimism, tests promises; intensity:medium',
+    'temperament: gentle, reserved, considerate; speech: careful wording and indirect concern; interaction: avoids pressure and helps through small acts; mannerisms: offers quiet options, remembers preferences, avoids interrupting; intensity:medium',
+    'temperament: ambitious, polished, calculating; speech: controlled compliments and strategic questions; interaction: measures usefulness, status, and future leverage; mannerisms: redirects conversations, tracks favors, avoids loose promises; intensity:medium',
+    'temperament: reckless, bold, thrill-seeking; speech: confident dares and fast commitments; interaction: pushes momentum and underestimates risk; mannerisms: volunteers first, laughs at danger, treats warnings as challenges; intensity:medium',
+    'temperament: secretive, evasive, careful; speech: partial answers and controlled omissions; interaction: protects information and redirects scrutiny; mannerisms: answers questions with questions, changes subject, gives only necessary facts; intensity:medium',
+    'temperament: nurturing, practical, firm; speech: plain care mixed with boundaries; interaction: helps concretely but refuses foolishness; mannerisms: assigns tasks, checks injuries or supplies, scolds dangerous choices; intensity:medium',
+]);
+
+export function deterministicPersonalitySummaryForName(name, salt = '') {
+    const key = `${String(name || '').trim().toLowerCase()}|${String(salt || '').trim().toLowerCase()}`;
+    let hash = 2166136261;
+    for (let index = 0; index < key.length; index += 1) {
+        hash ^= key.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    const profile = GENERAL_PERSONALITY_PROFILES[Math.abs(hash >>> 0) % GENERAL_PERSONALITY_PROFILES.length];
+    return profile || GENERAL_PERSONALITY_PROFILES[0];
+}
 
 export const TRACKER_DELTA_CONTRACT = [
     'STRICT POST-NARRATION TRACKER DELTA CONTRACT:',
@@ -41,9 +75,11 @@ export const TRACKER_DELTA_CONTRACT = [
     '- MECHANICAL_TRACKER_AUTHORITY is binding for target, condition ceilings, fatal outcomes, and contextual injury caps. Use FINAL_NARRATION to choose concrete wording/body part/detail when authority delegates detail to narration.',
     '- Use semantic reading, not keyword matching. Identify who is affected, what changed, and whether the change persists beyond the instant of narration.',
     '- Do not infer hidden consequences. Do not add momentary pain, effort, hesitation, fear, impact, or flavor as wounds/status.',
-    '- NPC personalitySummary is stable personality memory only: a concise compact seed for enduring temperament, values, manner, archetype, or interaction style revealed by FINAL_NARRATION, SEMANTIC_PERSONALITY_EVIDENCE, or explicit first-contact personality seed.',
-    '- When an active tracked NPC has no personalitySummary and durable first-contact evidence supports one, write a compact seed using the best matching glossary archetype plus concrete traits and intensity, e.g. "tsundere; proud, guarded, sharp-tongued; hides concern through criticism; intensity:medium".',
-    '- Choose an archetype only when evidence clearly matches the glossary. If unclear, mixed, or not a dere-style pattern, use none/custom plus concrete stable traits. Never guess a flashy archetype from mood, attraction, relationship score, fear/hostility score, injury, gear, or a one-turn reaction.',
+    '- NPC personalitySummary is stable personality memory only: a concise compact seed for enduring temperament, values, speech style, interaction style, optional mannerisms, or internal behavior pattern revealed by FINAL_NARRATION, SEMANTIC_PERSONALITY_EVIDENCE, or explicit first-contact personality seed.',
+    '- Write personalitySummary as natural language only. Do not output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere.',
+    '- Preferred format: "temperament: ...; speech: ...; interaction: ...; mannerisms: ...; intensity:low|medium|high". Mannerisms are occasional observable tendencies, not mandatory repeated beats.',
+    '- When an active tracked NPC has no personalitySummary and durable first-contact evidence supports one, write a compact natural-language seed using the best matching internal pattern plus concrete traits, speech style, interaction style, mannerisms if useful, and intensity.',
+    '- Choose an internal pattern only when evidence clearly matches the glossary. If unclear, mixed, or not a stylized pattern, use grounded general traits instead. Never guess a flashy profile from mood, attraction, relationship score, fear/hostility score, injury, gear, or a one-turn reaction.',
     '- Personality evidence may come from FINAL_NARRATION, SEMANTIC_PERSONALITY_EVIDENCE, previous tracker history, or explicit card/lore/scenario/context evidence summarized in the prompt. If those sources give no durable temperament, output unchanged.',
     'PERSONALITY_ARCHETYPE_GLOSSARY:',
     PERSONALITY_ARCHETYPE_GLOSSARY,
