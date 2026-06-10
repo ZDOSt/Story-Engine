@@ -3234,7 +3234,7 @@ function relationshipTowardUser(disposition, classified) {
 
 function buildTrackerDisplayHtml(snapshot) {
     const npcs = normalizeDisplayTrackerNpcs(snapshot?.npcs);
-    const visibleNames = Array.isArray(snapshot?.visibleNpcNames)
+    const visibleNames = Array.isArray(snapshot?.visibleNpcNames) && snapshot.visibleNpcNames.length
         ? new Set(snapshot.visibleNpcNames.map(name => String(name).toLowerCase()))
         : null;
     const names = Object.keys(npcs)
