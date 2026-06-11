@@ -2241,6 +2241,80 @@ const tests = [
     },
   },
   {
+    name: '12g.3 negative social memory is bucket-specific',
+    run() {
+      const tracker = {
+        Bandit: trackerEntry({
+          currentDisposition: { B: 2, F: 2, H: 2 },
+          socialResolutionMemory: {
+            Bluff: {
+              resolved: 'Y',
+              outcome: 'failure',
+              disposition: 'B2/F2/H2',
+              goal: 'talk past the toll',
+            },
+          },
+        }),
+      };
+      const intimidateReport = runCase({
+        userText: '"Drop the toll or bleed," I tell the bandit.',
+        dice: [18, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'intimidate the bandit into dropping the toll',
+            identifyChallenge: 'threaten the bandit into dropping the toll',
+            explicitMeans: '"Drop the toll or bleed"',
+            identifyTargets: {
+              ActionTargets: ['Bandit'],
+              OppTargets: { NPC: ['Bandit'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            rollReason: 'Fresh intimidation pressure separate from the prior failed bluff.',
+            actionBucket: 'Social',
+            socialBucket: 'Intimidate',
+            combatType: 'None',
+          },
+          relationshipEngine: [relationship('Bandit', { explicitIntimidationOrCoercion: true })],
+        }),
+      });
+      assert.equal(intimidateReport.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'Y');
+      assert.equal(intimidateReport.finalNarrativeHandoff.resolutionPacket.SocialBucket, 'Intimidate');
+      assert.equal(auditIncludes(intimidateReport, 'deterministicNegativeSocialRepeat'), false);
+
+      const repeatBluffReport = runCase({
+        userText: '"The duke sent me, I swear," I tell the bandit again.',
+        dice: [18, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'bluff the bandit into dropping the toll',
+            identifyChallenge: 'repeat the duke-sent-me bluff',
+            explicitMeans: '"The duke sent me, I swear"',
+            identifyTargets: {
+              ActionTargets: ['Bandit'],
+              OppTargets: { NPC: ['Bandit'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            rollReason: 'Repeated bluff against the same target.',
+            actionBucket: 'Social',
+            socialBucket: 'Bluff',
+            combatType: 'None',
+          },
+          relationshipEngine: [relationship('Bandit')],
+        }),
+      });
+      assert.equal(repeatBluffReport.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
+      assert.equal(repeatBluffReport.finalNarrativeHandoff.resolutionPacket.SocialBucket, 'None');
+      assert.match(repeatBluffReport.finalNarrativeHandoff.resolutionPacket.RollReason, /Bluff already failed/);
+      assert.equal(auditIncludes(repeatBluffReport, 'deterministicNegativeSocialRepeat'), true);
+    },
+  },
+  {
     name: '12h B4 calm romance initiative uses style and new ranges',
     run() {
       const tracker = {
@@ -5703,7 +5777,8 @@ const tests = [
       }
       const modelPrompt = prompt(report);
       assert.match(modelPrompt, /Name pool use is mandatory and obeys fog of war\./);
-      assert.match(modelPrompt, /If a new proper name is revealed, use only one unused approved name from this pool/);
+      assert.match(modelPrompt, /Any newly revealed proper name in this response MUST exactly match one unused approved name from this pool/);
+      assert.match(modelPrompt, /If no approved listed name fits, leave the person, entity, or place unnamed/);
       assert.match(modelPrompt, /Female: /);
       assert.match(modelPrompt, /Male: /);
       assert.match(modelPrompt, /Location: /);
@@ -5727,10 +5802,8 @@ const tests = [
       assert.equal(pool.location.every(name => reserved.includes(name)), true);
       const engineSource = fs.readFileSync(extensionFile('engines.js'), 'utf8');
       const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
-      const archiveSource = fs.readFileSync(extensionFile('archived-name-generation-engine.md'), 'utf8');
       assert.doesNotMatch(engineSource, /function NameGenerationEngine/);
       assert.doesNotMatch(semanticSource, /NameGenerationEngine/);
-      assert.match(archiveSource, /function NameGenerationEngine/);
     },
   },
   {
@@ -5750,7 +5823,8 @@ const tests = [
       });
       const text = prompt(report);
       assert.match(text, /Name pool use is mandatory and obeys fog of war\./);
-      assert.match(text, /If a new proper name is revealed, use only one unused approved name from this pool/);
+      assert.match(text, /Any newly revealed proper name in this response MUST exactly match one unused approved name from this pool/);
+      assert.match(text, /If no approved listed name fits, leave the person, entity, or place unnamed/);
       assert.match(text, /Female: [A-Z]/);
       assert.match(text, /Male: [A-Z]/);
       assert.match(text, /Location: [A-Z]/);
@@ -7434,7 +7508,8 @@ const tests = [
       assert.doesNotMatch(semanticSource, /consequence_affordance/);
       assert.match(runnerSource, /USER_OWNED_ITEM_SOURCES/);
       assert.match(runnerSource, /user-owned item sources require saved user gear\/inventory/i);
-      assert.match(runnerSource, /ItemUse:\s*normalizeItemUseForHandoff\(semantic\.itemUse,\s*context,\s*audit,\s*playerTrackerSnapshot\)/);
+      assert.match(runnerSource, /const itemUse = normalizeItemUseForHandoff\(semantic\.itemUse,\s*context,\s*itemUseAudit,\s*playerTrackerSnapshot\)/);
+      assert.match(runnerSource, /getUnavailablePersonalItemNoRollEvidence\(itemUse\)/);
       assert.match(runnerSource, /saved user gear\/inventory overrides semantic false unavailable result/i);
       assert.doesNotMatch(runnerSource, /ItemUse[\s\S]{0,240}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
       assert.match(preflightSource, /If personal item use is listed, obey the listed gear\/inventory availability exactly/i);
@@ -7489,6 +7564,55 @@ const tests = [
       assert.match(unavailablePrompt, /Do not skip, gloss over, or replace the attempt/i);
       assert.doesNotMatch(unavailablePrompt, /sword is available to the user in the scene from gear/i);
       assert.doesNotMatch(unavailablePrompt, /ItemUse:/);
+
+      const unavailableCombatReport = runCase({
+        userText: 'I reach for the longsword at my belt and try to draw it, saying, "I gave you a chance."',
+        tracker: {
+          Valerie: trackerEntry({ currentDisposition: { B: 1, F: 2, H: 2 }, currentCoreStats: { PHY: 3, MND: 2, CHA: 2 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Draw a longsword and attack Valerie',
+            identifyChallenge: 'Drawing a longsword and attacking Valerie',
+            explicitMeans: 'I reach for the longsword at my belt and try to draw it',
+            itemUse: {
+              attempted: true,
+              available: false,
+              item: 'longsword',
+              source: 'unavailable',
+              evidence: 'I reach for the longsword at my belt and try to draw it',
+              noEffectReason: 'not in saved user gear/inventory',
+            },
+            identifyTargets: {
+              ActionTargets: ['Valerie'],
+              OppTargets: { NPC: ['Valerie'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            actionBucket: 'Combat',
+            combatType: 'Mundane',
+          },
+          injuryEffectEngine: {
+            effects: [
+              {
+                target: 'Valerie',
+                effectType: 'physical_injury',
+                description: 'minor Slash or stab wound from a longsword attack',
+                severity: 'minor',
+              },
+            ],
+          },
+          relationshipEngine: [relationship('Valerie')],
+        }),
+      });
+      assert.equal(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
+      assert.equal(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.ActionBucket, 'None');
+      assert.equal(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.CombatType, 'None');
+      assert.equal(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.LandedActions, '(none)');
+      assert.deepEqual(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.InflictedInjuries, []);
+      assert.match(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.RollReason, /unavailable personal item: longsword/i);
+      assert.match(unavailableCombatReport.auditLines.join('\n'), /deterministicUnavailableItem/);
 
       const falseWornReport = runCase({
         userText: 'I draw the sword at my belt.',
@@ -7975,10 +8099,11 @@ const tests = [
       assert.match(semanticSource, /classify it as stakes only when the user also declares a demand, threat, attack, aim\/pointing at a target/);
       assert.match(semanticSource, /rollNeeded is the sole semantic roll gate/);
       assert.match(semanticSource, /do not roll the same settled disposition reaction again/);
-      assert.match(semanticSource, /A failed or resolved negative social roll such as intimidation, coercion, bluffing, deception, manipulation, blackmail, or forced submission cannot be immediately retried/);
+      assert.match(semanticSource, /Failed\/resolved Bluff blocks repeated Bluff; failed\/resolved Intimidate blocks repeated Intimidate/);
+      assert.match(semanticSource, /Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff/);
       assert.match(semanticSource, /Do not carry forward a prior social goal as the current goal after it already failed or resolved/);
       assert.match(semanticSource, /post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath\/escalation/);
-      assert.match(semanticSource, /do not immediately retry a failed or resolved negative social attempt against the same target for the same goal/);
+      assert.match(semanticSource, /do not immediately retry the same failed\/resolved negative social bucket against the same target for the same goal/);
     },
   },
   {
@@ -9025,7 +9150,8 @@ const tests = [
       assert.match(source, /state\.lastNarratorHandoff = narratorContext;\s*beginProseGuardDisplayIntercept\(state\.pendingGeneration\.type \|\| 'normal'\)/);
       assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: true \}\);\s*showProgress\('Computing structured pre-flight\.\.\.'\)/);
       assert.match(source, /function canHideExpectedProseGuardMessage\(messageId\)/);
-      assert.match(source, /if \(!Number\.isFinite\(normalizedId\) \|\| normalizedId <= 0\) return false;/);
+      assert.match(source, /if \(!Number\.isFinite\(normalizedId\) \|\| normalizedId < 0\) return false;/);
+      assert.match(source, /if \(state\.pendingRun\?\.adventureIntro\) return true;/);
       assert.match(source, /if \(!Number\.isFinite\(expectedMessageId\)\) return false;/);
       assert.match(source, /function ensureProseGuardDisplayInterceptor\(\)/);
       assert.match(source, /function beginProseGuardDisplayIntercept\(type, dryRun = false\) \{\s*ensureProseGuardDisplayInterceptor\(\);/);
@@ -9210,14 +9336,9 @@ const tests = [
       assert.match(source, /if \(hasVisibleUserMessage\(context\)\) return ''/);
       assert.match(source, /function isBeginningAdventureIntroGeneration/);
       assert.match(source, /if \(!\['normal', 'swipe', 'regenerate'\]\.includes\(type\)\) return false/);
-      assert.match(source, /return Boolean\(String\(pendingGeneration\.adventureStartPrompt \|\| root\.adventureStartPrompt \|\| ''\)\.trim\(\)\)/);
+      assert.match(source, /return Boolean\(getActiveAdventureIntroPrompt\(pendingGeneration, context\)\)/);
       assert.match(source, /adventureStartPrompt: getBeginningAdventureStartPrompt\(context, type\)/);
-      assert.match(source, /function appendAdventureStartPromptToNarratorPrompt/);
-      assert.ok(
-        source.indexOf('appendAdventureStartPromptToNarratorPrompt(eventData.chat, state.pendingGeneration.adventureStartPrompt)') <
-        source.indexOf('appendNarratorContextToPrompt(eventData.chat, narratorModelContext)'),
-        'Saved adventure prompt should be restored before the narrator contract on beginning-only regenerate/swipe.',
-      );
+      assert.match(source, /formatAdventureIntroNarratorModelPromptContext\(adventurePrompt\)/);
       const promptReadySource = source.slice(
         source.indexOf('async function handleChatCompletionPromptReady'),
         source.indexOf('async function runSemanticPassWithPromptReadyBypass'),
@@ -9227,13 +9348,16 @@ const tests = [
         promptReadySource.indexOf('state.runningSemanticPass = true'),
       );
       assert.ok(introBypassSource.length > 0, 'Adventure intro bypass should happen before the semantic pass.');
-      assert.match(introBypassSource, /state\.lastNarratorHandoff = ''/);
-      assert.match(introBypassSource, /state\.pendingRun = null/);
+      assert.match(introBypassSource, /formatAdventureIntroNarratorPromptContext\(adventurePrompt\)/);
+      assert.match(introBypassSource, /formatAdventureIntroNarratorModelPromptContext\(adventurePrompt\)/);
+      assert.match(introBypassSource, /buildAdventureIntroPendingRun\(context, state\.pendingGeneration, narratorModelContext\)/);
+      assert.match(introBypassSource, /state\.lastNarratorHandoff = narratorContext/);
+      assert.match(introBypassSource, /beginProseGuardDisplayIntercept\(state\.pendingGeneration\.type \|\| 'normal'\)/);
       assert.match(introBypassSource, /sanitizeFinalPromptHistory\(eventData\.chat\)/);
-      assert.match(introBypassSource, /appendAdventureStartPromptToNarratorPrompt\(eventData\.chat, state\.pendingGeneration\.adventureStartPrompt\)/);
+      assert.match(introBypassSource, /appendNarratorContextToPrompt\(eventData\.chat, narratorModelContext\)/);
       assert.match(introBypassSource, /markNextNarratorRequestThinkingDisabled\(\)/);
       assert.match(introBypassSource, /waitForStoryEngineModelCallSpacing\('adventure intro model call'\)/);
-      assert.doesNotMatch(introBypassSource, /runSemanticPassWithPromptReadyBypass|runDeterministicEngines|formatNarratorModelPromptContext|appendNarratorContextToPrompt|beginProseGuardDisplayIntercept/);
+      assert.doesNotMatch(introBypassSource, /runSemanticPassWithPromptReadyBypass|runDeterministicEngines|formatNarratorModelPromptContext/);
     },
   },
   {

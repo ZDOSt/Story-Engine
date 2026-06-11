@@ -5,7 +5,7 @@ import { addEphemeralStoppingString, flushEphemeralStoppingStrings } from '../..
 import { persona_description_positions, power_user } from '../../../../scripts/power-user.js';
 import { setPersonaDescription, user_avatar } from '../../../../scripts/personas.js';
 import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
-import { formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
+import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, mergeUserKnowledgeLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
@@ -2704,6 +2704,61 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     return applyVisibleTrackerState(snapshot, activeNames, getPreviousTrackerDisplaySnapshot(messageKey));
 }
 
+function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModelContext) {
+    const trackerSnapshot = pendingGeneration?.trackerSnapshot || buildTrackerSnapshot(context);
+    const playerTrackerSnapshot = pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context);
+    const powerActorSnapshot = pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context);
+    const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
+    const report = {
+        semanticLedger: {},
+        finalNarrativeHandoff: {
+            resolutionPacket: {
+                GOAL: 'Adventure intro',
+                RollNeeded: 'N',
+                RollReason: 'Adventure opening; mechanics pipeline skipped.',
+                Outcome: 'no_roll',
+                OutcomeTier: 'NONE',
+                NPCInScene: [],
+                ActionTargets: [],
+                OppTargets: { NPC: [], ENV: [] },
+                hostilesInScene: { NPC: [] },
+                BenefitedObservers: [],
+                HarmedObservers: [],
+                InflictedInjuries: [],
+            },
+            npcHandoffs: [],
+            proactivityResults: {},
+            aggressionResults: {},
+            nameGeneration: {},
+        },
+        trackerUpdate: {
+            npcs: {},
+            user: {},
+            powerActors: {},
+            userKnowledge: {},
+        },
+    };
+    return {
+        type: pendingGeneration?.type || 'normal',
+        mode: 'adventure_intro',
+        trackerBefore: trackerSnapshot,
+        trackerAfter: {},
+        userBefore: playerTrackerSnapshot,
+        userAfter: {},
+        powerActorsBefore: powerActorSnapshot,
+        powerActorsAfter: {},
+        userKnowledgeBefore: userKnowledgeSnapshot,
+        userKnowledgeAfter: {},
+        resolutionPacket: report.finalNarrativeHandoff.resolutionPacket,
+        userCoreStats: playerTrackerSnapshot?.coreStats || null,
+        contextualInjuryCaps: [],
+        latestUserText: '',
+        adventureIntro: true,
+        narratorModelContext,
+        report,
+    };
+}
+
 function applyExplicitNamePromotions(npcs, { assistantText } = {}) {
     const normalized = normalizeDisplayTrackerNpcs(npcs);
     const activeNames = Object.entries(normalized)
@@ -3833,7 +3888,8 @@ function hideProseGuardMessageById(messageId) {
 }
 
 function hasPendingProseGuardGenerationInput() {
-    const pendingText = String(state.pendingGeneration?.latestUserText || state.pendingGeneration?.rawUserText || '').trim();
+    if (state.pendingRun?.adventureIntro) return true;
+    const pendingText = String(state.pendingGeneration?.latestUserText || state.pendingGeneration?.rawUserText || state.pendingGeneration?.adventureStartPrompt || '').trim();
     return Boolean(pendingText);
 }
 
@@ -3843,8 +3899,9 @@ function hasActiveProseGuardDisplayRun() {
 
 function canHideExpectedProseGuardMessage(messageId) {
     const normalizedId = Number(messageId);
-    if (!Number.isFinite(normalizedId) || normalizedId <= 0) return false;
+    if (!Number.isFinite(normalizedId) || normalizedId < 0) return false;
     if (!hasActiveProseGuardDisplayRun()) return false;
+    if (state.pendingRun?.adventureIntro) return true;
 
     const context = getContext();
     const priorMessages = Array.isArray(context?.chat) ? context.chat.slice(0, normalizedId) : [];
@@ -5813,6 +5870,10 @@ function getBeginningAdventureStartPrompt(context = getContext(), type = '') {
     return String(root.adventureStartPrompt || '').trim();
 }
 
+function getActiveAdventureIntroPrompt(pendingGeneration = state.pendingGeneration, context = getContext()) {
+    return String(pendingGeneration?.adventureStartPrompt || getPlayerRoot(context)?.adventureStartPrompt || '').trim();
+}
+
 function isBeginningAdventureIntroGeneration(pendingGeneration = state.pendingGeneration, context = getContext()) {
     if (!pendingGeneration) return false;
     const type = String(pendingGeneration.type || 'normal');
@@ -5820,7 +5881,7 @@ function isBeginningAdventureIntroGeneration(pendingGeneration = state.pendingGe
     if (hasVisibleUserMessage(context)) return false;
     const root = getPlayerRoot(context);
     if (!root?.adventureStarted) return false;
-    return Boolean(String(pendingGeneration.adventureStartPrompt || root.adventureStartPrompt || '').trim());
+    return Boolean(getActiveAdventureIntroPrompt(pendingGeneration, context));
 }
 
 function detectStructuredUserInputMode(text) {
@@ -6228,6 +6289,9 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         trackerNpcs: trackerDisplaySnapshot?.npcs || {},
         semanticTrackerNpcs,
     });
+    const introTrackerInstruction = pendingRun?.adventureIntro
+        ? 'ADVENTURE INTRO ONLY: No semantic or deterministic mechanics ran for this opening. Use FINAL_NARRATION to add tracker entries for named or foreground NPCs who are concretely present, speaking, acting, blocking access, offering help, threatening, guiding, or otherwise relevant to the first playable scene. Do not add background crowds, unnamed passersby, atmospheric groups, offscreen figures, lore-only names, or speculative NPCs. If a new foreground NPC is added and no stronger personality evidence exists, assign a compact stable personalitySummary from their visible behavior or a grounded deterministic-style profile.'
+        : '';
 
     return [
         'STORY_ENGINE_POST_NARRATION_TRACKER_UPDATE',
@@ -6237,6 +6301,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         '',
         '==TRACKER_CONTRACT==',
         TRACKER_DELTA_CONTRACT,
+        introTrackerInstruction,
         'Use this exact shape:',
         TRACKER_DELTA_TEMPLATE,
         '',
@@ -6824,10 +6889,14 @@ async function handleChatCompletionPromptReady(eventData) {
         }
 
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
-            state.lastNarratorHandoff = '';
-            state.pendingRun = null;
+            const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
+            const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt);
+            const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt);
+            state.pendingRun = buildAdventureIntroPendingRun(context, state.pendingGeneration, narratorModelContext);
+            state.lastNarratorHandoff = narratorContext;
+            beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
-            appendAdventureStartPromptToNarratorPrompt(eventData.chat, state.pendingGeneration.adventureStartPrompt);
+            appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
             markNextNarratorRequestThinkingDisabled();
             await waitForStoryEngineModelCallSpacing('adventure intro model call');
             clearAllProgress();

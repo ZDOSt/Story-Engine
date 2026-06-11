@@ -1620,6 +1620,20 @@ function getStakeBearingClaimStakesEvidence(semantic, semanticRollNeeded) {
     };
 }
 
+function getUnavailablePersonalItemNoRollEvidence(itemUse) {
+    if (itemUse?.Attempted !== 'Y' || itemUse?.Available !== 'N') return null;
+    return {
+        rollNeeded: 'N',
+        rule: 'deterministic_unavailable_personal_item_no_effect',
+        evidence: {
+            hardRule: 'Unavailable personal gear/inventory cannot produce item-dependent success, hits, injuries, access, consumption, or effects',
+            item: itemUse.Item,
+            source: itemUse.Source,
+            noEffectReason: itemUse.NoEffectReason,
+        },
+    };
+}
+
 function normalizeRollReason(value, fallback = NONE) {
     const text = String(value ?? '').trim();
     return isReal(text) ? text.slice(0, 240) : fallback;
@@ -1644,11 +1658,22 @@ function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socia
         }
     }
     if (!blocked.length) return null;
+    const priorOutcome = blocked.every(item => item.priorOutcome === blocked[0].priorOutcome)
+        ? blocked[0].priorOutcome
+        : 'mixed';
+    const reason = socialBucket === 'Bluff'
+        ? priorOutcome === 'success'
+            ? 'Bluff was already accepted by the same target under the current disposition; maintain or test that fiction without a new bluff roll.'
+            : 'Bluff already failed against the same target under the current disposition; the target remains suspicious and repeated deception does not get a new roll.'
+        : priorOutcome === 'success'
+            ? 'Intimidation already succeeded against the same target under the current disposition; carry forward fear/compliance without a new intimidation roll.'
+            : 'Intimidation already failed against the same target under the current disposition; further threats are aftermath, escalation, pressure, or combat setup rather than a new intimidation roll.';
     return {
         rollNeeded: 'N',
         rule: 'deterministic_negative_social_already_resolved',
+        reason,
         evidence: {
-            hardRule: 'Resolved Bluff/Intimidate cannot be rerolled against the same NPC while their saved disposition is unchanged; treat the latest line as continuation, aftermath, or escalation rather than a fresh social contest.',
+            hardRule: 'Resolved Bluff or Intimidate cannot be rerolled against the same NPC while their saved disposition is unchanged; this memory is bucket-specific, so Bluff does not block Intimidate and Intimidate does not block Bluff.',
             from: 'Y',
             to: 'N',
             blocked,
@@ -1667,6 +1692,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let socialBucket = normalizeSocialBucket(semantic.socialBucket, actionBucket);
     let combatType = normalizeCombatType(semantic.combatType, actionBucket);
     let rollReason = normalizeRollReason(semantic.rollReason);
+    const itemUseAudit = [];
+    const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, itemUseAudit, playerTrackerSnapshot);
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
     const boundaryViolationExplicit = bool(semantic.boundaryViolationExplicit) ? 'Y' : 'N';
 
@@ -1714,6 +1741,12 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         combatType = 'None';
         rollReason = normalizeRollReason(rollReason, 'stakes-bearing factual claim');
     }
+    const unavailableItemEvidence = getUnavailablePersonalItemNoRollEvidence(itemUse);
+    if (unavailableItemEvidence) {
+        rollNeeded = unavailableItemEvidence.rollNeeded;
+        stakesRule = unavailableItemEvidence.rule;
+        rollReason = `unavailable personal item: ${itemUse.Item} is not in saved user gear/inventory; the item-dependent action cannot resolve`;
+    }
     if (rollNeeded === 'N') {
         actionBucket = 'None';
         socialBucket = 'None';
@@ -1726,7 +1759,11 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     if (stakesOverrideEvidence) {
         audit.push(`2.4c deterministicStakesEvidence=${compact(stakesOverrideEvidence.evidence)}`);
     }
+    if (unavailableItemEvidence) {
+        audit.push(`2.4c.0 deterministicUnavailableItem=${compact(unavailableItemEvidence.evidence)}`);
+    }
     audit.push(`2.4 rollNeeded=${rollNeeded}`);
+    audit.push(...itemUseAudit);
 
     const semanticTargetsForResolution = companionCommandNoRollEvidence
         ? normalizeDirectedCompanionCommandTargets(identityTargets, targetClassifier, semantic, trackerSnapshot, context, audit)
@@ -1739,7 +1776,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     if (negativeSocialRepeatEvidence) {
         rollNeeded = negativeSocialRepeatEvidence.rollNeeded;
         stakesRule = negativeSocialRepeatEvidence.rule;
-        rollReason = 'repeated negative social attempt already resolved for current disposition';
+        rollReason = negativeSocialRepeatEvidence.reason || 'repeated same-bucket negative social attempt already resolved for current disposition';
         actionBucket = 'None';
         socialBucket = 'None';
         combatType = 'None';
@@ -1919,7 +1956,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const packet = {
         GOAL: goal,
         UserAbilityUse: normalizeUserAbilityUseForHandoff(semantic.userAbilityUse),
-        ItemUse: normalizeItemUseForHandoff(semantic.itemUse, context, audit, playerTrackerSnapshot),
+        ItemUse: itemUse,
         ClaimCheck: normalizeClaimCheckForHandoff(semantic.claimCheck),
         actions,
         intimacyAdvanceExplicit,

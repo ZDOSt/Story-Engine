@@ -7,7 +7,7 @@ function ResolutionEngine(input) {
     BUCKETS:
 'Roll buckets are semantic action shapes only. None = ordinary/no-roll scene continuity. Social = NPC-facing social pressure, split into Diplomacy, Bluff, or Intimidate. Combat = direct violence or harmful supernatural attack, split into Mundane or SpellOrSupernatural by the primary attack. Challenge = physical/environmental obstacles, stealth, pursuit, locks, traps, terrain, weather, barriers, or hazards. Deterministic code maps buckets to stats and rolls.',
     STAKES:
-'Stakes are meaningful possible consequences tied to success or failure. Stakes include physical risk, harm, danger, detection, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. Only new unresolved stakes require a roll. If success/failure would not materially change the outcome, the relevant NPC reaction is already decided by saved disposition/intimacy state, or a failed negative social attempt is merely being repeated against the same target for the same goal in the same scene, no roll is needed.'
+'Stakes are meaningful possible consequences tied to success or failure. Stakes include physical risk, harm, danger, detection, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. Only new unresolved stakes require a roll. If success/failure would not materially change the outcome, the relevant NPC reaction is already decided by saved disposition/intimacy state, or the same failed/resolved negative social bucket is merely being repeated against the same target for the same goal in the same scene, no roll is needed. Bluff and Intimidate are remembered separately.'
   });
 
   identifyGoal(input):
@@ -97,7 +97,8 @@ function ResolutionEngine(input) {
     rule: if boundaryViolationExplicit=Y, evaluate stakes normally under DEF.STAKES; boundary violation usually affects autonomy, trust, safety, or social standing.
     rule: return Y only if success or failure of finalGoal or explicit challenge creates new unresolved stakes for {{user}} or a living entity, as per DEF.STAKES
     rule: return N if the only relevant NPC reaction is already decided by saved fear/terror, hostility/hatred, or persisted intimacy boundary
-    rule: return N for repeated/rephrased/intensified negative social attempts after a resolved failure or refusal against the same target for the same goal in the current scene
+    rule: return N for repeated/rephrased/intensified negative social attempts only when the same socialBucket was already resolved against the same target for the same goal in the current scene under unchanged disposition
+    rule: Bluff memory blocks repeated Bluff; Intimidate memory blocks repeated Intimidate. Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff.
     rule: saved disposition never suppresses separate combat, pursuit, restraint, theft, bargaining, deception, access, resources, secrets, or environmental obstacles
     else -> N
 
