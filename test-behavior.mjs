@@ -9323,7 +9323,9 @@ const tests = [
       assert.match(source, /const genre = creator\.flow === 'new'/);
       assert.match(source, /root\.adventureStartPending = true/);
       assert.match(source, /delete root\.adventureStartPrompt/);
-      assert.match(source, /root\.creator = \{ stage: 'approved' \}/);
+      assert.match(source, /data-spe-player-action="back-from-adventure-start"/);
+      assert.match(source, /root\.creator = \{\s*\.\.\.clone\(creator\),\s*stage: 'approved'/);
+      assert.match(source, /reseedPlayerTrackerFromPersona\(trackerRoot, context\)/);
       assert.match(source, /function submitPlayerAdventureStartPrompt/);
       assert.match(source, /quiet_prompt: text/);
       assert.match(source, /quietToLoud: true/);

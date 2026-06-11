@@ -1936,6 +1936,26 @@ function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
     return true;
 }
 
+function reseedPlayerTrackerFromPersona(root, context = getContext()) {
+    if (!root) return false;
+    const user = normalizeTrackerUserState(root.user || {});
+    const persona = getPersonaText(context);
+    const seed = extractPersonaTrackerSeed(persona);
+    root.user = normalizeTrackerUserState({
+        ...user,
+        gear: seed.gear,
+        inventory: seed.inventory,
+    });
+    root.personaInventorySeeded = {
+        at: Date.now(),
+        hash: hashTextForSeed(persona),
+        gearCount: seed.gear.length,
+        inventoryCount: seed.inventory.length,
+        forced: true,
+    };
+    return true;
+}
+
 function extractPersonaTrackerSeed(personaText) {
     const gear = [];
     const inventory = [];
@@ -4736,6 +4756,7 @@ function buildPlayerAdventureStartHtml(root) {
         <div class="spe-player-muted">Opening genre: <code>${escapeHtml(genre)}</code></div>
         <div class="spe-player-actions">
             <button class="menu_button" data-spe-player-action="start-adventure">Start Adventure</button>
+            <button class="menu_button" data-spe-player-action="back-from-adventure-start">Back</button>
             <button class="menu_button" data-spe-player-action="dismiss-adventure-start">Hide</button>
         </div>
     `;
@@ -4951,6 +4972,35 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
             root.creator.stage = root.creator.flow === 'new' ? 'identity' : 'swap';
         } else if (action === 'approve-sheet') {
             await approvePlayerSheet(root, context);
+        } else if (action === 'back-from-adventure-start') {
+            const flow = root.creator?.flow || (root.sheet?.source === 'existing_persona_conversion' ? 'persona' : 'new');
+            root.ready = false;
+            root.forceCreator = true;
+            root.adventureStartPending = false;
+            root.adventureStarted = false;
+            delete root.adventureStartPrompt;
+            delete root.adventureStartPromptCreatedAt;
+            if (flow === 'persona') {
+                root.creator = {
+                    ...(root.creator || {}),
+                    flow: 'persona',
+                    stage: 'persona-sheet',
+                    stats: isValidCoreStats(root.creator?.stats) ? normalizeCoreStats(root.creator.stats) : normalizeCoreStats(root.stats),
+                    sheetText: root.creator?.sheetText || root.sheet?.text || '',
+                };
+            } else {
+                root.creator = {
+                    ...(root.creator || {}),
+                    flow: 'new',
+                    stage: 'identity',
+                    stats: isValidCoreStats(root.creator?.stats) ? normalizeCoreStats(root.creator.stats) : normalizeCoreStats(root.stats),
+                    sheetText: root.creator?.sheetText || root.sheet?.text || '',
+                    identity: {
+                        ...(root.creator?.identity || {}),
+                        genre: normalizePlayerAdventureGenre(root.creator?.identity?.genre || root.sheet?.genre || root.adventureGenre || 'Fantasy'),
+                    },
+                };
+            }
         } else if (action === 'start-adventure') {
             const prompt = buildPlayerAdventureStartPrompt(root);
             if (submitPlayerAdventureStartPrompt(prompt)) {
@@ -5077,11 +5127,15 @@ async function approvePlayerSheet(root, context = getContext()) {
         approvedAt: Date.now(),
     };
     const trackerRoot = getTrackerRoot(context);
-    if (trackerRoot && !normalizeTrackerUserState(trackerRoot.user || {}).gear.length && !normalizeTrackerUserState(trackerRoot.user || {}).inventory.length) {
+    if (trackerRoot) {
         trackerRoot.personaInventorySeeded = null;
-        seedPlayerTrackerFromPersonaIfEmpty(trackerRoot, context);
+        reseedPlayerTrackerFromPersona(trackerRoot, context);
     }
-    root.creator = { stage: 'approved' };
+    root.creator = {
+        ...clone(creator),
+        stage: 'approved',
+        sheetText,
+    };
     globalThis.toastr?.success?.('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
 }
 
