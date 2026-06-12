@@ -7038,10 +7038,18 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
 }
 
 function appendNarratorContextToPrompt(chat, narratorContext) {
-    chat.push({
+    const message = {
         role: 'system',
         content: buildFinalNarrationPrompt(narratorContext),
-    });
+    };
+    const latestUserIndex = Array.isArray(chat)
+        ? chat.findLastIndex(entry => String(entry?.role || '').toLowerCase() === 'user')
+        : -1;
+    if (latestUserIndex >= 0) {
+        chat.splice(latestUserIndex + 1, 0, message);
+    } else {
+        chat.push(message);
+    }
 }
 
 function appendAdventureStartPromptToNarratorPrompt(chat, prompt) {
