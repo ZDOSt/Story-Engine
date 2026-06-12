@@ -32,7 +32,6 @@ const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
 const TRACKER_PROFILE_CURRENT = '<Current semantic profile>';
 const PROSE_GUARD_PROFILE_CURRENT = '<Current semantic profile>';
-const PROGRESSION_PROFILE_CURRENT = '<Current semantic profile>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 const TRACKER_DISPLAY_VERSION = 1;
@@ -517,7 +516,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     proseGuardFormattingEnabled: true,
     proseGuardFormattingPrompt: DEFAULT_PROSE_GUARD_FORMATTING_PROMPT,
     characterProgressionEnabled: true,
-    progressionConnectionProfile: PROGRESSION_PROFILE_CURRENT,
     writingStyleEnabled: true,
     writingStylePrompt: DEFAULT_WRITING_STYLE_PROMPT,
     writingStylePlacement: 'before_prompt',
@@ -755,23 +753,6 @@ async function withProseGuardGenerationSettings(callback) {
     return await withSemanticGenerationSettings(callback);
 }
 
-async function withProgressionGenerationSettings(callback) {
-    const settings = getSettings();
-    const progressionProfile = String(settings.progressionConnectionProfile || PROGRESSION_PROFILE_CURRENT).trim();
-    if (progressionProfile && progressionProfile !== PROGRESSION_PROFILE_CURRENT) {
-        const profile = getConnectionProfileByName(progressionProfile);
-        if (!profile) {
-            throw new Error(`Progression connection profile "${progressionProfile}" was not found.`);
-        }
-        console.info(`[${EXTENSION_NAME}] using direct Progression connection profile request: ${profile.name}`);
-        return await callback({
-            semanticProfileId: profile.id,
-            semanticProfileName: profile.name,
-        });
-    }
-    return await withSemanticGenerationSettings(callback);
-}
-
 function getModelCallDelayMs() {
     const settings = getSettings();
     if (settings.modelCallDelayEnabled !== true) return 0;
@@ -962,7 +943,6 @@ function refreshSettingsControls() {
     const proseGuardFormattingDrawer = document.getElementById('structured_preflight_prose_guard_formatting_drawer');
     const proseGuardFormattingPrompt = document.getElementById('structured_preflight_prose_guard_formatting_prompt');
     const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
-    const progressionProfileSelect = document.getElementById('structured_preflight_progression_profile');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
     const modelCallDelayEnabledCheckbox = document.getElementById('structured_preflight_model_call_delay_enabled');
     const modelCallDelaySecondsInput = document.getElementById('structured_preflight_model_call_delay_seconds');
@@ -1018,14 +998,6 @@ function refreshSettingsControls() {
         settings.proseGuardConnectionProfile || PROSE_GUARD_PROFILE_CURRENT,
         'Profile not found',
     );
-    setSelectOptions(
-        progressionProfileSelect,
-        [PROGRESSION_PROFILE_CURRENT, ...getConnectionProfileNames()],
-        PROGRESSION_PROFILE_CURRENT,
-        settings.progressionConnectionProfile || PROGRESSION_PROFILE_CURRENT,
-        'Profile not found',
-    );
-
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
     if (trackerProfileSelect) trackerProfileSelect.disabled = !engineEnabled || settings.postNarrationTrackerEnabled === false;
@@ -1036,7 +1008,6 @@ function refreshSettingsControls() {
         proseGuardFormattingDrawer.hidden = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
         if (proseGuardFormattingDrawer.hidden) proseGuardFormattingDrawer.open = false;
     }
-    if (progressionProfileSelect) progressionProfileSelect.disabled = !engineEnabled || settings.characterProgressionEnabled === false;
     if (writingStylePrompt) writingStylePrompt.disabled = !engineEnabled || settings.writingStyleEnabled === false;
     if (writingStyleDrawer) {
         writingStyleDrawer.hidden = !engineEnabled || settings.writingStyleEnabled === false;
@@ -1389,11 +1360,7 @@ function renderSettingsPanel() {
                                 <input id="structured_preflight_progression_enabled" type="checkbox">
                                 <span>Enable Character Progression</span>
                             </label>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_progression_profile">Progression profile</label>
-                                <select id="structured_preflight_progression_profile" class="text_pole flex1"></select>
-                            </div>
-                            <small class="spe-settings-note">Counts one critical accomplishment per turn. Ability options use this profile and default to the semantic profile.</small>
+                            <small class="spe-settings-note">Counts one critical accomplishment per turn. Generated ability and spell options use the current narrator profile.</small>
                         </div>
                     </section>
                 </div>
@@ -1489,11 +1456,6 @@ function renderSettingsPanel() {
     document.getElementById('structured_preflight_progression_enabled')?.addEventListener('change', event => {
         settings.characterProgressionEnabled = Boolean(event.target?.checked);
         refreshSettingsControls();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_progression_profile')?.addEventListener('change', event => {
-        const selected = String(event.target?.value || PROGRESSION_PROFILE_CURRENT);
-        settings.progressionConnectionProfile = selected || PROGRESSION_PROFILE_CURRENT;
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_name_style')?.addEventListener('change', event => {
@@ -5458,18 +5420,15 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
     const context = getContext();
     state.bypassPromptReady = true;
     try {
-        return await withStoryEngineModelRequest(() => withProgressionGenerationSettings(async settings => {
-            if (settings?.semanticProfileId) {
-                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, overridePayload);
-            }
+        return await withStoryEngineModelRequest(async () => {
             if (!context?.generateRawData) {
                 throw new Error('SillyTavern generateRawData API is unavailable for progression generation.');
             }
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await context.generateRawData({ prompt: textPrompt, responseLength });
-        }));
+            return await context.generateRawData({ prompt: textPrompt, responseLength, ...overridePayload });
+        });
     } finally {
         state.bypassPromptReady = false;
     }
@@ -5848,18 +5807,15 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
     const context = getContext();
     state.bypassPromptReady = true;
     try {
-        return await withStoryEngineModelRequest(() => withSemanticGenerationSettings(async settings => {
-            if (settings?.semanticProfileId) {
-                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, overridePayload);
-            }
+        return await withStoryEngineModelRequest(async () => {
             if (!context?.generateRawData) {
                 throw new Error('SillyTavern generateRawData API is unavailable for player setup.');
             }
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await context.generateRawData({ prompt: textPrompt, responseLength });
-        }));
+            return await context.generateRawData({ prompt: textPrompt, responseLength, ...overridePayload });
+        });
     } finally {
         state.bypassPromptReady = false;
     }
