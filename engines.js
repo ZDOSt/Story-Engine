@@ -274,7 +274,9 @@ function RelationshipEngine(npc, resolutionPacket) {
     if resolutionPacket.boundaryViolationExplicit=Y and (isDirect or isOpp):
       if explicit goal/challenge is coercion, threat, force, or fear pressure -> FearHostility
       else -> Hostility
-    if explicit goal/challenge is intimidation, coercion, menacing threat, forced submission, or terrorizing display -> Fear
+    if explicit goal/challenge is intimidation, coercion, menacing threat, forced submission, or terrorizing display:
+      if landed -> Fear
+      else -> No Change
     if landed && (isDirect || isOpp || isHarmed) and actual outcome materially harms this NPC:
       if out in [dominant_impact, solid_impact] -> FearHostility
       else -> Hostility
@@ -924,7 +926,7 @@ export function routeDispositionTarget(npc, packet, auditInteraction, sem) {
     }
     if (!isDirect && !isOpp && isBenefited) return auditInteraction === 'Y' ? 'Bond' : 'No Change';
     if (!isDirect && !isOpp && isHarmed) return ['dominant_impact', 'solid_impact'].includes(out) ? 'FearHostility' : 'Hostility';
-    if (bool(sem.explicitIntimidationOrCoercion)) return 'Fear';
+    if (bool(sem.explicitIntimidationOrCoercion)) return landed ? 'Fear' : 'No Change';
     if (landed && (isDirect || isOpp || isHarmed) && landedActionHarmsRelationship(packet, sem, out, isHarmed)) {
         return ['dominant_impact', 'solid_impact'].includes(out) ? 'FearHostility' : 'Hostility';
     }

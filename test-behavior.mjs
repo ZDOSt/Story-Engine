@@ -2241,6 +2241,55 @@ const tests = [
     },
   },
   {
+    name: '12g.2a failed intimidation does not escalate existing fear into terror',
+    run() {
+      const tracker = {
+        Bandit: trackerEntry({
+          currentDisposition: { B: 1, F: 3, H: 2 },
+          currentRapport: 0,
+          dominantLock: 'None',
+          pressureMode: 'none',
+          currentCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 3, MND: 5, CHA: 3 },
+        }),
+      };
+      const report = runCase({
+        userText: 'I call lightning down beside the bandits and ask if they really want to keep blocking the pass.',
+        dice: [1, 20, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'intimidate the bandits into letting the caravan pass',
+            identifyChallenge: 'call lightning near the bandits as intimidation',
+            explicitMeans: 'call lightning beside the bandits',
+            identifyTargets: {
+              ActionTargets: ['Bandit'],
+              OppTargets: { NPC: ['Bandit'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            rollReason: 'Fresh unresolved intimidation attempt.',
+            actionBucket: 'Social',
+            socialBucket: 'Intimidate',
+            combatType: 'None',
+          },
+          relationshipEngine: [relationship('Bandit', {
+            explicitIntimidationOrCoercion: true,
+          })],
+        }),
+      });
+
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.Outcome, 'failure');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].FinalState, 'B1/F3/H2');
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Lock, 'FREEZE');
+      assert.deepEqual(report.trackerUpdate.npcs.Bandit.currentDisposition, { B: 1, F: 3, H: 2 });
+      assert.equal(auditIncludes(report, '3.4c routeDispositionTarget=No Change'), true);
+      assert.doesNotMatch(prompt(report), /Terror-led|prioritize escape, surrender/);
+      assert.match(prompt(report), /intimidation, threat, coercion, or fear pressure fails/);
+    },
+  },
+  {
     name: '12g.3 negative social memory is bucket-specific',
     run() {
       const tracker = {
