@@ -2051,7 +2051,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const rawState = trackerSnapshot[npc] || {};
         const firstTrackedEncounter = !rawState.currentDisposition;
         const state = normalizeTrackerEntry(rawState);
-        if (!cleanPersonalitySummary(state.personalitySummary)) {
+        if (!cleanPersonalitySummary(state.personalitySummary) && !isActiveCardCharacterName(npc, context)) {
             state.personalitySummary = deterministicPersonalitySummaryForName(npc, 'deterministic-runner');
         }
         const globalActiveMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
@@ -4666,7 +4666,7 @@ function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, c
         npcs[name] = normalizeTrackerEntry(value);
     }
 
-    assignMissingNpcPersonalitySummaries(npcs, Object.keys(relationshipTrackerUpdate || {}), 'deterministic-runner');
+    assignMissingNpcPersonalitySummaries(npcs, Object.keys(relationshipTrackerUpdate || {}), 'deterministic-runner', context);
 
     for (const delta of semantic.npcs || []) {
         const name = delta?.NPC;
@@ -4677,7 +4677,7 @@ function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, c
             ...applyTrackerDeltaToState(before, delta, false),
         });
     }
-    assignMissingNpcPersonalitySummaries(npcs, (semantic.npcs || []).map(delta => delta?.NPC), 'deterministic-runner');
+    assignMissingNpcPersonalitySummaries(npcs, (semantic.npcs || []).map(delta => delta?.NPC), 'deterministic-runner', context);
     applyInflictedNpcInjuriesToNpcMap(npcs, trackerSnapshot, relationshipTrackerUpdate?.__inflictedInjuries || []);
     for (const item of npcResultDeltas || []) {
         if (!shouldApplyDeterministicResultInjury(item?.injury)) continue;
@@ -4694,7 +4694,7 @@ function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, c
     return { user, npcs };
 }
 
-function assignMissingNpcPersonalitySummaries(npcs, names = [], salt = '') {
+function assignMissingNpcPersonalitySummaries(npcs, names = [], salt = '', context = null) {
     if (!npcs || typeof npcs !== 'object') return;
     const wanted = new Set((names || []).map(name => String(name || '').trim()).filter(isReal));
     for (const name of wanted) {
@@ -4705,9 +4705,32 @@ function assignMissingNpcPersonalitySummaries(npcs, names = [], salt = '') {
             npcs[name] = entry;
             continue;
         }
+        if (isActiveCardCharacterName(name, context)) {
+            npcs[name] = entry;
+            continue;
+        }
         entry.personalitySummary = deterministicPersonalitySummaryForName(name, salt);
         npcs[name] = normalizeTrackerEntry(entry);
     }
+}
+
+function isActiveCardCharacterName(name, context = null) {
+    const wanted = String(name || '').trim().toLowerCase();
+    if (!wanted) return false;
+    return getActiveCardCharacterNames(context).some(candidate => candidate.toLowerCase() === wanted);
+}
+
+function getActiveCardCharacterNames(context = null) {
+    const fields = getCardFields(context);
+    return unique([
+        context?.name2,
+        context?.characterName,
+        fields?.name2,
+        fields?.characterName,
+        fields?.name,
+        fields?.char_name,
+        fields?.avatarName,
+    ].map(name => String(name || '').trim()).filter(isReal));
 }
 
 function shouldApplyDeterministicResultInjury(injury) {

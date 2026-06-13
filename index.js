@@ -2845,9 +2845,9 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
             promoteTrackerEntry(npcs, name, revealedName);
         }
     }
-    assignMissingDisplayNpcPersonalitySummaries(npcs, 'post-narration');
+    assignMissingDisplayNpcPersonalitySummaries(npcs, 'post-narration', options.context);
     merged.npcs = reconcileNamedNpcDuplicates(applyExplicitNamePromotions(npcs, options).npcs, options.beforeNpcs, delta);
-    assignMissingDisplayNpcPersonalitySummaries(merged.npcs, 'post-narration');
+    assignMissingDisplayNpcPersonalitySummaries(merged.npcs, 'post-narration', options.context);
     const deltaActiveNames = new Set();
     for (const npcDelta of delta.npcs || []) {
         addActiveDisplayNpcName(deltaActiveNames, merged.npcs, npcDelta?.NPC);
@@ -2866,16 +2866,35 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     return merged;
 }
 
-function assignMissingDisplayNpcPersonalitySummaries(npcs, salt = '') {
+function assignMissingDisplayNpcPersonalitySummaries(npcs, salt = '', context = null) {
     if (!npcs || typeof npcs !== 'object') return;
     for (const [name, value] of Object.entries(npcs)) {
         if (!isRealName(name)) continue;
         const entry = normalizeTrackerEntry(value || {});
-        if (!cleanPersonalitySummary(entry.personalitySummary)) {
+        if (!cleanPersonalitySummary(entry.personalitySummary) && !isActiveCardCharacterName(name, context)) {
             entry.personalitySummary = deterministicPersonalitySummaryForName(name, salt);
         }
         npcs[name] = normalizeTrackerEntry(entry);
     }
+}
+
+function isActiveCardCharacterName(name, context = null) {
+    const wanted = String(name || '').trim().toLowerCase();
+    if (!wanted) return false;
+    return getActiveCardCharacterNames(context).some(candidate => candidate.toLowerCase() === wanted);
+}
+
+function getActiveCardCharacterNames(context = null) {
+    const fields = getCharacterCardFieldsSafe(context);
+    return uniqueNames([
+        context?.name2,
+        context?.characterName,
+        fields?.name2,
+        fields?.characterName,
+        fields?.name,
+        fields?.char_name,
+        fields?.avatarName,
+    ].map(name => String(name || '').trim()).filter(isRealName));
 }
 
 function userKnowledgeDeltaHasChanges(delta) {
@@ -6539,6 +6558,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                         assistantText: narrationText,
                         beforeNpcs: pendingRun.trackerBefore,
                         userKnowledgeBefore: pendingRun.userKnowledgeBefore,
+                        context,
                     });
                 } catch (error) {
                     trackerDeltaWarning = error instanceof Error ? error.message : String(error);
