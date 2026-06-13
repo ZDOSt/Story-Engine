@@ -6995,7 +6995,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
 
 function appendNarratorContextToPrompt(chat, narratorContext) {
     const message = {
-        role: 'system',
+        role: 'user',
         content: buildFinalNarrationPrompt(narratorContext),
     };
     const latestUserIndex = Array.isArray(chat)
