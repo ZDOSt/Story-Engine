@@ -1,13 +1,19 @@
 import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
 
-import { name1, saveSettingsDebounced } from '../../../../script.js';
-
-import { extension_settings } from '../../../../scripts/extensions.js';
-
-import { addEphemeralStoppingString, flushEphemeralStoppingStrings } from '../../../../scripts/power-user.js';
-import { persona_description_positions, power_user } from '../../../../scripts/power-user.js';
-import { setPersonaDescription, user_avatar } from '../../../../scripts/personas.js';
-import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
+import {
+    addEphemeralStoppingString,
+    applyConnectionProfileName,
+    extension_settings,
+    flushEphemeralStoppingStrings,
+    getActiveConnectionProfileName,
+    getConnectionProfileByName,
+    getConnectionProfileNames,
+    getPersonaText,
+    getUserName,
+    readActiveConnectionProfileName,
+    saveSettingsDebounced,
+    writePersonaDescription,
+} from './st-adapter.js';
 import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, mergeUserKnowledgeLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
@@ -831,88 +837,6 @@ function removeStreamingArtifactRegex() {
     }
 
     return false;
-
-}
-
-
-
-function getConnectionProfileNames() {
-
-    return (extension_settings.connectionManager?.profiles || [])
-
-        .map(profile => String(profile?.name || '').trim())
-
-        .filter(Boolean)
-
-        .sort((a, b) => a.localeCompare(b));
-
-}
-
-
-
-function getConnectionProfileByName(profileName) {
-
-    const wanted = String(profileName || '').trim();
-
-    if (!wanted) return null;
-
-    return (extension_settings.connectionManager?.profiles || [])
-
-        .find(profile => String(profile?.name || '').trim().toLowerCase() === wanted.toLowerCase()) || null;
-
-}
-
-
-
-function getActiveConnectionProfileName() {
-
-    const selectedProfile = extension_settings.connectionManager?.selectedProfile;
-
-    const profile = (extension_settings.connectionManager?.profiles || []).find(item => item.id === selectedProfile);
-
-    return profile?.name || PROFILE_NONE;
-
-}
-
-
-
-async function readActiveConnectionProfileName() {
-
-    const command = SlashCommandParser.commands?.profile;
-
-    if (command?.callback) {
-
-        try {
-
-            return String(await command.callback({}, '') || PROFILE_NONE);
-
-        } catch (error) {
-
-            console.warn(`[${EXTENSION_NAME}] could not read active connection profile through /profile; using settings fallback.`, error);
-
-        }
-
-    }
-
-    return getActiveConnectionProfileName();
-
-}
-
-
-
-async function applyConnectionProfileName(profileName) {
-
-    const normalized = String(profileName || PROFILE_NONE);
-
-    const command = SlashCommandParser.commands?.profile;
-
-    if (!command?.callback) {
-
-        throw new Error('Connection profile switching is unavailable because SillyTavern /profile command is not registered.');
-
-    }
-
-    await command.callback({ 'await': 'true', timeout: '10000' }, normalized);
 
 }
 
@@ -2483,26 +2407,6 @@ function getCharacterCardFieldsSafe(context = getContext()) {
 
 
 
-function getPersonaText(context = getContext()) {
-
-    const fields = getCharacterCardFieldsSafe(context);
-
-    const avatarId = String(user_avatar || '').trim();
-
-    return [
-
-        fields.persona,
-
-        power_user?.persona_description,
-
-        avatarId ? power_user?.persona_descriptions?.[avatarId]?.description : '',
-
-    ].map(value => String(value || '').trim()).find(Boolean) || '';
-
-}
-
-
-
 function getPersonaCoreStats(context = getContext()) {
 
     return parseCoreStatsBlock(getPersonaText(context));
@@ -3210,88 +3114,8 @@ function buildPersonaRollState(analysis) {
 
 
 
-function getActivePersonaDescriptor() {
-
-    if (!power_user) return null;
-
-    power_user.persona_descriptions = power_user.persona_descriptions || {};
-
-    const avatarId = String(user_avatar || '').trim();
-
-    if (!avatarId) return null;
-
-    if (!power_user.persona_descriptions[avatarId]) {
-
-        power_user.persona_descriptions[avatarId] = {
-
-            description: power_user.persona_description || '',
-
-            position: power_user.persona_description_position ?? persona_description_positions.IN_PROMPT,
-
-            depth: power_user.persona_description_depth,
-
-            role: power_user.persona_description_role,
-
-            lorebook: power_user.persona_description_lorebook,
-
-        };
-
-    }
-
-    return power_user.persona_descriptions[avatarId];
-
-}
-
-
-
 async function writePlayerSheetToPersona(sheetText, context = getContext()) {
-    const descriptor = getActivePersonaDescriptor();
-
-    if (!descriptor) {
-
-        throw new Error('No active SillyTavern persona is selected, so the generated character sheet could not be inserted into persona.');
-
-    }
-
-
-
-    const current = String(power_user.persona_description || descriptor.description || '').trim();
-
-    const cleanSheet = String(sheetText || '').trim();
-
-    if (!cleanSheet) {
-
-        throw new Error('Generated character sheet is empty; persona was not changed.');
-
-    }
-
-
-
-    const nextDescription = cleanSheet;
-
-
-
-    power_user.persona_description = nextDescription;
-
-    descriptor.description = nextDescription;
-
-    descriptor.position = descriptor.position ?? power_user.persona_description_position ?? persona_description_positions.IN_PROMPT;
-
-    if (descriptor.depth === undefined && power_user.persona_description_depth !== undefined) descriptor.depth = power_user.persona_description_depth;
-
-    if (descriptor.role === undefined && power_user.persona_description_role !== undefined) descriptor.role = power_user.persona_description_role;
-
-    if (descriptor.lorebook === undefined && power_user.persona_description_lorebook !== undefined) descriptor.lorebook = power_user.persona_description_lorebook;
-
-
-
-    setPersonaDescription?.();
-
-    saveExtensionSettings();
-
-    if (typeof context?.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
-
-    return { previous: current, next: nextDescription };
+    return await writePersonaDescription(sheetText, context);
 }
 
 function findPersonaSection(text, matcher) {
@@ -4780,7 +4604,7 @@ function buildTrackerDisplayHtml(snapshot) {
     const active = names.filter(name => npcs[name]?.lifecycle === 'Active');
     const userCore = snapshot?.userCoreStats;
     const user = normalizeTrackerUserState(snapshot?.user || {});
-    const personaName = cleanTrackerDisplayName(name1) || 'User';
+    const personaName = cleanTrackerDisplayName(getUserName()) || 'User';
 
     const renderNpc = name => {
 
@@ -9535,7 +9359,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
 
     try {
 
-        addEphemeralStoppingString(SEMANTIC_PREFLIGHT_STOP_SENTINEL);
+        await addEphemeralStoppingString(SEMANTIC_PREFLIGHT_STOP_SENTINEL);
 
         return await withStoryEngineModelRequest(() => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
@@ -9550,7 +9374,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
         })));
     } finally {
 
-        flushEphemeralStoppingStrings();
+        await flushEphemeralStoppingStrings();
 
         state.bypassPromptReady = false;
 
