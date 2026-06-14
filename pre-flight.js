@@ -454,7 +454,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
 
 function renderFinalWritingStyleReminder() {
     return String.raw`FINAL WRITING STYLE REMINDER:
-Write this as natural, vivid fiction, not as a procedural report. Make the scene easy to imagine through concrete rooms, clothing, gestures, expressions, texture, sound, movement, spacing, and social pressure. During dialogue, keep the camera close to the participants: posture, hands, distance, objects, pauses, tone, and reactions. Description is not decoration; let it reveal the world, danger, tension, intimacy, character behavior, or available choices while preserving narrativeFacts(input).`;
+Write narration with the density and clarity of skilled fantasy fiction, not as a procedural report. Make the scene easy to imagine through concrete rooms, clothing, gestures, expressions, texture, sound, movement, spacing, and social pressure. In conversation-centered scenes, keep the camera close to the participants without wrapping every line in broad ambience. This dialogue pacing does not override intimacy, combat, pursuit, restraint, injury care, or other physically driven scenes: let physical action, contact, pressure, sensation, rhythm, and consequence carry those beats while preserving narrativeFacts(input).`;
 }
 
 function renderControlEngineNarrativeContract() {

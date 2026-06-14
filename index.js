@@ -256,7 +256,7 @@ Make it embodied, specific, and scene-aware.
 
 **FLOW:**
 Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed, but not ornate, and vivid, but not bloated.`;
-const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+const DIALOGUE_STAGING_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
 
 **STYLE TARGET:**
 Write vivid, natural fantasy narration with the density and clarity of a skilled novelist. The scene should feel inhabited: rooms have objects and wear, people have posture and habits, clothing moves, light falls across surfaces, voices carry through space, and pressure changes how characters behave.
@@ -293,6 +293,42 @@ Make it embodied, specific, mutual, and scene-aware.
 Write in cohesive scene beats. Vary sentence length naturally: shorter sentences for impact, interruption, danger, refusal, or sudden contact; longer sentences for observation, movement, pressure, intimacy, or environmental detail.
 
 The prose should be vivid without becoming ornate, physical without becoming robotic, and detailed without losing the roleplay handoff.`;
+const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+
+**STYLE TARGET:**
+Write narration with the density and clarity of a skilled fantasy novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, and social pressure should be used to make the moment easy to imagine.
+
+Description is not decoration. It is how the scene is understood.
+
+**NARRATION FIRST:**
+Treat narration as the main craft of the response. Do not reduce the scene to a chain of actions. Frame each beat so the reader can picture the room, the people in it, and the pressure between them.
+
+Notice the details that matter: the way a cloak hangs, how a patron turns in a chair, what a hand lingers over, how a face changes, how someone stands in a doorway, how the room feels crowded or quiet, what is worn, polished, broken, muddy, bloodied, or half-hidden.
+
+**SCENE SENSE:**
+Use concrete detail to reveal status, mood, intent, danger, fatigue, confidence, discomfort, attraction, fear, hesitation, or control.
+
+Describe the room, clothing, objects, gestures, and expressions as part of the scene's meaning, not as a catalog. Let the details serve the moment.
+
+**DIALOGUE PACING:**
+In conversation-centered scenes, keep the descriptive camera close to the speakers and listeners. Use posture, distance, eye-line, hand movement, object handling, pauses, interruptions, tone, and nearby surroundings to stage the exchange.
+
+Do not wrap every dialogue line in broad ambience or half a paragraph of scenery. Environmental detail is welcome when it changes pressure, reveals information, clarifies position, gives a character something to interact with, or affects what someone does.
+
+This pacing rule does not override intimacy, combat, pursuit, restraint, injury care, or other physically driven scenes merely because characters speak. In physically driven scenes, dialogue should remain embedded inside the physical action instead of shrinking or replacing the embodied narration.
+
+**ACTION AND PRESENCE:**
+In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
+
+Every physical beat should be easy to imagine. Let movement change the shape of the room and the next possible action.
+
+**INTIMACY:**
+When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
+
+Make it embodied, specific, mutual, graphic when the scene is explicit, and scene-aware. Physical contact, proximity, pacing, touch, wetness, slickness, breath against skin, changing position, restraint, resistance, release, and aftermath should carry the scene. Dialogue may appear, but it must not reduce or replace the physical narration.
+
+**FLOW:**
+Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed, but not ornate, and vivid, but not bloated.`;
 const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
 Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
 
@@ -681,7 +717,8 @@ function getSettings() {
     }
     if (
         extension_settings[SETTINGS_KEY].writingStylePrompt === LEGACY_DEFAULT_WRITING_STYLE_PROMPT ||
-        extension_settings[SETTINGS_KEY].writingStylePrompt === PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT
+        extension_settings[SETTINGS_KEY].writingStylePrompt === PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT ||
+        extension_settings[SETTINGS_KEY].writingStylePrompt === DIALOGUE_STAGING_DEFAULT_WRITING_STYLE_PROMPT
     ) {
         extension_settings[SETTINGS_KEY].writingStylePrompt = DEFAULT_WRITING_STYLE_PROMPT;
     }
@@ -8385,16 +8422,19 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'You are PROSE_GUARD, a strict prose compliance editor.',
         '',
         'TASK:',
-        'Edit TEXT_TO_CHECK only to remove prose-rule violations. Preserve the scene exactly.',
+        'Edit TEXT_TO_CHECK only to repair clear prose-rule violations. Preserve the scene exactly.',
+        'You are not a style improver, summarizer, censor, or second narrator.',
         'If no violations exist, return TEXT_TO_CHECK unchanged.',
-        'A sensory violation is a prose-rule violation. Repair smell/taste misuse without adding new sensory detail.',
-        'A chronology violation is a prose-rule violation. Remove or rewrite narration that restates RECENT_USER_INPUT instead of starting right after it with consequence.',
-        'A turn-boundary violation is a prose-rule violation. Cut invalid after-beat tailing instead of preserving it.',
+        'If you are uncertain whether text violates a rule, leave it unchanged.',
+        'Prefer narrow rewrites over deletion. Delete only invalid after-beat tailing, duplicated user-input restatement, empty/invalid separators, or text that cannot be repaired without changing facts.',
+        'A sensory violation is a prose-rule violation only when smell/taste breaks the explicit gate. Repair misuse without adding new sensory detail.',
+        'A chronology violation is a prose-rule violation only when narration restates RECENT_USER_INPUT instead of starting right after it with consequence.',
+        'A turn-boundary violation is a prose-rule violation only when text continues after the natural response point.',
         '',
         'ONE-CALL PRIVATE PASS PIPELINE:',
         'Work through these private correction passes in order. Do not output pass notes, labels, analysis, or intermediate drafts.',
-        '1. SensoryNarrationDirective(response): repair smell/taste misuse and sensory filler only.',
-        '2. literalStyleFilter(response): remove literal prose/style violations only.',
+        '1. SensoryNarrationDirective(response): repair clear smell/taste misuse only.',
+        '2. literalStyleFilter(response): repair specific literal prose/style violations only.',
         '3. chronologyControl(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
         '4. responseEndpointControl(response): cut invalid after-beat tailing only.',
         ...(formattingPrompt ? [
@@ -8411,20 +8451,22 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         ] : []),
         '- Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
         '- Exception: remove every sentence, paragraph, separator line, or outro that appears after the final response beat unless it is required by an explicit resolved mechanic.',
+        '- Preserve valid explicit, sensual, romantic, violent, tense, atmospheric, environmental, and intimate detail. Do not sanitize, soften, summarize, reduce, or desexualize valid content.',
+        '- Do not shorten a valid message just because it is rich, vivid, intimate, descriptive, or atmospheric.',
         '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
         '',
         'PASS 1: SensoryNarrationDirective(response)',
-        'Goal: preserve the same scene content while keeping sensory description concrete and useful.',
+        'Goal: preserve the same scene content while repairing only clear smell/taste gate violations.',
         'Prioritize visible, audible, tactile, spatial, and physical detail already present in TEXT_TO_CHECK: layout, distance, movement, contact, pressure, object state, visibility, sound, threat, consequence, and available choices.',
         'Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs, smells, tastes, eats, or drinks, or TEXT_TO_CHECK ties the sensation to a specific close-range physical source that is overpowering and unavoidable at the user position.',
         'Valid smell/taste sources must be concrete and immediate, such as smoke filling the room, blood on a hand, rot beside a body, food or drink in the mouth, chemicals in contact, or fire filling the space.',
-        'Remove or rewrite smell/taste used for "the air," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, decorative sensual language, or filler.',
+        'Repair smell/taste only when it is clearly used for "the air," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
         'If smell/taste is valid, keep at most one mention per beat or major location shift and attach it to the concrete source. Do not add a new smell or taste to replace a removed one.',
         '',
         'PASS 2: literalStyleFilter(response)',
-        'Goal: keep the same scene content while removing prose/style violations.',
+        'Goal: keep the same scene content while narrowly repairing specific prose/style violations.',
         'Stock body-emotion shorthand:',
-        'Ban stock physical tells used as emotion/sexual/effort shorthand. This includes blush, flush, cheeks heating, ears reddening, face paling, jaw tightening, jaw setting, jaw working, mouth firming, lips parting without consequence, throat bobbing, fingers twitching, knuckles whitening, grip color changes, breath hitching, breath catching, heart pounding, pulse jumping, stomach dropping, heat pooling, and any equivalent workaround phrase.',
+        'Repair stock physical tells used as emotion/sexual/effort shorthand. This includes blush, flush, cheeks heating, ears reddening, face paling, jaw tightening, jaw setting, jaw working, mouth firming, lips parting without consequence, throat bobbing, throat working, fingers twitching, knuckles whitening, grip color changes, breath hitching, breath catching, heart pounding, pulse jumping, stomach dropping, heat pooling, and direct equivalent workaround phrases.',
         'Do not preserve the same coded tell by rewording it. Replace it with action that changes contact, space, timing, posture, speech content, object handling, or visible consequence.',
         'Ban oscillating micro-cue loops and body-language churn: mouth opens/closes/opens, grip tightens/loosens/tightens, gaze looks away/back/down, gestures start/stop/restart, repeated tapping/gripping/releasing, and stacked hands/eyes/mouth/shoulder tells used only to show hesitation, fear, arousal, embarrassment, tension, or uncertainty.',
         'Replace twitch loops with one consequential physical choice plus dialogue, such as increasing distance, blocking contact, keeping an object, refusing, protecting an exit, changing position, or stopping at a clear boundary.',
@@ -8436,21 +8478,23 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Ban canned quiet-voice phrasing and its equivalents: "barely above a whisper," "just above a whisper," "almost a whisper," "voice barely audible," "low murmur," "soft murmur," "a thread of sound," "a thin whisper," "a small voice," "a fragile whisper," or similar trope delivery. Low, quiet, shaking, hoarse, rough, strained, interrupted, or trembling speech is allowed only when physically specific and not canned shorthand.',
         '',
         'Nonliteral prose:',
-        'Ban metaphor, simile, idiom, hyperbole, ellipsis, poetic framing, personification, emotional physics, vibe adjectives, decorative sensual haze, sensory analogy phrasing, atmospheric filler, and "not X, but Y" contrast constructions.',
+        'Repair clear metaphor, simile, idiom, hyperbole, personification, emotional physics, and "not X, but Y" contrast constructions when they make the meaning nonliteral or turn an abstraction into a physical actor/substance/force.',
         'This includes abstract events treated as physical objects or forces: words cannot land, drop, hang, cut, hit, weigh, burn, freeze, crawl, bloom, bloom under skin, fill the room, stretch between people, fall like stones, or behave like weather/liquid/pressure. Smoke, rooms, silence, tension, heat, darkness, and atmosphere cannot breathe, swallow, press, listen, wait, coil, curl with intent, or otherwise act like characters.',
         'Directly ban patterns like "the word lands flat and hard," "dropped like a stone," "like a stone on still water," "silence stretches," "tension coils," "the room holds its breath," and equivalent nonliteral replacements.',
+        'Do not treat all vivid description, sensuality, intimacy, atmosphere, rhythm, or environmental detail as a violation. It is a violation only when it matches a specific prohibited pattern or breaks a locked rule.',
         '',
         'Unsupported emotion labels:',
         'Do not state feelings directly unless the text also shows consequential visible behavior.',
         '',
-        'Decorative filler:',
-        'Remove or rewrite ornamental atmosphere that does not change action, visibility, sound, contact, footing, threat, or available choices. Keep environmental detail only when it materially affects the scene.',
+        'Atmosphere and detail:',
+        'Preserve environmental, intimate, and atmospheric detail unless it clearly violates smell/taste gating, endpoint control, chronology control, user agency, or a specific literal-style prohibition above.',
+        'Do not remove valid scenery, texture, intimacy, physical sensation, or emotional pressure merely because it is descriptive.',
         '',
         'Valid replacements for literalStyleFilter:',
-        'Replace violations with concrete, consequential physical behavior: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, or environmental interaction.',
+        'Replace violations narrowly with concrete physical prose that preserves the original intensity and meaning: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, physical sensation, intimacy, or environmental interaction.',
         'Do not replace a violation with another coded tell or workaround phrase.',
         'Do not replace one invalid tell with a pileup of smaller tells. Collapse repeated micro-reactions into a single scene-changing beat.',
-        'Use literal sentences that preserve intensity through action and consequence, not poetic comparison.',
+        'Use natural grounded sentences that preserve intensity through action, contact, sensation, and consequence, not poetic comparison.',
         '',
         'PASS 3: chronologyControl(response, RECENT_USER_INPUT)',
         'Goal: make the narration start at the point right after the latest user input.',
@@ -8481,12 +8525,13 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
             'PASS 5: integrityCheck(original, corrected)',
         ]),
         'Goal: return only a corrected narration that preserves the resolved scene.',
-        'Before answering, verify that the corrected text did not change protected facts, did not add a new scene beat, did not delete a valid pre-boundary scene beat, and did not reinterpret mechanics or character decisions.',
+        'Before answering, verify that the corrected text did not change protected facts, did not add a new scene beat, did not delete a valid pre-boundary scene beat, did not reduce valid intimacy/detail/intensity, and did not reinterpret mechanics or character decisions.',
         ...(formattingPrompt ? [
             'Verify that required formatting remains intact after prose corrections. Do not flatten speaker blocks, remove valid underlines, or remove valid separators.',
         ] : []),
         'If a proposed correction would change protected facts, keep the original valid content and only remove the prose violation.',
         'If a sentence is both a valid resolved scene beat and contains a prose violation, rewrite the sentence narrowly instead of deleting it.',
+        'Deletion is a last resort except for endpoint tailing, repeated user-action restatement, or unrecoverable invalid formatting.',
         '',
         'GOOD REPLACEMENT PATTERN:',
         'Invalid: "Her jaw tightened. The word landed flat and hard, dropped like a stone between them."',
