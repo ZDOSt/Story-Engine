@@ -227,7 +227,7 @@ Write in cohesive scene beats. Combine related action, posture, object handling,
 
 
 The prose should be detailed without becoming ornate, physical without becoming robotic, and intense without losing spatial clarity.`;
-const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+const PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
 
 **STYLE TARGET:**
 Write narration with the density and clarity of a skilled fantasy novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, and social pressure should be used to make the moment easy to imagine.
@@ -256,6 +256,43 @@ Make it embodied, specific, and scene-aware.
 
 **FLOW:**
 Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed, but not ornate, and vivid, but not bloated.`;
+const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+
+**STYLE TARGET:**
+Write vivid, natural fantasy narration with the density and clarity of a skilled novelist. The scene should feel inhabited: rooms have objects and wear, people have posture and habits, clothing moves, light falls across surfaces, voices carry through space, and pressure changes how characters behave.
+
+Description is not decoration. It should reveal the world, the danger, the intimacy, the social tension, the character's nature, or the choices now available.
+
+**NARRATION FIRST:**
+Treat narration as the main craft of the response. Do not reduce the scene to a chain of actions or dialogue lines. Frame each beat so the reader can picture where people stand, what they can reach, what blocks them, what changes, and how the moment feels through concrete physical detail.
+
+**SCENE TEXTURE:**
+In exploration, travel, arrival, crowds, taverns, halls, wilderness, camps, markets, bedrooms, temples, ruins, and roads, use rich but purposeful detail: clothing, tools, weapons, trade signs, furniture, footprints, mud, worn stone, firelight, shutters, rain on wood, damaged objects, rank markers, overheard fragments, and how bystanders react.
+
+Let the environment participate in the scene without taking over it.
+
+**DIALOGUE STAGING:**
+When the scene is centered on dialogue, keep the descriptive camera close to the speakers and listeners. Prioritize posture, distance, eye-line, hand movement, object handling, pauses, interruptions, tone, and how the surrounding space affects the exchange.
+
+Do not interrupt dialogue with broad scenery unless the environment directly changes the pressure, reveals information, or affects what someone does.
+
+**CHARACTER BEHAVIOR:**
+Show personality through choices and physical behavior: how someone approaches, retreats, offers an object, withholds an answer, blocks a path, tends a wound, avoids contact, closes distance, handles a cup, adjusts clothing, watches a door, or changes their voice under pressure.
+
+**ACTION AND PRESENCE:**
+In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
+
+Every physical beat should be easy to imagine. Let movement change the shape of the room and the next possible action.
+
+**INTIMACY:**
+When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep focus on bodies, contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
+
+Make it embodied, specific, mutual, and scene-aware.
+
+**FLOW AND RHYTHM:**
+Write in cohesive scene beats. Vary sentence length naturally: shorter sentences for impact, interruption, danger, refusal, or sudden contact; longer sentences for observation, movement, pressure, intimacy, or environmental detail.
+
+The prose should be vivid without becoming ornate, physical without becoming robotic, and detailed without losing the roleplay handoff.`;
 const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
 Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
 
@@ -376,15 +413,15 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
 
   literalStyleFilter(response, context):
-    policy: GROUNDED PHYSICAL PROSE
+    policy: NATURAL GROUNDED PROSE
 
     mandate:
-      Write vivid, natural prose grounded in observable scene facts, physical sensation, movement, environment, dialogue, and consequence.
-      The prose may be rhythmic, intimate, tense, detailed, or quiet, but its meaning must remain physically clear.
-      Do not flatten the narration to avoid figurative language.
+      Write natural, grounded prose that remains physically clear.
+      The narration may be vivid, rhythmic, intimate, tense, quiet, or richly detailed, but every sentence should still point to something observable, audible, tactile, spatial, behavioral, or consequential.
+      Do not make the prose stiff or procedural just to avoid figurative language.
 
     principle:
-      Replace figurative shortcuts with specific physical detail, action, sound, texture, spacing, or consequence.
+      When a figurative shortcut would appear, replace it with specific scene detail: movement, texture, sound, contact, spacing, object state, weather on surfaces, posture, gesture, or consequence.
 
     hardLimit:
       Do not use metaphor, simile, personification, emotional physics, or decorative abstraction when it turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
@@ -642,7 +679,10 @@ function getSettings() {
             extension_settings[SETTINGS_KEY][key] = value;
         }
     }
-    if (extension_settings[SETTINGS_KEY].writingStylePrompt === LEGACY_DEFAULT_WRITING_STYLE_PROMPT) {
+    if (
+        extension_settings[SETTINGS_KEY].writingStylePrompt === LEGACY_DEFAULT_WRITING_STYLE_PROMPT ||
+        extension_settings[SETTINGS_KEY].writingStylePrompt === PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT
+    ) {
         extension_settings[SETTINGS_KEY].writingStylePrompt = DEFAULT_WRITING_STYLE_PROMPT;
     }
     return extension_settings[SETTINGS_KEY];
@@ -9663,5 +9703,3 @@ if (typeof jQuery === 'function') {
 clearRuntimePrompts();
 
 console.info(`[${EXTENSION_NAME}] loaded`);
-
-
