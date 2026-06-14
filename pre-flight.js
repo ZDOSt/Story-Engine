@@ -451,65 +451,38 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
 function renderControlEngineNarrativeContract() {
     return String.raw`renderControlEngine(input):
 
-smellGate:
-Smell and taste are banned unless the user explicitly smells, sniffs, tastes, eats, or drinks, or unless a specific close-range source is physically overpowering and unavoidable. If allowed, use at most one specific smell/taste mention. Never use smell or taste as atmospheric shorthand.
+SensoryNarrationDirective:
+Apply SensoryNarrationDirective(input): prioritize concrete sight, sound, and touch from {{user}}'s position: layout, distance, movement, object state, contact, texture, pressure, danger, consequence, and available choices. Smell/taste stay locked unless explicitly invoked by {{user}} or forced by a specific close-range physical source. Never use smell/taste as atmosphere, mood, romance, "the air," vibe, or filler.
 
-abilityAndItemRender:
-Render abilities, magic, senses, and supernatural traits only through directly perceivable effects listed in narrativeFacts(input).
-If an available ability is listed, preserve its described effect as fictional method/flavor only. Do not add bonuses, extra success, or bypassed consequences.
-If an unavailable ability/spell attempt is listed, no ability effect occurs.
-Do not echo or repeat setup, preparation, activation, channeling, focus, or the declared action.
-Do not name, label, explain, activate, charge, focus, channel, or attribute abilities unless the name is spoken aloud in dialogue.
-If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use has no item effect; narrate attempted access from T+1 as absence or failed access, not possession. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
+abilityIntegration:
+Apply abilityIntegration(response, context): render abilities, magic, senses, spells, supernatural effects, and racial/body traits only as directly perceivable physical results from narrativeFacts(input). Show scene changes, not labels or mechanics: movement, pressure, light, sound, force, damage, altered distance, changed material, bodily change, environmental reaction, or changed access. Do not name, announce, activate, channel, focus, charge, ritualize, system-label, or explain abilities unless spoken aloud in dialogue. Hidden/offscreen sources stay unknown; narrate only their visible or audible result.
+
+itemAvailability:
+If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use has no item effect; after the attempted access point, narrate absence or failed access, not possession. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
 
 epistemicRender:
-Write only from direct in-scene evidence available from the user's physical position. Respect line of sight, lighting, occlusion, direction, distance, and obstruction. No mindreading, hidden motives, hidden causes, unseen knowledge, or unrevealed identities. Names and roles remain locked until revealed in-world.
+Apply epistemicRender(response, context): write only from direct in-scene evidence available at {{user}}'s physical position. Respect line of sight, lighting, occlusion, distance, direction, barriers, and sound obstruction. Preserve uncertainty for partial or obscured evidence. Unknown names, roles, species, motives, loyalties, hidden causes, and lore stay locked until introduced, spoken, read, directly evidenced, or already established. Do not narrate what {{user}} thinks, feels, notices, realizes, remembers, assumes, decides, chooses, wants, intends, silently does, or automatically recognizes.
 
 behavioralRender:
-Show emotion only through consequential visible behavior that changes speech, timing, distance, posture, object use, movement, access, pressure, contact, possession, risk, or choice.
-Do not use isolated body-part reactions, skin-color changes, breath/pulse/stomach cues, facial micro-tells, grip/tension cues, or equivalent shorthand.
-Body detail is allowed only when it performs a concrete physical function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct consequence.
-Skin color, facial color, and localized reddening/paling/whitening require a direct tissue-color cause; never use them as emotional, romantic, sexual, psychological, or effort shorthand.
-If tempted to use a body tell, replace it with scene-changing action: move, stop, block, refuse, cut speech short, delay speech, take or release an object, change distance, protect an exit, or interrupt.
-Do not chain or oscillate micro-cues to simulate emotion. Ban open-close-open mouth beats, tighten-loosen-tighten grip beats, look-away-look-back gaze beats, start-stop-restart gestures, repeated tapping/gripping/releasing, and stacked hands/eyes/mouth/shoulder tells unless they directly change speech, distance, contact, object control, balance, access, injury, or risk.
+Apply behavioralRender(response, context): show character state through observable behavior that changes the scene: spacing, access, timing, objects, contact, pressure, risk, or dialogue. Use macro-actions such as moving, stopping, blocking, refusing, interrupting, delaying speech, cutting speech short, changing distance, taking or releasing objects, protecting exits, altering access, or changing contact. Do not state emotional labels as fact or use body-tell shorthand. Ban breath catching/hitching, throat working/bobbing/tightening, swallowing as emotion, pulse/heart/stomach cues, jaw clenching, lips parting without consequence, mouth opening/closing loops, fingers twitching, eye/face softening or flickering, blush/flush/paling/reddening, grip-color language, micro-cue loops, empty gestures, and equivalent rewordings.
 
 literalStyleFilter:
-Use literal, grounded prose. No metaphor, simile, hyperbole, idiom, ellipsis, personification, poetic framing, decorative sensual wording, vibe adjectives, emotional physics, or non-literal comparison. Adjectives must describe physical properties or materially relevant distinctions only.
+Apply literalStyleFilter(response, context): write literal, physical prose where every sentence means exactly what it says. Use direct verbs, concrete nouns, physical adjectives, material cause and effect, and observable scene facts. Keep description attached to current action, obstacle, consequence, threat, position, object state, dialogue, or choice. Do not use metaphor, simile, hyperbole, idiom, ellipsis, poetic analogy, poetic framing, personification, pathetic fallacy, emotional physics, vibe adjectives, decorative sensual wording, atmospheric filler, sensory analogy phrasing, or "not X, but Y" contrast constructions. Silence, darkness, rooms, air, mood, tension, fear, desire, heat, and cold are not actors, weights, hands, mouths, pressure, intent, or living presences.
 
 sceneBeatComposition:
-Prefer concrete, materially relevant physical detail. Combine related action, posture, object handling, dialogue, and consequence into cohesive scene beats.
-Each sentence should advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
-Dialogue delivery may describe lowered voice, trembling, roughness, pace, interruption, or strain when physically grounded. Ban only stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand.
-Prefer one consequential physical choice plus dialogue over several isolated body cues. Ban micro-reaction loops, twitch-cadence narration, and body-cue pileups where repeated small gestures substitute for one meaningful beat.
+Apply sceneBeatComposition(response, context): write cohesive scene beats, not motion logs or twitch chains. Combine related action, posture, object handling, dialogue, and consequence into unified paragraphs. Keep same-speaker action and dialogue together. Prefer one strong NPC beat over several small fragments. Each sentence must advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice. Ban robotic one-action cadence, pingpong structure, isolated speech balloons, same-speaker fragmentation, micro-reaction loops, body-cue pileups, and stock quietness shorthand used as emotional crutch.
 
 chronologyControl:
-Begin at T+1 from the user input with external consequence, NPC response, environmental change, revealed information, or new stimulus.
-Treat declared user actions as already complete unless narrativeFacts(input) says they failed, stalled, or were interrupted.
-Do not echo, restage, re-perform, summarize, paraphrase, or narrate the declared user action back to the user.
-Preserve visible continuity from recent chat. Completed NPC/world actions, object positions, delivered items, current locations, open/closed/removed/placed states, and other concrete scene facts are already true unless narrativeFacts(input) changes them. Do not repeat the immediately previous assistant beat or replay an already-completed NPC/world action as if it happens again.
+Apply chronologyControl(response, input, context): start your response at the point right after the latest {{user}} input. Do not replay the declared action. If it succeeded, start with what changed because of it. If it failed, stalled, was blocked, or was interrupted, start with the failure point, obstruction, resistance, absence, interruption, NPC response, or changed scene state. Preserve completed actions, delivered items, object positions, locations, and open/closed/removed/placed states from recent chat unless narrativeFacts(input) changes them. Do not echo, restage, summarize, paraphrase, re-perform, or narrate back {{user}} input. Do not use opening recap transitions or "as you" phrasing.
 
 userAgencyControl:
-Render NPCs and the world as active and independent. NPCs may speak, move, leave, approach, block, offer, refuse, attack, retreat, reveal, hide, interrupt, or change the scene according to narrativeFacts(input).
-The user takes no voluntary action unless the latest user input explicitly declares that action.
-If the user did not explicitly declare a voluntary action in the latest input, that action did not happen.
-Involuntary physical reactions caused by external stimulus may be narrated when concrete and proportional. Voluntary actions are never involuntary reactions.
-Never assume, infer, imply, bridge, complete, or narrate undeclared user actions, decisions, compliance, movement, speech, silence, attention, inspection, acceptance, refusal, or reactions.
-Do not make the user take, open, unfold, read, inspect, answer, follow, accept, refuse, speak, nod, look, move, or otherwise act on an object, note, door, route, NPC, or stimulus.
-If an NPC gives, returns, drops, slides, or places an object or note for the user, stop with it delivered, available, visible, or within reach.
-If proxy user action mode is active, narrate only the exact specified user action for that turn, then return to normal agency separation.
+Apply userAgencyControl(response, input, context): render the world, NPCs, hazards, objects, and consequences as active and independent. Render {{user}} voluntary actions only when explicitly declared in the latest input or allowed by PROXY USER ACTION MODE. If an object/note is delivered or revealed, stop with it available, visible, or within reach; do not make {{user}} take/open/read/inspect it or reveal contents requiring inspection. Do not make {{user}} voluntarily take, open, read, inspect, pocket, wear, eat, drink, touch, follow, accept, answer, speak, nod, look, approach, retreat, attack, defend, search, examine, comply, or otherwise act. Do not write {{user}} speech, thoughts, feelings, reactions, silence, choices, decisions, internal states, or voluntary movement.
 
 turnStructureControl:
-Keep NPC beats compact and cohesive. Allow at most one inter-NPC exchange and at most three sentences per monologue. Never answer a question directed at the user. Keep same-speaker action and dialogue together when they belong to one beat. Ban pingpong structure, same-speaker fragmentation, isolated speech balloons, and answering for the user.
+Apply turnStructureControl(response, context): keep NPC action and dialogue tight, cohesive, and readable. Allow at most 1 inter-NPC exchange per turn and at most 3 sentences per NPC monologue. Keep same-speaker action and dialogue together. Never answer a question directed at {{user}}. Ban pingpong structure, isolated speech balloons, same-speaker fragmentation, narration/speech/narration/speech chains before {{user}} can respond, and answering for {{user}}.
 
 responseEndpointControl:
-End where the scene naturally returns control to the user.
-Before writing, choose the natural user-centered response beat: the point where the immediate consequence, NPC response, revealed information, available object, changed access, danger, or environmental condition is clear enough for the user to choose what to do next.
-Continue NPC/world action only while it remains independent of any new user choice or action.
-If an NPC speaks or acts toward the user, end on that speech or action once it creates a natural point for the user to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act.
-If no NPC is driving the beat, end on the relevant consequence of the user's action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.
-Stop at the first beat where continuing would require the user to choose, respond, move, comply, inspect, answer, follow, accept, refuse, or otherwise act.
-Do not advance location, time, conversation, sensory access, or scene state through undeclared user participation.
-Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat just to create an endpoint. Never end by prompting the user to act. HARD STOP: after the response beat, output nothing else. Ban explicit waiting, "she waits," "awaits your response," "what do you do," "the choice is yours," all-eyes-on-user framing, mood-only silence, unrelated ambience, outro paragraphs, scene-break tails, and extra narration after the response beat.`;
+Apply responseEndpointControl(response, context): end exactly where the scene naturally returns control to {{user}}. Stop at the first beat where continuing would require {{user}} to choose, respond, move, comply, inspect, defend, follow, accept, refuse, or act. If no NPC is driving the beat, end on the consequence of {{user}}'s action, visible scene change, available object/path, obstruction, hazard, or concrete environmental stimulus. Output nothing after the response beat. Do not invent a question, threat, gesture, stare, pause, silence, waiting beat, all-eyes-on-user framing, or mood-only silence to create an endpoint. Ban explicit waiting cues, outro paragraphs, scene-break tails, meta-questions, unrelated ambience, and ambient filler endings.`;
 }
 
 function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = {} }) {
@@ -1755,7 +1728,7 @@ function itemUseGuide(value = {}) {
         const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}; preserve concrete limitations in that saved state.` : '';
         return `Personal item branch: ${item.item} is available from user ${item.source}.${state} Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes from item use.`;
     }
-    return `Unavailable personal item branch: ${item.item} is not in user gear/inventory. No item effect occurs. Narrate the attempt from T+1 as immediate absence or failed access: empty belt/sheath/pack/pocket, no item under the hand, or no item effect. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering {{user}} possession. Visible reactions may follow from the failed access.`;
+    return `Unavailable personal item branch: ${item.item} is not in user gear/inventory. No item effect occurs. After the attempted access point, narrate immediate absence or failed access: empty belt/sheath/pack/pocket, no item under the hand, or no item effect. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering {{user}} possession. Visible reactions may follow from the failed access.`;
 }
 
 function normalizeClaimCheckObject(value = {}) {
