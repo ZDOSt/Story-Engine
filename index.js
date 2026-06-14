@@ -490,6 +490,28 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Bad: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
 
 
+  dialoguePacing(response, context):
+    policy: CHARACTERFUL-TURN-PACING
+
+    mandate:
+      Let NPC dialogue feel natural, expressive, and shaped by personality, but keep each NPC turn to one coherent conversational beat before returning space to {{user}}.
+
+    principle:
+      A conversational beat may include speech, posture, movement, object handling, interruption, hesitation, or a brief nearby detail. These elements should support the exchange, not extend it after {{user}} already has a clear response point.
+
+    pacingRule:
+      If an NPC asks a question, makes a request, gives a warning, offers or withholds something, blocks access, reveals important information, or creates a clear choice point, stop once that point is clear.
+
+    hardLimit:
+      Do not chain repeated dialogue-action-dialogue-action follow-ups from the same NPC.
+      Do not add extra clarifications, second questions, repeated prompts, self-answers, or stacked micro-gestures after a natural response point exists.
+      Do not make nervous, excited, evasive, or flustered speech become an endless monologue.
+
+    example:
+      Good: Naomi shifts the tote strap higher on her shoulder and glances toward the hallway. "I haven't even put my bag down yet," she says, half laughing despite herself. "Where do you want me?"
+      Bad: Naomi shifts the tote strap higher on her shoulder, glances toward the hallway, then looks back at you. "Where do you want me?" She rocks onto her heels, brushes hair from her cheek, and laughs under her breath. "I mean, in the house. Where in the house. Do you want me in the hall, or the kitchen, or-" She adjusts the bag again and keeps talking. "Oh my god, I am making this weird."
+
+
   chronologyControl(response, input, context):
     policy: AFTER-INPUT-CONSEQUENCE, STRICT-LINEAR
 
@@ -587,6 +609,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - observable behavior instead of emotion labels
       - grounded physical prose
       - cohesive scene beats
+      - characterful dialogue pacing without same-speaker rambling
       - immediate consequence after user input
       - clean endpoint where control returns to {{user}}
 
