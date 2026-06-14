@@ -1636,7 +1636,7 @@ function getUnavailablePersonalItemNoRollEvidence(itemUse) {
 
 function normalizeRollReason(value, fallback = NONE) {
     const text = String(value ?? '').trim();
-    return isReal(text) ? text.slice(0, 240) : fallback;
+    return isReal(text) ? text.slice(0, 500) : fallback;
 }
 
 function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socialBucket, targets, trackerSnapshot }) {
