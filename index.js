@@ -301,33 +301,43 @@ Write in cohesive scene beats. Vary sentence length naturally: shorter sentences
 The prose should be vivid without becoming ornate, physical without becoming robotic, and detailed without losing the roleplay handoff.`;
 const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
 
-**STYLE TARGET:**
-Write narration with the density and clarity of a skilled fantasy novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, and social pressure should be used to make the moment easy to imagine.
+**NARRATION STYLE:**
+Write narration with the density and clarity of a skilled novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, sound, and social pressure should make the moment easy to imagine.
 
-Description is not decoration. It is how the scene is understood.
+Description is not decoration. It is how the scene is understood. Let details reveal place, mood, danger, status, attraction, tension, intent, fatigue, confidence, discomfort, hesitation, control, and available choices.
 
-**NARRATION FIRST:**
-Treat narration as the main craft of the response. Do not reduce the scene to a chain of actions. Frame each beat so the reader can picture the room, the people in it, and the pressure between them.
+Pace the prose according to the scene.
+
+**EXPLORATION:**
+In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use rich, concrete environmental detail: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
 
 Notice the details that matter: the way a cloak hangs, how a patron turns in a chair, what a hand lingers over, how a face changes, how someone stands in a doorway, how the room feels crowded or quiet, what is worn, polished, broken, muddy, bloodied, or half-hidden.
 
-**SCENE SENSE:**
-Use concrete detail to reveal status, mood, intent, danger, fatigue, confidence, discomfort, attraction, fear, hesitation, or control.
+Exploration prose should orient the user. Make the place legible, atmospheric, and interactive without turning it into a static catalog.
 
-Describe the room, clothing, objects, gestures, and expressions as part of the scene's meaning, not as a catalog. Let the details serve the moment.
+**DIALOGUE:**
+During dialogue, center the narration on the immediate exchange between {{user}} and the NPCs present in the beat. Let each participating NPC receive one coherent response beat, then return space to {{user}}.
 
-**ACTION AND PRESENCE:**
-In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
+An NPC response beat may include dialogue, supporting posture, gesture, movement, object handling, expression, tone, pause, or nearby scene detail, then a final line of dialogue if it belongs to the same thought. The beat should feel like one natural response, not a separate mini-scene.
 
-Every physical beat should be easy to imagine. Let movement change the shape of the room and the next possible action.
+Multiple NPCs may participate when the scene calls for it, but each should receive at most one beat before {{user}} responds. Keep the exchange from becoming NPC ping-pong; let NPCs react to the situation and to {{user}}, then stop at the natural handoff point.
+
+Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity. Use surrounding details when they sharpen the exchange, but keep the focus on the speaker, the listener, and the pressure between them.
+
+**ACTION:**
+During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
+
+Action prose should be vivid but efficient. Every sentence should clarify what happens, where bodies move, what changes, and what can happen next. Let movement change the shape of the room and the next possible action.
 
 **INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
+When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, let the prose become detailed, sensual, embodied, and physically specific. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, wetness, heat, restraint, exposure, proximity, bodies, consent, and aftermath.
 
-Make it embodied, specific, and scene-aware.
+Let intimate scenes linger when the scene supports it. Capture small physical tells, shifting positions, breath against skin, hands, tension, release, texture, sound, slickness, and the changing pressure between bodies. Keep the prose direct, specific, and scene-aware.
 
 **FLOW:**
-Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed, but not ornate, and vivid, but not bloated.`;
+Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed but not ornate, vivid but not bloated, expressive but not rambling.
+
+Match density to the scene: exploration can be richer, dialogue should be participant-centered, action should be punchy and clear, and intimacy should be embodied and sustained when appropriate.`;
 const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
 Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
 

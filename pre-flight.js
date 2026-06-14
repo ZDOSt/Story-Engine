@@ -454,7 +454,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
 
 function renderFinalWritingStyleReminder() {
     return String.raw`FINAL WRITING STYLE REMINDER:
-Write narration with the density and clarity of a skilled fantasy novelist. Make the scene easy to imagine through concrete rooms, clothing, gestures, expressions, texture, sound, movement, and social pressure. Description is not decoration: let it reveal the world, danger, tension, character behavior, or available choices while preserving narrativeFacts(input). In dialogue, let staging serve the exchange: use posture, distance, hands, objects, pauses, tone, and nearby surroundings when they matter, but do not turn every spoken line into a scenery paragraph.`;
+Write narration with the density and clarity of a skilled novelist while preserving narrativeFacts(input). Match prose density to the scene: exploration can breathe with rich environmental detail; dialogue should stay centered on the immediate exchange, giving each participating NPC one coherent response beat before {{user}} responds; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Let description reveal place, pressure, character behavior, danger, attraction, available choices, and the changing shape of the moment.`;
 }
 
 function renderControlEngineNarrativeContract() {
