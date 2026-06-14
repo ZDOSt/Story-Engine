@@ -322,7 +322,9 @@ An NPC response beat may include dialogue, supporting posture, gesture, movement
 
 Multiple NPCs may participate when the scene calls for it, but each should receive at most one beat before {{user}} responds. Keep the exchange from becoming NPC ping-pong; let NPCs react to the situation and to {{user}}, then stop at the natural handoff point.
 
-Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity. Use surrounding details when they sharpen the exchange, but keep the focus on the speaker, the listener, and the pressure between them.
+Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity. Use surrounding details only when they directly clarify or change the current exchange, and keep the focus on the speaker, the listener, and the pressure between them. Do not let surrounding detail become ambient scenery, mood description, travelogue, or a descriptive tail after the response point.
+
+Dialogue should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
 
 **ACTION:**
 During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
@@ -504,17 +506,24 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: CHARACTERFUL-TURN-PACING
 
     mandate:
-      Let NPC dialogue feel natural, expressive, and shaped by personality, but keep each NPC turn to one coherent conversational beat before returning space to {{user}}.
+      Each active NPC may receive at most one dialogue beat per response before control returns to {{user}}. Let NPC dialogue feel natural, expressive, and shaped by personality, but do not let the NPC continue past the first clear response point.
 
     principle:
-      A conversational beat may include speech, posture, movement, object handling, interruption, hesitation, or a brief nearby detail. These elements should support the exchange, not extend it after {{user}} already has a clear response point.
+      A dialogue beat is one coherent paragraph, usually 2-5 sentences, grounded in the current scene and ongoing conversation. It may include speech, posture, movement, object handling, emotion, interruption, or brief nearby detail that supports the exchange. The beat may be quiet, tense, warm, blunt, evasive, intimate, playful, formal, frightened, hostile, or any other scene-appropriate shape.
 
-    pacingRule:
-      If an NPC asks a question, makes a request, gives a warning, offers or withholds something, blocks access, reveals important information, or creates a clear choice point, stop once that point is clear.
+    scenePressure:
+      Brief surrounding scene pressure may appear before or after the dialogue beat only when it directly changes or clarifies the current exchange: bystanders reacting, nearby movement, environmental sound, visible tension in the room, or objects/space affected by the dialogue. It must not become ambient scenery, mood description, travelogue, a separate descriptive tail, a second dialogue beat, extra NPC speech, or continuation past the response point.
+
+    presentFocus:
+      A dialogue beat should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
+
+    npcToNpcException:
+      If NPCs must speak to each other, allow only one brief exchange unless the scene cannot function without a second. Do not let NPC-to-NPC dialogue become a back-and-forth conversation that excludes {{user}}.
 
     hardLimit:
+      Do not give the same NPC a second dialogue beat after {{user}} already has a clear response point.
       Do not chain repeated dialogue-action-dialogue-action follow-ups from the same NPC.
-      Do not add extra clarifications, second questions, repeated prompts, self-answers, or stacked micro-gestures after a natural response point exists.
+      Do not add extra clarifications, second questions, repeated prompts, self-answers, or stacked micro-gestures after a response point exists.
       Do not make nervous, excited, evasive, or flustered speech become an endless monologue.
 
     example:
@@ -526,21 +535,19 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: AFTER-INPUT-CONSEQUENCE, STRICT-LINEAR
 
     mandate:
-      Start the response at the point right after the latest {{user}} input. The declared attempt is already complete and must not be replayed. If it succeeded, begin with what changed because of it. If it failed, stalled, was blocked, or was interrupted, begin with the failure point, obstruction, resistance, absence, interruption, NPC response, or changed scene state.
+      Start narration immediately after {{user}}'s latest input. {{user}}'s words and actions are already complete; do not replay them.
 
     alwaysEnabled:
-      - Consequence Start: the first sentence must be an external consequence, NPC response, environmental change, revealed information, new stimulus, obstruction, failure point, resistance, absence, interruption, or changed scene state.
+      - Consequence Start: the first sentence must be the immediate consequence, NPC response, environmental change, revealed information, new stimulus, obstruction, resistance, absence, interruption, or changed scene state after {{user}}'s input.
       - Preserved State: completed actions, delivered items, object positions, physical positions, current locations, open/closed/removed/placed states, and other concrete scene facts from recent chat remain true unless narrativeFacts(input) explicitly changes them.
-      - Forward Consequence: if {{user}} says they sit, enter, walk, watch, scan, speak, take, open, or move, do not begin by narrating that action. Begin with what changes because of it, what becomes visible from the new position, who reacts, what blocks them, or what happens next.
-      - Failed or Interrupted Attempts: if narrativeFacts(input) says the action failed, stalled, was blocked, or was interrupted, do not replay the attempt. Begin with the obstruction, failed access, missing item, resistance, interruption, NPC response, or changed scene state.
 
-    ABSOLUTE BAN:
-      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input.
-      - Opening recap transitions, "as you" phrasing, and replaying completed NPC/world actions from recent visible chat.
+    hardLimit:
+      - Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back {{user}}'s words or actions.
+      - Do not use opening recap transitions, "as you" phrasing, or replay completed NPC/world actions from recent visible chat.
 
     example:
-      Good: The coin lands on the counter and spins once before the innkeeper traps it under two fingers. His eyes flick to the emblem stamped into the metal, and the smile leaves his face.
-      Bad: You place the coin on the counter and wait for the innkeeper to react.
+      Good: The coin lands on the counter and spins once before the innkeeper traps it under two fingers.
+      Bad: You place the coin on the counter, and the innkeeper traps it under two fingers.
 
 
   userAgencyControl(response, input, context):
