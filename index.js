@@ -310,13 +310,6 @@ Use concrete detail to reveal status, mood, intent, danger, fatigue, confidence,
 
 Describe the room, clothing, objects, gestures, and expressions as part of the scene's meaning, not as a catalog. Let the details serve the moment.
 
-**DIALOGUE PACING:**
-In conversation-centered scenes, keep the descriptive camera close to the speakers and listeners. Use posture, distance, eye-line, hand movement, object handling, pauses, interruptions, tone, and nearby surroundings to stage the exchange.
-
-Do not wrap every dialogue line in broad ambience or half a paragraph of scenery. Environmental detail is welcome when it changes pressure, reveals information, clarifies position, gives a character something to interact with, or affects what someone does.
-
-This pacing rule does not override intimacy, combat, pursuit, restraint, injury care, or other physically driven scenes merely because characters speak. In physically driven scenes, dialogue should remain embedded inside the physical action instead of shrinking or replacing the embodied narration.
-
 **ACTION AND PRESENCE:**
 In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
 
@@ -325,7 +318,7 @@ Every physical beat should be easy to imagine. Let movement change the shape of 
 **INTIMACY:**
 When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
 
-Make it embodied, specific, mutual, graphic when the scene is explicit, and scene-aware. Physical contact, proximity, pacing, touch, wetness, slickness, breath against skin, changing position, restraint, resistance, release, and aftermath should carry the scene. Dialogue may appear, but it must not reduce or replace the physical narration.
+Make it embodied, specific, and scene-aware.
 
 **FLOW:**
 Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed, but not ornate, and vivid, but not bloated.`;

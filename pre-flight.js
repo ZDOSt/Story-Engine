@@ -454,7 +454,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
 
 function renderFinalWritingStyleReminder() {
     return String.raw`FINAL WRITING STYLE REMINDER:
-Write narration with the density and clarity of skilled fantasy fiction, not as a procedural report. Make the scene easy to imagine through concrete rooms, clothing, gestures, expressions, texture, sound, movement, spacing, and social pressure. In conversation-centered scenes, keep the camera close to the participants without wrapping every line in broad ambience. This dialogue pacing does not override intimacy, combat, pursuit, restraint, injury care, or other physically driven scenes: let physical action, contact, pressure, sensation, rhythm, and consequence carry those beats while preserving narrativeFacts(input).`;
+Write narration with the density and clarity of a skilled fantasy novelist. Make the scene easy to imagine through concrete rooms, clothing, gestures, expressions, texture, sound, movement, and social pressure. Description is not decoration: let it reveal the world, danger, tension, character behavior, or available choices while preserving narrativeFacts(input). In dialogue, let staging serve the exchange: use posture, distance, hands, objects, pauses, tone, and nearby surroundings when they matter, but do not turn every spoken line into a scenery paragraph.`;
 }
 
 function renderControlEngineNarrativeContract() {
