@@ -44,8 +44,6 @@ const LEGACY_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_writing_style';
 
 const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
-const TRACKER_PROFILE_CURRENT = '<Current semantic profile>';
-const PROSE_GUARD_PROFILE_CURRENT = '<Current semantic profile>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 
@@ -68,6 +66,8 @@ const PROSE_GUARD_HIDDEN_MESSAGE_CLASS = 'structured-preflight-proseguard-hidden
 const PROSE_GUARD_HIDDEN_TEXT_CLASS = 'structured-preflight-proseguard-hidden-text';
 const PROSE_GUARD_DEFER_MS = 0;
 const PROSE_GUARD_TIMEOUT_MS = 90000;
+const COMBINED_POST_PASS_NARRATION_START = 'BEGIN_CORRECTED_NARRATION';
+const COMBINED_POST_PASS_NARRATION_END = 'END_CORRECTED_NARRATION';
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
 const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
@@ -640,9 +640,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     modelCallDelayEnabled: false,
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
-    trackerConnectionProfile: TRACKER_PROFILE_CURRENT,
     postNarrationProseGuardEnabled: true,
-    proseGuardConnectionProfile: PROSE_GUARD_PROFILE_CURRENT,
     proseGuardFormattingEnabled: true,
     proseGuardFormattingPrompt: DEFAULT_PROSE_GUARD_FORMATTING_PROMPT,
     characterProgressionEnabled: true,
@@ -910,36 +908,10 @@ async function withSemanticGenerationSettings(callback) {
 
 
 async function withTrackerGenerationSettings(callback) {
-    const settings = getSettings();
-    const trackerProfile = String(settings.trackerConnectionProfile || TRACKER_PROFILE_CURRENT).trim();
-    if (trackerProfile && trackerProfile !== TRACKER_PROFILE_CURRENT) {
-        const profile = getConnectionProfileByName(trackerProfile);
-        if (!profile) {
-            throw new Error(`Tracker connection profile "${trackerProfile}" was not found.`);
-        }
-        console.info(`[${EXTENSION_NAME}] using direct tracker connection profile request: ${profile.name}`);
-        return await callback({
-            semanticProfileId: profile.id,
-            semanticProfileName: profile.name,
-        });
-    }
     return await withSemanticGenerationSettings(callback);
 }
 
 async function withProseGuardGenerationSettings(callback) {
-    const settings = getSettings();
-    const proseGuardProfile = String(settings.proseGuardConnectionProfile || PROSE_GUARD_PROFILE_CURRENT).trim();
-    if (proseGuardProfile && proseGuardProfile !== PROSE_GUARD_PROFILE_CURRENT) {
-        const profile = getConnectionProfileByName(proseGuardProfile);
-        if (!profile) {
-            throw new Error(`Prose Guard connection profile "${proseGuardProfile}" was not found.`);
-        }
-        console.info(`[${EXTENSION_NAME}] using direct Prose Guard connection profile request: ${profile.name}`);
-        return await callback({
-            semanticProfileId: profile.id,
-            semanticProfileName: profile.name,
-        });
-    }
     return await withSemanticGenerationSettings(callback);
 }
 
@@ -1223,9 +1195,7 @@ function refreshSettingsControls() {
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
-    const trackerProfileSelect = document.getElementById('structured_preflight_tracker_profile');
     const proseGuardEnabledCheckbox = document.getElementById('structured_preflight_prose_guard_enabled');
-    const proseGuardProfileSelect = document.getElementById('structured_preflight_prose_guard_profile');
     const proseGuardFormattingEnabled = document.getElementById('structured_preflight_prose_guard_formatting_enabled');
     const proseGuardFormattingDrawer = document.getElementById('structured_preflight_prose_guard_formatting_drawer');
     const proseGuardFormattingPrompt = document.getElementById('structured_preflight_prose_guard_formatting_prompt');
@@ -1291,24 +1261,8 @@ function refreshSettingsControls() {
 
     );
 
-    setSelectOptions(
-        trackerProfileSelect,
-        [TRACKER_PROFILE_CURRENT, ...getConnectionProfileNames()],
-        TRACKER_PROFILE_CURRENT,
-        settings.trackerConnectionProfile || TRACKER_PROFILE_CURRENT,
-        'Profile not found',
-    );
-    setSelectOptions(
-        proseGuardProfileSelect,
-        [PROSE_GUARD_PROFILE_CURRENT, ...getConnectionProfileNames()],
-        PROSE_GUARD_PROFILE_CURRENT,
-        settings.proseGuardConnectionProfile || PROSE_GUARD_PROFILE_CURRENT,
-        'Profile not found',
-    );
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
-    if (trackerProfileSelect) trackerProfileSelect.disabled = !engineEnabled || settings.postNarrationTrackerEnabled === false;
-    if (proseGuardProfileSelect) proseGuardProfileSelect.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
     if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
     if (proseGuardFormattingPrompt) proseGuardFormattingPrompt.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
     if (proseGuardFormattingDrawer) {
@@ -1536,19 +1490,19 @@ function renderSettingsPanel() {
 
                     <section class="spe-settings-section" data-spe-settings-step="semantic">
                         <span class="spe-settings-kicker">1. First model call</span>
-                        <h4 class="spe-settings-title">Semantic Preflight</h4>
-                        <small class="spe-settings-description">The private structured pass reads the assembled prompt stack and resolves mechanics before narration.</small>
+                        <h4 class="spe-settings-title">Story Engine Profile</h4>
+                        <small class="spe-settings-description">The private structured profile reads the assembled prompt stack, resolves mechanics, and runs post-narration utility checks.</small>
                         <div class="spe-settings-body">
                             <label class="checkbox_label flexNoGap">
                                 <input id="structured_preflight_use_separate_semantic_settings" type="checkbox">
-                                <span>Use separate semantic connection profile</span>
+                                <span>Use private Story Engine connection profile</span>
                             </label>
                             <div class="spe-settings-row">
-                                <label for="structured_preflight_semantic_profile">Semantic profile</label>
+                                <label for="structured_preflight_semantic_profile">Story Engine profile</label>
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                             </div>
                             <div class="spe-settings-row">
-                                <small class="spe-settings-note flex1">Uses the fully assembled SillyTavern prompt stack and forces thinking/reasoning disabled on Story Engine model calls.</small>
+                                <small class="spe-settings-note flex1">Used for semantic preflight and post-narration Story Engine utility calls. Narration, adventure openings, character creation, and character progression use the current SillyTavern profile.</small>
                                 <button id="structured_preflight_refresh_semantic_settings" class="menu_button">Refresh</button>
                             </div>
                         </div>
@@ -1626,10 +1580,6 @@ function renderSettingsPanel() {
                                 <input id="structured_preflight_prose_guard_enabled" type="checkbox">
                                 <span>Enable Prose Guard</span>
                             </label>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_prose_guard_profile">Prose Guard profile</label>
-                                <select id="structured_preflight_prose_guard_profile" class="text_pole flex1"></select>
-                            </div>
                             <label class="checkbox_label flexNoGap">
                                 <input id="structured_preflight_prose_guard_formatting_enabled" type="checkbox">
                                 <span>Enable Prose Guard formatting rules</span>
@@ -1657,10 +1607,6 @@ function renderSettingsPanel() {
                                 <input id="structured_preflight_post_tracker_enabled" type="checkbox">
                                 <span>Enable post-narration tracker update</span>
                             </label>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_tracker_profile">Tracker profile</label>
-                                <select id="structured_preflight_tracker_profile" class="text_pole flex1"></select>
-                            </div>
                             <small class="spe-settings-note">Disable for compatibility with other tracker extensions.</small>
                         </div>
                     </section>
@@ -1755,19 +1701,9 @@ function renderSettingsPanel() {
 
     });
 
-    document.getElementById('structured_preflight_tracker_profile')?.addEventListener('change', event => {
-        const selected = String(event.target?.value || TRACKER_PROFILE_CURRENT);
-        settings.trackerConnectionProfile = selected || TRACKER_PROFILE_CURRENT;
-        saveExtensionSettings();
-    });
     document.getElementById('structured_preflight_prose_guard_enabled')?.addEventListener('change', event => {
         settings.postNarrationProseGuardEnabled = Boolean(event.target?.checked);
         refreshSettingsControls();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_prose_guard_profile')?.addEventListener('change', event => {
-        const selected = String(event.target?.value || PROSE_GUARD_PROFILE_CURRENT);
-        settings.proseGuardConnectionProfile = selected || PROSE_GUARD_PROFILE_CURRENT;
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_prose_guard_formatting_enabled')?.addEventListener('change', event => {
@@ -7596,7 +7532,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell abilities. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, perception, communication, traversal, transformation, environmental interaction, or supernatural body use. Good ability shapes include Shadow Step, Voice Projection, Telepathy, Wall Cling, Heat Sight, Mist Form, Amphibious Shift, or a special activated natural-weapon effect beyond ordinary anatomy such as venom, paralysis, extending bone blades, electrified bite, or supernatural claws. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
                 `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Allowed spell categories are offensive magic, practical utility magic, traversal, environmental manipulation, and healing or restoration short of resurrection. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
                 '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
-                '# FLAVOR / FIXED FACTS: concise fixed background flavor, origin facts, prior role, prior training, immutable constraints, ability/trait limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Do not include personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, emotional reactions, or statements about what the character will/may/usually/tends to do.',
+                '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
         },
     ];
     return sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
@@ -8417,6 +8353,124 @@ function sanitizeProseGuardResponse(raw, fallbackText) {
     return cleaned || fallbackText;
 }
 
+function canUseCombinedPostNarrationPass(settings = getSettings()) {
+    if (settings.postNarrationProseGuardEnabled === false || settings.postNarrationTrackerEnabled === false) return false;
+    return true;
+}
+
+function buildProseGuardReferencePrompt(narrationText, latestUserText = '') {
+    const prompt = buildProseGuardPrompt(narrationText, latestUserText);
+    const outputIndex = prompt.indexOf('\nOUTPUT CONTRACT:');
+    return outputIndex > 0 ? prompt.slice(0, outputIndex).trim() : prompt;
+}
+
+function buildTrackerReferencePrompt({ pendingRun, messageKey, trackerDisplaySnapshot }) {
+    return buildPostNarrationTrackerPrompt({
+        pendingRun,
+        messageKey,
+        narrationText: 'CORRECTED_NARRATION_FROM_FIRST_SECTION',
+        trackerDisplaySnapshot,
+    })
+        .replace('You update tracker state only. Do not narrate, roleplay, explain, or add prose.', 'For the tracker section, update tracker state only. Do not roleplay, explain, or add prose there.')
+        .replace('Return exactly one story_engine_tracker_delta fenced block and nothing else.', 'For this combined pass, place exactly one story_engine_tracker_delta fenced block after the corrected narration section.');
+}
+
+function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+    return [
+        'STORY_ENGINE_COMBINED_POST_NARRATION_PASS',
+        '',
+        'You are a private Story Engine finalization pass. Complete exactly two tasks in order:',
+        '1. Correct TEXT_TO_CHECK using the Prose Guard rules.',
+        '2. Extract tracker delta from CORRECTED_NARRATION using the Tracker Update rules.',
+        '',
+        'Do not narrate, roleplay, explain, summarize, add commentary, or output anything outside the required sections.',
+        'The tracker delta must be based on CORRECTED_NARRATION, not on rejected or removed draft text.',
+        'If no prose corrections are needed, CORRECTED_NARRATION must equal TEXT_TO_CHECK.',
+        '',
+        '==PROSE_GUARD_CONTRACT==',
+        'Use this as correction rules only; its standalone output contract is superseded by STRICT_OUTPUT_CONTRACT below.',
+        buildProseGuardReferencePrompt(narrationText, pendingRun?.latestUserText || ''),
+        '',
+        '==TRACKER_UPDATE_CONTRACT==',
+        'Use this as tracker extraction rules and authority only; its standalone output contract is superseded by STRICT_OUTPUT_CONTRACT below.',
+        buildTrackerReferencePrompt({ pendingRun, messageKey, trackerDisplaySnapshot }),
+        '',
+        '==STRICT_OUTPUT_CONTRACT==',
+        `Return exactly these two sections, in this order:`,
+        COMBINED_POST_PASS_NARRATION_START,
+        '<corrected narration only>',
+        COMBINED_POST_PASS_NARRATION_END,
+        '',
+        '```story_engine_tracker_delta',
+        'BEGIN_TRACKER_DELTA',
+        '...',
+        'END_TRACKER_DELTA',
+        '```',
+        '',
+        'No labels other than the required delimiters. No analysis. No prose outside corrected narration. No tracker text inside corrected narration.',
+        '',
+        '==TEXT_TO_CHECK==',
+        narrationText || '(empty)',
+        '',
+        '==RECENT_USER_INPUT==',
+        pendingRun?.latestUserText || '(empty)',
+        '',
+        '==OUTPUT==',
+    ].join('\n');
+}
+
+function extractCombinedCorrectedNarration(raw, fallbackText) {
+    const extracted = extractGeneratedText(raw);
+    const source = String(extracted || raw || '');
+    const pattern = new RegExp(`${escapeRegExp(COMBINED_POST_PASS_NARRATION_START)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(COMBINED_POST_PASS_NARRATION_END)}`, 'i');
+    const match = source.match(pattern);
+    if (!match) {
+        throw new Error('Combined post-pass response missing corrected narration section.');
+    }
+    const cleaned = sanitizeAssistantNarration(stripStructuredArtifacts(stripNarratorMetaPrefix(match[1]))).trim();
+    if (!cleaned) {
+        throw new Error('Combined post-pass corrected narration was empty.');
+    }
+    return cleaned || fallbackText;
+}
+
+function parseCombinedPostNarrationResponse(raw, fallbackText) {
+    const correctedNarration = extractCombinedCorrectedNarration(raw, fallbackText);
+    const trackerDeltaText = extractTrackerDeltaText(raw);
+    if (!trackerDeltaText) {
+        throw new Error('Combined post-pass response missing tracker delta block.');
+    }
+    const trackerDelta = parseNarratorTrackerDelta(trackerDeltaText, correctedNarration);
+    return { correctedNarration, trackerDelta };
+}
+
+async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
+    const prompt = buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot });
+    const proseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
+    const trackerLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
+    const responseLength = Math.min(9000, proseLength + trackerLength + 700);
+    state.bypassPromptReady = true;
+    try {
+        return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
+            if (settings?.semanticProfileId) {
+                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
+                    temperature: 0,
+                });
+            }
+            const context = getContext();
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for combined post-narration pass.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
+        }));
+    } finally {
+        state.bypassPromptReady = false;
+    }
+}
+
 async function requestProseGuardCorrection(narrationText, latestUserText = '') {
     if (!isStoryEngineEnabled()) {
         throw new Error('Story Engine is disabled.');
@@ -8760,8 +8814,19 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         const narratorHandoff = captured?.narratorHandoff ?? state.lastNarratorHandoff;
         const pendingRun = captured?.pendingRun ?? state.pendingRun;
         let trackerDeltaWarning = null;
+        const settings = getSettings();
+        const proseGuardEnabled = settings.postNarrationProseGuardEnabled !== false;
+        const trackerEnabled = settings.postNarrationTrackerEnabled !== false;
+        const root = getTrackerRoot(context);
+        const combinedPostPassEnabled = Boolean(narrationText && root && pendingRun && canUseCombinedPostNarrationPass(settings));
+        let combinedTrackerDelta = null;
 
-        if (getSettings().postNarrationProseGuardEnabled !== false && narrationText) {
+        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
+            clearRuntimePrompts();
+            return;
+        }
+
+        if (!(root && pendingRun) && proseGuardEnabled && narrationText) {
             try {
                 await deferForProseGuardFinalization();
                 const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
@@ -8771,12 +8836,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             }
         }
 
-        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
-            clearRuntimePrompts();
-            return;
-        }
-
-        const root = getTrackerRoot(context);
         if (root && pendingRun) {
             let trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
                 messageKey,
@@ -8789,26 +8848,66 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
             });
 
+            if (combinedPostPassEnabled) {
+                try {
+                    await deferForProseGuardFinalization();
+                    const combinedRaw = await requestCombinedPostNarrationPass({
+                        pendingRun,
+                        messageKey,
+                        narrationText,
+                        trackerDisplaySnapshot,
+                    });
+                    const combinedResult = parseCombinedPostNarrationResponse(combinedRaw, narrationText);
+                    narrationText = combinedResult.correctedNarration;
+                    combinedTrackerDelta = combinedResult.trackerDelta;
+                    trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
+                        messageKey,
+                        pendingRun,
+                        report: pendingRun.report,
+                        assistantText: narrationText,
+                    });
+                } catch (error) {
+                    console.warn(`[${EXTENSION_NAME}] combined post-narration pass failed; falling back to separate post passes.`, error);
+                    combinedTrackerDelta = null;
+                }
+            }
 
+            if (!combinedTrackerDelta && proseGuardEnabled && narrationText) {
+                try {
+                    await deferForProseGuardFinalization();
+                    const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
+                    narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
+                    trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
+                        messageKey,
+                        pendingRun,
+                        report: pendingRun.report,
+                        assistantText: narrationText,
+                    });
+                } catch (error) {
+                    console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
+                }
+            }
 
-            if (getSettings().postNarrationTrackerEnabled !== false) {
+            if (trackerEnabled) {
 
                 try {
 
-                    const trackerRaw = await requestPostNarrationTrackerDelta({
+                    let postNarrationDelta = combinedTrackerDelta;
+                    if (!postNarrationDelta) {
+                        const trackerRaw = await requestPostNarrationTrackerDelta({
 
-                        pendingRun,
+                            pendingRun,
 
-                        messageKey,
+                            messageKey,
 
-                        narrationText,
+                            narrationText,
 
-                        trackerDisplaySnapshot,
+                            trackerDisplaySnapshot,
 
-                    });
-
-                    const trackerDeltaText = extractTrackerDeltaText(trackerRaw) || String(trackerRaw || '');
-                    const postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
+                        });
+                        const trackerDeltaText = extractTrackerDeltaText(trackerRaw) || String(trackerRaw || '');
+                        postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
+                    }
 
                     const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
 
