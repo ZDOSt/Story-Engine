@@ -316,15 +316,15 @@ Notice the details that matter: the way a cloak hangs, how a patron turns in a c
 Exploration prose should orient the user. Make the place legible, atmospheric, and interactive without turning it into a static catalog.
 
 **DIALOGUE:**
-During dialogue, make the current exchange the priority. Center narration on the participating characters, what they say or withhold, and what physically changes between them in the moment. Let each participating NPC receive one coherent response beat, then return space to {{user}}.
+  During dialogue, prioritize the current interaction and active participants. Keep the narrative focus close to the exchange. Let each participating NPC receive one coherent response beat, then return space to {{user}}.
 
-An NPC response beat may include speech and supporting behavior when it serves the exchange. Examples include posture, gesture, movement, object handling, expression, pause, interruption, or a nearby reaction. These are examples, not required ingredients or a checklist. The beat should feel like one natural response, not a separate mini-scene.
+An NPC response beat may include speech and supporting behavior when it serves the exchange, but it should not be built from a checklist of gestures or reactions. The beat should feel like one natural response, not a separate mini-scene.
 
-Surrounding scene detail is as-needed only. Include it when setting a new scene, when a new element enters or changes the scene, or when it directly clarifies or changes the current exchange. Once a surrounding detail has been established, do not restate it during static dialogue beats unless it changes or becomes directly relevant.
+  Surrounding scene detail is as-needed only. Keep it minimal and directly relevant to the ongoing exchange. Once a scene element is established, do not restate or repeat it unless it changes or becomes directly relevant again.
 
 Multiple NPCs may participate when the scene calls for it, but each should receive at most one beat before {{user}} responds. Keep the exchange from becoming NPC ping-pong; let NPCs react to the situation and to {{user}}, then stop at the natural handoff point.
 
-Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity. Do not invent background noise, silence, appliances, weather, room inventory, or ambient scenery just to keep the setting present.
+Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity.
 
 Dialogue should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
 
@@ -505,34 +505,22 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
 
   dialoguePacing(response, context):
-    policy: CHARACTERFUL-TURN-PACING
+    policy: DIALOGUE-BEAT-PACING
 
-    mandate:
-      Each active NPC may receive at most one dialogue beat per response before control returns to {{user}}. The limit is structural: the beat may be natural, expressive, and shaped by personality, but the NPC must not continue past the first clear response point.
+    definition:
+      A dialogue beat is one coherent paragraph from a single NPC, usually 2-5 sentences. It may combine that NPC's speech, action, posture, delivery, or object handling, but it should read as one turn in the exchange.
 
-    principle:
-      A dialogue beat is one coherent paragraph, usually 2-5 sentences, grounded in the current exchange. The main priority is the participating characters: what they say, withhold, offer, refuse, interrupt, reveal, or physically change in the moment.
-
-      Supporting behavior may appear when it serves the exchange. Examples include posture, gesture, movement, object handling, expression, pause, interruption, or a nearby reaction. These are examples, not required ingredients or a checklist.
-
-    scenePressure:
-      Surrounding scene detail is as-needed only. Include it when setting a new scene, when a new element enters or changes the scene, or when it directly clarifies or changes the current exchange.
-
-      Once a surrounding detail has been established, do not restate it during static dialogue beats unless it changes or becomes directly relevant. Do not invent background noise, silence, appliances, weather, room inventory, or ambient scenery just to keep the setting present.
-
-    presentFocus:
-      Dialogue should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
+    rule:
+      In dialogue with {{user}}, each active NPC may receive at most one dialogue beat.
 
     npcToNpcException:
-      If NPCs must speak to each other, allow only one brief exchange unless the scene cannot function without a second. Do not let NPC-to-NPC dialogue become a back-and-forth conversation that excludes {{user}}.
+      If two NPCs directly interact with each other, allow a brief A -> B -> A exchange when needed. After that, do not continue the NPC-to-NPC conversation.
 
     hardLimit:
-      Each active NPC may receive at most one dialogue beat per response before {{user}} responds.
-      A dialogue beat must be one coherent paragraph, usually 2-5 sentences.
-      Do not give the same NPC a second dialogue beat after {{user}} already has a clear response point.
-      Do not chain repeated dialogue-action-dialogue-action follow-ups from the same NPC.
-      Do not add extra clarifications, second questions, repeated prompts, self-answers, exposition dumps, history recaps, or stacked micro-gestures after a response point exists.
-      Do not make nervous, excited, evasive, or flustered speech become an endless monologue.
+      Do not give the same NPC repeated follow-up beats outside the A -> B -> A exception.
+      Do not chain dialogue-action-dialogue-action from the same NPC as separate beats.
+      Do not add extra clarifications, second questions, repeated prompts, self-answers, exposition dumps, history recaps, or stacked micro-gestures as additional beats.
+      Do not let nervous, excited, evasive, or flustered speech become an endless monologue.
 
     example:
       Good: Naomi shifts the tote strap higher on her shoulder and glances toward the hallway. "I haven't even put my bag down yet," she says, half laughing despite herself. "Where do you want me?"
