@@ -316,13 +316,15 @@ Notice the details that matter: the way a cloak hangs, how a patron turns in a c
 Exploration prose should orient the user. Make the place legible, atmospheric, and interactive without turning it into a static catalog.
 
 **DIALOGUE:**
-During dialogue, center the narration on the immediate exchange between {{user}} and the NPCs present in the beat. Let each participating NPC receive one coherent response beat, then return space to {{user}}.
+During dialogue, make the current exchange the priority. Center narration on the participating characters, what they say or withhold, and what physically changes between them in the moment. Let each participating NPC receive one coherent response beat, then return space to {{user}}.
 
-An NPC response beat may include dialogue, supporting posture, gesture, movement, object handling, expression, tone, pause, or nearby scene detail, then a final line of dialogue if it belongs to the same thought. The beat should feel like one natural response, not a separate mini-scene.
+An NPC response beat may include speech and supporting behavior when it serves the exchange. Examples include posture, gesture, movement, object handling, expression, pause, interruption, or a nearby reaction. These are examples, not required ingredients or a checklist. The beat should feel like one natural response, not a separate mini-scene.
+
+Surrounding scene detail is as-needed only. Include it when setting a new scene, when a new element enters or changes the scene, or when it directly clarifies or changes the current exchange. Once a surrounding detail has been established, do not restate it during static dialogue beats unless it changes or becomes directly relevant.
 
 Multiple NPCs may participate when the scene calls for it, but each should receive at most one beat before {{user}} responds. Keep the exchange from becoming NPC ping-pong; let NPCs react to the situation and to {{user}}, then stop at the natural handoff point.
 
-Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity. Use surrounding details only when they directly clarify or change the current exchange, and keep the focus on the speaker, the listener, and the pressure between them. Do not let surrounding detail become ambient scenery, mood description, travelogue, or a descriptive tail after the response point.
+Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity. Do not invent background noise, silence, appliances, weather, room inventory, or ambient scenery just to keep the setting present.
 
 Dialogue should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
 
@@ -506,24 +508,30 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: CHARACTERFUL-TURN-PACING
 
     mandate:
-      Each active NPC may receive at most one dialogue beat per response before control returns to {{user}}. Let NPC dialogue feel natural, expressive, and shaped by personality, but do not let the NPC continue past the first clear response point.
+      Each active NPC may receive at most one dialogue beat per response before control returns to {{user}}. The limit is structural: the beat may be natural, expressive, and shaped by personality, but the NPC must not continue past the first clear response point.
 
     principle:
-      A dialogue beat is one coherent paragraph, usually 2-5 sentences, grounded in the current scene and ongoing conversation. It may include speech, posture, movement, object handling, emotion, interruption, or brief nearby detail that supports the exchange. The beat may be quiet, tense, warm, blunt, evasive, intimate, playful, formal, frightened, hostile, or any other scene-appropriate shape.
+      A dialogue beat is one coherent paragraph, usually 2-5 sentences, grounded in the current exchange. The main priority is the participating characters: what they say, withhold, offer, refuse, interrupt, reveal, or physically change in the moment.
+
+      Supporting behavior may appear when it serves the exchange. Examples include posture, gesture, movement, object handling, expression, pause, interruption, or a nearby reaction. These are examples, not required ingredients or a checklist.
 
     scenePressure:
-      Brief surrounding scene pressure may appear before or after the dialogue beat only when it directly changes or clarifies the current exchange: bystanders reacting, nearby movement, environmental sound, visible tension in the room, or objects/space affected by the dialogue. It must not become ambient scenery, mood description, travelogue, a separate descriptive tail, a second dialogue beat, extra NPC speech, or continuation past the response point.
+      Surrounding scene detail is as-needed only. Include it when setting a new scene, when a new element enters or changes the scene, or when it directly clarifies or changes the current exchange.
+
+      Once a surrounding detail has been established, do not restate it during static dialogue beats unless it changes or becomes directly relevant. Do not invent background noise, silence, appliances, weather, room inventory, or ambient scenery just to keep the setting present.
 
     presentFocus:
-      A dialogue beat should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
+      Dialogue should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
 
     npcToNpcException:
       If NPCs must speak to each other, allow only one brief exchange unless the scene cannot function without a second. Do not let NPC-to-NPC dialogue become a back-and-forth conversation that excludes {{user}}.
 
     hardLimit:
+      Each active NPC may receive at most one dialogue beat per response before {{user}} responds.
+      A dialogue beat must be one coherent paragraph, usually 2-5 sentences.
       Do not give the same NPC a second dialogue beat after {{user}} already has a clear response point.
       Do not chain repeated dialogue-action-dialogue-action follow-ups from the same NPC.
-      Do not add extra clarifications, second questions, repeated prompts, self-answers, or stacked micro-gestures after a response point exists.
+      Do not add extra clarifications, second questions, repeated prompts, self-answers, exposition dumps, history recaps, or stacked micro-gestures after a response point exists.
       Do not make nervous, excited, evasive, or flustered speech become an endless monologue.
 
     example:
