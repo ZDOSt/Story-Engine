@@ -299,7 +299,7 @@ Make it embodied, specific, mutual, and scene-aware.
 Write in cohesive scene beats. Vary sentence length naturally: shorter sentences for impact, interruption, danger, refusal, or sudden contact; longer sentences for observation, movement, pressure, intimacy, or environmental detail.
 
 The prose should be vivid without becoming ornate, physical without becoming robotic, and detailed without losing the roleplay handoff.`;
-const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+const PRE_DIALOGUE_EXAMPLES_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
 
 **NARRATION STYLE:**
 Write narration with the density and clarity of a skilled novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, sound, and social pressure should make the moment easy to imagine.
@@ -327,6 +327,57 @@ Multiple NPCs may participate when the scene calls for it, but each should recei
 Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity.
 
 Dialogue should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
+
+**ACTION:**
+During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
+
+Action prose should be vivid but efficient. Every sentence should clarify what happens, where bodies move, what changes, and what can happen next. Let movement change the shape of the room and the next possible action.
+
+**INTIMACY:**
+When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, let the prose become detailed, sensual, embodied, and physically specific. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, wetness, heat, restraint, exposure, proximity, bodies, consent, and aftermath.
+
+Let intimate scenes linger when the scene supports it. Capture small physical tells, shifting positions, breath against skin, hands, tension, release, texture, sound, slickness, and the changing pressure between bodies. Keep the prose direct, specific, and scene-aware.
+
+**FLOW:**
+Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed but not ornate, vivid but not bloated, expressive but not rambling.
+
+Match density to the scene: exploration can be richer, dialogue should be participant-centered, action should be punchy and clear, and intimacy should be embodied and sustained when appropriate.`;
+const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+
+**NARRATION STYLE:**
+Write narration with the density and clarity of a skilled novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, sound, and social pressure should make the moment easy to imagine.
+
+Description is not decoration. It is how the scene is understood. Let details reveal place, mood, danger, status, attraction, tension, intent, fatigue, confidence, discomfort, hesitation, control, and available choices.
+
+Pace the prose according to the scene.
+
+**EXPLORATION:**
+In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use rich, concrete environmental detail: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
+
+Notice the details that matter: the way a cloak hangs, how a patron turns in a chair, what a hand lingers over, how a face changes, how someone stands in a doorway, how the room feels crowded or quiet, what is worn, polished, broken, muddy, bloodied, or half-hidden.
+
+Exploration prose should orient the user. Make the place legible, atmospheric, and interactive without turning it into a static catalog.
+
+**DIALOGUE:**
+Write dialogue as a live exchange between the participants. Focus on what passes between them: what is said, how it is said, what is dodged or left unsaid, and the physical behavior that carries the subtext underneath the words.
+
+Let detail earn its place. Environmental detail belongs within a dialogue beat only when a character uses it, reacts to it, or when it shifts the pressure of the moment. A detail that reveals character, alters the exchange, or changes what can happen next belongs. A detail that only maintains scenery does not.
+
+Quiet beats can carry weight when they are tied to a concrete action, withheld answer, or visible change in the exchange. Do not fill them with chatter or atmosphere.
+
+Keep dialogue prose grounded and specific, and let emotion show through behavior rather than naming it.
+
+Dialogue style samples. These examples show the target shape; they are not required patterns, props, names, pacing beats, or scene content to repeat.
+
+Example 1:
+She unfolds the parchment and reads it in silence. Her lower lip trembles once; the fold comes out crooked when she closes the note again. She sets it on the table. "Please. Tell me it isn't true. Tell me she isn't dead."
+
+Example 2:
+Mara pushed the log deeper into the hearth with the toe of her boot. The charred end broke, scattering sparks into the smoke. "Were you planning to tell me?"
+
+Elias kept both hands around his cup, his thumb working the dent in the rim. "I was... trying to find the right words."
+
+Mara gave a short laugh and stepped back from the heat. "You found her bed easily enough."
 
 **ACTION:**
 During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
@@ -385,12 +436,11 @@ Formatting violations are invalid. Repair formatting before output.`;
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
 
   SensoryNarrationDirective(input, context):
-    policy: VIVID DIRECT PERCEPTION
+    policy: DIRECT PERCEPTION
 
     mandate:
       Narrate the scene as {{user}} could directly perceive it from their physical position.
-      Ground the prose in sight, sound, touch, space, movement, texture, pressure, and consequence.
-      Make the scene feel present and embodied, not like a list of actions.
+      Use sight, sound, touch, space, movement, texture, pressure, and consequence as direct perception channels.
 
     principle:
       Use sensory detail to clarify where things are, how they move, what they touch, what changes, and what choices or pressures become available.
@@ -462,12 +512,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
 
   literalStyleFilter(response, context):
-    policy: NATURAL GROUNDED PROSE
+    policy: PHYSICAL LITERAL PROSE
 
     mandate:
-      Write natural, grounded prose that remains physically clear.
-      The narration may be vivid, rhythmic, intimate, tense, quiet, or richly detailed, but every sentence should still point to something observable, audible, tactile, spatial, behavioral, or consequential.
-      Do not make the prose stiff or procedural just to avoid figurative language.
+      Keep prose physically clear. Every sentence should point to something observable, audible, tactile, spatial, behavioral, or consequential.
 
     principle:
       When a figurative shortcut would appear, replace it with specific scene detail: movement, texture, sound, contact, spacing, object state, weather on surfaces, posture, gesture, or consequence.
@@ -488,7 +536,6 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
     alwaysEnabled:
       - Unified Paragraphs: combine related movement, posture, object handling, dialogue, and consequence into one paragraph when they belong to the same beat.
-      - Tactical Pacing: use short sentences for impact or interruption; use longer sentences for continuous movement, tactical sequence, pressure, or dialogue integrated with action.
       - Grounded Vocalization: describe dialogue delivery only when it is physically grounded and changes audibility, privacy, speech control, injury, fatigue, fear, anger, restraint, intimacy, or scene pressure.
       - Action Preference: prefer one strong NPC beat that creates a response point for {{user}} over several small fragments from the same speaker.
       - Turn Flow: keep same-speaker action and dialogue together. Keep dialogue reactive, pressured, specific, and short enough to preserve roleplay flow.
@@ -612,11 +659,11 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Bad: The stairwell ends at a locked iron door. What do you do?
 
 
-  applicationContract:
+applicationContract:
     Apply every rule above as mandatory narration constraints before writing visible output.
 
     The final response must satisfy all active gates:
-      - concrete sensory grounding
+      - direct sensory grounding
       - diegetic ability rendering
       - strict POV and no user puppeting
       - observable behavior instead of emotion labels
@@ -751,7 +798,8 @@ function getSettings() {
     if (
         extension_settings[SETTINGS_KEY].writingStylePrompt === LEGACY_DEFAULT_WRITING_STYLE_PROMPT ||
         extension_settings[SETTINGS_KEY].writingStylePrompt === PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT ||
-        extension_settings[SETTINGS_KEY].writingStylePrompt === DIALOGUE_STAGING_DEFAULT_WRITING_STYLE_PROMPT
+        extension_settings[SETTINGS_KEY].writingStylePrompt === DIALOGUE_STAGING_DEFAULT_WRITING_STYLE_PROMPT ||
+        extension_settings[SETTINGS_KEY].writingStylePrompt === PRE_DIALOGUE_EXAMPLES_DEFAULT_WRITING_STYLE_PROMPT
     ) {
         extension_settings[SETTINGS_KEY].writingStylePrompt = DEFAULT_WRITING_STYLE_PROMPT;
     }
