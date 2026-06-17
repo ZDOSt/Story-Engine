@@ -234,9 +234,8 @@ UNDERLINE RULE:
 
 BLOCK RULE:
 - One speaker equals one cohesive block.
-- Keep one speaker's dialogue, action, and follow-up dialogue together when they belong to the same beat.
+- Keep one speaker's dialogue and action together when they belong to the same beat.
 - Do not split the same speaker across separators.
-- Max 3 paragraphs per speaker/NPC.
 - Paragraph breaks are allowed only inside the same speaker block.
 
 SEPARATOR RULE:
@@ -371,7 +370,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: DIALOGUE-BEAT-PACING
 
     definition:
-      A dialogue beat is one coherent paragraph from a single NPC, usually 2-5 sentences. It may combine that NPC's speech, action, posture, delivery, or object handling, but it should read as one turn in the exchange.
+      A dialogue beat is one coherent paragraph from a single NPC, 1-5 sentences long. It may combine that NPC's speech, action, posture, delivery, or object handling, but it should read as one turn in the exchange.
 
     rule:
       In dialogue with {{user}}, each active NPC may receive at most one dialogue beat.
