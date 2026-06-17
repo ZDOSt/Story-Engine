@@ -234,7 +234,6 @@ UNDERLINE RULE:
 
 BLOCK RULE:
 - One speaker equals one cohesive block.
-- Keep one speaker's dialogue and action together when they belong to the same beat.
 - Do not split the same speaker across separators.
 - Paragraph breaks are allowed only inside the same speaker block.
 
@@ -354,39 +353,16 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: COHESIVE-BEATS, HYPOTACTIC-PROSE
 
     mandate:
-      Hypotactic narration: write cohesive scene beats. Combine related movement, dialogue, action, object handling, and consequence into one paragraph when they belong to the same beat.
+      Hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose.
 
     hardLimit:
-      Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking, isolated speech balloons, or narration/speech/narration/speech chains from the same NPC before {{user}} can respond.
+      Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons.
       Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
       Do not use stock quietness shorthand as an emotional crutch.
 
     example:
       Good: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
       Bad: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
-
-
-  dialoguePacing(response, context):
-    policy: DIALOGUE-BEAT-PACING
-
-    definition:
-      A dialogue beat is one coherent paragraph from a single NPC, 1-5 sentences long. It may combine that NPC's speech, action, posture, delivery, or object handling, but it should read as one turn in the exchange.
-
-    rule:
-      In dialogue with {{user}}, each active NPC may receive at most one dialogue beat.
-
-    npcToNpcException:
-      If two NPCs directly interact with each other, allow a brief A -> B -> A exchange when needed. After that, do not continue the NPC-to-NPC conversation.
-
-    hardLimit:
-      Do not give the same NPC repeated follow-up beats outside the A -> B -> A exception.
-      Do not chain dialogue-action-dialogue-action from the same NPC as separate beats.
-      Do not add extra clarifications, second questions, repeated prompts, self-answers, exposition dumps, history recaps, or stacked micro-gestures as additional beats.
-      Do not let nervous, excited, evasive, or flustered speech become an endless monologue.
-
-    example:
-      Good: Naomi shifts the tote strap higher on her shoulder and glances toward the hallway. "I haven't even put my bag down yet," she says, half laughing despite herself. "Where do you want me?"
-      Bad: Naomi shifts the tote strap higher on her shoulder, glances toward the hallway, then looks back at you. "Where do you want me?" She rocks onto her heels, brushes hair from her cheek, and laughs under her breath. "I mean, in the house. Where in the house. Do you want me in the hall, or the kitchen, or-" She adjusts the bag again and keeps talking. "Oh my god, I am making this weird."
 
 
   chronologyControl(response, input, context):
@@ -437,13 +413,13 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: ROLEPLAY TURN FLOW
 
     mandate:
-      Keep NPC action and dialogue tight enough to preserve back-and-forth roleplay. Give the NPC a meaningful beat, then return space to {{user}} before the NPC continues the scene alone.
+      Preserve back-and-forth roleplay by ending at a clear handoff point for {{user}}.
 
     principle:
-      Keep same-speaker action and dialogue together. A turn may include action plus dialogue, but it should not become a chain of repeated prompts, gestures, explanations, and follow-up lines before {{user}} can respond.
+      Do not answer questions directed at {{user}} or resolve choices that belong to {{user}}.
 
     hardLimit:
-      Do not run extended NPC monologues, inter-NPC pingpong, same-speaker fragmentation, or repeated NPC follow-up prompts in the same turn.
+      Do not continue the scene through undeclared {{user}} participation.
 
     example:
       Good: Elian gives one answer, short enough that the others at the table stop talking. "The bridge is gone." He points through the rain-streaked window toward the black gap where the road used to continue. "How are you planning to cross?"
@@ -474,6 +450,29 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Bad: The stairwell ends at a locked iron door. What do you do?
 
 
+  characterTurnPacing(response, context):
+    policy: BOUNDED-CHARACTER-TURNS
+
+    definition:
+      A character turn is one NPC's complete contribution to the current response, written as one continuous, uninterrupted paragraph, 1-5 sentences maximum. It may include speech, action, reaction, posture, movement, delivery, object handling, or brief directly relevant detail, but all elements must belong to that single contribution.
+
+    mandate:
+      Each active NPC may take ONE character turn per user input, except under npcToNpcException.
+
+    npcToNpcException:
+      If two NPCs directly interact with each other, allow a brief NPC A -> NPC B -> NPC A exchange when needed. After that exchange, the response ends and control returns to {{user}}.
+
+    hardLimit:
+      Do not give the same NPC a second paragraph or second character turn outside the NPC A -> NPC B -> NPC A exception.
+      Do not let action-speech-action-speech chains become multiple turns from the same NPC.
+      Do not add extra clarifications, second questions, repeated prompts, self-answers, exposition dumps, history recaps, staged reactions, or stacked micro-gestures as additional turns.
+      Do not let nervous, excited, evasive, or flustered behavior become an endless character turn.
+
+    example:
+      Good: Naomi catches the tote strap before it slips off her shoulder and glances down at the pink hem of her skirt. "You really think so?" She looks back up, the strap still caught tight in both hands. "I guess I wanted to look cute for you."
+      Bad: Naomi catches the tote strap before it slips off her shoulder. "You really think so?" She glances down at her skirt, then back up. "I wasn't sure if I should wear this." She shifts closer. "I had this whole hello speech." Her hands tighten on the strap. "Where should I put my bag?"
+
+
 applicationContract:
     Apply every rule above as mandatory narration constraints before writing visible output.
 
@@ -484,7 +483,7 @@ applicationContract:
       - observable behavior instead of emotion labels
       - grounded physical prose
       - cohesive scene beats
-      - characterful dialogue pacing without same-speaker rambling
+      - bounded character turns
       - immediate consequence after user input
       - clean endpoint where control returns to {{user}}
 
