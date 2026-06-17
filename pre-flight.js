@@ -463,41 +463,45 @@ function renderFinalWritingStyleReminder(options = {}) {
 function renderControlEngineNarrativeContract() {
     return String.raw`renderControlEngine(input):
 
-SensoryNarrationDirective:
-Apply SensoryNarrationDirective(input): narrate only what {{user}} can directly perceive from their physical position, using concrete physical evidence. Sight, hearing, and touch are the primary avenues through which {{user}} experiences the world. Smell/taste are secondary: include them only when explicitly invoked by {{user}} or forced by a specific close-range physical source. Do not use smell/taste as atmosphere, mood, romance, tension, memory, vibe, or filler.
+cleanHandoff:
+Apply cleanHandoff(response, context): before writing visible narration, choose the response endpoint: the exact beat where control returns to {{user}}. Write toward that endpoint and stop there. The endpoint should leave {{user}} with a concrete situation that can be responded to immediately. Do not continue past the chosen endpoint or add waiting cues, meta-questions, mood-only silence, unrelated ambience, all-eyes-on-user framing, or extra narration after the handoff point.
 
-abilityIntegration:
-Apply abilityIntegration(response, context): render abilities, magic, senses, spells, supernatural effects, and body traits only through visible, audible, tactile, or environmental results from narrativeFacts(input). Show what changes in the scene: light, pressure, force, heat, cold, distance, damage, altered material, changed access, or bodily transformation. Do not name, announce, activate, charge, ritualize, system-label, or explain abilities unless spoken aloud in dialogue.
+strictChronology:
+Apply strictChronology(response, input, context): begin narration immediately after {{user}}'s latest input. {{user}}'s words and actions are already complete. Narrate forward in linear cause-and-effect order. Do not jump ahead, recap backward, or fill gaps with undeclared intermediate actions. Do not echo, summarize, paraphrase, restage, replay, or narrate back {{user}}'s input. Do not open with "as you..." framing or any form of restatement.
+
+characterTurnPacing:
+Apply characterTurnPacing(response, context): a character turn is one NPC's complete contribution to the current moment, written as one continuous, uninterrupted paragraph, 1-5 sentences maximum. Each active NPC may take one character turn per user input. If two NPCs directly interact, allow one brief NPC A -> NPC B -> NPC A exchange when needed; after that exchange, the response ends and control returns to {{user}}. Do not give the same NPC a second paragraph, second turn, follow-up clarification, repeated prompt, self-answer, exposition dump, or extra chain of micro-actions outside that exception.
+
+directPerception:
+Apply directPerception(response, context): narrate the scene as {{user}} could directly perceive it from their physical position, using concrete physical evidence. Sight, hearing, and touch are the primary avenues through which {{user}} experiences the world. Smell and taste are secondary: include them only when explicitly invoked by {{user}} or forced by a specific close-range physical source.
+
+strictEpistemology:
+Apply strictEpistemology(response, context): write only from direct in-scene evidence available at {{user}}'s physical position. Respect line of sight, lighting, occlusion, distance, direction, barriers, and sound obstruction. Preserve uncertainty for partial or obscured evidence. Unknown names, roles, species, motives, loyalties, hidden causes, lore, and private thoughts stay locked until introduced, spoken, read, directly evidenced, or already established.
+
+diegeticPhysicality:
+Apply diegeticPhysicality(response, context): render abilities, magic, traits, and unusual effects through their visible, audible, tactile, or environmental results in the scene. Show what changes in the world: light, pressure, force, heat, cold, distance, damage, altered material, changed access, or bodily transformation. Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue. Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
+
+agencySeparation:
+Apply agencySeparation(response, input, context): the narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist. Render {{user}}'s voluntary actions only when explicitly declared in the latest input. External physical forces may affect {{user}} when concrete and proportional. Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement. Do not interpret, assume, or complete {{user}}'s intent.
+
+behaviorism:
+Apply behaviorism(response, context): render character state through behaviorism: observable behavior and physical displacement. Narrate behavior as tangible, external action that could be noticed by someone present in the scene, not as abstract emotional cueing. Do not use emotion labels, canned body-language shorthand, autonomic emotional tropes, or repeated micro-gestures as substitutes for meaningful behavior. Never use blushing, flushing, reddening, paling, or knuckle-whitening as emotional shorthand.
+
+denotativePhysicality:
+Apply denotativePhysicality(response, context): strict literalism: keep prose physically clear and grounded in direct scene evidence. Use literal language when describing scenes. Replace figurative shortcuts with concrete physical description only when clarity requires it. Do not use metaphor, simile, personification, emotional physics, or decorative abstraction when it turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
+
+inanimateObjectivity:
+Apply inanimateObjectivity(response, context): give agency only to beings, forces, mechanisms, and processes capable of physical action. Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They do not want, watch, wait, threaten, breathe, intend, or remember. Reject Pathetic Fallacy. Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
+
+hypotacticSceneBeats:
+Apply hypotacticSceneBeats(response, context): hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose. Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons. Do not use micro-reaction loops, twitch-cadence narration, body-cue pileups, or stock quietness shorthand as an emotional crutch.
 
 itemAvailability:
 If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use has no item effect; after the attempted access point, narrate absence or failed access, not possession. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
 
-epistemicRender:
-Apply epistemicRender(response, context): write only from direct in-scene evidence available at {{user}}'s physical position. Respect line of sight, lighting, occlusion, distance, direction, barriers, and sound obstruction. Preserve uncertainty for partial or obscured evidence. Unknown names, roles, species, motives, loyalties, hidden causes, lore, and private thoughts stay locked until introduced, spoken, read, directly evidenced, or already established.
-
-behavioralRender:
-Apply behavioralRender(response, context): render character state through behaviorism: observable behavior and physical displacement. Narrate behavior as tangible, external action that could be noticed by someone present in the scene, not as abstract emotional cueing. Do not use emotion labels, canned body-language shorthand, autonomic emotional tropes, or repeated micro-gestures as substitutes for meaningful behavior. Never use blushing, flushing, reddening, paling, or knuckle-whitening as emotional shorthand.
-
-literalStyleFilter:
-Apply literalStyleFilter(response, context): strict literalism. Keep prose physically clear and grounded in direct scene evidence. Use literal language when describing scenes. Replace figurative shortcuts with concrete physical description only when clarity requires it. Do not use metaphor, simile, personification, emotional physics, or decorative abstraction that turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
-
-sceneBeatComposition:
-Apply sceneBeatComposition(response, context): hypotactic narration. Write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose. Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons. Do not use micro-reaction loops, twitch-cadence narration, body-cue pileups, or stock quietness shorthand as emotional crutch.
-
-chronologyControl:
-Start narration immediately after {{user}}'s input. The first sentence must be the consequence, NPC response, or changed scene state. Do not echo, summarize, or replay {{user}}'s words or actions.
-
-userAgencyControl:
-Apply userAgencyControl(response, input, context): render the world, NPCs, hazards, objects, and consequences as active and independent. Render {{user}} voluntary actions only when explicitly declared in the latest input or allowed by PROXY USER ACTION MODE. If an object/note/path/threat/invitation is delivered or revealed, stop with it available, visible, or within reach; do not make {{user}} take, open, read, inspect, pocket, wear, eat, drink, touch, follow, accept, answer, speak, nod, look, approach, retreat, attack, defend, search, examine, comply, or decide. Do not write {{user}} speech, thoughts, feelings, reactions, silence, choices, decisions, internal states, or voluntary movement.
-
-turnStructureControl:
-Apply turnStructureControl(response, context): preserve back-and-forth roleplay by ending at a clear handoff point for {{user}}. Do not answer questions directed at {{user}}, resolve choices that belong to {{user}}, or continue the scene through undeclared {{user}} participation.
-
-responseEndpointControl:
-Apply responseEndpointControl(response, context): end exactly where the scene naturally returns control to {{user}}. Stop once the immediate consequence, NPC response, revealed information, available object/path, obstruction, hazard, or choice point is clear. The ending should leave a concrete situation for {{user}} to respond to, not an explicit stage direction. Output nothing after the response beat. Do not add waiting cues, meta-questions, mood-only silence, unrelated ambience, all-eyes-on-user framing, scene-break tails, or extra narration after the response point.
-
-characterTurnPacing:
-Apply characterTurnPacing(response, context): a character turn is one NPC's complete contribution to the current response, written as one continuous, uninterrupted paragraph, 1-5 sentences maximum. Each active NPC may take one character turn per user input. If two NPCs directly interact, allow a brief NPC A -> NPC B -> NPC A exchange when needed; after that exchange, the response ends and control returns to {{user}}. Do not give the same NPC a second paragraph or second character turn outside that exception, let action-speech-action-speech chains become multiple turns from the same NPC, add repeated prompts, self-answers, exposition dumps, history recaps, staged reactions, stacked micro-gestures, or let nervous/excited/evasive/flustered behavior become an endless character turn.`;
+applicationContract:
+Apply every rule above as mandatory narration constraints before writing visible output. The final response must satisfy all active gates: direct sensory grounding, diegetic ability rendering, strict POV and no user puppeting, observable behavior instead of emotion labels, grounded physical prose, cohesive scene beats, bounded character turns, planned handoff endpoint, and linear narration.
+`;
 }
 
 function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = {} }) {

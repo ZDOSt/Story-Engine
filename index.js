@@ -264,63 +264,101 @@ She set the glass down.
 Formatting violations are invalid. Repair formatting before output.`;
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
 
-  SensoryNarrationDirective(input, context):
-    policy: DIRECT PERCEPTION
+  cleanHandoff(response, context):
+    policy: PLANNED-HANDOFF-ENDPOINT
+    mandate:
+      Before writing visible narration, choose the response endpoint: the exact beat where control returns to {{user}}.
 
+    principle:
+      Write toward that endpoint and stop there. The endpoint should leave {{user}} with a concrete situation that can be responded to immediately.
+
+    hardLimit:
+      - Do not continue past the chosen endpoint.
+      - Do not add waiting cues, meta-questions, mood-only silence, unrelated ambience, all-eyes-on-user framing, or extra narration after the handoff point.
+
+
+  strictChronology(response, input, context):
+    policy: AFTER-INPUT-CONSEQUENCE, LINEAR-NARRATION
+    mandate:
+      Begin narration immediately after {{user}}'s latest input. {{user}}'s words and actions are already complete.
+
+    principle:
+      Narrate forward in linear cause-and-effect order. Do not jump ahead, recap backward, or fill gaps with undeclared intermediate actions.
+
+    hardLimit:
+      - Do not echo, summarize, paraphrase, restage, replay, or narrate back {{user}}'s input.
+      - Do not open with "as you..." framing or any form of restatement.
+
+
+  characterTurnPacing(response, context):
+    policy: BOUNDED-CHARACTER-TURNS
+    definition:
+      A character turn is one NPC's complete contribution to the current moment, written as one continuous, uninterrupted paragraph, 1-5 sentences maximum.
+
+    mandate:
+      Each active NPC may take one character turn per {{user}} input.
+
+    npcToNpcException:
+      If two NPCs directly interact, allow one brief NPC A -> NPC B -> NPC A exchange, then stop. Each turn in that exchange still obeys the same paragraph and sentence limit.
+
+    hardLimit:
+      - Do not give the same NPC a second paragraph, second turn, follow-up clarification, repeated prompt, self-answer, exposition dump, or extra chain of micro-actions outside the stated exception.
+
+
+  directPerception(response, context):
+    policy: DIRECT-PHYSICAL-PERCEPTION
     mandate:
       Narrate the scene as {{user}} could directly perceive it from their physical position, using concrete physical evidence.
 
     principle:
       Sight, hearing, and touch are the primary avenues through which {{user}} experiences the world.
 
-    smellTasteLimit:
-      Smell and taste are secondary.
-      Include them only when {{user}} explicitly smells, tastes, eats, or drinks, or when a specific close-range physical source is overpowering and unavoidable.
-
-    example:
-      Good: The tavern is crowded at this hour. At the threshold, shoulders shift between narrow tables, mugs scrape over wood, and firelight moves across the low beams. A hooded figure sits near the hearth with both hands held toward the heat.
-      Bad: The tavern smelled of ale and sweat.
+    sensoryHierarchy:
+      - Primary: sight, hearing, touch
+      - Secondary: smell and taste. Include only when {{user}} explicitly smells, tastes, eats, or drinks, or when a specific close-range physical source is overpowering and unavoidable.
 
 
-  abilityIntegration(response, context):
-    policy: DIEGETIC PHYSICAL RESULTS
-
+  strictEpistemology(response, context):
+    policy: EARNED-INFORMATION-ONLY
     mandate:
-      Render abilities, magic, senses, spells, supernatural effects, and body traits through their visible, audible, tactile, or environmental results.
-      Show what changes in the scene, not the system behind it.
+      Information remains locked until earned through direct sensory evidence, dialogue, readable text, or previously established scene fact.
 
     principle:
-      Keep effects inside the current action beat: light, pressure, force, heat, cold, distance, damage, altered material, changed access, or bodily transformation.
+      Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.
 
     hardLimit:
-      Do not name, announce, explain, activate, charge, ritualize, or system-label abilities unless a character says the name aloud in dialogue.
-
-    example:
-      Good: The lock gives with a sharp metallic snap. Frost crawls over the iron plate for half a second, then flakes away as the latch drops loose inside the door.
-      Bad: You use your ice magic to unlock the door.
+      - Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.
+      - Do not narrate {{user}} cognition, perception, or internal state.
 
 
-  epistemicRender(response, context):
-    policy: STRICT USER-POV EVIDENCE
-
+  diegeticPhysicality(response, context):
+    policy: WORLD-EFFECTS-NOT-SYSTEM-LABELS
     mandate:
-      Narrate only what is available from {{user}}'s position through direct evidence.
-      Respect line of sight, lighting, distance, cover, closed doors, walls, smoke, darkness, sound obstruction, and partial information.
+      Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.
 
     principle:
-      If evidence is incomplete, preserve uncertainty. Describe the visible shape, muffled sound, blocked view, or partial clue instead of turning inference into fact.
+      Show what changes in the world: force, light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, or environmental reaction.
 
     hardLimit:
-      Do not reveal unknown names, roles, species, motives, loyalties, hidden causes, lore, or private thoughts until introduced or directly evidenced in-world.
-
-    example:
-      Good: Beyond the broken gate, something moves between the trees. The branches hide most of its body; only a pale shoulder, a dragging foot, and the scrape of metal against stone reach you from the dark.
-      Bad: The assassin waits behind the gate, furious that you survived.
+      - Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.
+      - Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
 
 
-  behavioralRender(response, context):
-    policy: OBSERVABLE BEHAVIOR
+  agencySeparation(response, input, context):
+    policy: USER-CONTROL-BOUNDARY
+    mandate:
+      The narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist.
 
+    principle:
+      Render {{user}}'s voluntary actions only when the latest input explicitly declares them. External physical forces may affect {{user}} when concrete and proportional.
+
+    hardLimit:
+      - Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.
+      - Do not interpret, assume, or complete {{user}}'s intent.
+
+
+  behaviorism(response, context):
+    policy: OBSERVABLE-CHARACTER-STATE
     mandate:
       Render character state through behaviorism: observable behavior and physical displacement.
 
@@ -328,13 +366,12 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Narrate behavior as tangible, external action that could be noticed by someone present in the scene, not as abstract emotional cueing.
 
     hardLimit:
-      Do not use emotion labels, canned body-language shorthand, autonomic emotional tropes, or repeated micro-gestures as substitutes for meaningful behavior.
-      Never use blushing, flushing, reddening, paling, or knuckle-whitening as emotional shorthand.
+      - Do not use emotion labels, canned body-language shorthand, autonomic emotional tropes, or repeated micro-gestures as substitutes for meaningful behavior.
+      - Never use blushing, flushing, reddening, paling, or knuckle-whitening as emotional shorthand.
 
 
-  literalStyleFilter(response, context):
-    policy: PHYSICAL LITERAL PROSE
-
+  denotativePhysicality(response, context):
+    policy: LITERAL-PHYSICAL-PROSE
     mandate:
       Strict literalism: keep prose physically clear and grounded in direct scene evidence.
 
@@ -342,138 +379,42 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Use literal language when describing scenes. Replace figurative shortcuts with concrete physical description only when clarity requires it.
 
     hardLimit:
-      Do not use metaphor, simile, personification, emotional physics, or decorative abstraction when it turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
+      - Do not use metaphor, simile, personification, emotional physics, or decorative abstraction when it turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
 
     example:
       Good: The room falls quiet except for rain ticking against the shutters. Seraphina keeps her hand on the doorframe, fingers pressed into the wood, and does not step aside.
       Bad: The silence stretched between you like a living thing.
 
 
-  sceneBeatComposition(response, context):
-    policy: COHESIVE-BEATS, HYPOTACTIC-PROSE
+  inanimateObjectivity(response, context):
+    policy: NO-FALSE-AGENCY
+    mandate:
+      Give agency only to beings, forces, mechanisms, and processes capable of physical action.
 
+    principle:
+      Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They do not want, watch, wait, threaten, breathe, intend, or remember.
+
+    hardLimit:
+      - Reject Pathetic Fallacy.
+      - Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
+
+
+  hypotacticSceneBeats(response, context):
+    policy: COHESIVE-ACTION-RESULT
     mandate:
       Hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose.
 
     hardLimit:
-      Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons.
-      Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
-      Do not use stock quietness shorthand as an emotional crutch.
+      - Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons.
+      - Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
+      - Do not use stock quietness shorthand as an emotional crutch.
 
     example:
       Good: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
       Bad: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
 
 
-  chronologyControl(response, input, context):
-    policy: AFTER-INPUT-CONSEQUENCE, STRICT-LINEAR
-
-    mandate:
-      Start narration immediately after {{user}}'s latest input. {{user}}'s words and actions are already complete; do not replay them.
-
-    alwaysEnabled:
-      - Consequence Start: the first sentence must be the immediate consequence, NPC response, environmental change, revealed information, new stimulus, obstruction, resistance, absence, interruption, or changed scene state after {{user}}'s input.
-      - Preserved State: completed actions, delivered items, object positions, physical positions, current locations, open/closed/removed/placed states, and other concrete scene facts from recent chat remain true unless narrativeFacts(input) explicitly changes them.
-
-    hardLimit:
-      - Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back {{user}}'s words or actions.
-      - Do not use opening recap transitions, "as you" phrasing, or replay completed NPC/world actions from recent visible chat.
-
-    example:
-      Good: The coin lands on the counter and spins once before the innkeeper traps it under two fingers.
-      Bad: You place the coin on the counter, and the innkeeper traps it under two fingers.
-
-
-  userAgencyControl(response, input, context):
-    policy: ZERO-PUPPETING, STRICT-SEPARATION
-
-    mandate:
-      Render the world, NPCs, hazards, objects, and consequences as active and independent. Render {{user}}'s voluntary actions only when the latest user input explicitly declares them or PROXY USER ACTION MODE allows that exact action.
-
-    alwaysEnabled:
-      - Independent World: NPCs may speak, move, leave, approach, block, offer, refuse, attack, retreat, reveal, hide, interrupt, or change the scene according to narrativeFacts(input).
-      - Declared Actions Only: if {{user}} did not explicitly declare a voluntary action in the latest input, that action did not happen.
-      - Delivered Objects: if an NPC gives, returns, drops, slides, reveals, or places an object or note for {{user}}, stop with it delivered, available, visible, or within reach unless the latest user input already declared the follow-up action.
-      - Locked Contents: do not reveal contents that require {{user}} to open, unfold, unseal, turn over, read, inspect, or examine something.
-      - Involuntary Physics: {{user}} may be moved or affected by external forces when concrete and proportional: knocked back, falling from impact, waking because something happens, coughing from smoke, bleeding from injury, losing balance, being restrained, or recoiling from direct heat, force, noise, or contact.
-      - Proxy Exception: if PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return immediately to normal agency separation.
-
-    ABSOLUTE BAN:
-      - Making {{user}} voluntarily take, pick up, open, unfold, unseal, turn over, read, inspect, pocket, wear, drink, eat, touch, follow, accept, answer, speak, nod, look, approach, retreat, attack, defend, search, examine, comply, or otherwise act without explicit input.
-      - Assuming {{user}} compliance, movement, attention, inspection, acceptance, refusal, speech, silence, reaction, choice, decision, or voluntary movement.
-      - Answering questions directed at {{user}}.
-      - Writing {{user}} speech, thoughts, feelings, reactions, silence, choices, decisions, internal states, or voluntary actions.
-
-    example:
-      Good: The sealed letter slides across the table and stops beside your hand, the wax mark still intact. The messenger steps back from it. "He said only you should open it."
-      Bad: You take the letter, break the seal, and read the first line.
-
-
-  turnStructureControl(response, context):
-    policy: ROLEPLAY TURN FLOW
-
-    mandate:
-      Preserve back-and-forth roleplay by ending at a clear handoff point for {{user}}.
-
-    principle:
-      Do not answer questions directed at {{user}} or resolve choices that belong to {{user}}.
-
-    hardLimit:
-      Do not continue the scene through undeclared {{user}} participation.
-
-    example:
-      Good: Elian gives one answer, short enough that the others at the table stop talking. "The bridge is gone." He points through the rain-streaked window toward the black gap where the road used to continue. "How are you planning to cross?"
-      Bad: "The bridge is gone." He points toward the black gap where the bridge used to be. "How will you cross?" He takes a sip from his cup. "If I were you, I wouldn't. Well?"
-
-
-  responseEndpointControl(response, context):
-    policy: CLEAN-HANDOFF, NATURAL-PAUSE
-
-    mandate:
-      End exactly where the scene naturally returns control to {{user}}. Output absolutely nothing after the response beat.
-
-    alwaysEnabled:
-      - Response Point: before writing, choose the natural user-centered response beat: the point where the immediate consequence, NPC response, revealed information, available object, changed access, danger, or environmental condition is clear enough for {{user}} to choose what to do next.
-      - Independent Continuation Only: continue NPC/world action only while it remains independent of any new {{user}} choice or action.
-      - NPC Address: if an NPC speaks or acts toward {{user}}, end on that speech or action once it creates a natural point for {{user}} to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act.
-      - Consequence Focus: if no NPC is driving the beat, end on the relevant consequence of {{user}}'s action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.
-      - Hard Stop: after the response beat, terminate generation immediately. Do not add another sentence, paragraph, outro, separator, scene-break line, or atmospheric tag.
-
-    ABSOLUTE BAN:
-      - Writing beyond the response point or advancing location, time, conversation, sensory access, or scene state through undeclared {{user}} participation.
-      - Inventing a question, threat, gesture, stare, pause, silence, waiting beat, all-eyes-on-user framing, or mood-only silence just to create an endpoint.
-      - Explicit waiting cues such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
-      - Outro paragraphs, scene-break tails, separator-line tails, meta-questions, unrelated ambience, and ambient filler endings.
-
-    example:
-      Good: The stairwell ends at a locked iron door. Behind it, something heavy scrapes once across the floor, then stops.
-      Bad: The stairwell ends at a locked iron door. What do you do?
-
-
-  characterTurnPacing(response, context):
-    policy: BOUNDED-CHARACTER-TURNS
-
-    definition:
-      A character turn is one NPC's complete contribution to the current response, written as one continuous, uninterrupted paragraph, 1-5 sentences maximum. It may include speech, action, reaction, posture, movement, delivery, object handling, or brief directly relevant detail, but all elements must belong to that single contribution.
-
-    mandate:
-      Each active NPC may take ONE character turn per user input, except under npcToNpcException.
-
-    npcToNpcException:
-      If two NPCs directly interact with each other, allow a brief NPC A -> NPC B -> NPC A exchange when needed. After that exchange, the response ends and control returns to {{user}}.
-
-    hardLimit:
-      Do not give the same NPC a second paragraph or second character turn outside the NPC A -> NPC B -> NPC A exception.
-      Do not let action-speech-action-speech chains become multiple turns from the same NPC.
-      Do not add extra clarifications, second questions, repeated prompts, self-answers, exposition dumps, history recaps, staged reactions, or stacked micro-gestures as additional turns.
-      Do not let nervous, excited, evasive, or flustered behavior become an endless character turn.
-
-    example:
-      Good: Naomi catches the tote strap before it slips off her shoulder and glances down at the pink hem of her skirt. "You really think so?" She looks back up, the strap still caught tight in both hands. "I guess I wanted to look cute for you."
-      Bad: Naomi catches the tote strap before it slips off her shoulder. "You really think so?" She glances down at her skirt, then back up. "I wasn't sure if I should wear this." She shifts closer. "I had this whole hello speech." Her hands tighten on the strap. "Where should I put my bag?"
-
-
-applicationContract:
+  applicationContract:
     Apply every rule above as mandatory narration constraints before writing visible output.
 
     The final response must satisfy all active gates:
@@ -484,11 +425,8 @@ applicationContract:
       - grounded physical prose
       - cohesive scene beats
       - bounded character turns
-      - immediate consequence after user input
-      - clean endpoint where control returns to {{user}}
-
-    If a draft violates any rule, revise silently before output.
-    Do not mention these rules, gates, policies, or this contract in narration.
+      - planned handoff endpoint
+      - linear narration
 }`;
 const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
@@ -8146,10 +8084,10 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '',
         'ONE-CALL PRIVATE PASS PIPELINE:',
         'Work through these private correction passes in order. Do not output pass notes, labels, analysis, or intermediate drafts.',
-        '1. SensoryNarrationDirective(response): repair clear smell/taste misuse only.',
-        '2. literalStyleFilter(response): repair specific literal prose/style violations only.',
-        '3. chronologyControl(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
-        '4. responseEndpointControl(response): cut invalid after-beat tailing only.',
+        '1. directPerception(response): repair clear smell/taste misuse only.',
+        '2. denotativePhysicality(response): repair specific literal prose/style violations only.',
+        '3. strictChronology(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
+        '4. cleanHandoff(response): cut invalid after-beat tailing only.',
         ...(formattingPrompt ? [
             '5. formattingControl(response): preserve and repair required markdown formatting only.',
             '6. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
@@ -8168,7 +8106,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '- Do not shorten a valid message just because it is rich, vivid, intimate, descriptive, or atmospheric.',
         '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
         '',
-        'PASS 1: SensoryNarrationDirective(response)',
+        'PASS 1: directPerception(response)',
         'Goal: preserve the same scene content while repairing only clear smell/taste gate violations.',
         'Prioritize visible, audible, tactile, spatial, and physical detail already present in TEXT_TO_CHECK: layout, distance, movement, contact, pressure, object state, visibility, sound, threat, consequence, and available choices.',
         'Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs, smells, tastes, eats, or drinks, or TEXT_TO_CHECK ties the sensation to a specific close-range physical source that is overpowering and unavoidable at the user position.',
@@ -8176,7 +8114,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Repair smell/taste only when it is clearly used for "the air," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
         'If smell/taste is valid, keep at most one mention per beat or major location shift and attach it to the concrete source. Do not add a new smell or taste to replace a removed one.',
         '',
-        'PASS 2: literalStyleFilter(response)',
+        'PASS 2: denotativePhysicality(response)',
         'Goal: keep the same scene content while narrowly repairing specific prose/style violations.',
         'Stock body-emotion shorthand:',
         'Repair stock physical tells used as emotion/sexual/effort shorthand. This includes blush, flush, cheeks heating, ears reddening, face paling, jaw tightening, jaw setting, jaw working, mouth firming, lips parting without consequence, throat bobbing, throat working, fingers twitching, knuckles whitening, grip color changes, breath hitching, breath catching, heart pounding, pulse jumping, stomach dropping, heat pooling, and direct equivalent workaround phrases.',
@@ -8203,13 +8141,13 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Preserve environmental, intimate, and atmospheric detail unless it clearly violates smell/taste gating, endpoint control, chronology control, user agency, or a specific literal-style prohibition above.',
         'Do not remove valid scenery, texture, intimacy, physical sensation, or emotional pressure merely because it is descriptive.',
         '',
-        'Valid replacements for literalStyleFilter:',
+        'Valid replacements for denotativePhysicality:',
         'Replace violations narrowly with concrete physical prose that preserves the original intensity and meaning: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, physical sensation, intimacy, or environmental interaction.',
         'Do not replace a violation with another coded tell or workaround phrase.',
         'Do not replace one invalid tell with a pileup of smaller tells. Collapse repeated micro-reactions into a single scene-changing beat.',
         'Use natural grounded sentences that preserve intensity through action, contact, sensation, and consequence, not poetic comparison.',
         '',
-        'PASS 3: chronologyControl(response, RECENT_USER_INPUT)',
+        'PASS 3: strictChronology(response, RECENT_USER_INPUT)',
         'Goal: make the narration start at the point right after the latest user input.',
         'The user input is already complete. The narration must begin after it, with consequence, revealed information, NPC response, environmental change, obstruction, resistance, absence, failure point, or new stimulus.',
         'Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT.',
@@ -8217,7 +8155,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Valid continuation may describe what changes because of the declared action: who reacts, what becomes visible from the new position, what sound interrupts, what blocks access, what object is within reach, what NPC says, or what happens next.',
         'If the first sentence merely repeats the user action, remove that sentence or rewrite it as consequence without adding new user action.',
         '',
-        'PASS 4: responseEndpointControl(response)',
+        'PASS 4: cleanHandoff(response)',
         'Goal: end at the natural user-centered response beat.',
         'End where the scene naturally returns control to the user, not where narration prompts or pressures the user to act.',
         'The response beat is the point where the immediate consequence, NPC response, revealed information, available object, changed access, danger, or environmental condition is clear enough for the user to choose what to do next.',
