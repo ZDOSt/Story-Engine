@@ -205,21 +205,10 @@ Notice the details that matter: clothing, tools, weapons, posture, trade signs, 
 
 Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`;
 
-const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`During dialogue or conversation, keep the narration close to the participants and their interaction: what is said, how it is said, what is dodged, and what is left unsaid. Let behavior carry subtext through what the characters actually do in the exchange, not through accumulated tells.
-
-Example:
-<example>
-She unfolds the parchment and reads it in silence. Her lower lip trembles once; the fold comes out crooked when she closes the note and sets it on the table. "Please..." She raises her eyes, already wet at the corners. "Tell me it isn't true. Tell me she isn't dead."
-</example>
+const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`During dialogue or conversation, keep the narration close to the participants and their interaction: what is said, how it is said, what is dodged, and what is left unsaid.
 
 Environmental detail within dialogue or conversation belongs only when it is directly relevant to the ongoing interaction: when a character uses it, reacts to it, or when it changes the pressure of the exchange.
-
-Example:
-<example>
-Mara pushed the log deeper into the hearth with the toe of her boot. The charred end broke, scattering sparks into the smoke. "Were you planning to tell me?"
-</example>
-
-These examples show the target shape; they are not required patterns, props, names, pacing beats, or scene content to repeat.`;
+`;
 
 const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
 
@@ -281,11 +270,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: DIRECT PERCEPTION
 
     mandate:
-      Narrate the scene as {{user}} could directly perceive it from their physical position.
-      Use sight, sound, touch, space, movement, texture, pressure, and consequence as direct perception channels.
+      Narrate the scene as {{user}} could directly perceive it from their physical position, using concrete physical evidence.
 
     principle:
-      Use sensory detail to clarify where things are, how they move, what they touch, what changes, and what choices or pressures become available.
+      Sight, hearing, and touch are the primary avenues through which {{user}} experiences the world.
 
     smellTasteLimit:
       Smell and taste are secondary.
@@ -336,31 +324,24 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: OBSERVABLE BEHAVIOR
 
     mandate:
-      Show character state through action that changes the scene: spacing, contact, objects, access, posture, timing, speech, refusal, approach, retreat, interruption, or silence with a concrete cause.
+      Render character state through behaviorism: observable behavior and physical displacement.
 
     principle:
-      Let behavior change something physical or social in the moment. A character should act within the scene, not merely display a body cue.
+      Narrate behavior as tangible, external action that could be noticed by someone present in the scene, not as abstract emotional cueing.
 
     hardLimit:
-      Do not rely on emotion labels, body-tell shorthand, skin-color emotional shorthand, breath/throat/pulse/stomach cues, eye-softening, jaw-clenching, twitch loops, or repeated micro-gestures as substitutes for action.
-      Specifically ban flushing, blushing, reddening, paling, color rising or creeping across skin, knuckle whitening, and equivalent skin-color shorthand.
-
-    physiologyGate:
-      Body detail is allowed only when it performs a concrete physical function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct consequence. Skin color changes are allowed only when they have a direct tissue-color cause such as injury, illness, blood loss, heat, cold, choking, poison, visible magic, makeup, lighting, species trait, existing complexion, bruising, or direct material pressure.
-
-    example:
-      Good: Mara looks away, then down at the cup in her hands. "I... I... well, thank you for the compliment," she says. She tightens her fingers around the ceramic and raises it to her lips, the tremor in her hand still visible.
-      Bad: A flush creeps over Mara's face and down to her collarbones. "I... well, thank you for the compliment," she says, squeezing the cup until her knuckles whiten.
+      Do not use emotion labels, canned body-language shorthand, autonomic emotional tropes, or repeated micro-gestures as substitutes for meaningful behavior.
+      Never use blushing, flushing, reddening, paling, or knuckle-whitening as emotional shorthand.
 
 
   literalStyleFilter(response, context):
     policy: PHYSICAL LITERAL PROSE
 
     mandate:
-      Keep prose physically clear. Every sentence should point to something observable, audible, tactile, spatial, behavioral, or consequential.
+      Strict literalism: keep prose physically clear and grounded in direct scene evidence.
 
     principle:
-      When a figurative shortcut would appear, replace it with specific scene detail: movement, texture, sound, contact, spacing, object state, weather on surfaces, posture, gesture, or consequence.
+      Use literal language when describing scenes. Replace figurative shortcuts with concrete physical description only when clarity requires it.
 
     hardLimit:
       Do not use metaphor, simile, personification, emotional physics, or decorative abstraction when it turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
@@ -371,22 +352,15 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
 
   sceneBeatComposition(response, context):
-    policy: COHESIVE-BEATS, GROUNDED-DELIVERY
+    policy: COHESIVE-BEATS, HYPOTACTIC-PROSE
 
     mandate:
-      Write cohesive scene beats. A scene beat is a unified block of action, posture, object handling, dialogue, and consequence. Never replace a meaningful beat with a sequence of twitch reactions.
+      Hypotactic narration: write cohesive scene beats. Combine related movement, dialogue, action, object handling, and consequence into one paragraph when they belong to the same beat.
 
-    alwaysEnabled:
-      - Unified Paragraphs: combine related movement, posture, object handling, dialogue, and consequence into one paragraph when they belong to the same beat.
-      - Grounded Vocalization: describe dialogue delivery only when it is physically grounded and changes audibility, privacy, speech control, injury, fatigue, fear, anger, restraint, intimacy, or scene pressure.
-      - Action Preference: prefer one strong NPC beat that creates a response point for {{user}} over several small fragments from the same speaker.
-      - Turn Flow: keep same-speaker action and dialogue together. Keep dialogue reactive, pressured, specific, and short enough to preserve roleplay flow.
-      - Sentence Function: each sentence must advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
-
-    ABSOLUTE BAN:
-      - Micro-reaction loops, twitch-cadence narration, and body-cue pileups where several small gestures substitute for one meaningful beat.
-      - Robotic one-action-per-sentence cadence, repetitive subject-verb action lists, pingpong structure, isolated speech balloons, same-speaker fragmentation, and narration/speech/narration/speech chains from the same NPC before {{user}} can respond.
-      - Stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand instead of physically grounded delivery.
+    hardLimit:
+      Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking, isolated speech balloons, or narration/speech/narration/speech chains from the same NPC before {{user}} can respond.
+      Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
+      Do not use stock quietness shorthand as an emotional crutch.
 
     example:
       Good: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
