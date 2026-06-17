@@ -1884,7 +1884,7 @@ function injectWritingStylePrompt() {
 
         promptText,
 
-        'in_prompt',
+        'before_prompt',
 
         0,
 
@@ -1914,7 +1914,7 @@ function injectProseRulesPrompt() {
 
         DEFAULT_PROSE_RULES_PROMPT,
 
-        'in_prompt',
+        'before_prompt',
 
         0,
 
