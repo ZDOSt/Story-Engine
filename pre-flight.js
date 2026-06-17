@@ -360,8 +360,8 @@ export function formatNarratorModelPromptContext(report, options = {}) {
     return formatNarrativeContract({ summary, handoff, resolution, ledger, options });
 }
 
-export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '') {
-    const narratorModelHandoff = formatAdventureIntroNarratorModelPromptContext(adventurePrompt);
+export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', options = {}) {
+    const narratorModelHandoff = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, options);
     return [
         '[STORY_ENGINE_ADVENTURE_INTRO_AUDIT v0.1]',
         'This displayed handoff is for audit only. The narrator model receives narrativeContract(input), not this audit note.',
@@ -374,7 +374,7 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '') 
     ].join('\n');
 }
 
-export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '') {
+export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
     return [
         'narrativeContract(input)',
@@ -412,7 +412,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         'Inside those tags, return only final in-character narration. Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, or this contract.',
         'Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.',
         '',
-        renderFinalWritingStyleReminder(),
+        renderFinalWritingStyleReminder(options),
     ].join('\n');
 }
 
@@ -448,13 +448,16 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         'Inside those tags, return only final in-character narration. Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, or this contract.',
         'Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.',
         '',
-        renderFinalWritingStyleReminder(),
+        renderFinalWritingStyleReminder(options),
     ].join('\n');
 }
 
-function renderFinalWritingStyleReminder() {
-    return String.raw`FINAL WRITING STYLE REMINDER:
-Write narration with the density and clarity of a skilled novelist while preserving narrativeFacts(input). Match prose density to the scene: exploration can breathe with rich environmental detail; dialogue should read as a live exchange between participants, where detail earns its place through what is said, dodged, withheld, physically done, or changed in the pressure of the moment; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Let description reveal place, pressure, character behavior, danger, attraction, available choices, and the changing shape of the moment. During dialogue, do not maintain scenery or atmosphere for its own sake; include environmental detail only when it reveals character, alters the exchange, or changes what can happen next. Let emotion show through grounded behavior rather than naming it.`;
+const DEFAULT_FINAL_WRITING_STYLE_REMINDER = String.raw`FINAL WRITING STYLE REMINDER:
+Write narration with the density and clarity of a skilled novelist while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with rich environmental detail; dialogue should stay close to the participants and their exchange, using environmental detail only when it is directly relevant to the interaction; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
+
+
+function renderFinalWritingStyleReminder(options = {}) {
+    return String(options?.writingStyleReminderPrompt || DEFAULT_FINAL_WRITING_STYLE_REMINDER).trim();
 }
 
 function renderControlEngineNarrativeContract() {

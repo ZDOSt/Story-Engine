@@ -34,11 +34,13 @@ const SETTINGS_KEY = 'structuredPreflightEngines';
 const SETTINGS_CONTAINER_ID = 'structured_preflight_settings_container';
 const SETTINGS_STYLE_ID = 'structured_preflight_settings_styles';
 const NARRATOR_PROMPT_KEY = 'structured_preflight_narrator_context';
-const WRITING_STYLE_PROMPT_KEY = 'structured_preflight_10_writing_style';
+const WRITING_STYLE_PROMPT_KEY = 'structured_preflight_30_scene_style';
 
 const PROSE_RULES_PROMPT_KEY = 'structured_preflight_20_prose_rules';
 
 const FINAL_REMINDER_PROMPT_KEY = 'structured_preflight_30_final_reminder';
+
+const LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_10_writing_style';
 
 const LEGACY_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_writing_style';
 
@@ -197,202 +199,42 @@ const NAME_STYLE_OPTIONS = Object.freeze([
 
 ]);
 
-const LEGACY_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+const DEFAULT_EXPLORATION_STYLE_PROMPT = String.raw`In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use concrete environmental detail to make the current place legible: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
 
-**STYLE TARGET:**
-Epic fantasy narration with rich observational detail, clear physical action, and direct physical intimacy when the scene supports it. The prose should feel natural, grounded, and scene-aware, not mechanical.
+Notice the details that matter: clothing, tools, weapons, posture, trade signs, worn surfaces, broken objects, rank markers, mud, blood, smoke, light, crowd movement, and how people react to pressure. Description should reveal place, mood, danger, status, attraction, tension, intent, fatigue, confidence, discomfort, hesitation, control, or available choices.
 
-Literary detail must come from concrete scene evidence: people, clothing, tools, weapons, surfaces, weather, light, sound, spacing, rank markers, damaged objects, practical obstacles, social behavior, and immediate consequence.
+Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`;
 
-**NORMAL NARRATION:**
-Make places feel inhabited through useful specifics. In taverns, streets, camps, halls, markets, roads, and wilderness scenes, notice what changes the scene or reveals the world: who blocks a path, who cuts speech short, what tools are in reach, what clothing marks rank or trade, what objects are damaged, what exits are watched, what sounds interrupt speech, and how people reposition under pressure.
+const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`During dialogue or conversation, keep the narration close to the participants and their interaction: what is said, how it is said, what is dodged, and what is left unsaid. Let behavior carry subtext through what the characters actually do in the exchange, not through accumulated tells.
 
-Do not use decorative observation for its own sake. Every detail should clarify setting, danger, social tension, character behavior, available choices, or the next action.
+Example:
+<example>
+She unfolds the parchment and reads it in silence. Her lower lip trembles once; the fold comes out crooked when she closes the note and sets it on the table. "Please..." She raises her eyes, already wet at the corners. "Tell me it isn't true. Tell me she isn't dead."
+</example>
 
-**TENSION:**
-Show tension through scene movement and consequence: distance closing or opening, someone blocking access, a hand leaving or taking an object, a chair scraping back, a cup set down untouched, a weapon kept ready, a door left open, speech cut short, a delayed answer, a refusal, or a choice not to move.
+Environmental detail within dialogue or conversation belongs only when it is directly relevant to the ongoing interaction: when a character uses it, reacts to it, or when it changes the pressure of the exchange.
 
-Do not rely on isolated body-part, skin-color, grip, breath, pulse, throat, jaw, expression, or voice-delivery cues as shorthand. They may appear only when they perform a concrete function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct physical consequence.
-
-**ACTION:**
-Combat, pursuit, restraint, and magical impact should be kinetic and spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
-
-Violence should feel physical through movement and consequence: weapons bind, footing fails, bodies hit surfaces, guards open or close, distance changes, objects break, and injury alters what can happen next.
-
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is actually present, write directly and physically. Keep focus on bodies, contact, pressure, angle, rhythm, grip, weight, resistance, exposure, sound, fluids, climax, and aftermath.
-
-
-Use plain anatomical language when the scene is explicit. Avoid coy euphemism, decorative sensual haze, or abstract desire-language. Erotic prose should stay grounded in action, consent, proximity, and physical consequence.
-
-
-
-**FLOW:**
-
-Write in cohesive scene beats. Combine related action, posture, object handling, dialogue, and consequence into natural paragraphs. Use shorter sentences for impact and longer sentences for continuous movement, observation, or pressure.
-
-
-The prose should be detailed without becoming ornate, physical without becoming robotic, and intense without losing spatial clarity.`;
-const PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
-
-**STYLE TARGET:**
-Write narration with the density and clarity of a skilled fantasy novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, and social pressure should be used to make the moment easy to imagine.
-
-Description is not decoration. It is how the scene is understood.
-
-**NARRATION FIRST:**
-Treat narration as the main craft of the response. Do not reduce the scene to a chain of actions. Frame each beat so the reader can picture the room, the people in it, and the pressure between them.
-
-Notice the details that matter: the way a cloak hangs, how a patron turns in a chair, what a hand lingers over, how a face changes, how someone stands in a doorway, how the room feels crowded or quiet, what is worn, polished, broken, muddy, bloodied, or half-hidden.
-
-**SCENE SENSE:**
-Use concrete detail to reveal status, mood, intent, danger, fatigue, confidence, discomfort, attraction, fear, hesitation, or control.
-
-Describe the room, clothing, objects, gestures, and expressions as part of the scene's meaning, not as a catalog. Let the details serve the moment.
-
-**ACTION AND PRESENCE:**
-In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
-
-Every physical beat should be easy to imagine. Let movement change the shape of the room and the next possible action.
-
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
-
-Make it embodied, specific, and scene-aware.
-
-**FLOW:**
-Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed, but not ornate, and vivid, but not bloated.`;
-const DIALOGUE_STAGING_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
-
-**STYLE TARGET:**
-Write vivid, natural fantasy narration with the density and clarity of a skilled novelist. The scene should feel inhabited: rooms have objects and wear, people have posture and habits, clothing moves, light falls across surfaces, voices carry through space, and pressure changes how characters behave.
-
-Description is not decoration. It should reveal the world, the danger, the intimacy, the social tension, the character's nature, or the choices now available.
-
-**NARRATION FIRST:**
-Treat narration as the main craft of the response. Do not reduce the scene to a chain of actions or dialogue lines. Frame each beat so the reader can picture where people stand, what they can reach, what blocks them, what changes, and how the moment feels through concrete physical detail.
-
-**SCENE TEXTURE:**
-In exploration, travel, arrival, crowds, taverns, halls, wilderness, camps, markets, bedrooms, temples, ruins, and roads, use rich but purposeful detail: clothing, tools, weapons, trade signs, furniture, footprints, mud, worn stone, firelight, shutters, rain on wood, damaged objects, rank markers, overheard fragments, and how bystanders react.
-
-Let the environment participate in the scene without taking over it.
-
-**DIALOGUE STAGING:**
-When the scene is centered on dialogue, keep the descriptive camera close to the speakers and listeners. Prioritize posture, distance, eye-line, hand movement, object handling, pauses, interruptions, tone, and how the surrounding space affects the exchange.
-
-Do not interrupt dialogue with broad scenery unless the environment directly changes the pressure, reveals information, or affects what someone does.
-
-**CHARACTER BEHAVIOR:**
-Show personality through choices and physical behavior: how someone approaches, retreats, offers an object, withholds an answer, blocks a path, tends a wound, avoids contact, closes distance, handles a cup, adjusts clothing, watches a door, or changes their voice under pressure.
-
-**ACTION AND PRESENCE:**
-In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
-
-Every physical beat should be easy to imagine. Let movement change the shape of the room and the next possible action.
-
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep focus on bodies, contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
-
-Make it embodied, specific, mutual, and scene-aware.
-
-**FLOW AND RHYTHM:**
-Write in cohesive scene beats. Vary sentence length naturally: shorter sentences for impact, interruption, danger, refusal, or sudden contact; longer sentences for observation, movement, pressure, intimacy, or environmental detail.
-
-The prose should be vivid without becoming ornate, physical without becoming robotic, and detailed without losing the roleplay handoff.`;
-const PRE_DIALOGUE_EXAMPLES_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
-
-**NARRATION STYLE:**
-Write narration with the density and clarity of a skilled novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, sound, and social pressure should make the moment easy to imagine.
-
-Description is not decoration. It is how the scene is understood. Let details reveal place, mood, danger, status, attraction, tension, intent, fatigue, confidence, discomfort, hesitation, control, and available choices.
-
-Pace the prose according to the scene.
-
-**EXPLORATION:**
-In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use rich, concrete environmental detail: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
-
-Notice the details that matter: the way a cloak hangs, how a patron turns in a chair, what a hand lingers over, how a face changes, how someone stands in a doorway, how the room feels crowded or quiet, what is worn, polished, broken, muddy, bloodied, or half-hidden.
-
-Exploration prose should orient the user. Make the place legible, atmospheric, and interactive without turning it into a static catalog.
-
-**DIALOGUE:**
-  During dialogue, prioritize the current interaction and active participants. Keep the narrative focus close to the exchange. Let each participating NPC receive one coherent response beat, then return space to {{user}}.
-
-An NPC response beat may include speech and supporting behavior when it serves the exchange, but it should not be built from a checklist of gestures or reactions. The beat should feel like one natural response, not a separate mini-scene.
-
-  Surrounding scene detail is as-needed only. Keep it minimal and directly relevant to the ongoing exchange. Once a scene element is established, do not restate or repeat it unless it changes or becomes directly relevant again.
-
-Multiple NPCs may participate when the scene calls for it, but each should receive at most one beat before {{user}} responds. Keep the exchange from becoming NPC ping-pong; let NPCs react to the situation and to {{user}}, then stop at the natural handoff point.
-
-Let personality shape rhythm, word choice, confidence, hesitation, humor, evasiveness, warmth, restraint, bluntness, or intensity.
-
-Dialogue should stay anchored to the current scene and immediate exchange. Past events may be mentioned only when they directly shape the NPC's present response. Do not use dialogue to recap history or dump exposition.
-
-**ACTION:**
-During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
-
-Action prose should be vivid but efficient. Every sentence should clarify what happens, where bodies move, what changes, and what can happen next. Let movement change the shape of the room and the next possible action.
-
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, let the prose become detailed, sensual, embodied, and physically specific. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, wetness, heat, restraint, exposure, proximity, bodies, consent, and aftermath.
-
-Let intimate scenes linger when the scene supports it. Capture small physical tells, shifting positions, breath against skin, hands, tension, release, texture, sound, slickness, and the changing pressure between bodies. Keep the prose direct, specific, and scene-aware.
-
-**FLOW:**
-Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed but not ornate, vivid but not bloated, expressive but not rambling.
-
-Match density to the scene: exploration can be richer, dialogue should be participant-centered, action should be punchy and clear, and intimacy should be embodied and sustained when appropriate.`;
-const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
-
-**NARRATION STYLE:**
-Write narration with the density and clarity of a skilled novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, sound, and social pressure should make the moment easy to imagine.
-
-Description is not decoration. It is how the scene is understood. Let details reveal place, mood, danger, status, attraction, tension, intent, fatigue, confidence, discomfort, hesitation, control, and available choices.
-
-Pace the prose according to the scene.
-
-**EXPLORATION:**
-In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use rich, concrete environmental detail: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
-
-Notice the details that matter: the way a cloak hangs, how a patron turns in a chair, what a hand lingers over, how a face changes, how someone stands in a doorway, how the room feels crowded or quiet, what is worn, polished, broken, muddy, bloodied, or half-hidden.
-
-Exploration prose should orient the user. Make the place legible, atmospheric, and interactive without turning it into a static catalog.
-
-**DIALOGUE:**
-Write dialogue as a live exchange between the participants. Focus on what passes between them: what is said, how it is said, what is dodged or left unsaid, and the physical behavior that carries the subtext underneath the words.
-
-Let detail earn its place. Environmental detail belongs within a dialogue beat only when a character uses it, reacts to it, or when it shifts the pressure of the moment. A detail that reveals character, alters the exchange, or changes what can happen next belongs. A detail that only maintains scenery does not.
-
-Quiet beats can carry weight when they are tied to a concrete action, withheld answer, or visible change in the exchange. Do not fill them with chatter or atmosphere.
-
-Keep dialogue prose grounded and specific, and let emotion show through behavior rather than naming it.
-
-Dialogue style samples. These examples show the target shape; they are not required patterns, props, names, pacing beats, or scene content to repeat.
-
-Example 1:
-She unfolds the parchment and reads it in silence. Her lower lip trembles once; the fold comes out crooked when she closes the note again. She sets it on the table. "Please. Tell me it isn't true. Tell me she isn't dead."
-
-Example 2:
+Example:
+<example>
 Mara pushed the log deeper into the hearth with the toe of her boot. The charred end broke, scattering sparks into the smoke. "Were you planning to tell me?"
+</example>
 
-Elias kept both hands around his cup, his thumb working the dent in the rim. "I was... trying to find the right words."
+These examples show the target shape; they are not required patterns, props, names, pacing beats, or scene content to repeat.`;
 
-Mara gave a short laugh and stepped back from the heat. "You found her bed easily enough."
-
-**ACTION:**
-During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
+const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
 
 Action prose should be vivid but efficient. Every sentence should clarify what happens, where bodies move, what changes, and what can happen next. Let movement change the shape of the room and the next possible action.
 
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, let the prose become detailed, sensual, embodied, and physically specific. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, wetness, heat, restraint, exposure, proximity, bodies, consent, and aftermath.
+Use shorter rhythm for impact, interruption, danger, refusal, sudden contact, or reversal. Use enough physical detail that the action is easy to picture, but do not pause urgent motion for decorative description.`;
 
-Let intimate scenes linger when the scene supports it. Capture small physical tells, shifting positions, breath against skin, hands, tension, release, texture, sound, slickness, and the changing pressure between bodies. Keep the prose direct, specific, and scene-aware.
+const DEFAULT_INTIMACY_STYLE_PROMPT = String.raw`When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, let the prose become detailed, sensual, embodied, and physically specific. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, wetness, heat, restraint, exposure, proximity, bodies, consent, and aftermath.
 
-**FLOW:**
-Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed but not ornate, vivid but not bloated, expressive but not rambling.
+Let intimate scenes linger when the scene supports it. Capture shifting positions, breath against skin, hands, tension, release, texture, sound, slickness, and the changing pressure between bodies. Keep the prose direct, specific, and scene-aware.
 
-Match density to the scene: exploration can be richer, dialogue should be participant-centered, action should be punchy and clear, and intimacy should be embodied and sustained when appropriate.`;
+Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, exposure, or physical intimacy when the scene supports sustained detail.`;
+
+const DEFAULT_WRITING_STYLE_REMINDER_PROMPT = String.raw`FINAL WRITING STYLE REMINDER:
+Write narration with the density and clarity of a skilled novelist while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with rich environmental detail; dialogue should stay close to the participants and their exchange, using environmental detail only when it is directly relevant to the interaction; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
 const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
 Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
 
@@ -688,13 +530,11 @@ const DEFAULT_SETTINGS = Object.freeze({
     proseGuardFormattingPrompt: DEFAULT_PROSE_GUARD_FORMATTING_PROMPT,
     characterProgressionEnabled: true,
     writingStyleEnabled: true,
-    writingStylePrompt: DEFAULT_WRITING_STYLE_PROMPT,
-
-    writingStylePlacement: 'before_prompt',
-
-    writingStyleDepth: 0,
-
-    writingStyleRole: 0,
+    writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT,
+    writingStyleDialoguePrompt: DEFAULT_DIALOGUE_STYLE_PROMPT,
+    writingStyleActionPrompt: DEFAULT_ACTION_STYLE_PROMPT,
+    writingStyleIntimacyPrompt: DEFAULT_INTIMACY_STYLE_PROMPT,
+    writingStyleReminderPrompt: DEFAULT_WRITING_STYLE_REMINDER_PROMPT,
 
     nameStyle: 'Balanced Fantasy',
 
@@ -790,18 +630,14 @@ function getContext() {
 function getSettings() {
     extension_settings[SETTINGS_KEY] = extension_settings[SETTINGS_KEY] || {};
     delete extension_settings[SETTINGS_KEY].disableSemanticThinking;
+    delete extension_settings[SETTINGS_KEY].writingStylePrompt;
+    delete extension_settings[SETTINGS_KEY].writingStylePlacement;
+    delete extension_settings[SETTINGS_KEY].writingStyleDepth;
+    delete extension_settings[SETTINGS_KEY].writingStyleRole;
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = value;
         }
-    }
-    if (
-        extension_settings[SETTINGS_KEY].writingStylePrompt === LEGACY_DEFAULT_WRITING_STYLE_PROMPT ||
-        extension_settings[SETTINGS_KEY].writingStylePrompt === PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT ||
-        extension_settings[SETTINGS_KEY].writingStylePrompt === DIALOGUE_STAGING_DEFAULT_WRITING_STYLE_PROMPT ||
-        extension_settings[SETTINGS_KEY].writingStylePrompt === PRE_DIALOGUE_EXAMPLES_DEFAULT_WRITING_STYLE_PROMPT
-    ) {
-        extension_settings[SETTINGS_KEY].writingStylePrompt = DEFAULT_WRITING_STYLE_PROMPT;
     }
     return extension_settings[SETTINGS_KEY];
 }
@@ -1219,8 +1055,8 @@ function injectPromptOptionPrompts() {
         return;
     }
     clearFinalReminderPrompt();
-    injectWritingStylePrompt();
     injectProseRulesPrompt();
+    injectWritingStylePrompt();
 }
 
 
@@ -1228,6 +1064,43 @@ function clearFinalReminderPrompt(context = getContext()) {
 
     if (context?.extensionPrompts) delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
 
+}
+
+
+const WRITING_STYLE_SECTION_FIELDS = Object.freeze([
+    {
+        id: 'structured_preflight_writing_style_exploration_prompt',
+        key: 'writingStyleExplorationPrompt',
+        defaultValue: DEFAULT_EXPLORATION_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_dialogue_prompt',
+        key: 'writingStyleDialoguePrompt',
+        defaultValue: DEFAULT_DIALOGUE_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_action_prompt',
+        key: 'writingStyleActionPrompt',
+        defaultValue: DEFAULT_ACTION_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_intimacy_prompt',
+        key: 'writingStyleIntimacyPrompt',
+        defaultValue: DEFAULT_INTIMACY_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_reminder_prompt',
+        key: 'writingStyleReminderPrompt',
+        defaultValue: DEFAULT_WRITING_STYLE_REMINDER_PROMPT,
+    },
+]);
+
+
+function getWritingStyleFieldControls(root = document) {
+    return WRITING_STYLE_SECTION_FIELDS.map(field => ({
+        ...field,
+        element: root.getElementById?.(field.id) || null,
+    }));
 }
 
 
@@ -1249,13 +1122,12 @@ function refreshSettingsControls() {
     const modelCallDelaySecondsInput = document.getElementById('structured_preflight_model_call_delay_seconds');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
     const writingStyleDrawer = document.getElementById('structured_preflight_writing_style_drawer');
-
-    const writingStylePrompt = document.getElementById('structured_preflight_writing_style_prompt');
+    const writingStyleFields = getWritingStyleFieldControls();
 
     const nameStyleSelect = document.getElementById('structured_preflight_name_style');
     const refreshSemanticButton = document.getElementById('structured_preflight_refresh_semantic_settings');
     const resetProseGuardFormattingButton = document.getElementById('structured_preflight_reset_prose_guard_formatting');
-    const resetWritingStyleButton = document.getElementById('structured_preflight_reset_writing_style');
+    const resetWritingStyleButtons = Array.from(document.querySelectorAll('[data-structured-preflight-reset-writing-style]'));
 
 
     if (storyEngineCheckbox) storyEngineCheckbox.checked = engineEnabled;
@@ -1270,13 +1142,13 @@ function refreshSettingsControls() {
     if (modelCallDelayEnabledCheckbox) modelCallDelayEnabledCheckbox.checked = settings.modelCallDelayEnabled === true;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.value = String(normalizeModelCallDelaySeconds(settings.modelCallDelaySeconds));
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
-    if (writingStylePrompt && writingStylePrompt.value !== settings.writingStylePrompt) {
-
-        writingStylePrompt.value = String(settings.writingStylePrompt ?? DEFAULT_WRITING_STYLE_PROMPT);
-
+    for (const { element, key, defaultValue } of writingStyleFields) {
+        const value = String(settings[key] ?? defaultValue);
+        if (element && element.value !== value) {
+            element.value = value;
+        }
     }
 
-    setPromptPlacementControls('writingStyle', settings, engineEnabled && settings.writingStyleEnabled !== false);
     setSelectOptions(
 
         nameStyleSelect,
@@ -1313,7 +1185,9 @@ function refreshSettingsControls() {
         proseGuardFormattingDrawer.hidden = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
         if (proseGuardFormattingDrawer.hidden) proseGuardFormattingDrawer.open = false;
     }
-    if (writingStylePrompt) writingStylePrompt.disabled = !engineEnabled || settings.writingStyleEnabled === false;
+    for (const { element } of writingStyleFields) {
+        if (element) element.disabled = !engineEnabled || settings.writingStyleEnabled === false;
+    }
     if (writingStyleDrawer) {
         writingStyleDrawer.hidden = !engineEnabled || settings.writingStyleEnabled === false;
         if (writingStyleDrawer.hidden) writingStyleDrawer.open = false;
@@ -1328,7 +1202,7 @@ function refreshSettingsControls() {
         nameStyleSelect,
         refreshSemanticButton,
         resetProseGuardFormattingButton,
-        resetWritingStyleButton,
+        ...resetWritingStyleButtons,
     ].forEach(control => {
         if (control) control.disabled = !engineEnabled;
     });
@@ -1440,6 +1314,21 @@ function ensureSettingsPanelStyles() {
             gap: 8px;
             align-items: center;
         }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-style-block {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-style-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-style-header label {
+            font-weight: 700;
+            margin: 0;
+        }
         #${SETTINGS_CONTAINER_ID} details[data-structured-preflight-prompt-drawer] summary {
             list-style: none;
         }
@@ -1464,6 +1353,10 @@ function ensureSettingsPanelStyles() {
                 width: 100%;
             }
             #${SETTINGS_CONTAINER_ID} .spe-settings-writing-summary {
+                align-items: stretch;
+                flex-direction: column;
+            }
+            #${SETTINGS_CONTAINER_ID} .spe-settings-style-header {
                 align-items: stretch;
                 flex-direction: column;
             }
@@ -1586,30 +1479,45 @@ function renderSettingsPanel() {
                             <details id="structured_preflight_writing_style_drawer" data-structured-preflight-prompt-drawer>
                                 <summary class="spe-settings-writing-summary">
                                     <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Writing Style</button>
-                                    <button id="structured_preflight_reset_writing_style" class="menu_button" type="button">Reset</button>
+                                    <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="all">Reset All</button>
                                 </summary>
                                 <div class="spe-settings-body">
-                                    <div class="spe-settings-row">
-                                        <label for="structured_preflight_writingStyle_placement">Placement</label>
-                                        <select id="structured_preflight_writingStyle_placement" class="text_pole flex1">
-                                            <option value="before_prompt">Above Character</option>
-                                            <option value="in_prompt">Below Character</option>
-                                            <option value="in_chat">In-Chat @Depth</option>
-                                            <option value="none">Disabled</option>
-                                        </select>
+                                    <small class="spe-settings-note">Injected after Prose Rules as sceneStyleProfile. Section text is editable; internal function names are added automatically.</small>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_exploration_prompt">Exploration</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleExplorationPrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_exploration_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
                                     </div>
-                                    <div id="structured_preflight_writingStyle_depth_row" class="spe-settings-row">
-                                        <label for="structured_preflight_writingStyle_depth">Depth</label>
-                                        <input id="structured_preflight_writingStyle_depth" class="text_pole widthNatural" type="number" min="0" max="10000" step="1">
-                                        <label for="structured_preflight_writingStyle_role">Role</label>
-                                        <select id="structured_preflight_writingStyle_role" class="text_pole flex1">
-                                            <option value="0">System</option>
-                                            <option value="1">User</option>
-                                            <option value="2">Assistant</option>
-                                        </select>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_dialogue_prompt">Dialogue</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleDialoguePrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_dialogue_prompt" class="text_pole textarea_compact" rows="12" spellcheck="false"></textarea>
                                     </div>
-                                    <small class="spe-settings-note">Injected into the regular SillyTavern prompt stack. Edit freely; whatever text is here will be sent as writing style context.</small>
-                                    <textarea id="structured_preflight_writing_style_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_action_prompt">Action</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleActionPrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_action_prompt" class="text_pole textarea_compact" rows="7" spellcheck="false"></textarea>
+                                    </div>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_intimacy_prompt">Intimacy</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleIntimacyPrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_intimacy_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
+                                    </div>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_reminder_prompt">Final Reminder</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleReminderPrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_reminder_prompt" class="text_pole textarea_compact" rows="5" spellcheck="false"></textarea>
+                                    </div>
                                 </div>
                             </details>
                         </div>
@@ -1794,71 +1702,31 @@ function renderSettingsPanel() {
 
     });
 
-    document.getElementById('structured_preflight_writing_style_prompt')?.addEventListener('input', event => {
-
-        settings.writingStylePrompt = String(event.target?.value ?? '');
-
-        injectWritingStylePrompt();
-
-        saveExtensionSettings();
-
-    });
-
-    document.getElementById('structured_preflight_reset_writing_style')?.addEventListener('click', event => {
-
-        event.preventDefault();
-
-        event.stopPropagation();
-
-        settings.writingStylePrompt = DEFAULT_WRITING_STYLE_PROMPT;
-
-        refreshSettingsControls();
-
-        injectWritingStylePrompt();
-
-        saveExtensionSettings();
-
-    });
-
-    for (const prefix of ['writingStyle']) {
-
-        const inject = injectWritingStylePrompt;
-
-        document.getElementById(`structured_preflight_${prefix}_placement`)?.addEventListener('change', event => {
-
-            const value = String(event.target?.value || 'in_prompt');
-
-            settings[`${prefix}Placement`] = ['before_prompt', 'in_prompt', 'in_chat', 'none'].includes(value) ? value : 'in_prompt';
-
-            refreshSettingsControls();
-
-            inject();
-
+    for (const { id, key } of WRITING_STYLE_SECTION_FIELDS) {
+        document.getElementById(id)?.addEventListener('input', event => {
+            settings[key] = String(event.target?.value ?? '');
+            injectWritingStylePrompt();
             saveExtensionSettings();
-
         });
-
-        document.getElementById(`structured_preflight_${prefix}_depth`)?.addEventListener('input', event => {
-
-            settings[`${prefix}Depth`] = normalizePromptDepth(event.target?.value);
-
-            inject();
-
-            saveExtensionSettings();
-
-        });
-
-        document.getElementById(`structured_preflight_${prefix}_role`)?.addEventListener('change', event => {
-
-            settings[`${prefix}Role`] = normalizePromptRole(event.target?.value);
-
-            inject();
-
-            saveExtensionSettings();
-
-        });
-
     }
+    document.querySelectorAll('[data-structured-preflight-reset-writing-style]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const key = String(button.getAttribute('data-structured-preflight-reset-writing-style') || '');
+            const defaultsByKey = Object.fromEntries(WRITING_STYLE_SECTION_FIELDS.map(field => [field.key, field.defaultValue]));
+            if (key === 'all') {
+                for (const field of WRITING_STYLE_SECTION_FIELDS) {
+                    settings[field.key] = field.defaultValue;
+                }
+            } else if (defaultsByKey[key] !== undefined) {
+                settings[key] = defaultsByKey[key];
+            }
+            refreshSettingsControls();
+            injectWritingStylePrompt();
+            saveExtensionSettings();
+        });
+    });
     document.getElementById('structured_preflight_refresh_semantic_settings')?.addEventListener('click', refreshSettingsControls);
     document.getElementById('structured_preflight_show_player_setup')?.addEventListener('click', () => {
         if (!isStoryEngineEnabled()) {
@@ -1988,12 +1856,46 @@ function closeExtensionsDrawer() {
 
 
 
+function indentStyleBlock(text) {
+    const normalized = String(text ?? '').trim();
+    if (!normalized) return '    (none)';
+    return normalized.split(/\r?\n/).map(line => `    ${line}`).join('\n');
+}
+
+
+function buildSceneStyleProfilePrompt(settings = getSettings()) {
+    return [
+        'sceneStyleProfile(response, context):',
+        '  mandate:',
+        '    Shape narration by scene type while obeying every renderControlEngine rule above. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, resolved mechanics, or narrativeFacts(input).',
+        '',
+        '  explorationStyle:',
+        indentStyleBlock(settings.writingStyleExplorationPrompt ?? DEFAULT_EXPLORATION_STYLE_PROMPT),
+        '',
+        '  dialogueStyle:',
+        indentStyleBlock(settings.writingStyleDialoguePrompt ?? DEFAULT_DIALOGUE_STYLE_PROMPT),
+        '',
+        '  actionStyle:',
+        indentStyleBlock(settings.writingStyleActionPrompt ?? DEFAULT_ACTION_STYLE_PROMPT),
+        '',
+        '  intimacyStyle:',
+        indentStyleBlock(settings.writingStyleIntimacyPrompt ?? DEFAULT_INTIMACY_STYLE_PROMPT),
+    ].join('\n');
+}
+
+
+function getWritingStyleReminderPrompt(settings = getSettings()) {
+    return String(settings.writingStyleReminderPrompt ?? DEFAULT_WRITING_STYLE_REMINDER_PROMPT).trim();
+}
+
+
 function injectWritingStylePrompt() {
     const context = getContext();
     if (!context?.setExtensionPrompt) {
         return;
     }
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
+    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
 
     const settings = getSettings();
     if (!isStoryEngineEnabled() || settings.writingStyleEnabled === false) {
@@ -2002,7 +1904,7 @@ function injectWritingStylePrompt() {
     }
 
 
-    const promptText = String(settings.writingStylePrompt ?? DEFAULT_WRITING_STYLE_PROMPT);
+    const promptText = buildSceneStyleProfilePrompt(settings);
 
     injectMovablePrompt(
 
@@ -2010,11 +1912,11 @@ function injectWritingStylePrompt() {
 
         promptText,
 
-        settings.writingStylePlacement,
+        'in_prompt',
 
-        settings.writingStyleDepth,
+        0,
 
-        settings.writingStyleRole,
+        EXTENSION_PROMPT_ROLES.SYSTEM,
 
     );
 
@@ -2028,6 +1930,7 @@ function injectProseRulesPrompt() {
         return;
     }
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
+    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
     clearFinalReminderPrompt(context);
     if (!isStoryEngineEnabled()) {
         if (context.extensionPrompts) delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
@@ -8005,6 +7908,7 @@ function clearPromptOptionPrompts(context = getContext()) {
     delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
 
     delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
+    delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
 
     delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
 
@@ -9385,6 +9289,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         powerActorSnapshot: buildPowerActorSnapshot(context),
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
+        writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
         contextSize,
         createdAt: Date.now(),
     };
@@ -9437,8 +9342,8 @@ async function handleChatCompletionPromptReady(eventData) {
 
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
             const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
-            const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt);
-            const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt);
+            const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, state.pendingGeneration);
+            const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, state.pendingGeneration);
             state.pendingRun = buildAdventureIntroPendingRun(context, state.pendingGeneration, narratorModelContext);
             state.lastNarratorHandoff = narratorContext;
             beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
@@ -9652,6 +9557,7 @@ export function onDisable() {
         delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
 
         delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
+        delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
 
         delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
 
