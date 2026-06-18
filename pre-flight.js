@@ -552,126 +552,34 @@ function narrativeAttemptResult(resolution = {}) {
     const fatalInjury = Array.isArray(resolution?.InflictedInjuries)
         ? resolution.InflictedInjuries.find(injury => injury?.condition === 'dead')
         : null;
-    const partial = narrativePartialActionFact(resolution);
-    const suffix = partial ? ` ${partial}` : '';
 
     if (fatalInjury) {
-        return `The user's completed action produces a fatal finish against ${valueOrNone(fatalInjury.NPC)}. Narrate the death clearly and do not soften it into another nonfatal wound.${suffix}`;
+        return `COMPLETE SUCCESS: {{user}}'s attempted action sequence succeeds and produces a fatal finish against ${valueOrNone(fatalInjury.NPC)}. Narrate the death clearly and do not soften it into another nonfatal wound. Do not add extra completed effects beyond {{user}}'s declared attempt and the listed narrative facts.`;
     }
     if (resolution?.RollNeeded === 'N' || tier === 'NONE' || outcome === 'no_roll') {
         const reason = valueOrNone(resolution?.RollReason);
         const reasonText = isNoneText(reason) ? '' : ` Reason: ${reason}.`;
-        return `No roll resolves this beat. Use only the visible scene state and the listed NPC/world facts for this response.${reasonText} Do not invent a new success, failure, contest, reversal, event, or extra response.${suffix}`;
+        return `NO ROLL: No roll resolves this beat. Use only the visible scene state and the listed NPC/world facts for this response.${reasonText} Do not invent a new success, failure, contest, reversal, event, or extra response.`;
     }
-    return `${narrativeBucketOutcomeFact(resolution, outcome)} MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.${suffix}`;
+    return narrativeResolvedAttemptFact(resolution, outcome);
 }
 
-function narrativeBucketOutcomeFact(resolution = {}, outcome = '') {
-    if (resolution?.classifyPhysicalBoundaryPressure === 'Y') {
-        return narrativeBoundaryOutcomeFact(outcome);
-    }
-    switch (resolution?.ActionBucket) {
-        case 'Social':
-            return narrativeSocialOutcomeFact(resolution?.SocialBucket, outcome);
-        case 'Combat':
-            return narrativeCombatOutcomeFact(resolution?.CombatType, outcome);
-        case 'Challenge':
-            return narrativeChallengeOutcomeFact(outcome);
-        default:
-            return narrativeGenericOutcomeFact(outcome);
-    }
-}
-
-function outcomeFamily(outcome = '') {
-    if (['dominant_impact', 'solid_impact', 'light_impact', 'success'].includes(outcome)) return 'success';
-    if (outcome === 'struggle') return 'struggle';
-    if (['checked', 'deflected', 'avoided', 'failure'].includes(outcome)) return 'failure';
-    return 'unknown';
-}
-
-function impactDegree(outcome = '') {
-    if (outcome === 'dominant_impact') return 'decisive';
-    if (outcome === 'solid_impact') return 'clear';
-    if (outcome === 'light_impact') return 'limited';
-    if (outcome === 'avoided') return 'decisive opposing';
-    if (outcome === 'deflected') return 'clear opposing';
-    if (outcome === 'checked') return 'partial opposing';
-    return 'standard';
-}
-
-function narrativeSocialOutcomeFact(bucket = 'None', outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    if (bucket === 'Diplomacy') {
-        if (family === 'success') return `The user's persuasion, negotiation, reassurance, or good-faith appeal succeeds with ${degree} effect; the target grants context-appropriate cooperation, concession, access, help, de-escalation, or an opening proportional to the result.`;
-        if (family === 'struggle') return 'The social appeal reaches a contested middle: partial cooperation, delay, conditions, guarded negotiation, or unresolved back-and-forth, with no full concession yet.';
-        return `The user's persuasion, negotiation, reassurance, or good-faith appeal fails with ${degree} effect; the target refuses, withholds the concession/access/help, adds conditions, disengages, or remains guarded.`;
-    }
-    if (bucket === 'Bluff') {
-        if (family === 'success') return `The user's bluff, lie, misdirection, or unsupported claim succeeds with ${degree} effect; the target believes enough to act, grant access, lower guard, delay, or commit resources as context supports.`;
-        if (family === 'struggle') return 'The deception is uncertain: the target hesitates, tests details, asks for proof, gives only limited provisional acceptance, or delays commitment.';
-        return `The user's bluff, lie, misdirection, or unsupported claim fails with ${degree} effect; the target doubts, refuses, demands proof, tests the claim, spots the contradiction if evidence allows, or calls it out.`;
-    }
-    if (bucket === 'Intimidate') {
-        if (family === 'success') return `The user's intimidation, threat, coercion, or fear pressure succeeds with ${degree} effect; the target treats the pressure as credible and yields, retreats, appeases, complies, backs down, creates distance, or seeks safety as context supports.`;
-        if (family === 'struggle') return 'The intimidation creates a contested reaction: hesitation, partial compliance, defensive bargaining, stalling, or a tense standoff with no full submission yet.';
-        return `The user's intimidation, threat, coercion, or fear pressure fails with ${degree} effect; the target does not submit and may refuse, brace, call the bluff, seek help, disengage, or escalate according to disposition and scene pressure.`;
-    }
-    return narrativeGenericOutcomeFact(outcome);
-}
-
-function narrativeCombatOutcomeFact(combatType = 'Mundane', outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    const isSpell = combatType === 'SpellOrSupernatural';
-    if (family === 'success') {
-        return isSpell
-            ? `The user's spell, power, or supernatural attack lands with ${degree} effect; narrate the completed magical/supernatural impact only within landedActions, injuryOrDeath, harmLimit, and listed effects.`
-            : `The user's mundane, bodily, weapon, or natural-weapon attack lands with ${degree} effect; narrate concrete contact, hit, force, position, or damage only within landedActions, injuryOrDeath, and harmLimit.`;
-    }
-    if (family === 'struggle') {
-        return isSpell
-            ? 'The supernatural attack is contested with no clear winner yet; narrate resistance, interference, unstable contact, or a deadlock without a completed full effect.'
-            : 'The physical attack becomes a struggle or bind with no clear winner yet; narrate blocked force, contested position, clinch, lock, or deadlock without a clean completed hit.';
-    }
-    return isSpell
-        ? `The user's spell, power, or supernatural attack fails with ${degree} effect; the effect is resisted, disrupted, deflected, avoided, fizzles, or fails to complete.`
-        : `The user's mundane, bodily, weapon, or natural-weapon attack fails with ${degree} effect; it misses, is blocked, is avoided, glances off, is stopped, or creates no completed hit.`;
-}
-
-function narrativeChallengeOutcomeFact(outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    if (family === 'success') return `The user's physical/environmental challenge succeeds with ${degree} effect; the obstacle is overcome, bypassed, opened, crossed, escaped, tracked through, hidden from, or progressed past as context supports.`;
-    if (family === 'struggle') return 'The physical/environmental challenge remains contested: partial progress, unstable footing, delay, exposure, a stuck position, or a temporary hold with no full resolution yet.';
-    return `The user's physical/environmental challenge fails with ${degree} effect; the obstacle blocks progress, delays them, worsens position, exposes them, costs time, or prevents the intended access/escape/progress.`;
-}
-
-function narrativeBoundaryOutcomeFact(outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    if (family === 'success') return `The user's physical boundary, access, possession, or space pressure succeeds with ${degree} effect; narrate changed access, position, possession, distance, or control without turning it into a completed injury unless injuryOrDeath says so.`;
-    if (family === 'struggle') return 'The physical boundary, access, possession, or space pressure remains contested: resistance, partial control, deadlock, guarded movement, or interrupted access without a completed injury.';
-    return `The user's physical boundary, access, possession, or space pressure fails with ${degree} effect; the target or obstacle keeps control, blocks access, maintains distance, protects possession, or resists the pressure.`;
-}
-
-function narrativeGenericOutcomeFact(outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    if (family === 'success') return `The user's attempt succeeds with ${degree} visible effect according to the listed scene facts.`;
-    if (family === 'struggle') return `The user's attempt becomes a contested struggle with no clear winner yet.`;
-    if (family === 'failure') return `The user's attempt fails with ${degree} visible effect according to the listed scene facts.`;
-    return 'Render the user attempt according to the listed resolved scene facts without inventing extra success or failure.';
-}
-
-function narrativePartialActionFact(resolution = {}) {
+function narrativeResolvedAttemptFact(resolution = {}, outcome = '') {
+    const tier = String(resolution?.OutcomeTier ?? '');
     const landed = Number(resolution?.LandedActions ?? 0);
-    const actionCount = Array.isArray(resolution?.actions) ? resolution.actions.length : 0;
-    if (!Number.isFinite(landed) || !actionCount || landed >= actionCount) return '';
-    if (landed <= 0) {
-        return 'None of the attempted actions connect, take hold, create successful contact, cause damage, establish possession, or produce a completed effect unless another narrative fact explicitly says otherwise.';
+    if (outcome === 'struggle' || tier === 'Stalemate') {
+        return 'STALEMATE: {{user}}\'s attempted action sequence remains contested and unresolved. No declared step fully completes unless another narrative fact explicitly says otherwise. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
     }
-    return `Only ${landed} of ${actionCount} attempted action${actionCount === 1 ? '' : 's'} takes effect. Narrate only that much concrete completion and limit the rest as missed, checked, interrupted, glanced off, or otherwise unfinished.`;
+    if (tier.includes('Failure') || ['checked', 'deflected', 'avoided', 'failure'].includes(outcome) || (Number.isFinite(landed) && landed <= 0)) {
+        return 'COMPLETE FAILURE: {{user}}\'s attempted action sequence fails. No declared step succeeds, connects, takes hold, changes access, establishes control, produces a completed effect, or enables any later declared step unless another narrative fact explicitly says otherwise. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
+    }
+    if (tier === 'Minor_Success' || (Number.isFinite(landed) && landed === 1 && tier !== 'Success')) {
+        return 'LIMITED SUCCESS: Only the first declared step in {{user}}\'s attempted action sequence succeeds. All later declared steps fail, are interrupted, or remain unfinished unless another narrative fact explicitly says otherwise. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
+    }
+    if (tier === 'Moderate_Success' || (Number.isFinite(landed) && landed === 2)) {
+        return 'MODERATE SUCCESS: Only the first two declared steps in {{user}}\'s attempted action sequence succeed. All later declared steps fail, are interrupted, or remain unfinished unless another narrative fact explicitly says otherwise. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
+    }
+    return 'COMPLETE SUCCESS: {{user}}\'s attempted action sequence succeeds. All declared steps may land and produce their completed effects, limited by injuryOrDeath, harmLimit, intimacyAndConsent, and other narrative facts. Do not add extra completed effects beyond {{user}}\'s declared attempt and the listed narrative facts. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
 }
 
 function narrativePresentCharacters(resolution = {}, handoff = {}) {
