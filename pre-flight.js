@@ -227,7 +227,7 @@ export function formatNarratorPromptContext(report, options = {}) {
         ...formatMechanicsResultList(summary, resolution, handoff),
         '',
         '==NARRATOR_MODEL_HANDOFF==',
-        'This is the exact narrator-facing handoff appended to the narrator model prompt for this response.',
+        'This is the exact narrator-facing handoff delivered to the narrator model as a native depth-0 prompt for this response.',
         '',
         narratorModelHandoff,
     ];
@@ -368,7 +368,7 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
         'No semantic pre-flight or deterministic mechanics were run for this adventure opening.',
         '',
         '==NARRATOR_MODEL_HANDOFF==',
-        'This is the exact narrator-facing handoff appended to the narrator model prompt for this response.',
+        'This is the exact narrator-facing handoff delivered to the narrator model as a native depth-0 prompt for this response.',
         '',
         narratorModelHandoff,
     ].join('\n');

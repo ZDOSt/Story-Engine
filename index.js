@@ -508,6 +508,7 @@ const state = {
     subscribed: false,
 
     pendingGeneration: null,
+    narratorDepthReplay: null,
 
     progressToast: null,
 
@@ -1871,6 +1872,175 @@ function buildFinalNarrationPrompt(narratorContext) {
 
 }
 
+function setNarratorDepthPrompt(context, narratorContext) {
+    const text = String(buildFinalNarrationPrompt(narratorContext) || '').trim();
+    if (!text) {
+        throw new Error('Story Engine narrator handoff is empty; generation aborted before narration.');
+    }
+    if (!context?.setExtensionPrompt) {
+        throw new Error('SillyTavern setExtensionPrompt API is unavailable; generation aborted before narration.');
+    }
+
+    context.setExtensionPrompt(
+        NARRATOR_PROMPT_KEY,
+        text,
+        EXTENSION_PROMPT_TYPES.IN_CHAT,
+        0,
+        false,
+        EXTENSION_PROMPT_ROLES.SYSTEM,
+    );
+
+    return text;
+}
+
+function hasNarratorDepthPrompt(context = getContext()) {
+    return Boolean(String(context?.extensionPrompts?.[NARRATOR_PROMPT_KEY]?.value || '').trim());
+}
+
+function isActiveNarratorDepthPromptContent(content) {
+    const replayText = String(state.narratorDepthReplay?.narratorModelContext || '').trim();
+    if (!replayText) return false;
+    const text = String(content || '').trim();
+    if (text === replayText || text.includes(replayText)) return true;
+    const macroTolerantReplayText = escapeRegExp(replayText)
+        .replace(/\\\{\\\{(?:user|char)\\\}\\\}/gi, '[\\s\\S]{1,160}');
+    return new RegExp(macroTolerantReplayText).test(text);
+}
+
+function chatHasNarratorDepthPrompt(chat) {
+    if (!Array.isArray(chat)) return false;
+    return chat.some(message => {
+        if (!message) return false;
+        if (typeof message.content === 'string') return isActiveNarratorDepthPromptContent(message.content);
+        if (Array.isArray(message.content)) {
+            return message.content.some(part => part && typeof part === 'object' && isActiveNarratorDepthPromptContent(part.text));
+        }
+        return false;
+    });
+}
+
+function clearNarratorDepthReplayTimer() {
+    if (state.narratorDepthReplay?.restartTimer) {
+        clearTimeout(state.narratorDepthReplay.restartTimer);
+        state.narratorDepthReplay.restartTimer = null;
+    }
+}
+
+function armNarratorDepthReplay({ context, pendingGeneration, pendingRun, narratorContext, narratorModelContext, generationMode, spacingLabel }) {
+    const nativePrompt = setNarratorDepthPrompt(context, narratorModelContext);
+    clearNarratorDepthReplayTimer();
+
+    const replay = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        phase: 'armed',
+        type: pendingGeneration?.type || 'normal',
+        mode: generationMode || pendingGeneration?.mode || 'normal',
+        pendingGeneration: clone(pendingGeneration || {}),
+        pendingRun,
+        narratorContext,
+        narratorModelContext: nativePrompt,
+        spacingLabel: spacingLabel || 'narrator model call',
+        createdAt: Date.now(),
+        restartTimer: null,
+    };
+
+    state.narratorDepthReplay = replay;
+    state.pendingRun = pendingRun;
+    state.lastNarratorHandoff = narratorContext;
+    return replay;
+}
+
+function clearNarratorDepthReplayState() {
+    clearNarratorDepthReplayTimer();
+    state.narratorDepthReplay = null;
+}
+
+function scheduleNarratorDepthReplay() {
+    const replay = state.narratorDepthReplay;
+    if (!replay) return;
+
+    clearNarratorDepthReplayTimer();
+    replay.restartTimer = setTimeout(() => {
+        replay.restartTimer = null;
+        if (state.narratorDepthReplay !== replay) return;
+
+        const replayContext = getContext();
+        try {
+            if (!isStoryEngineEnabled()) {
+                clearRuntimePrompts();
+                return;
+            }
+            if (!hasNarratorDepthPrompt(replayContext)) {
+                throw new Error('Story Engine native narrator handoff was cleared before replay; generation aborted before narration.');
+            }
+            if (typeof replayContext?.generate !== 'function') {
+                throw new Error('SillyTavern generate API is unavailable; generation aborted before narration.');
+            }
+
+            replay.phase = 'replaying';
+            showProgress('Starting narration with native handoff...');
+            Promise.resolve(replayContext.generate(replay.type || 'normal', { automatic_trigger: true }))
+                .catch(error => {
+                    clearRuntimePrompts();
+                    state.pendingRun = null;
+                    state.lastNarratorHandoff = '';
+                    releaseProseGuardDisplayIntercept({ restore: true });
+                    clearAllProgress();
+                    showBlockingError(error);
+                });
+        } catch (error) {
+            clearRuntimePrompts();
+            state.pendingRun = null;
+            state.lastNarratorHandoff = '';
+            releaseProseGuardDisplayIntercept({ restore: true });
+            clearAllProgress();
+            showBlockingError(error);
+        }
+    }, 350);
+}
+
+function isNarratorDepthReplayArmed() {
+    return state.narratorDepthReplay?.phase === 'armed';
+}
+
+function isNarratorDepthReplayPromptPass() {
+    return ['replaying', 'active'].includes(String(state.narratorDepthReplay?.phase || ''));
+}
+
+function activateNarratorDepthReplayPass(context, contextSize, type) {
+    const replay = state.narratorDepthReplay;
+    if (!replay) return false;
+
+    if (!hasNarratorDepthPrompt(context)) {
+        throw new Error('Story Engine native narrator handoff is missing during replay; generation aborted before narration.');
+    }
+
+    replay.phase = 'active';
+    replay.type = type || replay.type || 'normal';
+    replay.pendingGeneration = {
+        ...clone(replay.pendingGeneration || {}),
+        type: type || replay.type || 'normal',
+        contextSize,
+    };
+    state.pendingGeneration = replay.pendingGeneration;
+    state.pendingRun = replay.pendingRun;
+    state.lastNarratorHandoff = replay.narratorContext || '';
+    state.activeRunId = replay.id;
+    return true;
+}
+
+function replacePromptWithReplayNotice(chat) {
+    if (!Array.isArray(chat)) return;
+    chat.splice(0, chat.length, {
+        role: 'system',
+        content: [
+            '[STORY_ENGINE_NATIVE_DEPTH_REPLAY]',
+            'The first prompt assembly pass has completed. Do not narrate from this pass.',
+            'Return exactly: Story Engine is preparing the native narrator handoff.',
+        ].join('\n'),
+    });
+}
+
 
 
 function setChatInputLocked(locked, reason = '') {
@@ -1971,11 +2141,18 @@ function setChatInputLocked(locked, reason = '') {
 
 
 
-function clearRuntimePrompts() {
+function clearRuntimePrompts({ preserveNarratorDepthPrompt = false } = {}) {
     const context = getContext();
+    if (!preserveNarratorDepthPrompt) {
+        clearNarratorDepthReplayState();
+    } else {
+        clearNarratorDepthReplayTimer();
+    }
     if (!context?.extensionPrompts) return;
 
-    delete context.extensionPrompts[NARRATOR_PROMPT_KEY];
+    if (!preserveNarratorDepthPrompt) {
+        delete context.extensionPrompts[NARRATOR_PROMPT_KEY];
+    }
 }
 
 function disableStoryEngineRuntime() {
@@ -7942,6 +8119,9 @@ function sanitizeFinalPromptHistory(chat) {
 
 
         if (typeof message.content === 'string') {
+            if (isNarratorDepthReplayPromptPass() && isActiveNarratorDepthPromptContent(message.content)) {
+                continue;
+            }
 
             message.content = stripStructuredArtifacts(message.content).trim();
 
@@ -7958,6 +8138,9 @@ function sanitizeFinalPromptHistory(chat) {
                 .map(part => {
 
                     if (part && typeof part === 'object' && typeof part.text === 'string') {
+                        if (isNarratorDepthReplayPromptPass() && isActiveNarratorDepthPromptContent(part.text)) {
+                            return part;
+                        }
 
                         const text = stripStructuredArtifacts(part.text).trim();
 
@@ -9010,6 +9193,11 @@ function handleGenerationLifecycleEnd() {
     clearAllProgress();
     state.pendingGeneration = null;
     state.narratorThinkingDisablePending = false;
+    if (isNarratorDepthReplayArmed()) {
+        clearRuntimePrompts({ preserveNarratorDepthPrompt: true });
+        scheduleNarratorDepthReplay();
+        return;
+    }
     clearRuntimePrompts();
 
     if (!state.pendingRun) {
@@ -9113,6 +9301,24 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
         return true;
 
+    }
+
+    if (isNarratorDepthReplayPromptPass()) {
+        try {
+            injectPromptOptionPrompts();
+            activateNarratorDepthReplayPass(context, contextSize, type);
+            showProgress('Preparing native narrator handoff...');
+            return false;
+        } catch (error) {
+            clearRuntimePrompts();
+            state.pendingRun = null;
+            state.lastNarratorHandoff = '';
+            releaseProseGuardDisplayIntercept({ restore: true });
+            clearAllProgress();
+            showBlockingError(error);
+            if (typeof abort === 'function') abort(true);
+            return true;
+        }
     }
 
     const latestUserText = getLatestUserTextFromContext(context);
@@ -9251,18 +9457,36 @@ async function handleChatCompletionPromptReady(eventData) {
             return;
         }
 
+        if (isNarratorDepthReplayPromptPass()) {
+            if (!hasNarratorDepthPrompt(context) || !chatHasNarratorDepthPrompt(eventData.chat)) {
+                throw new Error('Story Engine native narrator handoff was not injected at depth 0; generation aborted before narration.');
+            }
+            beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
+            sanitizeFinalPromptHistory(eventData.chat);
+            markNextNarratorRequestThinkingDisabled();
+            await waitForStoryEngineModelCallSpacing(state.narratorDepthReplay?.spacingLabel || 'narrator model call');
+            clearAllProgress();
+            return;
+        }
+
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
             const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, state.pendingGeneration);
             const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, state.pendingGeneration);
-            state.pendingRun = buildAdventureIntroPendingRun(context, state.pendingGeneration, narratorModelContext);
-            state.lastNarratorHandoff = narratorContext;
-            beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
+            const pendingRun = buildAdventureIntroPendingRun(context, state.pendingGeneration, narratorModelContext);
+            armNarratorDepthReplay({
+                context,
+                pendingGeneration: state.pendingGeneration,
+                pendingRun,
+                narratorContext,
+                narratorModelContext,
+                generationMode,
+                spacingLabel: 'adventure intro model call',
+            });
             sanitizeFinalPromptHistory(eventData.chat);
-            appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
-            markNextNarratorRequestThinkingDisabled();
-            await waitForStoryEngineModelCallSpacing('adventure intro model call');
-            clearAllProgress();
+            replacePromptWithReplayNotice(eventData.chat);
+            abortGenerationAfterPromptReady(context);
+            scheduleNarratorDepthReplay();
             return;
         }
 
@@ -9318,13 +9542,19 @@ async function handleChatCompletionPromptReady(eventData) {
         };
         state.lastNarratorHandoff = narratorContext;
 
-        beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
+        armNarratorDepthReplay({
+            context,
+            pendingGeneration: state.pendingGeneration,
+            pendingRun: state.pendingRun,
+            narratorContext,
+            narratorModelContext,
+            generationMode,
+            spacingLabel: 'narrator model call',
+        });
         sanitizeFinalPromptHistory(eventData.chat);
-        appendAdventureStartPromptToNarratorPrompt(eventData.chat, state.pendingGeneration.adventureStartPrompt);
-        appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
-        markNextNarratorRequestThinkingDisabled();
-        await waitForStoryEngineModelCallSpacing('narrator model call');
-        clearAllProgress();
+        replacePromptWithReplayNotice(eventData.chat);
+        abortGenerationAfterPromptReady(context);
+        scheduleNarratorDepthReplay();
     } catch (error) {
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
@@ -9382,30 +9612,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
 }
 
 
-
-function appendNarratorContextToPrompt(chat, narratorContext) {
-    const message = {
-        role: 'user',
-        content: buildFinalNarrationPrompt(narratorContext),
-    };
-    const latestUserIndex = Array.isArray(chat)
-        ? chat.findLastIndex(entry => String(entry?.role || '').toLowerCase() === 'user')
-        : -1;
-    if (latestUserIndex >= 0) {
-        chat.splice(latestUserIndex + 1, 0, message);
-    } else {
-        chat.push(message);
-    }
-}
-
-function appendAdventureStartPromptToNarratorPrompt(chat, prompt) {
-    const text = String(prompt || '').trim();
-    if (!Array.isArray(chat) || !text) return;
-    chat.push({
-        role: 'system',
-        content: text,
-    });
-}
 
 function replacePromptWithAbortNotice(chat, error) {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
