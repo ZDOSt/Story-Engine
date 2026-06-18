@@ -675,6 +675,25 @@ function buildSemanticPreflightSchema() {
             reason: { type: 'string' },
         },
     };
+    const actionUnitSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'action', 'evidence'],
+        properties: {
+            id: {
+                type: 'string',
+                description: 'A1, A2, or A3, matching the actionCount marker order.',
+            },
+            action: {
+                type: 'string',
+                description: 'Short clean description of this mechanically counted user action.',
+            },
+            evidence: {
+                type: 'string',
+                description: 'Brief latest-user-text evidence for this action unit. Audit only; not narration.',
+            },
+        },
+    };
     return {
         type: 'object',
         additionalProperties: false,
@@ -718,6 +737,7 @@ function buildSemanticPreflightSchema() {
                     'socialBucket',
                     'combatType',
                     'actionCount',
+                    'actionUnits',
                     'environmentDifficultyTier',
                     'classifyHostilePhysicalIntent',
                     'activeHostileThreat',
@@ -816,6 +836,11 @@ function buildSemanticPreflightSchema() {
                         description: 'Mundane or SpellOrSupernatural only when actionBucket=Combat; otherwise None.',
                     },
                     actionCount: stringListSchema,
+                    actionUnits: {
+                        type: 'array',
+                        items: actionUnitSchema,
+                        description: 'Breakdown of the same mechanically counted actions represented by actionCount, capped at three.',
+                    },
                     environmentDifficultyTier: {
                         type: 'string',
                         enum: ENVIRONMENT_DIFFICULTY_TIERS,
@@ -1196,6 +1221,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest, speed contest, or another explicit stakes-bearing objective.',
     '- ResolutionEngine.rollNeeded is the sole semantic roll gate and directly applies DEF.STAKES. Return Y only when success/failure of the latest explicit user goal or challenge creates fresh unresolved stakes: physical risk, harm, danger, detection, material gain/loss, significant trust/status/authority shift, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacle resolution, or explicit goal advancement/failure. Return N for ordinary continuity, no material stakes, a reaction already decided by saved fear/terror, hostility/hatred, persisted intimacy boundary, or a repeated resolved same-bucket negative social attempt against the same NPC/goal under unchanged disposition. Failed/resolved Bluff blocks repeated Bluff; failed/resolved Intimidate blocks repeated Intimidate. Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff. Repeated wording, stronger insults, renewed same-bucket threats, rephrased same-bucket bluffs, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. ResolutionEngine.rollReason must briefly explain why rollNeeded is Y or N and must not contradict the flag: rollNeeded=Y requires fresh unresolved stakes; rollNeeded=N requires no fresh unresolved stakes.',
     '- ResolutionEngine.actionBucket is the roll shape, not a stat choice. Use None when rollNeeded=N. Use Social only for fresh unresolved NPC-facing social pressure, with socialBucket=Diplomacy for good-faith persuasion/negotiation/reassurance, Bluff for deception/lying/misleading/material false claims, and Intimidate for threats/coercion/blackmail/fear-based demands. Use Combat for direct violence or harmful supernatural attacks; combatType=Mundane for bodily/weapon/natural-weapon/ordinary force, and SpellOrSupernatural for the primary attack being a spell, power, curse, elemental blast, psychic attack, or similar. Use Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. If not Social, socialBucket=None. If not Combat, combatType=None.',
+    '- ResolutionEngine.actionUnits breaks the latest explicit {{user}} attempt into the same mechanically counted actions represented by actionCount. actionUnits.count must match actionCount length after the three-action cap. Each action is short clean wording of that action unit; evidence is brief latest-user-text audit evidence. actionUnits does not decide success, failure, outcome, injury, counterattack, or narration.',
     '- ResolutionEngine.identifyTargets.ActionTargets is the direct interaction list. Include every living NPC the latest user input directly addresses, speaks to, answers, asks, thanks, reassures, requests, warns, commands, helps, treats, touches, accompanies, follows, trades with, gives something to, receives something from, attacks, restrains, deceives, negotiates with, or otherwise directly interacts with this turn, whether rollNeeded is Y or N. ActionTargets are broader than OppTargets.NPC. If the latest user input directly involves a living NPC, that NPC belongs in ActionTargets even when the scene is ordinary continuity and OppTargets.NPC is (none). Do not include bystanders, background crowds, inferred listeners, offscreen entities, or hostilesInScene-only NPCs unless the latest user input directly involves them.',
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
     '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer lists.',
@@ -1279,6 +1305,10 @@ ResolutionEngine.actionBucket=None
 ResolutionEngine.socialBucket=None
 ResolutionEngine.combatType=None
 ResolutionEngine.actionCount=a1
+ResolutionEngine.actionUnits.count=1
+ResolutionEngine.actionUnits[0].id=A1
+ResolutionEngine.actionUnits[0].action={{user}} takes the latest explicit action.
+ResolutionEngine.actionUnits[0].evidence=(none)
 ResolutionEngine.environmentDifficultyTier=none
 ResolutionEngine.classifyHostilePhysicalIntent=N
 ResolutionEngine.activeHostileThreat=N
@@ -1485,7 +1515,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Detect personal gear/inventory item attempts before target/risk classification. Fill ResolutionEngine.itemUse only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory. Personal possession signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or equivalent wording that claims {{user}} already has the item. Mark Available=Y only when that exact attempted item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental or scene objects, including grabbing, picking up, finding, searching for, using, breaking, burning, throwing, or moving an object described or implied by the scene; those actions remain normal narration/stakes/ENV context, not itemUse. Do not infer item availability from setting likelihood. If Available=N, the personal item effect must not be treated as completed. ' +
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, actionUnits, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
         'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, or rewrite stored knowledge in preflight. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
@@ -1753,6 +1783,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!COMBAT_TYPES.includes(ledger?.resolutionEngine?.combatType)) missing.push('resolutionEngine.combatType');
     if (typeof ledger?.resolutionEngine?.nonLethal !== 'boolean') missing.push('resolutionEngine.nonLethal:boolean');
     if (!Array.isArray(ledger?.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
+    if (!Array.isArray(ledger?.resolutionEngine?.actionUnits)) missing.push('resolutionEngine.actionUnits');
     if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger?.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (typeof ledger?.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');
     if (typeof ledger?.resolutionEngine?.activeHostileThreat !== 'boolean') missing.push('resolutionEngine.activeHostileThreat:boolean');
@@ -1857,6 +1888,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.socialBucket',
         'ResolutionEngine.combatType',
         'ResolutionEngine.actionCount',
+        'ResolutionEngine.actionUnits.count',
         'ResolutionEngine.environmentDifficultyTier',
         'ResolutionEngine.classifyHostilePhysicalIntent',
         'ResolutionEngine.activeHostileThreat',
@@ -1886,6 +1918,22 @@ function parseCompactLedger(text, trackerSnapshot) {
         'PowerEventShape.count',
     ];
     const missing = required.filter(key => !fields.has(key));
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const actionUnitCount = clampNumber(readNumber(fields, 'ResolutionEngine.actionUnits.count', 0), 0, 3);
+    for (let index = 0; index < actionUnitCount; index += 1) {
+        const prefix = `ResolutionEngine.actionUnits[${index}]`;
+        const unitRequired = [
+            `${prefix}.id`,
+            `${prefix}.action`,
+            `${prefix}.evidence`,
+        ];
+        for (const key of unitRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
     if (missing.length) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
@@ -2183,6 +2231,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         socialBucket,
         combatType,
         actionCount: readList(fields, 'ResolutionEngine.actionCount', ['a1']),
+        actionUnits: readActionUnits(fields, actionUnitCount),
         environmentDifficultyTier: normalizeEnvironmentDifficultyTier(
             fields.get('ResolutionEngine.environmentDifficultyTier') ?? fields.get('ResolutionEngine.environmentDifficulty'),
             fields.get('ResolutionEngine.actionBucket'),
@@ -2915,6 +2964,19 @@ function readList(fields, key, fallback = []) {
         .filter(item => item && !isNoneValue(item));
 }
 
+function readActionUnits(fields, count = 0) {
+    const units = [];
+    for (let index = 0; index < count; index += 1) {
+        const prefix = `ResolutionEngine.actionUnits[${index}]`;
+        units.push({
+            id: cleanScalar(fields.get(`${prefix}.id`)) || `A${index + 1}`,
+            action: cleanScalar(fields.get(`${prefix}.action`)) || '(none)',
+            evidence: cleanScalar(fields.get(`${prefix}.evidence`)) || '(none)',
+        });
+    }
+    return units;
+}
+
 function cleanScalar(value) {
     return String(value ?? '')
         .trim()
@@ -3129,7 +3191,14 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.identifyTargets.BenefitedObservers = readPlainArray(ledger.resolutionEngine.identifyTargets.BenefitedObservers);
     ledger.resolutionEngine.identifyTargets.HarmedObservers = readPlainArray(ledger.resolutionEngine.identifyTargets.HarmedObservers);
     ledger.resolutionEngine.identifyTargets.PowerActors = readPlainArray(ledger.resolutionEngine.identifyTargets.PowerActors);
-    ledger.resolutionEngine.actionCount = normalizeActionMarkers(ledger.resolutionEngine.actionCount);
+    const rawActionMarkers = readPlainArray(ledger.resolutionEngine.actionCount);
+    ledger.resolutionEngine.actionCount = normalizeActionMarkers(rawActionMarkers);
+    ledger.resolutionEngine.actionUnits = normalizeActionUnits(
+        ledger.resolutionEngine.actionUnits,
+        ledger.resolutionEngine.actionCount,
+        ledger.resolutionEngine,
+        rawActionMarkers,
+    );
     ledger.resolutionEngine.userAbilityUse = normalizeUserAbilityUse(ledger.resolutionEngine.userAbilityUse);
     ledger.resolutionEngine.itemUse = normalizeItemUse(ledger.resolutionEngine.itemUse);
     ledger.resolutionEngine.claimCheck = normalizeClaimCheck(ledger.resolutionEngine.claimCheck);
@@ -3632,6 +3701,35 @@ function normalizeActionMarkers(markers) {
     return markers.slice(0, 3).map((_, index) => `a${index + 1}`);
 }
 
+function normalizeActionUnits(units, actionMarkers, resolutionEngine = {}, rawMarkers = []) {
+    const markers = Array.isArray(actionMarkers) && actionMarkers.length ? actionMarkers : ['a1'];
+    const source = Array.isArray(units) ? units : [];
+    const fallbackBase = cleanScalar(
+        resolutionEngine.identifyChallenge
+        || resolutionEngine.explicitMeans
+        || resolutionEngine.identifyGoal
+        || '{{user}} takes the latest explicit action',
+    ) || '{{user}} takes the latest explicit action';
+    return markers.slice(0, 3).map((marker, index) => {
+        const rawUnit = source[index] && typeof source[index] === 'object' ? source[index] : {};
+        const rawMarker = cleanScalar(rawMarkers[index] ?? marker);
+        const markerIsGeneric = /^a\d+$/i.test(rawMarker);
+        let action = cleanScalar(rawUnit.action ?? rawUnit.Action ?? rawUnit.description ?? rawUnit.Description);
+        if (!action || isNoneValue(action) || /^a\d+$/i.test(action)) {
+            action = rawMarker && !markerIsGeneric ? rawMarker : fallbackBase;
+        }
+        let evidence = cleanScalar(rawUnit.evidence ?? rawUnit.Evidence);
+        if (!evidence || isNoneValue(evidence)) {
+            evidence = rawMarker && !markerIsGeneric ? rawMarker : '(none)';
+        }
+        return {
+            id: `A${index + 1}`,
+            action: action.slice(0, 220),
+            evidence: evidence.slice(0, 220),
+        };
+    });
+}
+
 function validateNormalizedLedger(ledger, raw) {
     const missing = [];
     if (!ledger.engineContext) missing.push('engineContext');
@@ -3670,6 +3768,10 @@ function validateNormalizedLedger(ledger, raw) {
     if (typeof ledger.resolutionEngine?.intimacyAdvanceExplicit !== 'boolean') missing.push('resolutionEngine.intimacyAdvanceExplicit:boolean');
     if (typeof ledger.resolutionEngine?.boundaryViolationExplicit !== 'boolean') missing.push('resolutionEngine.boundaryViolationExplicit:boolean');
     if (!Array.isArray(ledger.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
+    if (!Array.isArray(ledger.resolutionEngine?.actionUnits)) missing.push('resolutionEngine.actionUnits');
+    if (Array.isArray(ledger.resolutionEngine?.actionCount) && Array.isArray(ledger.resolutionEngine?.actionUnits) && ledger.resolutionEngine.actionUnits.length !== ledger.resolutionEngine.actionCount.length) {
+        missing.push('resolutionEngine.actionUnits:length');
+    }
     if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (![0, 4, 8, 12].includes(ledger.resolutionEngine?.environmentDifficulty)) missing.push('resolutionEngine.environmentDifficulty');
     if (typeof ledger.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');

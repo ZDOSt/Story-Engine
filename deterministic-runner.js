@@ -132,6 +132,35 @@ function environmentDifficultySource(semantic = {}) {
     return semantic.environmentDifficulty;
 }
 
+function normalizeSemanticActionUnits(units, actions = ['a1'], semantic = {}) {
+    const markers = Array.isArray(actions) && actions.length ? actions : ['a1'];
+    const source = Array.isArray(units) ? units : [];
+    const fallback = cleanText(
+        semantic.identifyChallenge
+        || semantic.explicitMeans
+        || semantic.identifyGoal
+        || '{{user}} takes the latest explicit action',
+    ) || '{{user}} takes the latest explicit action';
+    return markers.slice(0, 3).map((marker, index) => {
+        const unit = source[index] && typeof source[index] === 'object' ? source[index] : {};
+        const action = cleanText(unit.action ?? unit.Action ?? unit.description ?? unit.Description) || fallback;
+        const evidence = cleanText(unit.evidence ?? unit.Evidence) || NONE;
+        return {
+            id: `A${index + 1}`,
+            marker,
+            action,
+            evidence,
+        };
+    });
+}
+
+function formatActionUnitsAudit(units = []) {
+    const items = Array.isArray(units) ? units : [];
+    return items.length
+        ? items.map(unit => `${unit.id}: ${unit.action} | evidence="${unit.evidence || NONE}"`).join('; ')
+        : NONE;
+}
+
 const NAME_STYLE_PROFILES = Object.freeze({
     'Balanced Fantasy': {
         key: 'balanced',
@@ -1808,6 +1837,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     }
 
     let actions = ['a1'];
+    let actionUnits = normalizeSemanticActionUnits(semantic.actionUnits, actions, semantic);
     let outcome = {
         OutcomeTier: 'NONE',
         LandedActions: '(none)',
@@ -1829,11 +1859,13 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, null, rollNeeded);
         audit.push('2.6 rollNeeded=N');
         audit.push('2.6a actions=[a1]');
+        audit.push(`2.6a.0 actionUnits=[${formatActionUnitsAudit(actionUnits)}]`);
         audit.push(`2.6a.1 UserImpairmentEngine=${compact(userImpairment)}`);
         audit.push(`2.6a.2 NPCImpairmentEngine=${compact(npcImpairment)}`);
         audit.push(`2.6b resolveOutcome=${compact(outcome)}`);
     } else {
         actions = normalizeActionMarkers(semantic.actionCount);
+        actionUnits = normalizeSemanticActionUnits(semantic.actionUnits, actions, semantic);
         let { userStat, oppStat } = deterministicStatsForBucket(actionBucket, socialBucket, combatType);
         const userCore = getUserCoreStats(ledger);
         let targetCore = null;
@@ -1867,6 +1899,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
 
         audit.push('2.7 rollNeeded=Y');
         audit.push(`2.7a actionCount=[${actions.join(',')}]`);
+        audit.push(`2.7a.1 actionUnits=[${formatActionUnitsAudit(actionUnits)}]`);
         audit.push(`2.7b actions=[${actions.join(',')}]`);
         audit.push(`2.7c bucketStats={USER:${userStat},OPP:${oppStat},actionBucket:${actionBucket},socialBucket:${socialBucket},combatType:${combatType}}`);
         if (oppStat === 'ENV') audit.push(`2.7c.1 environmentDifficulty=${environmentDifficulty} (${envDifficultySource ?? 'none'})`);
@@ -1959,6 +1992,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         ItemUse: itemUse,
         ClaimCheck: normalizeClaimCheckForHandoff(semantic.claimCheck),
         actions,
+        actionUnits,
         intimacyAdvanceExplicit,
         boundaryViolationExplicit,
         nonLethal: bool(semantic.nonLethal) ? 'Y' : 'N',

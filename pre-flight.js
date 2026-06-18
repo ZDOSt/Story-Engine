@@ -106,6 +106,7 @@ function buildReadableSemanticDebug(ledger) {
         'socialBucket=' + valueOrNone(resolution.socialBucket),
         'combatType=' + valueOrNone(resolution.combatType),
         'actionCount=' + list(resolution.actionCount),
+        'actionUnits=' + actionUnitsSummary(resolution.actionUnits, { includeEvidence: true }),
         'environmentDifficultyTier=' + valueOrNone(resolution.environmentDifficultyTier),
         'environmentDifficultyBonus=' + valueOrNone(resolution.environmentDifficulty),
         'classifyHostilePhysicalIntent=' + String(Boolean(resolution.classifyHostilePhysicalIntent)),
@@ -160,6 +161,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.CombatType=' + valueOrNone(resolution.CombatType),
         'resolutionPacket.ResolvedStats=' + inline(resolution.ResolvedStats ?? {}),
         'resolutionPacket.actions=' + list(resolution.actions),
+        'resolutionPacket.actionUnits=' + actionUnitsSummary(resolution.actionUnits, { includeEvidence: true }),
         'resolutionPacket.OutcomeTier=' + valueOrNone(resolution.OutcomeTier),
         'resolutionPacket.Outcome=' + valueOrNone(resolution.Outcome),
         'resolutionPacket.LandedActions=' + valueOrNone(resolution.LandedActions),
@@ -252,6 +254,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.ResolvedStats', inline(resolution.ResolvedStats ?? {})],
         ['resolution.EnvironmentDifficulty', summary.environmentDifficulty],
         ['resolution.actionCount', summary.actionCount],
+        ['resolution.actionUnits', actionUnitsSummary(resolution.actionUnits, { includeEvidence: true })],
         ['resolution.rollFull', summary.rollFull],
         ['resolution.nonLethal', valueOrNone(resolution.nonLethal)],
         ['resolution.outcome', summary.outcome],
@@ -506,8 +509,8 @@ Apply every rule above as mandatory narration constraints before writing visible
 
 function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = {} }) {
     const facts = [
-        ['userAttempt', narrativeUserAttempt(summary.userAction)],
-        ['attemptResult', narrativeAttemptResult(resolution)],
+        ['attemptedActions', narrativeAttemptedActions(resolution, summary)],
+        ['attemptedActionResults', narrativeAttemptedActionResults(resolution)],
         ['sceneContinuity', 'Continue from the visible scene state. Do not replay prior NPC actions, world actions, object movement, delivered items, opened/closed access, or already-completed events.'],
         ['presentCharacters', narrativePresentCharacters(resolution, handoff)],
         ['npcResponse', narrativeNpcResponseFact(handoff)],
@@ -539,47 +542,72 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
     ].join('\n').trimEnd();
 }
 
-function narrativeUserAttempt(userAction) {
-    const action = valueOrNone(userAction);
-    return isNoneText(action)
-        ? 'The latest user input does not contain a clear new action.'
-        : `The user attempts or declares this current beat: ${action}.`;
+function narrativeAttemptedActions(resolution = {}, summary = {}) {
+    const units = narrativeActionUnits(resolution, summary);
+    if (!units.length) return 'No resolved attempted action is listed for this beat.';
+    return units.map(unit => `${unit.id}: ${unit.action}.`).join('\n');
 }
 
-function narrativeAttemptResult(resolution = {}) {
-    const outcome = String(resolution?.Outcome ?? 'no_roll');
+function narrativeAttemptedActionResults(resolution = {}) {
+    const units = narrativeActionUnits(resolution);
     const tier = String(resolution?.OutcomeTier ?? 'NONE');
-    const fatalInjury = Array.isArray(resolution?.InflictedInjuries)
-        ? resolution.InflictedInjuries.find(injury => injury?.condition === 'dead')
-        : null;
-
-    if (fatalInjury) {
-        return `COMPLETE SUCCESS: {{user}}'s attempted action sequence succeeds and produces a fatal finish against ${valueOrNone(fatalInjury.NPC)}. Narrate the death clearly and do not soften it into another nonfatal wound. Do not add extra completed effects beyond {{user}}'s declared attempt and the listed narrative facts.`;
-    }
+    const outcome = String(resolution?.Outcome ?? 'no_roll');
+    if (!units.length) return 'No listed action result is active.';
     if (resolution?.RollNeeded === 'N' || tier === 'NONE' || outcome === 'no_roll') {
         const reason = valueOrNone(resolution?.RollReason);
         const reasonText = isNoneText(reason) ? '' : ` Reason: ${reason}.`;
-        return `NO ROLL: No roll resolves this beat. Use only the visible scene state and the listed NPC/world facts for this response.${reasonText} Do not invent a new success, failure, contest, reversal, event, or extra response.`;
+        return units.map(unit => `${unit.id}: NO ROLL - This listed action is not mechanically contested; narrate ordinary scene continuity only, without inventing success, failure, contest, reversal, or extra resolved effects.${reasonText}`).join('\n');
     }
-    return narrativeResolvedAttemptFact(resolution, outcome);
+    if (tier === 'Stalemate') {
+        return units.map(unit => `${unit.id}: UNRESOLVED - This listed action remains contested or unfinished. Do not narrate it fully succeeding or fully failing unless another narrative fact explicitly says otherwise.`).join('\n');
+    }
+    if (tier.includes('Failure')) {
+        const failureText = tier === 'Minor_Failure'
+            ? 'failing narrowly'
+            : tier === 'Moderate_Failure'
+                ? 'failing clearly'
+                : tier === 'Critical_Failure'
+                    ? 'failing decisively'
+                    : 'failing';
+        return units.map(unit => `${unit.id}: FAILURE - Narrate this listed action ${failureText}. It does not land, does not take hold, and does not produce a completed effect unless another narrative fact explicitly says otherwise.`).join('\n');
+    }
+    const successCount = successfulActionUnitCount(resolution, units.length);
+    return units.map((unit, index) => {
+        if (index >= successCount) {
+            return `${unit.id}: FAILURE - This listed action does not land or remains unfinished.`;
+        }
+        const successText = tier === 'Minor_Success'
+            ? 'succeeding narrowly, with limited visible impact'
+            : tier === 'Moderate_Success'
+                ? 'succeeding clearly, with solid visible impact'
+                : tier === 'Critical_Success'
+                    ? 'succeeding decisively'
+                    : 'succeeding clearly';
+        return `${unit.id}: SUCCESS - Narrate this listed action ${successText}.`;
+    }).join('\n');
 }
 
-function narrativeResolvedAttemptFact(resolution = {}, outcome = '') {
+function narrativeActionUnits(resolution = {}, summary = {}) {
+    const source = Array.isArray(resolution?.actionUnits) ? resolution.actionUnits : [];
+    const units = source
+        .map((unit, index) => ({
+            id: valueOrNone(unit?.id || `A${index + 1}`),
+            action: valueOrNone(unit?.action),
+        }))
+        .filter(unit => !isNoneText(unit.action));
+    if (units.length) return units.slice(0, 3);
+    const fallback = valueOrNone(summary.userAction || resolution.GOAL);
+    return isNoneText(fallback) ? [] : [{ id: 'A1', action: fallback }];
+}
+
+function successfulActionUnitCount(resolution = {}, total = 0) {
     const tier = String(resolution?.OutcomeTier ?? '');
-    const landed = Number(resolution?.LandedActions ?? 0);
-    if (outcome === 'struggle' || tier === 'Stalemate') {
-        return 'STALEMATE: {{user}}\'s attempted action sequence remains contested and unresolved. No declared step fully completes unless another narrative fact explicitly says otherwise. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
-    }
-    if (tier.includes('Failure') || ['checked', 'deflected', 'avoided', 'failure'].includes(outcome) || (Number.isFinite(landed) && landed <= 0)) {
-        return 'COMPLETE FAILURE: {{user}}\'s attempted action sequence fails. No declared step succeeds, connects, takes hold, changes access, establishes control, produces a completed effect, or enables any later declared step unless another narrative fact explicitly says otherwise. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
-    }
-    if (tier === 'Minor_Success' || (Number.isFinite(landed) && landed === 1 && tier !== 'Success')) {
-        return 'LIMITED SUCCESS: Only the first declared step in {{user}}\'s attempted action sequence succeeds. All later declared steps fail, are interrupted, or remain unfinished unless another narrative fact explicitly says otherwise. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
-    }
-    if (tier === 'Moderate_Success' || (Number.isFinite(landed) && landed === 2)) {
-        return 'MODERATE SUCCESS: Only the first two declared steps in {{user}}\'s attempted action sequence succeed. All later declared steps fail, are interrupted, or remain unfinished unless another narrative fact explicitly says otherwise. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
-    }
-    return 'COMPLETE SUCCESS: {{user}}\'s attempted action sequence succeeds. All declared steps may land and produce their completed effects, limited by injuryOrDeath, harmLimit, intimacyAndConsent, and other narrative facts. Do not add extra completed effects beyond {{user}}\'s declared attempt and the listed narrative facts. MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.';
+    if (tier === 'Minor_Success') return Math.min(1, total);
+    if (tier === 'Moderate_Success') return Math.min(2, total);
+    if (tier === 'Critical_Success') return total;
+    if (tier === 'Success') return total;
+    const landed = Number(resolution?.LandedActions);
+    return Number.isFinite(landed) ? Math.max(0, Math.min(total, landed)) : 0;
 }
 
 function narrativePresentCharacters(resolution = {}, handoff = {}) {
@@ -806,7 +834,7 @@ function narrativeAbilityFact(value = {}) {
 
 function narrativeItemFact(value = {}) {
     const item = normalizeItemUseObject(value);
-    if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by userAttempt and environment facts.';
+    if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by attemptedActions, attemptedActionResults, and environment facts.';
     const attemptedItem = `The user attempts to use/draw/produce/consume: ${item.item}.`;
     if (item.available) {
         const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}. Preserve the saved item state exactly: if it limits use, the limitation must affect the scene.` : '';
@@ -873,7 +901,7 @@ function narrativeEnvironmentFact(resolution = {}) {
     const oppEnv = list(resolution?.OppTargets?.ENV);
     if (isNoneText(oppEnv)) return 'No special environmental opposition is required.';
     const difficulty = narrativeEnvironmentPressure(resolution);
-    return `The relevant environmental obstacle is ${oppEnv}. Treat it as ${difficulty}. Render the user's attempt against it according to attemptResult, without turning the obstacle into an NPC or relationship participant.`;
+    return `The relevant environmental obstacle is ${oppEnv}. Treat it as ${difficulty}. Render the user's attempt against it according to attemptedActionResults, without turning the obstacle into an NPC or relationship participant.`;
 }
 
 function narrativeHarmLimitFact(resolution = {}) {
@@ -902,7 +930,7 @@ function narrativeLimitationsFact(resolution = {}) {
 
 function narrativeUserImpairmentFact(impairment = {}) {
     if (!impairment || impairment.Relevant !== 'Y') return '';
-    return `The user's ${valueOrNone(impairment.Source)} affects ${humanizeImpairmentFunctions(impairment.MatchedActionFunction || impairment.AffectedFunction)} through pain, limitation, compensation, instability, reduced speed, partial execution, or cost according to attemptResult. Do not forbid the attempt.`;
+    return `The user's ${valueOrNone(impairment.Source)} affects ${humanizeImpairmentFunctions(impairment.MatchedActionFunction || impairment.AffectedFunction)} through pain, limitation, compensation, instability, reduced speed, partial execution, or cost according to attemptedActionResults. Do not forbid the attempt.`;
 }
 
 function narrativeNpcImpairmentFact(impairment = {}) {
@@ -2105,6 +2133,19 @@ function coreLine(core) {
 
 function list(value) {
     return Array.isArray(value) ? value.join(',') : String(value ?? 'none');
+}
+
+function actionUnitsSummary(units = [], options = {}) {
+    const items = Array.isArray(units) ? units : [];
+    if (!items.length) return 'none';
+    return items.map((unit, index) => {
+        const id = valueOrNone(unit?.id || `A${index + 1}`);
+        const action = valueOrNone(unit?.action);
+        const evidence = valueOrNone(unit?.evidence);
+        return options.includeEvidence && !isNoneText(evidence)
+            ? `${id}: ${action} | evidence="${evidence}"`
+            : `${id}: ${action}`;
+    }).join('; ');
 }
 
 function isNoneText(value) {

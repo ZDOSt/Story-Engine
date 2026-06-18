@@ -135,6 +135,16 @@ function ResolutionEngine(input) {
     rule: each individual combat attack/effect within a sequence counts as one action, including physical attacks, spells, status effects, or mixed sequences
     rule: return one action marker per attack: [a1], [a1,a2], or [a1,a2,a3]
 
+  actionUnits(input, challenge, actionCount):
+    policy: LOCKED, EXPLICIT-ONLY, SEMANTIC-ONLY
+    rule: break the latest explicit {{user}} attempt into the same mechanically counted actions represented by actionCount
+    rule: output one short clean action description and one brief evidence phrase for each marker in actionCount
+    rule: each unit is one mechanically counted action; it does not decide success, failure, outcome, injury, counterattack, or narration
+    rule: include setup or movement only when it is inseparable from the counted action
+    rule: do not split setup, repositioning, defense, recovery, or flavor into separate units
+    rule: a compound dependent action may be one unit when it functions as one resolved attempt
+    rule: ids must be A1, A2, and A3 in order, capped to actionCount length
+
   environmentDifficultyTier(actionBucket, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: applies only when actionBucket=Challenge and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure
