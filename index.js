@@ -293,7 +293,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
   characterTurnPacing(response, context):
     policy: BOUNDED-CHARACTER-TURNS
     definition:
-      A character turn is one continuous, uninterrupted paragraph containing one NPC's complete contribution to the current moment: action, dialogue, or both.
+      A character turn is 1 continuous, uninterrupted paragraph containing one NPC's complete contribution to the current moment: action, dialogue, or both. The paragraph must be 1-6 sentences long.
 
     mandate:
       Each active NPC may take one character turn per {{user}} input. That turn may address multiple connected points from {{user}} when they belong to the same immediate reply, but it must remain one coherent turn.
@@ -302,7 +302,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       If two NPCs directly interact, allow one brief NPC A -> NPC B -> NPC A exchange, then stop. Each NPC turn in that exchange still obeys the same one-paragraph limit.
 
     hardLimit:
-      - Do not add ambient setup, repeated body language, or extra micro-actions that do not change the turn.
+      - Do not add repeated body language or extra micro-actions.
       - Do not give the same NPC a second paragraph, second turn, follow-up clarification, repeated prompt, self-answer, exposition dump, or extra chain of micro-actions outside the stated exception.
 
 
