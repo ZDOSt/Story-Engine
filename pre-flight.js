@@ -761,9 +761,9 @@ function narrativeNpcForceFact(resolution = {}, handoff = {}) {
             .filter(([, value]) => value?.Proactive === 'Y')
             .map(([name]) => name),
     ]);
-    if (!subject.length) return 'No completed NPC attack, shove, restraint, injury, counterattack, companion strike, or forceful NPC effect occurs in this beat.';
+    if (!subject.length) return 'NO NPC ATTACK: No NPC attack, counterattack, companion strike, spell effect, shove, restraint, injury, or completed forceful effect resolves in this beat.';
     const names = list(subject);
-    return `${names} may show hostility through speech, refusal, obstruction, threat posture, guarded movement, blocking, preparation, or distance control only. Do not narrate ${names} landing a hit, shove, restraint, injury, counterattack, companion strike, or completed forceful effect in this beat.`;
+    return `NO NPC ATTACK: No NPC attack, counterattack, companion strike, spell effect, shove, restraint, injury, or completed forceful effect from ${names} resolves in this beat. Any resistance from ${names} may appear only as refusal, self-protection, withdrawal, or unresolved struggle already supported by npcResponse and boundaryPressure; it must not create a resolved effect on {{user}}.`;
 }
 
 function narrativeBoundaryFact(resolution = {}, handoff = {}) {
@@ -807,17 +807,17 @@ function narrativeAggressionEntry(name, value = {}) {
 
     switch (value?.ReactionOutcome) {
         case 'npc_overpowers':
-            return `${opening} succeeds strongly. Show clear NPC advantage through ${style}.${injuryLimit} ${targetLock} ${targetLimit}`;
+            return `RESOLVED NPC ATTACK: ${opening} succeeds strongly. Narrate only the completed effect explicitly supported by this fact, injuryOrDeath, harmLimit, and other narrative facts. Show clear NPC advantage through ${style}.${injuryLimit} ${targetLock} ${targetLimit}`;
         case 'npc_succeeds':
-            return `${opening} succeeds modestly. Show one proportional effect only, not a combo chain or multiple separate hits.${injuryLimit} ${targetLock} ${targetLimit}`;
+            return `RESOLVED NPC ATTACK: ${opening} succeeds modestly. Narrate only the completed effect explicitly supported by this fact, injuryOrDeath, harmLimit, and other narrative facts. Show one proportional effect only, not a combo chain or multiple separate hits.${injuryLimit} ${targetLock} ${targetLimit}`;
         case 'stalemate':
-            return `${opening} meets equal resistance. Narrate only a deadlock, clash, bind, struggle, blocked motion, or interrupted exchange with no successful NPC strike, shove, restraint, injury, or completed forceful effect. Stop in the deadlock. ${targetLock} ${targetLimit}`;
+            return `CONTESTED NPC ATTACK: ${opening} remains unresolved. It does not produce a completed hit, injury, restraint, shove, control, spell effect, or forceful effect unless another narrative fact explicitly says otherwise. ${targetLock} ${targetLimit}`;
         case 'npc_fails':
         case 'user_resists':
         case 'user_dominates':
-            return `${opening} fails. Narrate only the attempted pressure being stopped, overpowered, avoided, controlled, or unable to connect. Do not narrate a successful NPC strike, shove, restraint, injury, or completed forceful effect. ${targetLock} ${targetLimit}`;
+            return `FAILED NPC ATTACK: ${opening} fails. It does not land, connect, injure, restrain, shove, control, produce a completed spell effect, or create any completed forceful effect unless another narrative fact explicitly says otherwise. ${targetLock} ${targetLimit}`;
         default:
-            return `${opening} may occur, but narrate only the forceful effect explicitly described by these narrative facts. ${targetLock} ${targetLimit}`;
+            return `NPC ATTACK RESULT: ${opening} may occur, but narrate only the forceful effect explicitly described by these narrative facts. ${targetLock} ${targetLimit}`;
     }
 }
 
@@ -1114,7 +1114,7 @@ function narrativeProactivityEntry(name, value = {}, aggressionResults = {}, den
     const forceLimit = aggressive
         ? (aggressionResults?.[name]
             ? ' Any completed force must match npcForce.'
-            : ' Show only intent, pressure, motion, preparation, interruption, distance control, or boundary-setting; no completed hit, injury, restraint, or forceful effect occurs.')
+            : ' This initiative does not authorize an NPC attack or completed force; obey npcForce.')
         : ' This is not a completed attack.';
     const relationshipLimit = isRomanceInitiativeIntent(intent)
         ? ' Use only if the current beat is calm and no other event is happening; never force gifts, dates, confessions, or romantic escalation into combat, crisis, mourning, active intimacy, public pressure, unresolved danger, boundary conflict, or any scene where the event would interrupt the actual moment. If context does not support it, soften it into ordinary flirtation, attention, or defer it. Do not establish a relationship unless acceptance happens in-scene; do not force intimacy.'
