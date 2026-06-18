@@ -561,7 +561,7 @@ function narrativeAttemptResult(resolution = {}) {
     if (resolution?.RollNeeded === 'N' || tier === 'NONE' || outcome === 'no_roll') {
         const reason = valueOrNone(resolution?.RollReason);
         const reasonText = isNoneText(reason) ? '' : ` Reason: ${reason}.`;
-        return `No roll resolves this beat; narrate ordinary scene continuity and the listed NPC/world response only.${reasonText} Do not invent a new success, failure, contest, or reversal.${suffix}`;
+        return `No roll resolves this beat. Use only the visible scene state and the listed NPC/world facts for this response.${reasonText} Do not invent a new success, failure, contest, reversal, event, or extra response.${suffix}`;
     }
     return `${narrativeBucketOutcomeFact(resolution, outcome)} MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.${suffix}`;
 }
@@ -690,15 +690,15 @@ function narrativePresentCharacters(resolution = {}, handoff = {}) {
         handoff?.powerActorPressure?.event?.ContactName ?? handoff?.powerActorPressure?.event?.contactName,
     ]);
     if (!names.length) {
-        return 'No known/tracked character is required to participate this beat. Known/lore/example/tracker/card characters remain offscreen unless a narrative fact explicitly introduces them. Ordinary scene-appropriate new figures may appear only if they do not contradict the listed facts.';
+        return 'No known/tracked character is required to participate this beat. Known/lore/example/tracker/card characters remain offscreen unless a narrative fact explicitly introduces them. This fact does not introduce new figures.';
     }
-    return `Current scene cast: ${list(names)}. Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn, unless narrativeFacts(input) explicitly introduces a new NPC. Known/lore/example/tracker/card characters not listed are offscreen and must not participate. Ordinary scene-appropriate new figures may appear only if they do not contradict the listed facts.`;
+    return `Current scene cast: ${list(names)}. Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn, unless narrativeFacts(input) explicitly introduces a new NPC. Known/lore/example/tracker/card characters not listed are offscreen and must not participate. This fact does not introduce additional figures.`;
 }
 
 function narrativeNpcResponseFact(handoff = {}) {
     const npcs = Array.isArray(handoff?.npcHandoffs) ? handoff.npcHandoffs : [];
     if (!npcs.length) {
-        return 'No specific existing NPC response is required. Narrate the environment, consequences, or ordinary scene-appropriate figures only as the listed facts allow.';
+        return 'No specific existing NPC response is required by this fact. This fact does not introduce an NPC response, environmental event, consequence, or new figure.';
     }
     return npcs.map(npc => `${valueOrNone(npc.NPC)}: ${relationshipNarrativeGuide(npc)}`).join(' ');
 }
@@ -870,7 +870,7 @@ function narrativeIntimacyFact(handoff = {}) {
     if (relevant.length) return relevant.map(narrativeIntimacyEntry).join(' ');
     const names = npcs.map(npc => valueOrNone(npc.NPC)).filter(name => !isNoneText(name));
     if (!names.length) return 'No intimate or sexual escalation is being judged in this beat.';
-    return `No intimacy permission is active for ${names.join(', ')} in this beat. Romantic, flirtatious, affectionate, or suggestive conversation may continue naturally according to context and personality, but conversation alone is not permission for intimate escalation: kissing, sex, undressing, bra or panties display, sexual exposure, offering or showing their body, bed, an inn room, a private room, sexual touching, secluded intimacy, arousal/compliance framing, consent-by-momentum, or relationship acceptance.`;
+    return `No intimacy permission is active for ${names.join(', ')} in this beat. This limits intimate escalation only; it does not change ordinary non-intimate dialogue, affection, flirtation, or relationship behavior allowed by other narrative facts. Because conversation alone is not permission for intimate escalation, do not narrate sexual contact, undressing or exposure, secluded-intimacy setup, arousal/compliance framing, consent-by-momentum, or relationship acceptance unless another narrativeFact explicitly permits it.`;
 }
 
 function narrativeIntimacyEntry(npc = {}) {
