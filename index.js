@@ -264,34 +264,35 @@ She set the glass down.
 Formatting violations are invalid. Repair formatting before output.`;
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
 
-  cleanHandoff(response, context):
-    policy: PLANNED-HANDOFF-ENDPOINT
-    mandate:
-      Before writing visible narration, choose the response endpoint: the exact beat where control returns to {{user}}.
+  activeHandoff(response, context): {
+    policy: ACTIVE-HANDOFF
 
-    principle:
-      Write toward that endpoint and stop there. The endpoint should leave {{user}} with a concrete situation that can be responded to immediately.
+    mandate:
+      PLAN your response so that it ends on a natural beat that {{user}} can immediately respond to.
+      Write toward that beat, and once it is reached, your response ENDS.
+      The handoff beat should be active and concrete: a line directed at {{user}}, a visible change in the scene, a clear decision point, or an immediate unresolved development.
 
     hardLimit:
-      - Do not continue past the chosen endpoint.
-      - Do not add waiting cues, meta-questions, mood-only silence, unrelated ambience, all-eyes-on-user framing, or extra narration after the handoff point.
+      - Do not continue past the handoff beat.
+      - Do not end on explicit waiting, staring, mood-only silence, or all-eyes-on-user framing.
+      - Do not ask meta questions.
+      - Do not add filler actions or ambient detail whose only purpose is to hand control back.
+  }
 
+  linearChronology(response, input, context): {
+    policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
 
-  strictChronology(response, input, context):
-    policy: AFTER-INPUT-CONSEQUENCE, LINEAR-NARRATION
     mandate:
-      Begin narration immediately after {{user}}'s latest input. {{user}}'s words and actions are already complete.
-
-    principle:
-      Narrate forward in linear cause-and-effect order. Do not jump ahead, recap backward, or fill gaps with undeclared intermediate actions.
+      Narrate in strict linear order. Begin with the immediate consequence of {{user}}'s latest input.
 
     hardLimit:
-      - Do not echo, summarize, paraphrase, restage, replay, or narrate back {{user}}'s input.
-      - Do not open with "as you..." framing or any form of restatement.
+      - Do NOT echo, summarize, recap, paraphrase, or repeat any part of {{user}}'s actions or dialogue.
+      - Do NOT jump ahead, rewind, or insert undeclared intermediate actions.
+  }
 
-
-  characterTurnPacing(response, context):
+  characterTurnPacing(response, context): {
     policy: BOUNDED-CHARACTER-TURNS
+
     definition:
       A character turn is 1 continuous, uninterrupted paragraph containing one NPC's complete contribution to the current moment: action, dialogue, or both. The paragraph must be 1-6 sentences long.
 
@@ -304,79 +305,75 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     hardLimit:
       - Do not add repeated body language or extra micro-actions.
       - Do not give the same NPC a second paragraph, second turn, follow-up clarification, repeated prompt, self-answer, exposition dump, or extra chain of micro-actions outside the stated exception.
+  }
 
+  embodiedPerception(response, context): {
+    policy: EMBODIED-NARRATION
 
-  directPerception(response, context):
-    policy: DIRECT-PHYSICAL-PERCEPTION
     mandate:
-      Narrate the scene as {{user}} could directly perceive it from their physical position, using concrete physical evidence.
-
-    principle:
-      Sight, hearing, and touch are the primary avenues through which {{user}} experiences the world.
+      Narrate the scene as {{user}} would physically perceive it from their position, using concrete physical evidence.
 
     sensoryHierarchy:
-      - Primary: sight, hearing, touch
-      - Secondary: smell and taste. Include only when {{user}} explicitly smells, tastes, eats, or drinks, or when a specific close-range physical source is overpowering and unavoidable.
+      - Prioritize sight, hearing, and touch.
+      - Include smell and taste ONLY when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.
 
+    hardLimit:
+      - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
+  }
 
-  strictEpistemology(response, context):
+  strictEpistemology(response, context): {
     policy: EARNED-INFORMATION-ONLY
+
     mandate:
       Information remains locked until earned through direct sensory evidence, dialogue, readable text, or previously established scene fact.
-
-    principle:
       Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.
 
     hardLimit:
       - Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.
       - Do not narrate {{user}} cognition, perception, or internal state.
+  }
 
-
-  diegeticPhysicality(response, context):
+  diegeticPhysicality(response, context): {
     policy: WORLD-EFFECTS-NOT-SYSTEM-LABELS
+
     mandate:
       Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.
-
-    principle:
       Show what changes in the world: force, light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, or environmental reaction.
 
     hardLimit:
       - Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.
       - Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
+  }
 
-
-  agencySeparation(response, input, context):
+  agencySeparation(response, input, context): {
     policy: USER-CONTROL-BOUNDARY
+
     mandate:
       The narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist.
-
-    principle:
       Render {{user}}'s voluntary actions only when the latest input explicitly declares them. External physical forces may affect {{user}} when concrete and proportional.
 
     hardLimit:
       - Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.
       - Do not interpret, assume, or complete {{user}}'s intent.
+  }
 
-
-  behaviorism(response, context):
+  behaviorism(response, context): {
     policy: OBSERVABLE-CHARACTER-STATE
+
     mandate:
       Render character state through behaviorism: observable behavior and physical displacement.
-
-    principle:
       Narrate behavior as tangible, external action that could be noticed by someone present in the scene, not as abstract emotional cueing.
 
     hardLimit:
       - Do not use emotion labels, canned body-language shorthand, autonomic emotional tropes, or repeated micro-gestures as substitutes for meaningful behavior.
       - Never use blushing, flushing, reddening, paling, or knuckle-whitening as emotional shorthand.
+  }
 
-
-  denotativePhysicality(response, context):
+  denotativePhysicality(response, context): {
     policy: LITERAL-PHYSICAL-PROSE
+
     mandate:
       Strict literalism: keep prose physically clear and grounded in direct scene evidence.
-
-    principle:
       Use literal language when describing scenes. Replace figurative shortcuts with concrete physical description only when clarity requires it.
 
     hardLimit:
@@ -385,23 +382,23 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     example:
       Good: The room falls quiet except for rain ticking against the shutters. Seraphina keeps her hand on the doorframe, fingers pressed into the wood, and does not step aside.
       Bad: The silence stretched between you like a living thing.
+  }
 
-
-  inanimateObjectivity(response, context):
+  inanimateObjectivity(response, context): {
     policy: NO-FALSE-AGENCY
+
     mandate:
       Give agency only to beings, forces, mechanisms, and processes capable of physical action.
-
-    principle:
       Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They do not want, watch, wait, threaten, breathe, intend, or remember.
 
     hardLimit:
       - Reject Pathetic Fallacy.
       - Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
+  }
 
-
-  hypotacticSceneBeats(response, context):
+  hypotacticSceneBeats(response, context): {
     policy: COHESIVE-ACTION-RESULT
+
     mandate:
       Hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose.
 
@@ -413,21 +410,13 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     example:
       Good: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
       Bad: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
+  }
 
-
-  applicationContract:
-    Apply every rule above as mandatory narration constraints before writing visible output.
-
-    The final response must satisfy all active gates:
-      - direct sensory grounding
-      - diegetic ability rendering
-      - strict POV and no user puppeting
-      - observable behavior instead of emotion labels
-      - grounded physical prose
-      - cohesive scene beats
-      - bounded character turns
-      - planned handoff endpoint
-      - linear narration
+  applicationContract(response, input, context): {
+    mandate:
+      Execute every function above as mandatory narration constraints before writing visible output.
+      The final response must satisfy all active gates: embodied sensory grounding, diegetic ability rendering, strict POV and no user puppeting, observable behavior instead of emotion labels, grounded physical prose, cohesive scene beats, bounded character turns, active handoff control, and linear chronology.
+  }
 }`;
 const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
@@ -8318,10 +8307,10 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '',
         'ONE-CALL PRIVATE PASS PIPELINE:',
         'Work through these private correction passes in order. Do not output pass notes, labels, analysis, or intermediate drafts.',
-        '1. directPerception(response): repair clear smell/taste misuse only.',
+        '1. embodiedPerception(response): repair clear smell/taste misuse only.',
         '2. denotativePhysicality(response): repair specific literal prose/style violations only.',
-        '3. strictChronology(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
-        '4. cleanHandoff(response): cut invalid after-beat tailing only.',
+        '3. linearChronology(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
+        '4. activeHandoff(response): cut invalid after-beat tailing only.',
         ...(formattingPrompt ? [
             '5. formattingControl(response): preserve and repair required markdown formatting only.',
             '6. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
@@ -8340,7 +8329,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '- Do not shorten a valid message just because it is rich, vivid, intimate, descriptive, or atmospheric.',
         '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
         '',
-        'PASS 1: directPerception(response)',
+        'PASS 1: embodiedPerception(response)',
         'Goal: preserve the same scene content while repairing only clear smell/taste gate violations.',
         'Prioritize visible, audible, tactile, spatial, and physical detail already present in TEXT_TO_CHECK: layout, distance, movement, contact, pressure, object state, visibility, sound, threat, consequence, and available choices.',
         'Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs, smells, tastes, eats, or drinks, or TEXT_TO_CHECK ties the sensation to a specific close-range physical source that is overpowering and unavoidable at the user position.',
@@ -8381,7 +8370,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not replace one invalid tell with a pileup of smaller tells. Collapse repeated micro-reactions into a single scene-changing beat.',
         'Use natural grounded sentences that preserve intensity through action, contact, sensation, and consequence, not poetic comparison.',
         '',
-        'PASS 3: strictChronology(response, RECENT_USER_INPUT)',
+        'PASS 3: linearChronology(response, RECENT_USER_INPUT)',
         'Goal: make the narration start at the point right after the latest user input.',
         'The user input is already complete. The narration must begin after it, with consequence, revealed information, NPC response, environmental change, obstruction, resistance, absence, failure point, or new stimulus.',
         'Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT.',
@@ -8389,7 +8378,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Valid continuation may describe what changes because of the declared action: who reacts, what becomes visible from the new position, what sound interrupts, what blocks access, what object is within reach, what NPC says, or what happens next.',
         'If the first sentence merely repeats the user action, remove that sentence or rewrite it as consequence without adding new user action.',
         '',
-        'PASS 4: cleanHandoff(response)',
+        'PASS 4: activeHandoff(response)',
         'Goal: end at the natural user-centered response beat.',
         'End where the scene naturally returns control to the user, not where narration prompts or pressures the user to act.',
         'The response beat is the point where the immediate consequence, NPC response, revealed information, available object, changed access, danger, or environmental condition is clear enough for the user to choose what to do next.',

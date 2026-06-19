@@ -1,6 +1,6 @@
 const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
 const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
-const RENDER_CONTROL_STAGE = '(?:cleanHandoff|strictChronology|characterTurnPacing|directPerception|strictEpistemology|diegeticPhysicality|agencySeparation|behaviorism|denotativePhysicality|inanimateObjectivity|hypotacticSceneBeats|itemAvailability|applicationContract|SensoryNarrationDirective|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|chronologyControl|userAgencyControl|turnStructureControl|responseEndpointControl|turnBoundaryControl)';
+const RENDER_CONTROL_STAGE = '(?:activeHandoff|cleanHandoff|linearChronology|strictChronology|characterTurnPacing|embodiedPerception|directPerception|strictEpistemology|diegeticPhysicality|agencySeparation|behaviorism|denotativePhysicality|inanimateObjectivity|hypotacticSceneBeats|itemAvailability|applicationContract|SensoryNarrationDirective|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|chronologyControl|userAgencyControl|turnStructureControl|responseEndpointControl|turnBoundaryControl)';
 
 export function stripComputedDebugPrefix(text) {
     return stripNarratorMetaPrefix(stripStructuredArtifacts(text)).trimStart();

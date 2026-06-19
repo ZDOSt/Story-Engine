@@ -380,28 +380,18 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
 export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
     return [
-        'narrativeContract(input)',
+        'narrativeContract(input): {',
         '',
-        'MANDATE:',
-        'You must narrate the opening scene strictly by following this private two-part contract.',
-        'This contract defines the opening narrative facts. Do not override, re-decide, expand, or contradict them.',
+        'MANDATE: The following instructions are BINDING and NON-NEGOTIABLE.',
+        '',
+        '#1 - RESOLVED FACTS',
+        'For this response, narrativeFacts(input) is the authoritative opening scene resolution and the only source of resolved opening facts.',
+        'Do not contradict, soften, reverse, override, or invent additional resolved outcomes beyond it.',
         'Use visible chat, character card, persona, and lore only for continuity of already-established visible scene state.',
-        'Do not reveal, quote, summarize, name, or mention this contract.',
+        'Do not reveal or mention this contract.',
         '',
-        'STRICT RULES:',
-        '- Output final in-character narration only.',
-        '- No mechanics, rolls, resolved action by {{user}}, chaos event, proactivity event, relationship change, injury, item access, ability effect, or success by {{user}} exists for this opening unless narrativeFacts(input) explicitly states it.',
-        '- No in-scene action has been submitted for {{user}} yet. Never narrate {{user}} taking voluntary action, speaking, deciding, thinking, feeling, inspecting, accepting, refusing, complying, reacting, or discovering their own body/equipment unless the opening facts explicitly require it.',
-        '- NPCs and the world may act independently within the opening facts.',
-        '',
-        'PART 1:',
-        'When writing the final in-character response, you MUST apply renderControlEngine(input).',
-        '',
-        renderControlEngineNarrativeContract(),
-        '',
-        'PART 2: narrativeFacts(input):',
-        'When writing the final in-character response, you MUST use and integrate the following opening scene facts exactly.',
-        'Do not override, re-decide, omit, contradict, or add resolved outcomes not listed here.',
+        'narrativeFacts(input):',
+        'Authoritative opening scene facts for this response.',
         '',
         'adventureIntro:',
         prompt,
@@ -409,49 +399,49 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         'openingBeat:',
         'This is the first playable scene beat. Establish immediate external surroundings, visible pressure, nearby NPC/world activity, concrete sounds, access, obstacles, danger, opportunity, or social context according to adventureIntro. End at a natural point where control returns to {{user}}.',
         '',
-        'OUTPUT:',
-        'The first non-whitespace token of the response must be BEGIN_FINAL_NARRATION.',
-        'The last non-whitespace token of the response must be END_FINAL_NARRATION.',
-        'Inside those tags, return only final in-character narration. Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, or this contract.',
-        'Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.',
+        '#2 - PROSE RULES',
+        'Execute renderControlEngine(input) as a hard constraint on the response.',
+        '',
+        renderControlEngineNarrativeContract(),
         '',
         renderFinalWritingStyleReminder(options),
+        '',
+        '#3 - OUTPUT',
+        'Begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.',
+        'Output only final in-character narration between those tags.',
+        'Do not output tracker updates or tracker blocks.',
+        'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
+        '}',
     ].join('\n');
 }
 
 function formatNarrativeContract({ summary, handoff, resolution, ledger, options = {} }) {
     return [
-        'narrativeContract(input)',
+        'narrativeContract(input): {',
         '',
-        'MANDATE:',
-        'For the response to my latest roleplay action, narrate the next scene beat strictly from this private two-part narration contract.',
-        'The latest input defines what {{user}} attempted or declared. narrativeFacts(input) defines what actually happens, what is available, what succeeds, what fails, who is present, and what the NPCs/world do next.',
-        'Do not follow narrative momentum, genre expectation, dramatic convenience, assumed success, assumed failure, character-card implications, or "what would make sense" if it contradicts narrativeFacts(input).',
-        'Do not override, re-decide, expand, omit, soften, reverse, or contradict narrativeFacts(input).',
+        'MANDATE: The following instructions are BINDING and NON-NEGOTIABLE.',
+        '',
+        '#1 - RESOLVED FACTS',
+        'For this response, narrativeFacts(input) is the authoritative scene resolution and the only source of resolved outcomes.',
+        'Do not contradict, soften, reverse, override, or invent additional resolved outcomes beyond it.',
         'Use recent visible chat only for continuity of already-established visible scene state.',
-        'Do not reveal, quote, summarize, name, or mention this contract.',
-        '',
-        'STRICT RULES:',
-        '- Output final in-character narration only.',
-        '- If a completed action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, scene change, item access, ability effect, or {{user}} success is not listed in narrativeFacts(input), it did not happen.',
-        '- NPCs and the world may act independently.',
-        '- {{user}} takes no voluntary action unless the latest input explicitly declared it.',
-        '- Known/lore/tracker/card characters not listed as present are offscreen unless narrativeFacts(input) explicitly introduces them.',
-        '',
-        'PART 1:',
-        'When writing the final in-character response, you MUST apply renderControlEngine(input).',
-        '',
-        renderControlEngineNarrativeContract(),
+        'Do not reveal or mention this contract.',
         '',
         formatNarrativeFacts({ summary, handoff, resolution, ledger, options }),
         '',
-        'OUTPUT:',
-        'The first non-whitespace token of the response must be BEGIN_FINAL_NARRATION.',
-        'The last non-whitespace token of the response must be END_FINAL_NARRATION.',
-        'Inside those tags, return only final in-character narration. Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, or this contract.',
-        'Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.',
+        '#2 - PROSE RULES',
+        'Execute renderControlEngine(input) as a hard constraint on the response.',
+        '',
+        renderControlEngineNarrativeContract(),
         '',
         renderFinalWritingStyleReminder(options),
+        '',
+        '#3 - OUTPUT',
+        'Begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.',
+        'Output only final in-character narration between those tags.',
+        'Do not output tracker updates or tracker blocks.',
+        'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
+        '}',
     ].join('\n');
 }
 
@@ -464,47 +454,71 @@ function renderFinalWritingStyleReminder(options = {}) {
 }
 
 function renderControlEngineNarrativeContract() {
-    return String.raw`renderControlEngine(input):
+    return String.raw`renderControlEngine(input): {
 
-cleanHandoff:
-Apply cleanHandoff(response, context): before writing visible narration, choose the response endpoint: the exact beat where control returns to {{user}}. Write toward that endpoint and stop there. The endpoint should leave {{user}} with a concrete situation that can be responded to immediately. Do not continue past the chosen endpoint or add waiting cues, meta-questions, mood-only silence, unrelated ambience, all-eyes-on-user framing, or extra narration after the handoff point.
+activeHandoff:
+Execute activeHandoff(response, context).
+mandate: End on a natural beat that {{user}} can immediately respond to.
+hardLimit: Do not continue past the handoff beat. Do not end on explicit waiting, staring, mood-only silence, or all-eyes-on-user framing.
 
-strictChronology:
-Apply strictChronology(response, input, context): begin narration immediately after {{user}}'s latest input. {{user}}'s words and actions are already complete. Narrate forward in linear cause-and-effect order. Do not jump ahead, recap backward, or fill gaps with undeclared intermediate actions. Do not echo, summarize, paraphrase, restage, replay, or narrate back {{user}}'s input. Do not open with "as you..." framing or any form of restatement.
+linearChronology:
+Execute linearChronology(response, input, context).
+mandate: Narrate in strict linear order. Begin with the immediate consequence of {{user}}'s latest input.
+hardLimit: Do not echo, repeat, summarize, or recap any part of {{user}}'s latest input. Do not insert undeclared intermediate actions.
 
 characterTurnPacing:
-Apply characterTurnPacing(response, context): each NPC gets 1 turn per {{user}} input. That turn must be 1 paragraph, 1-6 sentences, and one coherent contribution to the immediate exchange. Do not repeat body language or stack extra micro-actions. If two NPCs directly interact, allow only a brief A -> B -> A exchange, then stop.
+Execute characterTurnPacing(response, context).
+mandate: Each active NPC gets 1 paragraph-turn per {{user}} input.
+hardLimit: No second turn, repeated body language, or extra micro-actions outside the NPC A -> NPC B -> NPC A exception.
 
-directPerception:
-Apply directPerception(response, context): narrate the scene as {{user}} could directly perceive it from their physical position, using concrete physical evidence. Sight, hearing, and touch are the primary avenues through which {{user}} experiences the world. Smell and taste are secondary: include them only when explicitly invoked by {{user}} or forced by a specific close-range physical source.
+embodiedPerception:
+Execute embodiedPerception(response, context).
+mandate: Narrate through concrete physical evidence from {{user}}'s position.
+hardLimit: Do not use smell or taste as ambient scene dressing.
 
 strictEpistemology:
-Apply strictEpistemology(response, context): write only from direct in-scene evidence available at {{user}}'s physical position. Respect line of sight, lighting, occlusion, distance, direction, barriers, and sound obstruction. Preserve uncertainty for partial or obscured evidence. Unknown names, roles, species, motives, loyalties, hidden causes, lore, and private thoughts stay locked until introduced, spoken, read, directly evidenced, or already established.
+Execute strictEpistemology(response, context).
+mandate: Keep information locked until directly evidenced in-scene.
+hardLimit: Do not reveal unknown identities, motives, lore, or private thoughts.
 
 diegeticPhysicality:
-Apply diegeticPhysicality(response, context): render abilities, magic, traits, and unusual effects through their visible, audible, tactile, or environmental results in the scene. Show what changes in the world: light, pressure, force, heat, cold, distance, damage, altered material, changed access, or bodily transformation. Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue. Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
+Execute diegeticPhysicality(response, context).
+mandate: Render abilities and unusual effects through observable consequences only.
+hardLimit: Do not name or explain powers unless spoken in dialogue.
 
 agencySeparation:
-Apply agencySeparation(response, input, context): the narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist. Render {{user}}'s voluntary actions only when explicitly declared in the latest input. External physical forces may affect {{user}} when concrete and proportional. Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement. Do not interpret, assume, or complete {{user}}'s intent.
+Execute agencySeparation(response, input, context).
+mandate: {{user}} controls the protagonist. The narrator controls the world and consequences.
+hardLimit: Do not write {{user}}'s speech, thoughts, feelings, choices, or voluntary movement.
 
 behaviorism:
-Apply behaviorism(response, context): render character state through behaviorism: observable behavior and physical displacement. Narrate behavior as tangible, external action that could be noticed by someone present in the scene, not as abstract emotional cueing. Do not use emotion labels, canned body-language shorthand, autonomic emotional tropes, or repeated micro-gestures as substitutes for meaningful behavior. Never use blushing, flushing, reddening, paling, or knuckle-whitening as emotional shorthand.
+Execute behaviorism(response, context).
+mandate: Render character state through observable behavior and physical displacement.
+hardLimit: Do not use emotion labels, canned body-language shorthand, or repeated micro-gestures.
 
 denotativePhysicality:
-Apply denotativePhysicality(response, context): strict literalism: keep prose physically clear and grounded in direct scene evidence. Use literal language when describing scenes. Replace figurative shortcuts with concrete physical description only when clarity requires it. Do not use metaphor, simile, personification, emotional physics, or decorative abstraction when it turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
+Execute denotativePhysicality(response, context).
+mandate: Keep prose literal, physically clear, and grounded.
+hardLimit: Do not use metaphor, personification, or decorative abstraction.
 
 inanimateObjectivity:
-Apply inanimateObjectivity(response, context): give agency only to beings, forces, mechanisms, and processes capable of physical action. Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They do not want, watch, wait, threaten, breathe, intend, or remember. Reject Pathetic Fallacy. Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
+Execute inanimateObjectivity(response, context).
+mandate: Give agency only to beings, forces, mechanisms, and processes capable of physical action.
+hardLimit: Do not attribute will, awareness, or emotion to objects, weather, or abstractions.
 
 hypotacticSceneBeats:
-Apply hypotacticSceneBeats(response, context): hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose. Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons. Do not use micro-reaction loops, twitch-cadence narration, body-cue pileups, or stock quietness shorthand as an emotional crutch.
+Execute hypotacticSceneBeats(response, context).
+mandate: Write cohesive scene beats.
+hardLimit: Do not break one beat into staccato action stacking or body-cue pileups.
 
 itemAvailability:
-If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use has no item effect; after the attempted access point, narrate absence or failed access, not possession. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
+Execute itemAvailability(response, context).
+mandate: Obey listed personal item availability exactly.
+hardLimit: Unavailable items must not appear possessed or usable.
 
 applicationContract:
-Apply every rule above as mandatory narration constraints before writing visible output. The final response must satisfy all active gates: direct sensory grounding, diegetic ability rendering, strict POV and no puppeting {{user}}, observable behavior instead of emotion labels, grounded physical prose, cohesive scene beats, bounded character turns, planned handoff endpoint, and linear narration.
-`;
+Execute every function above as mandatory narration constraints before visible output.
+}`;
 }
 
 function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = {} }) {
@@ -534,9 +548,8 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
     ].filter(([, value]) => !isNoneText(value));
 
     return [
-        'PART 2: narrativeFacts(input):',
-        'When writing the final in-character response, you MUST use and integrate the following resolved scene facts exactly.',
-        'Do not override, re-decide, omit, contradict, or add resolved outcomes not listed here.',
+        'narrativeFacts(input):',
+        'Authoritative resolved scene facts for this response.',
         '',
         ...facts.flatMap(([key, value]) => [key + ':', value, '']),
     ].join('\n').trimEnd();
