@@ -28,11 +28,9 @@ function ResolutionEngine(input) {
 
   classifyHostilePhysicalIntent(input, finalGoal, targets):
     policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
-    rule: return true only if {{user}} explicitly uses direct physical aggression against a living entity's body: attack, assault, strike, shove, tackle, choke, cut, stab, injure, twist/hurt/crush a grabbed body part, violent restraint, pin, immobilization, dragging/forced movement, physical domination, blocking escape with bodily force, preventing casting/action with bodily force, or other harmful bodily control
-    rule: a grab/catch/hold is hostilePhysicalIntent only when it explicitly includes harm, attack, violent restraint, pinning, dragging, forced movement, twisting/crushing, choking, domination, or preventing bodily action by force
-    rule: return false for grabbing/catching/holding an NPC's wrist, arm, shoulder, sleeve, cloak, or clothing only to stop/delay/get attention/block departure/contest immediate movement, unless explicit harm, attack, violent restraint, pinning, dragging, forced movement, twisting/crushing, choking, domination, or bodily injury is also stated
-    rule: return false for taking, grabbing, pulling, snatching, opening, moving, or contesting an object/possession/space/access point, even when an NPC opposes it, unless {{user}} also attacks, harms, violently restrains, pins, shoves, drags, or controls the NPC's body
-    rule: return false for consensual/helpful touch, healing, examination, rescue, ordinary movement, environmental force, social pressure, or purely mental/social/magical actions with no explicit physical force by {{user}}'s body
+    rule: return true if {{user}} explicitly uses bodily force against a living entity's body to attack, injure, pin, immobilize, drag, dominate, or prevent bodily movement/action by force
+    rule: return false if the action only contests space, access, departure, attention, or an object, without bodily injury or bodily control
+    rule: consensual/helpful touch, healing, rescue, examination, ordinary movement, or purely social/magical pressure without explicit bodily force are not hostilePhysicalIntent
 
   classifyPhysicalBoundaryPressure(input, finalGoal, targets):
     policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
