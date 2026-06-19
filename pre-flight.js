@@ -390,8 +390,8 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         '',
         'STRICT RULES:',
         '- Output final in-character narration only.',
-        '- No mechanics, rolls, resolved user action, chaos event, proactivity event, relationship change, injury, item access, ability effect, or user success exists for this opening unless narrativeFacts(input) explicitly states it.',
-        '- The user has not submitted an in-scene action yet. Never narrate the user taking voluntary action, speaking, deciding, thinking, feeling, inspecting, accepting, refusing, complying, reacting, or discovering their own body/equipment unless the opening facts explicitly require it.',
+        '- No mechanics, rolls, resolved action by {{user}}, chaos event, proactivity event, relationship change, injury, item access, ability effect, or success by {{user}} exists for this opening unless narrativeFacts(input) explicitly states it.',
+        '- No in-scene action has been submitted for {{user}} yet. Never narrate {{user}} taking voluntary action, speaking, deciding, thinking, feeling, inspecting, accepting, refusing, complying, reacting, or discovering their own body/equipment unless the opening facts explicitly require it.',
         '- NPCs and the world may act independently within the opening facts.',
         '',
         'PART 1:',
@@ -407,7 +407,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         prompt,
         '',
         'openingBeat:',
-        'This is the first playable scene beat. Establish immediate external surroundings, visible pressure, nearby NPC/world activity, concrete sounds, access, obstacles, danger, opportunity, or social context according to adventureIntro. End at a natural point where control returns to the user.',
+        'This is the first playable scene beat. Establish immediate external surroundings, visible pressure, nearby NPC/world activity, concrete sounds, access, obstacles, danger, opportunity, or social context according to adventureIntro. End at a natural point where control returns to {{user}}.',
         '',
         'OUTPUT:',
         'The first non-whitespace token of the response must be BEGIN_FINAL_NARRATION.',
@@ -425,7 +425,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '',
         'MANDATE:',
         'For the response to my latest roleplay action, narrate the next scene beat strictly from this private two-part narration contract.',
-        'The latest user message defines what was attempted or declared. narrativeFacts(input) defines what actually happens, what is available, what succeeds, what fails, who is present, and what the NPCs/world do next.',
+        'The latest input defines what {{user}} attempted or declared. narrativeFacts(input) defines what actually happens, what is available, what succeeds, what fails, who is present, and what the NPCs/world do next.',
         'Do not follow narrative momentum, genre expectation, dramatic convenience, assumed success, assumed failure, character-card implications, or "what would make sense" if it contradicts narrativeFacts(input).',
         'Do not override, re-decide, expand, omit, soften, reverse, or contradict narrativeFacts(input).',
         'Use recent visible chat only for continuity of already-established visible scene state.',
@@ -433,9 +433,9 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '',
         'STRICT RULES:',
         '- Output final in-character narration only.',
-        '- If a completed action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, scene change, item access, ability effect, or user success is not listed in narrativeFacts(input), it did not happen.',
+        '- If a completed action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, scene change, item access, ability effect, or {{user}} success is not listed in narrativeFacts(input), it did not happen.',
         '- NPCs and the world may act independently.',
-        '- The user takes no voluntary action unless the latest user input explicitly declared it.',
+        '- {{user}} takes no voluntary action unless the latest input explicitly declared it.',
         '- Known/lore/tracker/card characters not listed as present are offscreen unless narrativeFacts(input) explicitly introduces them.',
         '',
         'PART 1:',
@@ -456,7 +456,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
 }
 
 const DEFAULT_FINAL_WRITING_STYLE_REMINDER = String.raw`FINAL WRITING STYLE REMINDER:
-Write narration with the density and clarity of a skilled novelist while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with rich environmental detail; dialogue should stay close to the participants and their exchange, using environmental detail only when it is directly relevant to the interaction; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
+Write narration with the density and clarity of a skilled novelist while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with rich environmental detail; dialogue should stay close to the participants and their exchange, using environmental detail only when it is directly relevant to the interaction; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, agency for {{user}}, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
 
 
 function renderFinalWritingStyleReminder(options = {}) {
@@ -503,7 +503,7 @@ itemAvailability:
 If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use has no item effect; after the attempted access point, narrate absence or failed access, not possession. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
 
 applicationContract:
-Apply every rule above as mandatory narration constraints before writing visible output. The final response must satisfy all active gates: direct sensory grounding, diegetic ability rendering, strict POV and no user puppeting, observable behavior instead of emotion labels, grounded physical prose, cohesive scene beats, bounded character turns, planned handoff endpoint, and linear narration.
+Apply every rule above as mandatory narration constraints before writing visible output. The final response must satisfy all active gates: direct sensory grounding, diegetic ability rendering, strict POV and no puppeting {{user}}, observable behavior instead of emotion labels, grounded physical prose, cohesive scene beats, bounded character turns, planned handoff endpoint, and linear narration.
 `;
 }
 
@@ -545,7 +545,7 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
 function narrativeAttemptedActions(resolution = {}, summary = {}) {
     const units = narrativeActionUnits(resolution, summary);
     if (!units.length) return 'No resolved attempted action is listed for this beat.';
-    return units.map(unit => `${unit.id}: ${unit.action}.`).join('\n');
+    return units.map(unit => `${unit.id}: ${narratorUserMacroText(unit.action)}.`).join('\n');
 }
 
 function narrativeAttemptedActionResults(resolution = {}) {
@@ -555,7 +555,7 @@ function narrativeAttemptedActionResults(resolution = {}) {
     if (!units.length) return 'No listed action result is active.';
     if (resolution?.RollNeeded === 'N' || tier === 'NONE' || outcome === 'no_roll') {
         const reason = valueOrNone(resolution?.RollReason);
-        const reasonText = isNoneText(reason) ? '' : ` Reason: ${reason}.`;
+        const reasonText = isNoneText(reason) ? '' : ` Reason: ${narratorUserMacroText(reason)}.`;
         return units.map(unit => `${unit.id}: NO ROLL - This listed action is not mechanically contested; narrate ordinary scene continuity only, without inventing success, failure, contest, reversal, or extra resolved effects.${reasonText}`).join('\n');
     }
     if (tier === 'Stalemate') {
@@ -728,18 +728,19 @@ function narrativeCompanionCommandFact(resolution = {}) {
 function narrativeAggressionEntry(name, value = {}) {
     const target = value?.ProactivityTarget && value.ProactivityTarget !== '(none)'
         ? value.ProactivityTarget
-        : 'the user';
+        : '{{user}}';
+    const targetText = narratorTargetText(target);
     const source = valueOrNone(name);
     const attackType = narrativeAttackType(value);
     const style = narrativeAggressionStyle(value);
     const injuryLimit = narrativeAggressionInjuryLimit(value);
-    const targetLock = isUserReferenceText(target)
-        ? 'This force targets the user only; do not redirect it to another target.'
-        : `This force targets only ${valueOrNone(target)}; do not redirect it to another target.`;
-    const targetLimit = isUserReferenceText(target)
-        ? 'Do not narrate the user counterattacking, reacting voluntarily, speaking, deciding, or following up.'
-        : `Do not narrate ${valueOrNone(target)}'s counterattack, follow-up action, voluntary reaction, speech, decision, or choice unless another narrative fact says so.`;
-    const opening = `${source}: ${attackType} against ${valueOrNone(target)}`;
+    const targetLock = isUserReferenceText(targetText)
+        ? 'This force targets {{user}} only; do not redirect it to another target.'
+        : `This force targets only ${targetText}; do not redirect it to another target.`;
+    const targetLimit = isUserReferenceText(targetText)
+        ? 'Do not narrate {{user}} counterattacking, reacting voluntarily, speaking, deciding, or following up.'
+        : `Do not narrate ${targetText}'s counterattack, follow-up action, voluntary reaction, speech, decision, or choice unless another narrative fact says so.`;
+    const opening = `${source}: ${attackType} against ${targetText}`;
 
     switch (value?.ReactionOutcome) {
         case 'npc_overpowers':
@@ -760,7 +761,7 @@ function narrativeAggressionEntry(name, value = {}) {
 function narrativeAttackType(value = {}) {
     switch (value.AttackType) {
         case 'Retaliation':
-            return 'retaliation after the user action';
+            return `retaliation after {{user}}'s action`;
         case 'CounterAttack':
             return 'counterattack exploiting the opening';
         case 'ProactiveAttack':
@@ -784,7 +785,7 @@ function narrativeAggressionInjuryLimit(value = {}) {
     if (!injury) return '';
     const condition = String(injury.condition ?? '').toLowerCase();
     const severity = String(injury.severity ?? injury.InjurySeverityLimit ?? '').toLowerCase();
-    const target = injury.target || (injury.targetType === 'npc' ? value.ProactivityTarget : 'the user');
+    const target = narratorTargetText(injury.target || (injury.targetType === 'npc' ? value.ProactivityTarget : '{{user}}'));
     if (condition === 'bruised' || severity === 'minor') {
         return ' Choose the concrete wound and affected body area from the attack context, but any lasting injury is capped at one minor bruise or minor impact, with no bleeding, cuts, incapacitation, restraint, or extra landed strikes.';
     }
@@ -825,22 +826,22 @@ function narrativeIntimacyEntry(npc = {}) {
 
 function narrativeAbilityFact(value = {}) {
     const ability = normalizeAbilityUseObject(value);
-    if (!ability.attempted) return 'No user ability effect is active.';
+    if (!ability.attempted) return 'No ability effect from {{user}} is active.';
     if (!ability.available) {
-        return `The user attempts an unavailable supernatural or special ability: ${ability.abilityName}. The attempted effect does not occur. Do not create the attempted effect: ${ability.narrativeEffect}. Render only the lack of effect and visible reactions. This is not backlash unless another narrative fact says so.`;
+        return `{{user}} attempts an unavailable supernatural or special ability: ${ability.abilityName}. The attempted effect does not occur. Do not create the attempted effect: ${ability.narrativeEffect}. Render only the lack of effect and visible reactions. This is not backlash unless another narrative fact says so.`;
     }
-    return `The user's ability can produce this direct scene effect: ${ability.narrativeEffect}. Render only the direct perceivable effect or delivery. Do not announce, label, explain, activate, focus, channel, charge, or name the ability unless its name is spoken aloud in dialogue. Do not add extra success, extra impact, or bypassed consequences beyond the listed facts.`;
+    return `{{user}}'s ability can produce this direct scene effect: ${ability.narrativeEffect}. Render only the direct perceivable effect or delivery. Do not announce, label, explain, activate, focus, channel, charge, or name the ability unless its name is spoken aloud in dialogue. Do not add extra success, extra impact, or bypassed consequences beyond the listed facts.`;
 }
 
 function narrativeItemFact(value = {}) {
     const item = normalizeItemUseObject(value);
     if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by attemptedActions, attemptedActionResults, and environment facts.';
-    const attemptedItem = `The user attempts to use/draw/produce/consume: ${item.item}.`;
+    const attemptedItem = `{{user}} attempts to use/draw/produce/consume: ${item.item}.`;
     if (item.available) {
         const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}. Preserve the saved item state exactly: if it limits use, the limitation must affect the scene.` : '';
         return `${attemptedItem} Availability: available from ${item.source}.${state} Narrate the attempt and its immediate result. Do not skip, gloss over, or replace the attempt. Item availability is not automatic success, extra impact, or bypassed consequence.`;
     }
-    return `${attemptedItem} Availability: unavailable. No item effect occurs. Narrate the attempt and its immediate result: the item is absent, unreachable, or not in the claimed place. Do not skip, gloss over, or replace the attempt. The item must not appear, be drawn, be wielded, be consumed, unlock anything, or enter user possession. Visible reactions may follow naturally.`;
+    return `${attemptedItem} Availability: unavailable. No item effect occurs. Narrate the attempt and its immediate result: the item is absent, unreachable, or not in the claimed place. Do not skip, gloss over, or replace the attempt. The item must not appear, be drawn, be wielded, be consumed, unlock anything, or enter {{user}} possession. Visible reactions may follow naturally.`;
 }
 
 function narrativeClaimFact(value = {}, resolution = {}, summary = {}) {
@@ -886,14 +887,14 @@ function narrativeClaimFact(value = {}, resolution = {}, summary = {}) {
         : claim.npcAccess === 'partial'
             ? `${target} has partial access to judge the claim, not omniscient certainty.`
             : `${target} has no special direct access to verify the claim.`;
-    return `Treat the user's claim as a belief contest for ${target}: "${claim.claim}". ${accessText} ${reaction} ${accessCap} Do not present the claim as objective truth unless it was already established as true in visible scene state.`;
+    return `Treat {{user}}'s claim as a belief contest for ${target}: "${claim.claim}". ${accessText} ${reaction} ${accessCap} Do not present the claim as objective truth unless it was already established as true in visible scene state.`;
 }
 
 function narrativeUserKnowledgeFact(applications = []) {
     const items = normalizeUserKnowledgeApplications(applications);
-    if (!items.length) return 'No special reputation or personal knowledge about the user is applied this beat.';
+    if (!items.length) return 'No special reputation or personal knowledge about {{user}} is applied this beat.';
     return items
-        .map(item => `${item.target} may know or have heard this about the user: ${item.line}. Use it only for recognition, demeanor, caution, trust, suspicion, fear, questions, or context when it naturally fits the visible scene.`)
+        .map(item => `${item.target} may know or have heard this about {{user}}: ${narratorUserMacroText(item.line)}. Use it only for recognition, demeanor, caution, trust, suspicion, fear, questions, or context when it naturally fits the visible scene.`)
         .join(' ');
 }
 
@@ -901,13 +902,13 @@ function narrativeEnvironmentFact(resolution = {}) {
     const oppEnv = list(resolution?.OppTargets?.ENV);
     if (isNoneText(oppEnv)) return 'No special environmental opposition is required.';
     const difficulty = narrativeEnvironmentPressure(resolution);
-    return `The relevant environmental obstacle is ${oppEnv}. Treat it as ${difficulty}. Render the user's attempt against it according to attemptedActionResults, without turning the obstacle into an NPC or relationship participant.`;
+    return `The relevant environmental obstacle is ${oppEnv}. Treat it as ${difficulty}. Render {{user}}'s attempt against it according to attemptedActionResults, without turning the obstacle into an NPC or relationship participant.`;
 }
 
 function narrativeHarmLimitFact(resolution = {}) {
     if (isNoneText(resolution?.nonLethal)) return 'No special harm limit is listed beyond injuryOrDeath and npcForce.';
     if (String(resolution.nonLethal).toUpperCase() === 'Y') {
-        return 'Keep the user-side harmful result nonlethal unless injuryOrDeath explicitly says otherwise. Do not narrate a killing blow from the user in this beat.';
+        return `Keep {{user}}'s harmful result nonlethal unless injuryOrDeath explicitly says otherwise. Do not narrate a killing blow from {{user}} in this beat.`;
     }
     return 'No nonlethal restriction is listed; still obey injuryOrDeath exactly and do not invent extra injury or death.';
 }
@@ -925,12 +926,12 @@ function narrativeLimitationsFact(resolution = {}) {
         narrativeUserImpairmentFact(resolution.UserImpairment),
         narrativeNpcImpairmentFact(resolution.NPCImpairment),
     ].filter(part => part && !isNoneText(part));
-    return parts.length ? parts.join(' ') : 'No special user or NPC physical/mental limitation is applied this beat.';
+    return parts.length ? parts.join(' ') : 'No special physical/mental limitation for {{user}} or an NPC is applied this beat.';
 }
 
 function narrativeUserImpairmentFact(impairment = {}) {
     if (!impairment || impairment.Relevant !== 'Y') return '';
-    return `The user's ${valueOrNone(impairment.Source)} affects ${humanizeImpairmentFunctions(impairment.MatchedActionFunction || impairment.AffectedFunction)} through pain, limitation, compensation, instability, reduced speed, partial execution, or cost according to attemptedActionResults. Do not forbid the attempt.`;
+    return `{{user}}'s ${narratorUserMacroText(impairment.Source)} affects ${humanizeImpairmentFunctions(impairment.MatchedActionFunction || impairment.AffectedFunction)} through pain, limitation, compensation, instability, reduced speed, partial execution, or cost according to attemptedActionResults. Do not forbid the attempt.`;
 }
 
 function narrativeNpcImpairmentFact(impairment = {}) {
@@ -965,7 +966,7 @@ function narrativeAggressionTargetInjuries(aggressionResults = {}) {
         const userInjury = value?.InflictedUserInjury || (value?.InflictedTargetInjury?.targetType === 'user' ? value.InflictedTargetInjury : null);
         if (userInjury) {
             entries.push(narrativeInjuryEntry({
-                target: 'the user',
+                target: '{{user}}',
                 source: name,
                 condition: userInjury.condition,
                 severity: userInjury.severity ?? userInjury.InjurySeverityLimit,
@@ -993,7 +994,7 @@ function narrativeAggressionTargetInjuries(aggressionResults = {}) {
 }
 
 function narrativeInjuryEntry({ target, source, condition, severity, wounds, status, effectType, rule }) {
-    const targetText = valueOrNone(target);
+    const targetText = narratorTargetText(target);
     const sourceText = !isNoneText(source) ? ` from ${valueOrNone(source)}` : '';
     const conditionText = valueOrNone(condition);
     const severityText = valueOrNone(severity);
@@ -1040,9 +1041,10 @@ function narrativeProactivityEntry(name, value = {}, aggressionResults = {}, den
     const intent = proactivityNarrationIntent(value);
     const target = value?.ProactivityTarget && value.ProactivityTarget !== '(none)'
         ? value.ProactivityTarget
-        : 'the user';
+        : '{{user}}';
+    const targetText = narratorTargetText(target);
     const deniedForNpc = deniedIntimacyNames.has(String(name ?? '').toLowerCase());
-    const description = personalizeNpcInstruction(name, proactivityIntentDescription(intent, target))
+    const description = personalizeNpcInstruction(name, proactivityIntentDescription(intent, targetText))
         .replace(/\bAggression result\b/g, 'npcForce fact')
         .replace(/\baggression result\b/g, 'npcForce fact')
         .replace(/\bresolved attack\b/g, 'completed attack');
@@ -1062,10 +1064,10 @@ function narrativeProactivityEntry(name, value = {}, aggressionResults = {}, den
         ? ' Keep it grounded in the immediate danger, the NPC\'s bond, self-preservation, and the listed target.'
         : '';
     const companionSupportLimit = isCompanionSupportIntent(intent)
-        ? ' In combat or immediate danger, this support must be tactically useful; do not use comfort-touch, leaning on the user, hand-on-back reassurance, hugging, or sentimental encouragement unless it is physically necessary to drag, brace, shield, heal, or reposition the user.'
+        ? ' In combat or immediate danger, this support must be tactically useful; do not use comfort-touch, leaning on {{user}}, hand-on-back reassurance, hugging, or sentimental encouragement unless it is physically necessary to drag, brace, shield, heal, or reposition {{user}}.'
         : '';
     const crisisAttackLimit = intent === 'Companion_Attack'
-        ? ' This must target only the listed hostile target, never the user or a bystander.'
+        ? ' This must target only the listed hostile target, never {{user}} or a bystander.'
         : '';
     const denialLimit = deniedForNpc
         ? ' Keep this fully compatible with the intimacy denial; do not turn it into consent, arousal, relationship acceptance, or intimate escalation.'
@@ -1092,13 +1094,13 @@ function narrativeNameRevealFact(nameGeneration = {}) {
     const femaleNames = (pool.female || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const maleNames = (pool.male || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
-    return `Name pool use is mandatory and obeys fog of war. Any newly revealed proper name in this response MUST exactly match one unused approved name from this pool: Female: ${list(femaleNames)}. Male: ${list(maleNames)}. Location: ${list(locationNames)}. If no approved listed name fits, leave the person, entity, or place unnamed. Already revealed names from chat, character card, lore, or tracker may continue unchanged. A new name may appear only after the scene reveals that specific person, entity, or place in-world through speech, readable text, self-introduction, direct reference, signage, documents, or clear recognition. Use the matching gender/presentation bucket when known. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not name background, incidental, or unnamed figures unless the scene actually reveals the name.`;
+    return `Name pool use is mandatory and obeys fog of war. Any newly revealed proper name in this response MUST exactly match one unused approved name from this pool: Female: ${list(femaleNames)}. Male: ${list(maleNames)}. Location: ${list(locationNames)}. If no approved listed name fits, leave the person, entity, or place unnamed. Already revealed names from chat, character card, lore, or tracker may continue unchanged. A new name may appear only after the scene reveals that specific person, entity, or place in-world through speech, readable text, self-introduction, direct reference, signage, documents, or clear recognition. Use the matching gender/presentation bucket when known. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character names or {{user}}'s name. Do not name background, incidental, or unnamed figures unless the scene actually reveals the name.`;
 }
 
 function narrativeProxyUserActionFact(options = {}) {
     if (options?.mode !== 'proxy') return '';
-    const action = valueOrNone(options?.latestUserText || options?.proxyUserAction);
-    return `Proxy user action mode is active for this response only because the latest instruction used double square brackets. The user has asked narration to cover this exact user action: ${action}. This is the only exception to normal agency separation. Do not add extra user dialogue, thoughts, feelings, decisions, follow-up actions, reactions, silence, or choices beyond that instruction and the listed narrative facts.`;
+    const action = narratorUserMacroText(options?.latestUserText || options?.proxyUserAction);
+    return `Proxy action mode for {{user}} is active for this response only because the latest instruction used double square brackets. The human has asked narration to cover this exact action by {{user}}: ${action}. This is the only exception to normal agency separation. Do not add extra dialogue, thoughts, feelings, decisions, follow-up actions, reactions, silence, or choices for {{user}} beyond that instruction and the listed narrative facts.`;
 }
 
 function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
@@ -1354,7 +1356,7 @@ function chaosMagnitudeGuide(magnitude) {
 function chaosAnchorGuide(anchor) {
     switch (String(anchor ?? '').toUpperCase()) {
         case 'GOAL':
-            return "the user's current goal or action";
+            return "{{user}}'s current goal or action";
         case 'ENVIRONMENT':
             return 'terrain, weather, objects, or physical surroundings';
         case 'KNOWN_NPC':
@@ -1535,7 +1537,7 @@ function powerActorEventAuditSummary(event) {
 
 function powerActorEventNarratorSummary(event) {
     if (!event || typeof event !== 'object') return 'none';
-    const instruction = valueOrNone(event.VisibleInstruction ?? event.visibleInstruction);
+    const instruction = narratorUserMacroText(event.VisibleInstruction ?? event.visibleInstruction);
     if (isNoneText(instruction)) return 'none';
     const contact = valueOrNone(event.ContactName ?? event.contactName);
     const role = valueOrNone(event.SurfaceRole ?? event.surfaceRole);
@@ -2092,6 +2094,28 @@ function isCompanionInitiativeIntent(intent) {
 
 function isCompanionSupportIntent(intent) {
     return ['Companion_Warn', 'Companion_Assist', 'Companion_Cover'].includes(intent);
+}
+
+function narratorTargetText(value) {
+    const text = valueOrNone(value);
+    return isUserReferenceText(text) ? '{{user}}' : narratorUserMacroText(text);
+}
+
+function narratorUserMacroText(value) {
+    const macro = '__ST_ENGINE_USER_MACRO__';
+    return valueOrNone(value)
+        .replace(/\{\{user\}\}/g, macro)
+        .replace(/\bthe user's\b/gi, "{{user}}'s")
+        .replace(/\buser's\b/gi, "{{user}}'s")
+        .replace(/\bsaved user gear\/inventory\b/gi, 'saved gear/inventory for {{user}}')
+        .replace(/\buser gear\/inventory\b/gi, 'gear/inventory for {{user}}')
+        .replace(/\bknown user abilities\b/gi, 'known abilities for {{user}}')
+        .replace(/\buser abilities\b/gi, 'abilities for {{user}}')
+        .replace(/\buser action\b/gi, "{{user}}'s action")
+        .replace(/\buser input\b/gi, 'latest input')
+        .replace(/\bthe user\b/gi, '{{user}}')
+        .replace(/\buser\b/gi, '{{user}}')
+        .replace(new RegExp(macro, 'g'), '{{user}}');
 }
 
 function isUserReferenceText(value) {

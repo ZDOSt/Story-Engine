@@ -509,6 +509,8 @@ const state = {
 
     pendingGeneration: null,
     narratorDepthReplay: null,
+    internalGenerationStopPending: false,
+    internalGenerationStopTimer: null,
 
     progressToast: null,
 
@@ -1955,6 +1957,32 @@ function clearNarratorDepthReplayState() {
     state.narratorDepthReplay = null;
 }
 
+function clearInternalGenerationStopState() {
+    if (state.internalGenerationStopTimer) {
+        clearTimeout(state.internalGenerationStopTimer);
+        state.internalGenerationStopTimer = null;
+    }
+    state.internalGenerationStopPending = false;
+}
+
+function markInternalGenerationStop() {
+    clearInternalGenerationStopState();
+    state.internalGenerationStopPending = true;
+    state.internalGenerationStopTimer = setTimeout(() => {
+        clearInternalGenerationStopState();
+    }, 2000);
+}
+
+function consumeInternalGenerationStop() {
+    if (!state.internalGenerationStopPending) return false;
+    clearInternalGenerationStopState();
+    return true;
+}
+
+function isCurrentStoryEngineRun(runId) {
+    return Boolean(runId) && state.activeRunId === runId;
+}
+
 function scheduleNarratorDepthReplay() {
     const replay = state.narratorDepthReplay;
     if (!replay) return;
@@ -2156,6 +2184,7 @@ function clearRuntimePrompts({ preserveNarratorDepthPrompt = false } = {}) {
 }
 
 function disableStoryEngineRuntime() {
+    clearInternalGenerationStopState();
     clearPostNarrationFinalizerTimers();
     clearPendingRunCleanupTimer();
     clearAllProgress();
@@ -2182,6 +2211,27 @@ function disableStoryEngineRuntime() {
     document.getElementById(TRACKER_WIDGET_ID)?.remove();
     document.getElementById(PLAYER_SETUP_CARD_ID)?.remove();
     document.getElementById(PROGRESSION_CARD_ID)?.remove();
+}
+
+function cancelStoryEnginePipeline(reason = 'generation stopped') {
+    clearInternalGenerationStopState();
+    clearPostNarrationFinalizerTimers();
+    clearPendingRunCleanupTimer();
+    clearAllProgress();
+    clearRuntimePrompts();
+    setChatInputLocked(false);
+    releaseProseGuardDisplayIntercept({ restore: true });
+    clearThinkingDisableRuntimeState();
+    state.runningSemanticPass = false;
+    state.bypassPromptReady = false;
+    state.activeRunId = null;
+    state.lastNarratorHandoff = '';
+    state.lastNarratorHandoffKey = null;
+    state.pendingRun = null;
+    state.pendingGeneration = null;
+    state.proseGuardHideNextMessage = false;
+    state.proseGuardExpectedMessageId = null;
+    console.info(`[${EXTENSION_NAME}] ${reason}; Story Engine pipeline cancelled.`);
 }
 
 
@@ -9224,6 +9274,19 @@ function handleGenerationLifecycleEnd() {
     }, 0);
 }
 
+function handleGenerationLifecycleStopped() {
+    if (consumeInternalGenerationStop()) {
+        handleGenerationLifecycleEnd();
+        return;
+    }
+
+    cancelStoryEnginePipeline('Human stop button pressed');
+    setTimeout(() => {
+        renderAllTrackerDisplayBlocks();
+        renderProgressionCard();
+    }, 0);
+}
+
 
 function subscribeMessageHandler() {
 
@@ -9246,7 +9309,7 @@ function subscribeMessageHandler() {
     if (context.eventTypes.CHAT_CREATED) context.eventSource.on(context.eventTypes.CHAT_CREATED, handleChatChanged);
     if (context.eventTypes.GENERATION_STARTED) context.eventSource.on(context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
     if (context.eventTypes.GENERATION_ENDED) context.eventSource.on(context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
-    if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
+    if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleStopped);
     if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
     if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
     state.subscribed = true;
@@ -9436,6 +9499,7 @@ async function handleChatCompletionPromptReady(eventData) {
 
     if (!context) return;
 
+    const runId = state.activeRunId;
 
 
     try {
@@ -9465,6 +9529,7 @@ async function handleChatCompletionPromptReady(eventData) {
             sanitizeFinalPromptHistory(eventData.chat);
             markNextNarratorRequestThinkingDisabled();
             await waitForStoryEngineModelCallSpacing(state.narratorDepthReplay?.spacingLabel || 'narrator model call');
+            if (!isCurrentStoryEngineRun(runId)) return;
             clearAllProgress();
             return;
         }
@@ -9502,6 +9567,8 @@ async function handleChatCompletionPromptReady(eventData) {
             trackerSnapshot,
 
         );
+
+        if (!isCurrentStoryEngineRun(runId) || !state.pendingGeneration) return;
 
         applyPlayerCoreStatsOverride(semanticLedger, context);
 
@@ -9556,6 +9623,7 @@ async function handleChatCompletionPromptReady(eventData) {
         abortGenerationAfterPromptReady(context);
         scheduleNarratorDepthReplay();
     } catch (error) {
+        if (!isCurrentStoryEngineRun(runId)) return;
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
         state.narratorThinkingDisablePending = false;
@@ -9570,11 +9638,13 @@ async function handleChatCompletionPromptReady(eventData) {
 
     } finally {
 
-        state.runningSemanticPass = false;
+        if (state.activeRunId === runId || state.activeRunId == null) {
+            state.runningSemanticPass = false;
 
-        state.activeRunId = null;
+            state.activeRunId = null;
 
-        state.pendingGeneration = null;
+            state.pendingGeneration = null;
+        }
 
     }
 
@@ -9635,6 +9705,7 @@ function replacePromptWithAbortNotice(chat, error) {
 function abortGenerationAfterPromptReady(context) {
 
     try {
+        markInternalGenerationStop();
 
         if (typeof context?.stopGeneration === 'function') {
 
@@ -9691,7 +9762,7 @@ export function onDisable() {
         if (context.eventTypes.CHAT_CREATED) removeEventHandler(context, context.eventTypes.CHAT_CREATED, handleChatChanged);
         if (context.eventTypes.GENERATION_STARTED) removeEventHandler(context, context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
         if (context.eventTypes.GENERATION_ENDED) removeEventHandler(context, context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
-        if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
+        if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleStopped);
         if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
         if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
         state.subscribed = false;
