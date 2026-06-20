@@ -201,13 +201,20 @@ const NAME_STYLE_OPTIONS = Object.freeze([
 
 const DEFAULT_EXPLORATION_STYLE_PROMPT = String.raw`In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use concrete environmental detail to make the current place legible: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
 
-Notice the details that matter: clothing, tools, weapons, posture, trade signs, worn surfaces, broken objects, rank markers, mud, blood, smoke, light, crowd movement, and how people react to pressure. Description should reveal place, mood, danger, status, attraction, tension, intent, fatigue, confidence, discomfort, hesitation, control, or available choices.
+Notice the details that matter: clothing, tools, weapons, posture, trade signs, worn surfaces, broken objects, rank markers, mud, blood, smoke, light, crowd movement, and how people react to pressure.
 
 Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`;
 
-const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`During dialogue or conversation, keep the narration close to the participants and their interaction: what is said, how it is said, what is dodged, and what is left unsaid.
+const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`ACTION-BEAT DIALOGUE:
+Write dialogue naturally. Characters may speak while moving, handling objects, adjusting clothing, changing position, using the environment, or making ordinary visible gestures.
 
-Environmental detail within dialogue or conversation belongs only when it is directly relevant to the ongoing interaction: when a character uses it, reacts to it, or when it changes the pressure of the exchange.
+Keep the narrative lens close to the active participants and the immediate exchange.
+
+Physical behavior during dialogue should feel natural to the moment and directly belong to the ongoing turn, rather than reading like decorative filler or a stacked sequence of tells.
+
+Environmental or object interaction belongs only when a character is actively using it, reacting to it, or when it materially affects the exchange.
+
+Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary. Observable behavior only.
 `;
 
 const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
@@ -223,7 +230,7 @@ Let intimate scenes linger when the scene supports it. Capture shifting position
 Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, exposure, or physical intimacy when the scene supports sustained detail.`;
 
 const DEFAULT_WRITING_STYLE_REMINDER_PROMPT = String.raw`FINAL WRITING STYLE REMINDER:
-Write narration with the density and clarity of a skilled novelist while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with rich environmental detail; dialogue should stay close to the participants and their exchange, using environmental detail only when it is directly relevant to the interaction; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
+Write clear, grounded narration while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with concrete environmental detail; dialogue should stay close to the active participants and immediate exchange, using observable behavior only and object or environmental interaction only when a character is actively using it, reacting to it, or when it materially affects the exchange; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
 const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
 Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
 
@@ -361,23 +368,31 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: OBSERVABLE-CHARACTER-STATE
 
     mandate:
-      Render character state through behaviorism: observable behavior and physical displacement.
-      Narrate behavior as tangible, external action that could be noticed by someone present in the scene, not as abstract emotional cueing.
+      Render character state only through observable behavior and physical displacement that can be directly witnessed by someone physically present in the scene.
+      Narrate only tangible, external action.
 
     hardLimit:
-      - Do not use emotion labels, canned body-language shorthand, autonomic emotional tropes, or repeated micro-gestures as substitutes for meaningful behavior.
-      - Never use blushing, flushing, reddening, paling, or knuckle-whitening as emotional shorthand.
+      - Do not name internal, emotional, or psychological states.
+      - Do not use subtext labels, interpretive commentary, or inferred inner states.
+      - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
+      - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts.
   }
 
   denotativePhysicality(response, context): {
     policy: LITERAL-PHYSICAL-PROSE
 
     mandate:
-      Strict literalism: keep prose physically clear and grounded in direct scene evidence.
-      Use literal language when describing scenes. Replace figurative shortcuts with concrete physical description only when clarity requires it.
+      Keep prose literal, physically clear, and grounded only in what can be directly perceived in the scene.
+      Describe what is physically there, what physically happens, and what can be physically observed.
 
     hardLimit:
-      - Do not use metaphor, simile, personification, emotional physics, or decorative abstraction when it turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
+      - No metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.
+      - Rooms do not breathe.
+      - Silence does not stretch.
+      - Words do not hang, land, hit, cut, or fall flat.
+      - Tension does not coil, thicken, or hum.
+      - Air, darkness, mood, and atmosphere do not act like living presences.
+      - If a line depends on figurative language to communicate mood or meaning, it is noncompliant and must be rewritten as literal physical description.
 
     example:
       Good: The room falls quiet except for rain ticking against the shutters. Seraphina keeps her hand on the doorframe, fingers pressed into the wood, and does not step aside.

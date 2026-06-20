@@ -446,7 +446,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
 }
 
 const DEFAULT_FINAL_WRITING_STYLE_REMINDER = String.raw`FINAL WRITING STYLE REMINDER:
-Write narration with the density and clarity of a skilled novelist while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with rich environmental detail; dialogue should stay close to the participants and their exchange, using environmental detail only when it is directly relevant to the interaction; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, agency for {{user}}, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
+Write clear, grounded narration while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with concrete environmental detail; dialogue should stay close to the active participants and immediate exchange, using observable behavior only and object or environmental interaction only when a character is actively using it, reacting to it, or when it materially affects the exchange; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, agency for {{user}}, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
 
 
 function renderFinalWritingStyleReminder(options = {}) {
@@ -493,13 +493,13 @@ hardLimit: Do not write {{user}}'s speech, thoughts, feelings, choices, or volun
 
 behaviorism:
 Execute behaviorism(response, context).
-mandate: Render character state through observable behavior and physical displacement.
-hardLimit: Do not use emotion labels, canned body-language shorthand, or repeated micro-gestures.
+mandate: Render character state only through directly witnessable behavior and physical displacement.
+hardLimit: No internal states, subtext labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, or canned emotional shorthand.
 
 denotativePhysicality:
 Execute denotativePhysicality(response, context).
-mandate: Keep prose literal, physically clear, and grounded.
-hardLimit: Do not use metaphor, personification, or decorative abstraction.
+mandate: Keep prose literal, physically clear, and directly perceivable.
+hardLimit: No figurative language. Rooms do not breathe. Silence does not stretch. Words do not hang, land, hit, cut, or fall flat. Rewrite any figurative line as literal physical description.
 
 inanimateObjectivity:
 Execute inanimateObjectivity(response, context).
