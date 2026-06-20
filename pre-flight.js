@@ -397,7 +397,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         prompt,
         '',
         'openingBeat:',
-        'This is the first playable scene beat. Introduce {{user}}\'s immediate external surroundings. Do not describe {{user}}\'s body, appearance, actions, awakening, reactions, or self-discovery.',
+        'This is the first playable scene of an isekai adventure. Introduce {{user}}\'s immediate external surroundings as the aftermath of a specific crossing. Do not describe {{user}}\'s body, appearance, actions, awakening, reactions, or self-discovery.',
         '',
         '#2 - PROSE RULES',
         'Execute renderControlEngine(input) as a hard constraint on the response.',
