@@ -155,7 +155,7 @@ const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
     'Sci-fi': 'Start with a short playable opening scene that clearly belongs to science fiction. Let the genre show through concrete surroundings, visible pressure, technology, alien or future context, artificial intelligence, corporate or institutional systems, exploration, technical danger, or other immediate scene evidence.',
     Modern: 'Start with a short playable opening scene that clearly belongs to a contemporary real-world or near-real-world setting. Let the genre show through concrete surroundings, visible pressure, ordinary technology, public life, work, school, travel, money, crime, family, community, or other immediate scene evidence.',
     'Slice of Life': 'Start with a short playable opening scene that clearly belongs to slice of life. Let the genre show through concrete surroundings, routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or other immediate scene evidence.',
-    Isekai: 'Start with a short playable opening scene that clearly belongs to isekai. Begin with {{user}}\'s final moments on Earth, then their arrival in the new world. The final Earth moment must be brief, concrete, external, and no more than one short paragraph. Before transition, {{user}} was human in their previous life, regardless of their approved new race/body. Do not decide whether {{user}} remembers, forgets, understands, recognizes, or has processed the transition. Do not summarize {{user}}\'s life, memories, personality, skills, inventory, or biography. Move quickly to the first playable moment in the new world. Avoid overused openings: being alone in a forest as the opening beat; being chased or hunted immediately.',
+    Isekai: 'Start with a short playable opening that clearly belongs to the isekai genre. Narrate {{user}}\'s final moments on Earth first. This final moment should be brief, concrete, external, and no more than one short paragraph.',
     'Urban Fantasy': 'Start with a short playable opening scene that clearly belongs to urban fantasy. Let the genre show through concrete surroundings where ordinary life and supernatural pressure occupy the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or other immediate scene evidence.',
     Cyberpunk: 'Start with a short playable opening scene that clearly belongs to cyberpunk. Let the genre show through concrete surroundings, visible pressure, technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity.',
     'Post-Apocalyptic': 'Start with a short playable opening scene that clearly belongs to life after collapse. Let the genre show through concrete surroundings, visible pressure, scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, moral pressure, or other immediate scene evidence.',
@@ -167,20 +167,20 @@ const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
     'Wuxia / Xianxia': 'Start with a short playable opening scene that clearly belongs to martial or cultivation fiction. Let the genre show through concrete surroundings, visible pressure, honor, danger, rivalry, spiritual pressure, sect or clan influence, debt, beasts, duels, cultivation, immortal politics, or other immediate scene evidence.',
 });
 const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`OPENING CONTRACT:
-Keep the opening short: 180-350 words.
+Keep the opening short: 150-200 words.
 
-Narrate only what surrounds {{user}}:
-environment, light, weather, sound, visible movement, nearby people, immediate pressure, danger, opportunity, or point of interest.
+Narrate ONLY what surrounds {{user}}.
+Narrate ONLY what {{user}} can perceive externally.
 
-Do not narrate or describe:
-{{user}}'s body, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.
+Do NOT narrate:
+{{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.
+{{user}} actions such as "you push yourself up" or "you open your eyes."
 
 Do not summarize the character sheet, biography, skills, past, goals, personality, inventory, powers, or private history.
 
 Do not explain the world. Do not summarize lore. Let the scene imply the genre.
 
-End at the first concrete moment where {{user}} can act.
-The scene is set. {{user}} discovers themselves through play.`;
+End at the first concrete moment where {{user}} can act.`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
@@ -1455,14 +1455,14 @@ function renderSettingsPanel() {
 
                     <section class="spe-settings-section" data-spe-settings-step="tracker">
                         <span class="spe-settings-kicker">4. After final prose</span>
-                        <h4 class="spe-settings-title">Tracker Update</h4>
-                        <small class="spe-settings-description">Updates the visible tracker from the final narration text after Prose Guard finishes or is skipped.</small>
+                        <h4 class="spe-settings-title">Visible Tracker</h4>
+                        <small class="spe-settings-description">Shows or hides the visible tracker widget. Hidden tracker state still updates after narration.</small>
                         <div class="spe-settings-body">
                             <label class="checkbox_label flexNoGap">
                                 <input id="structured_preflight_post_tracker_enabled" type="checkbox">
-                                <span>Enable post-narration tracker update</span>
+                                <span>Show visible tracker</span>
                             </label>
-                            <small class="spe-settings-note">Disable for compatibility with other tracker extensions.</small>
+                            <small class="spe-settings-note">Hide the tracker UI without affecting hidden tracker updates.</small>
                         </div>
                     </section>
 
@@ -8435,7 +8435,7 @@ function sanitizeProseGuardResponse(raw, fallbackText) {
 }
 
 function canUseCombinedPostNarrationPass(settings = getSettings()) {
-    if (settings.postNarrationProseGuardEnabled === false || settings.postNarrationTrackerEnabled === false) return false;
+    if (settings.postNarrationProseGuardEnabled === false) return false;
     return true;
 }
 
@@ -8897,7 +8897,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         let trackerDeltaWarning = null;
         const settings = getSettings();
         const proseGuardEnabled = settings.postNarrationProseGuardEnabled !== false;
-        const trackerEnabled = settings.postNarrationTrackerEnabled !== false;
         const root = getTrackerRoot(context);
         const combinedPostPassEnabled = Boolean(narrationText && root && pendingRun && canUseCombinedPostNarrationPass(settings));
         let combinedTrackerDelta = null;
@@ -8969,48 +8968,40 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 }
             }
 
-            if (trackerEnabled) {
+            try {
 
-                try {
+                let postNarrationDelta = combinedTrackerDelta;
+                if (!postNarrationDelta) {
+                    const trackerRaw = await requestPostNarrationTrackerDelta({
 
-                    let postNarrationDelta = combinedTrackerDelta;
-                    if (!postNarrationDelta) {
-                        const trackerRaw = await requestPostNarrationTrackerDelta({
+                        pendingRun,
 
-                            pendingRun,
-
-                            messageKey,
-
-                            narrationText,
-
-                            trackerDisplaySnapshot,
-
-                        });
-                        const trackerDeltaText = extractTrackerDeltaText(trackerRaw) || String(trackerRaw || '');
-                        postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
-                    }
-
-                    const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
-
-                    trackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, clampedTrackerDelta, {
                         messageKey,
-                        latestUserText: pendingRun.latestUserText,
-                        assistantText: narrationText,
-                        beforeNpcs: pendingRun.trackerBefore,
-                        userKnowledgeBefore: pendingRun.userKnowledgeBefore,
-                        context,
+
+                        narrationText,
+
+                        trackerDisplaySnapshot,
+
                     });
-                } catch (error) {
-
-                    trackerDeltaWarning = error instanceof Error ? error.message : String(error);
-
-                    console.warn(`[${EXTENSION_NAME}] post-narration tracker update failed; keeping mechanical tracker snapshot.`, error);
-
+                    const trackerDeltaText = extractTrackerDeltaText(trackerRaw) || String(trackerRaw || '');
+                    postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
                 }
 
-            } else {
+                const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
 
-                trackerDeltaWarning = 'Post-narration tracker update disabled by settings.';
+                trackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, clampedTrackerDelta, {
+                    messageKey,
+                    latestUserText: pendingRun.latestUserText,
+                    assistantText: narrationText,
+                    beforeNpcs: pendingRun.trackerBefore,
+                    userKnowledgeBefore: pendingRun.userKnowledgeBefore,
+                    context,
+                });
+            } catch (error) {
+
+                trackerDeltaWarning = error instanceof Error ? error.message : String(error);
+
+                console.warn(`[${EXTENSION_NAME}] post-narration tracker update failed; keeping mechanical tracker snapshot.`, error);
 
             }
 
@@ -9242,10 +9233,7 @@ function handleGenerationLifecycleEnd() {
     if (!state.pendingRun) {
         releaseProseGuardDisplayIntercept({ restore: true });
     } else if (!state.pendingRunCleanupTimer) {
-        const settings = getSettings();
-        if (settings.postNarrationTrackerEnabled !== false || settings.postNarrationProseGuardEnabled !== false) {
-            setChatInputLocked(true, 'Finalizing narration...');
-        }
+        setChatInputLocked(true, 'Finalizing narration...');
         state.pendingRunCleanupTimer = setTimeout(() => {
             state.pendingRunCleanupTimer = null;
             if (!state.pendingRun) return;

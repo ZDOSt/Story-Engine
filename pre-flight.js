@@ -397,7 +397,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         prompt,
         '',
         'openingBeat:',
-        'This is the first playable scene beat. Establish immediate external surroundings, visible pressure, nearby NPC/world activity, concrete sounds, access, obstacles, danger, opportunity, or social context according to adventureIntro. End at a natural point where control returns to {{user}}.',
+        'This is the first playable scene beat. Introduce {{user}}\'s immediate external surroundings. Do not describe {{user}}\'s body, appearance, actions, awakening, reactions, or self-discovery.',
         '',
         '#2 - PROSE RULES',
         'Execute renderControlEngine(input) as a hard constraint on the response.',
