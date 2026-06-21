@@ -397,7 +397,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         prompt,
         '',
         'openingBeat:',
-        'This is the first playable scene of an isekai adventure. Introduce {{user}}\'s immediate external surroundings as the aftermath of a specific crossing. Do not describe {{user}}\'s body, appearance, actions, awakening, reactions, or self-discovery.',
+        'This is the first playable scene of an isekai adventure. CAR CRASHES AS DEATH MECHANIC IS FORBIDDEN. DO NOT FUCKING DO IT. Come up with your own UNIQUE introduction. After the transfer, introduce {{user}}\'s immediate external surroundings as the aftermath of a specific crossing. Do not describe {{user}}\'s body, appearance, actions, awakening, reactions, or self-discovery. Maximum length: 200 words.',
         '',
         '#2 - PROSE RULES',
         'Execute renderControlEngine(input) as a hard constraint on the response.',
