@@ -296,9 +296,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     mandate:
       Narrate in strict linear order. Begin with the immediate consequence of {{user}}'s latest input.
 
-    hardLimit:
-      - Do NOT echo, summarize, recap, paraphrase, or repeat any part of {{user}}'s actions or dialogue.
-      - Do NOT jump ahead, rewind, or insert undeclared intermediate actions.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do NOT echo, summarize, recap, paraphrase, or repeat any part of {{user}}'s actions or dialogue.
+        - Do NOT jump ahead, rewind, or insert undeclared intermediate actions.
   }
 
   characterTurnPacing(response, context): {
@@ -313,9 +314,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     npcToNpcException:
       If two NPCs directly interact, allow one brief NPC A -> NPC B -> NPC A exchange, then stop. Each NPC turn in that exchange still obeys the same one-paragraph limit.
 
-    hardLimit:
-      - Do not add repeated body language or extra micro-actions.
-      - Do not give the same NPC a second paragraph, second turn, follow-up clarification, repeated prompt, self-answer, exposition dump, or extra chain of micro-actions outside the stated exception.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not add repeated body language or extra micro-actions.
+        - Do not give the same NPC a second paragraph, second turn, follow-up clarification, repeated prompt, self-answer, exposition dump, or extra chain of micro-actions outside the stated exception.
   }
 
   embodiedPerception(response, context): {
@@ -328,8 +330,9 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Prioritize sight, hearing, and touch.
       - Include smell and taste ONLY when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.
 
-    hardLimit:
-      - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
   }
 
   strictEpistemology(response, context): {
@@ -339,9 +342,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Information remains locked until earned through direct sensory evidence, dialogue, readable text, or previously established scene fact.
       Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.
 
-    hardLimit:
-      - Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.
-      - Do not narrate {{user}} cognition, perception, or internal state.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.
+        - Do not narrate {{user}} cognition, perception, or internal state.
   }
 
   diegeticPhysicality(response, context): {
@@ -351,9 +355,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.
       Show what changes in the world: force, light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, or environmental reaction.
 
-    hardLimit:
-      - Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.
-      - Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.
+        - Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
   }
 
   agencySeparation(response, input, context): {
@@ -363,9 +368,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       The narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist.
       Render {{user}}'s voluntary actions only when the latest input explicitly declares them. External physical forces may affect {{user}} when concrete and proportional.
 
-    hardLimit:
-      - Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.
-      - Do not interpret, assume, or complete {{user}}'s intent.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.
+        - Do not interpret, assume, or complete {{user}}'s intent.
   }
 
   behaviorism(response, context): {
@@ -375,11 +381,12 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Render character state only through observable behavior and physical displacement that can be directly witnessed by someone physically present in the scene.
       Narrate only tangible, external action.
 
-    hardLimit:
-      - Do not name internal, emotional, or psychological states.
-      - Do not use subtext labels, interpretive commentary, or inferred inner states.
-      - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
-      - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not name internal, emotional, or psychological states.
+        - Do not use subtext labels, interpretive commentary, or inferred inner states.
+        - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
+        - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts.
   }
 
   denotativePhysicality(response, context): {
@@ -389,14 +396,15 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Keep prose literal, physically clear, and grounded only in what can be directly perceived in the scene.
       Describe what is physically there, what physically happens, and what can be physically observed.
 
-    hardLimit:
-      - No metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.
-      - Rooms do not breathe.
-      - Silence does not stretch.
-      - Words do not hang, land, hit, cut, or fall flat.
-      - Tension does not coil, thicken, or hum.
-      - Air, darkness, mood, and atmosphere do not act like living presences.
-      - If a line depends on figurative language to communicate mood or meaning, it is noncompliant and must be rewritten as literal physical description.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - No metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.
+        - Rooms do not breathe.
+        - Silence does not stretch.
+        - Words do not hang, land, hit, cut, or fall flat.
+        - Tension does not coil, thicken, or hum.
+        - Air, darkness, mood, and atmosphere do not act like living presences.
+        - If a line depends on figurative language to communicate mood or meaning, it is noncompliant and must be rewritten as literal physical description.
 
     example:
       Good: The room falls quiet except for rain ticking against the shutters. Seraphina keeps her hand on the doorframe, fingers pressed into the wood, and does not step aside.
@@ -410,9 +418,10 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Give agency only to beings, forces, mechanisms, and processes capable of physical action.
       Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They do not want, watch, wait, threaten, breathe, intend, or remember.
 
-    hardLimit:
-      - Reject Pathetic Fallacy.
-      - Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Reject Pathetic Fallacy.
+        - Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
   }
 
   hypotacticSceneBeats(response, context): {
@@ -421,10 +430,11 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     mandate:
       Hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose.
 
-    hardLimit:
-      - Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons.
-      - Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
-      - Do not use stock quietness shorthand as an emotional crutch.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons.
+        - Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
+        - Do not use stock quietness shorthand as an emotional crutch.
 
     example:
       Good: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
