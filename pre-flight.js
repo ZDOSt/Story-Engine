@@ -455,8 +455,11 @@ function renderControlEngineNarrativeContract() {
 
 activeHandoff:
 Execute activeHandoff(response, context).
-mandate: End on a natural beat that {{user}} can immediately respond to.
-hardLimit: Do not continue past the handoff beat. Do not end on explicit waiting, staring, mood-only silence, or all-eyes-on-user framing.
+mandate: End on a natural beat that {{user}} can immediately respond to. (Dialogue or action directed at {{user}}, or a visible scene change that requires a response)
+NEVER:
+- Continue past the handoff beat
+- End on explicit waiting, staring, silence or all-eyes-on-user framing.
+- Ask or prompt {{user}} to take action.
 
 linearChronology:
 Execute linearChronology(response, input, context).
