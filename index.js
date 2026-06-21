@@ -79,7 +79,7 @@ const PROGRESSION_VERSION = 1;
 const PROGRESSION_CARD_ID = 'structured_preflight_progression_card';
 const PROGRESSION_STYLE_ID = 'structured_preflight_progression_styles';
 const PROGRESSION_REQUIRED_ACCOMPLISHMENTS = 3;
-const PROGRESSION_REQUIRED_ABILITIES = 2;
+const PROGRESSION_REQUIRED_ABILITIES = 1;
 const PROGRESSION_MAX_STAT = 10;
 const PROGRESSION_ABILITY_OPTIONS = 3;
 const PROGRESSION_SPELL_OPTIONS = 3;
@@ -271,6 +271,12 @@ She set the glass down.
 Formatting violations are invalid. Repair formatting before output.`;
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
 
+  applicationContract(response, input, context): {
+    mandate:
+      Execute every function in this contract as mandatory narration constraints before writing visible output.
+      The final response must satisfy all active gates: embodied sensory grounding, diegetic ability rendering, strict POV and no user puppeting, observable behavior instead of emotion labels, grounded physical prose, cohesive scene beats, bounded character turns, active handoff control, and linear chronology.
+  }
+
   activeHandoff(response, context): {
     policy: ACTIVE-HANDOFF
 
@@ -288,18 +294,6 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Prompt the {{user}} to respond or ask meta questions (e.g., "what do you do?", "the ball is in your court")
         - End on explicit waiting, staring, mood-only silence, or all-eyes-on-user framing (e.g., "She waits", "She looks at you, expectantly", "Everyone is silent, waiting")
         - Narrate filler background, ambient, or environmental details that are irrelevant to the ongoing interaction.
-  }
-
-  linearChronology(response, input, context): {
-    policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
-
-    mandate:
-      Narrate in strict linear order. Begin with the immediate consequence of {{user}}'s latest input.
-
-    ABSOLUTELY-FORBIDDEN:
-      NEVER DO ANY OF THE FOLLOWING:
-        - Do NOT echo, summarize, recap, paraphrase, or repeat any part of {{user}}'s actions or dialogue.
-        - Do NOT jump ahead, rewind, or insert undeclared intermediate actions.
   }
 
   characterTurnPacing(response, context): {
@@ -320,45 +314,33 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not give the same NPC a second paragraph, second turn, follow-up clarification, repeated prompt, self-answer, exposition dump, or extra chain of micro-actions outside the stated exception.
   }
 
-  embodiedPerception(response, context): {
-    policy: EMBODIED-NARRATION
+  hypotacticSceneBeats(response, context): {
+    policy: COHESIVE-ACTION-RESULT
 
     mandate:
-      Narrate the scene as {{user}} would physically perceive it from their position, using concrete physical evidence.
-
-    sensoryHierarchy:
-      - Prioritize sight, hearing, and touch.
-      - Include smell and taste ONLY when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.
+      Hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose.
 
     ABSOLUTELY-FORBIDDEN:
       NEVER DO ANY OF THE FOLLOWING:
-        - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
+        - Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons.
+        - Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
+        - Do not use stock quietness shorthand as an emotional crutch.
+
+    example:
+      Good: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
+      Bad: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
   }
 
-  strictEpistemology(response, context): {
-    policy: EARNED-INFORMATION-ONLY
+  linearChronology(response, input, context): {
+    policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
 
     mandate:
-      Information remains locked until earned through direct sensory evidence, dialogue, readable text, or previously established scene fact.
-      Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.
+      Narrate in strict linear order. Begin with the immediate consequence of {{user}}'s latest input.
 
     ABSOLUTELY-FORBIDDEN:
       NEVER DO ANY OF THE FOLLOWING:
-        - Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.
-        - Do not narrate {{user}} cognition, perception, or internal state.
-  }
-
-  diegeticPhysicality(response, context): {
-    policy: WORLD-EFFECTS-NOT-SYSTEM-LABELS
-
-    mandate:
-      Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.
-      Show what changes in the world: force, light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, or environmental reaction.
-
-    ABSOLUTELY-FORBIDDEN:
-      NEVER DO ANY OF THE FOLLOWING:
-        - Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.
-        - Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
+        - Do NOT echo, summarize, recap, paraphrase, or repeat any part of {{user}}'s actions or dialogue.
+        - Do NOT jump ahead, rewind, or insert undeclared intermediate actions.
   }
 
   agencySeparation(response, input, context): {
@@ -387,6 +369,21 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not use subtext labels, interpretive commentary, or inferred inner states.
         - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
         - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts.
+  }
+
+  embodiedPerception(response, context): {
+    policy: EMBODIED-NARRATION
+
+    mandate:
+      Narrate the scene as {{user}} would physically perceive it from their position, using concrete physical evidence.
+
+    sensoryHierarchy:
+      - Prioritize sight, hearing, and touch.
+      - Include smell and taste ONLY when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.
+
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
   }
 
   denotativePhysicality(response, context): {
@@ -424,27 +421,30 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
   }
 
-  hypotacticSceneBeats(response, context): {
-    policy: COHESIVE-ACTION-RESULT
+  strictEpistemology(response, context): {
+    policy: EARNED-INFORMATION-ONLY
 
     mandate:
-      Hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose.
+      Information remains locked until earned through direct sensory evidence, dialogue, readable text, or previously established scene fact.
+      Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.
 
     ABSOLUTELY-FORBIDDEN:
       NEVER DO ANY OF THE FOLLOWING:
-        - Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons.
-        - Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
-        - Do not use stock quietness shorthand as an emotional crutch.
-
-    example:
-      Good: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
-      Bad: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
+        - Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.
+        - Do not narrate {{user}} cognition, perception, or internal state.
   }
 
-  applicationContract(response, input, context): {
+  diegeticPhysicality(response, context): {
+    policy: WORLD-EFFECTS-NOT-SYSTEM-LABELS
+
     mandate:
-      Execute every function above as mandatory narration constraints before writing visible output.
-      The final response must satisfy all active gates: embodied sensory grounding, diegetic ability rendering, strict POV and no user puppeting, observable behavior instead of emotion labels, grounded physical prose, cohesive scene beats, bounded character turns, active handoff control, and linear chronology.
+      Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.
+      Show what changes in the world: force, light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, or environmental reaction.
+
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.
+        - Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
   }
 }`;
 const DEFAULT_SETTINGS = Object.freeze({
@@ -7198,9 +7198,9 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
             content:
                 'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
                 'Abilities are activated non-spell fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing racial/body traits, abilities, spells, genre, stats, and recent critical accomplishments. ' +
-                'Each option must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, perception, communication, traversal, transformation, environmental interaction, or supernatural body use. ' +
+                'Each option must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, communication, traversal, transformation, environmental interaction, concealment, storage, or supernatural body use. ' +
                 'Each ability must also include a short, natural activation cue in a separate abilityCue field. Keep it brief and scene-natural; it may be physical, mental, or mixed, but should not be verbose or ceremonial. ' +
-                'Good ability shapes include Shadow Step, Voice Projection, Telepathy, Wall Cling, Heat Sight, Mist Form, Amphibious Shift, or a special activated natural-weapon effect beyond ordinary anatomy. ' +
+                'Good ability shapes include Shadow Step, Teleport, Invisibility, Voice Projection, Telepathy, Wall Cling, Mist Form, Dimensional Pocket/Storage, or a special activated natural-weapon effect beyond ordinary anatomy. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. ' +
                 'Do not return spells, passive traits, racial/body facts, mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, intimidation aura, surgery skill, toughness, resistance, immunity, personality flavor, lore labels, or background-only qualities. ' +
                 'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed escape, guaranteed control, automatic protection, or automatic solutions. ' +
                 'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, or dangerous use still requires normal scene resolution. ' +
@@ -7649,7 +7649,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
                 '# NATURAL WEAPONS: concrete offensive body parts only, if any. Write None when the race/body has no clear natural weapon. Examples: horns, claws, fangs, talons, tusks, stinger, crushing tail, biting jaws. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
-                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell abilities. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, perception, communication, traversal, transformation, environmental interaction, or supernatural body use. Good ability shapes include Shadow Step, Voice Projection, Telepathy, Wall Cling, Heat Sight, Mist Form, Amphibious Shift, or a special activated natural-weapon effect beyond ordinary anatomy such as venom, paralysis, extending bone blades, electrified bite, or supernatural claws. Each ability must also include a separate abilityCue field with a short, natural activation cue. Keep it brief and scene-natural; it may be physical, mental, or mixed, but should not be verbose or ceremonial. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
+                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, communication, traversal, transformation, environmental interaction, concealment, storage, or supernatural body use. Good ability shapes include Shadow Step, Teleport, Invisibility, Voice Projection, Telepathy, Wall Cling, Mist Form, Dimensional Pocket/Storage, or a special activated natural-weapon effect beyond ordinary anatomy such as venom, paralysis, extending bone blades, electrified bite, or supernatural claws. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. Each ability must also include a separate abilityCue field with a short, natural activation cue. Keep it brief and scene-natural; it may be physical, mental, or mixed, but should not be verbose or ceremonial. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
                 `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Allowed spell categories are offensive magic, practical utility magic, traversal, environmental manipulation, and healing or restoration short of resurrection. Each spell must also include a separate spellCue field with a short, natural activation cue. Keep it brief and scene-natural; it may be physical, mental, or mixed, but should not be verbose or ceremonial. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
                 '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
                 '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
