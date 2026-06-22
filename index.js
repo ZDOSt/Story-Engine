@@ -3353,17 +3353,15 @@ function findLastNonBlankLine(lines, start, end) {
 function formatProgressionAbility(option) {
     const name = cleanAbilityName(option?.name);
     const description = String(option?.description || '').replace(/\s+/g, ' ').trim();
-    const cue = String(option?.cue || '').replace(/\s+/g, ' ').trim();
-    if (!name || !description || !cue) throw new Error('Generated ability option is incomplete.');
-    return `**${name}**\n- ${description}\n- abilityCue: ${cue}`;
+    if (!name || !description) throw new Error('Generated ability option is incomplete.');
+    return `**${name}**\n- ${description}`;
 }
 
 function formatProgressionSpell(option) {
     const name = cleanAbilityName(option?.name);
     const description = String(option?.description || '').replace(/\s+/g, ' ').trim();
-    const cue = String(option?.cue || '').replace(/\s+/g, ' ').trim();
-    if (!name || !description || !cue) throw new Error('Generated spell option is incomplete.');
-    return `**${name}**\n- ${description}\n- spellCue: ${cue}`;
+    if (!name || !description) throw new Error('Generated spell option is incomplete.');
+    return `**${name}**\n- ${description}`;
 }
 
 function replaceAbilityInPersona(personaText, abilityIndex, option) {
@@ -6357,7 +6355,6 @@ function buildProgressionCardHtml(root, context = getContext()) {
                 <div class="spe-progression-option">
                     <b>${escapeHtml(option.name || `Option ${index + 1}`)}</b>
                     <div>${escapeHtml(option.description || '')}</div>
-                    <div><small><b>Cue:</b> ${escapeHtml(option.cue || '')}</small></div>
                     <div class="spe-progression-actions">
                         <button class="menu_button" data-spe-progression-action="choose-ability" data-option-index="${index}">Choose This Ability</button>
                     </div>
@@ -6375,7 +6372,6 @@ function buildProgressionCardHtml(root, context = getContext()) {
                 <div class="spe-progression-option">
                     <b>${escapeHtml(option.name || `Spell ${index + 1}`)}</b>
                     <div>${escapeHtml(option.description || '')}</div>
-                    <div><small><b>Cue:</b> ${escapeHtml(option.cue || '')}</small></div>
                     <div class="spe-progression-actions">
                         <button class="menu_button" data-spe-progression-action="choose-spell" data-option-index="${index}">Learn This Spell</button>
                     </div>
@@ -7249,7 +7245,6 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
                 'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
                 'Abilities are activated non-spell fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing racial/body traits, abilities, spells, genre, stats, and recent critical accomplishments. ' +
                 'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Each option must be concrete, usable, activated, non-spell, and distinct from ordinary PHY/MND/CHA action mechanics. ' +
-                'Each ability must also include a short, natural activation cue in a separate abilityCue field. Define a specific physical activation cue for this ability. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. ' +
                 'On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. ' +
                 'Do not return spells, passive traits, racial/body facts, mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, intimidation aura, surgery skill, toughness, resistance, immunity, personality flavor, lore labels, or background-only qualities. ' +
                 'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed escape, guaranteed control, automatic protection, or automatic solutions. ' +
@@ -7263,13 +7258,10 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
                 'BEGIN_PROGRESSION_ABILITIES\n' +
                 'Option1Name=short ability name\n' +
                 'Option1Description=one or two sentences, activated non-spell utility permission only, with fictional limits and no mechanics or measurements\n' +
-                'Option1Cue=specific physical cue\n' +
                 'Option2Name=short ability name\n' +
                 'Option2Description=one or two sentences, activated non-spell utility permission only, with fictional limits and no mechanics or measurements\n' +
-                'Option2Cue=specific physical cue\n' +
                 'Option3Name=short ability name\n' +
                 'Option3Description=one or two sentences, activated non-spell utility permission only, with fictional limits and no mechanics or measurements\n' +
-                'Option3Cue=specific physical cue\n' +
                 'END_PROGRESSION_ABILITIES\n\n' +
                 'MODE: SWAP_ABILITY\n' +
                 `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
@@ -7295,7 +7287,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
             content:
                 'You generate concise RPG spell options for a deterministic SillyTavern extension. ' +
                 'Spells are activated magical permissions with one concrete effect. They must fit the character race/body/origin, genre, stats, existing spells, and recent critical accomplishments. ' +
-                'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Each spell must be concrete, usable, activated magical permission with one concrete effect, and genre-fitting. Each spell must also include a short, natural activation cue in a separate spellCue field. Define a specific physical activation cue for this spell. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
+                'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Each spell must be concrete, usable, activated magical permission with one concrete effect, and genre-fitting. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
                 'Do not return passive traits, mundane expertise, personality flavor, lore labels, broad spell schools, magic mastery, resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, or automatic solutions. ' +
                 'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed healing, guaranteed escape, guaranteed control, or automatic solutions. ' +
                 'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, healing, or dangerous use still requires normal scene resolution. ' +
@@ -7308,13 +7300,10 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
                 'BEGIN_PROGRESSION_SPELLS\n' +
                 'Option1Name=short spell name\n' +
                 'Option1Description=one or two sentences, activated magical permission only, with fictional limits and no mechanics or measurements\n' +
-                'Option1Cue=specific physical cue\n' +
                 'Option2Name=short spell name\n' +
                 'Option2Description=one or two sentences, activated magical permission only, with fictional limits and no mechanics or measurements\n' +
-                'Option2Cue=specific physical cue\n' +
                 'Option3Name=short spell name\n' +
                 'Option3Description=one or two sentences, activated magical permission only, with fictional limits and no mechanics or measurements\n' +
-                'Option3Cue=specific physical cue\n' +
                 'END_PROGRESSION_SPELLS\n\n' +
                 'MODE: LEARN_SPELL\n' +
                 `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
@@ -7444,11 +7433,11 @@ function parseProgressionAbilityOptions(raw) {
     const text = extractGeneratedText(raw);
     const fields = {};
     for (const line of text.split(/\r?\n/)) {
-        const match = /^Option([123])(Name|Description|Text|Cue)\s*=\s*(.+)$/i.exec(line.trim());
+        const match = /^Option([123])(Name|Description|Text)\s*=\s*(.+)$/i.exec(line.trim());
         if (!match) continue;
         const index = Number(match[1]) - 1;
         fields[index] = fields[index] || {};
-        const key = match[2].toLowerCase() === 'name' ? 'name' : match[2].toLowerCase() === 'cue' ? 'cue' : 'description';
+        const key = match[2].toLowerCase() === 'name' ? 'name' : 'description';
         fields[index][key] = String(match[3] || '').trim();
     }
     const options = [0, 1, 2].map(index => sanitizeProgressionAbilityOption(fields[index]));
@@ -7468,11 +7457,11 @@ function parseProgressionSpellOptions(raw) {
     const text = extractGeneratedText(raw);
     const fields = {};
     for (const line of text.split(/\r?\n/)) {
-        const match = /^Option([123])(Name|Description|Text|Cue)\s*=\s*(.+)$/i.exec(line.trim());
+        const match = /^Option([123])(Name|Description|Text)\s*=\s*(.+)$/i.exec(line.trim());
         if (!match) continue;
         const index = Number(match[1]) - 1;
         fields[index] = fields[index] || {};
-        const key = match[2].toLowerCase() === 'name' ? 'name' : match[2].toLowerCase() === 'cue' ? 'cue' : 'description';
+        const key = match[2].toLowerCase() === 'name' ? 'name' : 'description';
         fields[index][key] = String(match[3] || '').trim();
     }
     const options = [0, 1, 2].map(index => sanitizeProgressionSpellOption(fields[index]));
@@ -7493,14 +7482,11 @@ function sanitizeProgressionAbilityOption(option) {
     const description = String(option?.description || '')
         .replace(/\s+/g, ' ')
         .trim();
-    const cue = String(option?.cue || '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    if (!name || !description || !cue) return null;
+    if (!name || !description) return null;
     if (hasProgressionMechanicalLanguage(description)) {
         throw new Error(`Generated ability "${name}" included mechanical language.`);
     }
-    return { name, description: clipText(description, 520), cue: clipText(cue, 180) };
+    return { name, description: clipText(description, 520) };
 }
 
 function sanitizeProgressionSpellOption(option) {
@@ -7508,14 +7494,11 @@ function sanitizeProgressionSpellOption(option) {
     const description = String(option?.description || '')
         .replace(/\s+/g, ' ')
         .trim();
-    const cue = String(option?.cue || '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    if (!name || !description || !cue) return null;
+    if (!name || !description) return null;
     if (hasProgressionMechanicalLanguage(description)) {
         throw new Error(`Generated spell "${name}" included mechanical language.`);
     }
-    return { name, description: clipText(description, 520), cue: clipText(cue, 180) };
+    return { name, description: clipText(description, 520) };
 }
 
 function hasProgressionMechanicalLanguage(value) {
@@ -7704,8 +7687,8 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
                 '# NATURAL WEAPONS: concrete offensive body parts only, if any. Write None when the race/body has no clear natural weapon. Examples: horns, claws, fangs, talons, tusks, stinger, crushing tail, biting jaws. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
-                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Keep the ability concrete, usable, and distinct from ordinary PHY/MND/CHA action mechanics. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. Each ability must also include a separate abilityCue field. Define a specific physical activation cue for this ability. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
-                `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Keep the spell concrete, usable, and genre-fitting. Each spell must also include a separate spellCue field. Define a specific physical activation cue for this spell. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
+                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Keep the ability concrete, usable, and distinct from ordinary PHY/MND/CHA action mechanics. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
+                `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Keep the spell concrete, usable, and genre-fitting. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
                 '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
                 '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
         },
@@ -7915,8 +7898,8 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 '# APPEARANCE: preserve explicit appearance facts only, including explicit visible natural weapons/body armaments; otherwise write Not specified.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
                 '# NATURAL WEAPONS: preserve explicit offensive body parts only: claws, fangs, horns, talons, tusks, stinger, crushing tail, biting jaws, or similar built-in offensive anatomy. Do not invent missing natural weapons. Do not preserve passive racial traits, anatomy, senses, body texture, vulnerabilities, vague toughness, resistance, immunity, skill boosts, better-at wording, or mechanical advantages here. If none are explicit, write None.\n' +
-                '# ABILITIES: preserve explicit activated non-spell abilities only. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. Include a separate abilityCue field if one is explicit. Preserve the cue as a specific physical activation cue. If the source text says activation requires clear intent or visualization of the desired effect, keep that requirement; do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Do not preserve mundane expertise, combat techniques, hidden bonuses, passive traits, or broad skill competence as abilities. If none are explicit, write Not specified.\n' +
-                '# SPELLS: preserve explicit spells only, maximum 5. If none are explicit, write None. Preserve healing spells, and include a separate spellCue field if one is explicit. Preserve the cue as a specific physical activation cue. If the source text says activation requires clear intent or visualization of the desired effect, keep that requirement; do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
+                '# ABILITIES: preserve explicit activated non-spell abilities only. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. Do not preserve mundane expertise, combat techniques, hidden bonuses, passive traits, or broad skill competence as abilities. If none are explicit, write Not specified.\n' +
+                '# SPELLS: preserve explicit spells only, maximum 5. If none are explicit, write None. Preserve healing spells, but do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
                 '# INVENTORY: preserve explicit gear/inventory only. Do not list natural weapons or body armaments as inventory, gear, equipment, or held items. If none is explicit, write Not specified.\n' +
                 '# NOTES: preserve all important persona notes, origin facts, limits, fighting style, and secrecy rules.\n\n' +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
