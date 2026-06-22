@@ -4296,6 +4296,33 @@ function uniqueNames(names) {
 }
 
 
+function uniqueStrings(values) {
+
+    const result = [];
+
+    const seen = new Set();
+
+    for (const value of values || []) {
+
+        const text = String(value ?? '').trim();
+
+        if (!text) continue;
+
+        const key = text.toLowerCase();
+
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+
+        result.push(text);
+
+    }
+
+    return result;
+
+}
+
+
 
 function escapeRegExp(value) {
 
