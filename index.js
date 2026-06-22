@@ -3124,6 +3124,7 @@ function buildNewCharacterRollState() {
 
         rerollSkipped: false,
         swapApplied: null,
+        retryNotes: [],
         identity: {
             sex: '',
             genre: 'Fantasy',
@@ -3184,6 +3185,8 @@ function buildPersonaRollState(analysis) {
         rerollSkipped: false,
 
         swapApplied: null,
+
+        retryNotes: [],
 
         personaAnalysis: analysis,
 
@@ -3279,6 +3282,19 @@ function extractPersonaAbilities(personaText) {
 function extractPersonaSpells(personaText) {
     const section = findPersonaSection(personaText, isSpellsSectionHeading);
     return extractPersonaEntriesFromSection(section, 'Spell');
+}
+
+function buildRetryIdeaNotesFromSheetText(sheetText) {
+    const notes = [];
+    for (const entry of extractPersonaAbilities(sheetText)) {
+        const text = clipText(String(entry?.text || entry?.name || '').trim(), 240);
+        if (text) notes.push(`Ability: ${text}`);
+    }
+    for (const entry of extractPersonaSpells(sheetText)) {
+        const text = clipText(String(entry?.text || entry?.name || '').trim(), 240);
+        if (text) notes.push(`Spell: ${text}`);
+    }
+    return uniqueStrings(notes).slice(0, 8);
 }
 
 function extractPersonaEntriesFromSection(section, fallbackLabel = 'Entry') {
@@ -6801,6 +6817,8 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             renderPlayerSetupCard(context);
 
+            root.creator.retryNotes = [];
+
             root.creator.sheetText = await generateExistingPersonaCharacterSheet(root.creator, context);
 
             root.creator.stage = 'review';
@@ -6813,6 +6831,8 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             renderPlayerSetupCard(context);
 
+            root.creator.retryNotes = [];
+
             root.creator.sheetText = await generateNewPlayerCharacterSheet(root.creator, context);
 
             root.creator.stage = 'review';
@@ -6822,6 +6842,8 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
             state.playerSetupBusy = true;
 
             renderPlayerSetupCard(context);
+
+            root.creator.retryNotes = buildRetryIdeaNotesFromSheetText(root.creator.sheetText || root.sheet?.text || '');
 
             root.creator.sheetText = root.creator.flow === 'persona'
 
@@ -7192,15 +7214,16 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
     const replacing = pending?.choice === 'swapAbility'
         ? abilities[Math.max(0, Math.floor(Number(pending.swapAbilityIndex || 0)))]
         : null;
+    const retryNotes = Array.isArray(pending?.retryNotes) ? pending.retryNotes : [];
     return [
         {
             role: 'system',
             content:
                 'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
                 'Abilities are activated non-spell fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing racial/body traits, abilities, spells, genre, stats, and recent critical accomplishments. ' +
-                'Each option must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, communication, traversal, transformation, environmental interaction, concealment, storage, or supernatural body use. ' +
+                'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Each option must be concrete, usable, activated, non-spell, and distinct from ordinary PHY/MND/CHA action mechanics. ' +
                 'Each ability must also include a short, natural activation cue in a separate abilityCue field. Define a specific physical activation cue for this ability. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. ' +
-                'Good ability shapes include Shadow Step, Teleport, Invisibility, Voice Projection, Telepathy, Wall Cling, Mist Form, Dimensional Pocket/Storage, or a special activated natural-weapon effect beyond ordinary anatomy. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. ' +
+                'On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. ' +
                 'Do not return spells, passive traits, racial/body facts, mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, intimidation aura, surgery skill, toughness, resistance, immunity, personality flavor, lore labels, or background-only qualities. ' +
                 'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed escape, guaranteed control, automatic protection, or automatic solutions. ' +
                 'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, or dangerous use still requires normal scene resolution. ' +
@@ -7222,6 +7245,7 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
                 'Option3Cue=specific physical cue\n' +
                 'END_PROGRESSION_ABILITIES\n\n' +
                 'MODE: SWAP_ABILITY\n' +
+                `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `EXISTING ABILITIES:\n${abilities.length ? abilities.map((ability, index) => `${index + 1}. ${ability.text}`).join('\n') : 'none'}\n\n` +
                 `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
@@ -7237,13 +7261,14 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
     const spells = extractPersonaSpells(persona);
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || {};
     const recent = getProgressionRecentAccomplishments(getProgressionRoot(context), pending);
+    const retryNotes = Array.isArray(pending?.retryNotes) ? pending.retryNotes : [];
     return [
         {
             role: 'system',
             content:
                 'You generate concise RPG spell options for a deterministic SillyTavern extension. ' +
                 'Spells are activated magical permissions with one concrete effect. They must fit the character race/body/origin, genre, stats, existing spells, and recent critical accomplishments. ' +
-                'Allowed spell categories: offensive magic, practical utility magic, traversal, environmental manipulation, and healing or restoration short of resurrection. Each spell must also include a short, natural activation cue in a separate spellCue field. Define a specific physical activation cue for this spell. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. ' +
+                'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Each spell must be concrete, usable, activated magical permission with one concrete effect, and genre-fitting. Each spell must also include a short, natural activation cue in a separate spellCue field. Define a specific physical activation cue for this spell. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
                 'Do not return passive traits, mundane expertise, personality flavor, lore labels, broad spell schools, magic mastery, resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, or automatic solutions. ' +
                 'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed healing, guaranteed escape, guaranteed control, or automatic solutions. ' +
                 'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, healing, or dangerous use still requires normal scene resolution. ' +
@@ -7265,6 +7290,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
                 'Option3Cue=specific physical cue\n' +
                 'END_PROGRESSION_SPELLS\n\n' +
                 'MODE: LEARN_SPELL\n' +
+                `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `SPELL LIMIT: current ${spells.length}; maximum ${PROGRESSION_MAX_SPELLS}\n` +
                 `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
@@ -7622,6 +7648,7 @@ function parsePersonaAnalysis(raw) {
 async function generateNewPlayerCharacterSheet(creator, context = getContext()) {
     const stats = normalizeCoreStats(creator.stats || {});
     const identity = creator.identity || {};
+    const retryNotes = Array.isArray(creator.retryNotes) ? creator.retryNotes : [];
     const statInstruction = buildNewCharacterStatInstruction(stats);
     const genreInstruction = buildNewCharacterGenreInstruction(identity);
     const raceInstruction = buildNewCharacterRaceInstruction(identity);
@@ -7644,13 +7671,14 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 'Return only the finished character sheet in markdown. No preface and no questions.\n\n' +
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
                 `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
+                `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 'Required sections:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
                 '# NATURAL WEAPONS: concrete offensive body parts only, if any. Write None when the race/body has no clear natural weapon. Examples: horns, claws, fangs, talons, tusks, stinger, crushing tail, biting jaws. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
-                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, communication, traversal, transformation, environmental interaction, concealment, storage, or supernatural body use. Good ability shapes include Shadow Step, Teleport, Invisibility, Voice Projection, Telepathy, Wall Cling, Mist Form, Dimensional Pocket/Storage, or a special activated natural-weapon effect beyond ordinary anatomy such as venom, paralysis, extending bone blades, electrified bite, or supernatural claws. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. Each ability must also include a separate abilityCue field. Define a specific physical activation cue for this ability. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
-                `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Allowed spell categories are offensive magic, practical utility magic, traversal, environmental manipulation, and healing or restoration short of resurrection. Each spell must also include a separate spellCue field. Define a specific physical activation cue for this spell. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
+                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Keep the ability concrete, usable, and distinct from ordinary PHY/MND/CHA action mechanics. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. Each ability must also include a separate abilityCue field. Define a specific physical activation cue for this ability. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
+                `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Keep the spell concrete, usable, and genre-fitting. Each spell must also include a separate spellCue field. Define a specific physical activation cue for this spell. Also state that activation requires clear intent or visualization of the desired effect. Do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
                 '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
                 '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
         },
@@ -7807,6 +7835,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
     const stats = normalizeCoreStats(creator.stats || {});
 
     const persona = getPersonaText(context);
+    const retryNotes = Array.isArray(creator.retryNotes) ? creator.retryNotes : [];
 
     if (!persona) {
 
@@ -7863,6 +7892,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 '# SPELLS: preserve explicit spells only, maximum 5. If none are explicit, write None. Preserve healing spells, and include a separate spellCue field if one is explicit. Preserve the cue as a specific physical activation cue. If the source text says activation requires clear intent or visualization of the desired effect, keep that requirement; do not invent the visualization itself. Prefer an unusual or distinctive physical cue over a routine motion. Do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
                 '# INVENTORY: preserve explicit gear/inventory only. Do not list natural weapons or body armaments as inventory, gear, equipment, or held items. If none is explicit, write Not specified.\n' +
                 '# NOTES: preserve all important persona notes, origin facts, limits, fighting style, and secrecy rules.\n\n' +
+                `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
 
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
 
