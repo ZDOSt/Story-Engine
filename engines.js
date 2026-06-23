@@ -1824,6 +1824,7 @@ export function normalizeTargets(value) {
         },
         BenefitedObservers: toRealArray(value?.BenefitedObservers),
         HarmedObservers: toRealArray(value?.HarmedObservers),
+        NPCAwareOfUser: toRealArray(value?.NPCAwareOfUser),
         PowerActors: toRealArray(value?.PowerActors),
     };
 }
@@ -1835,6 +1836,7 @@ export function sanitizeTargets(targets, classifier, options = {}) {
     const oppEnv = [...targets.OppTargets.ENV];
     const benefitedCandidates = [];
     const harmedCandidates = [];
+    const awareCandidates = [];
 
     for (const name of targets.hostilesInScene?.NPC || []) {
         if (classifier.isLiving(name)) hostilesNpc.push(name);
@@ -1858,10 +1860,16 @@ export function sanitizeTargets(targets, classifier, options = {}) {
         if (classifier.isLiving(name)) harmedCandidates.push(name);
         else oppEnv.push(name);
     }
+    for (const name of targets.NPCAwareOfUser) {
+        if (classifier.isLiving(name)) awareCandidates.push(name);
+        else oppEnv.push(name);
+    }
 
     const directOrOpposed = new Set([...actionTargets, ...oppNpc].map(normalizeNameKey));
     const benefited = benefitedCandidates.filter(name => !directOrOpposed.has(normalizeNameKey(name)));
     const harmed = harmedCandidates.filter(name => !directOrOpposed.has(normalizeNameKey(name)));
+    const alreadyRouted = new Set([...actionTargets, ...oppNpc, ...benefited, ...harmed].map(normalizeNameKey));
+    const aware = awareCandidates.filter(name => !alreadyRouted.has(normalizeNameKey(name)));
 
     return {
         hostilesInScene: {
@@ -1874,6 +1882,7 @@ export function sanitizeTargets(targets, classifier, options = {}) {
         },
         BenefitedObservers: unique(benefited),
         HarmedObservers: unique(harmed),
+        NPCAwareOfUser: unique(aware),
         PowerActors: unique(targets.PowerActors),
     };
 }
@@ -1894,6 +1903,7 @@ export function targetSummary(targets) {
         },
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
+        NPCAwareOfUser: showNone(targets.NPCAwareOfUser),
         PowerActors: showNone(targets.PowerActors),
     };
 }
@@ -2117,6 +2127,7 @@ export function formatTargets(targets) {
         OppTargets: { NPC: showNone(targets.OppTargets.NPC), ENV: showNone(targets.OppTargets.ENV) },
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
+        NPCAwareOfUser: showNone(targets.NPCAwareOfUser),
         PowerActors: showNone(targets.PowerActors),
     });
 }

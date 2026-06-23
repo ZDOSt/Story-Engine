@@ -656,6 +656,7 @@ function currentPowerActorCandidates(ledger) {
         ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.OppTargets?.NPC),
         ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.BenefitedObservers),
         ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.HarmedObservers),
+        ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.NPCAwareOfUser),
     ]);
     const currentKeys = new Set(currentNames.map(normalizeNameKey).filter(Boolean));
     return (Array.isArray(ledger?.powerActorEnmity?.assessments) ? ledger.powerActorEnmity.assessments : [])
@@ -696,6 +697,7 @@ function powerActorLatestActionSource(ledger, context, effect = null, playerTrac
         ...toRealArray(semantic.identifyTargets?.PowerActors),
         ...toRealArray(semantic.identifyTargets?.ActionTargets),
         ...toRealArray(semantic.identifyTargets?.HarmedObservers),
+        ...toRealArray(semantic.identifyTargets?.NPCAwareOfUser),
         effect?.actor,
         effect?.reason,
     ].filter(Boolean).join(' ').toLowerCase();
@@ -1828,6 +1830,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         ...targets.OppTargets.NPC,
         ...targets.BenefitedObservers,
         ...targets.HarmedObservers,
+        ...targets.NPCAwareOfUser,
     ].filter(name => isReal(name) && targetClassifier.isLiving(name)));
     const pendingNpcInScene = pendingProactivityResponseNpcNames(trackerSnapshot, context, targetNpcInScene);
     const npcInScene = unique([...targetNpcInScene, ...pendingNpcInScene]);
@@ -2027,6 +2030,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         EnvironmentDifficulty: resolvedOppStat === 'ENV' ? environmentDifficulty : 0,
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
+        NPCAwareOfUser: showNone(targets.NPCAwareOfUser),
         PowerActors: showNone(targets.PowerActors),
         NPCInScene: showNone(npcInScene),
         UserImpairment: userImpairment,
@@ -3512,6 +3516,7 @@ function repairLivingOppositionTargets(targets, classifier, options = {}, audit)
         },
         BenefitedObservers: toRealArray(targets.BenefitedObservers),
         HarmedObservers: toRealArray(targets.HarmedObservers),
+        NPCAwareOfUser: toRealArray(targets.NPCAwareOfUser),
         PowerActors: toRealArray(targets.PowerActors),
     };
     if (options.rollNeeded !== 'Y') return repaired;
@@ -3555,6 +3560,7 @@ function repairStakeBearingClaimTargets(targets, classifier, semantic, options =
         },
         BenefitedObservers: toRealArray(targets.BenefitedObservers),
         HarmedObservers: toRealArray(targets.HarmedObservers),
+        NPCAwareOfUser: toRealArray(targets.NPCAwareOfUser),
         PowerActors: toRealArray(targets.PowerActors),
     };
     if (options.rollNeeded !== 'Y' || !isStakeBearingUntrustedClaim(semantic?.claimCheck)) return repaired;
@@ -3705,6 +3711,7 @@ function normalizeDirectedCompanionCommandTargets(targets, classifier, semantic,
         OppTargets: { NPC: [], ENV: toRealArray(targets?.OppTargets?.ENV) },
         BenefitedObservers: [],
         HarmedObservers: [],
+        NPCAwareOfUser: toRealArray(targets?.NPCAwareOfUser),
         PowerActors: toRealArray(targets?.PowerActors),
     };
     audit?.push(`2.4c.1 directedCompanionCommandTargetNormalization=${compact({
@@ -3727,6 +3734,7 @@ function repairDirectedCompanionAttackHostilePool(targets, ledger, trackerSnapsh
         },
         BenefitedObservers: toRealArray(targets.BenefitedObservers),
         HarmedObservers: toRealArray(targets.HarmedObservers),
+        NPCAwareOfUser: toRealArray(targets.NPCAwareOfUser),
         PowerActors: toRealArray(targets.PowerActors),
     };
     const latestUserText = relationshipText(getLatestUserTextFromContext(context));
@@ -6299,6 +6307,7 @@ function removeUserReferencesFromTargets(targets, refereeContext = null) {
         },
         BenefitedObservers: withoutUser(targets?.BenefitedObservers),
         HarmedObservers: withoutUser(targets?.HarmedObservers),
+        NPCAwareOfUser: withoutUser(targets?.NPCAwareOfUser),
         PowerActors: withoutUser(targets?.PowerActors),
     };
 }
@@ -6517,6 +6526,7 @@ function buildTargetClassifier(ledger, trackerSnapshot, context) {
     for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.OppTargets?.NPC)) addLivingName(livingNames, name);
     for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.BenefitedObservers)) addLivingName(livingNames, name);
     for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.HarmedObservers)) addLivingName(livingNames, name);
+    for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.NPCAwareOfUser)) addLivingName(livingNames, name);
     for (const item of ledger.relationshipEngine || []) addLivingName(livingNames, item?.NPC);
 
     try {
