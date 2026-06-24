@@ -273,27 +273,28 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
   applicationContract(response, input, context): {
     mandate:
-      Execute every function in this contract as mandatory narration constraints before writing visible output.
-      The final response must satisfy all active gates: embodied sensory grounding, diegetic ability rendering, strict POV and no user puppeting, observable behavior instead of emotion labels, grounded physical prose, cohesive scene beats, bounded character turns, active handoff control, and linear chronology.
+      Before writing the final, in-character response, treat these constraints as binding: activeHandoff, characterTurnPacing, hypotacticSceneBeats, linearChronology, strictBehaviorism, embodiedPerception, denotativePhysicality, inanimateObjectivity, strictEpistemology, and diegeticPhysicality.
+      The response must be fully filtered through them and remain compliant with all of them.
+      Any failure invalidates the response.
   }
 
   activeHandoff(response, context): {
     policy: ACTIVE-HANDOFF
 
     mandate:
-      Your response MUST END on an active, concrete beat that {{user}} can respond to.
+      Your response MUST END on an active, concrete beat that {{user}} can immediately respond to.
 
     ACCEPTABLE BEATS:
       - Dialogue directed at {{user}}
       - Action(s) directed at {{user}}
-      - A visible change in the scene that forces a clear decision and IMMEDIATELY requires a response from {{user}}.
+      - A visible scene change that immediately requires a response from {{user}}.
 
     ABSOLUTELY-FORBIDDEN:
       NEVER DO ANY OF THE FOLLOWING:
         - Continue past the handoff beat.
-        - Prompt the {{user}} to respond or ask meta questions (e.g., "what do you do?", "the ball is in your court")
-        - End on explicit waiting, staring, mood-only silence, or all-eyes-on-user framing (e.g., "She waits", "She looks at you, expectantly", "Everyone is silent, waiting")
-        - Narrate filler background, ambient, or environmental details that are irrelevant to the ongoing interaction.
+        - Prompt the {{user}} to respond or ask direct questions such as "what do you do?" or "the ball is in your court."
+        - End on explicit waiting, staring, silence, or all-eyes-on-user framing (e.g., "She waits", "She looks at you, expectantly", "Everyone is silent, waiting").
+        - End on filler background, ambient, or environmental details that are irrelevant to the ongoing interaction (e.g., "Somewhere, a dog barks", "The fire in the room crackles once").
   }
 
   characterTurnPacing(response, context): {
@@ -361,7 +362,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not interpret, assume, or complete {{user}}'s intent.
   }
 
-  behaviorism(response, context): {
+  strictBehaviorism(response, context): {
     policy: OBSERVABLE-CHARACTER-STATE
 
     mandate:
@@ -373,7 +374,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not name internal, emotional, or psychological states.
         - Do not use subtext labels, interpretive commentary, or inferred inner states.
         - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
-        - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts.
+        - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, breath catching, voice hitching, voice catching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts. Examples: "her breath catches", "his breath hitches", "her voice catches", "his voice hitches".
   }
 
   embodiedPerception(response, context): {
@@ -8418,7 +8419,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.',
         'Do not interpret, assume, or complete {{user}} intent.',
         '',
-        'behaviorism(response):',
+        'strictBehaviorism(response):',
         'Render character state only through observable behavior and physical displacement that can be directly witnessed by someone physically present in the scene.',
         'Narrate only tangible, external action.',
         'Do not name internal, emotional, or psychological states.',
@@ -8458,7 +8459,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '1. embodiedPerception(response): repair clear smell/taste gate violations and obvious spatial-continuity impossibilities only.',
         '2. diegeticPhysicality(response): repair obvious ability, spell, power, trait, activation, casting, or system-mechanic labels only.',
         '3. agencySeparation(response, RECENT_USER_INPUT): repair obvious {{user}} puppeting only.',
-        '4. behaviorism(response): repair internal states, subtext labels, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand only.',
+        '4. strictBehaviorism(response): repair internal states, subtext labels, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand only.',
         '5. denotativePhysicality(response): repair specific literal prose/style violations only.',
         '6. inanimateObjectivity(response): repair false agency assigned to objects, weather, architecture, rooms, atmosphere, silence, tension, darkness, or abstractions only.',
         '7. strictEpistemology(response): repair obvious private thoughts, hidden motives, unknown identities, unseen actions, or unrevealed lore only.',
@@ -8507,7 +8508,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not remove external forces affecting {{user}} when physically concrete and already part of the resolved scene, such as being shoved, blocked, struck, restrained, pulled, or exposed to environmental pressure.',
         'Rewrite puppeting as external scene state, NPC action, visible consequence, or available information without deciding {{user}} response.',
         '',
-        'PASS 4: behaviorism(response)',
+        'PASS 4: strictBehaviorism(response)',
         'Goal: preserve character meaning while repairing internal state labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand.',
         'Do not name internal, emotional, sexual, psychological, or subtext states as exposition: no "she is nervous," "desire shows," "curiosity flickers," "something bolder beneath the surface," or equivalent interpretation.',
         'Do not use eyes, gaze, expression shifts, micro-expressions, breath, pulse, throat, stomach, heat, blush, flush, skin color, trembling, twitching, jaw, lips, knuckles, or similar body cues as canned emotional shorthand.',
