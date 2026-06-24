@@ -487,6 +487,7 @@ behaviorism:
 Execute behaviorism(response, context).
 mandate: Render character state only through directly witnessable behavior and physical displacement.
 ABSOLUTELY-FORBIDDEN: Never do any of the following. No internal states, subtext labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, or canned emotional shorthand.
+No blushing, flushing, reddening, paling, or indirect skin-color emotional shorthand.
 
 agencySeparation:
 Execute agencySeparation(response, input, context).
