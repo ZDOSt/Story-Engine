@@ -398,6 +398,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
     ABSOLUTELY-FORBIDDEN:
       NEVER DO ANY OF THE FOLLOWING:
+        - Do not say that the air smells, the room smells, the place smells, or anything similar.
         - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
   }
 
@@ -8433,6 +8434,8 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Keep relative positions, distance, facing, occlusion, and barriers consistent across the response.',
         'If a character changes position, narrate the movement before using the new position.',
         'Do not let {{user}} perceive, reach, or interact through walls, doors, distance, cover, or other barriers unless the scene explicitly opens that path.',
+        'Do not say that the air smells, the room smells, the place smells, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.',
+        'Do not use smell or taste as ambient scene dressing or atmospheric shorthand.',
         '',
         'diegeticPhysicality(response):',
         'Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.',
@@ -8481,7 +8484,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '',
         'ONE-CALL PRIVATE PASS PIPELINE:',
         'Work through these private correction passes in order. Do not output pass notes, labels, analysis, or intermediate drafts.',
-        '1. embodiedPerception(response): repair clear smell/taste gate violations and obvious spatial-continuity impossibilities only.',
+        '1. embodiedPerception(response): repair clear smell/taste gate violations, explicit air/room/place smell phrasing, and obvious spatial-continuity impossibilities only.',
         '2. diegeticPhysicality(response): repair obvious ability, spell, power, trait, activation, casting, or system-mechanic labels only.',
         '3. agencySeparation(response, RECENT_USER_INPUT): repair obvious {{user}} puppeting only.',
         '4. strictBehaviorism(response): repair internal states, subtext labels, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand only.',
@@ -8513,7 +8516,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Prioritize visible, audible, tactile, spatial, and physical detail already present in TEXT_TO_CHECK: layout, distance, movement, contact, pressure, object state, visibility, sound, threat, consequence, and available choices.',
         'Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs, smells, tastes, eats, or drinks, or TEXT_TO_CHECK ties the sensation to a specific close-range physical source that is overpowering and unavoidable at the user position.',
         'Valid smell/taste sources must be concrete and immediate, such as smoke filling the room, blood on a hand, rot beside a body, food or drink in the mouth, chemicals in contact, or fire filling the space.',
-        'Repair smell/taste only when it is clearly used for "the air," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
+        'Repair smell/taste only when it is clearly used for "the air," "the room," "the place," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
         'If smell/taste is valid, keep at most one mention per beat or major location shift and attach it to the concrete source. Do not add a new smell or taste to replace a removed one.',
         'Keep established position, distance, facing, barriers, cover, doors, walls, line of sight, and reach consistent.',
         'Repair only obvious impossibilities, such as touching a person across the room without movement, seeing through a closed door or wall, hearing precise quiet speech from an implausible distance, or using a new position before movement to that position is narrated.',
