@@ -86,6 +86,9 @@ const PROGRESSION_SPELL_OPTIONS = 3;
 const PROGRESSION_MAX_SPELLS = 5;
 const PLAYER_CREATION_MAX_STARTING_SPELLS = 1;
 const PLAYER_STATS = Object.freeze(['PHY', 'MND', 'CHA']);
+const PLAYER_CREATION_STAT_POINTS = 24;
+const PLAYER_CREATION_MIN_STAT = 1;
+const PLAYER_CREATION_MAX_STAT = 9;
 const PLAYER_RACE_CHOICES = Object.freeze([
     'Aasimar',
     'Angelkin',
@@ -2451,7 +2454,7 @@ function getPlayerRoot(context = getContext()) {
 
     root.stats = isValidCoreStats(root.stats) ? normalizeCoreStats(root.stats) : null;
 
-    root.creator = root.creator && typeof root.creator === 'object' ? root.creator : { stage: 'offer' };
+    root.creator = normalizePlayerCreatorSetupState(root.creator);
 
     if (!root.ready && !root.disabled && !root.creator.stage) {
 
@@ -2460,6 +2463,24 @@ function getPlayerRoot(context = getContext()) {
     }
 
     return root;
+}
+
+function normalizePlayerCreatorSetupState(creator) {
+    const next = creator && typeof creator === 'object' ? creator : { stage: 'offer' };
+    const stage = String(next.stage || 'offer');
+    if (stage === 'reroll' || stage === 'swap') {
+        next.stage = 'stats';
+    }
+    if (next.stage !== 'offer' && next.stage !== 'approved') {
+        next.flow = next.flow === 'persona' ? 'persona' : 'new';
+        if (!isValidPlayerCreationStats(next.stats)) {
+            next.stats = next.flow === 'persona'
+                ? suggestedPersonaPointBuyStats(next.personaAnalysis || {})
+                : defaultPlayerPointBuyStats();
+            next.stage = 'stats';
+        }
+    }
+    return next;
 }
 
 function getProgressionRoot(context = getContext()) {
@@ -3066,76 +3087,49 @@ function clampNumber(value, min, max, fallback) {
 
 
 
-function rollD10() {
-
-    return Math.floor(Math.random() * 10) + 1;
-
+function defaultPlayerPointBuyStats() {
+    return { PHY: 8, MND: 8, CHA: 8 };
 }
 
-
-
-function rollStatPair() {
-
-    const rolls = [rollD10(), rollD10()];
-
-    return { rolls, value: Math.max(...rolls) };
-
+function playerPointBuySpent(stats = {}) {
+    const normalized = normalizePlayerCreationStats(stats);
+    return PLAYER_STATS.reduce((sum, stat) => sum + Number(normalized[stat] || 0), 0);
 }
 
-
-
-function shuffleArray(values) {
-
-    const copy = [...values];
-
-    for (let index = copy.length - 1; index > 0; index -= 1) {
-
-        const swapIndex = Math.floor(Math.random() * (index + 1));
-
-        [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-
-    }
-
-    return copy;
-
+function playerPointBuyRemaining(stats = {}) {
+    return PLAYER_CREATION_STAT_POINTS - playerPointBuySpent(stats);
 }
 
-
-
-function buildNewCharacterRollState() {
-
-    const statPools = {};
-
-    const stats = {};
-
+function normalizePlayerCreationStats(stats = {}) {
+    const source = isValidCoreStats(stats) ? normalizeCoreStats(stats) : defaultPlayerPointBuyStats();
+    const normalized = {};
     for (const stat of PLAYER_STATS) {
-
-        const roll = rollStatPair();
-
-        statPools[stat] = roll.rolls;
-
-        stats[stat] = roll.value;
-
+        normalized[stat] = clampNumber(source[stat], PLAYER_CREATION_MIN_STAT, PLAYER_CREATION_MAX_STAT, 8);
     }
+    return normalized;
+}
 
+function isValidPlayerCreationStats(stats = {}) {
+    if (!stats || typeof stats !== 'object') return false;
+    const normalized = normalizePlayerCreationStats(stats);
+    return PLAYER_STATS.every(stat => normalized[stat] === Number(stats[stat])) && playerPointBuySpent(normalized) === PLAYER_CREATION_STAT_POINTS;
+}
+
+function suggestedPersonaPointBuyStats(analysis = {}) {
+    const primary = PLAYER_STATS.includes(analysis?.PrimaryStat) ? analysis.PrimaryStat : 'PHY';
+    const stats = defaultPlayerPointBuyStats();
+    stats[primary] = PLAYER_CREATION_MAX_STAT;
+    const secondary = PLAYER_STATS.find(stat => stat !== primary) || 'MND';
+    stats[secondary] = Math.max(PLAYER_CREATION_MIN_STAT, stats[secondary] - 1);
+    return stats;
+}
+
+function buildNewCharacterPointBuyState() {
     return {
-
-        stage: 'reroll',
-
+        stage: 'stats',
         flow: 'new',
-
         createdAt: Date.now(),
-
-        statPools,
-
-        stats,
-
-        rerollValue: rollD10(),
-
-        rerollApplied: null,
-
-        rerollSkipped: false,
-        swapApplied: null,
+        stats: defaultPlayerPointBuyStats(),
         retryNotes: [],
         identity: {
             sex: '',
@@ -3152,58 +3146,15 @@ function buildNewCharacterRollState() {
 }
 
 
-function buildPersonaRollState(analysis) {
-
-    const primary = PLAYER_STATS.includes(analysis?.PrimaryStat) ? analysis.PrimaryStat : 'PHY';
-
-    const rolls = [rollStatPair(), rollStatPair(), rollStatPair()].sort((a, b) => b.value - a.value);
-
-    const otherStats = shuffleArray(PLAYER_STATS.filter(stat => stat !== primary));
-
-    const stats = {
-
-        [primary]: rolls[0].value,
-
-        [otherStats[0]]: rolls[1].value,
-
-        [otherStats[1]]: rolls[2].value,
-
-    };
-
+function buildPersonaPointBuyState(analysis) {
     return {
-
-        stage: 'reroll',
-
+        stage: 'stats',
         flow: 'persona',
-
         createdAt: Date.now(),
-
-        statPools: {
-
-            [primary]: rolls[0].rolls,
-
-            [otherStats[0]]: rolls[1].rolls,
-
-            [otherStats[1]]: rolls[2].rolls,
-
-        },
-
-        stats,
-
-        rerollValue: rollD10(),
-
-        rerollApplied: null,
-
-        rerollSkipped: false,
-
-        swapApplied: null,
-
+        stats: suggestedPersonaPointBuyStats(analysis),
         retryNotes: [],
-
         personaAnalysis: analysis,
-
     };
-
 }
 
 
@@ -6034,43 +5985,83 @@ function ensurePlayerSetupStyles() {
     style.id = PLAYER_SETUP_STYLE_ID;
     style.textContent = `
         #${PLAYER_SETUP_CARD_ID} {
-
             margin: 0.75rem auto;
-
-            padding: 0.85rem;
-
-            width: min(760px, calc(100% - 1.2rem));
-
+            padding: 0;
+            width: min(820px, calc(100% - 1.2rem));
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
-
             border-radius: 8px;
-
             background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 34%, transparent);
-
             box-shadow: 0 10px 26px rgba(0,0,0,0.22);
-
             line-height: 1.45;
-
+            overflow: hidden;
         }
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            padding: 0.95rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: flex-start;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.14));
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-titleblock {
+            min-width: 0;
+        }
         #${PLAYER_SETUP_CARD_ID} .spe-player-title {
-
             font-weight: 700;
-
-            font-size: 1rem;
-
-            margin-bottom: 0.35rem;
-
+            font-size: 1.05rem;
+            margin-bottom: 0.25rem;
         }
-
         #${PLAYER_SETUP_CARD_ID} .spe-player-muted {
-
             opacity: 0.78;
-
             font-size: 0.9rem;
-
         }
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-subtitle {
+            opacity: 0.78;
+            font-size: 0.9rem;
+            max-width: 42rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-badges {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 0.4rem;
+            flex: 0 0 auto;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-badge {
+            padding: 0.22rem 0.5rem;
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.16));
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 24%, transparent);
+            font-size: 0.82rem;
+            white-space: nowrap;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stage {
+            font-weight: 700;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-body {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-section-title {
+            font-weight: 700;
+            font-size: 0.96rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.55rem;
+            align-items: start;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-form-grid .spe-player-full {
+            grid-column: 1 / -1;
+        }
         #${PLAYER_SETUP_CARD_ID} .spe-player-row,
         #${PLAYER_SETUP_CARD_ID} .spe-player-actions {
             display: flex;
@@ -6079,6 +6070,9 @@ function ensurePlayerSetupStyles() {
             align-items: center;
             margin-top: 0.55rem;
         }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-actions {
+            justify-content: flex-end;
+        }
         #${PLAYER_SETUP_CARD_ID} [hidden] {
             display: none !important;
         }
@@ -6086,75 +6080,117 @@ function ensurePlayerSetupStyles() {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.45rem;
-            margin-top: 0.6rem;
         }
-
         #${PLAYER_SETUP_CARD_ID} .spe-player-stat {
-
             border-left: 2px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
-
             padding: 0.45rem 0.55rem;
-
             background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
-
             border-radius: 6px;
-
+            min-width: 0;
         }
-
-        #${PLAYER_SETUP_CARD_ID} textarea,
-
-        #${PLAYER_SETUP_CARD_ID} input,
-
-        #${PLAYER_SETUP_CARD_ID} select {
-
-            width: 100%;
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.45rem;
+            align-items: baseline;
         }
-
-        #${PLAYER_SETUP_CARD_ID} textarea {
-
-            min-height: 5.5rem;
-
-            resize: vertical;
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat code,
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-value {
+            font-weight: 700;
+            font-size: 1.05rem;
         }
-
-        #${PLAYER_SETUP_CARD_ID} pre {
-
-            white-space: pre-wrap;
-
-            max-height: 26rem;
-
-            overflow: auto;
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-meter {
+            display: block;
+            height: 0.35rem;
+            margin-top: 0.35rem;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.1);
+            overflow: hidden;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-meter span {
+            display: block;
+            height: 100%;
+            width: 0;
+            border-radius: inherit;
+            background: var(--SmartThemeQuoteColor, rgba(255,255,255,0.5));
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-point-buy {
+            display: grid;
+            gap: 0.55rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-editor {
+            display: grid;
+            grid-template-columns: minmax(8rem, 1.1fr) minmax(9rem, 1.6fr) auto;
+            gap: 0.65rem;
+            align-items: center;
             padding: 0.65rem;
-
+            border-left: 2px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
             border-radius: 6px;
-
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-copy {
+            min-width: 0;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-desc {
+            opacity: 0.78;
+            font-size: 0.86rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stepper {
+            display: grid;
+            grid-template-columns: 2.25rem 2.75rem 2.25rem;
+            gap: 0.35rem;
+            align-items: center;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stepper .menu_button {
+            min-width: 2.25rem;
+            width: 2.25rem;
+            padding-left: 0;
+            padding-right: 0;
+            text-align: center;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-value {
+            text-align: center;
+        }
+        #${PLAYER_SETUP_CARD_ID} textarea,
+        #${PLAYER_SETUP_CARD_ID} input,
+        #${PLAYER_SETUP_CARD_ID} select {
+            width: 100%;
+        }
+        #${PLAYER_SETUP_CARD_ID} textarea {
+            min-height: 5.5rem;
+            resize: vertical;
+        }
+        #${PLAYER_SETUP_CARD_ID} pre {
+            white-space: pre-wrap;
+            max-height: 26rem;
+            overflow: auto;
+            padding: 0.65rem;
+            border-radius: 6px;
             background: rgba(0,0,0,0.24);
-
+            margin: 0;
         }
-
         #${PLAYER_SETUP_CARD_ID} .spe-player-error {
-
             margin-top: 0.55rem;
-
             color: var(--SmartThemeQuoteColor, #ffb4b4);
-
             font-weight: 600;
-
         }
-
         @media (max-width: 520px) {
-
-            #${PLAYER_SETUP_CARD_ID} .spe-player-grid {
-
+            #${PLAYER_SETUP_CARD_ID} .spe-player-header,
+            #${PLAYER_SETUP_CARD_ID} .spe-player-stat-editor {
                 grid-template-columns: 1fr;
-
+                display: grid;
             }
-
+            #${PLAYER_SETUP_CARD_ID} .spe-player-badges,
+            #${PLAYER_SETUP_CARD_ID} .spe-player-actions {
+                justify-content: flex-start;
+            }
+            #${PLAYER_SETUP_CARD_ID} .spe-player-grid {
+                grid-template-columns: 1fr;
+            }
+            #${PLAYER_SETUP_CARD_ID} .spe-player-form-grid {
+                grid-template-columns: 1fr;
+            }
         }
-
     `;
     document.head.append(style);
 }
@@ -6278,27 +6314,67 @@ function buildPlayerSetupCardHtml(root) {
     const busy = state.playerSetupBusy;
     const error = creator.error ? `<div class="spe-player-error">${escapeHtml(creator.error)}</div>` : '';
     const busyLine = busy ? '<div class="spe-player-muted">Working...</div>' : '';
-    const body = stage === 'reroll'
-        ? buildPlayerRerollHtml(creator)
-        : stage === 'swap'
-            ? buildPlayerSwapHtml(creator)
-            : stage === 'identity'
-                ? buildPlayerIdentityHtml(creator)
-                : stage === 'review'
-                    ? buildPlayerReviewHtml(creator)
-                    : stage === 'persona-sheet'
-                        ? buildPlayerPersonaSheetHtml(creator)
-                        : stage === 'approved'
-                            ? buildPlayerAdventureStartHtml(root)
-                            : buildPlayerOfferHtml();
+    const body = stage === 'stats'
+        ? buildPlayerStatsHtml(creator)
+        : stage === 'identity'
+            ? buildPlayerIdentityHtml(creator)
+            : stage === 'review'
+                ? buildPlayerReviewHtml(creator)
+                : stage === 'persona-sheet'
+                    ? buildPlayerPersonaSheetHtml(creator)
+                    : stage === 'approved'
+                        ? buildPlayerAdventureStartHtml(root)
+                        : buildPlayerOfferHtml();
     const ready = stage === 'approved';
+    const title = ready
+        ? 'Adventure Ready'
+        : stage === 'stats'
+            ? 'Assign Stats'
+            : stage === 'identity'
+                ? 'Character Details'
+                : stage === 'review'
+                    ? 'Review Character'
+                    : stage === 'persona-sheet'
+                        ? 'Persona Conversion'
+                        : 'Player Setup';
+    const subtitle = ready
+        ? 'Player setup is complete. Start the first scene now, or dismiss this card and begin manually.'
+        : stage === 'stats'
+            ? `Distribute ${PLAYER_CREATION_STAT_POINTS} points across PHY, MND, and CHA. Starting stats cannot exceed ${PLAYER_CREATION_MAX_STAT}.`
+            : 'Complete setup once, then the creator stays out of the way for this story.';
+    const stageLabel = ready
+        ? 'Start Adventure'
+        : stage === 'offer'
+            ? 'Choose Flow'
+            : stage === 'stats'
+                ? 'Step 1 of 3'
+                : stage === 'identity' || stage === 'persona-sheet'
+                    ? 'Step 2 of 3'
+                    : stage === 'review'
+                        ? 'Review'
+                        : 'Setup';
+    const statsBadge = creator?.stats && stage !== 'offer'
+        ? `<span class="spe-player-badge">Points ${playerPointBuySpent(creator.stats)}/${PLAYER_CREATION_STAT_POINTS}</span>`
+        : '';
 
     return `
-        <div class="spe-player-title">${ready ? 'Adventure Ready' : 'Player Setup'}</div>
-        <div class="spe-player-muted">${ready ? 'Player setup is complete. Start the first scene now, or dismiss this card and begin manually.' : 'This chat has no valid PHY/MND/CHA player stats yet. Complete setup once, then the creator stays out of the way for this story.'}</div>
-        ${busyLine}
-        ${body}
-        ${error}
+        <div class="spe-player-shell">
+            <div class="spe-player-header">
+                <div class="spe-player-titleblock">
+                    <div class="spe-player-title">${title}</div>
+                    <div class="spe-player-subtitle">${subtitle}</div>
+                </div>
+                <div class="spe-player-badges">
+                    <span class="spe-player-badge spe-player-stage">${stageLabel}</span>
+                    ${statsBadge}
+                </div>
+            </div>
+            <div class="spe-player-body">
+                ${busyLine}
+                ${body}
+                ${error}
+            </div>
+        </div>
     `;
 }
 
@@ -6315,7 +6391,7 @@ function buildPlayerOfferHtml() {
 
         </div>
 
-        <div class="spe-player-muted">Create rolls a new character. Use Existing Persona only asks the model which stat should be highest; the extension still rolls the actual values.</div>
+        <div class="spe-player-muted">Create Character starts a ${PLAYER_CREATION_STAT_POINTS}-point stat assignment, then keeps the same character detail choices as before. Use Existing Persona suggests a point-buy shape from the active persona, then lets you adjust it before conversion.</div>
 
     `;
 }
@@ -6408,9 +6484,7 @@ function buildProgressionCardHtml(root, context = getContext()) {
 }
 
 function buildStatsGridHtml(creator) {
-    const stats = normalizeCoreStats(creator.stats || {});
-
-    const pools = creator.statPools || {};
+    const stats = normalizePlayerCreationStats(creator.stats || {});
 
     return `
 
@@ -6418,9 +6492,14 @@ function buildStatsGridHtml(creator) {
 
             ${PLAYER_STATS.map(stat => {
 
-                const pair = Array.isArray(pools[stat]) ? pools[stat].join(', ') : '-';
+                const value = Number(stats[stat] || 1);
+                const width = Math.round((value / PLAYER_CREATION_MAX_STAT) * 100);
 
-                return `<div class="spe-player-stat"><b>${stat}</b><br><code>${stats[stat]}</code><br><span class="spe-player-muted">rolls: ${escapeHtml(pair)}</span></div>`;
+                return `<div class="spe-player-stat">
+                    <div class="spe-player-stat-head"><b>${stat}</b><code>${value}</code></div>
+                    <span class="spe-player-stat-meter"><span style="width:${width}%"></span></span>
+                    <div class="spe-player-muted">Starting cap ${PLAYER_CREATION_MAX_STAT}</div>
+                </div>`;
 
             }).join('')}
 
@@ -6430,81 +6509,56 @@ function buildStatsGridHtml(creator) {
 
 }
 
-
-
-function buildPlayerRerollHtml(creator) {
-
+function buildPlayerStatsHtml(creator) {
+    const stats = normalizePlayerCreationStats(creator.stats || {});
+    const spent = playerPointBuySpent(stats);
+    const remaining = playerPointBuyRemaining(stats);
+    const valid = isValidPlayerCreationStats(stats);
     const analysis = creator.flow === 'persona' && creator.personaAnalysis
-
-        ? `<div class="spe-player-muted">Persona read: highest stat should be <code>${escapeHtml(creator.personaAnalysis.PrimaryStat || 'PHY')}</code>. ${escapeHtml(creator.personaAnalysis.Evidence || '')}</div>`
-
+        ? `<div class="spe-player-muted">Persona read: strongest fit is <code>${escapeHtml(creator.personaAnalysis.PrimaryStat || 'PHY')}</code>. ${escapeHtml(creator.personaAnalysis.Evidence || '')}</div>`
         : '';
-
+    const statDescriptions = {
+        PHY: 'Body, combat readiness, endurance, stealth movement, and physical execution.',
+        MND: 'Knowledge, perception, focus, technical skill, magic, and deliberate mental exertion.',
+        CHA: 'Presence, persuasion, deception, intimidation, leadership, and social pressure.',
+    };
     return `
-
         ${analysis}
-
-        ${buildStatsGridHtml(creator)}
-
-        <div class="spe-player-muted">Optional reroll: choose one stat. The hidden 1d10 reroll is compared against the current value and the higher value is kept.</div>
-
+        <div class="spe-player-section-title">Point Buy</div>
+        <div class="spe-player-muted">Lower one stat to raise another. All ${PLAYER_CREATION_STAT_POINTS} points must be assigned before continuing.</div>
+        <div class="spe-player-badges">
+            <span class="spe-player-badge">Spent ${spent}/${PLAYER_CREATION_STAT_POINTS}</span>
+            <span class="spe-player-badge">Remaining ${remaining}</span>
+            <span class="spe-player-badge">Max ${PLAYER_CREATION_MAX_STAT}</span>
+        </div>
+        <div class="spe-player-point-buy">
+            ${PLAYER_STATS.map(stat => {
+                const value = Number(stats[stat] || PLAYER_CREATION_MIN_STAT);
+                const width = Math.round((value / PLAYER_CREATION_MAX_STAT) * 100);
+                const minusDisabled = value <= PLAYER_CREATION_MIN_STAT ? 'disabled' : '';
+                const plusDisabled = remaining <= 0 || value >= PLAYER_CREATION_MAX_STAT ? 'disabled' : '';
+                return `
+                    <div class="spe-player-stat-editor">
+                        <div class="spe-player-stat-copy">
+                            <div class="spe-player-stat-head"><b>${stat}</b><span class="spe-player-stat-value">${value}</span></div>
+                            <div class="spe-player-stat-desc">${statDescriptions[stat]}</div>
+                        </div>
+                        <span class="spe-player-stat-meter"><span style="width:${width}%"></span></span>
+                        <div class="spe-player-stepper">
+                            <button class="menu_button" title="Lower ${stat}" data-spe-player-action="stat-minus" data-stat="${stat}" ${minusDisabled}>-</button>
+                            <div class="spe-player-stat-value">${value}</div>
+                            <button class="menu_button" title="Raise ${stat}" data-spe-player-action="stat-plus" data-stat="${stat}" ${plusDisabled}>+</button>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
         <div class="spe-player-actions">
-
-            ${PLAYER_STATS.map(stat => `<button class="menu_button" data-spe-player-action="reroll" data-stat="${stat}">Reroll ${stat}</button>`).join('')}
-
-            <button class="menu_button" data-spe-player-action="skip-reroll">Keep These</button>
-
+            <button class="menu_button" data-spe-player-action="reset-stats">Reset</button>
+            <button class="menu_button" data-spe-player-action="continue-stats" ${valid ? '' : 'disabled'}>Continue</button>
         </div>
-
     `;
-
 }
-
-
-
-function buildPlayerSwapHtml(creator) {
-
-    const rerollLine = creator.rerollApplied
-
-        ? `<div class="spe-player-muted">Reroll used on <code>${escapeHtml(creator.rerollApplied.stat)}</code>: hidden roll <code>${escapeHtml(creator.rerollApplied.roll)}</code>, kept <code>${escapeHtml(creator.rerollApplied.value)}</code>.</div>`
-
-        : '<div class="spe-player-muted">No reroll used.</div>';
-
-    return `
-
-        ${buildStatsGridHtml(creator)}
-
-        ${rerollLine}
-
-        <div class="spe-player-row">
-
-            <label class="flex1">First stat
-
-                <select id="spe_player_swap_a" class="text_pole">${PLAYER_STATS.map(stat => `<option value="${stat}">${stat}</option>`).join('')}</select>
-
-            </label>
-
-            <label class="flex1">Second stat
-
-                <select id="spe_player_swap_b" class="text_pole">${PLAYER_STATS.map(stat => `<option value="${stat}" ${stat === 'MND' ? 'selected' : ''}>${stat}</option>`).join('')}</select>
-
-            </label>
-
-        </div>
-
-        <div class="spe-player-actions">
-
-            <button class="menu_button" data-spe-player-action="apply-swap">Swap Selected</button>
-
-            <button class="menu_button" data-spe-player-action="skip-swap">No Swap</button>
-
-        </div>
-
-    `;
-
-}
-
-
 
 function buildPlayerIdentityHtml(creator) {
     const identity = creator.identity || {};
@@ -6523,12 +6577,10 @@ function buildPlayerIdentityHtml(creator) {
     return `
         ${buildStatsGridHtml(creator)}
         <div class="spe-player-muted">Character name: <code>${escapeHtml(personaName)}</code> from the current SillyTavern persona.</div>
-        <div class="spe-player-row">
+        <div class="spe-player-form-grid">
             <label class="flex1">Sex
                 <input id="spe_player_sex" class="text_pole" value="${escapeHtml(identity.sex || '')}" placeholder="Optional. Leave blank to generate.">
             </label>
-        </div>
-        <div class="spe-player-row">
             <label class="flex1">Genre
                 <select id="spe_player_genre" class="text_pole">
                     ${PLAYER_GENRE_CHOICES.map(item => `<option value="${escapeHtml(item)}" ${genre === item ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}
@@ -6541,41 +6593,31 @@ function buildPlayerIdentityHtml(creator) {
                     <option value="custom" ${raceValue === 'custom' ? 'selected' : ''}>Custom / Specify</option>
                 </select>
             </label>
-        </div>
-        <div class="spe-player-row" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>
-            <label class="flex1">Specify race or ancestry
+            <label class="flex1 spe-player-full" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>Specify race or ancestry
                 <input id="spe_player_race_specify" class="text_pole" value="${escapeHtml(identity.specifiedRace || '')}" placeholder="Optional">
             </label>
-        </div>
-        <div class="spe-player-row" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>
-            <label class="flex1">Specified race details
+            <label class="flex1 spe-player-full" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>Specified race details
                 <select id="spe_player_race_description_mode" class="text_pole">
                     <option value="system" ${raceDescriptionMode === 'system' ? 'selected' : ''}>Let system describe it</option>
                     <option value="user" ${raceDescriptionMode === 'user' ? 'selected' : ''}>Describe it myself</option>
                 </select>
             </label>
-        </div>
-        <div class="spe-player-row" data-spe-player-race-description ${raceIsCustom && raceDescriptionMode === 'user' ? '' : 'hidden'}>
-            <label class="flex1">Your race description
+            <label class="flex1 spe-player-full" data-spe-player-race-description ${raceIsCustom && raceDescriptionMode === 'user' ? '' : 'hidden'}>Your race description
                 <textarea id="spe_player_race_description" class="text_pole" placeholder="Optional unless you choose Describe it myself.">${escapeHtml(identity.specifiedRaceDescription || '')}</textarea>
             </label>
-        </div>
-        <div class="spe-player-row">
-            <label class="flex1">Additional character details
+            <label class="flex1 spe-player-full">Additional character details
                 <select id="spe_player_additional_details_mode" class="text_pole">
                     <option value="system" ${additionalDetailsMode === 'system' ? 'selected' : ''}>Let AI decide</option>
                     <option value="user" ${additionalDetailsMode === 'user' ? 'selected' : ''}>Use my notes + fill the rest</option>
                 </select>
             </label>
-        </div>
-        <div class="spe-player-row" data-spe-player-additional-details ${additionalDetailsMode === 'user' ? '' : 'hidden'}>
-            <label class="flex1">Your character details
+            <label class="flex1 spe-player-full" data-spe-player-additional-details ${additionalDetailsMode === 'user' ? '' : 'hidden'}>Your character details
                 <textarea id="spe_player_additional_details" class="text_pole" placeholder="Optional background, Earth life, appearance, clothing, training, inventory, origin, scars, or other fixed starting facts.">${escapeHtml(additionalDetails)}</textarea>
             </label>
         </div>
         <div class="spe-player-actions">
+            <button class="menu_button" data-spe-player-action="back-to-stats">Back</button>
             <button class="menu_button" data-spe-player-action="generate-sheet">Generate Character Sheet</button>
-            <button class="menu_button" data-spe-player-action="back-to-swap">Back</button>
         </div>
 
     `;
@@ -6636,13 +6678,13 @@ function buildPlayerPersonaSheetHtml(creator) {
     const analysis = creator.personaAnalysis || {};
     return `
         ${buildStatsGridHtml(creator)}
-        <div class="spe-player-muted">Existing persona conversion: highest-stat reading <code>${escapeHtml(analysis.PrimaryStat || 'PHY')}</code>. The model will reformat the current persona into the character-sheet template and copy the locked stats exactly.</div>
+        <div class="spe-player-muted">Existing persona conversion: strongest-stat reading <code>${escapeHtml(analysis.PrimaryStat || 'PHY')}</code>. The model will reformat the current persona into the character-sheet template and copy the locked stats exactly.</div>
 
         <div class="spe-player-actions">
 
-            <button class="menu_button" data-spe-player-action="generate-persona-sheet">Generate Persona Sheet</button>
+            <button class="menu_button" data-spe-player-action="back-to-stats">Back</button>
 
-            <button class="menu_button" data-spe-player-action="back-to-swap">Back</button>
+            <button class="menu_button" data-spe-player-action="generate-persona-sheet">Generate Persona Sheet</button>
 
         </div>
 
@@ -6800,7 +6842,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
         if (action === 'start-new') {
 
-            root.creator = buildNewCharacterRollState();
+            root.creator = buildNewCharacterPointBuyState();
 
         } else if (action === 'use-persona') {
 
@@ -6810,7 +6852,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             const analysis = await analyzePersonaForPrimaryStat(context);
 
-            root.creator = buildPersonaRollState(analysis);
+            root.creator = buildPersonaPointBuyState(analysis);
 
         } else if (action === 'skip-chat') {
 
@@ -6818,33 +6860,30 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             root.forceCreator = false;
 
-        } else if (action === 'reroll') {
+        } else if (action === 'stat-plus') {
 
-            applyPlayerReroll(root.creator, details.stat);
+            adjustPlayerCreationStat(root.creator, details.stat, 1);
 
-        } else if (action === 'skip-reroll') {
+        } else if (action === 'stat-minus') {
 
-            root.creator.rerollSkipped = true;
+            adjustPlayerCreationStat(root.creator, details.stat, -1);
 
-            root.creator.stage = 'swap';
+        } else if (action === 'reset-stats') {
 
-        } else if (action === 'apply-swap') {
+            resetPlayerCreationStats(root.creator);
 
-            const a = document.getElementById('spe_player_swap_a')?.value;
+        } else if (action === 'continue-stats') {
 
-            const b = document.getElementById('spe_player_swap_b')?.value;
+            root.creator.stats = normalizePlayerCreationStats(root.creator.stats || {});
+            if (!isValidPlayerCreationStats(root.creator.stats)) {
+                throw new Error(`Assign exactly ${PLAYER_CREATION_STAT_POINTS} points before continuing.`);
+            }
+            root.creator.stage = root.creator.flow === 'persona' ? 'persona-sheet' : 'identity';
 
-            applyPlayerSwap(root.creator, a, b);
+        } else if (action === 'back-to-stats') {
 
-        } else if (action === 'skip-swap') {
-
-            root.creator.swapApplied = null;
-
-            advanceAfterSwap(root.creator);
-
-        } else if (action === 'back-to-swap') {
-
-            root.creator.stage = 'swap';
+            if (root.creator.flow === 'new' && root.creator.stage === 'identity') syncIdentityInputs(root.creator);
+            root.creator.stage = 'stats';
 
         } else if (action === 'generate-persona-sheet') {
 
@@ -6889,7 +6928,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
             root.creator.stage = 'review';
 
         } else if (action === 'back-to-identity') {
-            root.creator.stage = root.creator.flow === 'new' ? 'identity' : 'swap';
+            root.creator.stage = root.creator.flow === 'new' ? 'identity' : 'persona-sheet';
         } else if (action === 'approve-sheet') {
             await approvePlayerSheet(root, context);
         } else if (action === 'back-from-adventure-start') {
@@ -6955,64 +6994,27 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
 }
 
-
-
-function applyPlayerReroll(creator, stat) {
-
-    if (!PLAYER_STATS.includes(stat)) throw new Error('Choose a valid stat to reroll.');
-
-    const current = normalizeCoreStats(creator.stats || {})[stat];
-
-    const roll = clampNumber(creator.rerollValue, 1, 10, rollD10());
-
-    const value = Math.max(current, roll);
-
-    creator.stats = { ...normalizeCoreStats(creator.stats || {}), [stat]: value };
-
-    creator.rerollApplied = { stat, roll, previous: current, value };
-
-    creator.stage = 'swap';
-
-}
-
-
-
-function applyPlayerSwap(creator, statA, statB) {
-
-    if (!PLAYER_STATS.includes(statA) || !PLAYER_STATS.includes(statB) || statA === statB) {
-
-        throw new Error('Choose two different stats to swap.');
-
-    }
-
-    const stats = normalizeCoreStats(creator.stats || {});
-
-    [stats[statA], stats[statB]] = [stats[statB], stats[statA]];
-
-    creator.stats = stats;
-
-    creator.swapApplied = { from: statA, to: statB };
-
-    advanceAfterSwap(creator);
-
-}
-
-
-
-function advanceAfterSwap(creator) {
-
-    if (creator.flow === 'persona') {
-
-        creator.sheetText = '';
-
-        creator.stage = 'persona-sheet';
-
+function adjustPlayerCreationStat(creator, stat, delta) {
+    const statName = String(stat || '').toUpperCase();
+    if (!PLAYER_STATS.includes(statName)) throw new Error('Choose a valid stat.');
+    const amount = Math.sign(Number(delta) || 0);
+    if (!amount) return;
+    const stats = normalizePlayerCreationStats(creator.stats || {});
+    const current = Number(stats[statName] || PLAYER_CREATION_MIN_STAT);
+    if (amount > 0) {
+        if (current >= PLAYER_CREATION_MAX_STAT || playerPointBuyRemaining(stats) <= 0) return;
+        stats[statName] = current + 1;
     } else {
-
-        creator.stage = 'identity';
-
+        if (current <= PLAYER_CREATION_MIN_STAT) return;
+        stats[statName] = current - 1;
     }
+    creator.stats = stats;
+}
 
+function resetPlayerCreationStats(creator) {
+    creator.stats = creator.flow === 'persona'
+        ? suggestedPersonaPointBuyStats(creator.personaAnalysis || {})
+        : defaultPlayerPointBuyStats();
 }
 
 
