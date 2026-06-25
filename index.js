@@ -2473,7 +2473,10 @@ function normalizePlayerCreatorSetupState(creator) {
     }
     if (next.stage !== 'offer' && next.stage !== 'approved') {
         next.flow = next.flow === 'persona' ? 'persona' : 'new';
-        if (!isValidPlayerCreationStats(next.stats)) {
+        const isStatsStage = next.stage === 'stats';
+        const hasUsableDraft = isValidPlayerCreationStatsDraft(next.stats);
+        const hasCompleteStats = isValidPlayerCreationStats(next.stats);
+        if (!hasUsableDraft || (!isStatsStage && !hasCompleteStats)) {
             next.stats = next.flow === 'persona'
                 ? suggestedPersonaPointBuyStats(next.personaAnalysis || {})
                 : defaultPlayerPointBuyStats();
@@ -3113,6 +3116,15 @@ function isValidPlayerCreationStats(stats = {}) {
     if (!stats || typeof stats !== 'object') return false;
     const normalized = normalizePlayerCreationStats(stats);
     return PLAYER_STATS.every(stat => normalized[stat] === Number(stats[stat])) && playerPointBuySpent(normalized) === PLAYER_CREATION_STAT_POINTS;
+}
+
+function isValidPlayerCreationStatsDraft(stats = {}) {
+    if (!stats || typeof stats !== 'object') return false;
+    const normalized = normalizePlayerCreationStats(stats);
+    const spent = playerPointBuySpent(normalized);
+    return PLAYER_STATS.every(stat => normalized[stat] === Number(stats[stat]))
+        && spent >= PLAYER_STATS.length * PLAYER_CREATION_MIN_STAT
+        && spent <= PLAYER_CREATION_STAT_POINTS;
 }
 
 function suggestedPersonaPointBuyStats(analysis = {}) {
@@ -5990,16 +6002,18 @@ function ensurePlayerSetupStyles() {
             width: min(820px, calc(100% - 1.2rem));
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
             border-radius: 8px;
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 34%, transparent);
-            box-shadow: 0 10px 26px rgba(0,0,0,0.22);
+            background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.55));
+            color: var(--SmartThemeBodyColor, inherit);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.18);
             line-height: 1.45;
-            overflow: hidden;
+            max-height: min(74vh, 42rem);
+            overflow: auto;
         }
         #${PLAYER_SETUP_CARD_ID} .spe-player-shell {
             display: flex;
             flex-direction: column;
-            gap: 0.8rem;
-            padding: 0.95rem;
+            gap: 0.7rem;
+            padding: 0.85rem;
         }
         #${PLAYER_SETUP_CARD_ID} .spe-player-header {
             display: flex;
@@ -6037,7 +6051,7 @@ function ensurePlayerSetupStyles() {
             padding: 0.22rem 0.5rem;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.16));
             border-radius: 999px;
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 24%, transparent);
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 7%, transparent);
             font-size: 0.82rem;
             white-space: nowrap;
         }
@@ -6084,7 +6098,7 @@ function ensurePlayerSetupStyles() {
         #${PLAYER_SETUP_CARD_ID} .spe-player-stat {
             border-left: 2px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
             padding: 0.45rem 0.55rem;
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 5%, transparent);
             border-radius: 6px;
             min-width: 0;
         }
@@ -6126,7 +6140,7 @@ function ensurePlayerSetupStyles() {
             padding: 0.65rem;
             border-left: 2px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
             border-radius: 6px;
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 5%, transparent);
         }
         #${PLAYER_SETUP_CARD_ID} .spe-player-stat-copy {
             min-width: 0;
@@ -6175,6 +6189,14 @@ function ensurePlayerSetupStyles() {
             font-weight: 600;
         }
         @media (max-width: 520px) {
+            #${PLAYER_SETUP_CARD_ID} {
+                width: calc(100% - 0.6rem);
+                max-height: 72vh;
+                margin: 0.45rem auto;
+            }
+            #${PLAYER_SETUP_CARD_ID} .spe-player-shell {
+                padding: 0.7rem;
+            }
             #${PLAYER_SETUP_CARD_ID} .spe-player-header,
             #${PLAYER_SETUP_CARD_ID} .spe-player-stat-editor {
                 grid-template-columns: 1fr;
