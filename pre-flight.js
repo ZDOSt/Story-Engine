@@ -487,6 +487,7 @@ strictBehaviorism:
 Execute strictBehaviorism(response, context).
 mandate: Render character state only through directly witnessable behavior and physical displacement.
 ABSOLUTELY-FORBIDDEN: Never do any of the following. No internal states, subtext labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, or canned emotional shorthand. Do not use breath hitching, breath catching, voice hitching, or voice catching as emotional shorthand (e.g., "her breath catches", "his breath hitches", "her voice catches", "his voice hitches").
+Do not use repeated mouth/jaw opening-closing loops as emotional shorthand (e.g., "mouth opens, then closes, then opens again").
 No blushing, flushing, reddening, paling, or indirect skin-color emotional shorthand.
 
 agencySeparation:

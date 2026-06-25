@@ -375,6 +375,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not use subtext labels, interpretive commentary, or inferred inner states.
         - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
         - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, breath catching, voice hitching, voice catching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts. Examples: "her breath catches", "his breath hitches", "her voice catches", "his voice hitches".
+        - Do not use repeated mouth/jaw opening-closing loops as emotional shorthand. Example: "mouth opens, then closes, then opens again".
   }
 
   embodiedPerception(response, context): {
@@ -8512,6 +8513,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Goal: preserve character meaning while repairing internal state labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand.',
         'Do not name internal, emotional, sexual, psychological, or subtext states as exposition: no "she is nervous," "desire shows," "curiosity flickers," "something bolder beneath the surface," or equivalent interpretation.',
         'Do not use eyes, gaze, expression shifts, micro-expressions, breath, pulse, throat, stomach, heat, blush, flush, skin color, trembling, twitching, jaw, lips, knuckles, or similar body cues as canned emotional shorthand.',
+        'Do not use repeated mouth/jaw opening-closing loops as emotional shorthand, including "mouth opens, then closes, then opens again," "mouth opens and closes," or equivalent open-close-open loops.',
         'Ban indirect skin-color/emotion workarounds: color rising, spreading, crossing, touching, filling, staining, warming, darkening, draining, blooming, or appearing across cheeks, face, ears, throat, chest, or skin.',
         'Ban indirect eye/subtext workarounds: something flickers in the eyes, eyes darken, eyes soften, gaze sharpens with meaning, expression says, a look betrays, or equivalent hidden-state cues.',
         'Replace violations with consequential visible behavior: movement, spacing, contact, timing, posture that affects action, object handling, blocked access, retreat, approach, refusal, interruption, dialogue content, or visible consequence.',
