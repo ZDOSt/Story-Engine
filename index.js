@@ -2042,7 +2042,13 @@ function scheduleNarratorDepthReplay() {
 
             replay.phase = 'replaying';
             showProgress('Starting narration with native handoff...');
-            Promise.resolve(replayContext.generate(replay.type || 'normal', { automatic_trigger: true }))
+            const generateOptions = { automatic_trigger: true };
+            const adventureReplayPrompt = String(replay.pendingGeneration?.adventureStartPrompt || '').trim();
+            if (adventureReplayPrompt) {
+                generateOptions.quiet_prompt = adventureReplayPrompt;
+                generateOptions.quietToLoud = true;
+            }
+            Promise.resolve(replayContext.generate(replay.type || 'normal', generateOptions))
                 .catch(error => {
                     clearRuntimePrompts();
                     state.pendingRun = null;
