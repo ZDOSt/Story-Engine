@@ -106,6 +106,7 @@ function buildReadableSemanticDebug(ledger) {
         'socialBucket=' + valueOrNone(resolution.socialBucket),
         'combatType=' + valueOrNone(resolution.combatType),
         'actionCount=' + list(resolution.actionCount),
+        'actionUnits=' + actionUnitsSummary(resolution.actionUnits, { includeEvidence: true }),
         'environmentDifficultyTier=' + valueOrNone(resolution.environmentDifficultyTier),
         'environmentDifficultyBonus=' + valueOrNone(resolution.environmentDifficulty),
         'classifyHostilePhysicalIntent=' + String(Boolean(resolution.classifyHostilePhysicalIntent)),
@@ -160,6 +161,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.CombatType=' + valueOrNone(resolution.CombatType),
         'resolutionPacket.ResolvedStats=' + inline(resolution.ResolvedStats ?? {}),
         'resolutionPacket.actions=' + list(resolution.actions),
+        'resolutionPacket.actionUnits=' + actionUnitsSummary(resolution.actionUnits, { includeEvidence: true }),
         'resolutionPacket.OutcomeTier=' + valueOrNone(resolution.OutcomeTier),
         'resolutionPacket.Outcome=' + valueOrNone(resolution.Outcome),
         'resolutionPacket.LandedActions=' + valueOrNone(resolution.LandedActions),
@@ -227,7 +229,7 @@ export function formatNarratorPromptContext(report, options = {}) {
         ...formatMechanicsResultList(summary, resolution, handoff),
         '',
         '==NARRATOR_MODEL_HANDOFF==',
-        'This is the exact narrator-facing handoff appended to the narrator model prompt for this response.',
+        'This is the exact narrator-facing handoff delivered to the narrator model as a native depth-0 prompt for this response.',
         '',
         narratorModelHandoff,
     ];
@@ -252,6 +254,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.ResolvedStats', inline(resolution.ResolvedStats ?? {})],
         ['resolution.EnvironmentDifficulty', summary.environmentDifficulty],
         ['resolution.actionCount', summary.actionCount],
+        ['resolution.actionUnits', actionUnitsSummary(resolution.actionUnits, { includeEvidence: true })],
         ['resolution.rollFull', summary.rollFull],
         ['resolution.nonLethal', valueOrNone(resolution.nonLethal)],
         ['resolution.outcome', summary.outcome],
@@ -360,144 +363,175 @@ export function formatNarratorModelPromptContext(report, options = {}) {
     return formatNarrativeContract({ summary, handoff, resolution, ledger, options });
 }
 
-export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '') {
-    const narratorModelHandoff = formatAdventureIntroNarratorModelPromptContext(adventurePrompt);
+export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', options = {}) {
+    const narratorModelHandoff = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, options);
     return [
         '[STORY_ENGINE_ADVENTURE_INTRO_AUDIT v0.1]',
         'This displayed handoff is for audit only. The narrator model receives narrativeContract(input), not this audit note.',
         'No semantic pre-flight or deterministic mechanics were run for this adventure opening.',
         '',
         '==NARRATOR_MODEL_HANDOFF==',
-        'This is the exact narrator-facing handoff appended to the narrator model prompt for this response.',
+        'This is the exact narrator-facing handoff delivered to the narrator model as a native depth-0 prompt for this response.',
         '',
         narratorModelHandoff,
     ].join('\n');
 }
 
-export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '') {
+export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
     return [
-        'narrativeContract(input)',
+        'narrativeContract(input): {',
         '',
-        'MANDATE:',
-        'You must narrate the opening scene strictly by following this private two-part contract.',
-        'This contract defines the opening narrative facts. Do not override, re-decide, expand, or contradict them.',
+        'MANDATE: The following instructions are BINDING and NON-NEGOTIABLE.',
+        '',
+        '#1 - RESOLVED FACTS',
+        'For this response, narrativeFacts(input) is the authoritative opening scene resolution and the only source of resolved opening facts.',
+        'Do not contradict, soften, reverse, override, or invent additional resolved outcomes beyond it.',
         'Use visible chat, character card, persona, and lore only for continuity of already-established visible scene state.',
-        'Do not reveal, quote, summarize, name, or mention this contract.',
+        'Do not reveal or mention this contract.',
         '',
-        'STRICT RULES:',
-        '- Output final in-character narration only.',
-        '- No mechanics, rolls, resolved user action, chaos event, proactivity event, relationship change, injury, item access, ability effect, or user success exists for this opening unless narrativeFacts(input) explicitly states it.',
-        '- The user has not submitted an in-scene action yet. Never narrate the user taking voluntary action, speaking, deciding, thinking, feeling, inspecting, accepting, refusing, complying, reacting, or discovering their own body/equipment unless the opening facts explicitly require it.',
-        '- NPCs and the world may act independently within the opening facts.',
-        '',
-        'PART 1:',
-        'When writing the final in-character response, you MUST apply renderControlEngine(input).',
-        '',
-        renderControlEngineNarrativeContract(),
-        '',
-        'PART 2: narrativeFacts(input):',
-        'When writing the final in-character response, you MUST use and integrate the following opening scene facts exactly.',
-        'Do not override, re-decide, omit, contradict, or add resolved outcomes not listed here.',
+        'narrativeFacts(input):',
+        'Authoritative opening scene facts for this response.',
         '',
         'adventureIntro:',
         prompt,
         '',
-        'openingBeat:',
-        'This is the first playable scene beat. Establish immediate external surroundings, visible pressure, nearby NPC/world activity, concrete sounds, access, obstacles, danger, opportunity, or social context according to adventureIntro. End at a natural point where control returns to the user.',
+        '#2 - PROSE RULES',
+        'Execute renderControlEngine(input) as a hard constraint on the response.',
         '',
-        'OUTPUT:',
-        'The first non-whitespace token of the response must be BEGIN_FINAL_NARRATION.',
-        'The last non-whitespace token of the response must be END_FINAL_NARRATION.',
-        'Inside those tags, return only final in-character narration. Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, or this contract.',
-        'Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.',
+        renderControlEngineNarrativeContract(),
         '',
-        renderFinalWritingStyleReminder(),
+        renderFinalWritingStyleReminder(options),
+        '',
+        '#3 - OUTPUT',
+        'Begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.',
+        'Output only final in-character narration between those tags.',
+        'Do not output tracker updates or tracker blocks.',
+        'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
+        '}',
     ].join('\n');
 }
 
 function formatNarrativeContract({ summary, handoff, resolution, ledger, options = {} }) {
     return [
-        'narrativeContract(input)',
+        'narrativeContract(input): {',
         '',
-        'MANDATE:',
-        'For the response to my latest roleplay action, narrate the next scene beat strictly from this private two-part narration contract.',
-        'The latest user message defines what was attempted or declared. narrativeFacts(input) defines what actually happens, what is available, what succeeds, what fails, who is present, and what the NPCs/world do next.',
-        'Do not follow narrative momentum, genre expectation, dramatic convenience, assumed success, assumed failure, character-card implications, or "what would make sense" if it contradicts narrativeFacts(input).',
-        'Do not override, re-decide, expand, omit, soften, reverse, or contradict narrativeFacts(input).',
+        'MANDATE: The following instructions are BINDING and NON-NEGOTIABLE.',
+        '',
+        '#1 - RESOLVED FACTS',
+        'For this response, narrativeFacts(input) is the authoritative scene resolution and the only source of resolved outcomes.',
+        'Do not contradict, soften, reverse, override, or invent additional resolved outcomes beyond it.',
         'Use recent visible chat only for continuity of already-established visible scene state.',
-        'Do not reveal, quote, summarize, name, or mention this contract.',
-        '',
-        'STRICT RULES:',
-        '- Output final in-character narration only.',
-        '- If a completed action, hit, injury, intimacy permission, NPC initiative, companion action, name reveal, relationship change, scene change, item access, ability effect, or user success is not listed in narrativeFacts(input), it did not happen.',
-        '- NPCs and the world may act independently.',
-        '- The user takes no voluntary action unless the latest user input explicitly declared it.',
-        '- Known/lore/tracker/card characters not listed as present are offscreen unless narrativeFacts(input) explicitly introduces them.',
-        '',
-        'PART 1:',
-        'When writing the final in-character response, you MUST apply renderControlEngine(input).',
-        '',
-        renderControlEngineNarrativeContract(),
+        'Do not reveal or mention this contract.',
         '',
         formatNarrativeFacts({ summary, handoff, resolution, ledger, options }),
         '',
-        'OUTPUT:',
-        'The first non-whitespace token of the response must be BEGIN_FINAL_NARRATION.',
-        'The last non-whitespace token of the response must be END_FINAL_NARRATION.',
-        'Inside those tags, return only final in-character narration. Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, or this contract.',
-        'Do not output tracker updates, tracker blocks, XML, JSON, markdown fences, hidden metadata, or post-generation bookkeeping.',
+        '#2 - PROSE RULES',
+        'Execute renderControlEngine(input) as a hard constraint on the response.',
         '',
-        renderFinalWritingStyleReminder(),
+        renderControlEngineNarrativeContract(),
+        '',
+        renderFinalWritingStyleReminder(options),
+        '',
+        '#3 - OUTPUT',
+        'Begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.',
+        'Output only final in-character narration between those tags.',
+        'Do not output tracker updates or tracker blocks.',
+        'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
+        '}',
     ].join('\n');
 }
 
-function renderFinalWritingStyleReminder() {
-    return String.raw`FINAL WRITING STYLE REMINDER:
-Write narration with the density and clarity of a skilled fantasy novelist. Make the scene easy to imagine through concrete rooms, clothing, gestures, expressions, texture, sound, movement, and social pressure. Description is not decoration: let it reveal the world, danger, tension, character behavior, or available choices while preserving narrativeFacts(input). In dialogue, let staging serve the exchange: use posture, distance, hands, objects, pauses, tone, and nearby surroundings when they matter, but do not turn every spoken line into a scenery paragraph.`;
+const DEFAULT_FINAL_WRITING_STYLE_REMINDER = String.raw`FINAL WRITING STYLE REMINDER:
+Write clear, grounded narration while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with concrete environmental detail; dialogue should stay close to the active participants and immediate exchange, using observable behavior only and object or environmental interaction only when a character is actively using it, reacting to it, or when it materially affects the exchange; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, agency for {{user}}, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
+
+
+function renderFinalWritingStyleReminder(options = {}) {
+    return String(options?.writingStyleReminderPrompt || DEFAULT_FINAL_WRITING_STYLE_REMINDER).trim();
 }
 
 function renderControlEngineNarrativeContract() {
-    return String.raw`renderControlEngine(input):
-
-SensoryNarrationDirective:
-Apply SensoryNarrationDirective(input): narrate from {{user}}'s direct physical perception with vivid sight, sound, touch, space, movement, texture, pressure, and consequence. Make the scene feel present and embodied, not like an action list. Smell/taste are secondary: include them only when explicitly invoked by {{user}} or forced by a specific close-range physical source. Do not use smell/taste as atmosphere, mood, romance, tension, memory, vibe, or filler.
-
-abilityIntegration:
-Apply abilityIntegration(response, context): render abilities, magic, senses, spells, supernatural effects, and body traits only through visible, audible, tactile, or environmental results from narrativeFacts(input). Show what changes in the scene: light, pressure, force, heat, cold, distance, damage, altered material, changed access, or bodily transformation. Do not name, announce, activate, charge, ritualize, system-label, or explain abilities unless spoken aloud in dialogue.
+    return String.raw`renderControlEngine(input): {
 
 itemAvailability:
-If personal item use is listed, obey the listed gear/inventory availability exactly. Available item use is scene fact only, not automatic success. Unavailable personal item use has no item effect; after the attempted access point, narrate absence or failed access, not possession. Unavailable personal item use must not appear as freely possessed, drawn, wielded, used, consumed, presented, or unlocked unless narrativeFacts(input) explicitly resolves that access.
+Execute itemAvailability(response, context).
+mandate: Obey listed personal item availability exactly.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. Unavailable items must not appear possessed or usable.
 
-epistemicRender:
-Apply epistemicRender(response, context): write only from direct in-scene evidence available at {{user}}'s physical position. Respect line of sight, lighting, occlusion, distance, direction, barriers, and sound obstruction. Preserve uncertainty for partial or obscured evidence. Unknown names, roles, species, motives, loyalties, hidden causes, lore, and private thoughts stay locked until introduced, spoken, read, directly evidenced, or already established.
+diegeticPhysicality:
+Execute diegeticPhysicality(response, context).
+mandate: Render abilities and unusual effects through observable consequences only.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not name or explain powers unless spoken in dialogue.
 
-behavioralRender:
-Apply behavioralRender(response, context): show character state through observable behavior that changes the scene: spacing, access, timing, objects, contact, pressure, risk, dialogue, refusal, interruption, approach, retreat, or controlled silence. Do not use emotion labels, body-tell shorthand, skin-color emotional shorthand, breath/throat/pulse/stomach cues, eye-softening, jaw-clenching, twitch loops, or repeated micro-gestures as substitutes for action. Specifically ban flushing, blushing, reddening, paling, color rising/creeping across skin, knuckle whitening, and equivalents.
+strictEpistemology:
+Execute strictEpistemology(response, context).
+mandate: Keep information locked until directly evidenced in-scene.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not reveal unknown identities, motives, lore, or private thoughts.
 
-literalStyleFilter:
-Apply literalStyleFilter(response, context): write natural, grounded prose that remains physically clear. The narration may be vivid, rhythmic, intimate, tense, quiet, or richly detailed, but every sentence should still point to something observable, audible, tactile, spatial, behavioral, or consequential. Do not make the prose stiff or procedural just to avoid figurative language. Replace figurative shortcuts with specific scene detail: movement, texture, sound, contact, spacing, object state, weather on surfaces, posture, gesture, or consequence. Do not use metaphor, simile, personification, emotional physics, or decorative abstraction that turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
+inanimateObjectivity:
+Execute inanimateObjectivity(response, context).
+mandate: Give agency only to beings, forces, mechanisms, and processes capable of physical action.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not attribute will, awareness, or emotion to objects, weather, or abstractions.
 
-sceneBeatComposition:
-Apply sceneBeatComposition(response, context): write cohesive scene beats, not motion logs or twitch chains. Combine related movement, contact, environment, object handling, dialogue, and consequence into natural paragraphs. Keep same-speaker action and dialogue together. Vary sentence openings and rhythm. Prefer one strong NPC beat over several small fragments. Do not use robotic one-action cadence, pingpong structure, isolated speech balloons, same-speaker fragmentation, micro-reaction loops, body-cue pileups, or stock quietness shorthand as emotional crutch.
+denotativePhysicality:
+Execute denotativePhysicality(response, context).
+mandate: Keep prose literal, physically clear, and directly perceivable.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. No figurative language. Rooms do not breathe. Silence does not stretch. Words do not hang, land, hit, cut, or fall flat. Rewrite any figurative line as literal physical description.
 
-chronologyControl:
-Apply chronologyControl(response, input, context): start the response at the point right after the latest {{user}} input. Do not replay the declared action. If it succeeded, start with what changed because of it. If it failed, stalled, was blocked, or was interrupted, start with the failure point, obstruction, resistance, absence, interruption, NPC response, or changed scene state. Preserve completed actions, delivered items, object positions, locations, and open/closed/removed/placed states unless narrativeFacts(input) changes them. Do not echo, restage, summarize, paraphrase, re-perform, or narrate back {{user}} input. Do not use opening recap transitions or "as you" phrasing.
+embodiedPerception:
+Execute embodiedPerception(response, context).
+mandate: Narrate through concrete physical evidence from {{user}}'s position. Keep positions, distance, facing, occlusion, and barriers consistent.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not use smell or taste as ambient scene dressing. Do not let {{user}} perceive, reach, or interact through walls, doors, distance, cover, or other barriers unless the scene explicitly opens that path.
+Do not say that the air smells, the room smells, the place smells, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.
+Do not say that the air tastes, the room tastes, the place tastes, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.
 
-userAgencyControl:
-Apply userAgencyControl(response, input, context): render the world, NPCs, hazards, objects, and consequences as active and independent. Render {{user}} voluntary actions only when explicitly declared in the latest input or allowed by PROXY USER ACTION MODE. If an object/note/path/threat/invitation is delivered or revealed, stop with it available, visible, or within reach; do not make {{user}} take, open, read, inspect, pocket, wear, eat, drink, touch, follow, accept, answer, speak, nod, look, approach, retreat, attack, defend, search, examine, comply, or decide. Do not write {{user}} speech, thoughts, feelings, reactions, silence, choices, decisions, internal states, or voluntary movement.
+strictBehaviorism:
+Execute strictBehaviorism(response, context).
+mandate: Render character state only through directly witnessable behavior and physical displacement.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. No internal states, subtext labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, or canned emotional shorthand. Do not use breath hitching, breath catching, voice hitching, or voice catching as emotional shorthand (e.g., "her breath catches", "his breath hitches", "her voice catches", "his voice hitches").
+Do not use repeated mouth/jaw opening-closing loops as emotional shorthand (e.g., "mouth opens, then closes, then opens again").
+No blushing, flushing, reddening, paling, or indirect skin-color emotional shorthand.
 
-turnStructureControl:
-Apply turnStructureControl(response, context): preserve back-and-forth roleplay. Give each NPC a meaningful beat, then return space to {{user}} before that NPC continues the scene alone. Keep same-speaker action and dialogue together. Do not run extended NPC monologues, inter-NPC pingpong, same-speaker fragmentation, narration/speech/narration/speech chains, repeated follow-up prompts, or answers to questions directed at {{user}}.
+agencySeparation:
+Execute agencySeparation(response, input, context).
+mandate: {{user}} controls the protagonist. The narrator controls the world and consequences.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not write {{user}}'s speech, thoughts, feelings, choices, or voluntary movement.
 
-responseEndpointControl:
-Apply responseEndpointControl(response, context): end exactly where the scene naturally returns control to {{user}}. Stop once the immediate consequence, NPC response, revealed information, available object/path, obstruction, hazard, or choice point is clear. The ending should leave a concrete situation for {{user}} to respond to, not an explicit stage direction. Output nothing after the response beat. Do not add waiting cues, meta-questions, mood-only silence, unrelated ambience, all-eyes-on-user framing, scene-break tails, or extra narration after the response point.`;
+linearChronology:
+Execute linearChronology(response, input, context).
+mandate: Narrate in strict linear order. Begin with the immediate consequence of {{user}}'s latest input.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not echo, repeat, summarize, or recap any part of {{user}}'s latest input. Do not insert undeclared intermediate actions. Bad: "You reach for the scroll..." Good: the guard blocks the scroll before the attempt completes.
+
+hypotacticSceneBeats:
+Execute hypotacticSceneBeats(response, context).
+mandate: Write cohesive scene beats.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not break one beat into staccato action stacking or body-cue pileups.
+
+characterTurnPacing:
+Execute characterTurnPacing(response, context).
+mandate: Each active NPC gets 1 paragraph-turn per {{user}} input.
+ABSOLUTELY-FORBIDDEN: Never do any of the following. No second turn, repeated body language, or extra micro-actions outside the NPC A -> NPC B -> NPC A exception.
+
+activeHandoff:
+Execute activeHandoff(response, context).
+mandate: End on an active, concrete beat that {{user}} can immediately respond to. (Dialogue or action directed at {{user}}, or a visible scene change that immediately requires a response)
+NEVER:
+- Continue past the handoff beat
+- Prompt {{user}} to respond or ask direct questions such as "what do you do?" or "the ball is in your court."
+- End on explicit waiting, staring, silence, or all-eyes-on-user framing.
+- End on filler background, ambient, or environmental details that are irrelevant to the ongoing interaction.
+
+applicationContract:
+Before writing the final, in-character response, treat these constraints as binding: activeHandoff, characterTurnPacing, hypotacticSceneBeats, linearChronology, strictBehaviorism, embodiedPerception, denotativePhysicality, inanimateObjectivity, strictEpistemology, and diegeticPhysicality.
+The response must be fully filtered through them and remain compliant with all of them.
+Any failure invalidates the response.
+}`;
 }
 
 function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = {} }) {
     const facts = [
-        ['userAttempt', narrativeUserAttempt(summary.userAction)],
-        ['attemptResult', narrativeAttemptResult(resolution)],
+        ['attemptedActions', narrativeAttemptedActions(resolution, summary)],
+        ['attemptedActionResults', narrativeAttemptedActionResults(resolution)],
         ['sceneContinuity', 'Continue from the visible scene state. Do not replay prior NPC actions, world actions, object movement, delivered items, opened/closed access, or already-completed events.'],
         ['presentCharacters', narrativePresentCharacters(resolution, handoff)],
         ['npcResponse', narrativeNpcResponseFact(handoff)],
@@ -521,147 +555,79 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
     ].filter(([, value]) => !isNoneText(value));
 
     return [
-        'PART 2: narrativeFacts(input):',
-        'When writing the final in-character response, you MUST use and integrate the following resolved scene facts exactly.',
-        'Do not override, re-decide, omit, contradict, or add resolved outcomes not listed here.',
+        'narrativeFacts(input):',
+        'Authoritative resolved scene facts for this response.',
         '',
         ...facts.flatMap(([key, value]) => [key + ':', value, '']),
     ].join('\n').trimEnd();
 }
 
-function narrativeUserAttempt(userAction) {
-    const action = valueOrNone(userAction);
-    return isNoneText(action)
-        ? 'The latest user input does not contain a clear new action.'
-        : `The user attempts or declares this current beat: ${action}.`;
+function narrativeAttemptedActions(resolution = {}, summary = {}) {
+    const units = narrativeActionUnits(resolution, summary);
+    if (!units.length) return 'No resolved attempted action is listed for this beat.';
+    return units.map(unit => `${unit.id}: ${narratorUserMacroText(unit.action)}.`).join('\n');
 }
 
-function narrativeAttemptResult(resolution = {}) {
-    const outcome = String(resolution?.Outcome ?? 'no_roll');
+function narrativeAttemptedActionResults(resolution = {}) {
+    const units = narrativeActionUnits(resolution);
     const tier = String(resolution?.OutcomeTier ?? 'NONE');
-    const fatalInjury = Array.isArray(resolution?.InflictedInjuries)
-        ? resolution.InflictedInjuries.find(injury => injury?.condition === 'dead')
-        : null;
-    const partial = narrativePartialActionFact(resolution);
-    const suffix = partial ? ` ${partial}` : '';
-
-    if (fatalInjury) {
-        return `The user's completed action produces a fatal finish against ${valueOrNone(fatalInjury.NPC)}. Narrate the death clearly and do not soften it into another nonfatal wound.${suffix}`;
-    }
+    const outcome = String(resolution?.Outcome ?? 'no_roll');
+    if (!units.length) return 'No listed action result is active.';
     if (resolution?.RollNeeded === 'N' || tier === 'NONE' || outcome === 'no_roll') {
         const reason = valueOrNone(resolution?.RollReason);
-        const reasonText = isNoneText(reason) ? '' : ` Reason: ${reason}.`;
-        return `No roll resolves this beat; narrate ordinary scene continuity and the listed NPC/world response only.${reasonText} Do not invent a new success, failure, contest, or reversal.${suffix}`;
+        const reasonText = isNoneText(reason) ? '' : ` Reason: ${narratorUserMacroText(reason)}.`;
+        return units.map(unit => `${unit.id}: NO ROLL - This listed action is not mechanically contested; narrate ordinary scene continuity only, without inventing success, failure, contest, reversal, or extra resolved effects.${reasonText}`).join('\n');
     }
-    return `${narrativeBucketOutcomeFact(resolution, outcome)} MUST narrate this resolved outcome. Do not reverse, soften, omit, reroll, or contradict it.${suffix}`;
+    if (tier === 'Stalemate') {
+        return units.map(unit => `${unit.id}: UNRESOLVED - This listed action remains contested or unfinished. Do not narrate it fully succeeding or fully failing unless another narrative fact explicitly says otherwise.`).join('\n');
+    }
+    if (tier.includes('Failure')) {
+        const failureText = tier === 'Minor_Failure'
+            ? 'failing narrowly'
+            : tier === 'Moderate_Failure'
+                ? 'failing clearly'
+                : tier === 'Critical_Failure'
+                    ? 'failing decisively'
+                    : 'failing';
+        return units.map(unit => `${unit.id}: FAILURE - Narrate this listed action ${failureText}. It does not land, does not take hold, and does not produce a completed effect unless another narrative fact explicitly says otherwise.`).join('\n');
+    }
+    const successCount = successfulActionUnitCount(resolution, units.length);
+    return units.map((unit, index) => {
+        if (index >= successCount) {
+            return `${unit.id}: FAILURE - This listed action does not land or remains unfinished.`;
+        }
+        const successText = tier === 'Minor_Success'
+            ? 'succeeding narrowly, with limited visible impact'
+            : tier === 'Moderate_Success'
+                ? 'succeeding clearly, with solid visible impact'
+                : tier === 'Critical_Success'
+                    ? 'succeeding decisively'
+                    : 'succeeding clearly';
+        return `${unit.id}: SUCCESS - Narrate this listed action ${successText}.`;
+    }).join('\n');
 }
 
-function narrativeBucketOutcomeFact(resolution = {}, outcome = '') {
-    if (resolution?.classifyPhysicalBoundaryPressure === 'Y') {
-        return narrativeBoundaryOutcomeFact(outcome);
-    }
-    switch (resolution?.ActionBucket) {
-        case 'Social':
-            return narrativeSocialOutcomeFact(resolution?.SocialBucket, outcome);
-        case 'Combat':
-            return narrativeCombatOutcomeFact(resolution?.CombatType, outcome);
-        case 'Challenge':
-            return narrativeChallengeOutcomeFact(outcome);
-        default:
-            return narrativeGenericOutcomeFact(outcome);
-    }
+function narrativeActionUnits(resolution = {}, summary = {}) {
+    const source = Array.isArray(resolution?.actionUnits) ? resolution.actionUnits : [];
+    const units = source
+        .map((unit, index) => ({
+            id: valueOrNone(unit?.id || `A${index + 1}`),
+            action: valueOrNone(unit?.action),
+        }))
+        .filter(unit => !isNoneText(unit.action));
+    if (units.length) return units.slice(0, 3);
+    const fallback = valueOrNone(summary.userAction || resolution.GOAL);
+    return isNoneText(fallback) ? [] : [{ id: 'A1', action: fallback }];
 }
 
-function outcomeFamily(outcome = '') {
-    if (['dominant_impact', 'solid_impact', 'light_impact', 'success'].includes(outcome)) return 'success';
-    if (outcome === 'struggle') return 'struggle';
-    if (['checked', 'deflected', 'avoided', 'failure'].includes(outcome)) return 'failure';
-    return 'unknown';
-}
-
-function impactDegree(outcome = '') {
-    if (outcome === 'dominant_impact') return 'decisive';
-    if (outcome === 'solid_impact') return 'clear';
-    if (outcome === 'light_impact') return 'limited';
-    if (outcome === 'avoided') return 'decisive opposing';
-    if (outcome === 'deflected') return 'clear opposing';
-    if (outcome === 'checked') return 'partial opposing';
-    return 'standard';
-}
-
-function narrativeSocialOutcomeFact(bucket = 'None', outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    if (bucket === 'Diplomacy') {
-        if (family === 'success') return `The user's persuasion, negotiation, reassurance, or good-faith appeal succeeds with ${degree} effect; the target grants context-appropriate cooperation, concession, access, help, de-escalation, or an opening proportional to the result.`;
-        if (family === 'struggle') return 'The social appeal reaches a contested middle: partial cooperation, delay, conditions, guarded negotiation, or unresolved back-and-forth, with no full concession yet.';
-        return `The user's persuasion, negotiation, reassurance, or good-faith appeal fails with ${degree} effect; the target refuses, withholds the concession/access/help, adds conditions, disengages, or remains guarded.`;
-    }
-    if (bucket === 'Bluff') {
-        if (family === 'success') return `The user's bluff, lie, misdirection, or unsupported claim succeeds with ${degree} effect; the target believes enough to act, grant access, lower guard, delay, or commit resources as context supports.`;
-        if (family === 'struggle') return 'The deception is uncertain: the target hesitates, tests details, asks for proof, gives only limited provisional acceptance, or delays commitment.';
-        return `The user's bluff, lie, misdirection, or unsupported claim fails with ${degree} effect; the target doubts, refuses, demands proof, tests the claim, spots the contradiction if evidence allows, or calls it out.`;
-    }
-    if (bucket === 'Intimidate') {
-        if (family === 'success') return `The user's intimidation, threat, coercion, or fear pressure succeeds with ${degree} effect; the target treats the pressure as credible and yields, retreats, appeases, complies, backs down, creates distance, or seeks safety as context supports.`;
-        if (family === 'struggle') return 'The intimidation creates a contested reaction: hesitation, partial compliance, defensive bargaining, stalling, or a tense standoff with no full submission yet.';
-        return `The user's intimidation, threat, coercion, or fear pressure fails with ${degree} effect; the target does not submit and may refuse, brace, call the bluff, seek help, disengage, or escalate according to disposition and scene pressure.`;
-    }
-    return narrativeGenericOutcomeFact(outcome);
-}
-
-function narrativeCombatOutcomeFact(combatType = 'Mundane', outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    const isSpell = combatType === 'SpellOrSupernatural';
-    if (family === 'success') {
-        return isSpell
-            ? `The user's spell, power, or supernatural attack lands with ${degree} effect; narrate the completed magical/supernatural impact only within landedActions, injuryOrDeath, harmLimit, and listed effects.`
-            : `The user's mundane, bodily, weapon, or natural-weapon attack lands with ${degree} effect; narrate concrete contact, hit, force, position, or damage only within landedActions, injuryOrDeath, and harmLimit.`;
-    }
-    if (family === 'struggle') {
-        return isSpell
-            ? 'The supernatural attack is contested with no clear winner yet; narrate resistance, interference, unstable contact, or a deadlock without a completed full effect.'
-            : 'The physical attack becomes a struggle or bind with no clear winner yet; narrate blocked force, contested position, clinch, lock, or deadlock without a clean completed hit.';
-    }
-    return isSpell
-        ? `The user's spell, power, or supernatural attack fails with ${degree} effect; the effect is resisted, disrupted, deflected, avoided, fizzles, or fails to complete.`
-        : `The user's mundane, bodily, weapon, or natural-weapon attack fails with ${degree} effect; it misses, is blocked, is avoided, glances off, is stopped, or creates no completed hit.`;
-}
-
-function narrativeChallengeOutcomeFact(outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    if (family === 'success') return `The user's physical/environmental challenge succeeds with ${degree} effect; the obstacle is overcome, bypassed, opened, crossed, escaped, tracked through, hidden from, or progressed past as context supports.`;
-    if (family === 'struggle') return 'The physical/environmental challenge remains contested: partial progress, unstable footing, delay, exposure, a stuck position, or a temporary hold with no full resolution yet.';
-    return `The user's physical/environmental challenge fails with ${degree} effect; the obstacle blocks progress, delays them, worsens position, exposes them, costs time, or prevents the intended access/escape/progress.`;
-}
-
-function narrativeBoundaryOutcomeFact(outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    if (family === 'success') return `The user's physical boundary, access, possession, or space pressure succeeds with ${degree} effect; narrate changed access, position, possession, distance, or control without turning it into a completed injury unless injuryOrDeath says so.`;
-    if (family === 'struggle') return 'The physical boundary, access, possession, or space pressure remains contested: resistance, partial control, deadlock, guarded movement, or interrupted access without a completed injury.';
-    return `The user's physical boundary, access, possession, or space pressure fails with ${degree} effect; the target or obstacle keeps control, blocks access, maintains distance, protects possession, or resists the pressure.`;
-}
-
-function narrativeGenericOutcomeFact(outcome = '') {
-    const family = outcomeFamily(outcome);
-    const degree = impactDegree(outcome);
-    if (family === 'success') return `The user's attempt succeeds with ${degree} visible effect according to the listed scene facts.`;
-    if (family === 'struggle') return `The user's attempt becomes a contested struggle with no clear winner yet.`;
-    if (family === 'failure') return `The user's attempt fails with ${degree} visible effect according to the listed scene facts.`;
-    return 'Render the user attempt according to the listed resolved scene facts without inventing extra success or failure.';
-}
-
-function narrativePartialActionFact(resolution = {}) {
-    const landed = Number(resolution?.LandedActions ?? 0);
-    const actionCount = Array.isArray(resolution?.actions) ? resolution.actions.length : 0;
-    if (!Number.isFinite(landed) || !actionCount || landed >= actionCount) return '';
-    if (landed <= 0) {
-        return 'None of the attempted actions connect, take hold, create successful contact, cause damage, establish possession, or produce a completed effect unless another narrative fact explicitly says otherwise.';
-    }
-    return `Only ${landed} of ${actionCount} attempted action${actionCount === 1 ? '' : 's'} takes effect. Narrate only that much concrete completion and limit the rest as missed, checked, interrupted, glanced off, or otherwise unfinished.`;
+function successfulActionUnitCount(resolution = {}, total = 0) {
+    const tier = String(resolution?.OutcomeTier ?? '');
+    if (tier === 'Minor_Success') return Math.min(1, total);
+    if (tier === 'Moderate_Success') return Math.min(2, total);
+    if (tier === 'Critical_Success') return total;
+    if (tier === 'Success') return total;
+    const landed = Number(resolution?.LandedActions);
+    return Number.isFinite(landed) ? Math.max(0, Math.min(total, landed)) : 0;
 }
 
 function narrativePresentCharacters(resolution = {}, handoff = {}) {
@@ -680,15 +646,15 @@ function narrativePresentCharacters(resolution = {}, handoff = {}) {
         handoff?.powerActorPressure?.event?.ContactName ?? handoff?.powerActorPressure?.event?.contactName,
     ]);
     if (!names.length) {
-        return 'No known/tracked character is required to participate this beat. Known/lore/example/tracker/card characters remain offscreen unless a narrative fact explicitly introduces them. Ordinary scene-appropriate new figures may appear only if they do not contradict the listed facts.';
+        return 'No known/tracked character is required to participate this beat. Known/lore/example/tracker/card characters remain offscreen unless a narrative fact explicitly introduces them. This fact does not introduce new figures.';
     }
-    return `Current scene cast: ${list(names)}. Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn, unless narrativeFacts(input) explicitly introduces a new NPC. Known/lore/example/tracker/card characters not listed are offscreen and must not participate. Ordinary scene-appropriate new figures may appear only if they do not contradict the listed facts.`;
+    return `Current scene cast: ${list(names)}. Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn, unless narrativeFacts(input) explicitly introduces a new NPC. Known/lore/example/tracker/card characters not listed are offscreen and must not participate. This fact does not introduce additional figures.`;
 }
 
 function narrativeNpcResponseFact(handoff = {}) {
     const npcs = Array.isArray(handoff?.npcHandoffs) ? handoff.npcHandoffs : [];
     if (!npcs.length) {
-        return 'No specific existing NPC response is required. Narrate the environment, consequences, or ordinary scene-appropriate figures only as the listed facts allow.';
+        return 'No specific existing NPC response is required by this fact. This fact does not introduce an NPC response, environmental event, consequence, or new figure.';
     }
     return npcs.map(npc => `${valueOrNone(npc.NPC)}: ${relationshipNarrativeGuide(npc)}`).join(' ');
 }
@@ -698,7 +664,7 @@ function relationshipNarrativeGuide(npc = {}) {
     const behavior = behaviorNarrationGuide(npc?.Behavior);
     const target = relationshipTargetNarrativeGuide(npc?.Target);
     const personality = npc?.PersonalitySummary && !isNoneText(npc.PersonalitySummary)
-        ? ` Use this stable personality note as expression guidance, not a hard script: ${npc.PersonalitySummary}. It may shape speech style, posture, refusal style, affection style, pressure, initiative flavor, and occasional mannerisms, but it never overrides the listed facts. Mannerisms are optional recurring tendencies, not required beats; do not repeat them every response.`
+        ? ` Use this stable personality note as expression guidance, not a hard script: ${npc.PersonalitySummary}. Let speech style and interaction style carry most personality. Any listed mannerism is optional, flexible, and scene-valid only; do not repeat it every response, force props/locations, or turn it into a required beat. It never overrides the listed facts.`
         : '';
     const boundary = npc?.BoundaryPressure === 'Y'
         ? ' Respect active boundary pressure through physical space, refusal, guarded movement, or physical protection.'
@@ -751,9 +717,9 @@ function narrativeNpcForceFact(resolution = {}, handoff = {}) {
             .filter(([, value]) => value?.Proactive === 'Y')
             .map(([name]) => name),
     ]);
-    if (!subject.length) return 'No completed NPC attack, shove, restraint, injury, counterattack, companion strike, or forceful NPC effect occurs in this beat.';
+    if (!subject.length) return 'NO NPC ATTACK: No NPC attack, counterattack, companion strike, spell effect, shove, restraint, injury, or completed forceful effect resolves in this beat.';
     const names = list(subject);
-    return `${names} may show hostility through speech, refusal, obstruction, threat posture, guarded movement, blocking, preparation, or distance control only. Do not narrate ${names} landing a hit, shove, restraint, injury, counterattack, companion strike, or completed forceful effect in this beat.`;
+    return `NO NPC ATTACK: No NPC attack, counterattack, companion strike, spell effect, shove, restraint, injury, or completed forceful effect from ${names} resolves in this beat. Any resistance from ${names} may appear only as refusal, self-protection, withdrawal, or unresolved struggle already supported by npcResponse and boundaryPressure; it must not create a resolved effect on {{user}}.`;
 }
 
 function narrativeBoundaryFact(resolution = {}, handoff = {}) {
@@ -782,39 +748,40 @@ function narrativeCompanionCommandFact(resolution = {}) {
 function narrativeAggressionEntry(name, value = {}) {
     const target = value?.ProactivityTarget && value.ProactivityTarget !== '(none)'
         ? value.ProactivityTarget
-        : 'the user';
+        : '{{user}}';
+    const targetText = narratorTargetText(target);
     const source = valueOrNone(name);
     const attackType = narrativeAttackType(value);
     const style = narrativeAggressionStyle(value);
     const injuryLimit = narrativeAggressionInjuryLimit(value);
-    const targetLock = isUserReferenceText(target)
-        ? 'This force targets the user only; do not redirect it to another target.'
-        : `This force targets only ${valueOrNone(target)}; do not redirect it to another target.`;
-    const targetLimit = isUserReferenceText(target)
-        ? 'Do not narrate the user counterattacking, reacting voluntarily, speaking, deciding, or following up.'
-        : `Do not narrate ${valueOrNone(target)}'s counterattack, follow-up action, voluntary reaction, speech, decision, or choice unless another narrative fact says so.`;
-    const opening = `${source}: ${attackType} against ${valueOrNone(target)}`;
+    const targetLock = isUserReferenceText(targetText)
+        ? 'This force targets {{user}} only; do not redirect it to another target.'
+        : `This force targets only ${targetText}; do not redirect it to another target.`;
+    const targetLimit = isUserReferenceText(targetText)
+        ? 'Do not narrate {{user}} counterattacking, reacting voluntarily, speaking, deciding, or following up.'
+        : `Do not narrate ${targetText}'s counterattack, follow-up action, voluntary reaction, speech, decision, or choice unless another narrative fact says so.`;
+    const opening = `${source}: ${attackType} against ${targetText}`;
 
     switch (value?.ReactionOutcome) {
         case 'npc_overpowers':
-            return `${opening} succeeds strongly. Show clear NPC advantage through ${style}.${injuryLimit} ${targetLock} ${targetLimit}`;
+            return `RESOLVED NPC ATTACK: ${opening} succeeds strongly. Narrate only the completed effect explicitly supported by this fact, injuryOrDeath, harmLimit, and other narrative facts. Show clear NPC advantage through ${style}.${injuryLimit} ${targetLock} ${targetLimit}`;
         case 'npc_succeeds':
-            return `${opening} succeeds modestly. Show one proportional effect only, not a combo chain or multiple separate hits.${injuryLimit} ${targetLock} ${targetLimit}`;
+            return `RESOLVED NPC ATTACK: ${opening} succeeds modestly. Narrate only the completed effect explicitly supported by this fact, injuryOrDeath, harmLimit, and other narrative facts. Show one proportional effect only, not a combo chain or multiple separate hits.${injuryLimit} ${targetLock} ${targetLimit}`;
         case 'stalemate':
-            return `${opening} meets equal resistance. Narrate only a deadlock, clash, bind, struggle, blocked motion, or interrupted exchange with no successful NPC strike, shove, restraint, injury, or completed forceful effect. Stop in the deadlock. ${targetLock} ${targetLimit}`;
+            return `CONTESTED NPC ATTACK: ${opening} remains unresolved. It does not produce a completed hit, injury, restraint, shove, control, spell effect, or forceful effect unless another narrative fact explicitly says otherwise. ${targetLock} ${targetLimit}`;
         case 'npc_fails':
         case 'user_resists':
         case 'user_dominates':
-            return `${opening} fails. Narrate only the attempted pressure being stopped, overpowered, avoided, controlled, or unable to connect. Do not narrate a successful NPC strike, shove, restraint, injury, or completed forceful effect. ${targetLock} ${targetLimit}`;
+            return `FAILED NPC ATTACK: ${opening} fails. It does not land, connect, injure, restrain, shove, control, produce a completed spell effect, or create any completed forceful effect unless another narrative fact explicitly says otherwise. ${targetLock} ${targetLimit}`;
         default:
-            return `${opening} may occur, but narrate only the forceful effect explicitly described by these narrative facts. ${targetLock} ${targetLimit}`;
+            return `NPC ATTACK RESULT: ${opening} may occur, but narrate only the forceful effect explicitly described by these narrative facts. ${targetLock} ${targetLimit}`;
     }
 }
 
 function narrativeAttackType(value = {}) {
     switch (value.AttackType) {
         case 'Retaliation':
-            return 'retaliation after the user action';
+            return `retaliation after {{user}}'s action`;
         case 'CounterAttack':
             return 'counterattack exploiting the opening';
         case 'ProactiveAttack':
@@ -838,7 +805,7 @@ function narrativeAggressionInjuryLimit(value = {}) {
     if (!injury) return '';
     const condition = String(injury.condition ?? '').toLowerCase();
     const severity = String(injury.severity ?? injury.InjurySeverityLimit ?? '').toLowerCase();
-    const target = injury.target || (injury.targetType === 'npc' ? value.ProactivityTarget : 'the user');
+    const target = narratorTargetText(injury.target || (injury.targetType === 'npc' ? value.ProactivityTarget : '{{user}}'));
     if (condition === 'bruised' || severity === 'minor') {
         return ' Choose the concrete wound and affected body area from the attack context, but any lasting injury is capped at one minor bruise or minor impact, with no bleeding, cuts, incapacitation, restraint, or extra landed strikes.';
     }
@@ -860,7 +827,7 @@ function narrativeIntimacyFact(handoff = {}) {
     if (relevant.length) return relevant.map(narrativeIntimacyEntry).join(' ');
     const names = npcs.map(npc => valueOrNone(npc.NPC)).filter(name => !isNoneText(name));
     if (!names.length) return 'No intimate or sexual escalation is being judged in this beat.';
-    return `No intimacy permission is active for ${names.join(', ')} in this beat. Romantic, flirtatious, affectionate, or suggestive conversation may continue naturally according to context and personality, but conversation alone is not permission for intimate escalation: kissing, sex, undressing, bra or panties display, sexual exposure, offering or showing their body, bed, an inn room, a private room, sexual touching, secluded intimacy, arousal/compliance framing, consent-by-momentum, or relationship acceptance.`;
+    return `No intimacy permission is active for ${names.join(', ')} in this beat. This limits intimate escalation only; it does not change ordinary non-intimate dialogue, affection, flirtation, or relationship behavior allowed by other narrative facts. Because conversation alone is not permission for intimate escalation, do not narrate sexual contact, undressing or exposure, secluded-intimacy setup, arousal/compliance framing, consent-by-momentum, or relationship acceptance unless another narrativeFact explicitly permits it.`;
 }
 
 function narrativeIntimacyEntry(npc = {}) {
@@ -879,22 +846,22 @@ function narrativeIntimacyEntry(npc = {}) {
 
 function narrativeAbilityFact(value = {}) {
     const ability = normalizeAbilityUseObject(value);
-    if (!ability.attempted) return 'No user ability effect is active.';
+    if (!ability.attempted) return 'No ability effect from {{user}} is active.';
     if (!ability.available) {
-        return `The user attempts an unavailable supernatural or special ability: ${ability.abilityName}. The attempted effect does not occur. Do not create the attempted effect: ${ability.narrativeEffect}. Render only the lack of effect and visible reactions. This is not backlash unless another narrative fact says so.`;
+        return `{{user}} attempts an unavailable supernatural or special ability: ${ability.abilityName}. The attempted effect does not occur. Do not create the attempted effect: ${ability.narrativeEffect}. Render only the lack of effect and visible reactions. This is not backlash unless another narrative fact says so.`;
     }
-    return `The user's ability can produce this direct scene effect: ${ability.narrativeEffect}. Render only the direct perceivable effect or delivery. Do not announce, label, explain, activate, focus, channel, charge, or name the ability unless its name is spoken aloud in dialogue. Do not add extra success, extra impact, or bypassed consequences beyond the listed facts.`;
+    return `{{user}}'s ability can produce this direct scene effect: ${ability.narrativeEffect}. Render only the direct perceivable effect or delivery. Do not announce, label, explain, activate, focus, channel, charge, or name the ability unless its name is spoken aloud in dialogue. Do not add extra success, extra impact, or bypassed consequences beyond the listed facts.`;
 }
 
 function narrativeItemFact(value = {}) {
     const item = normalizeItemUseObject(value);
-    if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by userAttempt and environment facts.';
-    const attemptedItem = `The user attempts to use/draw/produce/consume: ${item.item}.`;
+    if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by attemptedActions, attemptedActionResults, and environment facts.';
+    const attemptedItem = `{{user}} attempts to use/draw/produce/consume: ${item.item}.`;
     if (item.available) {
         const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}. Preserve the saved item state exactly: if it limits use, the limitation must affect the scene.` : '';
         return `${attemptedItem} Availability: available from ${item.source}.${state} Narrate the attempt and its immediate result. Do not skip, gloss over, or replace the attempt. Item availability is not automatic success, extra impact, or bypassed consequence.`;
     }
-    return `${attemptedItem} Availability: unavailable. No item effect occurs. Narrate the attempt and its immediate result: the item is absent, unreachable, or not in the claimed place. Do not skip, gloss over, or replace the attempt. The item must not appear, be drawn, be wielded, be consumed, unlock anything, or enter user possession. Visible reactions may follow naturally.`;
+    return `${attemptedItem} Availability: unavailable. No item effect occurs. Narrate the attempt and its immediate result: the item is absent, unreachable, or not in the claimed place. Do not skip, gloss over, or replace the attempt. The item must not appear, be drawn, be wielded, be consumed, unlock anything, or enter {{user}} possession. Visible reactions may follow naturally.`;
 }
 
 function narrativeClaimFact(value = {}, resolution = {}, summary = {}) {
@@ -940,14 +907,14 @@ function narrativeClaimFact(value = {}, resolution = {}, summary = {}) {
         : claim.npcAccess === 'partial'
             ? `${target} has partial access to judge the claim, not omniscient certainty.`
             : `${target} has no special direct access to verify the claim.`;
-    return `Treat the user's claim as a belief contest for ${target}: "${claim.claim}". ${accessText} ${reaction} ${accessCap} Do not present the claim as objective truth unless it was already established as true in visible scene state.`;
+    return `Treat {{user}}'s claim as a belief contest for ${target}: "${claim.claim}". ${accessText} ${reaction} ${accessCap} Do not present the claim as objective truth unless it was already established as true in visible scene state.`;
 }
 
 function narrativeUserKnowledgeFact(applications = []) {
     const items = normalizeUserKnowledgeApplications(applications);
-    if (!items.length) return 'No special reputation or personal knowledge about the user is applied this beat.';
+    if (!items.length) return 'No special reputation or personal knowledge about {{user}} is applied this beat.';
     return items
-        .map(item => `${item.target} may know or have heard this about the user: ${item.line}. Use it only for recognition, demeanor, caution, trust, suspicion, fear, questions, or context when it naturally fits the visible scene.`)
+        .map(item => `${item.target} may know or have heard this about {{user}}: ${narratorUserMacroText(item.line)}. Use it only for recognition, demeanor, caution, trust, suspicion, fear, questions, or context when it naturally fits the visible scene.`)
         .join(' ');
 }
 
@@ -955,13 +922,13 @@ function narrativeEnvironmentFact(resolution = {}) {
     const oppEnv = list(resolution?.OppTargets?.ENV);
     if (isNoneText(oppEnv)) return 'No special environmental opposition is required.';
     const difficulty = narrativeEnvironmentPressure(resolution);
-    return `The relevant environmental obstacle is ${oppEnv}. Treat it as ${difficulty}. Render the user's attempt against it according to attemptResult, without turning the obstacle into an NPC or relationship participant.`;
+    return `The relevant environmental obstacle is ${oppEnv}. Treat it as ${difficulty}. Render {{user}}'s attempt against it according to attemptedActionResults, without turning the obstacle into an NPC or relationship participant.`;
 }
 
 function narrativeHarmLimitFact(resolution = {}) {
     if (isNoneText(resolution?.nonLethal)) return 'No special harm limit is listed beyond injuryOrDeath and npcForce.';
     if (String(resolution.nonLethal).toUpperCase() === 'Y') {
-        return 'Keep the user-side harmful result nonlethal unless injuryOrDeath explicitly says otherwise. Do not narrate a killing blow from the user in this beat.';
+        return `Keep {{user}}'s harmful result nonlethal unless injuryOrDeath explicitly says otherwise. Do not narrate a killing blow from {{user}} in this beat.`;
     }
     return 'No nonlethal restriction is listed; still obey injuryOrDeath exactly and do not invent extra injury or death.';
 }
@@ -979,12 +946,12 @@ function narrativeLimitationsFact(resolution = {}) {
         narrativeUserImpairmentFact(resolution.UserImpairment),
         narrativeNpcImpairmentFact(resolution.NPCImpairment),
     ].filter(part => part && !isNoneText(part));
-    return parts.length ? parts.join(' ') : 'No special user or NPC physical/mental limitation is applied this beat.';
+    return parts.length ? parts.join(' ') : 'No special physical/mental limitation for {{user}} or an NPC is applied this beat.';
 }
 
 function narrativeUserImpairmentFact(impairment = {}) {
     if (!impairment || impairment.Relevant !== 'Y') return '';
-    return `The user's ${valueOrNone(impairment.Source)} affects ${humanizeImpairmentFunctions(impairment.MatchedActionFunction || impairment.AffectedFunction)} through pain, limitation, compensation, instability, reduced speed, partial execution, or cost according to attemptResult. Do not forbid the attempt.`;
+    return `{{user}}'s ${narratorUserMacroText(impairment.Source)} affects ${humanizeImpairmentFunctions(impairment.MatchedActionFunction || impairment.AffectedFunction)} through pain, limitation, compensation, instability, reduced speed, partial execution, or cost according to attemptedActionResults. Do not forbid the attempt.`;
 }
 
 function narrativeNpcImpairmentFact(impairment = {}) {
@@ -1019,7 +986,7 @@ function narrativeAggressionTargetInjuries(aggressionResults = {}) {
         const userInjury = value?.InflictedUserInjury || (value?.InflictedTargetInjury?.targetType === 'user' ? value.InflictedTargetInjury : null);
         if (userInjury) {
             entries.push(narrativeInjuryEntry({
-                target: 'the user',
+                target: '{{user}}',
                 source: name,
                 condition: userInjury.condition,
                 severity: userInjury.severity ?? userInjury.InjurySeverityLimit,
@@ -1047,7 +1014,7 @@ function narrativeAggressionTargetInjuries(aggressionResults = {}) {
 }
 
 function narrativeInjuryEntry({ target, source, condition, severity, wounds, status, effectType, rule }) {
-    const targetText = valueOrNone(target);
+    const targetText = narratorTargetText(target);
     const sourceText = !isNoneText(source) ? ` from ${valueOrNone(source)}` : '';
     const conditionText = valueOrNone(condition);
     const severityText = valueOrNone(severity);
@@ -1094,9 +1061,10 @@ function narrativeProactivityEntry(name, value = {}, aggressionResults = {}, den
     const intent = proactivityNarrationIntent(value);
     const target = value?.ProactivityTarget && value.ProactivityTarget !== '(none)'
         ? value.ProactivityTarget
-        : 'the user';
+        : '{{user}}';
+    const targetText = narratorTargetText(target);
     const deniedForNpc = deniedIntimacyNames.has(String(name ?? '').toLowerCase());
-    const description = personalizeNpcInstruction(name, proactivityIntentDescription(intent, target))
+    const description = personalizeNpcInstruction(name, proactivityIntentDescription(intent, targetText))
         .replace(/\bAggression result\b/g, 'npcForce fact')
         .replace(/\baggression result\b/g, 'npcForce fact')
         .replace(/\bresolved attack\b/g, 'completed attack');
@@ -1104,7 +1072,7 @@ function narrativeProactivityEntry(name, value = {}, aggressionResults = {}, den
     const forceLimit = aggressive
         ? (aggressionResults?.[name]
             ? ' Any completed force must match npcForce.'
-            : ' Show only intent, pressure, motion, preparation, interruption, distance control, or boundary-setting; no completed hit, injury, restraint, or forceful effect occurs.')
+            : ' This initiative does not authorize an NPC attack or completed force; obey npcForce.')
         : ' This is not a completed attack.';
     const relationshipLimit = isRomanceInitiativeIntent(intent)
         ? ' Use only if the current beat is calm and no other event is happening; never force gifts, dates, confessions, or romantic escalation into combat, crisis, mourning, active intimacy, public pressure, unresolved danger, boundary conflict, or any scene where the event would interrupt the actual moment. If context does not support it, soften it into ordinary flirtation, attention, or defer it. Do not establish a relationship unless acceptance happens in-scene; do not force intimacy.'
@@ -1116,10 +1084,10 @@ function narrativeProactivityEntry(name, value = {}, aggressionResults = {}, den
         ? ' Keep it grounded in the immediate danger, the NPC\'s bond, self-preservation, and the listed target.'
         : '';
     const companionSupportLimit = isCompanionSupportIntent(intent)
-        ? ' In combat or immediate danger, this support must be tactically useful; do not use comfort-touch, leaning on the user, hand-on-back reassurance, hugging, or sentimental encouragement unless it is physically necessary to drag, brace, shield, heal, or reposition the user.'
+        ? ' In combat or immediate danger, this support must be tactically useful; do not use comfort-touch, leaning on {{user}}, hand-on-back reassurance, hugging, or sentimental encouragement unless it is physically necessary to drag, brace, shield, heal, or reposition {{user}}.'
         : '';
     const crisisAttackLimit = intent === 'Companion_Attack'
-        ? ' This must target only the listed hostile target, never the user or a bystander.'
+        ? ' This must target only the listed hostile target, never {{user}} or a bystander.'
         : '';
     const denialLimit = deniedForNpc
         ? ' Keep this fully compatible with the intimacy denial; do not turn it into consent, arousal, relationship acceptance, or intimate escalation.'
@@ -1146,13 +1114,13 @@ function narrativeNameRevealFact(nameGeneration = {}) {
     const femaleNames = (pool.female || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const maleNames = (pool.male || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
-    return `Name pool use is mandatory and obeys fog of war. Any newly revealed proper name in this response MUST exactly match one unused approved name from this pool: Female: ${list(femaleNames)}. Male: ${list(maleNames)}. Location: ${list(locationNames)}. If no approved listed name fits, leave the person, entity, or place unnamed. Already revealed names from chat, character card, lore, or tracker may continue unchanged. A new name may appear only after the scene reveals that specific person, entity, or place in-world through speech, readable text, self-introduction, direct reference, signage, documents, or clear recognition. Use the matching gender/presentation bucket when known. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character/user names. Do not name background, incidental, or unnamed figures unless the scene actually reveals the name.`;
+    return `Name pool use is mandatory and obeys fog of war. Any newly revealed proper name in this response MUST exactly match one unused approved name from this pool: Female: ${list(femaleNames)}. Male: ${list(maleNames)}. Location: ${list(locationNames)}. If no approved listed name fits, leave the person, entity, or place unnamed. Already revealed names from chat, character card, lore, or tracker may continue unchanged. A new name may appear only after the scene reveals that specific person, entity, or place in-world through speech, readable text, self-introduction, direct reference, signage, documents, or clear recognition. Use the matching gender/presentation bucket when known. Do not invent, modify, translate, combine, suffix, add surnames to, or derive names from existing character names or {{user}}'s name. Do not name background, incidental, or unnamed figures unless the scene actually reveals the name.`;
 }
 
 function narrativeProxyUserActionFact(options = {}) {
     if (options?.mode !== 'proxy') return '';
-    const action = valueOrNone(options?.latestUserText || options?.proxyUserAction);
-    return `Proxy user action mode is active for this response only because the latest instruction used double square brackets. The user has asked narration to cover this exact user action: ${action}. This is the only exception to normal agency separation. Do not add extra user dialogue, thoughts, feelings, decisions, follow-up actions, reactions, silence, or choices beyond that instruction and the listed narrative facts.`;
+    const action = narratorUserMacroText(options?.latestUserText || options?.proxyUserAction);
+    return `Proxy action mode for {{user}} is active for this response only because the latest instruction used double square brackets. The human has asked narration to cover this exact action by {{user}}: ${action}. This is the only exception to normal agency separation. Do not add extra dialogue, thoughts, feelings, decisions, follow-up actions, reactions, silence, or choices for {{user}} beyond that instruction and the listed narrative facts.`;
 }
 
 function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
@@ -1408,7 +1376,7 @@ function chaosMagnitudeGuide(magnitude) {
 function chaosAnchorGuide(anchor) {
     switch (String(anchor ?? '').toUpperCase()) {
         case 'GOAL':
-            return "the user's current goal or action";
+            return "{{user}}'s current goal or action";
         case 'ENVIRONMENT':
             return 'terrain, weather, objects, or physical surroundings';
         case 'KNOWN_NPC':
@@ -1589,7 +1557,7 @@ function powerActorEventAuditSummary(event) {
 
 function powerActorEventNarratorSummary(event) {
     if (!event || typeof event !== 'object') return 'none';
-    const instruction = valueOrNone(event.VisibleInstruction ?? event.visibleInstruction);
+    const instruction = narratorUserMacroText(event.VisibleInstruction ?? event.visibleInstruction);
     if (isNoneText(instruction)) return 'none';
     const contact = valueOrNone(event.ContactName ?? event.contactName);
     const role = valueOrNone(event.SurfaceRole ?? event.surfaceRole);
@@ -2148,6 +2116,28 @@ function isCompanionSupportIntent(intent) {
     return ['Companion_Warn', 'Companion_Assist', 'Companion_Cover'].includes(intent);
 }
 
+function narratorTargetText(value) {
+    const text = valueOrNone(value);
+    return isUserReferenceText(text) ? '{{user}}' : narratorUserMacroText(text);
+}
+
+function narratorUserMacroText(value) {
+    const macro = '__ST_ENGINE_USER_MACRO__';
+    return valueOrNone(value)
+        .replace(/\{\{user\}\}/g, macro)
+        .replace(/\bthe user's\b/gi, "{{user}}'s")
+        .replace(/\buser's\b/gi, "{{user}}'s")
+        .replace(/\bsaved user gear\/inventory\b/gi, 'saved gear/inventory for {{user}}')
+        .replace(/\buser gear\/inventory\b/gi, 'gear/inventory for {{user}}')
+        .replace(/\bknown user abilities\b/gi, 'known abilities for {{user}}')
+        .replace(/\buser abilities\b/gi, 'abilities for {{user}}')
+        .replace(/\buser action\b/gi, "{{user}}'s action")
+        .replace(/\buser input\b/gi, 'latest input')
+        .replace(/\bthe user\b/gi, '{{user}}')
+        .replace(/\buser\b/gi, '{{user}}')
+        .replace(new RegExp(macro, 'g'), '{{user}}');
+}
+
 function isUserReferenceText(value) {
     const text = String(value ?? '').trim().toLowerCase();
     return !text
@@ -2187,6 +2177,19 @@ function coreLine(core) {
 
 function list(value) {
     return Array.isArray(value) ? value.join(',') : String(value ?? 'none');
+}
+
+function actionUnitsSummary(units = [], options = {}) {
+    const items = Array.isArray(units) ? units : [];
+    if (!items.length) return 'none';
+    return items.map((unit, index) => {
+        const id = valueOrNone(unit?.id || `A${index + 1}`);
+        const action = valueOrNone(unit?.action);
+        const evidence = valueOrNone(unit?.evidence);
+        return options.includeEvidence && !isNoneText(evidence)
+            ? `${id}: ${action} | evidence="${evidence}"`
+            : `${id}: ${action}`;
+    }).join('; ');
 }
 
 function isNoneText(value) {

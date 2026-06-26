@@ -1,7 +1,6 @@
 import { ENGINE_PROMPT_TEXT, normalizeSocialResolutionMemory } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
-import { getRequestHeaders } from '../../../../script.js';
-import { createGenerationParameters, getChatCompletionModel, oai_settings, proxies } from '../../../../scripts/openai.js';
+import { getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 
 export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
 export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES };
@@ -11,7 +10,6 @@ const SEMANTIC_RESPONSE_LENGTH_MAX = 16384;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
-const SEMANTIC_BACKEND_ENDPOINT = '/api/backends/chat-completions/generate';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
@@ -221,18 +219,20 @@ async function generateSemanticRaw(context, prompt, responseLength) {
 }
 
 async function generateSemanticRawWithProfile(prompt, responseLength, options = {}) {
-    const result = await sendChatCompletionProfileRequest(
+    const result = await sendChatCompletionProfileRequest({
+        profileId: options.semanticProfileId,
+        profileName: options.semanticProfileName,
         prompt,
         responseLength,
-        options,
-        {
+        overridePayload: {
             temperature: 0,
             stop: [SEMANTIC_PREFLIGHT_STOP_SENTINEL],
             stopping_strings: [SEMANTIC_PREFLIGHT_STOP_SENTINEL],
             stop_sequence: [SEMANTIC_PREFLIGHT_STOP_SENTINEL],
         },
-        true,
-    );
+        extractData: true,
+        preparePayload: applySemanticThinkingPayload,
+    });
     return extractGeneratedText(result);
 }
 
@@ -261,79 +261,30 @@ function isRecoverableSemanticToolCallError(error) {
 }
 
 async function generateSemanticToolCall(context, prompt, responseLength, options = {}) {
-    let generateData;
     const toolPrompt = buildSemanticToolPrompt(prompt);
     try {
-        const model = getChatCompletionModel(oai_settings);
-        const params = await createGenerationParameters(oai_settings, model, 'quiet', toolPrompt);
-        generateData = params.generate_data;
-    } catch (error) {
-        throw new SemanticToolTransportError('Could not build SillyTavern chat-completion backend request for semantic tool call.', { cause: error });
-    }
-
-    const chatCompletionSource = generateData.chat_completion_source || oai_settings?.chat_completion_source;
-    const semanticTool = buildSemanticPreflightTool(chatCompletionSource);
-    generateData.messages = toolPrompt;
-    generateData.stream = false;
-    generateData.n = undefined;
-    generateData.tools = [semanticTool];
-    generateData.tool_choice = buildSemanticToolChoice(chatCompletionSource);
-    applySemanticThinkingPayload(generateData);
-    generateData.enable_web_search = false;
-    delete generateData.request_images;
-    delete generateData.request_image_resolution;
-    delete generateData.request_image_aspect_ratio;
-    delete generateData.json_schema;
-    delete generateData.stop;
-
-    if (Number.isFinite(responseLength) && responseLength > 0) {
-        if (Object.prototype.hasOwnProperty.call(generateData, 'max_completion_tokens') && !Object.prototype.hasOwnProperty.call(generateData, 'max_tokens')) {
-            generateData.max_completion_tokens = responseLength;
-        } else {
-            generateData.max_tokens = responseLength;
-        }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(generateData, 'temperature')) {
-        generateData.temperature = 0;
-    }
-
-    let response;
-    try {
-        response = await fetch(SEMANTIC_BACKEND_ENDPOINT, {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify(generateData),
+        const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
+            buildTool: buildSemanticPreflightTool,
+            buildToolChoice: buildSemanticToolChoice,
+            preparePayload: applySemanticThinkingPayload,
         });
-    } catch (error) {
-        throw new SemanticToolTransportError('SillyTavern backend semantic tool-call request failed before provider response.', { cause: error });
-    }
-
-    if (!response.ok) {
-        let body = '';
-        try {
-            body = await response.text();
-        } catch {
-            body = '';
+        if (raw?.error) {
+            throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
         }
-        throw new SemanticToolTransportError(`SillyTavern backend rejected semantic tool-call request: ${response.status} ${response.statusText}${body ? ` ${body.slice(0, 600)}` : ''}`, {
-            status: response.status,
-            body,
+        const ledger = extractSemanticToolLedger(raw);
+        return { raw, ledger };
+    } catch (error) {
+        if (isSemanticToolTransportError(error)) throw error;
+        throw new SemanticToolTransportError(error instanceof Error ? error.message : String(error), {
+            status: error?.status,
+            body: error?.body,
+            cause: error,
         });
     }
-
-    const raw = await response.json();
-    if (raw?.error) {
-        throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
-    }
-    const ledger = extractSemanticToolLedger(raw);
-    return { raw, ledger };
 }
 
 async function generateSemanticToolCallWithProfile(context, prompt, responseLength, options = {}) {
-    const profile = getConnectionProfile(options.semanticProfileId);
-    const apiMap = context?.CONNECT_API_MAP?.[profile?.api];
-    const chatCompletionSource = apiMap?.source;
+    const chatCompletionSource = getChatCompletionSourceForProfile(options.semanticProfileId, options.semanticProfileName);
     if (!chatCompletionSource) {
         throw new SemanticToolTransportError(`Semantic profile "${options.semanticProfileName || options.semanticProfileId}" does not support chat-completion tool calls.`);
     }
@@ -357,13 +308,15 @@ async function generateSemanticToolCallWithProfile(context, prompt, responseLeng
 
     let raw;
     try {
-        raw = await sendChatCompletionProfileRequest(
-            toolPrompt,
+        raw = await sendChatCompletionProfileRequest({
+            profileId: options.semanticProfileId,
+            profileName: options.semanticProfileName,
+            prompt: toolPrompt,
             responseLength,
-            options,
             overridePayload,
-            false,
-        );
+            extractData: false,
+            preparePayload: applySemanticThinkingPayload,
+        });
     } catch (error) {
         throw new SemanticToolTransportError(`Direct semantic profile tool-call request failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
@@ -377,7 +330,15 @@ async function generateSemanticToolCallWithProfile(context, prompt, responseLeng
 }
 
 export async function sendSemanticProfileTextRequest(prompt, responseLength, options = {}, overridePayload = {}) {
-    const result = await sendChatCompletionProfileRequest(prompt, responseLength, options, overridePayload, true);
+    const result = await sendChatCompletionProfileRequest({
+        profileId: options.semanticProfileId,
+        profileName: options.semanticProfileName,
+        prompt,
+        responseLength,
+        overridePayload,
+        extractData: true,
+        preparePayload: applySemanticThinkingPayload,
+    });
     return extractGeneratedText(result);
 }
 
@@ -430,58 +391,6 @@ function mergeYamlObjectString(...parts) {
         merged.push(text);
     }
     return merged.join('\n');
-}
-
-async function sendChatCompletionProfileRequest(prompt, responseLength, options = {}, overridePayload = {}, extractData = true) {
-    if (!options?.semanticProfileId) {
-        throw new SemanticToolTransportError('Semantic connection profile id is missing.');
-    }
-
-    const context = globalThis.SillyTavern?.getContext?.();
-    const profile = getConnectionProfile(options.semanticProfileId);
-    const apiMap = context?.CONNECT_API_MAP?.[profile?.api];
-    const chatCompletionSource = apiMap?.source;
-    if (!context?.ChatCompletionService?.processRequest || !chatCompletionSource) {
-        throw new SemanticToolTransportError(`Semantic profile "${options.semanticProfileName || options.semanticProfileId}" does not support direct chat-completion requests.`);
-    }
-
-    const proxyPreset = proxies.find(proxy => proxy.name === profile.proxy);
-    const messages = Array.isArray(prompt)
-        ? prompt
-        : [{ role: 'user', content: String(prompt || '') }];
-
-    const requestPayload = applySemanticThinkingPayload({
-            stream: false,
-            messages,
-            max_tokens: responseLength,
-            model: profile.model,
-            chat_completion_source: chatCompletionSource,
-            secret_id: profile['secret-id'],
-            custom_url: profile['api-url'],
-            vertexai_region: profile['api-url'],
-            zai_endpoint: profile['api-url'],
-            siliconflow_endpoint: profile['api-url'],
-            reverse_proxy: proxyPreset?.url,
-            proxy_password: proxyPreset?.password,
-            custom_prompt_post_processing: profile['prompt-post-processing'],
-            ...overridePayload,
-        },
-    );
-
-    return await context.ChatCompletionService.processRequest(
-        requestPayload,
-        {},
-        extractData,
-    );
-}
-
-function getConnectionProfile(profileId) {
-    const profile = globalThis.SillyTavern?.getContext?.()?.extensionSettings?.connectionManager?.profiles
-        ?.find(item => item?.id === profileId);
-    if (!profile) {
-        throw new SemanticToolTransportError(`Semantic connection profile not found: ${profileId}`);
-    }
-    return profile;
 }
 
 function buildSemanticToolPrompt(prompt) {
@@ -766,6 +675,25 @@ function buildSemanticPreflightSchema() {
             reason: { type: 'string' },
         },
     };
+    const actionUnitSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'action', 'evidence'],
+        properties: {
+            id: {
+                type: 'string',
+                description: 'A1, A2, or A3, matching the actionCount marker order.',
+            },
+            action: {
+                type: 'string',
+                description: 'Short clean description of this mechanically counted user action.',
+            },
+            evidence: {
+                type: 'string',
+                description: 'Brief latest-user-text evidence for this action unit. Audit only; not narration.',
+            },
+        },
+    };
     return {
         type: 'object',
         additionalProperties: false,
@@ -809,6 +737,7 @@ function buildSemanticPreflightSchema() {
                     'socialBucket',
                     'combatType',
                     'actionCount',
+                    'actionUnits',
                     'environmentDifficultyTier',
                     'classifyHostilePhysicalIntent',
                     'activeHostileThreat',
@@ -852,7 +781,7 @@ function buildSemanticPreflightSchema() {
                     identifyTargets: {
                         type: 'object',
                         additionalProperties: false,
-                        required: ['hostilesInScene', 'ActionTargets', 'OppTargets', 'BenefitedObservers', 'HarmedObservers', 'PowerActors'],
+                        required: ['hostilesInScene', 'ActionTargets', 'OppTargets', 'BenefitedObservers', 'HarmedObservers', 'NPCAwareOfUser', 'PowerActors'],
                         properties: {
                             hostilesInScene: {
                                 type: 'object',
@@ -874,6 +803,7 @@ function buildSemanticPreflightSchema() {
                             },
                             BenefitedObservers: stringListSchema,
                             HarmedObservers: stringListSchema,
+                            NPCAwareOfUser: stringListSchema,
                             PowerActors: stringListSchema,
                         },
                     },
@@ -907,6 +837,11 @@ function buildSemanticPreflightSchema() {
                         description: 'Mundane or SpellOrSupernatural only when actionBucket=Combat; otherwise None.',
                     },
                     actionCount: stringListSchema,
+                    actionUnits: {
+                        type: 'array',
+                        items: actionUnitSchema,
+                        description: 'Breakdown of the same mechanically counted actions represented by actionCount, capped at three.',
+                    },
                     environmentDifficultyTier: {
                         type: 'string',
                         enum: ENVIRONMENT_DIFFICULTY_TIERS,
@@ -1287,10 +1222,12 @@ const COMPACT_LEDGER_CONTRACT = [
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest, speed contest, or another explicit stakes-bearing objective.',
     '- ResolutionEngine.rollNeeded is the sole semantic roll gate and directly applies DEF.STAKES. Return Y only when success/failure of the latest explicit user goal or challenge creates fresh unresolved stakes: physical risk, harm, danger, detection, material gain/loss, significant trust/status/authority shift, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacle resolution, or explicit goal advancement/failure. Return N for ordinary continuity, no material stakes, a reaction already decided by saved fear/terror, hostility/hatred, persisted intimacy boundary, or a repeated resolved same-bucket negative social attempt against the same NPC/goal under unchanged disposition. Failed/resolved Bluff blocks repeated Bluff; failed/resolved Intimidate blocks repeated Intimidate. Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff. Repeated wording, stronger insults, renewed same-bucket threats, rephrased same-bucket bluffs, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. ResolutionEngine.rollReason must briefly explain why rollNeeded is Y or N and must not contradict the flag: rollNeeded=Y requires fresh unresolved stakes; rollNeeded=N requires no fresh unresolved stakes.',
     '- ResolutionEngine.actionBucket is the roll shape, not a stat choice. Use None when rollNeeded=N. Use Social only for fresh unresolved NPC-facing social pressure, with socialBucket=Diplomacy for good-faith persuasion/negotiation/reassurance, Bluff for deception/lying/misleading/material false claims, and Intimidate for threats/coercion/blackmail/fear-based demands. Use Combat for direct violence or harmful supernatural attacks; combatType=Mundane for bodily/weapon/natural-weapon/ordinary force, and SpellOrSupernatural for the primary attack being a spell, power, curse, elemental blast, psychic attack, or similar. Use Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. If not Social, socialBucket=None. If not Combat, combatType=None.',
+    '- ResolutionEngine.actionUnits breaks the latest explicit {{user}} attempt into the same mechanically counted actions represented by actionCount. actionUnits.count must match actionCount length after the three-action cap. Each action is short clean wording of that action unit; evidence is brief latest-user-text audit evidence. actionUnits does not decide success, failure, outcome, injury, counterattack, or narration.',
     '- ResolutionEngine.identifyTargets.ActionTargets is the direct interaction list. Include every living NPC the latest user input directly addresses, speaks to, answers, asks, thanks, reassures, requests, warns, commands, helps, treats, touches, accompanies, follows, trades with, gives something to, receives something from, attacks, restrains, deceives, negotiates with, or otherwise directly interacts with this turn, whether rollNeeded is Y or N. ActionTargets are broader than OppTargets.NPC. If the latest user input directly involves a living NPC, that NPC belongs in ActionTargets even when the scene is ordinary continuity and OppTargets.NPC is (none). Do not include bystanders, background crowds, inferred listeners, offscreen entities, or hostilesInScene-only NPCs unless the latest user input directly involves them.',
+    '- ResolutionEngine.identifyTargets.NPCAwareOfUser is the individual-awareness list. Include only named or clearly individual living NPCs who are present and directly become aware of {{user}} by noticing, looking at, addressing, gesturing to, reacting to, or otherwise individually interacting with {{user}} in the current scene/context, even if {{user}} has not directly acted on them. Exclude groups, crowds, factions, unnamed plural background NPCs, inferred listeners, offscreen entities, and generic bystanders. Example: "the innkeeper looks at {{user}}" belongs in NPCAwareOfUser; "the patrons turn toward the newcomer" does not.',
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
-    '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer lists.',
-    '- If no living NPC is in those target/observer lists, output RelationshipEngine.count=0 and no RelationshipEngine[index] lines.',
+    '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer/awareness lists.',
+    '- If no living NPC is in those target/observer/awareness lists, output RelationshipEngine.count=0 and no RelationshipEngine[index] lines.',
     '- RelationshipEngine[index].initPreset is only "how this NPC initially feels toward {{user}}" when currentDisposition is missing. Check all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. The semantic pass chooses only these Y/N tags; deterministic code assigns B/F/H stats. romanticOpen=Y when prior card/lore/scenario/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward {{user}}. This can be stated directly or shown through clearly romantic behavior, gestures, plans, keepsakes, letters, gifts, jealousy, longing, attempts to be noticed, attempts to spend time alone, or other evidence that the NPC interest in {{user}} is romantic rather than merely friendly. Do not mark romanticOpen for generic friendliness, politeness, casual flirting, shallow physical attraction, ordinary embarrassment, first impressions, vague chemistry, gratitude, or non-romantic loyalty. Do not suppress romanticOpen solely because userNonHuman=Y; set both flags if both are explicit. userBadRep=Y only if {{user}} is hated, distrusted, wanted, enemy-coded, or has a bad prior reputation with this NPC before the current first interaction. priorUserGoodRep=Y only if prior lore/card/scenario/tracker/history or UserKnowledgeApplication explicitly gives {{user}} an established favorable reputation with this NPC before the current scene; first-encounter kindness, rescue, courtesy, friendliness, praise, or warm first impression do not count. userFearRep=Y only if UserKnowledgeApplication or explicit prior context gives {{user}} an established fearsome/dangerous reputation known to this NPC; not ordinary caution, current-scene danger, rank, bravado, or visible nonhuman form alone. userNonHuman=Y only if {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like. fearImmunity=Y only if this NPC is the same kind/race category as that user form, a superior or peer supernatural/monstrous being, explicitly immune/naturally resistant to fear or mental fear, or card/lore/scenario explicitly portrays them as an ancient/powerful/non-ordinary being that has faced such horrors and is not meaningfully afraid of them. Title, rank, bravado, posturing, composure, courage, or pretending to be fearless do not count.',
     '- RelationshipEngine[index].establishedRelationship is true only if this NPC already has B4 relationship state and tracker establishedRelationship=Y, or the current explicit scene shows a direct romantic/love/relationship declaration or request from {{user}} accepted by that NPC, or from that NPC accepted by {{user}}. If the immediately previous NPC message contains a clear love/relationship confession or request, and the current user input accepts it verbally or through unmistakable romantic reciprocation such as kissing/embracing without refusal, return true. If the immediately previous user input contains a clear love/relationship confession or request, and the current NPC response accepted it, return true. It must establish an actual romantic relationship, partnership, lovers status, dating/courting bond, or equivalent committed romantic connection. Flirting, attraction, arousal, sex, prior intimacy, affection, kindness, trust, loyalty, closeness, friendship, gratitude, protectiveness, or B4 alone does not count.',
     '- RelationshipEngine[index].romanceStyle is for B4 pre-relationship initiative only. Return nervous if explicit card/lore/context portrays this NPC as shy, reserved, guarded, restrained, formal, awkward, timid, emotionally cautious, or likely to show romantic interest through hesitation. Return flirt if explicit card/lore/context portrays this NPC as bold, outgoing, playful, teasing, direct, seductive, socially confident, or likely to show romantic interest through open flirtation. Return auto if unclear or mixed.',
@@ -1314,7 +1251,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- TrackerUpdateEngine must not treat a requested, intended, commanded, allowed, promised, predicted, or pending attempted action as an established wound/status/condition change. "I tell him to hit my arm hard enough to bruise it", "I stab him", or "I let the blow land" is not woundsAdd/statusAdd/condition by itself. "My arm is already bruised", "his arm is bleeding", or "I am poisoned" is.',
     '- TrackerUpdateEngine must track only current lasting injuries/status. Do not track momentary pain, impact, a hit landing, being knocked back/down, being winded, losing breath, flinching, staggering, or temporary shock unless the text explicitly establishes an ongoing bruise, cut, bleeding, sprain, break, fracture, poison, sickness, restraint, exhaustion, unconsciousness, or similar continuing state.',
     '- TrackerUpdateEngine NPC revealedName is identity tracking only. If final narration explicitly reveals that an already tracked generic NPC/person/role is actually named something, set NPC to the existing tracker label and revealedName to the revealed proper name. Example: tracked NPC "bystander" says "Torvinash." as an introduction -> NPC=bystander and revealedName=Torvinash. Use revealedName only when the narration semantically identifies which tracked generic NPC received the name; if multiple possible generic NPCs exist and identity is unclear, use (none).',
-    '- TrackerUpdateEngine NPC personalitySummary is optional stable personality memory. If this is the first meaningful tracking of an NPC or the existing personalitySummary is empty, assign a compact natural-language personality seed when card/lore/scenario/context or visible behavior supports one. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerisms: ...; intensity:low|medium|high. Mannerisms are occasional observable tendencies, not required repeated beats. If personalitySummary already exists, use unchanged unless durable context clearly contradicts or refines it. Do not write mood, temporary emotion, injuries, relationship state, attraction, fear/hostility level, or what happened this turn.',
+    '- TrackerUpdateEngine NPC personalitySummary is optional stable personality memory. If this is the first meaningful tracking of an NPC or the existing personalitySummary is empty, assign a compact natural-language personality seed when card/lore/scenario/context or visible behavior supports one. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerism: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. Mannerism is one optional flexible, scene-valid habit, not a fixed gesture, prop, location, or mandatory repeated beat. If personalitySummary already exists, use unchanged unless durable context clearly contradicts or refines it. Do not write mood, temporary emotion, injuries, relationship state, attraction, fear/hostility level, or what happened this turn.',
     'PERSONALITY_ARCHETYPE_GLOSSARY:',
     PERSONALITY_ARCHETYPE_GLOSSARY,
     '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
@@ -1360,6 +1297,7 @@ ResolutionEngine.identifyTargets.OppTargets.NPC=(none)
 ResolutionEngine.identifyTargets.OppTargets.ENV=(none)
 ResolutionEngine.identifyTargets.BenefitedObservers=(none)
 ResolutionEngine.identifyTargets.HarmedObservers=(none)
+ResolutionEngine.identifyTargets.NPCAwareOfUser=(none)
 ResolutionEngine.identifyTargets.PowerActors=(none)
 ResolutionEngine.intimacyAdvanceExplicit=N
 ResolutionEngine.boundaryViolationExplicit=N
@@ -1370,6 +1308,10 @@ ResolutionEngine.actionBucket=None
 ResolutionEngine.socialBucket=None
 ResolutionEngine.combatType=None
 ResolutionEngine.actionCount=a1
+ResolutionEngine.actionUnits.count=1
+ResolutionEngine.actionUnits[0].id=A1
+ResolutionEngine.actionUnits[0].action={{user}} takes the latest explicit action.
+ResolutionEngine.actionUnits[0].evidence=(none)
 ResolutionEngine.environmentDifficultyTier=none
 ResolutionEngine.classifyHostilePhysicalIntent=N
 ResolutionEngine.activeHostileThreat=N
@@ -1562,12 +1504,12 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Classify only contextual/semantic predicates needed by the engines. Use EXPLICIT-ONLY and FIRST-YES-WINS from the engine reference. ' +
         'The semantic/contextual fields you return are authoritative; the deterministic runner should not reinterpret them. ' +
         'rollNeeded is the sole semantic roll gate and directly applies DEF.STAKES. Return rollNeeded=true only for fresh unresolved stakes: success/failure would materially change risk, harm, danger, detection, resources, trust/status/authority, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacles, or explicit goal advancement. Return rollNeeded=false when there are no material stakes, when the only relevant NPC reaction is already settled by saved fear/terror, hostility/hatred, or persisted intimacy boundary, or when the latest input repeats a resolved same-bucket negative social attempt against the same NPC/goal under unchanged disposition. Still return true for separate combat, pursuit, restraint, theft, bargaining, new deception, access, resources, secrets, environmental obstacles, or new material pressure. Failed/resolved Bluff blocks repeated Bluff; failed/resolved Intimidate blocks repeated Intimidate. Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff. Do not treat repeated same-bucket threats, stronger insults, rephrased same-bucket bluffs, renewed same-bucket coercion, or dramatic display after refusal/failure as a fresh social contest. rollReason must be a concise explanation that agrees with rollNeeded: rollNeeded=true requires fresh unresolved stakes, and rollNeeded=false requires no fresh unresolved stakes. ' +
-        'Living/non-living target separation is mandatory: hostilesInScene.NPC, ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, RelationshipEngine NPC entries, and NPCInScene candidates are living entities only. OppTargets.ENV is only for a non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure that directly obstructs or resists {{user}}\'s current stakes-bearing action. A non-living object merely being acted on, damaged, taken, read, or moved is not a scene target by itself. PowerActors is strategic-only and can contain organizations/groups/institutions or potential power figures with credible means to affect {{user}} beyond acting alone in the moment; it never creates immediate rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by itself. ' +
-        'Execute target identification in this order: first identify hostilesInScene.NPC as ALL established, present, living hostile entities in scene; then identify ActionTargets as every living NPC the latest user input directly addresses, speaks to, answers, asks, thanks, reassures, requests, warns, commands, helps, treats, touches, accompanies, follows, trades with, gives something to, receives something from, attacks, restrains, deceives, negotiates with, or otherwise directly interacts with this turn, whether rollNeeded is true or false; then identify which targets, if any, directly oppose {{user}}\'s current action as OppTargets.NPC. ActionTargets are the broad direct interaction list and are not limited to stakes-bearing actions. If the latest user input directly involves a living NPC, that NPC belongs in ActionTargets even when the scene is ordinary continuity and OppTargets.NPC is ["(none)"]. Do not include bystanders, background crowds, inferred listeners, offscreen entities, or hostilesInScene-only NPCs unless the latest user input directly involves them. hostilesInScene.NPC is a broad hostile pool and does not itself create relationship changes, rolls, NPCInScene entries, or OppTargets.NPC. A hostile is established only if present in assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create hostiles from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated enemies no longer posing danger, and non-living hazards/obstacles. Companion/ally commands are tactical requests only: they may address the companion as an ActionTarget and may name an established hostile for later companion crisis targeting, but do not treat the command as {{user}} making the companion act, do not force a companion attack, and do not create a user-resolved success/failure roll for companion obedience. If several hostiles exist and no specific hostile is named, do not guess. ' +
+        'Living/non-living target separation is mandatory: hostilesInScene.NPC, ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, NPCAwareOfUser, RelationshipEngine NPC entries, and NPCInScene candidates are living entities only. OppTargets.ENV is only for a non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure that directly obstructs or resists {{user}}\'s current stakes-bearing action. A non-living object merely being acted on, damaged, taken, read, or moved is not a scene target by itself. PowerActors is strategic-only and can contain organizations/groups/institutions or potential power figures with credible means to affect {{user}} beyond acting alone in the moment; it never creates immediate rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by itself. ' +
+        'Execute target identification in this order: first identify hostilesInScene.NPC as ALL established, present, living hostile entities in scene; then identify ActionTargets as every living NPC the latest user input directly addresses, speaks to, answers, asks, thanks, reassures, requests, warns, commands, helps, treats, touches, accompanies, follows, trades with, gives something to, receives something from, attacks, restrains, deceives, negotiates with, or otherwise directly interacts with this turn, whether rollNeeded is true or false; then identify NPCAwareOfUser as each individual living NPC who is present and directly notices, looks at, addresses, gestures to, reacts to, or otherwise individually interacts with {{user}}; then identify which targets, if any, directly oppose {{user}}\'s current action as OppTargets.NPC. ActionTargets are the broad direct interaction list and are not limited to stakes-bearing actions. If the latest user input directly involves a living NPC, that NPC belongs in ActionTargets even when the scene is ordinary continuity and OppTargets.NPC is ["(none)"]. NPCAwareOfUser is individual-only: include an innkeeper who looks at {{user}}, but exclude patrons/crowds/groups/factions, unnamed plural background NPCs, inferred listeners, offscreen entities, and generic bystanders. Do not include bystanders, background crowds, inferred listeners, offscreen entities, or hostilesInScene-only NPCs in ActionTargets unless the latest user input directly involves them. hostilesInScene.NPC is a broad hostile pool and does not itself create relationship changes, rolls, NPCInScene entries, or OppTargets.NPC. A hostile is established only if present in assistant narration, tracker, character/scenario/lore context, or the initial test setup; do not create hostiles from the latest user input alone. Exclude friendly/neutral NPCs, absent/offscreen entities, defeated/incapacitated enemies no longer posing danger, and non-living hazards/obstacles. Companion/ally commands are tactical requests only: they may address the companion as an ActionTarget and may name an established hostile for later companion crisis targeting, but do not treat the command as {{user}} making the companion act, do not force a companion attack, and do not create a user-resolved success/failure roll for companion obedience. If several hostiles exist and no specific hostile is named, do not guess. ' +
         'OppTargets.NPC is only for rollNeeded=true living opposition/resistance/contest against {{user}}\'s current action/challenge: directly opposing, contesting, resisting, blocking, defending against, or being attacked/challenged by {{user}}. If rollNeeded=false, OppTargets.NPC must be ["(none)"]. If a living ActionTarget meaningfully resists/opposes a rollNeeded action, that same NPC may also appear in OppTargets.NPC. Do not put every enemy in OppTargets.NPC merely because they are hostile; use hostilesInScene.NPC for the broader hostile pool. ' +
         'BenefitedObservers and HarmedObservers are living entities present in scene who are NOT already in ActionTargets or OppTargets.NPC. Do not put a direct target or opposing NPC in observer lists. ' +
-        'Identify ResolutionEngine.identifyTargets.PowerActors during target discovery: include any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Assess semantically, not by keywords or titles. A living NPC can appear in HarmedObservers/BenefitedObservers/ActionTargets/OppTargets.NPC for personal B/F/H and also appear in PowerActors for hidden strategic consequences. PowerActors never replace normal target/observer placement. ' +
-        'Create one relationshipEngine entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, or HarmedObservers. This coverage is mandatory even when that same NPC is also in PowerActors or assessed as a PowerActorEnmity power actor. PowerActors and PowerActorEnmity never replace RelationshipEngine. Do not create entries for bystanders, hostilesInScene-only NPCs, PowerActors-only entities, or inferred scene participants outside those target/observer lists. ' +
+        'Identify ResolutionEngine.identifyTargets.PowerActors during target discovery: include any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Assess semantically, not by keywords or titles. A living NPC can appear in HarmedObservers/BenefitedObservers/ActionTargets/OppTargets.NPC/NPCAwareOfUser for personal B/F/H and also appear in PowerActors for hidden strategic consequences. PowerActors never replace normal target/observer/awareness placement. ' +
+        'Create one relationshipEngine entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser. This coverage is mandatory even when that same NPC is also in PowerActors or assessed as a PowerActorEnmity power actor. PowerActors and PowerActorEnmity never replace RelationshipEngine. Do not create entries for bystanders, hostilesInScene-only NPCs, PowerActors-only entities, groups/crowds, or inferred scene participants outside those target/observer/awareness lists. ' +
         'For each living NPC in relationshipEngine, stakeChangeByOutcome must describe that NPC stakes change for each outcome: benefit means their stakes improve, harm means their stakes worsen, none means no meaningful stake change. For explicit boundary violations toward a direct/opposing NPC target, successful or landed outcomes worsen that NPC boundary/autonomy/trust stakes, so use harm and not none. ' +
         'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC stat seed from explicit portrayal and copy the same Rank/MainStat seed into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
         'Do not leave a named portrayed NPC as Rank none/MainStat none unless the card, scene, and tracker give no explicit portrayal at all. ' +
@@ -1576,10 +1518,10 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Detect personal gear/inventory item attempts before target/risk classification. Fill ResolutionEngine.itemUse only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory. Personal possession signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or equivalent wording that claims {{user}} already has the item. Mark Available=Y only when that exact attempted item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental or scene objects, including grabbing, picking up, finding, searching for, using, breaking, burning, throwing, or moving an object described or implied by the scene; those actions remain normal narration/stakes/ENV context, not itemUse. Do not infer item availability from setting likelihood. If Available=N, the personal item effect must not be treated as completed. ' +
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, actionUnits, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
         'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, or rewrite stored knowledge in preflight. ' +
-        'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
+        'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer/awareness living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. Name pools are deterministic runtime data and not part of this semantic pass; do not generate name candidates or output name fields. ' +
         'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. Mark knownToActor=Y only for that concrete knowledge path. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
@@ -1590,7 +1532,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Use Add only for explicit gains/new injuries/new effects/new obligations. Use Remove only for explicit dropping, spending, losing, completing, canceling, failing, or abandoning. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does not remove injuries unless the text also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing. Never infer unchanged lists from silence and never output a full replacement list. ' +
         'Do not mark wounds/status/condition from requested, intended, commanded, allowed, promised, predicted, or pending attempted actions before deterministic resolution; only track state already explicit as current/completed in context. ' +
         'Do not track momentary pain, impact, knockdown, stagger, breath loss, winded reaction, or temporary shock as wounds/status/condition unless an ongoing injury or continuing status is explicitly stated. ' +
-        'For TrackerUpdateEngine NPC revealedName, use semantic identity resolution: when final narration reveals that an existing tracked generic NPC/person/role is named, keep NPC as the existing tracker label and write revealedName as the proper name. This is for renaming generic entries such as bystander, man, stranger, guard, raider, or Unknown Woman once their name is revealed. If several tracked generic NPCs could match and the narration does not clearly identify which one, use (none). For NPC personalitySummary, use stable personality memory only. If this is first meaningful tracking or the current summary is empty, write a compact natural-language seed when explicit card/context or the scene reveals enduring temperament or interaction style. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerisms: ...; intensity:low|medium|high. Mannerisms are occasional observable tendencies, not repeated required beats. If an NPC already has a summary, leave unchanged unless durable evidence clearly refines it. Do not summarize mood, attraction, relationship score, fear/hostility, injuries, or temporary reactions. Personality internal pattern glossary: ' + PERSONALITY_ARCHETYPE_GLOSSARY.replace(/\n/g, ' ') + ' ' +
+        'For TrackerUpdateEngine NPC revealedName, use semantic identity resolution: when final narration reveals that an existing tracked generic NPC/person/role is named, keep NPC as the existing tracker label and write revealedName as the proper name. This is for renaming generic entries such as bystander, man, stranger, guard, raider, or Unknown Woman once their name is revealed. If several tracked generic NPCs could match and the narration does not clearly identify which one, use (none). For NPC personalitySummary, use stable personality memory only. If this is first meaningful tracking or the current summary is empty, write a compact natural-language seed when explicit card/context or the scene reveals enduring temperament or interaction style. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerism: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. Mannerism is one optional flexible, scene-valid habit, not a fixed gesture, prop, location, or repeated required beat. If an NPC already has a summary, leave unchanged unless durable evidence clearly refines it. Do not summarize mood, attraction, relationship score, fear/hostility, injuries, or temporary reactions. Personality internal pattern glossary: ' + PERSONALITY_ARCHETYPE_GLOSSARY.replace(/\n/g, ' ') + ' ' +
         'NPC proactivity cap is deterministic; do not output semantic lines for it. ' +
         'Tie rule override: exact roll ties are cinematic stalemates/struggles, not defender wins; include stakeChangeByOutcome.struggle accordingly. ' +
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
@@ -1836,6 +1778,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.OppTargets?.ENV)) missing.push('resolutionEngine.identifyTargets.OppTargets.ENV');
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.BenefitedObservers)) missing.push('resolutionEngine.identifyTargets.BenefitedObservers');
     if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.HarmedObservers)) missing.push('resolutionEngine.identifyTargets.HarmedObservers');
+    if (!Array.isArray(ledger?.resolutionEngine?.identifyTargets?.NPCAwareOfUser)) missing.push('resolutionEngine.identifyTargets.NPCAwareOfUser');
     if (ledger?.resolutionEngine?.identifyTargets?.PowerActors != null && !Array.isArray(ledger.resolutionEngine.identifyTargets.PowerActors)) missing.push('resolutionEngine.identifyTargets.PowerActors');
     if (typeof ledger?.resolutionEngine?.rollNeeded !== 'boolean') missing.push('resolutionEngine.rollNeeded:boolean');
     if (!ledger?.resolutionEngine?.rollReason) missing.push('resolutionEngine.rollReason');
@@ -1844,6 +1787,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!COMBAT_TYPES.includes(ledger?.resolutionEngine?.combatType)) missing.push('resolutionEngine.combatType');
     if (typeof ledger?.resolutionEngine?.nonLethal !== 'boolean') missing.push('resolutionEngine.nonLethal:boolean');
     if (!Array.isArray(ledger?.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
+    if (!Array.isArray(ledger?.resolutionEngine?.actionUnits)) missing.push('resolutionEngine.actionUnits');
     if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger?.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (typeof ledger?.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');
     if (typeof ledger?.resolutionEngine?.activeHostileThreat !== 'boolean') missing.push('resolutionEngine.activeHostileThreat:boolean');
@@ -1938,6 +1882,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.identifyTargets.OppTargets.ENV',
         'ResolutionEngine.identifyTargets.BenefitedObservers',
         'ResolutionEngine.identifyTargets.HarmedObservers',
+        'ResolutionEngine.identifyTargets.NPCAwareOfUser',
         'ResolutionEngine.identifyTargets.PowerActors',
         'ResolutionEngine.intimacyAdvanceExplicit',
         'ResolutionEngine.boundaryViolationExplicit',
@@ -1948,6 +1893,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.socialBucket',
         'ResolutionEngine.combatType',
         'ResolutionEngine.actionCount',
+        'ResolutionEngine.actionUnits.count',
         'ResolutionEngine.environmentDifficultyTier',
         'ResolutionEngine.classifyHostilePhysicalIntent',
         'ResolutionEngine.activeHostileThreat',
@@ -1977,6 +1923,22 @@ function parseCompactLedger(text, trackerSnapshot) {
         'PowerEventShape.count',
     ];
     const missing = required.filter(key => !fields.has(key));
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const actionUnitCount = clampNumber(readNumber(fields, 'ResolutionEngine.actionUnits.count', 0), 0, 3);
+    for (let index = 0; index < actionUnitCount; index += 1) {
+        const prefix = `ResolutionEngine.actionUnits[${index}]`;
+        const unitRequired = [
+            `${prefix}.id`,
+            `${prefix}.action`,
+            `${prefix}.evidence`,
+        ];
+        for (const key of unitRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
     if (missing.length) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
@@ -2263,6 +2225,7 @@ function parseCompactLedger(text, trackerSnapshot) {
             },
             BenefitedObservers: readList(fields, 'ResolutionEngine.identifyTargets.BenefitedObservers'),
             HarmedObservers: readList(fields, 'ResolutionEngine.identifyTargets.HarmedObservers'),
+            NPCAwareOfUser: readList(fields, 'ResolutionEngine.identifyTargets.NPCAwareOfUser'),
             PowerActors: readList(fields, 'ResolutionEngine.identifyTargets.PowerActors'),
         },
         intimacyAdvanceExplicit: readBoolean(fields, 'ResolutionEngine.intimacyAdvanceExplicit', false),
@@ -2274,6 +2237,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         socialBucket,
         combatType,
         actionCount: readList(fields, 'ResolutionEngine.actionCount', ['a1']),
+        actionUnits: readActionUnits(fields, actionUnitCount),
         environmentDifficultyTier: normalizeEnvironmentDifficultyTier(
             fields.get('ResolutionEngine.environmentDifficultyTier') ?? fields.get('ResolutionEngine.environmentDifficulty'),
             fields.get('ResolutionEngine.actionBucket'),
@@ -2846,11 +2810,12 @@ function validateRelationshipCoverage(resolutionEngine, relationshipEngine) {
         ...resolutionEngine.identifyTargets.OppTargets.NPC,
         ...resolutionEngine.identifyTargets.BenefitedObservers,
         ...resolutionEngine.identifyTargets.HarmedObservers,
+        ...resolutionEngine.identifyTargets.NPCAwareOfUser,
     ].filter(name => name && !isNoneValue(name));
     const relationshipNames = new Set(relationshipEngine.map(item => normalizeNameKey(item.NPC)));
     const missing = requiredNames.filter(name => !relationshipNames.has(normalizeNameKey(name)));
     if (missing.length) {
-        throw new Error(`compact ledger missing RelationshipEngine entry for target/observer names: ${missing.join(', ')}`);
+        throw new Error(`compact ledger missing RelationshipEngine entry for target/observer/awareness names: ${missing.join(', ')}`);
     }
 }
 
@@ -2865,7 +2830,7 @@ function repairRelationshipCoverage(resolutionEngine, relationshipEngine, source
 
     return {
         source,
-        reason: 'missing RelationshipEngine entry for target/observer living NPC',
+        reason: 'missing RelationshipEngine entry for target/observer/awareness living NPC',
         repairedNPCs: missing,
         fallback: 'neutral semantic relationship entry; deterministic B/F/H still applies',
     };
@@ -2877,6 +2842,7 @@ function missingRelationshipCoverageNames(resolutionEngine, relationshipEngine) 
         ...(resolutionEngine?.identifyTargets?.OppTargets?.NPC || []),
         ...(resolutionEngine?.identifyTargets?.BenefitedObservers || []),
         ...(resolutionEngine?.identifyTargets?.HarmedObservers || []),
+        ...(resolutionEngine?.identifyTargets?.NPCAwareOfUser || []),
     ]);
     const relationshipNames = new Set((relationshipEngine || []).map(item => normalizeNameKey(item?.NPC)).filter(Boolean));
     return requiredNames.filter(name => !relationshipNames.has(normalizeNameKey(name)));
@@ -3004,6 +2970,19 @@ function readList(fields, key, fallback = []) {
         .split(/[;,]/)
         .map(cleanScalar)
         .filter(item => item && !isNoneValue(item));
+}
+
+function readActionUnits(fields, count = 0) {
+    const units = [];
+    for (let index = 0; index < count; index += 1) {
+        const prefix = `ResolutionEngine.actionUnits[${index}]`;
+        units.push({
+            id: cleanScalar(fields.get(`${prefix}.id`)) || `A${index + 1}`,
+            action: cleanScalar(fields.get(`${prefix}.action`)) || '(none)',
+            evidence: cleanScalar(fields.get(`${prefix}.evidence`)) || '(none)',
+        });
+    }
+    return units;
 }
 
 function cleanScalar(value) {
@@ -3219,8 +3198,16 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.identifyTargets.OppTargets.ENV = readPlainArray(ledger.resolutionEngine.identifyTargets.OppTargets.ENV);
     ledger.resolutionEngine.identifyTargets.BenefitedObservers = readPlainArray(ledger.resolutionEngine.identifyTargets.BenefitedObservers);
     ledger.resolutionEngine.identifyTargets.HarmedObservers = readPlainArray(ledger.resolutionEngine.identifyTargets.HarmedObservers);
+    ledger.resolutionEngine.identifyTargets.NPCAwareOfUser = readPlainArray(ledger.resolutionEngine.identifyTargets.NPCAwareOfUser);
     ledger.resolutionEngine.identifyTargets.PowerActors = readPlainArray(ledger.resolutionEngine.identifyTargets.PowerActors);
-    ledger.resolutionEngine.actionCount = normalizeActionMarkers(ledger.resolutionEngine.actionCount);
+    const rawActionMarkers = readPlainArray(ledger.resolutionEngine.actionCount);
+    ledger.resolutionEngine.actionCount = normalizeActionMarkers(rawActionMarkers);
+    ledger.resolutionEngine.actionUnits = normalizeActionUnits(
+        ledger.resolutionEngine.actionUnits,
+        ledger.resolutionEngine.actionCount,
+        ledger.resolutionEngine,
+        rawActionMarkers,
+    );
     ledger.resolutionEngine.userAbilityUse = normalizeUserAbilityUse(ledger.resolutionEngine.userAbilityUse);
     ledger.resolutionEngine.itemUse = normalizeItemUse(ledger.resolutionEngine.itemUse);
     ledger.resolutionEngine.claimCheck = normalizeClaimCheck(ledger.resolutionEngine.claimCheck);
@@ -3723,6 +3710,35 @@ function normalizeActionMarkers(markers) {
     return markers.slice(0, 3).map((_, index) => `a${index + 1}`);
 }
 
+function normalizeActionUnits(units, actionMarkers, resolutionEngine = {}, rawMarkers = []) {
+    const markers = Array.isArray(actionMarkers) && actionMarkers.length ? actionMarkers : ['a1'];
+    const source = Array.isArray(units) ? units : [];
+    const fallbackBase = cleanScalar(
+        resolutionEngine.identifyChallenge
+        || resolutionEngine.explicitMeans
+        || resolutionEngine.identifyGoal
+        || '{{user}} takes the latest explicit action',
+    ) || '{{user}} takes the latest explicit action';
+    return markers.slice(0, 3).map((marker, index) => {
+        const rawUnit = source[index] && typeof source[index] === 'object' ? source[index] : {};
+        const rawMarker = cleanScalar(rawMarkers[index] ?? marker);
+        const markerIsGeneric = /^a\d+$/i.test(rawMarker);
+        let action = cleanScalar(rawUnit.action ?? rawUnit.Action ?? rawUnit.description ?? rawUnit.Description);
+        if (!action || isNoneValue(action) || /^a\d+$/i.test(action)) {
+            action = rawMarker && !markerIsGeneric ? rawMarker : fallbackBase;
+        }
+        let evidence = cleanScalar(rawUnit.evidence ?? rawUnit.Evidence);
+        if (!evidence || isNoneValue(evidence)) {
+            evidence = rawMarker && !markerIsGeneric ? rawMarker : '(none)';
+        }
+        return {
+            id: `A${index + 1}`,
+            action: action.slice(0, 220),
+            evidence: evidence.slice(0, 220),
+        };
+    });
+}
+
 function validateNormalizedLedger(ledger, raw) {
     const missing = [];
     if (!ledger.engineContext) missing.push('engineContext');
@@ -3752,6 +3768,7 @@ function validateNormalizedLedger(ledger, raw) {
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.OppTargets?.ENV)) missing.push('resolutionEngine.identifyTargets.OppTargets.ENV');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.BenefitedObservers)) missing.push('resolutionEngine.identifyTargets.BenefitedObservers');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.HarmedObservers)) missing.push('resolutionEngine.identifyTargets.HarmedObservers');
+    if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.NPCAwareOfUser)) missing.push('resolutionEngine.identifyTargets.NPCAwareOfUser');
     if (!Array.isArray(ledger.resolutionEngine?.identifyTargets?.PowerActors)) missing.push('resolutionEngine.identifyTargets.PowerActors');
     if (typeof ledger.resolutionEngine?.rollNeeded !== 'boolean') missing.push('resolutionEngine.rollNeeded:boolean');
     if (!ledger.resolutionEngine?.rollReason) missing.push('resolutionEngine.rollReason');
@@ -3761,6 +3778,10 @@ function validateNormalizedLedger(ledger, raw) {
     if (typeof ledger.resolutionEngine?.intimacyAdvanceExplicit !== 'boolean') missing.push('resolutionEngine.intimacyAdvanceExplicit:boolean');
     if (typeof ledger.resolutionEngine?.boundaryViolationExplicit !== 'boolean') missing.push('resolutionEngine.boundaryViolationExplicit:boolean');
     if (!Array.isArray(ledger.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
+    if (!Array.isArray(ledger.resolutionEngine?.actionUnits)) missing.push('resolutionEngine.actionUnits');
+    if (Array.isArray(ledger.resolutionEngine?.actionCount) && Array.isArray(ledger.resolutionEngine?.actionUnits) && ledger.resolutionEngine.actionUnits.length !== ledger.resolutionEngine.actionCount.length) {
+        missing.push('resolutionEngine.actionUnits:length');
+    }
     if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (![0, 4, 8, 12].includes(ledger.resolutionEngine?.environmentDifficulty)) missing.push('resolutionEngine.environmentDifficulty');
     if (typeof ledger.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');

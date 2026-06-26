@@ -1,13 +1,19 @@
 import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
 
-import { name1, saveSettingsDebounced } from '../../../../script.js';
-
-import { extension_settings } from '../../../../scripts/extensions.js';
-
-import { addEphemeralStoppingString, flushEphemeralStoppingStrings } from '../../../../scripts/power-user.js';
-import { persona_description_positions, power_user } from '../../../../scripts/power-user.js';
-import { setPersonaDescription, user_avatar } from '../../../../scripts/personas.js';
-import { SlashCommandParser } from '../../../../scripts/slash-commands/SlashCommandParser.js';
+import {
+    addEphemeralStoppingString,
+    applyConnectionProfileName,
+    extension_settings,
+    flushEphemeralStoppingStrings,
+    getActiveConnectionProfileName,
+    getConnectionProfileByName,
+    getConnectionProfileNames,
+    getPersonaText,
+    getUserName,
+    readActiveConnectionProfileName,
+    saveSettingsDebounced,
+    writePersonaDescription,
+} from './st-adapter.js';
 import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, mergeUserKnowledgeLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
@@ -28,18 +34,18 @@ const SETTINGS_KEY = 'structuredPreflightEngines';
 const SETTINGS_CONTAINER_ID = 'structured_preflight_settings_container';
 const SETTINGS_STYLE_ID = 'structured_preflight_settings_styles';
 const NARRATOR_PROMPT_KEY = 'structured_preflight_narrator_context';
-const WRITING_STYLE_PROMPT_KEY = 'structured_preflight_10_writing_style';
+const WRITING_STYLE_PROMPT_KEY = 'structured_preflight_30_scene_style';
 
 const PROSE_RULES_PROMPT_KEY = 'structured_preflight_20_prose_rules';
 
 const FINAL_REMINDER_PROMPT_KEY = 'structured_preflight_30_final_reminder';
 
+const LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_10_writing_style';
+
 const LEGACY_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_writing_style';
 
 const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
-const TRACKER_PROFILE_CURRENT = '<Current semantic profile>';
-const PROSE_GUARD_PROFILE_CURRENT = '<Current semantic profile>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 
@@ -62,6 +68,8 @@ const PROSE_GUARD_HIDDEN_MESSAGE_CLASS = 'structured-preflight-proseguard-hidden
 const PROSE_GUARD_HIDDEN_TEXT_CLASS = 'structured-preflight-proseguard-hidden-text';
 const PROSE_GUARD_DEFER_MS = 0;
 const PROSE_GUARD_TIMEOUT_MS = 90000;
+const COMBINED_POST_PASS_NARRATION_START = 'BEGIN_CORRECTED_NARRATION';
+const COMBINED_POST_PASS_NARRATION_END = 'END_CORRECTED_NARRATION';
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
 const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
@@ -71,13 +79,16 @@ const PROGRESSION_VERSION = 1;
 const PROGRESSION_CARD_ID = 'structured_preflight_progression_card';
 const PROGRESSION_STYLE_ID = 'structured_preflight_progression_styles';
 const PROGRESSION_REQUIRED_ACCOMPLISHMENTS = 3;
-const PROGRESSION_REQUIRED_ABILITIES = 2;
+const PROGRESSION_REQUIRED_ABILITIES = 1;
 const PROGRESSION_MAX_STAT = 10;
 const PROGRESSION_ABILITY_OPTIONS = 3;
 const PROGRESSION_SPELL_OPTIONS = 3;
 const PROGRESSION_MAX_SPELLS = 5;
 const PLAYER_CREATION_MAX_STARTING_SPELLS = 1;
 const PLAYER_STATS = Object.freeze(['PHY', 'MND', 'CHA']);
+const PLAYER_CREATION_STAT_POINTS = 24;
+const PLAYER_CREATION_MIN_STAT = 1;
+const PLAYER_CREATION_MAX_STAT = 9;
 const PLAYER_RACE_CHOICES = Object.freeze([
     'Aasimar',
     'Angelkin',
@@ -147,7 +158,7 @@ const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
     'Sci-fi': 'Start with a short playable opening scene that clearly belongs to science fiction. Let the genre show through concrete surroundings, visible pressure, technology, alien or future context, artificial intelligence, corporate or institutional systems, exploration, technical danger, or other immediate scene evidence.',
     Modern: 'Start with a short playable opening scene that clearly belongs to a contemporary real-world or near-real-world setting. Let the genre show through concrete surroundings, visible pressure, ordinary technology, public life, work, school, travel, money, crime, family, community, or other immediate scene evidence.',
     'Slice of Life': 'Start with a short playable opening scene that clearly belongs to slice of life. Let the genre show through concrete surroundings, routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or other immediate scene evidence.',
-    Isekai: 'Start with a short playable opening scene that clearly belongs to isekai. Begin with {{user}}\'s final moments on Earth, then their arrival in the new world. The final Earth moment must be brief, concrete, external, and no more than one short paragraph. Before transition, {{user}} was human in their previous life, regardless of their approved new race/body. Do not decide whether {{user}} remembers, forgets, understands, recognizes, or has processed the transition. Do not summarize {{user}}\'s life, memories, personality, skills, inventory, or biography. Move quickly to the first playable moment in the new world. Avoid overused openings: being alone in a forest as the opening beat; being chased or hunted immediately.',
+    Isekai: 'Start with a short playable opening scene that clearly belongs to isekai. Briefly narrate {{user}}\'s final moments on Earth, then move directly into the first playable scene as a fully settled fantasy opening. The crossing may be implied by the scene itself or shown through an original, scene-specific transition, aftermath, summoning, audience, goddess encounter, ritual room, portal residue, or similar logic. Use the same descriptive richness as the Fantasy genre: concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, or other immediate scene evidence. If the first scene is a meeting, audience, summons, chamber, or conversation with a goddess or other being, treat that as the scene itself and describe it vividly. Do not narrate awakening, landing mechanics, self-discovery, or the transfer itself in the playable scene. The opening should feel like a normal fantasy scene that happens after an isekai crossing.\n\nMANDATORY CONSTRAINTS, FORBIDDEN, DO NOT DO ANY OF THE FOLLOWING:\n\n- USE a car crash, dying on a road, hitting asphalt, or hitting the curb, or ANYTHING that would imply that {{user}} died in a car accident. This is NON-NEGOTIABLE. The opening MUST BE UNIQUE.\n- DO NOT NARRATE {{user}}\'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.\n- DO NOT NARRATE {{user}} actions such as "you push yourself up" or "you open your eyes."',
     'Urban Fantasy': 'Start with a short playable opening scene that clearly belongs to urban fantasy. Let the genre show through concrete surroundings where ordinary life and supernatural pressure occupy the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or other immediate scene evidence.',
     Cyberpunk: 'Start with a short playable opening scene that clearly belongs to cyberpunk. Let the genre show through concrete surroundings, visible pressure, technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity.',
     'Post-Apocalyptic': 'Start with a short playable opening scene that clearly belongs to life after collapse. Let the genre show through concrete surroundings, visible pressure, scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, moral pressure, or other immediate scene evidence.',
@@ -159,20 +170,20 @@ const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
     'Wuxia / Xianxia': 'Start with a short playable opening scene that clearly belongs to martial or cultivation fiction. Let the genre show through concrete surroundings, visible pressure, honor, danger, rivalry, spiritual pressure, sect or clan influence, debt, beasts, duels, cultivation, immortal politics, or other immediate scene evidence.',
 });
 const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`OPENING CONTRACT:
-Keep the opening short: 180-350 words.
+Keep the opening short: 150-200 words.
 
-Narrate only what surrounds {{user}}:
-environment, light, weather, sound, visible movement, nearby people, immediate pressure, danger, opportunity, or point of interest.
+Narrate ONLY what surrounds {{user}}.
+Narrate ONLY what {{user}} can perceive externally.
 
-Do not narrate or describe:
-{{user}}'s body, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.
+Do NOT narrate:
+{{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.
+{{user}} actions such as "you push yourself up" or "you open your eyes."
 
 Do not summarize the character sheet, biography, skills, past, goals, personality, inventory, powers, or private history.
 
 Do not explain the world. Do not summarize lore. Let the scene imply the genre.
 
-End at the first concrete moment where {{user}} can act.
-The scene is set. {{user}} discovers themselves through play.`;
+End at the first concrete moment where {{user}} can act.`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
@@ -191,137 +202,38 @@ const NAME_STYLE_OPTIONS = Object.freeze([
 
 ]);
 
-const LEGACY_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
+const DEFAULT_EXPLORATION_STYLE_PROMPT = String.raw`In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use concrete environmental detail to make the current place legible: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
 
-**STYLE TARGET:**
-Epic fantasy narration with rich observational detail, clear physical action, and direct physical intimacy when the scene supports it. The prose should feel natural, grounded, and scene-aware, not mechanical.
+Notice the details that matter: clothing, tools, weapons, posture, trade signs, worn surfaces, broken objects, rank markers, mud, blood, smoke, light, crowd movement, and how people react to pressure.
 
-Literary detail must come from concrete scene evidence: people, clothing, tools, weapons, surfaces, weather, light, sound, spacing, rank markers, damaged objects, practical obstacles, social behavior, and immediate consequence.
+Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`;
 
-**NORMAL NARRATION:**
-Make places feel inhabited through useful specifics. In taverns, streets, camps, halls, markets, roads, and wilderness scenes, notice what changes the scene or reveals the world: who blocks a path, who cuts speech short, what tools are in reach, what clothing marks rank or trade, what objects are damaged, what exits are watched, what sounds interrupt speech, and how people reposition under pressure.
+const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`ACTION-BEAT DIALOGUE:
+Write dialogue naturally. Characters may speak while moving, handling objects, adjusting clothing, changing position, using the environment, or making ordinary visible gestures.
 
-Do not use decorative observation for its own sake. Every detail should clarify setting, danger, social tension, character behavior, available choices, or the next action.
+Keep the narrative lens close to the active participants and the immediate exchange.
 
-**TENSION:**
-Show tension through scene movement and consequence: distance closing or opening, someone blocking access, a hand leaving or taking an object, a chair scraping back, a cup set down untouched, a weapon kept ready, a door left open, speech cut short, a delayed answer, a refusal, or a choice not to move.
+Physical behavior during dialogue should feel natural to the moment and directly belong to the ongoing turn, rather than reading like decorative filler or a stacked sequence of tells.
 
-Do not rely on isolated body-part, skin-color, grip, breath, pulse, throat, jaw, expression, or voice-delivery cues as shorthand. They may appear only when they perform a concrete function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct physical consequence.
+Environmental or object interaction belongs only when a character is actively using it, reacting to it, or when it materially affects the exchange.
 
-**ACTION:**
-Combat, pursuit, restraint, and magical impact should be kinetic and spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
+Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary. Observable behavior only.
+`;
 
-Violence should feel physical through movement and consequence: weapons bind, footing fails, bodies hit surfaces, guards open or close, distance changes, objects break, and injury alters what can happen next.
+const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
 
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is actually present, write directly and physically. Keep focus on bodies, contact, pressure, angle, rhythm, grip, weight, resistance, exposure, sound, fluids, climax, and aftermath.
+Action prose should be vivid but efficient. Every sentence should clarify what happens, where bodies move, what changes, and what can happen next. Let movement change the shape of the room and the next possible action.
 
+Use shorter rhythm for impact, interruption, danger, refusal, sudden contact, or reversal. Use enough physical detail that the action is easy to picture, but do not pause urgent motion for decorative description.`;
 
-Use plain anatomical language when the scene is explicit. Avoid coy euphemism, decorative sensual haze, or abstract desire-language. Erotic prose should stay grounded in action, consent, proximity, and physical consequence.
+const DEFAULT_INTIMACY_STYLE_PROMPT = String.raw`When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, let the prose become detailed, sensual, embodied, and physically specific. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, wetness, heat, restraint, exposure, proximity, bodies, consent, and aftermath.
 
+Let intimate scenes linger when the scene supports it. Capture shifting positions, breath against skin, hands, tension, release, texture, sound, slickness, and the changing pressure between bodies. Keep the prose direct, specific, and scene-aware.
 
+Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, exposure, or physical intimacy when the scene supports sustained detail.`;
 
-**FLOW:**
-
-Write in cohesive scene beats. Combine related action, posture, object handling, dialogue, and consequence into natural paragraphs. Use shorter sentences for impact and longer sentences for continuous movement, observation, or pressure.
-
-
-The prose should be detailed without becoming ornate, physical without becoming robotic, and intense without losing spatial clarity.`;
-const PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
-
-**STYLE TARGET:**
-Write narration with the density and clarity of a skilled fantasy novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, and social pressure should be used to make the moment easy to imagine.
-
-Description is not decoration. It is how the scene is understood.
-
-**NARRATION FIRST:**
-Treat narration as the main craft of the response. Do not reduce the scene to a chain of actions. Frame each beat so the reader can picture the room, the people in it, and the pressure between them.
-
-Notice the details that matter: the way a cloak hangs, how a patron turns in a chair, what a hand lingers over, how a face changes, how someone stands in a doorway, how the room feels crowded or quiet, what is worn, polished, broken, muddy, bloodied, or half-hidden.
-
-**SCENE SENSE:**
-Use concrete detail to reveal status, mood, intent, danger, fatigue, confidence, discomfort, attraction, fear, hesitation, or control.
-
-Describe the room, clothing, objects, gestures, and expressions as part of the scene's meaning, not as a catalog. Let the details serve the moment.
-
-**ACTION AND PRESENCE:**
-In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
-
-Every physical beat should be easy to imagine. Let movement change the shape of the room and the next possible action.
-
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
-
-Make it embodied, specific, and scene-aware.
-
-**FLOW:**
-Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed, but not ornate, and vivid, but not bloated.`;
-const DIALOGUE_STAGING_DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
-
-**STYLE TARGET:**
-Write vivid, natural fantasy narration with the density and clarity of a skilled novelist. The scene should feel inhabited: rooms have objects and wear, people have posture and habits, clothing moves, light falls across surfaces, voices carry through space, and pressure changes how characters behave.
-
-Description is not decoration. It should reveal the world, the danger, the intimacy, the social tension, the character's nature, or the choices now available.
-
-**NARRATION FIRST:**
-Treat narration as the main craft of the response. Do not reduce the scene to a chain of actions or dialogue lines. Frame each beat so the reader can picture where people stand, what they can reach, what blocks them, what changes, and how the moment feels through concrete physical detail.
-
-**SCENE TEXTURE:**
-In exploration, travel, arrival, crowds, taverns, halls, wilderness, camps, markets, bedrooms, temples, ruins, and roads, use rich but purposeful detail: clothing, tools, weapons, trade signs, furniture, footprints, mud, worn stone, firelight, shutters, rain on wood, damaged objects, rank markers, overheard fragments, and how bystanders react.
-
-Let the environment participate in the scene without taking over it.
-
-**DIALOGUE STAGING:**
-When the scene is centered on dialogue, keep the descriptive camera close to the speakers and listeners. Prioritize posture, distance, eye-line, hand movement, object handling, pauses, interruptions, tone, and how the surrounding space affects the exchange.
-
-Do not interrupt dialogue with broad scenery unless the environment directly changes the pressure, reveals information, or affects what someone does.
-
-**CHARACTER BEHAVIOR:**
-Show personality through choices and physical behavior: how someone approaches, retreats, offers an object, withholds an answer, blocks a path, tends a wound, avoids contact, closes distance, handles a cup, adjusts clothing, watches a door, or changes their voice under pressure.
-
-**ACTION AND PRESENCE:**
-In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
-
-Every physical beat should be easy to imagine. Let movement change the shape of the room and the next possible action.
-
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep focus on bodies, contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
-
-Make it embodied, specific, mutual, and scene-aware.
-
-**FLOW AND RHYTHM:**
-Write in cohesive scene beats. Vary sentence length naturally: shorter sentences for impact, interruption, danger, refusal, or sudden contact; longer sentences for observation, movement, pressure, intimacy, or environmental detail.
-
-The prose should be vivid without becoming ornate, physical without becoming robotic, and detailed without losing the roleplay handoff.`;
-const DEFAULT_WRITING_STYLE_PROMPT = String.raw`**WRITING STYLE**
-
-**STYLE TARGET:**
-Write narration with the density and clarity of a skilled fantasy novelist. The prose should feel observant, grounded, and alive to the scene: rooms, clothing, posture, gesture, expression, movement, light, texture, and social pressure should be used to make the moment easy to imagine.
-
-Description is not decoration. It is how the scene is understood.
-
-**NARRATION FIRST:**
-Treat narration as the main craft of the response. Do not reduce the scene to a chain of actions. Frame each beat so the reader can picture the room, the people in it, and the pressure between them.
-
-Notice the details that matter: the way a cloak hangs, how a patron turns in a chair, what a hand lingers over, how a face changes, how someone stands in a doorway, how the room feels crowded or quiet, what is worn, polished, broken, muddy, bloodied, or half-hidden.
-
-**SCENE SENSE:**
-Use concrete detail to reveal status, mood, intent, danger, fatigue, confidence, discomfort, attraction, fear, hesitation, or control.
-
-Describe the room, clothing, objects, gestures, and expressions as part of the scene's meaning, not as a catalog. Let the details serve the moment.
-
-**ACTION AND PRESENCE:**
-In combat, pursuit, restraint, travel, and magical impact, keep motion spatially clear. Track position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, and changed distance.
-
-Every physical beat should be easy to imagine. Let movement change the shape of the room and the next possible action.
-
-**INTIMACY:**
-When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, write directly and physically. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, fluids, and aftermath.
-
-Make it embodied, specific, and scene-aware.
-
-**FLOW:**
-Write in cohesive scene beats. Let narration move naturally from one observation or action to the next. Use varied sentence rhythm. Keep the prose detailed, but not ornate, and vivid, but not bloated.`;
+const DEFAULT_WRITING_STYLE_REMINDER_PROMPT = String.raw`FINAL WRITING STYLE REMINDER:
+Write clear, grounded narration while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with concrete environmental detail; dialogue should stay close to the active participants and immediate exchange, using observable behavior only and object or environmental interaction only when a character is actively using it, reacting to it, or when it materially affects the exchange; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
 const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
 Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
 
@@ -332,9 +244,7 @@ UNDERLINE RULE:
 
 BLOCK RULE:
 - One speaker equals one cohesive block.
-- Keep one speaker's dialogue, action, and follow-up dialogue together when they belong to the same beat.
 - Do not split the same speaker across separators.
-- Max 3 paragraphs per speaker/NPC.
 - Paragraph breaks are allowed only inside the same speaker block.
 
 SEPARATOR RULE:
@@ -364,228 +274,195 @@ She set the glass down.
 Formatting violations are invalid. Repair formatting before output.`;
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
 
-  SensoryNarrationDirective(input, context):
-    policy: VIVID DIRECT PERCEPTION
+  applicationContract(response, input, context): {
+    mandate:
+      Before writing the final, in-character response, treat these constraints as binding: activeHandoff, characterTurnPacing, hypotacticSceneBeats, linearChronology, strictBehaviorism, embodiedPerception, denotativePhysicality, inanimateObjectivity, strictEpistemology, and diegeticPhysicality.
+      The response must be fully filtered through them and remain compliant with all of them.
+      Any failure invalidates the response.
+  }
+
+  activeHandoff(response, context): {
+    policy: ACTIVE-HANDOFF
 
     mandate:
-      Narrate the scene as {{user}} could directly perceive it from their physical position.
-      Ground the prose in sight, sound, touch, space, movement, texture, pressure, and consequence.
-      Make the scene feel present and embodied, not like a list of actions.
+      Your response MUST END on an active, concrete beat that {{user}} can immediately respond to.
 
-    principle:
-      Use sensory detail to clarify where things are, how they move, what they touch, what changes, and what choices or pressures become available.
+    ACCEPTABLE BEATS:
+      - Dialogue directed at {{user}}
+      - Action(s) directed at {{user}}
+      - A visible scene change that immediately requires a response from {{user}}.
 
-    smellTasteLimit:
-      Smell and taste are secondary.
-      Include them only when {{user}} explicitly smells, tastes, eats, or drinks, or when a specific close-range physical source is overpowering and unavoidable.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Continue past the handoff beat.
+        - Prompt the {{user}} to respond or ask direct questions such as "what do you do?" or "the ball is in your court."
+        - End on explicit waiting, staring, silence, or all-eyes-on-user framing (e.g., "She waits", "She looks at you, expectantly", "Everyone is silent, waiting").
+        - End on filler background, ambient, or environmental details that are irrelevant to the ongoing interaction (e.g., "Somewhere, a dog barks", "The fire in the room crackles once").
+  }
 
-    example:
-      Good: The tavern is crowded at this hour. At the threshold, shoulders shift between narrow tables, mugs scrape over wood, and firelight moves across the low beams. A hooded figure sits near the hearth with both hands held toward the heat.
-      Bad: The tavern smelled of ale and sweat.
+  characterTurnPacing(response, context): {
+    policy: BOUNDED-CHARACTER-TURNS
 
-
-  abilityIntegration(response, context):
-    policy: DIEGETIC PHYSICAL RESULTS
-
-    mandate:
-      Render abilities, magic, senses, spells, supernatural effects, and body traits through their visible, audible, tactile, or environmental results.
-      Show what changes in the scene, not the system behind it.
-
-    principle:
-      Keep effects inside the current action beat: light, pressure, force, heat, cold, distance, damage, altered material, changed access, or bodily transformation.
-
-    hardLimit:
-      Do not name, announce, explain, activate, charge, ritualize, or system-label abilities unless a character says the name aloud in dialogue.
-
-    example:
-      Good: The lock gives with a sharp metallic snap. Frost crawls over the iron plate for half a second, then flakes away as the latch drops loose inside the door.
-      Bad: You use your ice magic to unlock the door.
-
-
-  epistemicRender(response, context):
-    policy: STRICT USER-POV EVIDENCE
+    definition:
+      A character turn is 1 continuous, uninterrupted paragraph containing one NPC's complete contribution to the current moment: action, dialogue, or both. The paragraph must be 1-6 sentences long.
 
     mandate:
-      Narrate only what is available from {{user}}'s position through direct evidence.
-      Respect line of sight, lighting, distance, cover, closed doors, walls, smoke, darkness, sound obstruction, and partial information.
+      Each active NPC may take one character turn per {{user}} input. That turn may address multiple connected points from {{user}} when they belong to the same immediate reply, but it must remain one coherent turn.
 
-    principle:
-      If evidence is incomplete, preserve uncertainty. Describe the visible shape, muffled sound, blocked view, or partial clue instead of turning inference into fact.
+    npcToNpcException:
+      If two NPCs directly interact, allow one brief NPC A -> NPC B -> NPC A exchange, then stop. Each NPC turn in that exchange still obeys the same one-paragraph limit.
 
-    hardLimit:
-      Do not reveal unknown names, roles, species, motives, loyalties, hidden causes, lore, or private thoughts until introduced or directly evidenced in-world.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not add repeated body language or extra micro-actions.
+        - Do not give the same NPC a second paragraph, second turn, follow-up clarification, repeated prompt, self-answer, exposition dump, or extra chain of micro-actions outside the stated exception.
+  }
 
-    example:
-      Good: Beyond the broken gate, something moves between the trees. The branches hide most of its body; only a pale shoulder, a dragging foot, and the scrape of metal against stone reach you from the dark.
-      Bad: The assassin waits behind the gate, furious that you survived.
-
-
-  behavioralRender(response, context):
-    policy: OBSERVABLE BEHAVIOR
+  hypotacticSceneBeats(response, context): {
+    policy: COHESIVE-ACTION-RESULT
 
     mandate:
-      Show character state through action that changes the scene: spacing, contact, objects, access, posture, timing, speech, refusal, approach, retreat, interruption, or silence with a concrete cause.
+      Hypotactic narration: write cohesive scene beats. Combine closely related movement, action, object handling, and consequence into connected prose.
 
-    principle:
-      Let behavior change something physical or social in the moment. A character should act within the scene, not merely display a body cue.
-
-    hardLimit:
-      Do not rely on emotion labels, body-tell shorthand, skin-color emotional shorthand, breath/throat/pulse/stomach cues, eye-softening, jaw-clenching, twitch loops, or repeated micro-gestures as substitutes for action.
-      Specifically ban flushing, blushing, reddening, paling, color rising or creeping across skin, knuckle whitening, and equivalent skin-color shorthand.
-
-    physiologyGate:
-      Body detail is allowed only when it performs a concrete physical function: speech, injury, illness, exertion, restraint, contact, balance, sex, recovery, object use, or direct consequence. Skin color changes are allowed only when they have a direct tissue-color cause such as injury, illness, blood loss, heat, cold, choking, poison, visible magic, makeup, lighting, species trait, existing complexion, bruising, or direct material pressure.
-
-    example:
-      Good: Mara looks away, then down at the cup in her hands. "I... I... well, thank you for the compliment," she says. She tightens her fingers around the ceramic and raises it to her lips, the tremor in her hand still visible.
-      Bad: A flush creeps over Mara's face and down to her collarbones. "I... well, thank you for the compliment," she says, squeezing the cup until her knuckles whiten.
-
-
-  literalStyleFilter(response, context):
-    policy: NATURAL GROUNDED PROSE
-
-    mandate:
-      Write natural, grounded prose that remains physically clear.
-      The narration may be vivid, rhythmic, intimate, tense, quiet, or richly detailed, but every sentence should still point to something observable, audible, tactile, spatial, behavioral, or consequential.
-      Do not make the prose stiff or procedural just to avoid figurative language.
-
-    principle:
-      When a figurative shortcut would appear, replace it with specific scene detail: movement, texture, sound, contact, spacing, object state, weather on surfaces, posture, gesture, or consequence.
-
-    hardLimit:
-      Do not use metaphor, simile, personification, emotional physics, or decorative abstraction when it turns mood, silence, darkness, tension, desire, fear, air, weather, or a room into an actor, substance, force, or living presence.
-
-    example:
-      Good: The room falls quiet except for rain ticking against the shutters. Seraphina keeps her hand on the doorframe, fingers pressed into the wood, and does not step aside.
-      Bad: The silence stretched between you like a living thing.
-
-
-  sceneBeatComposition(response, context):
-    policy: COHESIVE-BEATS, GROUNDED-DELIVERY
-
-    mandate:
-      Write cohesive scene beats. A scene beat is a unified block of action, posture, object handling, dialogue, and consequence. Never replace a meaningful beat with a sequence of twitch reactions.
-
-    alwaysEnabled:
-      - Unified Paragraphs: combine related movement, posture, object handling, dialogue, and consequence into one paragraph when they belong to the same beat.
-      - Tactical Pacing: use short sentences for impact or interruption; use longer sentences for continuous movement, tactical sequence, pressure, or dialogue integrated with action.
-      - Grounded Vocalization: describe dialogue delivery only when it is physically grounded and changes audibility, privacy, speech control, injury, fatigue, fear, anger, restraint, intimacy, or scene pressure.
-      - Action Preference: prefer one strong NPC beat that creates a response point for {{user}} over several small fragments from the same speaker.
-      - Turn Flow: keep same-speaker action and dialogue together. Keep dialogue reactive, pressured, specific, and short enough to preserve roleplay flow.
-      - Sentence Function: each sentence must advance position, contact, force, timing, spacing, object state, visibility, sound, pressure, consequence, dialogue, or choice.
-
-    ABSOLUTE BAN:
-      - Micro-reaction loops, twitch-cadence narration, and body-cue pileups where several small gestures substitute for one meaningful beat.
-      - Robotic one-action-per-sentence cadence, repetitive subject-verb action lists, pingpong structure, isolated speech balloons, same-speaker fragmentation, and narration/speech/narration/speech chains from the same NPC before {{user}} can respond.
-      - Stock quietness shorthand or equivalents such as "barely above a whisper," "just above a whisper," "almost a whisper," "low murmur," "soft murmur," or "a thread of sound" when used as tropey emotional shorthand instead of physically grounded delivery.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Avoid paratactic narration: do not break a beat into staccato subject-verb action stacking or isolated speech balloons.
+        - Do not use micro-reaction loops, twitch-cadence narration, or body-cue pileups where several small gestures substitute for one meaningful beat.
+        - Do not use stock quietness shorthand as an emotional crutch.
 
     example:
       Good: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
       Bad: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
+  }
 
-
-  chronologyControl(response, input, context):
-    policy: AFTER-INPUT-CONSEQUENCE, STRICT-LINEAR
-
-    mandate:
-      Start the response at the point right after the latest {{user}} input. The declared attempt is already complete and must not be replayed. If it succeeded, begin with what changed because of it. If it failed, stalled, was blocked, or was interrupted, begin with the failure point, obstruction, resistance, absence, interruption, NPC response, or changed scene state.
-
-    alwaysEnabled:
-      - Consequence Start: the first sentence must be an external consequence, NPC response, environmental change, revealed information, new stimulus, obstruction, failure point, resistance, absence, interruption, or changed scene state.
-      - Preserved State: completed actions, delivered items, object positions, physical positions, current locations, open/closed/removed/placed states, and other concrete scene facts from recent chat remain true unless narrativeFacts(input) explicitly changes them.
-      - Forward Consequence: if {{user}} says they sit, enter, walk, watch, scan, speak, take, open, or move, do not begin by narrating that action. Begin with what changes because of it, what becomes visible from the new position, who reacts, what blocks them, or what happens next.
-      - Failed or Interrupted Attempts: if narrativeFacts(input) says the action failed, stalled, was blocked, or was interrupted, do not replay the attempt. Begin with the obstruction, failed access, missing item, resistance, interruption, NPC response, or changed scene state.
-
-    ABSOLUTE BAN:
-      - Echoing, restating, paraphrasing, summarizing, restaging, re-performing, or narrating back {{user}} input.
-      - Opening recap transitions, "as you" phrasing, and replaying completed NPC/world actions from recent visible chat.
-
-    example:
-      Good: The coin lands on the counter and spins once before the innkeeper traps it under two fingers. His eyes flick to the emblem stamped into the metal, and the smile leaves his face.
-      Bad: You place the coin on the counter and wait for the innkeeper to react.
-
-
-  userAgencyControl(response, input, context):
-    policy: ZERO-PUPPETING, STRICT-SEPARATION
+  linearChronology(response, input, context): {
+    policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
 
     mandate:
-      Render the world, NPCs, hazards, objects, and consequences as active and independent. Render {{user}}'s voluntary actions only when the latest user input explicitly declares them or PROXY USER ACTION MODE allows that exact action.
+      Narrate in strict linear order. Begin with the immediate consequence of {{user}}'s latest input.
 
-    alwaysEnabled:
-      - Independent World: NPCs may speak, move, leave, approach, block, offer, refuse, attack, retreat, reveal, hide, interrupt, or change the scene according to narrativeFacts(input).
-      - Declared Actions Only: if {{user}} did not explicitly declare a voluntary action in the latest input, that action did not happen.
-      - Delivered Objects: if an NPC gives, returns, drops, slides, reveals, or places an object or note for {{user}}, stop with it delivered, available, visible, or within reach unless the latest user input already declared the follow-up action.
-      - Locked Contents: do not reveal contents that require {{user}} to open, unfold, unseal, turn over, read, inspect, or examine something.
-      - Involuntary Physics: {{user}} may be moved or affected by external forces when concrete and proportional: knocked back, falling from impact, waking because something happens, coughing from smoke, bleeding from injury, losing balance, being restrained, or recoiling from direct heat, force, noise, or contact.
-      - Proxy Exception: if PROXY USER ACTION MODE is active, narrate only the exact specified {{user}} action for that turn, then return immediately to normal agency separation.
-
-    ABSOLUTE BAN:
-      - Making {{user}} voluntarily take, pick up, open, unfold, unseal, turn over, read, inspect, pocket, wear, drink, eat, touch, follow, accept, answer, speak, nod, look, approach, retreat, attack, defend, search, examine, comply, or otherwise act without explicit input.
-      - Assuming {{user}} compliance, movement, attention, inspection, acceptance, refusal, speech, silence, reaction, choice, decision, or voluntary movement.
-      - Answering questions directed at {{user}}.
-      - Writing {{user}} speech, thoughts, feelings, reactions, silence, choices, decisions, internal states, or voluntary actions.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do NOT echo, summarize, recap, paraphrase, or repeat any part of {{user}}'s actions or dialogue.
+        - Do NOT jump ahead, rewind, or insert undeclared intermediate actions.
 
     example:
-      Good: The sealed letter slides across the table and stops beside your hand, the wax mark still intact. The messenger steps back from it. "He said only you should open it."
-      Bad: You take the letter, break the seal, and read the first line.
+      User input: "I try to grab the scroll from the desk."
+      Good: The guard's hand comes down on the scroll before your fingers reach it. He slides it off the desk and behind his back.
+      Bad: You reach for the scroll on the desk. The guard notices and grabs it before you can. He pulls it away.
+  }
 
-
-  turnStructureControl(response, context):
-    policy: ROLEPLAY TURN FLOW
+  agencySeparation(response, input, context): {
+    policy: USER-CONTROL-BOUNDARY
 
     mandate:
-      Keep NPC action and dialogue tight enough to preserve back-and-forth roleplay. Give the NPC a meaningful beat, then return space to {{user}} before the NPC continues the scene alone.
+      The narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist.
+      Render {{user}}'s voluntary actions only when the latest input explicitly declares them. External physical forces may affect {{user}} when concrete and proportional.
 
-    principle:
-      Keep same-speaker action and dialogue together. A turn may include action plus dialogue, but it should not become a chain of repeated prompts, gestures, explanations, and follow-up lines before {{user}} can respond.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.
+        - Do not interpret, assume, or complete {{user}}'s intent.
+  }
 
-    hardLimit:
-      Do not run extended NPC monologues, inter-NPC pingpong, same-speaker fragmentation, or repeated NPC follow-up prompts in the same turn.
-
-    example:
-      Good: Elian gives one answer, short enough that the others at the table stop talking. "The bridge is gone." He points through the rain-streaked window toward the black gap where the road used to continue. "How are you planning to cross?"
-      Bad: "The bridge is gone." He points toward the black gap where the bridge used to be. "How will you cross?" He takes a sip from his cup. "If I were you, I wouldn't. Well?"
-
-
-  responseEndpointControl(response, context):
-    policy: CLEAN-HANDOFF, NATURAL-PAUSE
+  strictBehaviorism(response, context): {
+    policy: OBSERVABLE-CHARACTER-STATE
 
     mandate:
-      End exactly where the scene naturally returns control to {{user}}. Output absolutely nothing after the response beat.
+      Render character state only through observable behavior and physical displacement that can be directly witnessed by someone physically present in the scene.
+      Narrate only tangible, external action.
 
-    alwaysEnabled:
-      - Response Point: before writing, choose the natural user-centered response beat: the point where the immediate consequence, NPC response, revealed information, available object, changed access, danger, or environmental condition is clear enough for {{user}} to choose what to do next.
-      - Independent Continuation Only: continue NPC/world action only while it remains independent of any new {{user}} choice or action.
-      - NPC Address: if an NPC speaks or acts toward {{user}}, end on that speech or action once it creates a natural point for {{user}} to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act.
-      - Consequence Focus: if no NPC is driving the beat, end on the relevant consequence of {{user}}'s action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.
-      - Hard Stop: after the response beat, terminate generation immediately. Do not add another sentence, paragraph, outro, separator, scene-break line, or atmospheric tag.
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not name internal, emotional, or psychological states.
+        - Do not use subtext labels, interpretive commentary, or inferred inner states.
+        - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
+        - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, breath catching, voice hitching, voice catching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts. Examples: "her breath catches", "his breath hitches", "her voice catches", "his voice hitches".
+        - Do not use repeated mouth/jaw opening-closing loops as emotional shorthand. Example: "mouth opens, then closes, then opens again".
+  }
 
-    ABSOLUTE BAN:
-      - Writing beyond the response point or advancing location, time, conversation, sensory access, or scene state through undeclared {{user}} participation.
-      - Inventing a question, threat, gesture, stare, pause, silence, waiting beat, all-eyes-on-user framing, or mood-only silence just to create an endpoint.
-      - Explicit waiting cues such as "she waits," "he waits for your answer," "awaits your response," "what do you do," or "the choice is yours."
-      - Outro paragraphs, scene-break tails, separator-line tails, meta-questions, unrelated ambience, and ambient filler endings.
+  embodiedPerception(response, context): {
+    policy: EMBODIED-NARRATION
+
+    mandate:
+      Narrate the scene as {{user}} would physically perceive it from their position, using concrete physical evidence.
+
+    sensoryHierarchy:
+      - Prioritize sight, hearing, and touch.
+      - Include smell and taste ONLY when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.
+
+    spatialContinuity:
+      - Keep relative positions, distance, facing, occlusion, and barriers consistent across the response.
+      - If a character changes position, narrate the movement before using the new position.
+      - Do not let {{user}} perceive, reach, or interact through walls, doors, distance, cover, or other barriers unless the scene explicitly opens that path.
+
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Do not say that the air smells, the room smells, the place smells, or anything similar.
+        - Do not say that the air tastes, the room tastes, the place tastes, or anything similar.
+        - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
+  }
+
+  denotativePhysicality(response, context): {
+    policy: LITERAL-PHYSICAL-PROSE
+
+    mandate:
+      Keep prose literal, physically clear, and grounded only in what can be directly perceived in the scene.
+      Describe what is physically there, what physically happens, and what can be physically observed.
+
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - No metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.
+        - Rooms do not breathe.
+        - Silence does not stretch.
+        - Words do not hang, land, hit, cut, or fall flat.
+        - Tension does not coil, thicken, or hum.
+        - Air, darkness, mood, and atmosphere do not act like living presences.
+        - If a line depends on figurative language to communicate mood or meaning, it is noncompliant and must be rewritten as literal physical description.
 
     example:
-      Good: The stairwell ends at a locked iron door. Behind it, something heavy scrapes once across the floor, then stops.
-      Bad: The stairwell ends at a locked iron door. What do you do?
+      Good: The room falls quiet except for rain ticking against the shutters. Seraphina keeps her hand on the doorframe, fingers pressed into the wood, and does not step aside.
+      Bad: The silence stretched between you like a living thing.
+  }
 
+  inanimateObjectivity(response, context): {
+    policy: NO-FALSE-AGENCY
 
-  applicationContract:
-    Apply every rule above as mandatory narration constraints before writing visible output.
+    mandate:
+      Give agency only to beings, forces, mechanisms, and processes capable of physical action.
+      Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They do not want, watch, wait, threaten, breathe, intend, or remember.
 
-    The final response must satisfy all active gates:
-      - concrete sensory grounding
-      - diegetic ability rendering
-      - strict POV and no user puppeting
-      - observable behavior instead of emotion labels
-      - grounded physical prose
-      - cohesive scene beats
-      - immediate consequence after user input
-      - clean endpoint where control returns to {{user}}
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Reject Pathetic Fallacy.
+        - Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
+  }
 
-    If a draft violates any rule, revise silently before output.
-    Do not mention these rules, gates, policies, or this contract in narration.
+  strictEpistemology(response, context): {
+    policy: EARNED-INFORMATION-ONLY
+
+    mandate:
+      Information remains locked until earned through direct sensory evidence, dialogue, readable text, or previously established scene fact.
+      Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.
+
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.
+        - Do not narrate {{user}} cognition, perception, or internal state.
+  }
+
+  diegeticPhysicality(response, context): {
+    policy: WORLD-EFFECTS-NOT-SYSTEM-LABELS
+
+    mandate:
+      Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.
+      Show what changes in the world: force, light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, or environmental reaction.
+
+    ABSOLUTELY-FORBIDDEN:
+      NEVER DO ANY OF THE FOLLOWING:
+        - Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.
+        - Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.
+  }
 }`;
 const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
@@ -594,20 +471,16 @@ const DEFAULT_SETTINGS = Object.freeze({
     modelCallDelayEnabled: false,
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
-    trackerConnectionProfile: TRACKER_PROFILE_CURRENT,
     postNarrationProseGuardEnabled: true,
-    proseGuardConnectionProfile: PROSE_GUARD_PROFILE_CURRENT,
     proseGuardFormattingEnabled: true,
     proseGuardFormattingPrompt: DEFAULT_PROSE_GUARD_FORMATTING_PROMPT,
     characterProgressionEnabled: true,
     writingStyleEnabled: true,
-    writingStylePrompt: DEFAULT_WRITING_STYLE_PROMPT,
-
-    writingStylePlacement: 'before_prompt',
-
-    writingStyleDepth: 0,
-
-    writingStyleRole: 0,
+    writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT,
+    writingStyleDialoguePrompt: DEFAULT_DIALOGUE_STYLE_PROMPT,
+    writingStyleActionPrompt: DEFAULT_ACTION_STYLE_PROMPT,
+    writingStyleIntimacyPrompt: DEFAULT_INTIMACY_STYLE_PROMPT,
+    writingStyleReminderPrompt: DEFAULT_WRITING_STYLE_REMINDER_PROMPT,
 
     nameStyle: 'Balanced Fantasy',
 
@@ -670,6 +543,9 @@ const state = {
     subscribed: false,
 
     pendingGeneration: null,
+    narratorDepthReplay: null,
+    internalGenerationStopPending: false,
+    internalGenerationStopTimer: null,
 
     progressToast: null,
 
@@ -703,17 +579,14 @@ function getContext() {
 function getSettings() {
     extension_settings[SETTINGS_KEY] = extension_settings[SETTINGS_KEY] || {};
     delete extension_settings[SETTINGS_KEY].disableSemanticThinking;
+    delete extension_settings[SETTINGS_KEY].writingStylePrompt;
+    delete extension_settings[SETTINGS_KEY].writingStylePlacement;
+    delete extension_settings[SETTINGS_KEY].writingStyleDepth;
+    delete extension_settings[SETTINGS_KEY].writingStyleRole;
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = value;
         }
-    }
-    if (
-        extension_settings[SETTINGS_KEY].writingStylePrompt === LEGACY_DEFAULT_WRITING_STYLE_PROMPT ||
-        extension_settings[SETTINGS_KEY].writingStylePrompt === PREVIOUS_DEFAULT_WRITING_STYLE_PROMPT ||
-        extension_settings[SETTINGS_KEY].writingStylePrompt === DIALOGUE_STAGING_DEFAULT_WRITING_STYLE_PROMPT
-    ) {
-        extension_settings[SETTINGS_KEY].writingStylePrompt = DEFAULT_WRITING_STYLE_PROMPT;
     }
     return extension_settings[SETTINGS_KEY];
 }
@@ -836,88 +709,6 @@ function removeStreamingArtifactRegex() {
 
 
 
-function getConnectionProfileNames() {
-
-    return (extension_settings.connectionManager?.profiles || [])
-
-        .map(profile => String(profile?.name || '').trim())
-
-        .filter(Boolean)
-
-        .sort((a, b) => a.localeCompare(b));
-
-}
-
-
-
-function getConnectionProfileByName(profileName) {
-
-    const wanted = String(profileName || '').trim();
-
-    if (!wanted) return null;
-
-    return (extension_settings.connectionManager?.profiles || [])
-
-        .find(profile => String(profile?.name || '').trim().toLowerCase() === wanted.toLowerCase()) || null;
-
-}
-
-
-
-function getActiveConnectionProfileName() {
-
-    const selectedProfile = extension_settings.connectionManager?.selectedProfile;
-
-    const profile = (extension_settings.connectionManager?.profiles || []).find(item => item.id === selectedProfile);
-
-    return profile?.name || PROFILE_NONE;
-
-}
-
-
-
-async function readActiveConnectionProfileName() {
-
-    const command = SlashCommandParser.commands?.profile;
-
-    if (command?.callback) {
-
-        try {
-
-            return String(await command.callback({}, '') || PROFILE_NONE);
-
-        } catch (error) {
-
-            console.warn(`[${EXTENSION_NAME}] could not read active connection profile through /profile; using settings fallback.`, error);
-
-        }
-
-    }
-
-    return getActiveConnectionProfileName();
-
-}
-
-
-
-async function applyConnectionProfileName(profileName) {
-
-    const normalized = String(profileName || PROFILE_NONE);
-
-    const command = SlashCommandParser.commands?.profile;
-
-    if (!command?.callback) {
-
-        throw new Error('Connection profile switching is unavailable because SillyTavern /profile command is not registered.');
-
-    }
-
-    await command.callback({ 'await': 'true', timeout: '10000' }, normalized);
-
-}
-
-
-
 async function withSemanticGenerationSettings(callback) {
     const settings = getSettings();
     const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
@@ -946,36 +737,10 @@ async function withSemanticGenerationSettings(callback) {
 
 
 async function withTrackerGenerationSettings(callback) {
-    const settings = getSettings();
-    const trackerProfile = String(settings.trackerConnectionProfile || TRACKER_PROFILE_CURRENT).trim();
-    if (trackerProfile && trackerProfile !== TRACKER_PROFILE_CURRENT) {
-        const profile = getConnectionProfileByName(trackerProfile);
-        if (!profile) {
-            throw new Error(`Tracker connection profile "${trackerProfile}" was not found.`);
-        }
-        console.info(`[${EXTENSION_NAME}] using direct tracker connection profile request: ${profile.name}`);
-        return await callback({
-            semanticProfileId: profile.id,
-            semanticProfileName: profile.name,
-        });
-    }
     return await withSemanticGenerationSettings(callback);
 }
 
 async function withProseGuardGenerationSettings(callback) {
-    const settings = getSettings();
-    const proseGuardProfile = String(settings.proseGuardConnectionProfile || PROSE_GUARD_PROFILE_CURRENT).trim();
-    if (proseGuardProfile && proseGuardProfile !== PROSE_GUARD_PROFILE_CURRENT) {
-        const profile = getConnectionProfileByName(proseGuardProfile);
-        if (!profile) {
-            throw new Error(`Prose Guard connection profile "${proseGuardProfile}" was not found.`);
-        }
-        console.info(`[${EXTENSION_NAME}] using direct Prose Guard connection profile request: ${profile.name}`);
-        return await callback({
-            semanticProfileId: profile.id,
-            semanticProfileName: profile.name,
-        });
-    }
     return await withSemanticGenerationSettings(callback);
 }
 
@@ -1239,8 +1004,8 @@ function injectPromptOptionPrompts() {
         return;
     }
     clearFinalReminderPrompt();
-    injectWritingStylePrompt();
     injectProseRulesPrompt();
+    injectWritingStylePrompt();
 }
 
 
@@ -1248,6 +1013,43 @@ function clearFinalReminderPrompt(context = getContext()) {
 
     if (context?.extensionPrompts) delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
 
+}
+
+
+const WRITING_STYLE_SECTION_FIELDS = Object.freeze([
+    {
+        id: 'structured_preflight_writing_style_exploration_prompt',
+        key: 'writingStyleExplorationPrompt',
+        defaultValue: DEFAULT_EXPLORATION_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_dialogue_prompt',
+        key: 'writingStyleDialoguePrompt',
+        defaultValue: DEFAULT_DIALOGUE_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_action_prompt',
+        key: 'writingStyleActionPrompt',
+        defaultValue: DEFAULT_ACTION_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_intimacy_prompt',
+        key: 'writingStyleIntimacyPrompt',
+        defaultValue: DEFAULT_INTIMACY_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_reminder_prompt',
+        key: 'writingStyleReminderPrompt',
+        defaultValue: DEFAULT_WRITING_STYLE_REMINDER_PROMPT,
+    },
+]);
+
+
+function getWritingStyleFieldControls(root = document) {
+    return WRITING_STYLE_SECTION_FIELDS.map(field => ({
+        ...field,
+        element: root.getElementById?.(field.id) || null,
+    }));
 }
 
 
@@ -1259,9 +1061,7 @@ function refreshSettingsControls() {
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
-    const trackerProfileSelect = document.getElementById('structured_preflight_tracker_profile');
     const proseGuardEnabledCheckbox = document.getElementById('structured_preflight_prose_guard_enabled');
-    const proseGuardProfileSelect = document.getElementById('structured_preflight_prose_guard_profile');
     const proseGuardFormattingEnabled = document.getElementById('structured_preflight_prose_guard_formatting_enabled');
     const proseGuardFormattingDrawer = document.getElementById('structured_preflight_prose_guard_formatting_drawer');
     const proseGuardFormattingPrompt = document.getElementById('structured_preflight_prose_guard_formatting_prompt');
@@ -1271,13 +1071,12 @@ function refreshSettingsControls() {
     const modelCallDelaySecondsInput = document.getElementById('structured_preflight_model_call_delay_seconds');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
     const writingStyleDrawer = document.getElementById('structured_preflight_writing_style_drawer');
-
-    const writingStylePrompt = document.getElementById('structured_preflight_writing_style_prompt');
+    const writingStyleFields = getWritingStyleFieldControls();
 
     const nameStyleSelect = document.getElementById('structured_preflight_name_style');
     const refreshSemanticButton = document.getElementById('structured_preflight_refresh_semantic_settings');
     const resetProseGuardFormattingButton = document.getElementById('structured_preflight_reset_prose_guard_formatting');
-    const resetWritingStyleButton = document.getElementById('structured_preflight_reset_writing_style');
+    const resetWritingStyleButtons = Array.from(document.querySelectorAll('[data-structured-preflight-reset-writing-style]'));
 
 
     if (storyEngineCheckbox) storyEngineCheckbox.checked = engineEnabled;
@@ -1292,13 +1091,13 @@ function refreshSettingsControls() {
     if (modelCallDelayEnabledCheckbox) modelCallDelayEnabledCheckbox.checked = settings.modelCallDelayEnabled === true;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.value = String(normalizeModelCallDelaySeconds(settings.modelCallDelaySeconds));
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
-    if (writingStylePrompt && writingStylePrompt.value !== settings.writingStylePrompt) {
-
-        writingStylePrompt.value = String(settings.writingStylePrompt ?? DEFAULT_WRITING_STYLE_PROMPT);
-
+    for (const { element, key, defaultValue } of writingStyleFields) {
+        const value = String(settings[key] ?? defaultValue);
+        if (element && element.value !== value) {
+            element.value = value;
+        }
     }
 
-    setPromptPlacementControls('writingStyle', settings, engineEnabled && settings.writingStyleEnabled !== false);
     setSelectOptions(
 
         nameStyleSelect,
@@ -1327,31 +1126,17 @@ function refreshSettingsControls() {
 
     );
 
-    setSelectOptions(
-        trackerProfileSelect,
-        [TRACKER_PROFILE_CURRENT, ...getConnectionProfileNames()],
-        TRACKER_PROFILE_CURRENT,
-        settings.trackerConnectionProfile || TRACKER_PROFILE_CURRENT,
-        'Profile not found',
-    );
-    setSelectOptions(
-        proseGuardProfileSelect,
-        [PROSE_GUARD_PROFILE_CURRENT, ...getConnectionProfileNames()],
-        PROSE_GUARD_PROFILE_CURRENT,
-        settings.proseGuardConnectionProfile || PROSE_GUARD_PROFILE_CURRENT,
-        'Profile not found',
-    );
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
-    if (trackerProfileSelect) trackerProfileSelect.disabled = !engineEnabled || settings.postNarrationTrackerEnabled === false;
-    if (proseGuardProfileSelect) proseGuardProfileSelect.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
     if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
     if (proseGuardFormattingPrompt) proseGuardFormattingPrompt.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
     if (proseGuardFormattingDrawer) {
         proseGuardFormattingDrawer.hidden = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
         if (proseGuardFormattingDrawer.hidden) proseGuardFormattingDrawer.open = false;
     }
-    if (writingStylePrompt) writingStylePrompt.disabled = !engineEnabled || settings.writingStyleEnabled === false;
+    for (const { element } of writingStyleFields) {
+        if (element) element.disabled = !engineEnabled || settings.writingStyleEnabled === false;
+    }
     if (writingStyleDrawer) {
         writingStyleDrawer.hidden = !engineEnabled || settings.writingStyleEnabled === false;
         if (writingStyleDrawer.hidden) writingStyleDrawer.open = false;
@@ -1366,7 +1151,7 @@ function refreshSettingsControls() {
         nameStyleSelect,
         refreshSemanticButton,
         resetProseGuardFormattingButton,
-        resetWritingStyleButton,
+        ...resetWritingStyleButtons,
     ].forEach(control => {
         if (control) control.disabled = !engineEnabled;
     });
@@ -1478,6 +1263,21 @@ function ensureSettingsPanelStyles() {
             gap: 8px;
             align-items: center;
         }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-style-block {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-style-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-style-header label {
+            font-weight: 700;
+            margin: 0;
+        }
         #${SETTINGS_CONTAINER_ID} details[data-structured-preflight-prompt-drawer] summary {
             list-style: none;
         }
@@ -1502,6 +1302,10 @@ function ensureSettingsPanelStyles() {
                 width: 100%;
             }
             #${SETTINGS_CONTAINER_ID} .spe-settings-writing-summary {
+                align-items: stretch;
+                flex-direction: column;
+            }
+            #${SETTINGS_CONTAINER_ID} .spe-settings-style-header {
                 align-items: stretch;
                 flex-direction: column;
             }
@@ -1572,19 +1376,19 @@ function renderSettingsPanel() {
 
                     <section class="spe-settings-section" data-spe-settings-step="semantic">
                         <span class="spe-settings-kicker">1. First model call</span>
-                        <h4 class="spe-settings-title">Semantic Preflight</h4>
-                        <small class="spe-settings-description">The private structured pass reads the assembled prompt stack and resolves mechanics before narration.</small>
+                        <h4 class="spe-settings-title">Story Engine Profile</h4>
+                        <small class="spe-settings-description">The private structured profile reads the assembled prompt stack, resolves mechanics, and runs post-narration utility checks.</small>
                         <div class="spe-settings-body">
                             <label class="checkbox_label flexNoGap">
                                 <input id="structured_preflight_use_separate_semantic_settings" type="checkbox">
-                                <span>Use separate semantic connection profile</span>
+                                <span>Use private Story Engine connection profile</span>
                             </label>
                             <div class="spe-settings-row">
-                                <label for="structured_preflight_semantic_profile">Semantic profile</label>
+                                <label for="structured_preflight_semantic_profile">Story Engine profile</label>
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                             </div>
                             <div class="spe-settings-row">
-                                <small class="spe-settings-note flex1">Uses the fully assembled SillyTavern prompt stack and forces thinking/reasoning disabled on Story Engine model calls.</small>
+                                <small class="spe-settings-note flex1">Used for semantic preflight and post-narration Story Engine utility calls. Narration, adventure openings, character creation, and character progression use the current SillyTavern profile.</small>
                                 <button id="structured_preflight_refresh_semantic_settings" class="menu_button">Refresh</button>
                             </div>
                         </div>
@@ -1624,30 +1428,45 @@ function renderSettingsPanel() {
                             <details id="structured_preflight_writing_style_drawer" data-structured-preflight-prompt-drawer>
                                 <summary class="spe-settings-writing-summary">
                                     <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Writing Style</button>
-                                    <button id="structured_preflight_reset_writing_style" class="menu_button" type="button">Reset</button>
+                                    <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="all">Reset All</button>
                                 </summary>
                                 <div class="spe-settings-body">
-                                    <div class="spe-settings-row">
-                                        <label for="structured_preflight_writingStyle_placement">Placement</label>
-                                        <select id="structured_preflight_writingStyle_placement" class="text_pole flex1">
-                                            <option value="before_prompt">Above Character</option>
-                                            <option value="in_prompt">Below Character</option>
-                                            <option value="in_chat">In-Chat @Depth</option>
-                                            <option value="none">Disabled</option>
-                                        </select>
+                                    <small class="spe-settings-note">Injected after Prose Rules as sceneStyleProfile. Section text is editable; internal function names are added automatically.</small>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_exploration_prompt">Exploration</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleExplorationPrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_exploration_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
                                     </div>
-                                    <div id="structured_preflight_writingStyle_depth_row" class="spe-settings-row">
-                                        <label for="structured_preflight_writingStyle_depth">Depth</label>
-                                        <input id="structured_preflight_writingStyle_depth" class="text_pole widthNatural" type="number" min="0" max="10000" step="1">
-                                        <label for="structured_preflight_writingStyle_role">Role</label>
-                                        <select id="structured_preflight_writingStyle_role" class="text_pole flex1">
-                                            <option value="0">System</option>
-                                            <option value="1">User</option>
-                                            <option value="2">Assistant</option>
-                                        </select>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_dialogue_prompt">Dialogue</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleDialoguePrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_dialogue_prompt" class="text_pole textarea_compact" rows="12" spellcheck="false"></textarea>
                                     </div>
-                                    <small class="spe-settings-note">Injected into the regular SillyTavern prompt stack. Edit freely; whatever text is here will be sent as writing style context.</small>
-                                    <textarea id="structured_preflight_writing_style_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_action_prompt">Action</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleActionPrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_action_prompt" class="text_pole textarea_compact" rows="7" spellcheck="false"></textarea>
+                                    </div>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_intimacy_prompt">Intimacy</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleIntimacyPrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_intimacy_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
+                                    </div>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="structured_preflight_writing_style_reminder_prompt">Final Reminder</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleReminderPrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_reminder_prompt" class="text_pole textarea_compact" rows="5" spellcheck="false"></textarea>
+                                    </div>
                                 </div>
                             </details>
                         </div>
@@ -1662,10 +1481,6 @@ function renderSettingsPanel() {
                                 <input id="structured_preflight_prose_guard_enabled" type="checkbox">
                                 <span>Enable Prose Guard</span>
                             </label>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_prose_guard_profile">Prose Guard profile</label>
-                                <select id="structured_preflight_prose_guard_profile" class="text_pole flex1"></select>
-                            </div>
                             <label class="checkbox_label flexNoGap">
                                 <input id="structured_preflight_prose_guard_formatting_enabled" type="checkbox">
                                 <span>Enable Prose Guard formatting rules</span>
@@ -1686,18 +1501,14 @@ function renderSettingsPanel() {
 
                     <section class="spe-settings-section" data-spe-settings-step="tracker">
                         <span class="spe-settings-kicker">4. After final prose</span>
-                        <h4 class="spe-settings-title">Tracker Update</h4>
-                        <small class="spe-settings-description">Updates the visible tracker from the final narration text after Prose Guard finishes or is skipped.</small>
+                        <h4 class="spe-settings-title">Visible Tracker</h4>
+                        <small class="spe-settings-description">Shows or hides the visible tracker widget. Hidden tracker state still updates after narration.</small>
                         <div class="spe-settings-body">
                             <label class="checkbox_label flexNoGap">
                                 <input id="structured_preflight_post_tracker_enabled" type="checkbox">
-                                <span>Enable post-narration tracker update</span>
+                                <span>Show visible tracker</span>
                             </label>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_tracker_profile">Tracker profile</label>
-                                <select id="structured_preflight_tracker_profile" class="text_pole flex1"></select>
-                            </div>
-                            <small class="spe-settings-note">Disable for compatibility with other tracker extensions.</small>
+                            <small class="spe-settings-note">Hide the tracker UI without affecting hidden tracker updates.</small>
                         </div>
                     </section>
 
@@ -1791,19 +1602,9 @@ function renderSettingsPanel() {
 
     });
 
-    document.getElementById('structured_preflight_tracker_profile')?.addEventListener('change', event => {
-        const selected = String(event.target?.value || TRACKER_PROFILE_CURRENT);
-        settings.trackerConnectionProfile = selected || TRACKER_PROFILE_CURRENT;
-        saveExtensionSettings();
-    });
     document.getElementById('structured_preflight_prose_guard_enabled')?.addEventListener('change', event => {
         settings.postNarrationProseGuardEnabled = Boolean(event.target?.checked);
         refreshSettingsControls();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_prose_guard_profile')?.addEventListener('change', event => {
-        const selected = String(event.target?.value || PROSE_GUARD_PROFILE_CURRENT);
-        settings.proseGuardConnectionProfile = selected || PROSE_GUARD_PROFILE_CURRENT;
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_prose_guard_formatting_enabled')?.addEventListener('change', event => {
@@ -1850,71 +1651,31 @@ function renderSettingsPanel() {
 
     });
 
-    document.getElementById('structured_preflight_writing_style_prompt')?.addEventListener('input', event => {
-
-        settings.writingStylePrompt = String(event.target?.value ?? '');
-
-        injectWritingStylePrompt();
-
-        saveExtensionSettings();
-
-    });
-
-    document.getElementById('structured_preflight_reset_writing_style')?.addEventListener('click', event => {
-
-        event.preventDefault();
-
-        event.stopPropagation();
-
-        settings.writingStylePrompt = DEFAULT_WRITING_STYLE_PROMPT;
-
-        refreshSettingsControls();
-
-        injectWritingStylePrompt();
-
-        saveExtensionSettings();
-
-    });
-
-    for (const prefix of ['writingStyle']) {
-
-        const inject = injectWritingStylePrompt;
-
-        document.getElementById(`structured_preflight_${prefix}_placement`)?.addEventListener('change', event => {
-
-            const value = String(event.target?.value || 'in_prompt');
-
-            settings[`${prefix}Placement`] = ['before_prompt', 'in_prompt', 'in_chat', 'none'].includes(value) ? value : 'in_prompt';
-
-            refreshSettingsControls();
-
-            inject();
-
+    for (const { id, key } of WRITING_STYLE_SECTION_FIELDS) {
+        document.getElementById(id)?.addEventListener('input', event => {
+            settings[key] = String(event.target?.value ?? '');
+            injectWritingStylePrompt();
             saveExtensionSettings();
-
         });
-
-        document.getElementById(`structured_preflight_${prefix}_depth`)?.addEventListener('input', event => {
-
-            settings[`${prefix}Depth`] = normalizePromptDepth(event.target?.value);
-
-            inject();
-
-            saveExtensionSettings();
-
-        });
-
-        document.getElementById(`structured_preflight_${prefix}_role`)?.addEventListener('change', event => {
-
-            settings[`${prefix}Role`] = normalizePromptRole(event.target?.value);
-
-            inject();
-
-            saveExtensionSettings();
-
-        });
-
     }
+    document.querySelectorAll('[data-structured-preflight-reset-writing-style]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const key = String(button.getAttribute('data-structured-preflight-reset-writing-style') || '');
+            const defaultsByKey = Object.fromEntries(WRITING_STYLE_SECTION_FIELDS.map(field => [field.key, field.defaultValue]));
+            if (key === 'all') {
+                for (const field of WRITING_STYLE_SECTION_FIELDS) {
+                    settings[field.key] = field.defaultValue;
+                }
+            } else if (defaultsByKey[key] !== undefined) {
+                settings[key] = defaultsByKey[key];
+            }
+            refreshSettingsControls();
+            injectWritingStylePrompt();
+            saveExtensionSettings();
+        });
+    });
     document.getElementById('structured_preflight_refresh_semantic_settings')?.addEventListener('click', refreshSettingsControls);
     document.getElementById('structured_preflight_show_player_setup')?.addEventListener('click', () => {
         if (!isStoryEngineEnabled()) {
@@ -2044,12 +1805,46 @@ function closeExtensionsDrawer() {
 
 
 
+function indentStyleBlock(text) {
+    const normalized = String(text ?? '').trim();
+    if (!normalized) return '    (none)';
+    return normalized.split(/\r?\n/).map(line => `    ${line}`).join('\n');
+}
+
+
+function buildSceneStyleProfilePrompt(settings = getSettings()) {
+    return [
+        'sceneStyleProfile(response, context):',
+        '  mandate:',
+        '    Shape narration by scene type while obeying every renderControlEngine rule above. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, resolved mechanics, or narrativeFacts(input).',
+        '',
+        '  explorationStyle:',
+        indentStyleBlock(settings.writingStyleExplorationPrompt ?? DEFAULT_EXPLORATION_STYLE_PROMPT),
+        '',
+        '  dialogueStyle:',
+        indentStyleBlock(settings.writingStyleDialoguePrompt ?? DEFAULT_DIALOGUE_STYLE_PROMPT),
+        '',
+        '  actionStyle:',
+        indentStyleBlock(settings.writingStyleActionPrompt ?? DEFAULT_ACTION_STYLE_PROMPT),
+        '',
+        '  intimacyStyle:',
+        indentStyleBlock(settings.writingStyleIntimacyPrompt ?? DEFAULT_INTIMACY_STYLE_PROMPT),
+    ].join('\n');
+}
+
+
+function getWritingStyleReminderPrompt(settings = getSettings()) {
+    return String(settings.writingStyleReminderPrompt ?? DEFAULT_WRITING_STYLE_REMINDER_PROMPT).trim();
+}
+
+
 function injectWritingStylePrompt() {
     const context = getContext();
     if (!context?.setExtensionPrompt) {
         return;
     }
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
+    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
 
     const settings = getSettings();
     if (!isStoryEngineEnabled() || settings.writingStyleEnabled === false) {
@@ -2058,7 +1853,7 @@ function injectWritingStylePrompt() {
     }
 
 
-    const promptText = String(settings.writingStylePrompt ?? DEFAULT_WRITING_STYLE_PROMPT);
+    const promptText = buildSceneStyleProfilePrompt(settings);
 
     injectMovablePrompt(
 
@@ -2066,11 +1861,11 @@ function injectWritingStylePrompt() {
 
         promptText,
 
-        settings.writingStylePlacement,
+        'before_prompt',
 
-        settings.writingStyleDepth,
+        0,
 
-        settings.writingStyleRole,
+        EXTENSION_PROMPT_ROLES.SYSTEM,
 
     );
 
@@ -2084,6 +1879,7 @@ function injectProseRulesPrompt() {
         return;
     }
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
+    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
     clearFinalReminderPrompt(context);
     if (!isStoryEngineEnabled()) {
         if (context.extensionPrompts) delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
@@ -2095,7 +1891,7 @@ function injectProseRulesPrompt() {
 
         DEFAULT_PROSE_RULES_PROMPT,
 
-        'in_prompt',
+        'before_prompt',
 
         0,
 
@@ -2111,6 +1907,214 @@ function buildFinalNarrationPrompt(narratorContext) {
 
     return narratorContext;
 
+}
+
+function setNarratorDepthPrompt(context, narratorContext) {
+    const text = String(buildFinalNarrationPrompt(narratorContext) || '').trim();
+    if (!text) {
+        throw new Error('Story Engine narrator handoff is empty; generation aborted before narration.');
+    }
+    if (!context?.setExtensionPrompt) {
+        throw new Error('SillyTavern setExtensionPrompt API is unavailable; generation aborted before narration.');
+    }
+
+    context.setExtensionPrompt(
+        NARRATOR_PROMPT_KEY,
+        text,
+        EXTENSION_PROMPT_TYPES.IN_CHAT,
+        0,
+        false,
+        EXTENSION_PROMPT_ROLES.SYSTEM,
+    );
+
+    return text;
+}
+
+function hasNarratorDepthPrompt(context = getContext()) {
+    return Boolean(String(context?.extensionPrompts?.[NARRATOR_PROMPT_KEY]?.value || '').trim());
+}
+
+function isActiveNarratorDepthPromptContent(content) {
+    const replayText = String(state.narratorDepthReplay?.narratorModelContext || '').trim();
+    if (!replayText) return false;
+    const text = String(content || '').trim();
+    if (text === replayText || text.includes(replayText)) return true;
+    const macroTolerantReplayText = escapeRegExp(replayText)
+        .replace(/\\\{\\\{(?:user|char)\\\}\\\}/gi, '[\\s\\S]{1,160}');
+    return new RegExp(macroTolerantReplayText).test(text);
+}
+
+function chatHasNarratorDepthPrompt(chat) {
+    if (!Array.isArray(chat)) return false;
+    return chat.some(message => {
+        if (!message) return false;
+        if (typeof message.content === 'string') return isActiveNarratorDepthPromptContent(message.content);
+        if (Array.isArray(message.content)) {
+            return message.content.some(part => part && typeof part === 'object' && isActiveNarratorDepthPromptContent(part.text));
+        }
+        return false;
+    });
+}
+
+function clearNarratorDepthReplayTimer() {
+    if (state.narratorDepthReplay?.restartTimer) {
+        clearTimeout(state.narratorDepthReplay.restartTimer);
+        state.narratorDepthReplay.restartTimer = null;
+    }
+}
+
+function armNarratorDepthReplay({ context, pendingGeneration, pendingRun, narratorContext, narratorModelContext, generationMode, spacingLabel }) {
+    const nativePrompt = setNarratorDepthPrompt(context, narratorModelContext);
+    clearNarratorDepthReplayTimer();
+
+    const replay = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        phase: 'armed',
+        type: pendingGeneration?.type || 'normal',
+        mode: generationMode || pendingGeneration?.mode || 'normal',
+        pendingGeneration: clone(pendingGeneration || {}),
+        pendingRun,
+        narratorContext,
+        narratorModelContext: nativePrompt,
+        spacingLabel: spacingLabel || 'narrator model call',
+        createdAt: Date.now(),
+        restartTimer: null,
+    };
+
+    state.narratorDepthReplay = replay;
+    state.pendingRun = pendingRun;
+    state.lastNarratorHandoff = narratorContext;
+    return replay;
+}
+
+function clearNarratorDepthReplayState() {
+    clearNarratorDepthReplayTimer();
+    state.narratorDepthReplay = null;
+}
+
+function clearInternalGenerationStopState() {
+    if (state.internalGenerationStopTimer) {
+        clearTimeout(state.internalGenerationStopTimer);
+        state.internalGenerationStopTimer = null;
+    }
+    state.internalGenerationStopPending = false;
+}
+
+function markInternalGenerationStop() {
+    clearInternalGenerationStopState();
+    state.internalGenerationStopPending = true;
+    state.internalGenerationStopTimer = setTimeout(() => {
+        clearInternalGenerationStopState();
+    }, 2000);
+}
+
+function consumeInternalGenerationStop() {
+    if (!state.internalGenerationStopPending) return false;
+    clearInternalGenerationStopState();
+    return true;
+}
+
+function isCurrentStoryEngineRun(runId) {
+    return Boolean(runId) && state.activeRunId === runId;
+}
+
+function scheduleNarratorDepthReplay() {
+    const replay = state.narratorDepthReplay;
+    if (!replay) return;
+
+    clearNarratorDepthReplayTimer();
+    replay.restartTimer = setTimeout(() => {
+        replay.restartTimer = null;
+        if (state.narratorDepthReplay !== replay) return;
+
+        const replayContext = getContext();
+        try {
+            if (!isStoryEngineEnabled()) {
+                clearRuntimePrompts();
+                return;
+            }
+            if (!hasNarratorDepthPrompt(replayContext)) {
+                throw new Error('Story Engine native narrator handoff was cleared before replay; generation aborted before narration.');
+            }
+            if (typeof replayContext?.generate !== 'function') {
+                throw new Error('SillyTavern generate API is unavailable; generation aborted before narration.');
+            }
+
+            replay.phase = 'replaying';
+            showProgress('Starting narration with native handoff...');
+            const generateOptions = { automatic_trigger: true };
+            const adventureReplayPrompt = String(replay.pendingGeneration?.adventureStartPrompt || '').trim();
+            if (adventureReplayPrompt) {
+                generateOptions.quiet_prompt = adventureReplayPrompt;
+                generateOptions.quietToLoud = true;
+            }
+            Promise.resolve(replayContext.generate(replay.type || 'normal', generateOptions))
+                .catch(error => {
+                    clearPendingRunCleanupTimer();
+                    setChatInputLocked(false);
+                    clearRuntimePrompts();
+                    state.pendingRun = null;
+                    state.lastNarratorHandoff = '';
+                    state.narratorThinkingDisablePending = false;
+                    state.pendingGeneration = null;
+                    state.activeRunId = null;
+                    clearInternalGenerationStopState();
+                    clearNarratorDepthReplayState();
+                    releaseProseGuardDisplayIntercept({ restore: true });
+                    clearAllProgress();
+                    showBlockingError(error);
+                });
+        } catch (error) {
+            clearRuntimePrompts();
+            state.pendingRun = null;
+            state.lastNarratorHandoff = '';
+            releaseProseGuardDisplayIntercept({ restore: true });
+            clearAllProgress();
+            showBlockingError(error);
+        }
+    }, 350);
+}
+
+function isNarratorDepthReplayArmed() {
+    return state.narratorDepthReplay?.phase === 'armed';
+}
+
+function isNarratorDepthReplayPromptPass() {
+    return ['replaying', 'active'].includes(String(state.narratorDepthReplay?.phase || ''));
+}
+
+function activateNarratorDepthReplayPass(context, contextSize, type) {
+    const replay = state.narratorDepthReplay;
+    if (!replay) return false;
+
+    if (!hasNarratorDepthPrompt(context)) {
+        throw new Error('Story Engine native narrator handoff is missing during replay; generation aborted before narration.');
+    }
+
+    replay.phase = 'active';
+    replay.type = type || replay.type || 'normal';
+    replay.pendingGeneration = {
+        ...clone(replay.pendingGeneration || {}),
+        type: type || replay.type || 'normal',
+        contextSize,
+    };
+    state.pendingGeneration = replay.pendingGeneration;
+    state.pendingRun = replay.pendingRun;
+    state.lastNarratorHandoff = replay.narratorContext || '';
+    state.activeRunId = replay.id;
+    return true;
+}
+
+function replacePromptWithReplayNotice(chat) {
+    if (!Array.isArray(chat)) return;
+    chat.splice(0, chat.length, {
+        role: 'system',
+        content: [
+            '[STORY_ENGINE_NATIVE_DEPTH_REPLAY]',
+            'The first prompt assembly pass has completed. Do not narrate from this pass.',
+            'Return exactly: Story Engine is preparing the native narrator handoff.',
+        ].join('\n'),
+    });
 }
 
 
@@ -2213,14 +2217,22 @@ function setChatInputLocked(locked, reason = '') {
 
 
 
-function clearRuntimePrompts() {
+function clearRuntimePrompts({ preserveNarratorDepthPrompt = false } = {}) {
     const context = getContext();
+    if (!preserveNarratorDepthPrompt) {
+        clearNarratorDepthReplayState();
+    } else {
+        clearNarratorDepthReplayTimer();
+    }
     if (!context?.extensionPrompts) return;
 
-    delete context.extensionPrompts[NARRATOR_PROMPT_KEY];
+    if (!preserveNarratorDepthPrompt) {
+        delete context.extensionPrompts[NARRATOR_PROMPT_KEY];
+    }
 }
 
 function disableStoryEngineRuntime() {
+    clearInternalGenerationStopState();
     clearPostNarrationFinalizerTimers();
     clearPendingRunCleanupTimer();
     clearAllProgress();
@@ -2247,6 +2259,27 @@ function disableStoryEngineRuntime() {
     document.getElementById(TRACKER_WIDGET_ID)?.remove();
     document.getElementById(PLAYER_SETUP_CARD_ID)?.remove();
     document.getElementById(PROGRESSION_CARD_ID)?.remove();
+}
+
+function cancelStoryEnginePipeline(reason = 'generation stopped') {
+    clearInternalGenerationStopState();
+    clearPostNarrationFinalizerTimers();
+    clearPendingRunCleanupTimer();
+    clearAllProgress();
+    clearRuntimePrompts();
+    setChatInputLocked(false);
+    releaseProseGuardDisplayIntercept({ restore: true });
+    clearThinkingDisableRuntimeState();
+    state.runningSemanticPass = false;
+    state.bypassPromptReady = false;
+    state.activeRunId = null;
+    state.lastNarratorHandoff = '';
+    state.lastNarratorHandoffKey = null;
+    state.pendingRun = null;
+    state.pendingGeneration = null;
+    state.proseGuardHideNextMessage = false;
+    state.proseGuardExpectedMessageId = null;
+    console.info(`[${EXTENSION_NAME}] ${reason}; Story Engine pipeline cancelled.`);
 }
 
 
@@ -2436,7 +2469,7 @@ function getPlayerRoot(context = getContext()) {
 
     root.stats = isValidCoreStats(root.stats) ? normalizeCoreStats(root.stats) : null;
 
-    root.creator = root.creator && typeof root.creator === 'object' ? root.creator : { stage: 'offer' };
+    root.creator = normalizePlayerCreatorSetupState(root.creator);
 
     if (!root.ready && !root.disabled && !root.creator.stage) {
 
@@ -2445,6 +2478,27 @@ function getPlayerRoot(context = getContext()) {
     }
 
     return root;
+}
+
+function normalizePlayerCreatorSetupState(creator) {
+    const next = creator && typeof creator === 'object' ? creator : { stage: 'offer' };
+    const stage = String(next.stage || 'offer');
+    if (stage === 'reroll' || stage === 'swap') {
+        next.stage = 'stats';
+    }
+    if (next.stage !== 'offer' && next.stage !== 'approved') {
+        next.flow = next.flow === 'persona' ? 'persona' : 'new';
+        const isStatsStage = next.stage === 'stats';
+        const hasUsableDraft = isValidPlayerCreationStatsDraft(next.stats);
+        const hasCompleteStats = isValidPlayerCreationStats(next.stats);
+        if (!hasUsableDraft || (!isStatsStage && !hasCompleteStats)) {
+            next.stats = next.flow === 'persona'
+                ? suggestedPersonaPointBuyStats(next.personaAnalysis || {})
+                : defaultPlayerPointBuyStats();
+            next.stage = 'stats';
+        }
+    }
+    return next;
 }
 
 function getProgressionRoot(context = getContext()) {
@@ -2478,26 +2532,6 @@ function getCharacterCardFieldsSafe(context = getContext()) {
         return {};
 
     }
-
-}
-
-
-
-function getPersonaText(context = getContext()) {
-
-    const fields = getCharacterCardFieldsSafe(context);
-
-    const avatarId = String(user_avatar || '').trim();
-
-    return [
-
-        fields.persona,
-
-        power_user?.persona_description,
-
-        avatarId ? power_user?.persona_descriptions?.[avatarId]?.description : '',
-
-    ].map(value => String(value || '').trim()).find(Boolean) || '';
 
 }
 
@@ -3071,76 +3105,59 @@ function clampNumber(value, min, max, fallback) {
 
 
 
-function rollD10() {
-
-    return Math.floor(Math.random() * 10) + 1;
-
+function defaultPlayerPointBuyStats() {
+    return { PHY: 8, MND: 8, CHA: 8 };
 }
 
-
-
-function rollStatPair() {
-
-    const rolls = [rollD10(), rollD10()];
-
-    return { rolls, value: Math.max(...rolls) };
-
+function playerPointBuySpent(stats = {}) {
+    const normalized = normalizePlayerCreationStats(stats);
+    return PLAYER_STATS.reduce((sum, stat) => sum + Number(normalized[stat] || 0), 0);
 }
 
-
-
-function shuffleArray(values) {
-
-    const copy = [...values];
-
-    for (let index = copy.length - 1; index > 0; index -= 1) {
-
-        const swapIndex = Math.floor(Math.random() * (index + 1));
-
-        [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-
-    }
-
-    return copy;
-
+function playerPointBuyRemaining(stats = {}) {
+    return PLAYER_CREATION_STAT_POINTS - playerPointBuySpent(stats);
 }
 
-
-
-function buildNewCharacterRollState() {
-
-    const statPools = {};
-
-    const stats = {};
-
+function normalizePlayerCreationStats(stats = {}) {
+    const source = isValidCoreStats(stats) ? normalizeCoreStats(stats) : defaultPlayerPointBuyStats();
+    const normalized = {};
     for (const stat of PLAYER_STATS) {
-
-        const roll = rollStatPair();
-
-        statPools[stat] = roll.rolls;
-
-        stats[stat] = roll.value;
-
+        normalized[stat] = clampNumber(source[stat], PLAYER_CREATION_MIN_STAT, PLAYER_CREATION_MAX_STAT, 8);
     }
+    return normalized;
+}
 
+function isValidPlayerCreationStats(stats = {}) {
+    if (!stats || typeof stats !== 'object') return false;
+    const normalized = normalizePlayerCreationStats(stats);
+    return PLAYER_STATS.every(stat => normalized[stat] === Number(stats[stat])) && playerPointBuySpent(normalized) === PLAYER_CREATION_STAT_POINTS;
+}
+
+function isValidPlayerCreationStatsDraft(stats = {}) {
+    if (!stats || typeof stats !== 'object') return false;
+    const normalized = normalizePlayerCreationStats(stats);
+    const spent = playerPointBuySpent(normalized);
+    return PLAYER_STATS.every(stat => normalized[stat] === Number(stats[stat]))
+        && spent >= PLAYER_STATS.length * PLAYER_CREATION_MIN_STAT
+        && spent <= PLAYER_CREATION_STAT_POINTS;
+}
+
+function suggestedPersonaPointBuyStats(analysis = {}) {
+    const primary = PLAYER_STATS.includes(analysis?.PrimaryStat) ? analysis.PrimaryStat : 'PHY';
+    const stats = defaultPlayerPointBuyStats();
+    stats[primary] = PLAYER_CREATION_MAX_STAT;
+    const secondary = PLAYER_STATS.find(stat => stat !== primary) || 'MND';
+    stats[secondary] = Math.max(PLAYER_CREATION_MIN_STAT, stats[secondary] - 1);
+    return stats;
+}
+
+function buildNewCharacterPointBuyState() {
     return {
-
-        stage: 'reroll',
-
+        stage: 'stats',
         flow: 'new',
-
         createdAt: Date.now(),
-
-        statPools,
-
-        stats,
-
-        rerollValue: rollD10(),
-
-        rerollApplied: null,
-
-        rerollSkipped: false,
-        swapApplied: null,
+        stats: defaultPlayerPointBuyStats(),
+        retryNotes: [],
         identity: {
             sex: '',
             genre: 'Fantasy',
@@ -3156,142 +3173,21 @@ function buildNewCharacterRollState() {
 }
 
 
-function buildPersonaRollState(analysis) {
-
-    const primary = PLAYER_STATS.includes(analysis?.PrimaryStat) ? analysis.PrimaryStat : 'PHY';
-
-    const rolls = [rollStatPair(), rollStatPair(), rollStatPair()].sort((a, b) => b.value - a.value);
-
-    const otherStats = shuffleArray(PLAYER_STATS.filter(stat => stat !== primary));
-
-    const stats = {
-
-        [primary]: rolls[0].value,
-
-        [otherStats[0]]: rolls[1].value,
-
-        [otherStats[1]]: rolls[2].value,
-
-    };
-
+function buildPersonaPointBuyState(analysis) {
     return {
-
-        stage: 'reroll',
-
+        stage: 'stats',
         flow: 'persona',
-
         createdAt: Date.now(),
-
-        statPools: {
-
-            [primary]: rolls[0].rolls,
-
-            [otherStats[0]]: rolls[1].rolls,
-
-            [otherStats[1]]: rolls[2].rolls,
-
-        },
-
-        stats,
-
-        rerollValue: rollD10(),
-
-        rerollApplied: null,
-
-        rerollSkipped: false,
-
-        swapApplied: null,
-
+        stats: suggestedPersonaPointBuyStats(analysis),
+        retryNotes: [],
         personaAnalysis: analysis,
-
     };
-
-}
-
-
-
-function getActivePersonaDescriptor() {
-
-    if (!power_user) return null;
-
-    power_user.persona_descriptions = power_user.persona_descriptions || {};
-
-    const avatarId = String(user_avatar || '').trim();
-
-    if (!avatarId) return null;
-
-    if (!power_user.persona_descriptions[avatarId]) {
-
-        power_user.persona_descriptions[avatarId] = {
-
-            description: power_user.persona_description || '',
-
-            position: power_user.persona_description_position ?? persona_description_positions.IN_PROMPT,
-
-            depth: power_user.persona_description_depth,
-
-            role: power_user.persona_description_role,
-
-            lorebook: power_user.persona_description_lorebook,
-
-        };
-
-    }
-
-    return power_user.persona_descriptions[avatarId];
-
 }
 
 
 
 async function writePlayerSheetToPersona(sheetText, context = getContext()) {
-    const descriptor = getActivePersonaDescriptor();
-
-    if (!descriptor) {
-
-        throw new Error('No active SillyTavern persona is selected, so the generated character sheet could not be inserted into persona.');
-
-    }
-
-
-
-    const current = String(power_user.persona_description || descriptor.description || '').trim();
-
-    const cleanSheet = String(sheetText || '').trim();
-
-    if (!cleanSheet) {
-
-        throw new Error('Generated character sheet is empty; persona was not changed.');
-
-    }
-
-
-
-    const nextDescription = cleanSheet;
-
-
-
-    power_user.persona_description = nextDescription;
-
-    descriptor.description = nextDescription;
-
-    descriptor.position = descriptor.position ?? power_user.persona_description_position ?? persona_description_positions.IN_PROMPT;
-
-    if (descriptor.depth === undefined && power_user.persona_description_depth !== undefined) descriptor.depth = power_user.persona_description_depth;
-
-    if (descriptor.role === undefined && power_user.persona_description_role !== undefined) descriptor.role = power_user.persona_description_role;
-
-    if (descriptor.lorebook === undefined && power_user.persona_description_lorebook !== undefined) descriptor.lorebook = power_user.persona_description_lorebook;
-
-
-
-    setPersonaDescription?.();
-
-    saveExtensionSettings();
-
-    if (typeof context?.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
-
-    return { previous: current, next: nextDescription };
+    return await writePersonaDescription(sheetText, context);
 }
 
 function findPersonaSection(text, matcher) {
@@ -3378,6 +3274,19 @@ function extractPersonaSpells(personaText) {
     return extractPersonaEntriesFromSection(section, 'Spell');
 }
 
+function buildRetryIdeaNotesFromSheetText(sheetText) {
+    const notes = [];
+    for (const entry of extractPersonaAbilities(sheetText)) {
+        const text = clipText(String(entry?.text || entry?.name || '').trim(), 240);
+        if (text) notes.push(`Ability: ${text}`);
+    }
+    for (const entry of extractPersonaSpells(sheetText)) {
+        const text = clipText(String(entry?.text || entry?.name || '').trim(), 240);
+        if (text) notes.push(`Spell: ${text}`);
+    }
+    return uniqueStrings(notes).slice(0, 8);
+}
+
 function extractPersonaEntriesFromSection(section, fallbackLabel = 'Entry') {
     if (section.start < 0) return [];
     const bodyText = section.lines.slice(section.start + 1, section.end).join('\n').trim();
@@ -3435,14 +3344,14 @@ function formatProgressionAbility(option) {
     const name = cleanAbilityName(option?.name);
     const description = String(option?.description || '').replace(/\s+/g, ' ').trim();
     if (!name || !description) throw new Error('Generated ability option is incomplete.');
-    return `**${name}** - ${description}`;
+    return `**${name}**\n- ${description}`;
 }
 
 function formatProgressionSpell(option) {
     const name = cleanAbilityName(option?.name);
     const description = String(option?.description || '').replace(/\s+/g, ' ').trim();
     if (!name || !description) throw new Error('Generated spell option is incomplete.');
-    return `**${name}** - ${description}`;
+    return `**${name}**\n- ${description}`;
 }
 
 function replaceAbilityInPersona(personaText, abilityIndex, option) {
@@ -4375,6 +4284,33 @@ function uniqueNames(names) {
 }
 
 
+function uniqueStrings(values) {
+
+    const result = [];
+
+    const seen = new Set();
+
+    for (const value of values || []) {
+
+        const text = String(value ?? '').trim();
+
+        if (!text) continue;
+
+        const key = text.toLowerCase();
+
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+
+        result.push(text);
+
+    }
+
+    return result;
+
+}
+
+
 
 function escapeRegExp(value) {
 
@@ -4780,7 +4716,7 @@ function buildTrackerDisplayHtml(snapshot) {
     const active = names.filter(name => npcs[name]?.lifecycle === 'Active');
     const userCore = snapshot?.userCoreStats;
     const user = normalizeTrackerUserState(snapshot?.user || {});
-    const personaName = cleanTrackerDisplayName(name1) || 'User';
+    const personaName = cleanTrackerDisplayName(getUserName()) || 'User';
 
     const renderNpc = name => {
 
@@ -6076,43 +6012,85 @@ function ensurePlayerSetupStyles() {
     style.id = PLAYER_SETUP_STYLE_ID;
     style.textContent = `
         #${PLAYER_SETUP_CARD_ID} {
-
             margin: 0.75rem auto;
-
-            padding: 0.85rem;
-
-            width: min(760px, calc(100% - 1.2rem));
-
+            padding: 0;
+            width: min(820px, calc(100% - 1.2rem));
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
-
             border-radius: 8px;
-
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 34%, transparent);
-
-            box-shadow: 0 10px 26px rgba(0,0,0,0.22);
-
+            background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.55));
+            color: var(--SmartThemeBodyColor, inherit);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.18);
             line-height: 1.45;
-
+            max-height: min(74vh, 42rem);
+            overflow: auto;
         }
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 0.7rem;
+            padding: 0.85rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: flex-start;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.14));
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-titleblock {
+            min-width: 0;
+        }
         #${PLAYER_SETUP_CARD_ID} .spe-player-title {
-
             font-weight: 700;
-
-            font-size: 1rem;
-
-            margin-bottom: 0.35rem;
-
+            font-size: 1.05rem;
+            margin-bottom: 0.25rem;
         }
-
         #${PLAYER_SETUP_CARD_ID} .spe-player-muted {
-
             opacity: 0.78;
-
             font-size: 0.9rem;
-
         }
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-subtitle {
+            opacity: 0.78;
+            font-size: 0.9rem;
+            max-width: 42rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-badges {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 0.4rem;
+            flex: 0 0 auto;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-badge {
+            padding: 0.22rem 0.5rem;
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.16));
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 7%, transparent);
+            font-size: 0.82rem;
+            white-space: nowrap;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stage {
+            font-weight: 700;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-body {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-section-title {
+            font-weight: 700;
+            font-size: 0.96rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.55rem;
+            align-items: start;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-form-grid .spe-player-full {
+            grid-column: 1 / -1;
+        }
         #${PLAYER_SETUP_CARD_ID} .spe-player-row,
         #${PLAYER_SETUP_CARD_ID} .spe-player-actions {
             display: flex;
@@ -6121,6 +6099,9 @@ function ensurePlayerSetupStyles() {
             align-items: center;
             margin-top: 0.55rem;
         }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-actions {
+            justify-content: flex-end;
+        }
         #${PLAYER_SETUP_CARD_ID} [hidden] {
             display: none !important;
         }
@@ -6128,75 +6109,125 @@ function ensurePlayerSetupStyles() {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.45rem;
-            margin-top: 0.6rem;
         }
-
         #${PLAYER_SETUP_CARD_ID} .spe-player-stat {
-
             border-left: 2px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
-
             padding: 0.45rem 0.55rem;
-
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
-
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 5%, transparent);
             border-radius: 6px;
-
+            min-width: 0;
         }
-
-        #${PLAYER_SETUP_CARD_ID} textarea,
-
-        #${PLAYER_SETUP_CARD_ID} input,
-
-        #${PLAYER_SETUP_CARD_ID} select {
-
-            width: 100%;
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.45rem;
+            align-items: baseline;
         }
-
-        #${PLAYER_SETUP_CARD_ID} textarea {
-
-            min-height: 5.5rem;
-
-            resize: vertical;
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat code,
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-value {
+            font-weight: 700;
+            font-size: 1.05rem;
         }
-
-        #${PLAYER_SETUP_CARD_ID} pre {
-
-            white-space: pre-wrap;
-
-            max-height: 26rem;
-
-            overflow: auto;
-
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-meter {
+            display: block;
+            height: 0.35rem;
+            margin-top: 0.35rem;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.1);
+            overflow: hidden;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-meter span {
+            display: block;
+            height: 100%;
+            width: 0;
+            border-radius: inherit;
+            background: var(--SmartThemeQuoteColor, rgba(255,255,255,0.5));
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-point-buy {
+            display: grid;
+            gap: 0.55rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-editor {
+            display: grid;
+            grid-template-columns: minmax(8rem, 1.1fr) minmax(9rem, 1.6fr) auto;
+            gap: 0.65rem;
+            align-items: center;
             padding: 0.65rem;
-
+            border-left: 2px solid var(--SmartThemeQuoteColor, rgba(255,255,255,0.28));
             border-radius: 6px;
-
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 5%, transparent);
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-copy {
+            min-width: 0;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-desc {
+            opacity: 0.78;
+            font-size: 0.86rem;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stepper {
+            display: grid;
+            grid-template-columns: 2.25rem 2.75rem 2.25rem;
+            gap: 0.35rem;
+            align-items: center;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stepper .menu_button {
+            min-width: 2.25rem;
+            width: 2.25rem;
+            padding-left: 0;
+            padding-right: 0;
+            text-align: center;
+        }
+        #${PLAYER_SETUP_CARD_ID} .spe-player-stat-value {
+            text-align: center;
+        }
+        #${PLAYER_SETUP_CARD_ID} textarea,
+        #${PLAYER_SETUP_CARD_ID} input,
+        #${PLAYER_SETUP_CARD_ID} select {
+            width: 100%;
+        }
+        #${PLAYER_SETUP_CARD_ID} textarea {
+            min-height: 5.5rem;
+            resize: vertical;
+        }
+        #${PLAYER_SETUP_CARD_ID} pre {
+            white-space: pre-wrap;
+            max-height: 26rem;
+            overflow: auto;
+            padding: 0.65rem;
+            border-radius: 6px;
             background: rgba(0,0,0,0.24);
-
+            margin: 0;
         }
-
         #${PLAYER_SETUP_CARD_ID} .spe-player-error {
-
             margin-top: 0.55rem;
-
             color: var(--SmartThemeQuoteColor, #ffb4b4);
-
             font-weight: 600;
-
         }
-
         @media (max-width: 520px) {
-
-            #${PLAYER_SETUP_CARD_ID} .spe-player-grid {
-
-                grid-template-columns: 1fr;
-
+            #${PLAYER_SETUP_CARD_ID} {
+                width: calc(100% - 0.6rem);
+                max-height: 72vh;
+                margin: 0.45rem auto;
             }
-
+            #${PLAYER_SETUP_CARD_ID} .spe-player-shell {
+                padding: 0.7rem;
+            }
+            #${PLAYER_SETUP_CARD_ID} .spe-player-header,
+            #${PLAYER_SETUP_CARD_ID} .spe-player-stat-editor {
+                grid-template-columns: 1fr;
+                display: grid;
+            }
+            #${PLAYER_SETUP_CARD_ID} .spe-player-badges,
+            #${PLAYER_SETUP_CARD_ID} .spe-player-actions {
+                justify-content: flex-start;
+            }
+            #${PLAYER_SETUP_CARD_ID} .spe-player-grid {
+                grid-template-columns: 1fr;
+            }
+            #${PLAYER_SETUP_CARD_ID} .spe-player-form-grid {
+                grid-template-columns: 1fr;
+            }
         }
-
     `;
     document.head.append(style);
 }
@@ -6320,27 +6351,67 @@ function buildPlayerSetupCardHtml(root) {
     const busy = state.playerSetupBusy;
     const error = creator.error ? `<div class="spe-player-error">${escapeHtml(creator.error)}</div>` : '';
     const busyLine = busy ? '<div class="spe-player-muted">Working...</div>' : '';
-    const body = stage === 'reroll'
-        ? buildPlayerRerollHtml(creator)
-        : stage === 'swap'
-            ? buildPlayerSwapHtml(creator)
-            : stage === 'identity'
-                ? buildPlayerIdentityHtml(creator)
-                : stage === 'review'
-                    ? buildPlayerReviewHtml(creator)
-                    : stage === 'persona-sheet'
-                        ? buildPlayerPersonaSheetHtml(creator)
-                        : stage === 'approved'
-                            ? buildPlayerAdventureStartHtml(root)
-                            : buildPlayerOfferHtml();
+    const body = stage === 'stats'
+        ? buildPlayerStatsHtml(creator)
+        : stage === 'identity'
+            ? buildPlayerIdentityHtml(creator)
+            : stage === 'review'
+                ? buildPlayerReviewHtml(creator)
+                : stage === 'persona-sheet'
+                    ? buildPlayerPersonaSheetHtml(creator)
+                    : stage === 'approved'
+                        ? buildPlayerAdventureStartHtml(root)
+                        : buildPlayerOfferHtml();
     const ready = stage === 'approved';
+    const title = ready
+        ? 'Adventure Ready'
+        : stage === 'stats'
+            ? 'Assign Stats'
+            : stage === 'identity'
+                ? 'Character Details'
+                : stage === 'review'
+                    ? 'Review Character'
+                    : stage === 'persona-sheet'
+                        ? 'Persona Conversion'
+                        : 'Player Setup';
+    const subtitle = ready
+        ? 'Player setup is complete. Start the first scene now, or dismiss this card and begin manually.'
+        : stage === 'stats'
+            ? `Distribute ${PLAYER_CREATION_STAT_POINTS} points across PHY, MND, and CHA. Starting stats cannot exceed ${PLAYER_CREATION_MAX_STAT}.`
+            : 'Complete setup once, then the creator stays out of the way for this story.';
+    const stageLabel = ready
+        ? 'Start Adventure'
+        : stage === 'offer'
+            ? 'Choose Flow'
+            : stage === 'stats'
+                ? 'Step 1 of 3'
+                : stage === 'identity' || stage === 'persona-sheet'
+                    ? 'Step 2 of 3'
+                    : stage === 'review'
+                        ? 'Review'
+                        : 'Setup';
+    const statsBadge = creator?.stats && stage !== 'offer'
+        ? `<span class="spe-player-badge">Points ${playerPointBuySpent(creator.stats)}/${PLAYER_CREATION_STAT_POINTS}</span>`
+        : '';
 
     return `
-        <div class="spe-player-title">${ready ? 'Adventure Ready' : 'Player Setup'}</div>
-        <div class="spe-player-muted">${ready ? 'Player setup is complete. Start the first scene now, or dismiss this card and begin manually.' : 'This chat has no valid PHY/MND/CHA player stats yet. Complete setup once, then the creator stays out of the way for this story.'}</div>
-        ${busyLine}
-        ${body}
-        ${error}
+        <div class="spe-player-shell">
+            <div class="spe-player-header">
+                <div class="spe-player-titleblock">
+                    <div class="spe-player-title">${title}</div>
+                    <div class="spe-player-subtitle">${subtitle}</div>
+                </div>
+                <div class="spe-player-badges">
+                    <span class="spe-player-badge spe-player-stage">${stageLabel}</span>
+                    ${statsBadge}
+                </div>
+            </div>
+            <div class="spe-player-body">
+                ${busyLine}
+                ${body}
+                ${error}
+            </div>
+        </div>
     `;
 }
 
@@ -6357,7 +6428,7 @@ function buildPlayerOfferHtml() {
 
         </div>
 
-        <div class="spe-player-muted">Create rolls a new character. Use Existing Persona only asks the model which stat should be highest; the extension still rolls the actual values.</div>
+        <div class="spe-player-muted">Create Character starts a ${PLAYER_CREATION_STAT_POINTS}-point stat assignment, then keeps the same character detail choices as before. Use Existing Persona suggests a point-buy shape from the active persona, then lets you adjust it before conversion.</div>
 
     `;
 }
@@ -6450,9 +6521,7 @@ function buildProgressionCardHtml(root, context = getContext()) {
 }
 
 function buildStatsGridHtml(creator) {
-    const stats = normalizeCoreStats(creator.stats || {});
-
-    const pools = creator.statPools || {};
+    const stats = normalizePlayerCreationStats(creator.stats || {});
 
     return `
 
@@ -6460,9 +6529,14 @@ function buildStatsGridHtml(creator) {
 
             ${PLAYER_STATS.map(stat => {
 
-                const pair = Array.isArray(pools[stat]) ? pools[stat].join(', ') : '-';
+                const value = Number(stats[stat] || 1);
+                const width = Math.round((value / PLAYER_CREATION_MAX_STAT) * 100);
 
-                return `<div class="spe-player-stat"><b>${stat}</b><br><code>${stats[stat]}</code><br><span class="spe-player-muted">rolls: ${escapeHtml(pair)}</span></div>`;
+                return `<div class="spe-player-stat">
+                    <div class="spe-player-stat-head"><b>${stat}</b><code>${value}</code></div>
+                    <span class="spe-player-stat-meter"><span style="width:${width}%"></span></span>
+                    <div class="spe-player-muted">Starting cap ${PLAYER_CREATION_MAX_STAT}</div>
+                </div>`;
 
             }).join('')}
 
@@ -6472,81 +6546,56 @@ function buildStatsGridHtml(creator) {
 
 }
 
-
-
-function buildPlayerRerollHtml(creator) {
-
+function buildPlayerStatsHtml(creator) {
+    const stats = normalizePlayerCreationStats(creator.stats || {});
+    const spent = playerPointBuySpent(stats);
+    const remaining = playerPointBuyRemaining(stats);
+    const valid = isValidPlayerCreationStats(stats);
     const analysis = creator.flow === 'persona' && creator.personaAnalysis
-
-        ? `<div class="spe-player-muted">Persona read: highest stat should be <code>${escapeHtml(creator.personaAnalysis.PrimaryStat || 'PHY')}</code>. ${escapeHtml(creator.personaAnalysis.Evidence || '')}</div>`
-
+        ? `<div class="spe-player-muted">Persona read: strongest fit is <code>${escapeHtml(creator.personaAnalysis.PrimaryStat || 'PHY')}</code>. ${escapeHtml(creator.personaAnalysis.Evidence || '')}</div>`
         : '';
-
+    const statDescriptions = {
+        PHY: 'Body, combat readiness, endurance, stealth movement, and physical execution.',
+        MND: 'Knowledge, perception, focus, technical skill, magic, and deliberate mental exertion.',
+        CHA: 'Presence, persuasion, deception, intimidation, leadership, and social pressure.',
+    };
     return `
-
         ${analysis}
-
-        ${buildStatsGridHtml(creator)}
-
-        <div class="spe-player-muted">Optional reroll: choose one stat. The hidden 1d10 reroll is compared against the current value and the higher value is kept.</div>
-
+        <div class="spe-player-section-title">Point Buy</div>
+        <div class="spe-player-muted">Lower one stat to raise another. All ${PLAYER_CREATION_STAT_POINTS} points must be assigned before continuing.</div>
+        <div class="spe-player-badges">
+            <span class="spe-player-badge">Spent ${spent}/${PLAYER_CREATION_STAT_POINTS}</span>
+            <span class="spe-player-badge">Remaining ${remaining}</span>
+            <span class="spe-player-badge">Max ${PLAYER_CREATION_MAX_STAT}</span>
+        </div>
+        <div class="spe-player-point-buy">
+            ${PLAYER_STATS.map(stat => {
+                const value = Number(stats[stat] || PLAYER_CREATION_MIN_STAT);
+                const width = Math.round((value / PLAYER_CREATION_MAX_STAT) * 100);
+                const minusDisabled = value <= PLAYER_CREATION_MIN_STAT ? 'disabled' : '';
+                const plusDisabled = remaining <= 0 || value >= PLAYER_CREATION_MAX_STAT ? 'disabled' : '';
+                return `
+                    <div class="spe-player-stat-editor">
+                        <div class="spe-player-stat-copy">
+                            <div class="spe-player-stat-head"><b>${stat}</b><span class="spe-player-stat-value">${value}</span></div>
+                            <div class="spe-player-stat-desc">${statDescriptions[stat]}</div>
+                        </div>
+                        <span class="spe-player-stat-meter"><span style="width:${width}%"></span></span>
+                        <div class="spe-player-stepper">
+                            <button class="menu_button" title="Lower ${stat}" data-spe-player-action="stat-minus" data-stat="${stat}" ${minusDisabled}>-</button>
+                            <div class="spe-player-stat-value">${value}</div>
+                            <button class="menu_button" title="Raise ${stat}" data-spe-player-action="stat-plus" data-stat="${stat}" ${plusDisabled}>+</button>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
         <div class="spe-player-actions">
-
-            ${PLAYER_STATS.map(stat => `<button class="menu_button" data-spe-player-action="reroll" data-stat="${stat}">Reroll ${stat}</button>`).join('')}
-
-            <button class="menu_button" data-spe-player-action="skip-reroll">Keep These</button>
-
+            <button class="menu_button" data-spe-player-action="reset-stats">Reset</button>
+            <button class="menu_button" data-spe-player-action="continue-stats" ${valid ? '' : 'disabled'}>Continue</button>
         </div>
-
     `;
-
 }
-
-
-
-function buildPlayerSwapHtml(creator) {
-
-    const rerollLine = creator.rerollApplied
-
-        ? `<div class="spe-player-muted">Reroll used on <code>${escapeHtml(creator.rerollApplied.stat)}</code>: hidden roll <code>${escapeHtml(creator.rerollApplied.roll)}</code>, kept <code>${escapeHtml(creator.rerollApplied.value)}</code>.</div>`
-
-        : '<div class="spe-player-muted">No reroll used.</div>';
-
-    return `
-
-        ${buildStatsGridHtml(creator)}
-
-        ${rerollLine}
-
-        <div class="spe-player-row">
-
-            <label class="flex1">First stat
-
-                <select id="spe_player_swap_a" class="text_pole">${PLAYER_STATS.map(stat => `<option value="${stat}">${stat}</option>`).join('')}</select>
-
-            </label>
-
-            <label class="flex1">Second stat
-
-                <select id="spe_player_swap_b" class="text_pole">${PLAYER_STATS.map(stat => `<option value="${stat}" ${stat === 'MND' ? 'selected' : ''}>${stat}</option>`).join('')}</select>
-
-            </label>
-
-        </div>
-
-        <div class="spe-player-actions">
-
-            <button class="menu_button" data-spe-player-action="apply-swap">Swap Selected</button>
-
-            <button class="menu_button" data-spe-player-action="skip-swap">No Swap</button>
-
-        </div>
-
-    `;
-
-}
-
-
 
 function buildPlayerIdentityHtml(creator) {
     const identity = creator.identity || {};
@@ -6565,12 +6614,10 @@ function buildPlayerIdentityHtml(creator) {
     return `
         ${buildStatsGridHtml(creator)}
         <div class="spe-player-muted">Character name: <code>${escapeHtml(personaName)}</code> from the current SillyTavern persona.</div>
-        <div class="spe-player-row">
+        <div class="spe-player-form-grid">
             <label class="flex1">Sex
                 <input id="spe_player_sex" class="text_pole" value="${escapeHtml(identity.sex || '')}" placeholder="Optional. Leave blank to generate.">
             </label>
-        </div>
-        <div class="spe-player-row">
             <label class="flex1">Genre
                 <select id="spe_player_genre" class="text_pole">
                     ${PLAYER_GENRE_CHOICES.map(item => `<option value="${escapeHtml(item)}" ${genre === item ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}
@@ -6583,41 +6630,31 @@ function buildPlayerIdentityHtml(creator) {
                     <option value="custom" ${raceValue === 'custom' ? 'selected' : ''}>Custom / Specify</option>
                 </select>
             </label>
-        </div>
-        <div class="spe-player-row" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>
-            <label class="flex1">Specify race or ancestry
+            <label class="flex1 spe-player-full" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>Specify race or ancestry
                 <input id="spe_player_race_specify" class="text_pole" value="${escapeHtml(identity.specifiedRace || '')}" placeholder="Optional">
             </label>
-        </div>
-        <div class="spe-player-row" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>
-            <label class="flex1">Specified race details
+            <label class="flex1 spe-player-full" data-spe-player-custom-race ${raceIsCustom ? '' : 'hidden'}>Specified race details
                 <select id="spe_player_race_description_mode" class="text_pole">
                     <option value="system" ${raceDescriptionMode === 'system' ? 'selected' : ''}>Let system describe it</option>
                     <option value="user" ${raceDescriptionMode === 'user' ? 'selected' : ''}>Describe it myself</option>
                 </select>
             </label>
-        </div>
-        <div class="spe-player-row" data-spe-player-race-description ${raceIsCustom && raceDescriptionMode === 'user' ? '' : 'hidden'}>
-            <label class="flex1">Your race description
+            <label class="flex1 spe-player-full" data-spe-player-race-description ${raceIsCustom && raceDescriptionMode === 'user' ? '' : 'hidden'}>Your race description
                 <textarea id="spe_player_race_description" class="text_pole" placeholder="Optional unless you choose Describe it myself.">${escapeHtml(identity.specifiedRaceDescription || '')}</textarea>
             </label>
-        </div>
-        <div class="spe-player-row">
-            <label class="flex1">Additional character details
+            <label class="flex1 spe-player-full">Additional character details
                 <select id="spe_player_additional_details_mode" class="text_pole">
                     <option value="system" ${additionalDetailsMode === 'system' ? 'selected' : ''}>Let AI decide</option>
                     <option value="user" ${additionalDetailsMode === 'user' ? 'selected' : ''}>Use my notes + fill the rest</option>
                 </select>
             </label>
-        </div>
-        <div class="spe-player-row" data-spe-player-additional-details ${additionalDetailsMode === 'user' ? '' : 'hidden'}>
-            <label class="flex1">Your character details
+            <label class="flex1 spe-player-full" data-spe-player-additional-details ${additionalDetailsMode === 'user' ? '' : 'hidden'}>Your character details
                 <textarea id="spe_player_additional_details" class="text_pole" placeholder="Optional background, Earth life, appearance, clothing, training, inventory, origin, scars, or other fixed starting facts.">${escapeHtml(additionalDetails)}</textarea>
             </label>
         </div>
         <div class="spe-player-actions">
+            <button class="menu_button" data-spe-player-action="back-to-stats">Back</button>
             <button class="menu_button" data-spe-player-action="generate-sheet">Generate Character Sheet</button>
-            <button class="menu_button" data-spe-player-action="back-to-swap">Back</button>
         </div>
 
     `;
@@ -6678,13 +6715,13 @@ function buildPlayerPersonaSheetHtml(creator) {
     const analysis = creator.personaAnalysis || {};
     return `
         ${buildStatsGridHtml(creator)}
-        <div class="spe-player-muted">Existing persona conversion: highest-stat reading <code>${escapeHtml(analysis.PrimaryStat || 'PHY')}</code>. The model will reformat the current persona into the character-sheet template and copy the locked stats exactly.</div>
+        <div class="spe-player-muted">Existing persona conversion: strongest-stat reading <code>${escapeHtml(analysis.PrimaryStat || 'PHY')}</code>. The model will reformat the current persona into the character-sheet template and copy the locked stats exactly.</div>
 
         <div class="spe-player-actions">
 
-            <button class="menu_button" data-spe-player-action="generate-persona-sheet">Generate Persona Sheet</button>
+            <button class="menu_button" data-spe-player-action="back-to-stats">Back</button>
 
-            <button class="menu_button" data-spe-player-action="back-to-swap">Back</button>
+            <button class="menu_button" data-spe-player-action="generate-persona-sheet">Generate Persona Sheet</button>
 
         </div>
 
@@ -6842,7 +6879,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
         if (action === 'start-new') {
 
-            root.creator = buildNewCharacterRollState();
+            root.creator = buildNewCharacterPointBuyState();
 
         } else if (action === 'use-persona') {
 
@@ -6852,7 +6889,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             const analysis = await analyzePersonaForPrimaryStat(context);
 
-            root.creator = buildPersonaRollState(analysis);
+            root.creator = buildPersonaPointBuyState(analysis);
 
         } else if (action === 'skip-chat') {
 
@@ -6860,39 +6897,38 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             root.forceCreator = false;
 
-        } else if (action === 'reroll') {
+        } else if (action === 'stat-plus') {
 
-            applyPlayerReroll(root.creator, details.stat);
+            adjustPlayerCreationStat(root.creator, details.stat, 1);
 
-        } else if (action === 'skip-reroll') {
+        } else if (action === 'stat-minus') {
 
-            root.creator.rerollSkipped = true;
+            adjustPlayerCreationStat(root.creator, details.stat, -1);
 
-            root.creator.stage = 'swap';
+        } else if (action === 'reset-stats') {
 
-        } else if (action === 'apply-swap') {
+            resetPlayerCreationStats(root.creator);
 
-            const a = document.getElementById('spe_player_swap_a')?.value;
+        } else if (action === 'continue-stats') {
 
-            const b = document.getElementById('spe_player_swap_b')?.value;
+            root.creator.stats = normalizePlayerCreationStats(root.creator.stats || {});
+            if (!isValidPlayerCreationStats(root.creator.stats)) {
+                throw new Error(`Assign exactly ${PLAYER_CREATION_STAT_POINTS} points before continuing.`);
+            }
+            root.creator.stage = root.creator.flow === 'persona' ? 'persona-sheet' : 'identity';
 
-            applyPlayerSwap(root.creator, a, b);
+        } else if (action === 'back-to-stats') {
 
-        } else if (action === 'skip-swap') {
-
-            root.creator.swapApplied = null;
-
-            advanceAfterSwap(root.creator);
-
-        } else if (action === 'back-to-swap') {
-
-            root.creator.stage = 'swap';
+            if (root.creator.flow === 'new' && root.creator.stage === 'identity') syncIdentityInputs(root.creator);
+            root.creator.stage = 'stats';
 
         } else if (action === 'generate-persona-sheet') {
 
             state.playerSetupBusy = true;
 
             renderPlayerSetupCard(context);
+
+            root.creator.retryNotes = [];
 
             root.creator.sheetText = await generateExistingPersonaCharacterSheet(root.creator, context);
 
@@ -6906,6 +6942,8 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             renderPlayerSetupCard(context);
 
+            root.creator.retryNotes = [];
+
             root.creator.sheetText = await generateNewPlayerCharacterSheet(root.creator, context);
 
             root.creator.stage = 'review';
@@ -6916,6 +6954,8 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             renderPlayerSetupCard(context);
 
+            root.creator.retryNotes = buildRetryIdeaNotesFromSheetText(root.creator.sheetText || root.sheet?.text || '');
+
             root.creator.sheetText = root.creator.flow === 'persona'
 
                 ? await generateExistingPersonaCharacterSheet(root.creator, context)
@@ -6925,7 +6965,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
             root.creator.stage = 'review';
 
         } else if (action === 'back-to-identity') {
-            root.creator.stage = root.creator.flow === 'new' ? 'identity' : 'swap';
+            root.creator.stage = root.creator.flow === 'new' ? 'identity' : 'persona-sheet';
         } else if (action === 'approve-sheet') {
             await approvePlayerSheet(root, context);
         } else if (action === 'back-from-adventure-start') {
@@ -6991,64 +7031,27 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
 }
 
-
-
-function applyPlayerReroll(creator, stat) {
-
-    if (!PLAYER_STATS.includes(stat)) throw new Error('Choose a valid stat to reroll.');
-
-    const current = normalizeCoreStats(creator.stats || {})[stat];
-
-    const roll = clampNumber(creator.rerollValue, 1, 10, rollD10());
-
-    const value = Math.max(current, roll);
-
-    creator.stats = { ...normalizeCoreStats(creator.stats || {}), [stat]: value };
-
-    creator.rerollApplied = { stat, roll, previous: current, value };
-
-    creator.stage = 'swap';
-
-}
-
-
-
-function applyPlayerSwap(creator, statA, statB) {
-
-    if (!PLAYER_STATS.includes(statA) || !PLAYER_STATS.includes(statB) || statA === statB) {
-
-        throw new Error('Choose two different stats to swap.');
-
-    }
-
-    const stats = normalizeCoreStats(creator.stats || {});
-
-    [stats[statA], stats[statB]] = [stats[statB], stats[statA]];
-
-    creator.stats = stats;
-
-    creator.swapApplied = { from: statA, to: statB };
-
-    advanceAfterSwap(creator);
-
-}
-
-
-
-function advanceAfterSwap(creator) {
-
-    if (creator.flow === 'persona') {
-
-        creator.sheetText = '';
-
-        creator.stage = 'persona-sheet';
-
+function adjustPlayerCreationStat(creator, stat, delta) {
+    const statName = String(stat || '').toUpperCase();
+    if (!PLAYER_STATS.includes(statName)) throw new Error('Choose a valid stat.');
+    const amount = Math.sign(Number(delta) || 0);
+    if (!amount) return;
+    const stats = normalizePlayerCreationStats(creator.stats || {});
+    const current = Number(stats[statName] || PLAYER_CREATION_MIN_STAT);
+    if (amount > 0) {
+        if (current >= PLAYER_CREATION_MAX_STAT || playerPointBuyRemaining(stats) <= 0) return;
+        stats[statName] = current + 1;
     } else {
-
-        creator.stage = 'identity';
-
+        if (current <= PLAYER_CREATION_MIN_STAT) return;
+        stats[statName] = current - 1;
     }
+    creator.stats = stats;
+}
 
+function resetPlayerCreationStats(creator) {
+    creator.stats = creator.flow === 'persona'
+        ? suggestedPersonaPointBuyStats(creator.personaAnalysis || {})
+        : defaultPlayerPointBuyStats();
 }
 
 
@@ -7285,14 +7288,15 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
     const replacing = pending?.choice === 'swapAbility'
         ? abilities[Math.max(0, Math.floor(Number(pending.swapAbilityIndex || 0)))]
         : null;
+    const retryNotes = Array.isArray(pending?.retryNotes) ? pending.retryNotes : [];
     return [
         {
             role: 'system',
             content:
                 'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
                 'Abilities are activated non-spell fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing racial/body traits, abilities, spells, genre, stats, and recent critical accomplishments. ' +
-                'Each option must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, perception, communication, traversal, transformation, environmental interaction, or supernatural body use. ' +
-                'Good ability shapes include Shadow Step, Voice Projection, Telepathy, Wall Cling, Heat Sight, Mist Form, Amphibious Shift, or a special activated natural-weapon effect beyond ordinary anatomy. ' +
+                'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Each option must be concrete, usable, activated, non-spell, and distinct from ordinary PHY/MND/CHA action mechanics. ' +
+                'On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. ' +
                 'Do not return spells, passive traits, racial/body facts, mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, intimidation aura, surgery skill, toughness, resistance, immunity, personality flavor, lore labels, or background-only qualities. ' +
                 'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed escape, guaranteed control, automatic protection, or automatic solutions. ' +
                 'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, or dangerous use still requires normal scene resolution. ' +
@@ -7311,6 +7315,7 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
                 'Option3Description=one or two sentences, activated non-spell utility permission only, with fictional limits and no mechanics or measurements\n' +
                 'END_PROGRESSION_ABILITIES\n\n' +
                 'MODE: SWAP_ABILITY\n' +
+                `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `EXISTING ABILITIES:\n${abilities.length ? abilities.map((ability, index) => `${index + 1}. ${ability.text}`).join('\n') : 'none'}\n\n` +
                 `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
@@ -7326,13 +7331,14 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
     const spells = extractPersonaSpells(persona);
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || {};
     const recent = getProgressionRecentAccomplishments(getProgressionRoot(context), pending);
+    const retryNotes = Array.isArray(pending?.retryNotes) ? pending.retryNotes : [];
     return [
         {
             role: 'system',
             content:
                 'You generate concise RPG spell options for a deterministic SillyTavern extension. ' +
                 'Spells are activated magical permissions with one concrete effect. They must fit the character race/body/origin, genre, stats, existing spells, and recent critical accomplishments. ' +
-                'Allowed spell categories: offensive magic, practical utility magic, traversal, environmental manipulation, and healing or restoration short of resurrection. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. ' +
+                'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Each spell must be concrete, usable, activated magical permission with one concrete effect, and genre-fitting. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
                 'Do not return passive traits, mundane expertise, personality flavor, lore labels, broad spell schools, magic mastery, resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, or automatic solutions. ' +
                 'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed healing, guaranteed escape, guaranteed control, or automatic solutions. ' +
                 'Opposed, risky, combat, stealth, coercive, unwilling-target, security-bypass, harmful, healing, or dangerous use still requires normal scene resolution. ' +
@@ -7351,6 +7357,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
                 'Option3Description=one or two sentences, activated magical permission only, with fictional limits and no mechanics or measurements\n' +
                 'END_PROGRESSION_SPELLS\n\n' +
                 'MODE: LEARN_SPELL\n' +
+                `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `SPELL LIMIT: current ${spells.length}; maximum ${PROGRESSION_MAX_SPELLS}\n` +
                 `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
@@ -7702,6 +7709,7 @@ function parsePersonaAnalysis(raw) {
 async function generateNewPlayerCharacterSheet(creator, context = getContext()) {
     const stats = normalizeCoreStats(creator.stats || {});
     const identity = creator.identity || {};
+    const retryNotes = Array.isArray(creator.retryNotes) ? creator.retryNotes : [];
     const statInstruction = buildNewCharacterStatInstruction(stats);
     const genreInstruction = buildNewCharacterGenreInstruction(identity);
     const raceInstruction = buildNewCharacterRaceInstruction(identity);
@@ -7724,15 +7732,16 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 'Return only the finished character sheet in markdown. No preface and no questions.\n\n' +
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
                 `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
+                `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 'Required sections:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
                 '# NATURAL WEAPONS: concrete offensive body parts only, if any. Write None when the race/body has no clear natural weapon. Examples: horns, claws, fangs, talons, tusks, stinger, crushing tail, biting jaws. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
-                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell abilities. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Prefer concrete utility, movement, perception, communication, traversal, transformation, environmental interaction, or supernatural body use. Good ability shapes include Shadow Step, Voice Projection, Telepathy, Wall Cling, Heat Sight, Mist Form, Amphibious Shift, or a special activated natural-weapon effect beyond ordinary anatomy such as venom, paralysis, extending bone blades, electrified bite, or supernatural claws. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
-                `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Allowed spell categories are offensive magic, practical utility magic, traversal, environmental manipulation, and healing or restoration short of resurrection. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
+                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Keep the ability concrete, usable, and distinct from ordinary PHY/MND/CHA action mechanics. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
+                `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Keep the spell concrete, usable, and genre-fitting. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
                 '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
-                '# FLAVOR / FIXED FACTS: concise fixed background flavor, origin facts, prior role, prior training, immutable constraints, ability/trait limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Do not include personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, emotional reactions, or statements about what the character will/may/usually/tends to do.',
+                '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
         },
     ];
     return sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
@@ -7887,6 +7896,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
     const stats = normalizeCoreStats(creator.stats || {});
 
     const persona = getPersonaText(context);
+    const retryNotes = Array.isArray(creator.retryNotes) ? creator.retryNotes : [];
 
     if (!persona) {
 
@@ -7943,6 +7953,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 '# SPELLS: preserve explicit spells only, maximum 5. If none are explicit, write None. Preserve healing spells, but do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
                 '# INVENTORY: preserve explicit gear/inventory only. Do not list natural weapons or body armaments as inventory, gear, equipment, or held items. If none is explicit, write Not specified.\n' +
                 '# NOTES: preserve all important persona notes, origin facts, limits, fighting style, and secrecy rules.\n\n' +
+                `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
 
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
 
@@ -8106,7 +8117,7 @@ function hasVisibleUserMessage(context = getContext()) {
 }
 
 function getBeginningAdventureStartPrompt(context = getContext(), type = '') {
-    if (!['swipe', 'regenerate'].includes(String(type || ''))) return '';
+    if (!['normal', 'swipe', 'regenerate'].includes(String(type || ''))) return '';
     if (hasVisibleUserMessage(context)) return '';
     const root = getPlayerRoot(context);
     if (!root?.adventureStarted) return '';
@@ -8161,6 +8172,7 @@ function clearPromptOptionPrompts(context = getContext()) {
     delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
 
     delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
+    delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
 
     delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
 
@@ -8283,6 +8295,9 @@ function sanitizeFinalPromptHistory(chat) {
 
 
         if (typeof message.content === 'string') {
+            if (isNarratorDepthReplayPromptPass() && isActiveNarratorDepthPromptContent(message.content)) {
+                continue;
+            }
 
             message.content = stripStructuredArtifacts(message.content).trim();
 
@@ -8299,6 +8314,9 @@ function sanitizeFinalPromptHistory(chat) {
                 .map(part => {
 
                     if (part && typeof part === 'object' && typeof part.text === 'string') {
+                        if (isNarratorDepthReplayPromptPass() && isActiveNarratorDepthPromptContent(part.text)) {
+                            return part;
+                        }
 
                         const text = stripStructuredArtifacts(part.text).trim();
 
@@ -8420,21 +8438,81 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'If no violations exist, return TEXT_TO_CHECK unchanged.',
         'If you are uncertain whether text violates a rule, leave it unchanged.',
         'Prefer narrow rewrites over deletion. Delete only invalid after-beat tailing, duplicated user-input restatement, empty/invalid separators, or text that cannot be repaired without changing facts.',
-        'A sensory violation is a prose-rule violation only when smell/taste breaks the explicit gate. Repair misuse without adding new sensory detail.',
-        'A chronology violation is a prose-rule violation only when narration restates RECENT_USER_INPUT instead of starting right after it with consequence.',
-        'A turn-boundary violation is a prose-rule violation only when text continues after the natural response point.',
+        'Repair only clear violations of the Prose Guard rules below.',
+        '',
+        'PROSE_GUARD_RULES:',
+        '',
+        'embodiedPerception(response):',
+        'Narrate the scene as {{user}} would physically perceive it from their position, using concrete physical evidence.',
+        'Prioritize sight, hearing, and touch. Include smell and taste ONLY when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.',
+        'Keep relative positions, distance, facing, occlusion, and barriers consistent across the response.',
+        'If a character changes position, narrate the movement before using the new position.',
+        'Do not let {{user}} perceive, reach, or interact through walls, doors, distance, cover, or other barriers unless the scene explicitly opens that path.',
+        'Do not say that the air smells, the room smells, the place smells, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.',
+        'Do not say that the air tastes, the room tastes, the place tastes, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.',
+        'Do not use smell or taste as ambient scene dressing or atmospheric shorthand.',
+        '',
+        'diegeticPhysicality(response):',
+        'Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.',
+        'Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.',
+        'Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.',
+        '',
+        'agencySeparation(response, RECENT_USER_INPUT):',
+        'The narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist.',
+        'Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.',
+        'Do not interpret, assume, or complete {{user}} intent.',
+        '',
+        'strictBehaviorism(response):',
+        'Render character state only through observable behavior and physical displacement that can be directly witnessed by someone physically present in the scene.',
+        'Narrate only tangible, external action.',
+        'Do not name internal, emotional, or psychological states.',
+        'Do not use subtext labels, interpretive commentary, inferred inner states, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, or canned emotional shorthand.',
+        '',
+        'denotativePhysicality(response):',
+        'Keep prose literal, physically clear, and grounded only in what can be directly perceived in the scene.',
+        'No metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.',
+        'Rooms do not breathe. Silence does not stretch. Words do not hang, land, hit, cut, or fall flat.',
+        'Tension does not coil, thicken, or hum. Air, darkness, mood, and atmosphere do not act like living presences.',
+        'If a line depends on figurative language to communicate mood or meaning, it is noncompliant and must be rewritten as literal physical description.',
+        '',
+        'inanimateObjectivity(response):',
+        'Give agency only to beings, forces, mechanisms, and processes capable of physical action.',
+        'Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They do not want, watch, wait, threaten, breathe, intend, or remember.',
+        'Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.',
+        '',
+        'strictEpistemology(response):',
+        'Information remains locked until earned through direct sensory evidence, dialogue, readable text, or previously established scene fact.',
+        'Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.',
+        'Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.',
+        'Do not narrate {{user}} cognition, perception, or internal state.',
+        '',
+        'linearChronology(response, RECENT_USER_INPUT):',
+        'Narrate in strict linear order. Begin with the immediate consequence of {{user}} latest input.',
+        'Do not echo, summarize, recap, paraphrase, or repeat any part of {{user}} actions or dialogue.',
+        'Do not jump ahead, rewind, or insert undeclared intermediate actions.',
+        '',
+        'activeHandoff(response):',
+        'The response MUST END on an active, concrete beat that {{user}} can respond to: dialogue directed at {{user}}, action directed at {{user}}, or a visible change in the scene that forces a clear decision and immediately requires a response.',
+        'Do not continue past the handoff beat.',
+        'Do not prompt {{user}} to respond or ask meta questions.',
+        'Do not end on explicit waiting, staring, mood-only silence, all-eyes-on-user framing, or irrelevant filler background/ambient detail.',
         '',
         'ONE-CALL PRIVATE PASS PIPELINE:',
         'Work through these private correction passes in order. Do not output pass notes, labels, analysis, or intermediate drafts.',
-        '1. SensoryNarrationDirective(response): repair clear smell/taste misuse only.',
-        '2. literalStyleFilter(response): repair specific literal prose/style violations only.',
-        '3. chronologyControl(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
-        '4. responseEndpointControl(response): cut invalid after-beat tailing only.',
+        '1. embodiedPerception(response): repair clear smell/taste gate violations, explicit air/room/place smell phrasing, and obvious spatial-continuity impossibilities only.',
+        '2. diegeticPhysicality(response): repair obvious ability, spell, power, trait, activation, casting, or system-mechanic labels only.',
+        '3. agencySeparation(response, RECENT_USER_INPUT): repair obvious {{user}} puppeting only.',
+        '4. strictBehaviorism(response): repair internal states, subtext labels, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand only.',
+        '5. denotativePhysicality(response): repair specific literal prose/style violations only.',
+        '6. inanimateObjectivity(response): repair false agency assigned to objects, weather, architecture, rooms, atmosphere, silence, tension, darkness, or abstractions only.',
+        '7. strictEpistemology(response): repair obvious private thoughts, hidden motives, unknown identities, unseen actions, or unrevealed lore only.',
+        '8. linearChronology(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
+        '9. activeHandoff(response): cut invalid after-beat tailing only.',
         ...(formattingPrompt ? [
-            '5. formattingControl(response): preserve and repair required markdown formatting only.',
-            '6. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
+            '10. formattingControl(response): preserve and repair required markdown formatting only.',
+            '11. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
         ] : [
-            '5. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
+            '10. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
         ]),
         '',
         'PROTECTED FACTS / INTEGRITY LOCK:',
@@ -8448,25 +8526,43 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '- Do not shorten a valid message just because it is rich, vivid, intimate, descriptive, or atmospheric.',
         '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
         '',
-        'PASS 1: SensoryNarrationDirective(response)',
-        'Goal: preserve the same scene content while repairing only clear smell/taste gate violations.',
+        'PASS 1: embodiedPerception(response)',
+        'Goal: preserve the same scene content while repairing only clear smell/taste gate violations and obvious spatial-continuity impossibilities.',
         'Prioritize visible, audible, tactile, spatial, and physical detail already present in TEXT_TO_CHECK: layout, distance, movement, contact, pressure, object state, visibility, sound, threat, consequence, and available choices.',
         'Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs, smells, tastes, eats, or drinks, or TEXT_TO_CHECK ties the sensation to a specific close-range physical source that is overpowering and unavoidable at the user position.',
         'Valid smell/taste sources must be concrete and immediate, such as smoke filling the room, blood on a hand, rot beside a body, food or drink in the mouth, chemicals in contact, or fire filling the space.',
-        'Repair smell/taste only when it is clearly used for "the air," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
+        'Repair smell/taste only when it is clearly used for "the air," "the room," "the place," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
         'If smell/taste is valid, keep at most one mention per beat or major location shift and attach it to the concrete source. Do not add a new smell or taste to replace a removed one.',
+        'Keep established position, distance, facing, barriers, cover, doors, walls, line of sight, and reach consistent.',
+        'Repair only obvious impossibilities, such as touching a person across the room without movement, seeing through a closed door or wall, hearing precise quiet speech from an implausible distance, or using a new position before movement to that position is narrated.',
+        'If the intended scene fact is clear, add the minimum necessary movement, obstruction, uncertainty, or line-of-sight wording. If uncertain, leave unchanged.',
         '',
-        'PASS 2: literalStyleFilter(response)',
+        'PASS 2: diegeticPhysicality(response)',
+        'Goal: preserve the same effect while removing obvious ability, spell, power, trait, activation, casting, or system-mechanic labels.',
+        'Repair phrases like "casts X," "uses X," "activates X," "triggers her passive," "the spell takes effect," "her ability works," or mechanical explanations unless a character explicitly says the name in dialogue.',
+        'Replace labels with observable consequences already present or directly implied by TEXT_TO_CHECK: light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, sound, force, or environmental reaction.',
+        'Do not invent a new effect, change whether the effect succeeds, add a cost, add a chant, add a gesture, or explain mechanics.',
+        'Visible preparation may remain only as ordinary in-scene action.',
+        '',
+        'PASS 3: agencySeparation(response, RECENT_USER_INPUT)',
+        'Goal: preserve the same scene while removing obvious {{user}} puppeting.',
+        'Repair narration that writes {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, voluntary movement, or completed intent not explicitly declared in RECENT_USER_INPUT.',
+        'Examples of puppeting include "you realize," "you decide," "you feel," "you want," "you hesitate," "you stay silent," "you nod," "your eyes move to," "you let her," or "you understand" when not explicitly declared.',
+        'Do not remove external forces affecting {{user}} when physically concrete and already part of the resolved scene, such as being shoved, blocked, struck, restrained, pulled, or exposed to environmental pressure.',
+        'Rewrite puppeting as external scene state, NPC action, visible consequence, or available information without deciding {{user}} response.',
+        '',
+        'PASS 4: strictBehaviorism(response)',
+        'Goal: preserve character meaning while repairing internal state labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand.',
+        'Do not name internal, emotional, sexual, psychological, or subtext states as exposition: no "she is nervous," "desire shows," "curiosity flickers," "something bolder beneath the surface," or equivalent interpretation.',
+        'Do not use eyes, gaze, expression shifts, micro-expressions, breath, pulse, throat, stomach, heat, blush, flush, skin color, trembling, twitching, jaw, lips, knuckles, or similar body cues as canned emotional shorthand.',
+        'Do not use repeated mouth/jaw opening-closing loops as emotional shorthand, including "mouth opens, then closes, then opens again," "mouth opens and closes," or equivalent open-close-open loops.',
+        'Ban indirect skin-color/emotion workarounds: color rising, spreading, crossing, touching, filling, staining, warming, darkening, draining, blooming, or appearing across cheeks, face, ears, throat, chest, or skin.',
+        'Ban indirect eye/subtext workarounds: something flickers in the eyes, eyes darken, eyes soften, gaze sharpens with meaning, expression says, a look betrays, or equivalent hidden-state cues.',
+        'Replace violations with consequential visible behavior: movement, spacing, contact, timing, posture that affects action, object handling, blocked access, retreat, approach, refusal, interruption, dialogue content, or visible consequence.',
+        'Do not replace one tell with another tell. Do not add a pileup of smaller gestures.',
+        '',
+        'PASS 5: denotativePhysicality(response)',
         'Goal: keep the same scene content while narrowly repairing specific prose/style violations.',
-        'Stock body-emotion shorthand:',
-        'Repair stock physical tells used as emotion/sexual/effort shorthand. This includes blush, flush, cheeks heating, ears reddening, face paling, jaw tightening, jaw setting, jaw working, mouth firming, lips parting without consequence, throat bobbing, throat working, fingers twitching, knuckles whitening, grip color changes, breath hitching, breath catching, heart pounding, pulse jumping, stomach dropping, heat pooling, and direct equivalent workaround phrases.',
-        'Do not preserve the same coded tell by rewording it. Replace it with action that changes contact, space, timing, posture, speech content, object handling, or visible consequence.',
-        'Ban oscillating micro-cue loops and body-language churn: mouth opens/closes/opens, grip tightens/loosens/tightens, gaze looks away/back/down, gestures start/stop/restart, repeated tapping/gripping/releasing, and stacked hands/eyes/mouth/shoulder tells used only to show hesitation, fear, arousal, embarrassment, tension, or uncertainty.',
-        'Replace twitch loops with one consequential physical choice plus dialogue, such as increasing distance, blocking contact, keeping an object, refusing, protecting an exit, changing position, or stopping at a clear boundary.',
-        '',
-        'Skin-color shorthand:',
-        'Do not use reddening, paling, whitening, darkening, flushing, or color changes as emotional, romantic, sexual, psychological, fear, pain, exertion, anger, embarrassment, arousal, or physical-effort shorthand.',
-        '',
         'Lazy voice shorthand:',
         'Ban canned quiet-voice phrasing and its equivalents: "barely above a whisper," "just above a whisper," "almost a whisper," "voice barely audible," "low murmur," "soft murmur," "a thread of sound," "a thin whisper," "a small voice," "a fragile whisper," or similar trope delivery. Low, quiet, shaking, hoarse, rough, strained, interrupted, or trembling speech is allowed only when physically specific and not canned shorthand.',
         '',
@@ -8483,13 +8579,25 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Preserve environmental, intimate, and atmospheric detail unless it clearly violates smell/taste gating, endpoint control, chronology control, user agency, or a specific literal-style prohibition above.',
         'Do not remove valid scenery, texture, intimacy, physical sensation, or emotional pressure merely because it is descriptive.',
         '',
-        'Valid replacements for literalStyleFilter:',
+        'Valid replacements for denotativePhysicality:',
         'Replace violations narrowly with concrete physical prose that preserves the original intensity and meaning: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, physical sensation, intimacy, or environmental interaction.',
         'Do not replace a violation with another coded tell or workaround phrase.',
         'Do not replace one invalid tell with a pileup of smaller tells. Collapse repeated micro-reactions into a single scene-changing beat.',
         'Use natural grounded sentences that preserve intensity through action, contact, sensation, and consequence, not poetic comparison.',
         '',
-        'PASS 3: chronologyControl(response, RECENT_USER_INPUT)',
+        'PASS 6: inanimateObjectivity(response)',
+        'Goal: preserve scene content while removing false agency from inanimate things and abstractions.',
+        'Repair rooms, silence, air, tension, darkness, atmosphere, weather, architecture, roads, doors, objects, concepts, or moods when they want, watch, wait, threaten, breathe, listen, remember, intend, judge, press with intent, or act like living beings.',
+        'Keep literal physical behavior when valid: objects may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state.',
+        'Replace false agency with concrete physical state, sound, movement, obstruction, weather behavior, lighting, or visible consequence.',
+        '',
+        'PASS 7: strictEpistemology(response)',
+        'Goal: preserve earned information while repairing obvious information leaks.',
+        'Repair private thoughts, hidden motives, unknown names, unknown identities, roles, species, loyalties, unseen actions, hidden causes, background lore, and {{user}} cognition/perception/internal state when they are not directly evidenced in TEXT_TO_CHECK or recent visible context.',
+        'Use uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.',
+        'If unsure whether a fact was already established, leave it unchanged.',
+        '',
+        'PASS 8: linearChronology(response, RECENT_USER_INPUT)',
         'Goal: make the narration start at the point right after the latest user input.',
         'The user input is already complete. The narration must begin after it, with consequence, revealed information, NPC response, environmental change, obstruction, resistance, absence, failure point, or new stimulus.',
         'Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT.',
@@ -8497,10 +8605,10 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Valid continuation may describe what changes because of the declared action: who reacts, what becomes visible from the new position, what sound interrupts, what blocks access, what object is within reach, what NPC says, or what happens next.',
         'If the first sentence merely repeats the user action, remove that sentence or rewrite it as consequence without adding new user action.',
         '',
-        'PASS 4: responseEndpointControl(response)',
+        'PASS 9: activeHandoff(response)',
         'Goal: end at the natural user-centered response beat.',
-        'End where the scene naturally returns control to the user, not where narration prompts or pressures the user to act.',
-        'The response beat is the point where the immediate consequence, NPC response, revealed information, available object, changed access, danger, or environmental condition is clear enough for the user to choose what to do next.',
+        'End on an active, concrete beat that {{user}} can respond to, not where narration prompts or pressures the user to act.',
+        'Acceptable beats are dialogue directed at {{user}}, action directed at {{user}}, or a visible scene change that forces a clear decision and immediately requires a response.',
         'If an NPC speaks or acts toward the user, end on that speech or action once it creates a natural point for the user to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act.',
         'If no NPC is driving the beat, end on the relevant consequence of the user\'s action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.',
         'Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat just to create an endpoint. Never end by prompting the user to act.',
@@ -8509,13 +8617,13 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not replace after-beat tailing with different after-beat tailing. Cut it.',
         '',
         ...(formattingPrompt ? [
-            'PASS 5: formattingControl(response)',
+            'PASS 10: formattingControl(response)',
             'Goal: preserve and repair required display formatting without changing scene content.',
             formattingPrompt,
             '',
-            'PASS 6: integrityCheck(original, corrected)',
+            'PASS 11: integrityCheck(original, corrected)',
         ] : [
-            'PASS 5: integrityCheck(original, corrected)',
+            'PASS 10: integrityCheck(original, corrected)',
         ]),
         'Goal: return only a corrected narration that preserves the resolved scene.',
         'Before answering, verify that the corrected text did not change protected facts, did not add a new scene beat, did not delete a valid pre-boundary scene beat, did not reduce valid intimacy/detail/intensity, and did not reinterpret mechanics or character decisions.',
@@ -8551,6 +8659,124 @@ function sanitizeProseGuardResponse(raw, fallbackText) {
     const extracted = extractGeneratedText(raw);
     const cleaned = sanitizeAssistantNarration(stripStructuredArtifacts(stripNarratorMetaPrefix(extracted))).trim();
     return cleaned || fallbackText;
+}
+
+function canUseCombinedPostNarrationPass(settings = getSettings()) {
+    if (settings.postNarrationProseGuardEnabled === false) return false;
+    return true;
+}
+
+function buildProseGuardReferencePrompt(narrationText, latestUserText = '') {
+    const prompt = buildProseGuardPrompt(narrationText, latestUserText);
+    const outputIndex = prompt.indexOf('\nOUTPUT CONTRACT:');
+    return outputIndex > 0 ? prompt.slice(0, outputIndex).trim() : prompt;
+}
+
+function buildTrackerReferencePrompt({ pendingRun, messageKey, trackerDisplaySnapshot }) {
+    return buildPostNarrationTrackerPrompt({
+        pendingRun,
+        messageKey,
+        narrationText: 'CORRECTED_NARRATION_FROM_FIRST_SECTION',
+        trackerDisplaySnapshot,
+    })
+        .replace('You update tracker state only. Do not narrate, roleplay, explain, or add prose.', 'For the tracker section, update tracker state only. Do not roleplay, explain, or add prose there.')
+        .replace('Return exactly one story_engine_tracker_delta fenced block and nothing else.', 'For this combined pass, place exactly one story_engine_tracker_delta fenced block after the corrected narration section.');
+}
+
+function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+    return [
+        'STORY_ENGINE_COMBINED_POST_NARRATION_PASS',
+        '',
+        'You are a private Story Engine finalization pass. Complete exactly two tasks in order:',
+        '1. Correct TEXT_TO_CHECK using the Prose Guard rules.',
+        '2. Extract tracker delta from CORRECTED_NARRATION using the Tracker Update rules.',
+        '',
+        'Do not narrate, roleplay, explain, summarize, add commentary, or output anything outside the required sections.',
+        'The tracker delta must be based on CORRECTED_NARRATION, not on rejected or removed draft text.',
+        'If no prose corrections are needed, CORRECTED_NARRATION must equal TEXT_TO_CHECK.',
+        '',
+        '==PROSE_GUARD_CONTRACT==',
+        'Use this as correction rules only; its standalone output contract is superseded by STRICT_OUTPUT_CONTRACT below.',
+        buildProseGuardReferencePrompt(narrationText, pendingRun?.latestUserText || ''),
+        '',
+        '==TRACKER_UPDATE_CONTRACT==',
+        'Use this as tracker extraction rules and authority only; its standalone output contract is superseded by STRICT_OUTPUT_CONTRACT below.',
+        buildTrackerReferencePrompt({ pendingRun, messageKey, trackerDisplaySnapshot }),
+        '',
+        '==STRICT_OUTPUT_CONTRACT==',
+        `Return exactly these two sections, in this order:`,
+        COMBINED_POST_PASS_NARRATION_START,
+        '<corrected narration only>',
+        COMBINED_POST_PASS_NARRATION_END,
+        '',
+        '```story_engine_tracker_delta',
+        'BEGIN_TRACKER_DELTA',
+        '...',
+        'END_TRACKER_DELTA',
+        '```',
+        '',
+        'No labels other than the required delimiters. No analysis. No prose outside corrected narration. No tracker text inside corrected narration.',
+        '',
+        '==TEXT_TO_CHECK==',
+        narrationText || '(empty)',
+        '',
+        '==RECENT_USER_INPUT==',
+        pendingRun?.latestUserText || '(empty)',
+        '',
+        '==OUTPUT==',
+    ].join('\n');
+}
+
+function extractCombinedCorrectedNarration(raw, fallbackText) {
+    const extracted = extractGeneratedText(raw);
+    const source = String(extracted || raw || '');
+    const pattern = new RegExp(`${escapeRegExp(COMBINED_POST_PASS_NARRATION_START)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(COMBINED_POST_PASS_NARRATION_END)}`, 'i');
+    const match = source.match(pattern);
+    if (!match) {
+        throw new Error('Combined post-pass response missing corrected narration section.');
+    }
+    const cleaned = sanitizeAssistantNarration(stripStructuredArtifacts(stripNarratorMetaPrefix(match[1]))).trim();
+    if (!cleaned) {
+        throw new Error('Combined post-pass corrected narration was empty.');
+    }
+    return cleaned || fallbackText;
+}
+
+function parseCombinedPostNarrationResponse(raw, fallbackText) {
+    const correctedNarration = extractCombinedCorrectedNarration(raw, fallbackText);
+    const trackerDeltaText = extractTrackerDeltaText(raw);
+    if (!trackerDeltaText) {
+        throw new Error('Combined post-pass response missing tracker delta block.');
+    }
+    const trackerDelta = parseNarratorTrackerDelta(trackerDeltaText, correctedNarration);
+    return { correctedNarration, trackerDelta };
+}
+
+async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
+    const prompt = buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot });
+    const proseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
+    const trackerLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
+    const responseLength = Math.min(9000, proseLength + trackerLength + 700);
+    state.bypassPromptReady = true;
+    try {
+        return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
+            if (settings?.semanticProfileId) {
+                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
+                    temperature: 0,
+                });
+            }
+            const context = getContext();
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for combined post-narration pass.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
+        }));
+    } finally {
+        state.bypassPromptReady = false;
+    }
 }
 
 async function requestProseGuardCorrection(narrationText, latestUserText = '') {
@@ -8896,8 +9122,18 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         const narratorHandoff = captured?.narratorHandoff ?? state.lastNarratorHandoff;
         const pendingRun = captured?.pendingRun ?? state.pendingRun;
         let trackerDeltaWarning = null;
+        const settings = getSettings();
+        const proseGuardEnabled = settings.postNarrationProseGuardEnabled !== false;
+        const root = getTrackerRoot(context);
+        const combinedPostPassEnabled = Boolean(narrationText && root && pendingRun && canUseCombinedPostNarrationPass(settings));
+        let combinedTrackerDelta = null;
 
-        if (getSettings().postNarrationProseGuardEnabled !== false && narrationText) {
+        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
+            clearRuntimePrompts();
+            return;
+        }
+
+        if (!(root && pendingRun) && proseGuardEnabled && narrationText) {
             try {
                 await deferForProseGuardFinalization();
                 const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
@@ -8907,12 +9143,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             }
         }
 
-        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
-            clearRuntimePrompts();
-            return;
-        }
-
-        const root = getTrackerRoot(context);
         if (root && pendingRun) {
             let trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
                 messageKey,
@@ -8925,12 +9155,50 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
             });
 
-
-
-            if (getSettings().postNarrationTrackerEnabled !== false) {
-
+            if (combinedPostPassEnabled) {
                 try {
+                    await deferForProseGuardFinalization();
+                    const combinedRaw = await requestCombinedPostNarrationPass({
+                        pendingRun,
+                        messageKey,
+                        narrationText,
+                        trackerDisplaySnapshot,
+                    });
+                    const combinedResult = parseCombinedPostNarrationResponse(combinedRaw, narrationText);
+                    narrationText = combinedResult.correctedNarration;
+                    combinedTrackerDelta = combinedResult.trackerDelta;
+                    trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
+                        messageKey,
+                        pendingRun,
+                        report: pendingRun.report,
+                        assistantText: narrationText,
+                    });
+                } catch (error) {
+                    console.warn(`[${EXTENSION_NAME}] combined post-narration pass failed; falling back to separate post passes.`, error);
+                    combinedTrackerDelta = null;
+                }
+            }
 
+            if (!combinedTrackerDelta && proseGuardEnabled && narrationText) {
+                try {
+                    await deferForProseGuardFinalization();
+                    const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
+                    narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
+                    trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
+                        messageKey,
+                        pendingRun,
+                        report: pendingRun.report,
+                        assistantText: narrationText,
+                    });
+                } catch (error) {
+                    console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
+                }
+            }
+
+            try {
+
+                let postNarrationDelta = combinedTrackerDelta;
+                if (!postNarrationDelta) {
                     const trackerRaw = await requestPostNarrationTrackerDelta({
 
                         pendingRun,
@@ -8942,31 +9210,25 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                         trackerDisplaySnapshot,
 
                     });
-
                     const trackerDeltaText = extractTrackerDeltaText(trackerRaw) || String(trackerRaw || '');
-                    const postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
-
-                    const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
-
-                    trackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, clampedTrackerDelta, {
-                        messageKey,
-                        latestUserText: pendingRun.latestUserText,
-                        assistantText: narrationText,
-                        beforeNpcs: pendingRun.trackerBefore,
-                        userKnowledgeBefore: pendingRun.userKnowledgeBefore,
-                        context,
-                    });
-                } catch (error) {
-
-                    trackerDeltaWarning = error instanceof Error ? error.message : String(error);
-
-                    console.warn(`[${EXTENSION_NAME}] post-narration tracker update failed; keeping mechanical tracker snapshot.`, error);
-
+                    postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
                 }
 
-            } else {
+                const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
 
-                trackerDeltaWarning = 'Post-narration tracker update disabled by settings.';
+                trackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, clampedTrackerDelta, {
+                    messageKey,
+                    latestUserText: pendingRun.latestUserText,
+                    assistantText: narrationText,
+                    beforeNpcs: pendingRun.trackerBefore,
+                    userKnowledgeBefore: pendingRun.userKnowledgeBefore,
+                    context,
+                });
+            } catch (error) {
+
+                trackerDeltaWarning = error instanceof Error ? error.message : String(error);
+
+                console.warn(`[${EXTENSION_NAME}] post-narration tracker update failed; keeping mechanical tracker snapshot.`, error);
 
             }
 
@@ -9188,15 +9450,17 @@ function handleGenerationLifecycleEnd() {
     clearAllProgress();
     state.pendingGeneration = null;
     state.narratorThinkingDisablePending = false;
+    if (isNarratorDepthReplayArmed()) {
+        clearRuntimePrompts({ preserveNarratorDepthPrompt: true });
+        scheduleNarratorDepthReplay();
+        return;
+    }
     clearRuntimePrompts();
 
     if (!state.pendingRun) {
         releaseProseGuardDisplayIntercept({ restore: true });
     } else if (!state.pendingRunCleanupTimer) {
-        const settings = getSettings();
-        if (settings.postNarrationTrackerEnabled !== false || settings.postNarrationProseGuardEnabled !== false) {
-            setChatInputLocked(true, 'Finalizing narration...');
-        }
+        setChatInputLocked(true, 'Finalizing narration...');
         state.pendingRunCleanupTimer = setTimeout(() => {
             state.pendingRunCleanupTimer = null;
             if (!state.pendingRun) return;
@@ -9208,6 +9472,19 @@ function handleGenerationLifecycleEnd() {
             console.warn(`[${EXTENSION_NAME}] cleared pending pre-flight handoff because no assistant message was received after generation ended.`);
         }, 5000);
     }
+    setTimeout(() => {
+        renderAllTrackerDisplayBlocks();
+        renderProgressionCard();
+    }, 0);
+}
+
+function handleGenerationLifecycleStopped() {
+    if (consumeInternalGenerationStop()) {
+        handleGenerationLifecycleEnd();
+        return;
+    }
+
+    cancelStoryEnginePipeline('Human stop button pressed');
     setTimeout(() => {
         renderAllTrackerDisplayBlocks();
         renderProgressionCard();
@@ -9236,7 +9513,7 @@ function subscribeMessageHandler() {
     if (context.eventTypes.CHAT_CREATED) context.eventSource.on(context.eventTypes.CHAT_CREATED, handleChatChanged);
     if (context.eventTypes.GENERATION_STARTED) context.eventSource.on(context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
     if (context.eventTypes.GENERATION_ENDED) context.eventSource.on(context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
-    if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
+    if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleStopped);
     if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
     if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
     state.subscribed = true;
@@ -9291,6 +9568,24 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
         return true;
 
+    }
+
+    if (isNarratorDepthReplayPromptPass()) {
+        try {
+            injectPromptOptionPrompts();
+            activateNarratorDepthReplayPass(context, contextSize, type);
+            showProgress('Preparing native narrator handoff...');
+            return false;
+        } catch (error) {
+            clearRuntimePrompts();
+            state.pendingRun = null;
+            state.lastNarratorHandoff = '';
+            releaseProseGuardDisplayIntercept({ restore: true });
+            clearAllProgress();
+            showBlockingError(error);
+            if (typeof abort === 'function') abort(true);
+            return true;
+        }
     }
 
     const latestUserText = getLatestUserTextFromContext(context);
@@ -9378,6 +9673,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         powerActorSnapshot: buildPowerActorSnapshot(context),
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
+        writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
         contextSize,
         createdAt: Date.now(),
     };
@@ -9407,6 +9703,7 @@ async function handleChatCompletionPromptReady(eventData) {
 
     if (!context) return;
 
+    const runId = state.activeRunId;
 
 
     try {
@@ -9424,6 +9721,19 @@ async function handleChatCompletionPromptReady(eventData) {
             state.lastNarratorHandoff = '';
             state.pendingRun = null;
             markNextNarratorRequestThinkingDisabled();
+            clearAllProgress();
+            return;
+        }
+
+        if (isNarratorDepthReplayPromptPass()) {
+            if (!hasNarratorDepthPrompt(context) || !chatHasNarratorDepthPrompt(eventData.chat)) {
+                throw new Error('Story Engine native narrator handoff was not injected at depth 0; generation aborted before narration.');
+            }
+            beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
+            sanitizeFinalPromptHistory(eventData.chat);
+            markNextNarratorRequestThinkingDisabled();
+            await waitForStoryEngineModelCallSpacing(state.narratorDepthReplay?.spacingLabel || 'narrator model call');
+            if (!isCurrentStoryEngineRun(runId)) return;
             clearAllProgress();
             return;
         }
@@ -9455,6 +9765,8 @@ async function handleChatCompletionPromptReady(eventData) {
             trackerSnapshot,
 
         );
+
+        if (!isCurrentStoryEngineRun(runId) || !state.pendingGeneration) return;
 
         applyPlayerCoreStatsOverride(semanticLedger, context);
 
@@ -9495,14 +9807,21 @@ async function handleChatCompletionPromptReady(eventData) {
         };
         state.lastNarratorHandoff = narratorContext;
 
-        beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
+        armNarratorDepthReplay({
+            context,
+            pendingGeneration: state.pendingGeneration,
+            pendingRun: state.pendingRun,
+            narratorContext,
+            narratorModelContext,
+            generationMode,
+            spacingLabel: 'narrator model call',
+        });
         sanitizeFinalPromptHistory(eventData.chat);
-        appendAdventureStartPromptToNarratorPrompt(eventData.chat, state.pendingGeneration.adventureStartPrompt);
-        appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
-        markNextNarratorRequestThinkingDisabled();
-        await waitForStoryEngineModelCallSpacing('narrator model call');
-        clearAllProgress();
+        replacePromptWithReplayNotice(eventData.chat);
+        abortGenerationAfterPromptReady(context);
+        scheduleNarratorDepthReplay();
     } catch (error) {
+        if (!isCurrentStoryEngineRun(runId)) return;
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
         state.narratorThinkingDisablePending = false;
@@ -9517,11 +9836,13 @@ async function handleChatCompletionPromptReady(eventData) {
 
     } finally {
 
-        state.runningSemanticPass = false;
+        if (state.activeRunId === runId || state.activeRunId == null) {
+            state.runningSemanticPass = false;
 
-        state.activeRunId = null;
+            state.activeRunId = null;
 
-        state.pendingGeneration = null;
+            state.pendingGeneration = null;
+        }
 
     }
 
@@ -9535,7 +9856,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
 
     try {
 
-        addEphemeralStoppingString(SEMANTIC_PREFLIGHT_STOP_SENTINEL);
+        await addEphemeralStoppingString(SEMANTIC_PREFLIGHT_STOP_SENTINEL);
 
         return await withStoryEngineModelRequest(() => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
@@ -9550,7 +9871,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
         })));
     } finally {
 
-        flushEphemeralStoppingStrings();
+        await flushEphemeralStoppingStrings();
 
         state.bypassPromptReady = false;
 
@@ -9559,30 +9880,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
 }
 
 
-
-function appendNarratorContextToPrompt(chat, narratorContext) {
-    const message = {
-        role: 'user',
-        content: buildFinalNarrationPrompt(narratorContext),
-    };
-    const latestUserIndex = Array.isArray(chat)
-        ? chat.findLastIndex(entry => String(entry?.role || '').toLowerCase() === 'user')
-        : -1;
-    if (latestUserIndex >= 0) {
-        chat.splice(latestUserIndex + 1, 0, message);
-    } else {
-        chat.push(message);
-    }
-}
-
-function appendAdventureStartPromptToNarratorPrompt(chat, prompt) {
-    const text = String(prompt || '').trim();
-    if (!Array.isArray(chat) || !text) return;
-    chat.push({
-        role: 'system',
-        content: text,
-    });
-}
 
 function replacePromptWithAbortNotice(chat, error) {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -9606,6 +9903,7 @@ function replacePromptWithAbortNotice(chat, error) {
 function abortGenerationAfterPromptReady(context) {
 
     try {
+        markInternalGenerationStop();
 
         if (typeof context?.stopGeneration === 'function') {
 
@@ -9645,6 +9943,7 @@ export function onDisable() {
         delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
 
         delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
+        delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
 
         delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
 
@@ -9661,7 +9960,7 @@ export function onDisable() {
         if (context.eventTypes.CHAT_CREATED) removeEventHandler(context, context.eventTypes.CHAT_CREATED, handleChatChanged);
         if (context.eventTypes.GENERATION_STARTED) removeEventHandler(context, context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
         if (context.eventTypes.GENERATION_ENDED) removeEventHandler(context, context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
-        if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleEnd);
+        if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleStopped);
         if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
         if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
         state.subscribed = false;
