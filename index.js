@@ -399,6 +399,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     ABSOLUTELY-FORBIDDEN:
       NEVER DO ANY OF THE FOLLOWING:
         - Do not say that the air smells, the room smells, the place smells, or anything similar.
+        - Do not say that the air tastes, the room tastes, the place tastes, or anything similar.
         - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
   }
 
@@ -8435,6 +8436,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'If a character changes position, narrate the movement before using the new position.',
         'Do not let {{user}} perceive, reach, or interact through walls, doors, distance, cover, or other barriers unless the scene explicitly opens that path.',
         'Do not say that the air smells, the room smells, the place smells, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.',
+        'Do not say that the air tastes, the room tastes, the place tastes, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.',
         'Do not use smell or taste as ambient scene dressing or atmospheric shorthand.',
         '',
         'diegeticPhysicality(response):',
