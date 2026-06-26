@@ -526,6 +526,7 @@ const state = {
     runningSemanticPass: false,
     bypassPromptReady: false,
     storyEngineModelRequestDepth: 0,
+    startAdventureReasoningCleanupPending: false,
     activeRunId: null,
     lastNarratorHandoff: '',
 
@@ -786,16 +787,28 @@ async function withStoryEngineModelRequest(callback) {
 
 function clearThinkingDisableRuntimeState() {
     state.storyEngineModelRequestDepth = 0;
+    state.startAdventureReasoningCleanupPending = false;
+}
+
+function markNextStartAdventureRequestReasoningCleanup() {
+    state.startAdventureReasoningCleanupPending = true;
 }
 
 function shouldDisableThinkingForCurrentRequest() {
     return isStoryEngineEnabled()
-        && state.storyEngineModelRequestDepth > 0;
+        && (state.storyEngineModelRequestDepth > 0 || state.startAdventureReasoningCleanupPending);
+}
+
+function consumeStartAdventureReasoningCleanupIfNeeded() {
+    if (state.storyEngineModelRequestDepth <= 0) {
+        state.startAdventureReasoningCleanupPending = false;
+    }
 }
 
 function handleChatCompletionSettingsReady(generateData) {
     if (!shouldDisableThinkingForCurrentRequest()) return;
     applySemanticThinkingPayload(generateData);
+    consumeStartAdventureReasoningCleanupIfNeeded();
 }
 
 function setSelectOptions(select, values, placeholder, selectedValue, missingLabel = 'Missing') {
@@ -9450,6 +9463,7 @@ function handleGenerationLifecycleEnd() {
     if (state.trackerUpdating) return;
     clearAllProgress();
     state.pendingGeneration = null;
+    state.startAdventureReasoningCleanupPending = false;
     if (isNarratorDepthReplayArmed()) {
         clearRuntimePrompts({ preserveNarratorDepthPrompt: true });
         scheduleNarratorDepthReplay();
@@ -9745,6 +9759,7 @@ async function handleChatCompletionPromptReady(eventData) {
             beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
             setNarratorDepthPrompt(context, narratorModelContext);
+            markNextStartAdventureRequestReasoningCleanup();
             await waitForStoryEngineModelCallSpacing('adventure intro model call');
             clearAllProgress();
             return;
@@ -9821,6 +9836,7 @@ async function handleChatCompletionPromptReady(eventData) {
         if (!isCurrentStoryEngineRun(runId)) return;
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
+        state.startAdventureReasoningCleanupPending = false;
         releaseProseGuardDisplayIntercept({ restore: true });
         clearAllProgress();
         clearRuntimePrompts();
