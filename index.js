@@ -379,8 +379,8 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not name internal, emotional, or psychological states.
         - Do not use subtext labels, interpretive commentary, or inferred inner states.
         - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
-        - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, knuckle-whitening, breath hitching, breath catching, voice hitching, voice catching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts. Examples: "her breath catches", "his breath hitches", "her voice catches", "his voice hitches".
-        - Do not use repeated mouth/jaw opening-closing loops as emotional shorthand. Example: "mouth opens, then closes, then opens again".
+        - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, skin turning pink, or red as emotional shorthand, knuckle-whitening, knuckle paling, breath hitching, breath catching, voice hitching, voice catching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts. Examples: "her breath catches", "his breath hitches", "her voice catches", "his voice hitches".
+        - Do not use mouth or jaw opening-closing loops as emotional shorthand. Example: "mouth opens, closes, opens again", "mouth opens, closes", "jaw opens, closes", "jaw opens, closes, opens again" or similar.
   }
 
   embodiedPerception(response, context): {
@@ -8580,7 +8580,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'PASS 5: denotativePhysicality(response)',
         'Goal: keep the same scene content while narrowly repairing specific prose/style violations.',
         'Lazy voice shorthand:',
-        'Ban canned quiet-voice phrasing and its equivalents: "barely above a whisper," "just above a whisper," "almost a whisper," "voice barely audible," "low murmur," "soft murmur," "a thread of sound," "a thin whisper," "a small voice," "a fragile whisper," or similar trope delivery. Low, quiet, shaking, hoarse, rough, strained, interrupted, or trembling speech is allowed only when physically specific and not canned shorthand.',
+        'Ban canned quiet-voice phrasing and its equivalents: "barely above a whisper," "barely above a breath," "just above a whisper," "almost a whisper," "voice barely audible," "low murmur," "soft murmur," "a thread of sound," "a thin whisper," "a small voice," "a fragile whisper," or similar trope delivery. Low, quiet, shaking, hoarse, rough, strained, interrupted, or trembling speech is allowed only when physically specific and not canned shorthand.',
         '',
         'Nonliteral prose:',
         'Repair clear metaphor, simile, idiom, hyperbole, personification, emotional physics, and "not X, but Y" contrast constructions when they make the meaning nonliteral or turn an abstraction into a physical actor/substance/force.',
