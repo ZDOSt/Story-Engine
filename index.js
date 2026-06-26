@@ -7087,7 +7087,7 @@ function submitPlayerAdventureStartPrompt(prompt, context = getContext()) {
         return false;
     }
     setTimeout(() => {
-        context.generate('normal', {
+        context.generate('quiet', {
             automatic_trigger: true,
             quiet_prompt: text,
             quietToLoud: true,
@@ -9740,22 +9740,12 @@ async function handleChatCompletionPromptReady(eventData) {
 
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
             const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
-            const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, state.pendingGeneration);
-            const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, state.pendingGeneration);
-            const pendingRun = buildAdventureIntroPendingRun(context, state.pendingGeneration, narratorModelContext);
-            armNarratorDepthReplay({
-                context,
-                pendingGeneration: state.pendingGeneration,
-                pendingRun,
-                narratorContext,
-                narratorModelContext,
-                generationMode,
-                spacingLabel: 'adventure intro model call',
-            });
             sanitizeFinalPromptHistory(eventData.chat);
-            replacePromptWithReplayNotice(eventData.chat);
-            abortGenerationAfterPromptReady(context);
-            scheduleNarratorDepthReplay();
+            if (typeof context?.setPrompt === 'function') {
+                context.setPrompt(adventurePrompt);
+            } else if (typeof context?.setPromptString === 'function') {
+                context.setPromptString(adventurePrompt);
+            }
             return;
         }
 
