@@ -339,11 +339,13 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
 
     mandate:
-      Narrate in strict linear order. Begin with the immediate consequence of {{user}}'s latest input.
+      Narrate in strict linear order. Narrate what FOLLOWS {{user}}'s latest input.
+      {{user}}'s actions and dialogue are already established.
 
     ABSOLUTELY-FORBIDDEN:
       NEVER DO ANY OF THE FOLLOWING:
         - Do NOT echo, summarize, recap, paraphrase, or repeat any part of {{user}}'s actions or dialogue.
+        - Do NOT restate {{user}}'s input before continuing.
         - Do NOT jump ahead, rewind, or insert undeclared intermediate actions.
 
     example:
