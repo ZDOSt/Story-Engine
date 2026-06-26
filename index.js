@@ -1909,6 +1909,21 @@ function buildFinalNarrationPrompt(narratorContext) {
 
 }
 
+function appendNarratorContextToPrompt(chat, narratorContext) {
+    const message = {
+        role: 'user',
+        content: buildFinalNarrationPrompt(narratorContext),
+    };
+    const latestUserIndex = Array.isArray(chat)
+        ? chat.findLastIndex(entry => String(entry?.role || '').toLowerCase() === 'user')
+        : -1;
+    if (latestUserIndex >= 0) {
+        chat.splice(latestUserIndex + 1, 0, message);
+    } else {
+        chat.push(message);
+    }
+}
+
 function setNarratorDepthPrompt(context, narratorContext) {
     const text = String(buildFinalNarrationPrompt(narratorContext) || '').trim();
     if (!text) {
