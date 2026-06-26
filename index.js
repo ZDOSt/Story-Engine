@@ -2050,9 +2050,16 @@ function scheduleNarratorDepthReplay() {
             }
             Promise.resolve(replayContext.generate(replay.type || 'normal', generateOptions))
                 .catch(error => {
+                    clearPendingRunCleanupTimer();
+                    setChatInputLocked(false);
                     clearRuntimePrompts();
                     state.pendingRun = null;
                     state.lastNarratorHandoff = '';
+                    state.narratorThinkingDisablePending = false;
+                    state.pendingGeneration = null;
+                    state.activeRunId = null;
+                    clearInternalGenerationStopState();
+                    clearNarratorDepthReplayState();
                     releaseProseGuardDisplayIntercept({ restore: true });
                     clearAllProgress();
                     showBlockingError(error);
@@ -9477,7 +9484,7 @@ function handleGenerationLifecycleStopped() {
         return;
     }
 
-    cancelStoryEnginePipeline('Human stop button pressed');
+    cancelStoryEnginePipeline('Generation stopped');
     setTimeout(() => {
         renderAllTrackerDisplayBlocks();
         renderProgressionCard();
