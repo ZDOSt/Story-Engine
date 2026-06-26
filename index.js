@@ -9758,8 +9758,8 @@ async function handleChatCompletionPromptReady(eventData) {
             state.lastNarratorHandoff = narratorContext;
             beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
-            setNarratorDepthPrompt(context, narratorModelContext);
-            markNextStartAdventureRequestReasoningCleanup();
+            appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
+            markNextNarratorRequestThinkingDisabled();
             await waitForStoryEngineModelCallSpacing('adventure intro model call');
             clearAllProgress();
             return;
