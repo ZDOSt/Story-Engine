@@ -7087,7 +7087,7 @@ function submitPlayerAdventureStartPrompt(prompt, context = getContext()) {
         return false;
     }
     setTimeout(() => {
-        context.generate('quiet', {
+        context.generate('normal', {
             automatic_trigger: true,
             quiet_prompt: text,
             quietToLoud: true,
@@ -8117,7 +8117,7 @@ function hasVisibleUserMessage(context = getContext()) {
 }
 
 function getBeginningAdventureStartPrompt(context = getContext(), type = '') {
-    if (!['swipe', 'regenerate'].includes(String(type || ''))) return '';
+    if (!['normal', 'swipe', 'regenerate'].includes(String(type || ''))) return '';
     if (hasVisibleUserMessage(context)) return '';
     const root = getPlayerRoot(context);
     if (!root?.adventureStarted) return '';
@@ -9121,6 +9121,11 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         let narrationText = sanitizeAssistantNarration(visibleText);
         const narratorHandoff = captured?.narratorHandoff ?? state.lastNarratorHandoff;
         const pendingRun = captured?.pendingRun ?? state.pendingRun;
+        if (pendingRun?.adventureIntro) {
+            clearRuntimePrompts();
+            releaseProseGuardDisplayIntercept({ restore: true, messageId });
+            return;
+        }
         let trackerDeltaWarning = null;
         const settings = getSettings();
         const proseGuardEnabled = settings.postNarrationProseGuardEnabled !== false;
@@ -9484,7 +9489,7 @@ function handleGenerationLifecycleStopped() {
         return;
     }
 
-    cancelStoryEnginePipeline('Generation stopped');
+    cancelStoryEnginePipeline('Human stop button pressed');
     setTimeout(() => {
         renderAllTrackerDisplayBlocks();
         renderProgressionCard();
@@ -9739,13 +9744,7 @@ async function handleChatCompletionPromptReady(eventData) {
         }
 
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
-            const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
             sanitizeFinalPromptHistory(eventData.chat);
-            if (typeof context?.setPrompt === 'function') {
-                context.setPrompt(adventurePrompt);
-            } else if (typeof context?.setPromptString === 'function') {
-                context.setPromptString(adventurePrompt);
-            }
             return;
         }
 
