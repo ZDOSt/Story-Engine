@@ -13,7 +13,6 @@ const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
-const DISABLE_THINKING_INCLUDE_BODY = 'thinking:\n  type: disabled';
 const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
 const POWER_ACTOR_SEVERITIES = Object.freeze(['none', 'minor', 'meaningful', 'major']);
 const POWER_ACTOR_ASSESSMENT_SCOPES = Object.freeze(['individual', 'organization', 'institution', 'group', 'unknown']);
@@ -351,14 +350,14 @@ export function applySemanticThinkingPayload(payload) {
     if (!payload || typeof payload !== 'object') {
         return payload;
     }
-    const source = String(payload.chat_completion_source || '').toLowerCase();
     payload.include_reasoning = false;
-    payload.custom_include_body = mergeYamlObjectString(removeTopLevelYamlKey(payload.custom_include_body, 'thinking'), DISABLE_THINKING_INCLUDE_BODY);
-    if (['openai', 'azure_openai', 'makersuite', 'vertexai', 'nanogpt'].includes(source)) {
-        payload.reasoning_effort = 'min';
+    const customIncludeBody = removeTopLevelYamlKey(payload.custom_include_body, 'thinking').trim();
+    if (customIncludeBody) {
+        payload.custom_include_body = customIncludeBody;
     } else {
-        delete payload.reasoning_effort;
+        delete payload.custom_include_body;
     }
+    delete payload.reasoning_effort;
     return payload;
 }
 
@@ -377,20 +376,6 @@ function removeTopLevelYamlKey(value, keyName) {
     }
 
     return kept.join('\n').trim();
-}
-
-function mergeYamlObjectString(...parts) {
-    const merged = [];
-    const seen = new Set();
-    for (const part of parts) {
-        const text = String(part || '').trim();
-        if (!text) continue;
-        const key = text.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        merged.push(text);
-    }
-    return merged.join('\n');
 }
 
 function buildSemanticToolPrompt(prompt) {

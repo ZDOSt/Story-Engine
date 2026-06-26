@@ -526,7 +526,6 @@ const state = {
     runningSemanticPass: false,
     bypassPromptReady: false,
     storyEngineModelRequestDepth: 0,
-    narratorThinkingDisablePending: false,
     activeRunId: null,
     lastNarratorHandoff: '',
 
@@ -785,30 +784,18 @@ async function withStoryEngineModelRequest(callback) {
     }
 }
 
-function markNextNarratorRequestThinkingDisabled() {
-    state.narratorThinkingDisablePending = true;
-}
-
 function clearThinkingDisableRuntimeState() {
     state.storyEngineModelRequestDepth = 0;
-    state.narratorThinkingDisablePending = false;
 }
 
 function shouldDisableThinkingForCurrentRequest() {
     return isStoryEngineEnabled()
-        && (state.storyEngineModelRequestDepth > 0 || state.narratorThinkingDisablePending);
-}
-
-function consumeNarratorThinkingDisableIfNeeded() {
-    if (state.storyEngineModelRequestDepth <= 0) {
-        state.narratorThinkingDisablePending = false;
-    }
+        && state.storyEngineModelRequestDepth > 0;
 }
 
 function handleChatCompletionSettingsReady(generateData) {
     if (!shouldDisableThinkingForCurrentRequest()) return;
     applySemanticThinkingPayload(generateData);
-    consumeNarratorThinkingDisableIfNeeded();
 }
 
 function setSelectOptions(select, values, placeholder, selectedValue, missingLabel = 'Missing') {
@@ -2070,7 +2057,6 @@ function scheduleNarratorDepthReplay() {
                     clearRuntimePrompts();
                     state.pendingRun = null;
                     state.lastNarratorHandoff = '';
-                    state.narratorThinkingDisablePending = false;
                     state.pendingGeneration = null;
                     state.activeRunId = null;
                     clearInternalGenerationStopState();
@@ -9464,7 +9450,6 @@ function handleGenerationLifecycleEnd() {
     if (state.trackerUpdating) return;
     clearAllProgress();
     state.pendingGeneration = null;
-    state.narratorThinkingDisablePending = false;
     if (isNarratorDepthReplayArmed()) {
         clearRuntimePrompts({ preserveNarratorDepthPrompt: true });
         scheduleNarratorDepthReplay();
@@ -9735,7 +9720,6 @@ async function handleChatCompletionPromptReady(eventData) {
             });
             state.lastNarratorHandoff = '';
             state.pendingRun = null;
-            markNextNarratorRequestThinkingDisabled();
             clearAllProgress();
             return;
         }
@@ -9746,7 +9730,6 @@ async function handleChatCompletionPromptReady(eventData) {
             }
             beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
-            markNextNarratorRequestThinkingDisabled();
             await waitForStoryEngineModelCallSpacing(state.narratorDepthReplay?.spacingLabel || 'narrator model call');
             if (!isCurrentStoryEngineRun(runId)) return;
             clearAllProgress();
@@ -9762,7 +9745,6 @@ async function handleChatCompletionPromptReady(eventData) {
             beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
             setNarratorDepthPrompt(context, narratorModelContext);
-            markNextNarratorRequestThinkingDisabled();
             await waitForStoryEngineModelCallSpacing('adventure intro model call');
             clearAllProgress();
             return;
@@ -9839,7 +9821,6 @@ async function handleChatCompletionPromptReady(eventData) {
         if (!isCurrentStoryEngineRun(runId)) return;
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
-        state.narratorThinkingDisablePending = false;
         releaseProseGuardDisplayIntercept({ restore: true });
         clearAllProgress();
         clearRuntimePrompts();
