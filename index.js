@@ -8202,9 +8202,15 @@ function buildOocResponsePrompt(userText) {
 
         'The latest user message is out of character.',
 
-        'Reply directly to the user as an assistant answer.',
+        'Answer the user\'s OOC question directly as an assistant.',
 
-        'Do not narrate the story, do not use scene mechanics, and do not update tracker state.',
+        'Use the visible prompt stack, chat history, character/persona/lore context, Prose Rules, and any visible handoff reminder as reference if relevant.',
+
+        'Do not continue the roleplay.',
+
+        'Do not narrate the scene.',
+
+        'Do not run, imply, or update mechanics, rolls, tracker state, scene consequences, relationship state, or memory.',
 
         note ? `User message: ${note}` : '',
 
@@ -9606,8 +9612,8 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
     if (userInputMode.mode === 'ooc') {
 
-        clearPromptOptionPrompts(context);
         clearRuntimePrompts();
+        injectPromptOptionPrompts();
         state.pendingGeneration = {
             type: type || 'normal',
 
@@ -9723,7 +9729,6 @@ async function handleChatCompletionPromptReady(eventData) {
         const generationMode = state.pendingGeneration.mode || 'normal';
 
         if (generationMode === 'ooc') {
-            clearPromptOptionPrompts(context);
             clearRuntimePrompts();
             eventData.chat.push({
                 role: 'system',
