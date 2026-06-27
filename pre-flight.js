@@ -512,8 +512,11 @@ ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not break one beat into 
 
 characterTurnPacing:
 Execute characterTurnPacing(response, context).
-mandate: Each active NPC gets 1 paragraph-turn per {{user}} input.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. No second turn, repeated body language, or extra micro-actions outside the NPC A -> NPC B -> NPC A exception.
+mandate: When an NPC responds directly to {{user}} during dialogue, their response must be one uninterrupted paragraph of at most 8 sentences, containing only that NPC's reaction, dialogue, and directly related supporting actions.
+The response ends the moment the NPC asks a question or performs an action that clearly requires {{user}}'s response.
+ABSOLUTELY-FORBIDDEN:
+- An NPC must never ask multiple questions in one response.
+- No repeated body language, filler micro-actions, second paragraph, second turn, follow-up clarification, self-answer, or exposition dump.
 
 activeHandoff:
 Execute activeHandoff(response, context).
