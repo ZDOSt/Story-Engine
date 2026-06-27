@@ -339,19 +339,15 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
 
     mandate:
-      Narrate in strict linear order. Narrate what FOLLOWS {{user}}'s latest input.
-      {{user}}'s actions and dialogue are already established.
+      You MUST ONLY narrate what follows AFTER {{user}}'s input. Narrate the external reactions, response, or consequence of {{user}}'s actions or dialogue.
 
-    ABSOLUTELY-FORBIDDEN:
-      NEVER DO ANY OF THE FOLLOWING:
-        - Do NOT echo, summarize, recap, paraphrase, or repeat any part of {{user}}'s actions or dialogue.
-        - Do NOT restate {{user}}'s input before continuing.
-        - Do NOT jump ahead, rewind, or insert undeclared intermediate actions.
+    NON-NEGOTIABLE PROHIBITION:
+      NEVER, UNDER ANY CIRCUMSTANCES, repeat, paraphrase, or narrate ANY part of {{user}}'s actions or dialogue.
 
-    example:
-      User input: "I try to grab the scroll from the desk."
-      Good: The guard's hand comes down on the scroll before your fingers reach it. He slides it off the desk and behind his back.
-      Bad: You reach for the scroll on the desk. The guard notices and grabs it before you can. He pulls it away.
+    Example:
+      Sample {{user}} input: "I try to grab the scroll from the desk."
+      GOOD response start: The guard's hand comes down on the scroll before your fingers reach it...
+      BAD Response Start: You reach for the scroll on the desk...
   }
 
   agencySeparation(response, input, context): {
