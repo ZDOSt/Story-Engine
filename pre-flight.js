@@ -487,10 +487,10 @@ Do not say that the air tastes, the room tastes, the place tastes, or anything s
 
 strictBehaviorism:
 Execute strictBehaviorism(response, context).
-mandate: Render character state only through directly witnessable behavior and physical displacement.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. No internal states, subtext labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, or canned emotional shorthand. Do not use breath hitching, breath catching, voice hitching, or voice catching as emotional shorthand (e.g., "her breath catches", "his breath hitches", "her voice catches", "his voice hitches").
-Do not use mouth or jaw opening-closing loops as emotional shorthand (e.g., "mouth opens, closes, opens again", "mouth opens, closes", "jaw opens, closes", "jaw opens, closes, opens again" or similar).
-No blushing, flushing, reddening, paling, skin turning pink, or red as emotional shorthand, or indirect skin-color emotional shorthand.
+Render character state and emotion through EXTERNAL BEHAVIOR AND ACTION ONLY. For example: speech, chosen action, posture, movement, object use, and spatial positioning.
+NON-NEGOTIABLE BAN: Do NOT use involuntary physiology such as skin/facial flushing, blushing, or color change. Do NOT use eye language, micro-expressions, body-cue shorthand, or autonomic tells to express emotion, attraction, embarrassment, fear, anger, arousal, hesitation, or tension.
+NEVER NARRATE: skin, face, or cheeks blushing, flushing, reddening, turning pink or red; heat in the face; color rising; faint flush; deep flush; breath hitching; breath catching; voice hitching; voice catching; throat working; jaw working; pulse jumping; stomach dropping; knuckle whitening or paling; mouth or jaw opening and closing loops.
+ALWAYS narrate character state and emotion through PHYSICAL BEHAVIOR / ACTION.
 
 agencySeparation:
 Execute agencySeparation(response, input, context).

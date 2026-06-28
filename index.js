@@ -364,19 +364,20 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
   }
 
   strictBehaviorism(response, context): {
-    policy: OBSERVABLE-CHARACTER-STATE
+    policy: EXTERNAL-ACTION-ONLY
 
     mandate:
-      Render character state only through observable behavior and physical displacement that can be directly witnessed by someone physically present in the scene.
-      Narrate only tangible, external action.
+      Render character/NPC state and emotion through external behavior/action ONLY.
 
-    ABSOLUTELY-FORBIDDEN:
-      NEVER DO ANY OF THE FOLLOWING:
-        - Do not name internal, emotional, or psychological states.
-        - Do not use subtext labels, interpretive commentary, or inferred inner states.
-        - Do not use eye-language, micro-expressions, autonomic tells, or repeated micro-gestures as substitutes for meaningful behavior.
-        - Do not use canned body-language shorthand such as blushing, flushing, reddening, paling, skin turning pink, or red as emotional shorthand, knuckle-whitening, knuckle paling, breath hitching, breath catching, voice hitching, voice catching, throat working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts. Examples: "her breath catches", "his breath hitches", "her voice catches", "his voice hitches".
-        - Do not use mouth or jaw opening-closing loops as emotional shorthand. Example: "mouth opens, closes, opens again", "mouth opens, closes", "jaw opens, closes", "jaw opens, closes, opens again" or similar.
+    NON-NEGOTIABLE BAN LIST: NEVER NARRATE:
+      - Internal, emotional, or psychological states.
+      - Subtext labels, interpretive commentary, or inferred inner states.
+      - Eye-language, micro-expressions, autonomic tells, or repeated micro-gestures.
+      - Skin or facial color changes used as emotional shorthand, including blushing, flushing, reddening, paling, skin turning pink, skin turning red, cheeks turning pink/red, heat in the face, color rising, faint flush, or deep flush.
+      - Canned body-language shorthand such as knuckle whitening, knuckle paling, breath hitching, breath catching, voice hitching, voice catching, throat working, jaw working, pulse-jumping, stomach-dropping, or equivalent emotional cue shortcuts.
+      - Mouth or jaw opening and closing loops such as "mouth opens, closes, then opens again", "mouth opens, then closes", "jaw opens, closes", "jaw opens, closes, then opens again".
+
+      - ALL EMOTIONAL SHORTCUTS ARE BANNED.
   }
 
   embodiedPerception(response, context): {
