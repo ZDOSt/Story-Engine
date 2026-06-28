@@ -1812,7 +1812,7 @@ function indentStyleBlock(text) {
 
 function buildSceneStyleProfilePrompt(settings = getSettings()) {
     return [
-        'sceneStyleProfile(response, context):',
+        'function sceneStyleProfile(response, context) {',
         '  mandate:',
         '    Shape narration by scene type while obeying every renderControlEngine rule above. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, resolved mechanics, or narrativeFacts(input).',
         '',
@@ -1827,6 +1827,7 @@ function buildSceneStyleProfilePrompt(settings = getSettings()) {
         '',
         '  intimacyStyle:',
         indentStyleBlock(settings.writingStyleIntimacyPrompt ?? DEFAULT_INTIMACY_STYLE_PROMPT),
+        '}',
     ].join('\n');
 }
 

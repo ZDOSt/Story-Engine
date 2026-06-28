@@ -28,6 +28,13 @@ const ENVIRONMENT_DIFFICULTY_TIERS = Object.freeze(['none', 'easy', 'average', '
 const ACTION_BUCKETS = Object.freeze(['None', 'Social', 'Combat', 'Challenge']);
 const SOCIAL_BUCKETS = Object.freeze(['None', 'Diplomacy', 'Bluff', 'Intimidate']);
 const COMBAT_TYPES = Object.freeze(['None', 'Mundane', 'SpellOrSupernatural']);
+const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
+    'RenderControlEngine',
+    'sceneStyleProfile',
+    'finalResponseElements',
+    'fanService',
+    'adultContent',
+]);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
     if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
@@ -1544,17 +1551,85 @@ function normalizeAssembledPromptMessages(assembledChat) {
 
 function sanitizeAssembledContent(content) {
     if (typeof content === 'string') {
-        return stripStructuredDebug(content).trim();
+        return sanitizeSemanticAssembledText(content);
     }
     if (Array.isArray(content)) {
         return content.map(part => {
             if (part && typeof part === 'object' && typeof part.text === 'string') {
-                return { ...part, text: stripStructuredDebug(part.text).trim() };
+                return { ...part, text: sanitizeSemanticAssembledText(part.text) };
             }
             return part;
         }).filter(part => !isEmptyContent(part?.text ?? part));
     }
     return content;
+}
+
+export function sanitizeSemanticAssembledText(content) {
+    return stripSemanticNarratorOnlyFunctionBlocks(stripStructuredDebug(content)).trim();
+}
+
+function stripSemanticNarratorOnlyFunctionBlocks(text) {
+    let source = String(text ?? '');
+    for (const blockName of SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS) {
+        source = stripNamedFunctionBlock(source, blockName);
+    }
+    return source
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n');
+}
+
+function stripNamedFunctionBlock(text, functionName) {
+    const source = String(text ?? '');
+    const openerPattern = new RegExp(`(^|\\n)[ \\t]*function\\s+${escapeRegExp(functionName)}\\s*\\([^)]*\\)\\s*\\{[ \\t]*(?=\\r?\\n|$)`, 'g');
+    let result = '';
+    let cursor = 0;
+    let match;
+
+    while ((match = openerPattern.exec(source)) !== null) {
+        const blockStart = match.index + (match[1] ? match[1].length : 0);
+        const blockEnd = findBalancedFunctionBlockEnd(source, blockStart);
+        if (blockEnd === null) {
+            openerPattern.lastIndex = blockStart + 1;
+            continue;
+        }
+
+        result += source.slice(cursor, blockStart);
+        cursor = blockEnd;
+        openerPattern.lastIndex = blockEnd;
+    }
+
+    return result + source.slice(cursor);
+}
+
+function findBalancedFunctionBlockEnd(text, startIndex) {
+    const source = String(text ?? '');
+    const openingBraceIndex = source.indexOf('{', startIndex);
+    if (openingBraceIndex < 0) return null;
+
+    let depth = 0;
+    for (let index = openingBraceIndex; index < source.length; index += 1) {
+        const pair = source.slice(index, index + 2);
+        if (pair === '{{' || pair === '}}') {
+            index += 1;
+            continue;
+        }
+
+        const char = source[index];
+        if (char === '{') {
+            depth += 1;
+        } else if (char === '}') {
+            depth -= 1;
+            if (depth === 0) {
+                let end = index + 1;
+                if (source[end] === '\r' && source[end + 1] === '\n') end += 2;
+                else if (source[end] === '\n') end += 1;
+                return end;
+            }
+            if (depth < 0) return null;
+        }
+    }
+
+    return null;
 }
 
 function isEmptyContent(content) {
