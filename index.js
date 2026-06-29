@@ -2880,7 +2880,7 @@ function parsePersonaListItem(line) {
 
     const text = stripMarkdownFormatting(line)
 
-        .replace(/^\s*(?:[-*+]|[0-9]+[.)])\s+/, '')
+        .replace(/^\s*(?:[-*+\u2022\u2023\u2043\u2013\u2014]|[0-9]+[.)])\s+/, '')
 
         .trim();
 
@@ -4103,7 +4103,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
 
         const revealedName = cleanRevealedTrackerName(npcDelta?.revealedName);
 
-        if (revealedName && isPromotableTrackerName(name)) {
+        if (revealedName) {
 
             promoteTrackerEntry(npcs, name, revealedName);
         }

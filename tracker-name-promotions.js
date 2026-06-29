@@ -51,8 +51,10 @@ const GENERIC_NAME_ROLES = Object.freeze([
 const GENERIC_ROLE_SET = new Set(GENERIC_NAME_ROLES);
 
 export function isPromotableTrackerName(value) {
+    const original = String(value ?? '').trim();
     const text = normalizeSearchText(value);
     if (!text) return false;
+    const originalCompact = original.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
     const compact = text.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
     if (/^(?:unknown|unnamed|unidentified|nameless|mysterious)\b/.test(compact)) return true;
     if (/^(?:npc|person|stranger|figure|enemy|attacker|assailant|bystander)\s*\d+$/.test(compact)) return true;
@@ -61,7 +63,9 @@ export function isPromotableTrackerName(value) {
     if (GENERIC_ROLE_SET.has(role)) return true;
     const words = compact.split(/\s+/).filter(Boolean);
     const lastWord = words[words.length - 1] || '';
-    return words.length > 1 && GENERIC_ROLE_SET.has(lastWord);
+    if (words.length > 1 && GENERIC_ROLE_SET.has(lastWord)) return true;
+    if (original.includes('_')) return true;
+    return words.length > 1 && originalCompact === originalCompact.toLowerCase();
 }
 
 export function getExplicitNamePromotions(text, trackedNames) {
