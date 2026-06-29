@@ -272,6 +272,55 @@ She set the glass down.
 "But you never listen."
 
 Formatting violations are invalid. Repair formatting before output.`;
+
+const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES = String.raw`cheeks flush
+cheeks flushed
+face flushes
+face flushed
+skin goes pink
+skin turns pink
+skin turns red
+deep flush
+color rises
+breath catches
+breath hitches
+voice catches
+voice hitches
+throat works
+jaw works
+mouth opens, closes
+mouth opens, then closes
+jaw opens, closes
+jaw opens, then closes`;
+
+const DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES = String.raw`air smells
+air tastes
+room smells
+room tastes
+place smells
+place tastes
+barely above a whisper
+barely above a breath
+silence stretches
+words hang in the air
+tension hangs
+tension coils
+the word lands
+words land
+dropped like a stone
+like a stone on still water`;
+
+const DEFAULT_PROSE_GUARD_INANIMATE_OBJECTIVITY_BANNED_PHRASES = String.raw`room holds its breath
+rooms hold their breath
+darkness swallows
+shadows dance
+wind whispers
+walls watch
+silence waits
+tension hums
+atmosphere presses
+air waits`;
+
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
 
   applicationContract(response, input, context): {
@@ -473,6 +522,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     postNarrationProseGuardEnabled: true,
     proseGuardFormattingEnabled: true,
     proseGuardFormattingPrompt: DEFAULT_PROSE_GUARD_FORMATTING_PROMPT,
+    proseGuardStrictBehaviorismBannedPhrases: DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES,
+    proseGuardDenotativePhysicalityBannedPhrases: DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES,
+    proseGuardInanimateObjectivityBannedPhrases: DEFAULT_PROSE_GUARD_INANIMATE_OBJECTIVITY_BANNED_PHRASES,
     characterProgressionEnabled: true,
     writingStyleEnabled: true,
     writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT,
@@ -490,6 +542,38 @@ const DEFAULT_SETTINGS = Object.freeze({
     trackerWidgetY: 120,
 
 });
+
+const PROSE_GUARD_TARGETED_BAN_FIELDS = Object.freeze([
+    {
+        id: 'structured_preflight_prose_guard_bans_strict_behaviorism',
+        key: 'proseGuardStrictBehaviorismBannedPhrases',
+        ruleName: 'strictBehaviorism',
+        label: 'strictBehaviorism',
+        description: 'Emotional/body-cue shorthand.',
+        defaultValue: DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES,
+        repairInstruction: 'Render character state and emotion through external behavior/action only. Remove involuntary physiology, body-cue shorthand, emotional shorthand, internal labels, eye-language, micro-expressions, autonomic tells, and mouth/jaw opening-closing loops. Do not replace one tell with another tell.',
+    },
+    {
+        id: 'structured_preflight_prose_guard_bans_denotative_physicality',
+        key: 'proseGuardDenotativePhysicalityBannedPhrases',
+        ruleName: 'denotativePhysicality',
+        label: 'denotativePhysicality',
+        description: 'Atmospheric shorthand, figurative language, and metaphor violations.',
+        defaultValue: DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES,
+        repairInstruction: 'Use literal physical description only. Remove metaphor, simile, decorative abstraction, emotional physics, and atmospheric shorthand. Replace the sentence with concrete physical facts, action, spacing, sound, contact, object state, or visible consequence already present or directly implied by the scene.',
+    },
+    {
+        id: 'structured_preflight_prose_guard_bans_inanimate_objectivity',
+        key: 'proseGuardInanimateObjectivityBannedPhrases',
+        ruleName: 'inanimateObjectivity',
+        label: 'inanimateObjectivity',
+        description: 'False agency/personification assigned to objects, places, weather, or abstractions.',
+        defaultValue: DEFAULT_PROSE_GUARD_INANIMATE_OBJECTIVITY_BANNED_PHRASES,
+        repairInstruction: 'Inanimate things may have physical properties, sounds, movement, obstruction, lighting, weather behavior, or material effects only. Remove agency, awareness, intent, will, emotion, watching, waiting, breathing, swallowing, whispering, judgment, or threat assigned to objects, rooms, air, weather, darkness, silence, tension, atmosphere, or abstractions.',
+    },
+]);
+
+const TARGETED_PROSE_BAN_FINDING_LIMIT = 24;
 
 const EXTENSION_PROMPT_TYPES = Object.freeze({
     NONE: -1,
@@ -1051,6 +1135,13 @@ function getWritingStyleFieldControls(root = document) {
     }));
 }
 
+function getProseGuardTargetedBanFieldControls(root = document) {
+    return PROSE_GUARD_TARGETED_BAN_FIELDS.map(field => ({
+        ...field,
+        element: root.getElementById?.(field.id) || null,
+    }));
+}
+
 
 
 function refreshSettingsControls() {
@@ -1064,6 +1155,8 @@ function refreshSettingsControls() {
     const proseGuardFormattingEnabled = document.getElementById('structured_preflight_prose_guard_formatting_enabled');
     const proseGuardFormattingDrawer = document.getElementById('structured_preflight_prose_guard_formatting_drawer');
     const proseGuardFormattingPrompt = document.getElementById('structured_preflight_prose_guard_formatting_prompt');
+    const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
+    const proseGuardBanFields = getProseGuardTargetedBanFieldControls();
     const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
     const modelCallDelayEnabledCheckbox = document.getElementById('structured_preflight_model_call_delay_enabled');
@@ -1075,6 +1168,7 @@ function refreshSettingsControls() {
     const nameStyleSelect = document.getElementById('structured_preflight_name_style');
     const refreshSemanticButton = document.getElementById('structured_preflight_refresh_semantic_settings');
     const resetProseGuardFormattingButton = document.getElementById('structured_preflight_reset_prose_guard_formatting');
+    const resetProseGuardBanButtons = Array.from(document.querySelectorAll('[data-structured-preflight-reset-prose-guard-bans]'));
     const resetWritingStyleButtons = Array.from(document.querySelectorAll('[data-structured-preflight-reset-writing-style]'));
 
 
@@ -1085,6 +1179,12 @@ function refreshSettingsControls() {
     if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.checked = settings.proseGuardFormattingEnabled !== false;
     if (proseGuardFormattingPrompt && proseGuardFormattingPrompt.value !== settings.proseGuardFormattingPrompt) {
         proseGuardFormattingPrompt.value = String(settings.proseGuardFormattingPrompt ?? DEFAULT_PROSE_GUARD_FORMATTING_PROMPT);
+    }
+    for (const { element, key, defaultValue } of proseGuardBanFields) {
+        const value = String(settings[key] ?? defaultValue);
+        if (element && element.value !== value) {
+            element.value = value;
+        }
     }
     if (progressionEnabledCheckbox) progressionEnabledCheckbox.checked = settings.characterProgressionEnabled !== false;
     if (modelCallDelayEnabledCheckbox) modelCallDelayEnabledCheckbox.checked = settings.modelCallDelayEnabled === true;
@@ -1133,6 +1233,13 @@ function refreshSettingsControls() {
         proseGuardFormattingDrawer.hidden = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
         if (proseGuardFormattingDrawer.hidden) proseGuardFormattingDrawer.open = false;
     }
+    for (const { element } of proseGuardBanFields) {
+        if (element) element.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
+    }
+    if (proseGuardBansDrawer) {
+        proseGuardBansDrawer.hidden = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
+        if (proseGuardBansDrawer.hidden) proseGuardBansDrawer.open = false;
+    }
     for (const { element } of writingStyleFields) {
         if (element) element.disabled = !engineEnabled || settings.writingStyleEnabled === false;
     }
@@ -1150,6 +1257,7 @@ function refreshSettingsControls() {
         nameStyleSelect,
         refreshSemanticButton,
         resetProseGuardFormattingButton,
+        ...resetProseGuardBanButtons,
         ...resetWritingStyleButtons,
     ].forEach(control => {
         if (control) control.disabled = !engineEnabled;
@@ -1494,6 +1602,24 @@ function renderSettingsPanel() {
                                     <textarea id="structured_preflight_prose_guard_formatting_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
                                 </div>
                             </details>
+                            <details id="structured_preflight_prose_guard_bans_drawer" data-structured-preflight-prompt-drawer>
+                                <summary class="spe-settings-writing-summary">
+                                    <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Targeted Phrase Bans</button>
+                                    <button class="menu_button" type="button" data-structured-preflight-reset-prose-guard-bans="all">Reset All</button>
+                                </summary>
+                                <div class="spe-settings-body">
+                                    <small class="spe-settings-note">One phrase per line. Matches whole phrases only, then asks Prose Guard to rewrite the full sentence containing each violation.</small>
+                                    ${PROSE_GUARD_TARGETED_BAN_FIELDS.map(field => `
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <label for="${field.id}">${field.label}</label>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-prose-guard-bans="${field.key}">Reset</button>
+                                        </div>
+                                        <small class="spe-settings-note">${field.description}</small>
+                                        <textarea id="${field.id}" class="text_pole textarea_compact" rows="7" spellcheck="false"></textarea>
+                                    </div>`).join('')}
+                                </div>
+                            </details>
                             <small class="spe-settings-note">Runs after narration and before tracker update. It edits only prose-rule violations and preserves scene outcomes.</small>
                         </div>
                     </section>
@@ -1621,6 +1747,29 @@ function renderSettingsPanel() {
         settings.proseGuardFormattingPrompt = DEFAULT_PROSE_GUARD_FORMATTING_PROMPT;
         refreshSettingsControls();
         saveExtensionSettings();
+    });
+    for (const { id, key } of PROSE_GUARD_TARGETED_BAN_FIELDS) {
+        document.getElementById(id)?.addEventListener('input', event => {
+            settings[key] = String(event.target?.value ?? '');
+            saveExtensionSettings();
+        });
+    }
+    document.querySelectorAll('[data-structured-preflight-reset-prose-guard-bans]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const key = String(button.getAttribute('data-structured-preflight-reset-prose-guard-bans') || '');
+            const defaultsByKey = Object.fromEntries(PROSE_GUARD_TARGETED_BAN_FIELDS.map(field => [field.key, field.defaultValue]));
+            if (key === 'all') {
+                for (const field of PROSE_GUARD_TARGETED_BAN_FIELDS) {
+                    settings[field.key] = field.defaultValue;
+                }
+            } else if (defaultsByKey[key] !== undefined) {
+                settings[key] = defaultsByKey[key];
+            }
+            refreshSettingsControls();
+            saveExtensionSettings();
+        });
     });
     document.getElementById('structured_preflight_progression_enabled')?.addEventListener('change', event => {
         settings.characterProgressionEnabled = Boolean(event.target?.checked);
@@ -8681,6 +8830,220 @@ function sanitizeProseGuardResponse(raw, fallbackText) {
     return cleaned || fallbackText;
 }
 
+function parseProseGuardBannedPhraseList(value) {
+    return uniqueStrings(String(value ?? '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('#')));
+}
+
+function getTargetedProseBanRules(settings = getSettings()) {
+    return PROSE_GUARD_TARGETED_BAN_FIELDS
+        .map(field => ({
+            ...field,
+            phrases: parseProseGuardBannedPhraseList(settings[field.key] ?? field.defaultValue),
+        }))
+        .filter(rule => rule.phrases.length > 0);
+}
+
+function buildTargetedProseBanPhraseRegex(phrase) {
+    const tokens = String(phrase ?? '').match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)?/gu) || [];
+    if (!tokens.length) return null;
+    const body = tokens.map(escapeRegExp).join('[\\s\\p{P}\\p{S}]+');
+    return new RegExp(`(^|[^\\p{L}\\p{N}])(${body})(?=$|[^\\p{L}\\p{N}])`, 'giu');
+}
+
+function findSentenceBoundsForIndex(text, matchStart, matchEnd) {
+    const source = String(text ?? '');
+    let start = 0;
+    for (let index = Math.max(0, matchStart - 1); index >= 0; index--) {
+        const char = source[index];
+        if (char === '\n') {
+            start = index + 1;
+            break;
+        }
+        if ('.!?'.includes(char)) {
+            start = index + 1;
+            while (start < source.length && /[\s"'”’)\]]/.test(source[start])) start += 1;
+            break;
+        }
+    }
+
+    let end = source.length;
+    for (let index = Math.max(matchEnd, 0); index < source.length; index++) {
+        const char = source[index];
+        if (char === '\n') {
+            end = index;
+            break;
+        }
+        if ('.!?'.includes(char)) {
+            end = index + 1;
+            while (end < source.length && /["'”’)\]]/.test(source[end])) end += 1;
+            break;
+        }
+    }
+
+    return { start, end };
+}
+
+function collectTargetedProseBanFindings(narrationText, settings = getSettings()) {
+    const source = String(narrationText ?? '');
+    if (!source.trim()) return [];
+
+    const findings = [];
+    const seen = new Set();
+    for (const rule of getTargetedProseBanRules(settings)) {
+        for (const phrase of rule.phrases) {
+            const pattern = buildTargetedProseBanPhraseRegex(phrase);
+            if (!pattern) continue;
+
+            for (const match of source.matchAll(pattern)) {
+                const prefix = match[1] || '';
+                const matchedPhrase = match[2] || phrase;
+                const index = match.index + prefix.length;
+                const matchEnd = index + matchedPhrase.length;
+                const bounds = findSentenceBoundsForIndex(source, index, matchEnd);
+                const sentence = source.slice(bounds.start, bounds.end).trim();
+                if (!sentence) continue;
+
+                const key = `${rule.ruleName}\u0000${phrase.toLowerCase()}\u0000${bounds.start}\u0000${bounds.end}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                findings.push({
+                    ruleName: rule.ruleName,
+                    phrase,
+                    matchedPhrase,
+                    sentence,
+                    start: bounds.start,
+                    end: bounds.end,
+                    repairInstruction: rule.repairInstruction,
+                });
+                if (findings.length >= TARGETED_PROSE_BAN_FINDING_LIMIT) return findings;
+            }
+        }
+    }
+    return findings;
+}
+
+function formatTargetedProseBanFindings(findings) {
+    return findings.map((finding, index) => [
+        `${index + 1}. rule: ${finding.ruleName}`,
+        `   banned phrase: ${finding.phrase}`,
+        `   matched text: ${finding.matchedPhrase}`,
+        `   full sentence to rewrite: ${finding.sentence}`,
+        `   required repair: ${finding.repairInstruction}`,
+    ].join('\n')).join('\n\n');
+}
+
+function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserText = '') {
+    return [
+        'STORY_ENGINE_TARGETED_PROSE_BAN_REPAIR',
+        '',
+        'You are PROSE_GUARD_TARGETED_REPAIR, a strict sentence-level prose compliance editor.',
+        '',
+        'TASK:',
+        'The deterministic scanner has already confirmed banned phrase violations in TEXT_TO_CHECK.',
+        'Rewrite the ENTIRE sentence containing each detected violation. Do not replace only the phrase.',
+        'If one sentence has multiple violations, rewrite that sentence once so it obeys every cited rule.',
+        'Leave all other compliant sentences unchanged.',
+        '',
+        'GOVERNING RULES:',
+        '- strictBehaviorism: character/NPC state and emotion must be rendered through external behavior/action only. No involuntary physiology, body-cue shorthand, emotional shorthand, internal labels, eye-language, micro-expressions, autonomic tells, or mouth/jaw opening-closing loops.',
+        '- denotativePhysicality: narration must stay literal and physically grounded. No metaphor, simile, decorative abstraction, emotional physics, or atmospheric shorthand.',
+        '- inanimateObjectivity: inanimate things may have physical properties/effects only. No agency, awareness, will, emotion, watching, waiting, breathing, swallowing, whispering, judgment, threat, or intent assigned to objects, places, weather, darkness, silence, tension, atmosphere, or abstractions.',
+        '',
+        'REPAIR REQUIREMENTS:',
+        '- Rewrite the full sentence containing each listed banned phrase.',
+        '- Remove the banned phrase and its workaround pattern completely.',
+        '- Preserve the same speaker, dialogue meaning, scene facts, action order, intensity, consent/refusal, mechanics, and final handoff.',
+        '- Do not add new actions, dialogue, events, thoughts, emotions, motives, lore, mechanics, or outcomes.',
+        '- Do not replace one banned phrase with another body cue, metaphor, atmospheric shorthand, or personification.',
+        '- Use concrete physical prose: chosen action, speech content, posture that changes action, movement, spacing, contact, object use, sound, material state, obstruction, lighting, weather behavior, visible consequence.',
+        '- Return the corrected narration only.',
+        '',
+        'DETERMINISTIC_FINDINGS:',
+        formatTargetedProseBanFindings(findings),
+        '',
+        '==RECENT_USER_INPUT==',
+        latestUserText || '(empty)',
+        '',
+        '==TEXT_TO_CHECK==',
+        narrationText || '(empty)',
+        '',
+        '==CORRECTED_TEXT==',
+    ].join('\n');
+}
+
+async function requestTargetedProseBanRepair(narrationText, findings, latestUserText = '') {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
+    const prompt = buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserText);
+    const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 600));
+    state.bypassPromptReady = true;
+    try {
+        return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
+            if (settings?.semanticProfileId) {
+                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
+                    temperature: 0,
+                });
+            }
+            const context = getContext();
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for targeted Prose Guard repair.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
+        }));
+    } finally {
+        state.bypassPromptReady = false;
+    }
+}
+
+async function requestTargetedProseBanRepairWithTimeout(narrationText, findings, latestUserText = '') {
+    let timeoutId = null;
+    try {
+        return await Promise.race([
+            requestTargetedProseBanRepair(narrationText, findings, latestUserText),
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => {
+                        state.bypassPromptReady = false;
+                        reject(new Error(`Targeted Prose Guard repair timed out after ${Math.round(PROSE_GUARD_TIMEOUT_MS / 1000)} seconds.`));
+                    },
+                    PROSE_GUARD_TIMEOUT_MS,
+                );
+            }),
+        ]);
+    } finally {
+        if (timeoutId != null) clearTimeout(timeoutId);
+    }
+}
+
+async function applyTargetedProseBanRepairIfNeeded(narrationText, latestUserText = '') {
+    const findings = collectTargetedProseBanFindings(narrationText);
+    if (!findings.length) {
+        return { narrationText, changed: false, findings, remainingFindings: [] };
+    }
+
+    try {
+        const repairRaw = await requestTargetedProseBanRepairWithTimeout(narrationText, findings, latestUserText);
+        const repairedText = sanitizeProseGuardResponse(repairRaw, narrationText);
+        const remainingFindings = collectTargetedProseBanFindings(repairedText);
+        if (remainingFindings.length) {
+            console.warn(`[${EXTENSION_NAME}] targeted Prose Guard repair left banned phrase findings in the final narration.`, remainingFindings);
+        }
+        return {
+            narrationText: repairedText,
+            changed: String(repairedText ?? '').trim() !== String(narrationText ?? '').trim(),
+            findings,
+            remainingFindings,
+        };
+    } catch (error) {
+        console.warn(`[${EXTENSION_NAME}] targeted Prose Guard repair failed; keeping current narration text.`, error);
+        return { narrationText, changed: false, findings, remainingFindings: findings };
+    }
+}
+
 function canUseCombinedPostNarrationPass(settings = getSettings()) {
     if (settings.postNarrationProseGuardEnabled === false) return false;
     return true;
@@ -9147,6 +9510,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         const root = getTrackerRoot(context);
         const combinedPostPassEnabled = Boolean(narrationText && root && pendingRun && canUseCombinedPostNarrationPass(settings));
         let combinedTrackerDelta = null;
+        let broadProseGuardAlreadyApplied = false;
 
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
             clearRuntimePrompts();
@@ -9158,6 +9522,8 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 await deferForProseGuardFinalization();
                 const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
                 narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
+                const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '');
+                narrationText = targetedRepair.narrationText;
             } catch (error) {
                 console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
             }
@@ -9187,6 +9553,12 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     const combinedResult = parseCombinedPostNarrationResponse(combinedRaw, narrationText);
                     narrationText = combinedResult.correctedNarration;
                     combinedTrackerDelta = combinedResult.trackerDelta;
+                    broadProseGuardAlreadyApplied = true;
+                    const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '');
+                    narrationText = targetedRepair.narrationText;
+                    if (targetedRepair.changed) {
+                        combinedTrackerDelta = null;
+                    }
                     trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
                         messageKey,
                         pendingRun,
@@ -9199,11 +9571,13 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 }
             }
 
-            if (!combinedTrackerDelta && proseGuardEnabled && narrationText) {
+            if (!combinedTrackerDelta && proseGuardEnabled && narrationText && !broadProseGuardAlreadyApplied) {
                 try {
                     await deferForProseGuardFinalization();
                     const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
                     narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
+                    const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '');
+                    narrationText = targetedRepair.narrationText;
                     trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
                         messageKey,
                         pendingRun,

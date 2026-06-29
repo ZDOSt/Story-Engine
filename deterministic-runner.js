@@ -2836,6 +2836,9 @@ function resolveIntimacyBoundary({ npc, currentDisposition, threshold, establish
     if (initiated.accepted) {
         return { boundary: 'ALLOW', source: 'NPC_INITIATED', refusalStyle: 'NONE' };
     }
+    if (threshold?.Override === 'CurrentInvitation') {
+        return { boundary: 'ALLOW', source: 'OVERRIDE:CurrentInvitation', refusalStyle: 'NONE' };
+    }
     const previous = normalizeIntimacyStateLocal(previousIntimacyState);
     if (previous.boundary === 'ALLOW') {
         return { boundary: 'ALLOW', source: persistedIntimacySource(previous.source, 'ALLOW'), refusalStyle: 'NONE' };
