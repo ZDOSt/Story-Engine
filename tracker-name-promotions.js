@@ -54,7 +54,6 @@ export function isPromotableTrackerName(value) {
     const original = String(value ?? '').trim();
     const text = normalizeSearchText(value);
     if (!text) return false;
-    const originalCompact = original.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
     const compact = text.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
     if (/^(?:unknown|unnamed|unidentified|nameless|mysterious)\b/.test(compact)) return true;
     if (/^(?:npc|person|stranger|figure|enemy|attacker|assailant|bystander)\s*\d+$/.test(compact)) return true;
@@ -65,7 +64,7 @@ export function isPromotableTrackerName(value) {
     const lastWord = words[words.length - 1] || '';
     if (words.length > 1 && GENERIC_ROLE_SET.has(lastWord)) return true;
     if (original.includes('_')) return true;
-    return words.length > 1 && originalCompact === originalCompact.toLowerCase();
+    return false;
 }
 
 export function getExplicitNamePromotions(text, trackedNames) {

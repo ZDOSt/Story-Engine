@@ -4071,14 +4071,7 @@ function promoteTrackerEntry(npcs, oldName, newName) {
         lifecycle: 'Active',
 
     });
-
-    npcs[oldName] = normalizeTrackerEntry({
-
-        ...oldEntry,
-
-        lifecycle: 'Retired',
-
-    });
+    delete npcs[oldName];
     return true;
 }
 
@@ -5445,10 +5438,10 @@ function ensureTrackerDisplayStyles() {
             grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
         }
         .structured-preflight-tracker-detail {
-            display: grid;
-            grid-template-columns: minmax(5.8rem, max-content) minmax(0, 1fr);
-            gap: 0.45rem;
-            align-items: start;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.12rem;
             min-width: 0;
             padding: 0.28rem 0.36rem;
             border-radius: 5px;
@@ -5515,7 +5508,6 @@ function ensureTrackerDisplayStyles() {
         }
         @media (max-width: 520px) {
             .structured-preflight-tracker-detail {
-                grid-template-columns: 1fr;
                 gap: 0.12rem;
             }
             .structured-preflight-tracker-chip,
