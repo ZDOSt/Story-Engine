@@ -10194,7 +10194,7 @@ async function handleChatCompletionPromptReady(eventData) {
             beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
             appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
-            markNextNarratorRequestThinkingDisabled();
+            markNextStartAdventureRequestReasoningCleanup();
             await waitForStoryEngineModelCallSpacing('adventure intro model call');
             clearAllProgress();
             return;
