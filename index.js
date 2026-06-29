@@ -235,43 +235,21 @@ Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, 
 const DEFAULT_WRITING_STYLE_REMINDER_PROMPT = String.raw`FINAL WRITING STYLE REMINDER:
 Write clear, grounded narration while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with concrete environmental detail; dialogue should stay close to the active participants and immediate exchange, using observable behavior only and object or environmental interaction only when a character is actively using it, reacting to it, or when it materially affects the exchange; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
 const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
-Preserve and repair required markdown formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
+Preserve and repair required display formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
 
 UNDERLINE RULE:
-- Underline all character names, location names, unnamed scene roles, scene placeholders, and role/pronoun references with double underscores.
+- Underline all character names, placeholder names, location names, unnamed scene roles, scene placeholders, and role references with double underscores.
 - This includes proper names and descriptive references such as __Seraphina__, __Urakami Village__, __the guard__, __the innkeeper__, __the shopkeeper__, __the teacher__, __the student__, __the girl__, or __the merchant__.
-- Preserve existing valid __underlines__. Add missing underlines only around the exact name/role phrase already present. Do not invent names, titles, labels, or new role descriptions.
+- Preserve existing valid __underlines__.
+- Add missing underlines only around the exact name, location, placeholder, or role phrase already present.
+- Do not invent names, titles, labels, locations, or new role descriptions.
 
-BLOCK RULE:
-- One speaker equals one cohesive block.
-- Do not split the same speaker across separators.
-- Paragraph breaks are allowed only inside the same speaker block.
+DIALOGUE RULE:
+- All spoken dialogue must be inside quotation marks.
+- Preserve speaker identity and dialogue meaning exactly.
+- Add quotation marks only around dialogue that is already present.
 
-SEPARATOR RULE:
-- Use *** only for environmental narration to character block, speaker change, major scene/time shift, or OOC message.
-- Never use *** inside a single speaker block.
-- Never use *** between one speaker's dialogue and that same speaker's action.
-- Never use *** between one speaker's first line and second line.
-- If endpoint cleanup removes text, remove only separators made empty or invalid by that cut.
-
-VALID FORMAT:
-***
-The fire cracked in the hearth. Rain streaked the windows.
-***
-"I told you not to come." __Seraphina__ set the glass down. "But you never listen."
-She turned to the window. "You never do."
-***
-__The innkeeper__ shrugged. "Not my business."
-
-INVALID FORMAT:
-***
-"I told you."
-***
-She set the glass down.
-***
-"But you never listen."
-
-Formatting violations are invalid. Repair formatting before output.`;
+Formatting violations are invalid. Repair required underlines and dialogue quotation before output.`;
 
 const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES = String.raw`cheeks flush
 cheeks flushed
@@ -3779,6 +3757,70 @@ function getMentionedDisplayNpcNames(npcs, assistantText) {
 
     return activeNames;
 
+}
+
+function collectNarrationUnderlinePhrases({ trackerDisplaySnapshot = null, context = null } = {}) {
+    const phrases = [];
+    const add = value => {
+        const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+        if (!text || text.length < 3) return;
+        if (/^(?:you|your|yours|he|him|his|she|her|hers|they|them|their|theirs|it|its)$/i.test(text)) return;
+        if (/^(?:none|null|undefined|unknown)$/i.test(text)) return;
+        phrases.push(text);
+    };
+    const addNameAliases = value => {
+        const raw = String(value ?? '').trim();
+        if (!isRealName(raw)) return;
+        const spaced = raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+        add(raw);
+        add(spaced);
+        if (spaced && spaced === spaced.toLowerCase()) add(`the ${spaced}`);
+    };
+
+    for (const name of Object.keys(normalizeDisplayTrackerNpcs(trackerDisplaySnapshot?.npcs || {}))) {
+        addNameAliases(name);
+    }
+
+    const personaName = cleanTrackerDisplayName(getUserName(context));
+    addNameAliases(personaName);
+
+    for (const cardName of getActiveCardCharacterNames(context)) {
+        addNameAliases(cardName);
+    }
+
+    return uniqueStrings(phrases)
+        .filter(phrase => phrase.length >= 3)
+        .sort((a, b) => b.length - a.length);
+}
+
+function buildNarrationUnderlineRegex(phrase) {
+    const escaped = escapeRegExp(String(phrase || '').trim()).replace(/\s+/g, '\\s+');
+    if (!escaped) return null;
+    return new RegExp(`(^|[^\\p{L}\\p{N}_])(${escaped})(?![\\p{L}\\p{N}_])`, 'giu');
+}
+
+function underlineNarrationPhrases(text, phrases) {
+    const source = String(text ?? '');
+    if (!source || !phrases?.length) return source;
+    return source
+        .split(/(__[\s\S]*?__)/g)
+        .map(part => {
+            if (!part || /^__[\s\S]*__$/.test(part)) return part;
+            let next = part;
+            for (const phrase of phrases) {
+                const pattern = buildNarrationUnderlineRegex(phrase);
+                if (!pattern) continue;
+                next = next.replace(pattern, (_match, prefix, found) => `${prefix}__${found}__`);
+            }
+            return next;
+        })
+        .join('');
+}
+
+function applyDeterministicNarrationFormatting(narrationText, options = {}) {
+    if (!getSettings().proseGuardFormattingEnabled) return narrationText;
+    const phrases = collectNarrationUnderlinePhrases(options);
+    return underlineNarrationPhrases(narrationText, phrases);
 }
 
 
@@ -8687,7 +8729,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'PROTECTED FACTS / INTEGRITY LOCK:',
         '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
         ...(formattingPrompt ? [
-            '- Required formatting is protected unless it violates endpoint control: valid __underlined names/roles/locations__, valid *** separators, speaker block structure, and paragraph breaks.',
+            '- Required formatting is protected unless it violates endpoint control: valid __underlined names/roles/locations__ and valid dialogue quotation marks.',
         ] : []),
         '- Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
         '- Exception: remove every sentence, paragraph, separator line, or outro that appears after the final response beat unless it is required by an explicit resolved mechanic.',
@@ -8797,7 +8839,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Goal: return only a corrected narration that preserves the resolved scene.',
         'Before answering, verify that the corrected text did not change protected facts, did not add a new scene beat, did not delete a valid pre-boundary scene beat, did not reduce valid intimacy/detail/intensity, and did not reinterpret mechanics or character decisions.',
         ...(formattingPrompt ? [
-            'Verify that required formatting remains intact after prose corrections. Do not flatten speaker blocks, remove valid underlines, or remove valid separators.',
+            'Verify that required formatting remains intact after prose corrections. Do not remove valid underlines or dialogue quotation marks.',
         ] : []),
         'If a proposed correction would change protected facts, keep the original valid content and only remove the prose violation.',
         'If a sentence is both a valid resolved scene beat and contains a prose violation, rewrite the sentence narrowly instead of deleting it.',
@@ -9511,6 +9553,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         const combinedPostPassEnabled = Boolean(narrationText && root && pendingRun && canUseCombinedPostNarrationPass(settings));
         let combinedTrackerDelta = null;
         let broadProseGuardAlreadyApplied = false;
+        let finalTrackerDisplaySnapshot = null;
 
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
             clearRuntimePrompts();
@@ -9650,6 +9693,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             };
 
             setMessageTrackerDisplaySnapshot(message, trackerDisplaySnapshot);
+            finalTrackerDisplaySnapshot = trackerDisplaySnapshot;
             if (state.pendingRun === pendingRun) state.pendingRun = null;
         }
 
@@ -9659,6 +9703,12 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         }
 
         maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context });
+
+        narrationText = applyDeterministicNarrationFormatting(narrationText, {
+            trackerDisplaySnapshot: finalTrackerDisplaySnapshot,
+            pendingRun,
+            context,
+        });
 
         message.mes = narrationText;
         message.extra.display_text = narrationText;
