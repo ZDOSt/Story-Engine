@@ -184,6 +184,12 @@ Do not summarize the character sheet, biography, skills, past, goals, personalit
 Do not explain the world. Do not summarize lore. Let the scene imply the genre.
 
 End at the first concrete moment where {{user}} can act.`;
+
+const PLAYER_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMINDER:
+This is the opening of a new adventure.
+Narrate the opening scene immediately.
+Do not mention readiness, instructions, process, or meta commentary.
+Use the selected genre and the surrounding context already provided.`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
@@ -2051,7 +2057,7 @@ function appendNarratorContextToPrompt(chat, narratorContext) {
     }
 }
 
-function setNarratorDepthPrompt(context, narratorContext) {
+function setNarratorDepthPrompt(context, narratorContext, role = EXTENSION_PROMPT_ROLES.SYSTEM) {
     const text = String(buildFinalNarrationPrompt(narratorContext) || '').trim();
     if (!text) {
         throw new Error('Story Engine narrator handoff is empty; generation aborted before narration.');
@@ -2066,7 +2072,7 @@ function setNarratorDepthPrompt(context, narratorContext) {
         EXTENSION_PROMPT_TYPES.IN_CHAT,
         0,
         false,
-        EXTENSION_PROMPT_ROLES.SYSTEM,
+        normalizePromptRole(role),
     );
 
     return text;
@@ -6908,11 +6914,11 @@ function buildPlayerAdventureStartPrompt(root = {}) {
     const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
     const genreFrame = PLAYER_ADVENTURE_GENRE_FRAMES[genre] || PLAYER_ADVENTURE_GENRE_FRAMES.Fantasy;
     return [
-        `Begin the adventure for this character in the selected genre: ${genre}.`,
+        PLAYER_ADVENTURE_START_REMINDER,
         '',
         genreFrame,
         '',
-        PLAYER_ADVENTURE_OPENING_CONTRACT,
+        `Begin the adventure for this character in the selected genre: ${genre}.`,
     ].join('\n');
 }
 
@@ -10187,7 +10193,7 @@ async function handleChatCompletionPromptReady(eventData) {
             state.lastNarratorHandoff = narratorContext;
             beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
-            setNarratorDepthPrompt(context, narratorModelContext);
+            setNarratorDepthPrompt(context, narratorModelContext, EXTENSION_PROMPT_ROLES.USER);
             markNextStartAdventureRequestReasoningCleanup();
             await waitForStoryEngineModelCallSpacing('adventure intro model call');
             clearAllProgress();
