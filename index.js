@@ -307,14 +307,14 @@ air waits`;
 
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
 
-  applicationContract(response, input, context): {
+  function applicationContract(response, input, context): {
     mandate:
       Before writing the final, in-character response, treat these constraints as binding: activeHandoff, characterTurnPacing, hypotacticSceneBeats, linearChronology, strictBehaviorism, embodiedPerception, denotativePhysicality, inanimateObjectivity, strictEpistemology, and diegeticPhysicality.
       The response must be fully filtered through them and remain compliant with all of them.
       Any failure invalidates the response.
   }
 
-  activeHandoff(response, context): {
+  function activeHandoff(response, context): {
     policy: ACTIVE-HANDOFF
 
     mandate:
@@ -333,7 +333,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - End on filler background, ambient, or environmental details that are irrelevant to the ongoing interaction (e.g., "Somewhere, a dog barks", "The fire in the room crackles once").
   }
 
-  characterTurnPacing(response, context): {
+  function characterTurnPacing(response, context): {
     policy: DIALOGUE-TURN-LIMITS
 
     mandate:
@@ -351,7 +351,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - If the NPC asks a question or performs an action that clearly requires {{user}} response, stop immediately after that beat.
   }
 
-  hypotacticSceneBeats(response, context): {
+  function hypotacticSceneBeats(response, context): {
     policy: COHESIVE-ACTION-RESULT
 
     mandate:
@@ -368,7 +368,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Bad: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
   }
 
-  linearChronology(response, input, context): {
+  function linearChronology(response, input, context): {
     policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
 
     mandate:
@@ -383,7 +383,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       BAD Response Start: You reach for the scroll on the desk...
   }
 
-  agencySeparation(response, input, context): {
+  function agencySeparation(response, input, context): {
     policy: USER-CONTROL-BOUNDARY
 
     mandate:
@@ -396,7 +396,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not interpret, assume, or complete {{user}}'s intent.
   }
 
-  strictBehaviorism(response, context): {
+  function strictBehaviorism(response, context): {
     policy: EXTERNAL-ACTION-ONLY
 
     mandate:
@@ -413,7 +413,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - ALL EMOTIONAL SHORTCUTS ARE BANNED.
   }
 
-  embodiedPerception(response, context): {
+  function embodiedPerception(response, context): {
     policy: EMBODIED-NARRATION
 
     mandate:
@@ -435,7 +435,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not use smell or taste as ambient scene dressing or atmospheric shorthand.
   }
 
-  denotativePhysicality(response, context): {
+  function denotativePhysicality(response, context): {
     policy: LITERAL-PHYSICAL-PROSE
 
     mandate:
@@ -457,7 +457,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Bad: The silence stretched between you like a living thing.
   }
 
-  inanimateObjectivity(response, context): {
+  function inanimateObjectivity(response, context): {
     policy: NO-FALSE-AGENCY
 
     mandate:
@@ -470,7 +470,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
   }
 
-  strictEpistemology(response, context): {
+  function strictEpistemology(response, context): {
     policy: EARNED-INFORMATION-ONLY
 
     mandate:
@@ -483,7 +483,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - Do not narrate {{user}} cognition, perception, or internal state.
   }
 
-  diegeticPhysicality(response, context): {
+  function diegeticPhysicality(response, context): {
     policy: WORLD-EFFECTS-NOT-SYSTEM-LABELS
 
     mandate:
