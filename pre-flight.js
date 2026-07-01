@@ -1875,6 +1875,7 @@ function intimacyBoundarySourceText(source) {
     const text = String(source ?? 'NONE');
     if (text === 'ESTABLISHED_RELATIONSHIP') return 'an established relationship exists';
     if (text === 'NPC_INITIATED') return 'the NPC initiated or invited this intimacy and {{user}} is accepting';
+    if (text === 'B4_ROMANTIC_CONTEXT') return 'the B4 close-bond scene has consistently built toward this romantic or intimate advance';
     if (text === 'PERSISTED' || text === 'PERSISTED_ALLOW' || text.startsWith('PERSISTED:')) return 'intimacy permission was already established and no new boundary change revoked it';
     if (text === 'PERSISTED_DENY') return 'a prior intimacy boundary remains active';
     if (text === 'OVERRIDE:CurrentInvitation') return 'the NPC clearly offered, requested, invited, strongly implied, or physically initiated this intimacy in the current or immediately recent scene';

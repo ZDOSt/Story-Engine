@@ -440,8 +440,9 @@ function RelationshipEngine(npc, resolutionPacket) {
     else if NPC explicitly sexually open, pleasure-seeking, casual, or promiscuous -> Override = Hedonist
     else if NPC explicitly willing to exchange intimacy for money, goods, favors, protection, status, or services -> Override = Transactional
     else if NPC explicitly has prior/current intimate access with current or recent receptivity toward {{user}} -> Override = Established
+    RomanticBuildup = Y only when a B4 scene has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior and no refusal, withdrawal, fear, hostility, danger, public interruption, or boundary limit
     OverrideActive = Override!=NONE ? Y : N
-    return {LockActive, OverrideActive, Override}
+    return {LockActive, OverrideActive, Override, RomanticBuildup}
 
   checkEstablishedRelationship(currentDisposition, context):
     policy: LOCKED, EXPLICIT-ONLY
@@ -1341,7 +1342,7 @@ export function checkThreshold(disposition, flags) {
     else if (bool(flags.Hedonist)) Override = 'Hedonist';
     else if (bool(flags.Transactional)) Override = 'Transactional';
     else if (bool(flags.Established)) Override = 'Established';
-    return { LockActive, OverrideActive: Override !== 'NONE' ? 'Y' : 'N', Override };
+    return { LockActive, OverrideActive: Override !== 'NONE' ? 'Y' : 'N', Override, RomanticBuildup: bool(flags.RomanticBuildup) ? 'Y' : 'N' };
 }
 
 export function getChaosContext(handoffs, sceneSummary) {
