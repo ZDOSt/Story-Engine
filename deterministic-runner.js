@@ -1422,7 +1422,7 @@ function normalizeUserAbilityUseForHandoff(value = {}) {
 
 function normalizeItemUseForHandoff(value = {}, context = null, audit = null, playerTrackerSnapshot = null) {
     const source = value && typeof value === 'object' ? value : {};
-    const attempted = bool(source.attempted ?? source.Attempted);
+    let attempted = bool(source.attempted ?? source.Attempted);
     const rawAvailable = bool(source.available ?? source.Available);
     const item = String(source.item ?? source.Item ?? '').trim();
     const rawSource = String(source.source ?? source.Source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -1431,6 +1431,18 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
     let noEffectReason = String(source.noEffectReason ?? source.NoEffectReason ?? '').trim();
     if (!attempted) itemSource = 'none';
     let available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
+    if (attempted && itemUseLooksLikeSceneObjectAccess(item, evidence, context)) {
+        audit?.push(`2.7s.0b deterministicSceneObjectItemUseRepair=${compact({
+            hardRule: 'scene, environmental, or NPC-offered objects are not personal gear/inventory itemUse',
+            item,
+            evidence,
+            correctedTo: 'not itemUse',
+        })}`);
+        attempted = false;
+        available = false;
+        itemSource = 'none';
+        noEffectReason = NONE;
+    }
     const savedItemMatch = attempted ? playerTrackerItemMatch(context, item, playerTrackerSnapshot) : null;
     const savedItemSource = savedItemMatch?.source || null;
     if (attempted && !available && savedItemSource) {
@@ -1488,6 +1500,25 @@ function itemUseRequiresPlayerTrackerItem(source, item, evidence, context) {
         || latestUserInputClaimsItemPossession(item, evidence, context);
 }
 
+function itemUseLooksLikeSceneObjectAccess(item, evidence, context) {
+    const itemText = normalizeItemMatchText(item);
+    if (!itemText) return false;
+    const source = normalizeItemPossessionClaimText([
+        evidence,
+        getLatestUserTextFromContext(context),
+    ].filter(Boolean).join(' '));
+    if (!source || latestUserInputClaimsCarriedItemSource(item, evidence, context)) return false;
+    const itemPattern = itemText.split(/\s+/).filter(Boolean).map(escapeRegex).join('\\s+');
+    const sceneSource = '(?:table|desk|counter|shelf|floor|ground|road|street|path|trail|dirt|sand|snow|grass|bed|chair|bench|couch|sofa|wall|rack|crate|barrel|box|chest|corpse|body|display|case|window|altar|pedestal|bar|stool|cart|wagon|doorstep)';
+    const scenePrep = '(?:from|off|off\\s+of|on|in|inside|at|under|beneath|beside|by|near|nearby|next\\s+to|behind|against)';
+    const sceneAction = '(?:grab|grabs|take|takes|pick\\s+up|picks\\s+up|lift|lifts|snatch|snatches|collect|collects|retrieve|retrieves)';
+    const transferVerb = '(?:hand|hands|handed|offer|offers|offered|give|gives|gave|pass|passes|passed)';
+    return new RegExp(`\\b${itemPattern}\\b.{0,80}\\b${scenePrep}\\b.{0,30}\\b${sceneSource}\\b`).test(source)
+        || new RegExp(`\\b${sceneAction}\\b.{0,80}\\b${itemPattern}\\b.{0,80}\\b${scenePrep}\\b.{0,30}\\b${sceneSource}\\b`).test(source)
+        || new RegExp(`\\b${transferVerb}\\b.{0,80}\\b(?:me|to\\s+me|toward\\s+me|over)\\b.{0,80}\\b${itemPattern}\\b`).test(source)
+        || new RegExp(`\\b${itemPattern}\\b.{0,80}\\b${transferVerb}\\b.{0,80}\\b(?:me|to\\s+me|toward\\s+me|over)\\b`).test(source);
+}
+
 function latestUserInputClaimsItemPossession(item, evidence, context) {
     const itemText = normalizeItemMatchText(item);
     if (!itemText) return false;
@@ -1504,6 +1535,25 @@ function latestUserInputClaimsItemPossession(item, evidence, context) {
     const carriedPlaces = '(?:belt|hip|waist|hand|hands|pocket|bag|pack|pouch|sheath|holster|back|shoulder|side)';
     return new RegExp(`\\bmy\\s+${itemPattern}\\b`).test(source)
         || new RegExp(`\\b${itemPattern}\\s+(?:at|on|in|from)\\s+my\\s+${carriedPlaces}\\b`).test(source)
+        || new RegExp(`\\b(?:draw|pull|take|retrieve|produce|unsheathe)\\b.{0,60}\\b${itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source)
+        || new RegExp(`\\b${tail ? escapeRegex(tail) : itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source);
+}
+
+function latestUserInputClaimsCarriedItemSource(item, evidence, context) {
+    const itemText = normalizeItemMatchText(item);
+    if (!itemText) return false;
+    const source = normalizeItemPossessionClaimText([
+        evidence,
+        getLatestUserTextFromContext(context),
+    ].filter(Boolean).join(' '));
+    if (!source) return false;
+    const words = itemText.split(/\s+/).filter(Boolean);
+    const tail = words[words.length - 1];
+    const itemPattern = words.length > 1
+        ? words.map(escapeRegex).join('\\s+')
+        : escapeRegex(tail);
+    const carriedPlaces = '(?:belt|hip|waist|hand|hands|pocket|bag|pack|pouch|sheath|holster|back|shoulder|side)';
+    return new RegExp(`\\b${itemPattern}\\s+(?:at|on|in|from)\\s+my\\s+${carriedPlaces}\\b`).test(source)
         || new RegExp(`\\b(?:draw|pull|take|retrieve|produce|unsheathe)\\b.{0,60}\\b${itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source)
         || new RegExp(`\\b${tail ? escapeRegex(tail) : itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source);
 }
@@ -1629,6 +1679,178 @@ function isStakeBearingUntrustedClaim(claimCheck) {
     return normalized.Present === 'Y'
         && normalized.StakesImpact === 'Y'
         && ['known_false', 'unsupported'].includes(normalized.TruthStatus);
+}
+
+function getAcceptedOfferedObjectNoRollEvidence(semantic, semanticRollNeeded, context) {
+    if (semanticRollNeeded !== 'Y') return null;
+    const exchange = getLatestRelationshipExchange(context);
+    const userText = relationshipText(exchange.user || getLatestUserTextFromContext(context)).toLowerCase();
+    const assistantText = relationshipText(exchange.assistant).toLowerCase();
+    if (!userText || !assistantText) return null;
+    if (!userAcceptsOfferedObjectText(userText)) return null;
+    if (!assistantOffersObjectToUserText(assistantText, extractAcceptedObjectTerms(userText))) return null;
+    if (acceptedOfferTextIsForcefulContest(userText) || acceptedOfferTextIgnoresRefusal(userText) || hasDirectBodilyAggression(userText)) return null;
+
+    return {
+        rollNeeded: 'N',
+        rule: 'hard_override_accepted_offered_object_no_roll',
+        reason: 'NPC-offered object accepted by user; ordinary transfer has no fresh contest unless refusal, withdrawal, force, theft, or danger is explicit.',
+        evidence: {
+            hardRule: 'ResolutionEngine.rollNeeded: accepting an item clearly offered, handed, passed, or given by an NPC is ordinary transfer, not a possession contest',
+            from: 'Y',
+            to: 'N',
+            userText: userText.slice(0, 180),
+            assistantText: assistantText.slice(0, 180),
+        },
+    };
+}
+
+function getFriendlyNpcObjectAccessNoRollEvidence(semantic, semanticRollNeeded, context, trackerSnapshot, targets, bucketContext = {}) {
+    if (semanticRollNeeded !== 'Y') return null;
+    const actionBucket = String(bucketContext.actionBucket || semantic?.actionBucket || '').toLowerCase();
+    const socialBucket = String(bucketContext.socialBucket || semantic?.socialBucket || '').toLowerCase();
+    if (actionBucket === 'combat' || ['bluff', 'intimidate'].includes(socialBucket)) return null;
+    if (toRealArray(targets?.hostilesInScene?.NPC).length || toRealArray(targets?.OppTargets?.ENV).length) return null;
+
+    const exchange = getLatestRelationshipExchange(context);
+    const userText = relationshipText(exchange.user || getLatestUserTextFromContext(context)).toLowerCase();
+    const assistantText = relationshipText(exchange.assistant).toLowerCase();
+    const source = [userText, semanticSourceText(semantic)].filter(Boolean).join(' ').toLowerCase();
+    if (!userText || !userFriendlyObjectAccessText(source)) return null;
+    if (friendlyAccessTextIsForcefulContest(source) || acceptedOfferTextIgnoresRefusal(source) || hasDirectBodilyAggression(source) || bool(semantic?.boundaryViolationExplicit)) return null;
+    if (assistantRefusesObjectAccessText(assistantText)) return null;
+    if (assistantRequestsItemReturnText(assistantText) && !userCompliesWithItemReturnText(userText)) return null;
+
+    const opposingTargets = toRealArray(targets?.OppTargets?.NPC);
+    if (opposingTargets.some(name => !friendlyNpcObjectAccessEligible(name, trackerSnapshot))) return null;
+
+    const directTargets = unique([...opposingTargets, ...toRealArray(targets?.ActionTargets)])
+        .filter(name => friendlyNpcObjectAccessEligible(name, trackerSnapshot));
+    if (!directTargets.length) return null;
+    const mentionedTargets = directTargets.filter(name => sourceMentionsNpcOrAlias(source, { NPC: name, ...normalizeTrackerEntry(trackerSnapshot?.[name] || {}) }));
+    const target = mentionedTargets[0] || (directTargets.length === 1 ? directTargets[0] : null);
+    if (!target) return null;
+
+    return {
+        rollNeeded: 'N',
+        rule: 'hard_override_friendly_object_access_no_roll',
+        reason: 'Friendly B3+ NPC possession access without force, refusal, or return dispute is ordinary borrowing/handling, not immediate opposition.',
+        evidence: {
+            hardRule: 'ResolutionEngine.rollNeeded: B3+ friendly NPC item access is not a possession contest unless force, theft, refusal, hostility, or a return dispute is explicit',
+            from: 'Y',
+            to: 'N',
+            NPC: target,
+            disposition: formatDisposition(normalizeTrackerEntry(trackerSnapshot?.[target] || {}).currentDisposition),
+            userText: userText.slice(0, 180),
+        },
+    };
+}
+
+function friendlyNpcObjectAccessEligible(name, trackerSnapshot) {
+    if (!isReal(name)) return false;
+    const state = normalizeTrackerEntry(trackerSnapshot?.[name] || {});
+    const disposition = state.currentDisposition;
+    if (!disposition) return false;
+    return Number(disposition.B || 0) >= 3
+        && Number(disposition.F || 0) < 3
+        && Number(disposition.H || 0) < 3
+        && state.dominantLock === 'None'
+        && state.pressureMode === 'none'
+        && state.condition !== 'dead';
+}
+
+function userFriendlyObjectAccessText(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    if (!source) return false;
+    const accessVerb = '(?:take|takes|took|grab|grabs|grabbed|borrow|borrows|borrowed|use|uses|used|pick\\s+up|picks\\s+up|picked\\s+up|draw|draws|drew|pull|pulls|pulled|lift|lifts|lifted|collect|collects|collected|handle|handles|handled|hold|holds|held|take\\s+hold\\s+of|reach\\s+for|reaches\\s+for|reached\\s+for)';
+    const bodyPart = '(?:hand|hands|arm|arms|wrist|wrists|shoulder|shoulders|neck|throat|face|hair|waist|body|leg|legs|ankle|ankles)';
+    const itemWord = '(?:phone|wallet|purse|bag|pack|pouch|sword|weapon|dagger|knife|blade|key|book|scroll|letter|coin|money|item|object|thing|tool|staff|wand|ring|amulet|bottle|cup|glass|map|note|paper|gear|equipment|possession)';
+    if (new RegExp(`\\b${accessVerb}\\b.{0,80}\\b${bodyPart}\\b`).test(source)) return false;
+    return new RegExp(`\\b${accessVerb}\\b.{0,100}\\b(?:his|her|their|[a-z0-9]+)\\s+${itemWord}\\b`).test(source)
+        || new RegExp(`\\b${accessVerb}\\b.{0,100}\\b${itemWord}\\b.{0,80}\\b(?:from|off|out\\s+of|in|on|at)\\s+(?:his|her|their|[a-z0-9]+)\\b`).test(source)
+        || new RegExp(`\\b${accessVerb}\\b.{0,100}\\b${itemWord}\\b`).test(source);
+}
+
+function friendlyAccessTextIsForcefulContest(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    return /\b(?:snatch|snatches|snatched|steal|steals|stole|stolen|rip|rips|ripped|yank|yanks|yanked|wrench|wrenches|wrenched|seize|seizes|seized|force|forces|forced|shove|shoves|shoved|barge|barges|barged)\b/.test(source);
+}
+
+function assistantRefusesObjectAccessText(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    if (!source) return false;
+    const accessVerb = '(?:take|grab|use|borrow|have|hold|keep|touch|draw|pull|handle|open|reach\\s+for)';
+    return /\b(?:do\s+not|don\s+t|dont|never|stop)\b.{0,80}\b(?:take|grab|use|borrow|have|hold|keep|touch|draw|pull|handle|open|reach\s+for)\b/.test(source)
+        || new RegExp(`\\b(?:you|your)\\b.{0,40}\\b(?:can\\s+not|cannot|can\\s+t|may\\s+not|must\\s+not|won\\s+t|will\\s+not|do\\s+not|don\\s+t|dont)\\b.{0,60}\\b${accessVerb}\\b`).test(source)
+        || /\b(?:can\s+not|cannot|can\s+t|may\s+not|must\s+not|won\s+t|will\s+not)\s+(?:have|take|use|borrow|keep|touch)\b/.test(source)
+        || /\b(?:hands?\s+off|no\s+touching|not\s+yours|mine,\s+not\s+yours|leave\s+(?:it|that|this|the\s+[a-z0-9\s]{1,40})\s+alone)\b/.test(source)
+        || /\b(?:pulls?|yanks?|takes?)\b.{0,60}\b(?:it|that|this|the\s+[a-z0-9\s]{1,40})\b.{0,40}\b(?:back|away|out\s+of\s+reach)\b/.test(source)
+        || /\b(?:keeps?|holds?)\b.{0,60}\b(?:it|that|this|the\s+[a-z0-9\s]{1,40})\b.{0,40}\b(?:away|out\s+of\s+reach|against\s+(?:himself|herself|themself|themselves))\b/.test(source);
+}
+
+function assistantRequestsItemReturnText(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    return /\b(?:give|hand|pass|return|bring)\b.{0,80}\b(?:it|that|this|the\s+[a-z0-9\s]{1,40})\s+back\b/.test(source)
+        || /\b(?:give|hand|pass|return|bring)\s+me\b.{0,80}\b(?:it|that|this|the\s+[a-z0-9\s]{1,40})\b/.test(source)
+        || /\b(?:my|mine)\b.{0,40}\bback\b/.test(source)
+        || /\b(?:that|this|it)\s+is\s+mine\b/.test(source);
+}
+
+function userCompliesWithItemReturnText(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    return /\b(?:give|hand|pass|return|bring)\b.{0,80}\b(?:it|that|this|the\s+[a-z0-9\s]{1,40})\s+back\b/.test(source)
+        || /\b(?:give|hand|pass|return|bring)\s+(?:it|that|this|the\s+[a-z0-9\s]{1,40})\s+(?:to|back\s+to)\b/.test(source)
+        || /\b(?:give|hand|pass|return|bring)\s+(?:him|her|them)\b.{0,80}\b(?:it|that|this)\b/.test(source);
+}
+
+function userAcceptsOfferedObjectText(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    if (!source) return false;
+    if (/\b(?:no thanks|no thank you|refuse|decline|reject|do not accept|don't accept|cannot accept|can't accept|won't accept|give it back|push it away)\b/.test(source)) return false;
+    return /\b(?:i\s+)?(?:take|takes|accept|accepts|grab|grabs|receive|receives|keep|keeps|collect|collects|pick\s+up|picks\s+up|take\s+hold\s+of|reach\s+for|reaches\s+for|borrow|borrows|use|uses)\b/.test(source);
+}
+
+function extractAcceptedObjectTerms(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    const terms = [];
+    const verbPattern = '(?:take|takes|accept|accepts|grab|grabs|receive|receives|keep|keeps|collect|collects|pick\\s+up|picks\\s+up|take\\s+hold\\s+of|reach\\s+for|reaches\\s+for|borrow|borrows|use|uses)';
+    const regex = new RegExp(`\\b${verbPattern}\\s+(?:the\\s+|a\\s+|an\\s+|his\\s+|her\\s+|their\\s+|your\\s+|my\\s+)?([a-z0-9][a-z0-9\\s]{0,60})`, 'g');
+    for (const match of source.matchAll(regex)) {
+        const phrase = String(match[1] || '')
+            .split(/\b(?:from|off|out|into|in|on|with|while|and|then|before|after|to|toward|over|away)\b/)[0]
+            .trim();
+        if (!phrase || /^(?:it|that|this|one|thing|item|object)$/.test(phrase)) continue;
+        const normalized = normalizeItemMatchText(phrase);
+        if (normalized) terms.push(normalized);
+    }
+    return unique(terms);
+}
+
+function assistantOffersObjectToUserText(text, acceptedTerms = []) {
+    const source = normalizeItemPossessionClaimText(text);
+    if (!source) return false;
+    if (/\b(?:does\s+not|doesn\s+t|did\s+not|didn\s+t|can\s+not|cannot|can\s+t|will\s+not|won\s+t|refuses?\s+to|declines?\s+to)\s+(?:hand|offer|give|pass|lend|let|allow)\b/.test(source)) return false;
+    if (/\b(?:keeps?\s+hold|does\s+not\s+let\s+go|won\s+t\s+let\s+go|pulls?\s+(?:it|that|this)\s+back|out\s+of\s+reach|if\s+you\s+can\s+take|can\s+t\s+have|cannot\s+have|not\s+yours)\b/.test(source)) return false;
+
+    const directedOffer = /\b(?:hand|hands|handed|offer|offers|offered|give|gives|gave|pass|passes|passed|present|presents|presented|extend|extends|extended|slide|slides|slid|push|pushes|pushed|lend|lends|lent|loan|loans|loaned)\b.{0,100}\b(?:you|your|to\s+you|toward\s+you|for\s+you|into\s+your\s+hand|over)\b/.test(source)
+        || /\b(?:hold|holds|held|holding)\b.{0,80}\bout\b.{0,60}\b(?:you|to\s+you|toward\s+you|for\s+you|over)\b/.test(source)
+        || /\b(?:use|take|borrow)\s+(?:mine|my|this|the)\b/.test(source)
+        || /\byou\s+can\s+(?:use|take|borrow|have|hold|keep)\b/.test(source);
+    if (!directedOffer) return false;
+
+    const sourceItems = normalizeItemMatchText(source);
+    return !acceptedTerms.length || acceptedTerms.some(term => sourceItems.includes(term) || normalizedItemNamesMatch(sourceItems, term));
+}
+
+function acceptedOfferTextIsForcefulContest(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    return /\b(?:snatch|snatches|snatched|steal|steals|stole|stolen|rip|rips|ripped|yank|yanks|yanked|wrench|wrenches|wrenched|seize|seizes|seized|force|forces|forced|shove|shoves|shoved|barge|barges|barged)\b/.test(source)
+        || /\b(?:from|out\s+of)\s+(?:his|her|their)\s+(?:grip|grasp|possession|bag|pocket|belt|pouch|sheath|holster)\b/.test(source);
+}
+
+function acceptedOfferTextIgnoresRefusal(text) {
+    const source = normalizeItemPossessionClaimText(text);
+    return /\b(?:despite|ignoring|ignore|after|even\s+though)\b.{0,80}\b(?:refus|said\s+no|told\s+me\s+no|told\s+me\s+stop|pulls?\s+away|withdraws?|stop)\b/.test(source);
 }
 
 function getStakeBearingClaimStakesEvidence(semantic, semanticRollNeeded) {
@@ -1759,13 +1981,20 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     audit.push(`2.3a boundaryViolationExplicit=${boundaryViolationExplicit}`);
     const pureLoveDeclarationEvidence = getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext);
     const companionCommandNoRollEvidence = getDirectedCompanionCommandNoRollEvidence(semantic, identityTargets, trackerSnapshot, targetClassifier, context);
+    const acceptedOfferedObjectEvidence = getAcceptedOfferedObjectNoRollEvidence(semantic, semanticRollNeeded, context);
+    const friendlyObjectAccessEvidence = getFriendlyNpcObjectAccessNoRollEvidence(semantic, semanticRollNeeded, context, trackerSnapshot, identityTargets, { actionBucket, socialBucket, combatType });
     const stakeBearingClaimEvidence = getStakeBearingClaimStakesEvidence(semantic, semanticRollNeeded);
     const stakesOverrideEvidence = companionCommandNoRollEvidence
         || pureLoveDeclarationEvidence
         || getRomanceNoRollOverrideEvidence(semantic, semanticRollNeeded, boundaryViolationExplicit, intimacyAdvanceExplicit)
+        || acceptedOfferedObjectEvidence
+        || friendlyObjectAccessEvidence
         || stakeBearingClaimEvidence;
     let rollNeeded = stakesOverrideEvidence?.rollNeeded || semanticRollNeeded;
     let stakesRule = stakesOverrideEvidence?.rule || 'semantic_final';
+    if (stakesOverrideEvidence?.reason) {
+        rollReason = normalizeRollReason(stakesOverrideEvidence.reason, rollReason);
+    }
     if (stakeBearingClaimEvidence && actionBucket === 'None') {
         actionBucket = 'Social';
         socialBucket = 'Bluff';
