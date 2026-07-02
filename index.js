@@ -632,6 +632,7 @@ const state = {
     proseGuardHiddenMessageIds: new Set(),
     postNarrationFinalizers: new Set(),
     postNarrationFinalizerTimers: new Map(),
+    trackerWidgetEditingUserItems: false,
 };
 
 
@@ -4075,6 +4076,63 @@ function promoteTrackerEntry(npcs, oldName, newName) {
     return true;
 }
 
+function normalizeManualUserItemList(value) {
+    const source = Array.isArray(value) ? value : [];
+    const result = [];
+    const seen = new Set();
+    for (const item of source) {
+        const text = cleanTrackerDeltaText(item);
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(text);
+        if (result.length >= 40) break;
+    }
+    return result;
+}
+
+function updateLatestTrackerDisplaySnapshotUser(context, user) {
+    const chat = context?.chat;
+    const root = getTrackerRoot(context);
+    if (!Array.isArray(chat)) return false;
+    const normalizedUser = normalizeTrackerUserState(user || {});
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        const message = chat[index];
+        const snapshot = getMessageTrackerDisplaySnapshot(message);
+        if (!snapshot?.npcs) continue;
+        const nextSnapshot = {
+            ...clone(snapshot),
+            user: normalizedUser,
+        };
+        const messageKey = getMessageKey(index, context);
+        if (root?.snapshots?.[messageKey]) {
+            root.snapshots[messageKey].afterUser = clone(normalizedUser);
+            root.snapshots[messageKey].display = {
+                ...(root.snapshots[messageKey].display || {}),
+                ...clone(nextSnapshot),
+            };
+        }
+        setMessageTrackerDisplaySnapshot(message, nextSnapshot);
+        return true;
+    }
+    return false;
+}
+
+async function saveManualUserTrackerItems({ gear, inventory }, context = getContext()) {
+    const root = getTrackerRoot(context);
+    if (!root) return false;
+    const nextUser = normalizeTrackerUserState({
+        ...(root.user || {}),
+        gear: normalizeManualUserItemList(gear),
+        inventory: normalizeManualUserItemList(inventory),
+    });
+    root.user = nextUser;
+    updateLatestTrackerDisplaySnapshotUser(context, nextUser);
+    await persistMetadata(context);
+    return true;
+}
+
 function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null) {
     const normalized = normalizeDisplayTrackerNpcs(npcs || {});
     const previous = normalizeDisplayTrackerNpcs(beforeNpcs || {});
@@ -4824,6 +4882,26 @@ function trackerDetailLine(label, value, options = {}) {
         </div>`;
 }
 
+function trackerEditableUserItemList(label, field, value) {
+    const items = normalizeManualUserItemList(value);
+    const rows = items.length
+        ? items.map(item => `
+            <div class="structured-preflight-tracker-edit-row">
+                <input class="text_pole structured-preflight-tracker-edit-input" data-spe-tracker-user-field="${escapeHtml(field)}" value="${escapeHtml(item)}" spellcheck="false">
+                <button class="menu_button structured-preflight-tracker-edit-remove" type="button" data-spe-tracker-remove-item title="Remove ${escapeHtml(label)} item" aria-label="Remove ${escapeHtml(label)} item">x</button>
+            </div>`).join('')
+        : '<div class="structured-preflight-tracker-muted" data-spe-tracker-empty-list>No items</div>';
+    return `
+        <div class="structured-preflight-tracker-detail structured-preflight-tracker-edit-list" data-spe-tracker-list="${escapeHtml(field)}">
+            <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(trackerDetailTone(label))}">${escapeHtml(label)}</span>
+            <div class="structured-preflight-tracker-edit-rows" data-spe-tracker-list-rows="${escapeHtml(field)}">${rows}</div>
+            <div class="structured-preflight-tracker-edit-add-row">
+                <input class="text_pole structured-preflight-tracker-edit-input" data-spe-tracker-add-input="${escapeHtml(field)}" placeholder="Add ${escapeHtml(label.toLowerCase())} item" spellcheck="false">
+                <button class="menu_button structured-preflight-tracker-edit-add" type="button" data-spe-tracker-add-item="${escapeHtml(field)}" title="Add ${escapeHtml(label)} item" aria-label="Add ${escapeHtml(label)} item">+</button>
+            </div>
+        </div>`;
+}
+
 function trackerChipLabelTone(label) {
     const key = String(label || '')
         .toLowerCase()
@@ -4921,6 +4999,26 @@ function buildTrackerDisplayHtml(snapshot) {
     const userCore = snapshot?.userCoreStats;
     const user = normalizeTrackerUserState(snapshot?.user || {});
     const personaName = cleanTrackerDisplayName(getUserName()) || 'User';
+    const editingUserItems = Boolean(state.trackerWidgetEditingUserItems);
+    const userItemControls = editingUserItems
+        ? `
+            <div class="structured-preflight-tracker-edit-actions">
+                <button class="menu_button structured-preflight-tracker-edit-save" type="button" data-spe-tracker-save-user-items>Save</button>
+                <button class="menu_button structured-preflight-tracker-edit-cancel" type="button" data-spe-tracker-cancel-user-items>Cancel</button>
+            </div>`
+        : `
+            <div class="structured-preflight-tracker-edit-actions">
+                <button class="menu_button structured-preflight-tracker-edit-toggle" type="button" data-spe-tracker-edit-user-items>Edit Inventory/Gear</button>
+            </div>`;
+    const userGearInventoryHtml = editingUserItems
+        ? [
+            trackerEditableUserItemList('Gear', 'gear', user.gear),
+            trackerEditableUserItemList('Inventory', 'inventory', user.inventory),
+        ].join('')
+        : [
+            trackerDetailLine('Gear', user.gear, { showEmpty: true }),
+            trackerDetailLine('Inventory', user.inventory, { showEmpty: true }),
+        ].join('');
 
     const renderNpc = name => {
 
@@ -4989,6 +5087,7 @@ function buildTrackerDisplayHtml(snapshot) {
                             <div class="structured-preflight-tracker-title structured-preflight-tracker-name-player">${escapeHtml(personaName)}</div>
                             <div class="structured-preflight-tracker-role">Player</div>
                         </div>
+                        ${userItemControls}
                         <div class="structured-preflight-tracker-chip-row">
                             ${trackerStatCluster(userCore)}
                             ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
@@ -4997,8 +5096,7 @@ function buildTrackerDisplayHtml(snapshot) {
                     <div class="structured-preflight-tracker-detail-grid">
                         ${trackerDetailLine('Wounds', user.wounds, { showEmpty: true })}
                         ${trackerDetailLine('Status', user.statusEffects, { showEmpty: true })}
-                        ${trackerDetailLine('Gear', user.gear, { showEmpty: true })}
-                        ${trackerDetailLine('Inventory', user.inventory, { showEmpty: true })}
+                        ${userGearInventoryHtml}
                         ${trackerDetailLine('Tasks', user.tasks, { showEmpty: true })}
                         ${trackerDetailLine('Commitments', user.commitments, { showEmpty: true })}
                     </div>
@@ -5493,6 +5591,51 @@ function ensureTrackerDisplayStyles() {
         .structured-preflight-tracker-detail-value {
             min-width: 0;
             overflow-wrap: anywhere;
+        }
+        .structured-preflight-tracker-edit-actions {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.32rem;
+            margin-left: auto;
+        }
+        .structured-preflight-tracker-edit-actions .menu_button {
+            min-height: 1.7rem;
+            padding: 0.18rem 0.48rem;
+            border-radius: 5px;
+            font-size: 0.78rem;
+            line-height: 1.1;
+        }
+        .structured-preflight-tracker-edit-list {
+            gap: 0.28rem;
+        }
+        .structured-preflight-tracker-edit-rows,
+        .structured-preflight-tracker-edit-add-row {
+            display: grid;
+            gap: 0.28rem;
+            width: 100%;
+        }
+        .structured-preflight-tracker-edit-row,
+        .structured-preflight-tracker-edit-add-row {
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+        }
+        .structured-preflight-tracker-edit-input {
+            min-width: 0;
+            width: 100%;
+            height: 1.9rem;
+            padding: 0.18rem 0.42rem;
+            font-size: 0.82rem;
+        }
+        .structured-preflight-tracker-edit-add,
+        .structured-preflight-tracker-edit-remove {
+            width: 1.9rem;
+            min-width: 1.9rem;
+            height: 1.9rem;
+            padding: 0;
+            border-radius: 5px;
+            font-weight: 800;
+            line-height: 1;
         }
         .structured-preflight-tracker-divider {
             height: 1px;
@@ -6010,9 +6153,113 @@ function renderTrackerWidget(context = getContext()) {
         ? buildTrackerDisplayHtml(snapshot)
 
         : '<div class="structured-preflight-tracker-empty">No tracker data yet.</div>';
+    attachTrackerWidgetEditorHandlers(body, context);
 
     if (panel && !panel.hidden) positionTrackerWidgetPanel(widget, panel);
 
+}
+
+function trackerEditableItemRowHtml(field, value = '') {
+    const label = field === 'gear' ? 'Gear' : 'Inventory';
+    return `
+        <div class="structured-preflight-tracker-edit-row">
+            <input class="text_pole structured-preflight-tracker-edit-input" data-spe-tracker-user-field="${escapeHtml(field)}" value="${escapeHtml(value)}" spellcheck="false">
+            <button class="menu_button structured-preflight-tracker-edit-remove" type="button" data-spe-tracker-remove-item title="Remove ${escapeHtml(label)} item" aria-label="Remove ${escapeHtml(label)} item">x</button>
+        </div>`;
+}
+
+function addTrackerEditableItemRow(root, field, value = '') {
+    const rows = root?.querySelector?.(`[data-spe-tracker-list-rows="${field}"]`);
+    if (!rows) return false;
+    rows.querySelector('[data-spe-tracker-empty-list]')?.remove();
+    rows.insertAdjacentHTML('beforeend', trackerEditableItemRowHtml(field, value));
+    return true;
+}
+
+function collectTrackerWidgetUserItems(root, field) {
+    return normalizeManualUserItemList(Array.from(root?.querySelectorAll?.(`[data-spe-tracker-user-field="${field}"]`) || [])
+        .map(input => input?.value ?? ''));
+}
+
+function attachTrackerWidgetEditorHandlers(body, context = getContext()) {
+    if (!body) return;
+    body.onclick = event => {
+        const target = event.target?.closest?.('button');
+        if (!target) return;
+
+        if (target.matches('[data-spe-tracker-edit-user-items]')) {
+            event.preventDefault();
+            state.trackerWidgetEditingUserItems = true;
+            renderTrackerWidget(context);
+            return;
+        }
+
+        if (target.matches('[data-spe-tracker-cancel-user-items]')) {
+            event.preventDefault();
+            state.trackerWidgetEditingUserItems = false;
+            renderTrackerWidget(context);
+            return;
+        }
+
+        if (target.matches('[data-spe-tracker-add-item]')) {
+            event.preventDefault();
+            const field = target.getAttribute('data-spe-tracker-add-item');
+            if (!['gear', 'inventory'].includes(field)) return;
+            const input = body.querySelector(`[data-spe-tracker-add-input="${field}"]`);
+            const value = cleanTrackerDeltaText(input?.value);
+            if (!value) return;
+            if (addTrackerEditableItemRow(body, field, value) && input) {
+                input.value = '';
+                input.focus?.();
+            }
+            return;
+        }
+
+        if (target.matches('[data-spe-tracker-remove-item]')) {
+            event.preventDefault();
+            const list = target.closest('[data-spe-tracker-list]');
+            const row = target.closest('.structured-preflight-tracker-edit-row');
+            row?.remove();
+            const rows = list?.querySelector('[data-spe-tracker-list-rows]');
+            if (rows && !rows.querySelector('[data-spe-tracker-user-field]')) {
+                rows.innerHTML = '<div class="structured-preflight-tracker-muted" data-spe-tracker-empty-list>No items</div>';
+            }
+            return;
+        }
+
+        if (target.matches('[data-spe-tracker-save-user-items]')) {
+            event.preventDefault();
+            target.disabled = true;
+            target.textContent = 'Saving...';
+            saveManualUserTrackerItems({
+                gear: collectTrackerWidgetUserItems(body, 'gear'),
+                inventory: collectTrackerWidgetUserItems(body, 'inventory'),
+            }, context)
+                .then(saved => {
+                    if (!saved) throw new Error('Tracker metadata unavailable.');
+                    state.trackerWidgetEditingUserItems = false;
+                    renderAllTrackerDisplayBlocks(context);
+                })
+                .catch(error => {
+                    console.error(`[${EXTENSION_NAME}] failed to save manual tracker edit.`, error);
+                    target.disabled = false;
+                    target.textContent = 'Save';
+                    try {
+                        globalThis.toastr?.error?.(error instanceof Error ? error.message : String(error), EXTENSION_NAME);
+                    } catch {
+                        // Toasts are optional.
+                    }
+                });
+        }
+    };
+
+    body.onkeydown = event => {
+        const input = event.target?.closest?.('[data-spe-tracker-add-input]');
+        if (!input || event.key !== 'Enter') return;
+        event.preventDefault();
+        const field = input.getAttribute('data-spe-tracker-add-input');
+        body.querySelector(`[data-spe-tracker-add-item="${field}"]`)?.click?.();
+    };
 }
 
 
