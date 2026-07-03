@@ -78,7 +78,15 @@ const PROGRESSION_KEY = 'structuredPreflightProgression';
 const PROGRESSION_VERSION = 1;
 const PROGRESSION_CARD_ID = 'structured_preflight_progression_card';
 const PROGRESSION_STYLE_ID = 'structured_preflight_progression_styles';
-const PROGRESSION_REQUIRED_ACCOMPLISHMENTS = 3;
+const PROGRESSION_MILESTONE_XP = 100;
+const PROGRESSION_RECORD_HISTORY_LIMIT = 48;
+const PROGRESSION_CONTEXT_RECORD_LIMIT = 8;
+const PROGRESSION_XP_AWARDS = Object.freeze({
+    Minor_Success: 10,
+    Moderate_Success: 20,
+    Critical_Success: 30,
+    Success: 10,
+});
 const PROGRESSION_REQUIRED_ABILITIES = 1;
 const PROGRESSION_MAX_STAT = 10;
 const PROGRESSION_ABILITY_OPTIONS = 3;
@@ -1625,13 +1633,13 @@ function renderSettingsPanel() {
                     <section class="spe-settings-section" data-spe-settings-step="progression">
                         <span class="spe-settings-kicker">5. Advancement</span>
                         <h4 class="spe-settings-title">Character Progression</h4>
-                        <small class="spe-settings-description">Counts critical accomplishments and offers stat increases or generated ability swaps when advancement is ready.</small>
+                        <small class="spe-settings-description">Tracks hidden advancement milestones and offers stat increases or generated ability swaps when growth is ready.</small>
                         <div class="spe-settings-body">
                             <label class="checkbox_label flexNoGap">
                                 <input id="structured_preflight_progression_enabled" type="checkbox">
                                 <span>Enable Character Progression</span>
                             </label>
-                            <small class="spe-settings-note">Counts one critical accomplishment per turn. Generated ability and spell options use the current narrator profile.</small>
+                            <small class="spe-settings-note">Advancement progress is hidden. Generated ability and spell options use the current narrator profile.</small>
                         </div>
                     </section>
                 </div>
@@ -2655,7 +2663,9 @@ function getProgressionRoot(context = getContext()) {
     context.chatMetadata[PROGRESSION_KEY] = context.chatMetadata[PROGRESSION_KEY] || {};
     const root = context.chatMetadata[PROGRESSION_KEY];
     root.version = PROGRESSION_VERSION;
-    root.accomplishments = Array.isArray(root.accomplishments) ? root.accomplishments : [];
+    root.accomplishments = Array.isArray(root.accomplishments)
+        ? root.accomplishments.map(normalizeProgressionRecord).filter(Boolean)
+        : [];
     root.spentAdvancements = Math.max(0, Math.floor(Number(root.spentAdvancements || 0)));
     root.pendingAdvancement = root.pendingAdvancement && typeof root.pendingAdvancement === 'object' ? root.pendingAdvancement : null;
     root.ui = root.ui && typeof root.ui === 'object' ? root.ui : {};
@@ -6954,7 +6964,7 @@ function buildProgressionCardHtml(root, context = getContext()) {
             `).join('')}`;
     } else {
         body = `
-            <div class="spe-progression-muted">${PROGRESSION_REQUIRED_ACCOMPLISHMENTS} critical accomplishments reached. Choose how the character advances.</div>
+            <div class="spe-progression-muted">Recent accomplishments have opened a path for growth. Choose how the character advances.</div>
             <div class="spe-progression-actions">
                 ${canRaiseStat ? '<button class="menu_button" data-spe-progression-action="choose-stat">Raise Stat</button>' : ''}
                 ${canSwapAbility ? '<button class="menu_button" data-spe-progression-action="choose-swap-ability">Swap Ability</button>' : ''}
@@ -6963,7 +6973,7 @@ function buildProgressionCardHtml(root, context = getContext()) {
     }
 
     return `
-        <div class="spe-progression-title">Character Progression</div>
+        <div class="spe-progression-title">Character Milestone Reached</div>
         ${busy}
         ${body}
         ${error}
@@ -7671,9 +7681,31 @@ function completeProgressionAdvancement(root, reward) {
     const pending = root?.pendingAdvancement;
     if (!root || !pending) return;
     const sourceIds = new Set(Array.isArray(pending.sourceRecordIds) ? pending.sourceRecordIds : []);
-    root.accomplishments = (root.accomplishments || []).map(record => sourceIds.has(record.id)
-        ? { ...record, spent: true, spentAt: Date.now() }
-        : record);
+    const spendById = new Map();
+    for (const item of Array.isArray(pending.sourceRecordXp) ? pending.sourceRecordXp : []) {
+        const id = String(item?.id || '').trim();
+        const xp = Math.max(0, Math.floor(Number(item?.xp || 0)));
+        if (!id || xp <= 0) continue;
+        spendById.set(id, (spendById.get(id) || 0) + xp);
+    }
+    root.accomplishments = (root.accomplishments || []).map(record => {
+        const normalized = normalizeProgressionRecord(record);
+        if (!normalized) return record;
+        const award = progressionRecordXpAward(normalized);
+        const spend = spendById.has(normalized.id)
+            ? spendById.get(normalized.id)
+            : sourceIds.has(normalized.id)
+                ? award
+                : 0;
+        if (spend <= 0) return normalized;
+        const xpSpent = clampNumber(progressionRecordXpSpent(normalized) + spend, 0, award, award);
+        return {
+            ...normalized,
+            xpSpent,
+            spent: xpSpent >= award,
+            ...(xpSpent >= award ? { spentAt: Date.now() } : {}),
+        };
+    }).filter(Boolean);
     root.spentAdvancements = Math.max(0, Math.floor(Number(root.spentAdvancements || 0))) + 1;
     root.lastAdvancement = {
         id: pending.id,
@@ -7744,7 +7776,7 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
             role: 'system',
             content:
                 'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
-                'Abilities are activated non-spell fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing racial/body traits, abilities, spells, genre, stats, and recent critical accomplishments. ' +
+                'Abilities are activated non-spell fictional permissions, not numerical mechanics. They must fit the character race/body/origin, existing racial/body traits, abilities, spells, genre, stats, and recent advancement accomplishments. ' +
                 'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Each option must be concrete, usable, activated, non-spell, and distinct from ordinary PHY/MND/CHA action mechanics. ' +
                 'On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. ' +
                 'Do not return spells, passive traits, racial/body facts, mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, intimidation aura, surgery skill, toughness, resistance, immunity, personality flavor, lore labels, or background-only qualities. ' +
@@ -7770,7 +7802,7 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
                 `EXISTING ABILITIES:\n${abilities.length ? abilities.map((ability, index) => `${index + 1}. ${ability.text}`).join('\n') : 'none'}\n\n` +
                 `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
                 `${replacing ? `ABILITY BEING REPLACED:\n${replacing.text}\n\n` : ''}` +
-                `RECENT CRITICAL ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
+                `RECENT ADVANCEMENT ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
                 `PERSONA SHEET:\n${clipText(persona, 5000)}`,
         },
     ];
@@ -7787,7 +7819,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
             role: 'system',
             content:
                 'You generate concise RPG spell options for a deterministic SillyTavern extension. ' +
-                'Spells are activated magical permissions with one concrete effect. They must fit the character race/body/origin, genre, stats, existing spells, and recent critical accomplishments. ' +
+                'Spells are activated magical permissions with one concrete effect. They must fit the character race/body/origin, genre, stats, existing spells, and recent advancement accomplishments. ' +
                 'Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Each spell must be concrete, usable, activated magical permission with one concrete effect, and genre-fitting. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
                 'Do not return passive traits, mundane expertise, personality flavor, lore labels, broad spell schools, magic mastery, resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, or automatic solutions. ' +
                 'Do not give numerical values, measured ranges, distances, radii, durations, weights, speeds, areas, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, guaranteed combat success, guaranteed healing, guaranteed escape, guaranteed control, or automatic solutions. ' +
@@ -7811,7 +7843,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `SPELL LIMIT: current ${spells.length}; maximum ${PROGRESSION_MAX_SPELLS}\n` +
                 `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
-                `RECENT CRITICAL ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
+                `RECENT ADVANCEMENT ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
                 `PERSONA SHEET:\n${clipText(persona, 5000)}`,
         },
     ];
@@ -7821,7 +7853,8 @@ function getProgressionRecentAccomplishments(root, pending) {
     const ids = new Set(Array.isArray(pending?.sourceRecordIds) ? pending.sourceRecordIds : []);
     const source = Array.isArray(root?.accomplishments) ? root.accomplishments : [];
     const selected = source.filter(record => ids.has(record.id));
-    return (selected.length ? selected : source.filter(record => !record.spent).slice(-PROGRESSION_REQUIRED_ACCOMPLISHMENTS)).slice(-PROGRESSION_REQUIRED_ACCOMPLISHMENTS);
+    return (selected.length ? selected : source.filter(record => progressionRecordUnspentXp(record) > 0))
+        .slice(-PROGRESSION_CONTEXT_RECORD_LIMIT);
 }
 
 function formatProgressionRecordForPrompt(record) {
@@ -7834,48 +7867,112 @@ function formatProgressionRecordForPrompt(record) {
     ].join('; ');
 }
 
+function progressionXpAwardForOutcomeTier(outcomeTier) {
+    const key = String(outcomeTier || '').trim();
+    return PROGRESSION_XP_AWARDS[key] || 0;
+}
+
+function progressionXpAwardFromPendingRun(pendingRun) {
+    const packet = pendingRun?.resolutionPacket || pendingRun?.report?.finalNarrativeHandoff?.resolutionPacket || {};
+    if (packet.RollNeeded !== 'Y') return 0;
+    return progressionXpAwardForOutcomeTier(packet.OutcomeTier);
+}
+
+function progressionRecordXpAward(record) {
+    const explicit = Number(record?.xpAward);
+    if (Number.isFinite(explicit) && explicit > 0) {
+        return clampNumber(explicit, 0, PROGRESSION_MILESTONE_XP, 0);
+    }
+    return progressionXpAwardForOutcomeTier(record?.outcomeTier);
+}
+
+function progressionRecordXpSpent(record) {
+    const award = progressionRecordXpAward(record);
+    if (award <= 0) return 0;
+    const explicit = Number(record?.xpSpent);
+    if (record?.spent && (!Number.isFinite(explicit) || explicit <= 0)) return award;
+    return clampNumber(explicit, 0, award, 0);
+}
+
+function progressionRecordUnspentXp(record) {
+    return Math.max(0, progressionRecordXpAward(record) - progressionRecordXpSpent(record));
+}
+
+function normalizeProgressionRecord(record) {
+    if (!record || typeof record !== 'object') return null;
+    const id = String(record.id || '').trim();
+    if (!id) return null;
+    const xpAward = progressionRecordXpAward(record);
+    const xpSpent = progressionRecordXpSpent(record);
+    return {
+        ...record,
+        xpAward,
+        xpSpent,
+        spent: xpAward > 0 && xpSpent >= xpAward,
+    };
+}
+
+function selectProgressionMilestoneSourceRecords(root) {
+    let remaining = PROGRESSION_MILESTONE_XP;
+    const sourceRecords = [];
+    for (const record of Array.isArray(root?.accomplishments) ? root.accomplishments : []) {
+        const available = progressionRecordUnspentXp(record);
+        if (available <= 0) continue;
+        const xp = Math.min(available, remaining);
+        sourceRecords.push({ id: record.id, xp });
+        remaining -= xp;
+        if (remaining <= 0) break;
+    }
+    return remaining <= 0 ? sourceRecords : [];
+}
+
+function maybeCreateProgressionPendingAdvancement(root) {
+    if (!root || root.pendingAdvancement) return false;
+    const sourceRecords = selectProgressionMilestoneSourceRecords(root);
+    if (!sourceRecords.length) return false;
+    root.pendingAdvancement = {
+        id: `adv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        createdAt: Date.now(),
+        choice: 'choose',
+        sourceRecordIds: sourceRecords.map(item => item.id),
+        sourceRecordXp: sourceRecords,
+        abilityOptions: [],
+        spellOptions: [],
+    };
+    root.ui = {};
+    return true;
+}
+
 function maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context = getContext() } = {}) {
     if (!isStoryEngineEnabled()) return false;
     if (getSettings().characterProgressionEnabled === false) return false;
     if (!pendingRun || !messageKey) return false;
     const root = getProgressionRoot(context);
     if (!root || root.pendingAdvancement) return false;
-    if (!isEligibleCriticalAccomplishment(pendingRun)) return false;
+    if (progressionXpAwardFromPendingRun(pendingRun) <= 0) return false;
     if (root.accomplishments.some(record => record.messageKey === messageKey)) return false;
 
     const record = buildProgressionAccomplishmentRecord(pendingRun, messageKey);
     root.accomplishments.push(record);
-    root.accomplishments = root.accomplishments.slice(-24);
-
-    const unspent = root.accomplishments.filter(item => !item.spent);
-    if (unspent.length >= PROGRESSION_REQUIRED_ACCOMPLISHMENTS) {
-        const sourceRecords = unspent.slice(0, PROGRESSION_REQUIRED_ACCOMPLISHMENTS);
-        root.pendingAdvancement = {
-            id: `adv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            createdAt: Date.now(),
-            choice: 'choose',
-            sourceRecordIds: sourceRecords.map(item => item.id),
-            abilityOptions: [],
-            spellOptions: [],
-        };
-        root.ui = {};
-    }
+    root.accomplishments = root.accomplishments
+        .map(normalizeProgressionRecord)
+        .filter(Boolean)
+        .slice(-PROGRESSION_RECORD_HISTORY_LIMIT);
+    maybeCreateProgressionPendingAdvancement(root);
     return true;
-}
-
-function isEligibleCriticalAccomplishment(pendingRun) {
-    const packet = pendingRun?.resolutionPacket || pendingRun?.report?.finalNarrativeHandoff?.resolutionPacket || {};
-    return packet.RollNeeded === 'Y' && packet.OutcomeTier === 'Critical_Success';
 }
 
 function buildProgressionAccomplishmentRecord(pendingRun, messageKey) {
     const packet = pendingRun?.resolutionPacket || pendingRun?.report?.finalNarrativeHandoff?.resolutionPacket || {};
     const resultLine = String(pendingRun?.report?.finalNarrativeHandoff?.resultLine || '');
+    const xpAward = progressionXpAwardFromPendingRun(pendingRun);
     return {
         id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         messageKey,
         createdAt: Date.now(),
         spent: false,
+        xpAward,
+        xpSpent: 0,
         userText: String(pendingRun?.latestUserText || '').trim(),
         goal: String(packet.GOAL || 'unknown'),
         stat: parseUserStatFromResultLine(resultLine),
