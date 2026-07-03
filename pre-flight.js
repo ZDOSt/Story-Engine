@@ -489,11 +489,13 @@ ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not break one beat into 
 
 characterTurnPacing:
 Execute characterTurnPacing(response, context).
-mandate: When an NPC responds directly to {{user}} during dialogue, their response must be one uninterrupted paragraph of at most 8 sentences, containing only that NPC's reaction, dialogue, and directly related supporting actions.
-The response ends the moment the NPC asks a question or performs an action that clearly requires {{user}}'s response.
+mandate: Write exactly one cohesive NPC dialogue turn with a natural, connected flow: immediate reaction, conversational dialogue, brief directly related supporting actions, and brief descriptive framing only when it supports dialogue/action. Maximum 8 sentences, maximum 1 question, maximum 1 clear user-facing handoff beat.
 ABSOLUTELY-FORBIDDEN:
-- An NPC must never ask multiple questions in one response.
-- No repeated body language, filler micro-actions, second paragraph, second turn, follow-up clarification, self-answer, or exposition dump.
+- Multiple questions.
+- Second NPC turn, chain reaction sequence, self-answer, follow-up clarification, or exposition dump.
+- Repeated body language, filler micro-actions, or canned reaction loops.
+- Continuing after a question or action that clearly requires {{user}}'s response.
+Endpoint quality is governed by activeHandoff(response, context).
 
 activeHandoff:
 Execute activeHandoff(response, context).

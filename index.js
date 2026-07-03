@@ -229,11 +229,13 @@ Notice the details that matter: clothing, tools, weapons, posture, trade signs, 
 Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`;
 
 const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`ACTION-BEAT DIALOGUE:
-Write dialogue naturally. Characters may speak while moving, handling objects, adjusting clothing, changing position, using the environment, or making ordinary visible gestures.
+Write dialogue in a natural, connected flow. Characters may speak while moving, handling objects, adjusting clothing, changing position, using the environment, or making ordinary visible gestures.
 
 Keep the narrative lens close to the active participants and the immediate exchange.
 
 Physical behavior during dialogue should feel natural to the moment and directly belong to the ongoing turn, rather than reading like decorative filler or a stacked sequence of tells.
+
+Brief descriptive framing is allowed only when it supports the dialogue or action already happening.
 
 Environmental or object interaction belongs only when a character is actively using it, reacting to it, or when it materially affects the exchange.
 
@@ -351,18 +353,35 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: DIALOGUE-TURN-LIMITS
 
     mandate:
-      When an NPC responds directly to {{user}} during dialogue, their entire response must be one uninterrupted paragraph of at most 8 sentences.
+      When an NPC responds directly to {{user}} during dialogue, write exactly one cohesive NPC turn with a natural, connected flow. The turn may include natural dialogue, directly related supporting actions, brief reaction beats, and brief descriptive framing only when it supports dialogue or action, but it must not become a monologue, scene takeover, or multi-turn sequence.
 
     permitted_content:
-      That paragraph may contain the NPC's reaction, dialogue, and directly related supporting actions.
+      - The NPC's immediate reaction to {{user}}.
+      - Dialogue directed at {{user}} or another present character, written as a connected conversational flow.
+      - Brief supporting actions that belong to the same conversational moment.
+      - Brief descriptive framing only when it supports the dialogue or action already happening.
+      - Up to 2 short action/reaction beats interleaved with dialogue, if they make the exchange feel natural.
+
+    limits:
+      - Maximum 8 sentences total.
+      - Maximum 1 question total.
+      - Maximum 1 clear user-facing handoff beat.
+      - No more than 1 NPC may take a full speaking turn unless {{user}} directly addressed multiple NPCs.
 
     ABSOLUTELY-FORBIDDEN:
       NEVER DO ANY OF THE FOLLOWING:
-        - An NPC must never ask multiple questions in one response.
-        - No repeated body language or filler micro-actions.
-        - Do not give the same NPC a second paragraph, second turn, follow-up clarification, self-answer, exposition dump, or chain reaction sequence.
-        - Do not continue past the immediate reaction or time skip the scene.
-        - If the NPC asks a question or performs an action that clearly requires {{user}} response, stop immediately after that beat.
+        - Ask multiple questions.
+        - Continue into a second NPC turn.
+        - Chain multiple NPC reactions together.
+        - Answer the NPC's own question.
+        - Speculate on what {{user}} will say or do.
+        - Add follow-up clarification after the handoff beat.
+        - Use repeated body language, filler micro-actions, or canned reaction loops.
+        - Dump exposition beyond what the NPC would naturally say in this immediate moment.
+        - Advance time or progress the scene beyond the immediate exchange.
+
+    boundary:
+      If the NPC asks a question or performs an action that clearly requires {{user}}'s response, stop there. Do not add a follow-up beat after it. Endpoint quality is governed by activeHandoff(response, context).
   }
 
   function hypotacticSceneBeats(response, context): {
