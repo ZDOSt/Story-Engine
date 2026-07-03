@@ -1824,7 +1824,7 @@ function normalizeKnowledgeEffect(value) {
     const text = String(value ?? '').trim().replace(/[\s-]+/g, '').toLowerCase();
     if (text === 'priorusergoodrep') return 'priorUserGoodRep';
     if (text === 'userbadrep') return 'userBadRep';
-    if (text === 'userfearrep') return 'userFearRep';
+    if (text === 'usernonhuman') return 'userNonHuman';
     if (text === 'contextonly') return 'contextOnly';
     return 'none';
 }

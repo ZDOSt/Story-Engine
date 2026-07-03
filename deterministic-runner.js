@@ -6912,8 +6912,6 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
         base = { label: 'userBadRep', disposition: { B: 1, F: 2, H: 3 } };
     } else if (flags.priorUserGoodRep) {
         base = { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 1 } };
-    } else if (flags.userFearRep && !flags.fearImmunity) {
-        base = { label: 'userFearRep', disposition: { B: 1, F: 3, H: 2 } };
     } else if (flags.userNonHuman && !flags.fearImmunity) {
         base = { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
     }
@@ -6925,7 +6923,6 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
             romanticOpen: yn(flags.romanticOpen),
             userBadRep: yn(flags.userBadRep),
             priorUserGoodRep: yn(flags.priorUserGoodRep),
-            userFearRep: yn(flags.userFearRep),
             userNonHuman: yn(flags.userNonHuman),
             fearImmunity: yn(flags.fearImmunity),
         },
@@ -6945,7 +6942,6 @@ function normalizeSemanticInitPresetFlags(value) {
         romanticOpen: bool(source.romanticOpen),
         userBadRep: bool(source.userBadRep),
         priorUserGoodRep: bool(source.priorUserGoodRep || source.userGoodRep),
-        userFearRep: bool(source.userFearRep),
         userNonHuman: bool(source.userNonHuman),
         fearImmunity: bool(source.fearImmunity || source.fearImmune),
     };
@@ -6955,7 +6951,6 @@ function initUserHistoryFromFlags(flags, stored) {
     const normalized = normalizeInitUserHistory(stored);
     if (flags.userBadRep) return { knowsUser: 'Y', standing: 'negative' };
     if (flags.romanticOpen || flags.priorUserGoodRep) return { knowsUser: 'Y', standing: 'positive' };
-    if (flags.userFearRep) return { knowsUser: 'Y', standing: 'fear' };
     if (normalized.knowsUser === 'Y' || normalized.standing !== 'neutral') return normalized;
     return { knowsUser: 'N', standing: 'neutral' };
 }
