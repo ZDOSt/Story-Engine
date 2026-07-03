@@ -17,6 +17,12 @@ import {
 import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, mergeUserKnowledgeLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import {
+    applyProgressionHealthMilestone,
+    cloneHiddenHealth,
+    normalizeHiddenHealth,
+    renameHiddenHealthNpc,
+} from './health-state.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
 import { deterministicPersonalitySummaryForName, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import {
@@ -2590,6 +2596,7 @@ function getTrackerRoot(context = getContext()) {
     root.user = normalizeTrackerUserState(root.user || {});
     root.powerActors = root.powerActors && typeof root.powerActors === 'object' ? root.powerActors : {};
     root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
+    root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
     if (seededPlayerTracker && typeof context.saveMetadataDebounced === 'function') {
 
@@ -3941,6 +3948,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         messageKey,
         assistantText,
     });
+    syncPendingRunHealthNamePromotions(pendingRun, promotionResult.promotions);
 
     const snapshot = {
 
@@ -3974,6 +3982,10 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const playerTrackerSnapshot = pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context);
     const powerActorSnapshot = pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context);
     const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
+    const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
+        user: playerTrackerSnapshot,
+        npcs: trackerSnapshot,
+    });
     const report = {
         semanticLedger: {},
         finalNarrativeHandoff: {
@@ -4010,6 +4022,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         trackerAfter: {},
         userBefore: playerTrackerSnapshot,
         userAfter: {},
+        healthBefore: cloneHiddenHealth(healthSnapshot),
+        healthAfter: cloneHiddenHealth(healthSnapshot),
         powerActorsBefore: powerActorSnapshot,
         powerActorsAfter: {},
         userKnowledgeBefore: userKnowledgeSnapshot,
@@ -4035,6 +4049,7 @@ function applyExplicitNamePromotions(npcs, { assistantText } = {}) {
     const promotions = getExplicitNamePromotions(assistantText, activeNames);
 
     const promotedOldNames = new Set();
+    const appliedPromotions = [];
 
 
 
@@ -4050,7 +4065,9 @@ function applyExplicitNamePromotions(npcs, { assistantText } = {}) {
 
 
 
-        promoteTrackerEntry(normalized, oldName, newName);
+        if (promoteTrackerEntry(normalized, oldName, newName)) {
+            appliedPromotions.push({ oldName, newName: cleanRevealedTrackerName(newName) });
+        }
 
         promotedOldNames.add(oldName);
 
@@ -4061,9 +4078,22 @@ function applyExplicitNamePromotions(npcs, { assistantText } = {}) {
     return {
 
         npcs: normalized,
+        promotions: appliedPromotions,
 
     };
 
+}
+
+function syncPendingRunHealthNamePromotions(pendingRun, promotions = []) {
+    if (!pendingRun || !Array.isArray(promotions) || !promotions.length) return;
+    for (const promotion of promotions) {
+        if (pendingRun.healthBefore) {
+            pendingRun.healthBefore = renameHiddenHealthNpc(pendingRun.healthBefore, promotion.oldName, promotion.newName);
+        }
+        if (pendingRun.healthAfter) {
+            pendingRun.healthAfter = renameHiddenHealthNpc(pendingRun.healthAfter, promotion.oldName, promotion.newName);
+        }
+    }
 }
 
 
@@ -4143,7 +4173,7 @@ async function saveManualUserTrackerItems({ gear, inventory }, context = getCont
     return true;
 }
 
-function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null) {
+function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null, pendingRun = null) {
     const normalized = normalizeDisplayTrackerNpcs(npcs || {});
     const previous = normalizeDisplayTrackerNpcs(beforeNpcs || {});
     const previousActivePromotable = Object.entries(previous)
@@ -4174,18 +4204,24 @@ function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null) {
     });
     if (candidates.length !== 1) return normalized;
 
-    promoteTrackerEntry(normalized, placeholder, candidates[0]);
+    if (promoteTrackerEntry(normalized, placeholder, candidates[0])) {
+        syncPendingRunHealthNamePromotions(pendingRun, [{ oldName: placeholder, newName: candidates[0] }]);
+    }
     return normalized;
 }
 
 
-function buildTrackerUpdateForPersistence(displaySnapshot) {
-    return {
+function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null) {
+    const update = {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
         user: normalizeTrackerUserState(displaySnapshot?.user || {}),
         powerActors: displaySnapshot?.powerActors || {},
         userKnowledge: mergeUserKnowledgeLedger(displaySnapshot?.userKnowledge || {}, {}),
     };
+    if (hiddenHealth) {
+        update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
+    }
+    return update;
 }
 
 
@@ -4215,10 +4251,13 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         if (revealedName) {
 
             promoteTrackerEntry(npcs, name, revealedName);
+            syncPendingRunHealthNamePromotions(options.pendingRun, [{ oldName: name, newName: revealedName }]);
         }
     }
     assignMissingDisplayNpcPersonalitySummaries(npcs, 'post-narration', options.context);
-    merged.npcs = reconcileNamedNpcDuplicates(applyExplicitNamePromotions(npcs, options).npcs, options.beforeNpcs, delta);
+    const textPromotions = applyExplicitNamePromotions(npcs, options);
+    syncPendingRunHealthNamePromotions(options.pendingRun, textPromotions.promotions);
+    merged.npcs = reconcileNamedNpcDuplicates(textPromotions.npcs, options.beforeNpcs, delta, options.pendingRun);
     assignMissingDisplayNpcPersonalitySummaries(merged.npcs, 'post-narration', options.context);
     const deltaActiveNames = new Set();
 
@@ -4406,7 +4445,9 @@ function normalizeTrackerDeltaCondition(value) {
 
     const text = String(value ?? 'unchanged').trim().toLowerCase().replace(/[\s-]+/g, '_');
 
-    return ['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead'].includes(text) ? text : 'unchanged';
+    if (text === 'defeated') return 'incapacitated';
+
+    return ['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead'].includes(text) ? text : 'unchanged';
 
 }
 
@@ -4807,6 +4848,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
     root.powerActors = snapshot.powerActors || root.powerActors || {};
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
+    root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
 }
@@ -4827,6 +4869,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
     root.powerActors = snapshot.powerActors || root.powerActors || {};
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
+    root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
 }
@@ -7622,7 +7665,7 @@ async function applyProgressionStatChoice(root, stat, context = getContext()) {
         type: 'stat',
         stat: statName,
         value: nextStats[statName],
-    });
+    }, context);
 }
 
 async function applyProgressionAbilityChoice(root, optionIndex, context = getContext()) {
@@ -7648,7 +7691,7 @@ async function applyProgressionAbilityChoice(root, optionIndex, context = getCon
         type: 'swapAbility',
         ability: option,
         replacedIndex: pending.swapAbilityIndex,
-    });
+    }, context);
 }
 
 async function applyProgressionSpellChoice(root, optionIndex, context = getContext()) {
@@ -7674,10 +7717,10 @@ async function applyProgressionSpellChoice(root, optionIndex, context = getConte
         type: 'learnSpell',
         spell: option,
         spellCount: spells.length + 1,
-    });
+    }, context);
 }
 
-function completeProgressionAdvancement(root, reward) {
+function completeProgressionAdvancement(root, reward, context = getContext()) {
     const pending = root?.pendingAdvancement;
     if (!root || !pending) return;
     const sourceIds = new Set(Array.isArray(pending.sourceRecordIds) ? pending.sourceRecordIds : []);
@@ -7714,6 +7757,29 @@ function completeProgressionAdvancement(root, reward) {
     };
     root.pendingAdvancement = null;
     root.ui = {};
+    const trackerRoot = getTrackerRoot(context);
+    if (trackerRoot) {
+        applyProgressionHealthMilestone(trackerRoot, getCurrentAdventuringCompanionNames(trackerRoot));
+    }
+}
+
+function getCurrentAdventuringCompanionNames(trackerRoot) {
+    const npcs = trackerRoot?.npcs && typeof trackerRoot.npcs === 'object' ? trackerRoot.npcs : {};
+    return Object.entries(npcs)
+        .filter(([, entry]) => {
+            const normalized = normalizeTrackerEntry(entry || {});
+            const disposition = normalized.currentDisposition || {};
+            const bond = Number(disposition.B || 0);
+            const active = normalized.lifecycle === 'Active';
+            const established = normalized.establishedRelationship === 'Y';
+            const companionCoded = /\b(companion|ally|party|partner|travels?\s+with|adventur(?:e|er|ing)|follower|retainer|teammate)\b/i.test([
+                normalized.personalitySummary,
+                normalized.userHistory,
+                normalized.socialResolutionMemory ? JSON.stringify(normalized.socialResolutionMemory) : '',
+            ].filter(Boolean).join(' '));
+            return active && (established || companionCoded || bond >= 4);
+        })
+        .map(([name]) => name);
 }
 
 function getSelectedProgressionSwapAbilityIndex(context = getContext()) {
@@ -8948,6 +9014,7 @@ function restoreTrackerForRegeneration(type) {
         const rapportClock = normalizeRapportClockState(root.rapportClock);
         root.npcs = normalizeDisplayTrackerNpcs(snapshot);
         root.user = normalizeTrackerUserState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUser || root.user || {});
+        root.health = normalizeHiddenHealth(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeHealth || root.health, { user: root.user, npcs: root.npcs });
         root.powerActors = root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforePowerActors || root.powerActors || {};
         root.userKnowledge = mergeUserKnowledgeLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserKnowledge || root.userKnowledge || {}, {});
         root.rapportClock = rapportClock;
@@ -10001,6 +10068,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     assistantText: narrationText,
                     beforeNpcs: pendingRun.trackerBefore,
                     userKnowledgeBefore: pendingRun.userKnowledgeBefore,
+                    pendingRun,
                     context,
                 });
             } catch (error) {
@@ -10013,16 +10081,22 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
 
 
-            await saveTrackerUpdate(context, buildTrackerUpdateForPersistence(trackerDisplaySnapshot), { save: false });
+            const hiddenHealthAfter = pendingRun.healthAfter
+                ? normalizeHiddenHealth(pendingRun.healthAfter, { user: trackerDisplaySnapshot.user, npcs: trackerDisplaySnapshot.npcs })
+                : null;
+
+            await saveTrackerUpdate(context, buildTrackerUpdateForPersistence(trackerDisplaySnapshot, hiddenHealthAfter), { save: false });
 
             root.snapshots[messageKey] = {
 
                 before: clone(pendingRun.trackerBefore),
                 beforeUser: clone(pendingRun.userBefore),
+                beforeHealth: cloneHiddenHealth(pendingRun.healthBefore || root.health),
                 beforePowerActors: clone(pendingRun.powerActorsBefore),
                 beforeUserKnowledge: clone(pendingRun.userKnowledgeBefore || {}),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
+                afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
                 afterPowerActors: clone(trackerDisplaySnapshot.powerActors || {}),
                 afterUserKnowledge: clone(trackerDisplaySnapshot.userKnowledge || {}),
                 display: clone(trackerDisplaySnapshot),
@@ -10129,7 +10203,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge };
             }
             delete root.snapshots[key];
             removeProgressionRecordsForMessage(key, context);
@@ -10151,6 +10225,7 @@ async function handleMessageDeleted(newLength) {
 
         root.npcs = normalizeDisplayTrackerNpcs(restoreCandidate.before);
         root.user = normalizeTrackerUserState(restoreCandidate.beforeUser || root.user || {});
+        root.health = normalizeHiddenHealth(restoreCandidate.beforeHealth || root.health, { user: root.user, npcs: root.npcs });
         root.powerActors = restoreCandidate.beforePowerActors || {};
         root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         await persistMetadata(context);
@@ -10575,6 +10650,8 @@ async function handleChatCompletionPromptReady(eventData) {
             trackerAfter: report.trackerUpdate?.npcs || {},
             userBefore: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             userAfter: report.trackerUpdate?.user || {},
+            healthBefore: report.hiddenHealth?.before || null,
+            healthAfter: report.hiddenHealth?.after || report.trackerUpdate?.health || null,
             powerActorsBefore: state.pendingGeneration.powerActorSnapshot || buildPowerActorSnapshot(context),
             powerActorsAfter: report.trackerUpdate?.powerActors || {},
             userKnowledgeBefore: state.pendingGeneration.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),

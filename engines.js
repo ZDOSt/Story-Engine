@@ -73,7 +73,7 @@ function ResolutionEngine(input) {
     rule: hostilesInScene.NPC is a scene-level hostile pool only; it does not create relationship changes, rolls, NPCInScene entries, or OppTargets.NPC by itself
     rule: hostilesInScene.NPC may include hostile enemies threatening {{user}}, companions, protected NPCs, bystanders, or the scene generally, as long as they are established and present
     rule: hostilesInScene.NPC must be established by assistant narration, tracker, character/scenario/lore context, or initial test setup; do not create a hostile from the latest user input alone
-    rule: hostilesInScene.NPC excludes neutral/friendly NPCs, absent/offscreen entities, defeated/incapacitated entities no longer posing danger, and non-living hazards or obstacles
+    rule: hostilesInScene.NPC excludes neutral/friendly NPCs, absent/offscreen entities, incapacitated/dead entities no longer posing danger, and non-living hazards or obstacles
     rule: if rollNeeded=N, OppTargets.NPC must be [(none)]
     rule: a direct ActionTarget can also be OppTargets.NPC only when that target's stakes are meaningfully contested or resisted
     rule: protective/rescue movement of an ally does not make that ally ActionTargets unless {{user}} contests their will, harms them, restrains them, or makes them the main opposed challenge
@@ -164,8 +164,8 @@ function ResolutionEngine(input) {
       Weak = clearly below an ordinary healthy adult; examples include a child, frail elder, badly injured person, small harmless animal, or sickly minor creature
       Average = roughly comparable to an ordinary healthy adult or ordinary capable creature; examples include a civilian adult, common laborer, goblin, or other ordinary non-elite being
       Trained = at least comparable to a trained and capable professional or dangerous lesser threat; examples include a city guard, soldier, adventurer, orc, ogre, or competent lesser monster
-      Elite = clearly beyond ordinary trained professionals or lesser threats; examples include a veteran knight, master duelist, powerful mage, apex predator, elder beast, or major supernatural threat
-      Boss = overwhelmingly beyond elite; examples include a legendary hero, warlord, ancient guardian, archmage, dragon, titan, ancient horror, or mythic apex entity
+      Elite = clearly beyond ordinary trained professionals or lesser threats; examples include a veteran knight, master duelist, powerful mage, apex predator, dire beast, warband leader, or high-rank adventurer. Elite is exceptional but still within the range of mortal or commonly encountered major threats
+      Boss = overwhelmingly beyond elite and rare enough that ordinary people almost never survive direct encounters; examples include a dragon, powerful demon, ancient guardian, archmage, titan, ancient horror, mythic apex entity, or legendary hero. Use Boss only for beings that would threaten elite fighters, high-rank adventurers, or entire parties
     mainStat:
       rule: identify the target's clearest proficiency from explicit portrayal in scene/context/backstory and assign MainStat as PHY, MND, CHA, or Balanced
       rule: MainStat must be PHY, MND, CHA, or Balanced
@@ -927,6 +927,11 @@ export function routeDispositionTarget(npc, packet, auditInteraction, sem) {
         && directOrOpposedBenefitAllowed(npc, packet, sem);
 
     if (!isDirect && !isOpp && !isBenefited && !isHarmed) return 'No Change';
+    if (!rollNeeded && packet.SafeAutomaticHealing === 'Y') {
+        if (benefitAllowedForDirect) return 'Bond';
+        if (!isDirect && !isOpp && isBenefited && auditInteraction === 'Y') return 'Bond';
+        return 'No Change';
+    }
     if (!rollNeeded) return softBondAllowedForNoStakes(npc, packet, sem) ? 'Bond' : 'No Change';
     if (packet.boundaryViolationExplicit === 'Y' && (isDirect || isOpp)) {
         return bool(sem.explicitIntimidationOrCoercion) || packet.classifyHostilePhysicalIntent === 'Y'
@@ -1540,7 +1545,7 @@ export function trackerSummary(trackerUpdate) {
     return [npcSummary, userSummary, powerActorSummary].filter(Boolean).join(';');
 }
 
-const TRACKER_CONDITIONS = Object.freeze(['healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead']);
+const TRACKER_CONDITIONS = Object.freeze(['healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
 export const SLOW_BOND_KEYS = Object.freeze([
     'respectfulContact',
     'cooperation',
@@ -1758,6 +1763,7 @@ export function normalizeTrackerUserState(value) {
 
 export function normalizeTrackerCondition(value) {
     const text = String(value ?? 'healthy').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (text === 'defeated') return 'incapacitated';
     return TRACKER_CONDITIONS.includes(text) ? text : 'healthy';
 }
 

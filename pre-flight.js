@@ -934,11 +934,17 @@ function narrativeLimitationsFact(resolution = {}) {
 
 function narrativeUserImpairmentFact(impairment = {}) {
     if (!impairment || impairment.Relevant !== 'Y') return '';
+    if (impairment.AutoFail === 'Y') {
+        return `{{user}}'s ${narratorUserMacroText(impairment.Source)} prevents meaningful voluntary action here. The attempted action fails or cannot progress unless it is limited permitted speech.`;
+    }
     return `{{user}}'s ${narratorUserMacroText(impairment.Source)} affects ${humanizeImpairmentFunctions(impairment.MatchedActionFunction || impairment.AffectedFunction)} through pain, limitation, compensation, instability, reduced speed, partial execution, or cost according to attemptedActionResults. Do not forbid the attempt.`;
 }
 
 function narrativeNpcImpairmentFact(impairment = {}) {
     if (!impairment || impairment.Relevant !== 'Y') return '';
+    if (impairment.AutoFail === 'Y') {
+        return `${valueOrNone(impairment.NPC)}'s ${valueOrNone(impairment.Source)} prevents meaningful voluntary action here. Their attempted action fails or cannot progress unless it is limited permitted speech.`;
+    }
     return `${valueOrNone(impairment.NPC)}'s ${valueOrNone(impairment.Source)} affects ${humanizeImpairmentFunctions(impairment.MatchedActionFunction || impairment.AffectedFunction)} through pain, limitation, compensation, instability, reduced speed, partial execution, or cost according to the listed NPC action or response.`;
 }
 

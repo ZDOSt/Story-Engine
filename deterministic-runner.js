@@ -72,6 +72,21 @@ import {
     stableStringify,
 } from './engines.js';
 import { deterministicPersonalitySummaryForName, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
+import {
+    applyHiddenHealthEvents,
+    applyHiddenHealthToTrackerState,
+    damageForOutcomeTier,
+    damageForSeverity,
+    getHealthActor,
+    getHealthActorCondition,
+    healingDcForTargets,
+    hiddenHealthPenaltyForCondition,
+    magicHealAmountForOutcomeTier,
+    naturalHealAmountForOutcomeTier,
+    naturalRecoveryAmountPerDay,
+    normalizeHiddenHealth,
+    safeSceneHealingAmount,
+} from './health-state.js';
 
 const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
@@ -85,11 +100,11 @@ const ENVIRONMENT_DIFFICULTY_BONUSES = Object.freeze({
     extreme: 12,
 });
 const GENERATED_CORE_RANGES = Object.freeze({
-    Weak: [1, 1],
-    Average: [1, 3],
-    Trained: [2, 4],
-    Elite: [3, 6],
-    Boss: [6, 10],
+    Weak: [1, 2],
+    Average: [2, 5],
+    Trained: [5, 8],
+    Elite: [8, 11],
+    Boss: [11, 14],
     none: [1, 1],
 });
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
@@ -369,6 +384,7 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.powerActors = normalizePowerActors(root.powerActors || {});
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
+    root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
 
     for (const [name, value] of Object.entries(trackerUpdate.npcs || {})) {
         root.npcs[name] = normalizeTrackerEntry({
@@ -391,6 +407,11 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.userKnowledge) {
         root.userKnowledge = normalizeUserKnowledgeLedger(trackerUpdate.userKnowledge);
     }
+    if (trackerUpdate.health) {
+        root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
+    } else {
+        root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
+    }
 
     context.chatMetadata.structuredPreflightTracker = root;
 
@@ -412,8 +433,13 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const dice = createDice();
     const refereeContext = buildRefereeContext(context);
     const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
+    const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger);
+    const healthBefore = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
+        user: playerTrackerSnapshot,
+        npcs: healthNpcRefsBefore,
+    });
     const rapportClock = advanceRapportClock(context, audit);
-    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot);
+    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot, healthBefore);
     const relationships = runRelationships(ledger, trackerSnapshot, resolution.packet, audit, refereeContext, context, rapportClock, dice);
     const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
     const name = runNameGeneration(ledger, audit, context, type);
@@ -421,17 +447,38 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit, refereeContext, context, rapportClock);
     applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit, rapportClock);
     const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext);
-    const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas);
+    const healthEvents = collectHiddenHealthEvents({
+        ledger,
+        resolutionPacket: resolution.packet,
+        aggression,
+        context,
+        trackerSnapshot,
+        relationshipTrackerUpdate: injuryTrackerUpdate,
+        healthBefore,
+    });
+    const healthAfter = applyHiddenHealthEvents(healthBefore, healthEvents, {
+        user: playerTrackerSnapshot,
+        npcs: buildHiddenHealthNpcRefs({
+            ...(trackerSnapshot || {}),
+            ...(injuryTrackerUpdate || {}),
+        }, ledger),
+    });
+    const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter);
     const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name, playerTrackerSnapshot);
 
-    const trackerUpdate = {
+    const visibleTrackerUpdate = {
         npcs: trackerDeltas.npcs,
         user: trackerDeltas.user,
         powerActors: powerActors.trackerUpdate,
     };
+    const trackerUpdate = {
+        ...visibleTrackerUpdate,
+        health: healthAfter,
+    };
+    const narrativeResolutionPacket = applyHiddenHealthToResolutionPacket(resolution.packet, healthAfter);
     const finalNarrativeHandoff = {
         generationType: type || 'normal',
-        resolutionPacket: resolution.packet,
+        resolutionPacket: narrativeResolutionPacket,
         npcHandoffs: relationships.handoffs,
         chaosHandoff: chaos.handoff,
         nameGeneration: name,
@@ -440,11 +487,11 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         powerActorPressure: powerActors.handoff,
         persistencePolicy: buildPersistencePolicy(),
         resultLine: resolution.resultLine,
-        narrationGuidance: buildNarrationGuidance(resolution.packet, relationships.handoffs, chaos.handoff, proactivity.results, aggression.results),
-        sceneTrackerUpdate: trackerUpdate,
+        narrationGuidance: buildNarrationGuidance(narrativeResolutionPacket, relationships.handoffs, chaos.handoff, proactivity.results, aggression.results),
+        sceneTrackerUpdate: visibleTrackerUpdate,
     };
 
-    audit.push(`TRACKER_UPDATE_SAVED=${trackerSummary(trackerUpdate)}`);
+    audit.push(`TRACKER_UPDATE_SAVED=${trackerSummary(visibleTrackerUpdate)}`);
     audit.push('RESULT_LINE=' + resolution.resultLine);
 
     return {
@@ -452,6 +499,60 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         semanticLedger: ledger,
         finalNarrativeHandoff,
         trackerUpdate,
+        hiddenHealth: {
+            before: healthBefore,
+            after: healthAfter,
+            events: healthEvents,
+        },
+    };
+}
+
+function buildHiddenHealthNpcRefs(trackerSnapshot = {}, ledger = {}) {
+    const refs = {};
+    for (const [name, entry] of Object.entries(trackerSnapshot || {})) {
+        if (!isReal(name)) continue;
+        refs[name] = { ...(entry || {}) };
+    }
+
+    const semantic = ledger?.resolutionEngine || {};
+    const targets = semantic.identifyTargets || {};
+    const markAdventuringScale = name => {
+        if (!isReal(name)) return;
+        refs[name] = {
+            ...(refs[name] || {}),
+            hiddenHealthScale: 'adventuring',
+        };
+    };
+
+    for (const name of toRealArray(targets.hostilesInScene?.NPC)) markAdventuringScale(name);
+    for (const name of toRealArray(targets.OppTargets?.NPC)) markAdventuringScale(name);
+
+    const combatOrHostilePhysical = String(semantic.actionBucket || '') === 'Combat'
+        || bool(semantic.classifyHostilePhysicalIntent)
+        || hasCombatActionLanguage([
+            semantic.identifyGoal,
+            semantic.identifyChallenge,
+            semantic.explicitMeans,
+        ].filter(Boolean).join(' '));
+    if (combatOrHostilePhysical) {
+        for (const name of toRealArray(targets.ActionTargets)) markAdventuringScale(name);
+        for (const name of toRealArray(targets.HarmedObservers)) markAdventuringScale(name);
+    }
+
+    return refs;
+}
+
+function applyHiddenHealthToResolutionPacket(packet = {}, healthAfter = null) {
+    if (!packet || typeof packet !== 'object' || !Array.isArray(packet.InflictedInjuries)) return packet;
+    return {
+        ...packet,
+        InflictedInjuries: packet.InflictedInjuries.map(injury => {
+            if (!isReal(injury?.NPC)) return injury;
+            const condition = getHealthActorCondition(healthAfter, { targetType: 'npc', name: injury.NPC });
+            return condition
+                ? { ...injury, condition }
+                : injury;
+        }),
     };
 }
 
@@ -1893,7 +1994,7 @@ function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socia
     };
 }
 
-function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot = null) {
+function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot = null, hiddenHealthSnapshot = null) {
     const semantic = ledger.resolutionEngine || {};
     const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, refereeContext);
     const rawTargets = normalizeTargets(semantic.identifyTargets);
@@ -1908,6 +2009,9 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, itemUseAudit, playerTrackerSnapshot);
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
     const boundaryViolationExplicit = bool(semantic.boundaryViolationExplicit) ? 'Y' : 'N';
+    const healingAttempt = classifyHealingAttempt(semantic, goal, context);
+    const healingHasActiveStakes = healingAttempt.isHealing && bool(semantic.activeHostileThreat);
+    let healingStaticDc = null;
 
     const rollPool = [dice.d20(), dice.d20(), dice.d20(), dice.d20(), dice.d20(), dice.d20()];
     audit.push('STEP 1: SILENT SEMANTIC PASS COMPLETE');
@@ -1938,6 +2042,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
 
     audit.push(`2.3 intimacyAdvanceExplicit=${intimacyAdvanceExplicit}`);
     audit.push(`2.3a boundaryViolationExplicit=${boundaryViolationExplicit}`);
+    audit.push(`2.3b healingAttempt=${healingAttempt.isHealing ? (healingAttempt.isMagic ? 'magic' : 'natural') : 'N'} activeStakes=${healingHasActiveStakes ? 'Y' : 'N'}`);
     const pureLoveDeclarationEvidence = getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext);
     const companionCommandNoRollEvidence = getDirectedCompanionCommandNoRollEvidence(semantic, identityTargets, trackerSnapshot, targetClassifier, context);
     const acceptedOfferedObjectEvidence = getAcceptedOfferedObjectNoRollEvidence(semantic, semanticRollNeeded, context);
@@ -1965,6 +2070,28 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         rollNeeded = unavailableItemEvidence.rollNeeded;
         stakesRule = unavailableItemEvidence.rule;
         rollReason = `unavailable personal item: ${itemUse.Item} is not in saved user gear/inventory; the item-dependent action cannot resolve`;
+    }
+    if (healingAttempt.isHealing && healingHasActiveStakes && rollNeeded !== 'Y') {
+        rollNeeded = 'Y';
+        stakesRule = 'deterministic_active_healing_roll';
+        rollReason = 'healing or treatment under active danger uses the current injury DC';
+        actionBucket = 'Challenge';
+        socialBucket = 'None';
+        combatType = 'None';
+    } else if (healingAttempt.isHealing && healingHasActiveStakes && rollNeeded === 'Y') {
+        stakesRule = 'deterministic_active_healing_roll';
+        actionBucket = 'Challenge';
+        socialBucket = 'None';
+        combatType = 'None';
+        rollReason = normalizeRollReason(rollReason, 'healing or treatment under active danger uses the current injury DC');
+    } else if (healingAttempt.isHealing && !healingHasActiveStakes) {
+        rollNeeded = 'N';
+        stakesRule = 'deterministic_safe_healing_no_roll';
+        rollReason = 'safe-scene healing or treatment resolves automatically';
+        audit.push(`2.4f cooperativeAidNoLivingOppositionRepair=${compact({
+            hardRule: 'safe-scene cooperative healing/treatment is direct aid and does not make the helped living target opposition',
+            targets: showNone(resolveHealingHealthTargets(semantic, { ActionTargets: identityTargets.ActionTargets }, hiddenHealthSnapshot, context).map(target => target.name || '{{user}}')),
+        })}`);
     }
     if (rollNeeded === 'N') {
         actionBucket = 'None';
@@ -2045,9 +2172,14 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let resolvedOppStat = 'ENV';
     let resolvedUserStat = null;
     let environmentDifficulty = 0;
+    let targetCore = null;
 
     if (rollNeeded === 'N') {
         userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, null, rollNeeded);
+        if (healingAttempt.isHealing && !healingHasActiveStakes) {
+            outcome = { OutcomeTier: 'Critical_Success', LandedActions: 1, Outcome: 'success', CounterPotential: 'none' };
+            resultLine = 'Safe-scene healing or treatment succeeds automatically at the highest tier.';
+        }
         audit.push('2.6 rollNeeded=N');
         audit.push('2.6a actions=[a1]');
         audit.push(`2.6a.0 actionUnits=[${formatActionUnitsAudit(actionUnits)}]`);
@@ -2058,8 +2190,12 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         actions = normalizeActionMarkers(semantic.actionCount);
         actionUnits = normalizeSemanticActionUnits(semantic.actionUnits, actions, semantic);
         let { userStat, oppStat } = deterministicStatsForBucket(actionBucket, socialBucket, combatType);
+        if (healingAttempt.isHealing) {
+            userStat = 'MND';
+            oppStat = 'ENV';
+            healingStaticDc = healingDcForTargets(hiddenHealthSnapshot, resolveHealingHealthTargets(semantic, { ActionTargets: targets.ActionTargets }, hiddenHealthSnapshot, context));
+        }
         const userCore = getUserCoreStats(ledger);
-        let targetCore = null;
         let oppTargetsNpcFirst = firstReal(targets.OppTargets.NPC);
         if (oppStat !== 'ENV' && !oppTargetsNpcFirst) {
             const livingActionTarget = firstReal(toRealArray(targets.ActionTargets).filter(name => targetClassifier.isLiving(name)));
@@ -2130,10 +2266,12 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         const npcImpairmentPenalty = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
         const atkDie = rollPool[0];
         userAttackDie = atkDie;
-        const defDie = rollPool[1];
+        const defDie = healingStaticDc ? null : rollPool[1];
         const userStatValue = statValue(userCore, userStat);
         const atkTot = atkDie + userStatValue + impairmentPenalty;
-        const defTot = oppStat === 'ENV' ? defDie + environmentDifficulty : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty;
+        const defTot = healingStaticDc
+            ? healingStaticDc
+            : oppStat === 'ENV' ? defDie + environmentDifficulty : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty;
         const margin = atkTot - defTot;
         const hostileReferee = applyHostilePhysicalIntentHardRules(semantic, audit);
         const hostilePhysicalIntent = hostileReferee.value;
@@ -2146,14 +2284,21 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         } else {
             outcome = nonHostileOutcome(margin);
         }
+        if (userImpairment?.AutoFail === 'Y') {
+            outcome = { OutcomeTier: 'Failure', LandedActions: 0, Outcome: 'failure', CounterPotential: 'none' };
+        }
 
         audit.push(`2.7n.1 UserImpairmentEngine=${compact(userImpairment)}`);
         audit.push(`2.7n.2 NPCImpairmentEngine=${compact(npcImpairment)}`);
-        audit.push(`2.7o resolveOutcome=atkDie:${atkDie}, atkTot:${atkTot}, defDie:${defDie}, defTot:${defTot}, margin:${margin}, classifyHostilePhysicalIntent:${hostilePhysical ? 'Y' : 'N'}, classifyCombatActionSequence:${combatActionSequence ? 'Y' : 'N'} -> ${compact(outcome)}`);
+        audit.push(`2.7o resolveOutcome=atkDie:${atkDie}, atkTot:${atkTot}, ${healingStaticDc ? `healingDC:${healingStaticDc}` : `defDie:${defDie}`}, defTot:${defTot}, margin:${margin}, classifyHostilePhysicalIntent:${hostilePhysical ? 'Y' : 'N'}, classifyCombatActionSequence:${combatActionSequence ? 'Y' : 'N'} -> ${compact(outcome)}`);
         const impairmentText = impairmentPenalty ? ` + impairment(${impairmentPenalty})` : '';
         const npcImpairmentText = npcImpairmentPenalty ? ` + impairment(${npcImpairmentPenalty})` : '';
-        const oppStatText = oppStat === 'ENV' ? ` + ENV(${environmentDifficulty})` : ` + ${oppStat}(${statValue(targetCore, oppStat)})${npcImpairmentText}`;
-        resultLine = `1d20(${atkDie}) + ${userStat}(${userStatValue})${impairmentText} = ${atkTot} vs 1d20(${defDie})${oppStatText} = ${defTot} (${margin} - ${outcome.OutcomeTier})`;
+        const oppStatText = healingStaticDc
+            ? `healingDC(${healingStaticDc})`
+            : oppStat === 'ENV' ? `1d20(${defDie}) + ENV(${environmentDifficulty})` : `1d20(${defDie}) + ${oppStat}(${statValue(targetCore, oppStat)})${npcImpairmentText}`;
+        resultLine = userImpairment?.AutoFail === 'Y'
+            ? `Automatic failure: ${userImpairment.Reason}`
+            : `1d20(${atkDie}) + ${userStat}(${userStatValue})${impairmentText} = ${atkTot} vs ${oppStatText} = ${defTot} (${margin} - ${outcome.OutcomeTier})`;
         primaryOppTarget = oppStat !== 'ENV' ? oppTargetsNpcFirst : null;
     }
 
@@ -2173,7 +2318,9 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         userAttackDie,
         nonLethal: bool(semantic.nonLethal) ? 'Y' : 'N',
         primaryTarget: primaryOppTarget,
+        primaryTargetCore: targetCore,
         trackerSnapshot,
+        hiddenHealthSnapshot,
         audit,
     });
 
@@ -2203,6 +2350,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         classifyHostilePhysicalIntent: hostilePhysical ? 'Y' : 'N',
         classifyCombatActionSequence: combatActionSequence ? 'Y' : 'N',
         activeHostileThreat: bool(semantic.activeHostileThreat) ? 'Y' : 'N',
+        SafeAutomaticHealing: healingAttempt.isHealing && !healingHasActiveStakes ? 'Y' : 'N',
         classifyPhysicalBoundaryPressure: boundaryReferee.value ? 'Y' : 'N',
         CompanionCommand: companionCommandNoRollEvidence
             ? {
@@ -2331,7 +2479,9 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const stakeReferee = resolveStakeChangeByOutcome(npc, relationshipContext, resolutionPacket);
         const benefitReferee = applyMeaningfulBenefitReferee(npc, resolutionPacket, stakeReferee.value, relationshipContext);
         const stakeChange = benefitReferee.value;
-        const npcStakes = resolutionPacket.RollNeeded === 'Y' && ['benefit', 'harm'].includes(stakeChange) ? 'Y' : 'N';
+        const resolvedForRelationship = resolutionPacket.RollNeeded === 'Y'
+            || (resolutionPacket.SafeAutomaticHealing === 'Y' && stakeChange === 'benefit');
+        const npcStakes = resolvedForRelationship && ['benefit', 'harm'].includes(stakeChange) ? 'Y' : 'N';
         const auditInteraction = npcStakes === 'Y' && stakeChange === 'benefit' ? 'Y' : 'N';
         const routedTarget = routeDispositionTarget(npc, resolutionPacket, auditInteraction, relationshipContext);
         const relation = relationToUserAction(npc, resolutionPacket);
@@ -3665,7 +3815,7 @@ function registerGeneratedName(context, name, meta) {
     if (typeof context.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
 }
 
-function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, nonLethal = 'N', primaryTarget = null, trackerSnapshot = {}, audit = null }) {
+function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, nonLethal = 'N', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
     if (rollNeeded !== 'Y') return [];
     if (!effectOutcomeLanded(outcome)) return [];
 
@@ -3675,10 +3825,15 @@ function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, roll
         userAttackDie,
         nonLethal,
         primaryTarget,
+        primaryTargetCore,
         trackerSnapshot,
+        hiddenHealthSnapshot,
     });
     if (fatalInjury) {
-        audit?.push(`2.7p deterministicUserAttackFatality=${compact(fatalInjury)}`);
+        const label = fatalInjury.condition === 'dead'
+            ? 'deterministicUserAttackFatality'
+            : 'deterministicBossCriticalDamage';
+        audit?.push(`2.7p ${label}=${compact(fatalInjury)}`);
         return [fatalInjury];
     }
 
@@ -3688,6 +3843,13 @@ function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, roll
         .slice(0, Math.max(0, landedCount))
         .map(effect => buildInflictedInjuryFromSemanticEffect(effect, outcome))
         .filter(Boolean);
+    if (!injuries.length) {
+        const fallback = buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, nonLethal });
+        if (fallback) {
+            audit?.push(`2.7p.1 fallbackCombatInjury=${compact(fallback)}`);
+            injuries.push(fallback);
+        }
+    }
     return mergeInflictedInjuries(injuries);
 }
 
@@ -3696,16 +3858,32 @@ function effectOutcomeLanded(outcome) {
     return Number.isFinite(landedCount) && landedCount > 0;
 }
 
-function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttackDie, nonLethal, primaryTarget, trackerSnapshot }) {
+function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttackDie, nonLethal, primaryTarget, primaryTargetCore, trackerSnapshot, hiddenHealthSnapshot }) {
     if (!combatActionSequence) return null;
     if (!isReal(primaryTarget)) return null;
     const nonlethal = String(nonLethal ?? 'N').trim().toUpperCase() === 'Y';
     if (nonlethal) return null;
 
     const existingCondition = normalizeTrackerCondition(trackerSnapshot?.[primaryTarget]?.condition);
+    const targetRank = String(primaryTargetCore?.Rank || trackerSnapshot?.[primaryTarget]?.currentCoreStats?.Rank || 'none');
     const instantKill = Number(userAttackDie) === 20 && outcome?.OutcomeTier === 'Critical_Success';
     const finishOffKill = ['badly_wounded', 'critical'].includes(existingCondition);
     if (!instantKill && !finishOffKill) return null;
+    if (instantKill && targetRank === 'Boss' && !bossAtOrBelowHalfHealth(primaryTarget, hiddenHealthSnapshot)) {
+        return {
+            NPC: primaryTarget,
+            condition: 'critical',
+            woundsAdd: [],
+            statusAdd: [],
+            severity: 'critical',
+            bodyPart: 'body',
+            effectType: 'boss_critical_damage',
+            sourceAction: 'boss_nat20_critical_damage',
+            DamageAmount: 18,
+            FatalityTrigger: 'blocked_boss_above_half_hp',
+            NarrationRule: `${primaryTarget} is a Boss-rank target above half hidden health, so this natural 20 Critical_Success cannot instantly kill them. Render the hit as an exceptional, concrete, non-fatal blow that deals massive damage and proves the attack mattered, but do not narrate death, collapse as final defeat, escape, or a trivialized encounter.`,
+        };
+    }
 
     const trigger = instantKill
         ? 'nat20_critical_success'
@@ -3725,6 +3903,219 @@ function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttack
             ? `${primaryTarget} is killed by this exceptional user attack result: nonLethal=N, natural 20, and Critical_Success. Render the kill as decisive, cinematic, concrete, and rewarding; do not soften it into a wound, near miss, survival, escape, or unresolved struggle. The target is dead.`
             : `${primaryTarget} was already ${existingCondition}; this landed combat hit deterministically finishes them. Render the result as a clear fatal finish, not another wound or continued fighting. The target is dead.`,
     };
+}
+
+function bossAtOrBelowHalfHealth(primaryTarget, hiddenHealthSnapshot) {
+    const actor = getHealthActor(hiddenHealthSnapshot, { targetType: 'npc', name: primaryTarget });
+    if (!actor) return false;
+    const maxHp = Math.max(1, Math.floor(Number(actor.maxHp || 1)));
+    const currentHp = Math.max(0, Math.floor(Number(actor.currentHp ?? maxHp)));
+    return currentHp <= Math.floor(maxHp / 2);
+}
+
+function buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, nonLethal = 'N' }) {
+    if (!combatActionSequence || !isReal(primaryTarget) || !effectOutcomeLanded(outcome)) return null;
+    const severity = severityFromOutcomeAndText(outcome, '');
+    const condition = conditionFromInflictedSeverity(severity);
+    return {
+        NPC: primaryTarget,
+        condition,
+        woundsAdd: [],
+        statusAdd: [],
+        severity,
+        bodyPart: 'body',
+        effectType: 'physical_injury',
+        sourceAction: 'fallback_combat_damage',
+        InjuryDetailMode: 'narrator_contextual',
+        InjurySeverityLimit: severity,
+        NarrationRule: `${primaryTarget} takes deterministic combat damage from the landed user attack. Narrate a concrete physical hit and impairment appropriate to the attack context, but do not exceed ${severity} severity. ${String(nonLethal).toUpperCase() === 'Y' ? 'This is nonlethal pressure; if the target drops, render defeat or incapacitation rather than death.' : 'If the target drops, render death only when the resolved outcome makes it lethal.'}`,
+    };
+}
+
+function collectHiddenHealthEvents({ ledger, resolutionPacket, aggression, context, healthBefore }) {
+    const events = [];
+    const nonlethal = String(resolutionPacket?.nonLethal || 'N').toUpperCase() === 'Y';
+
+    for (const injury of resolutionPacket?.InflictedInjuries || []) {
+        if (!isReal(injury?.NPC)) continue;
+        const fatal = injury?.condition === 'dead' || injury?.severity === 'fatal';
+        const damageOverride = Math.max(0, Math.floor(Number(injury?.DamageAmount || injury?.damageAmount || 0)));
+        const amount = fatal
+            ? 999
+            : damageOverride || damageForOutcomeTier(resolutionPacket?.OutcomeTier) || damageForSeverity(injury?.severity);
+        if (amount <= 0 && !fatal) continue;
+        events.push({
+            kind: 'damage',
+            targetType: 'npc',
+            target: injury.NPC,
+            amount,
+            fatal,
+            nonlethal,
+            defeatedCondition: 'incapacitated',
+            source: 'user_action',
+        });
+    }
+
+    const userInjury = aggression?.userTrackerDelta;
+    if (shouldApplyDeterministicResultInjury(userInjury)) {
+        const fatal = userInjury?.condition === 'dead' || userInjury?.severity === 'fatal';
+        const amount = fatal ? 999 : damageForSeverity(userInjury?.severity);
+        if (amount > 0 || fatal) {
+            events.push({
+                kind: 'damage',
+                targetType: 'user',
+                amount,
+                fatal,
+                nonlethal: false,
+                source: 'npc_aggression',
+            });
+        }
+    }
+
+    for (const item of aggression?.npcTrackerDeltas || []) {
+        const injury = item?.injury;
+        const name = item?.NPC || injury?.target || injury?.NPC;
+        if (!isReal(name) || !shouldApplyDeterministicResultInjury(injury)) continue;
+        const fatal = injury?.condition === 'dead' || injury?.severity === 'fatal';
+        const amount = fatal ? 999 : damageForSeverity(injury?.severity);
+        if (amount <= 0 && !fatal) continue;
+        events.push({
+            kind: 'damage',
+            targetType: 'npc',
+            target: name,
+            amount,
+            fatal,
+            nonlethal: false,
+            source: 'npc_aggression',
+        });
+    }
+
+    events.push(...collectHiddenHealingEvents({ ledger, resolutionPacket, context, healthBefore }));
+    events.push(...collectHiddenNaturalRecoveryEvents({ ledger, resolutionPacket, context, healthBefore }));
+    return events;
+}
+
+function collectHiddenHealingEvents({ ledger, resolutionPacket, context, healthBefore }) {
+    const semantic = ledger?.resolutionEngine || {};
+    const healing = classifyHealingAttempt(semantic, resolutionPacket?.GOAL, context);
+    if (!healing.isHealing) return [];
+
+    const targets = resolveHealingHealthTargets(semantic, resolutionPacket, healthBefore, context);
+    if (!targets.length) return [];
+
+    const activeStakes = healing.isHealing && resolutionPacket?.activeHostileThreat === 'Y';
+    const landed = activeStakes
+        ? ['Success', 'Minor_Success', 'Moderate_Success', 'Critical_Success'].includes(String(resolutionPacket?.OutcomeTier || ''))
+        : true;
+    if (!landed) return [];
+
+    const amount = activeStakes
+        ? healing.isMagic
+            ? magicHealAmountForOutcomeTier(resolutionPacket?.OutcomeTier)
+            : naturalHealAmountForOutcomeTier(resolutionPacket?.OutcomeTier)
+        : safeSceneHealingAmount(healing.isMagic);
+    if (amount <= 0) return [];
+
+    return targets.map(target => ({
+        kind: 'heal',
+        targetType: target.targetType,
+        target: target.name,
+        amount,
+        naturalTreatment: healing.isMagic ? 'N' : 'Y',
+        treatmentKey: target.treatmentKey,
+        source: healing.isMagic ? 'magic_healing' : 'natural_treatment',
+    }));
+}
+
+function collectHiddenNaturalRecoveryEvents({ ledger, resolutionPacket, context, healthBefore }) {
+    if (!isNaturalRecoveryTurn(ledger, context)) return [];
+    if (resolutionPacket?.activeHostileThreat === 'Y') return [];
+
+    const health = normalizeHiddenHealth(healthBefore);
+    const amount = naturalRecoveryAmountPerDay();
+    const events = [];
+    if (health.user.currentHp < health.user.maxHp && !health.user.dead) {
+        events.push({ kind: 'recovery', targetType: 'user', amount, source: 'natural_recovery' });
+    }
+    for (const [name, actor] of Object.entries(health.npcs || {})) {
+        if (!isReal(name) || actor.dead || actor.currentHp >= actor.maxHp) continue;
+        events.push({ kind: 'recovery', targetType: 'npc', target: name, amount, source: 'natural_recovery' });
+    }
+    return events;
+}
+
+function classifyHealingAttempt(semantic, goal, context) {
+    const source = [
+        semanticSourceText({ ...semantic, identifyGoal: goal }),
+        getLatestUserTextFromContext(context),
+        semantic?.userAbilityUse?.AbilityName,
+        semantic?.userAbilityUse?.NarrativeEffect,
+        semantic?.userAbilityUse?.Evidence,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const healingWords = /\b(?:heal|heals|healing|cure|cures|curing|mend|mends|mending|restore|restores|restoring|regenerate|regenerates|regenerating|close(?:s|d|ing)?\s+(?:the\s+)?wound|seal(?:s|ed|ing)?\s+(?:the\s+)?wound|treat|treats|treating|first[-\s]?aid|bandage|bandages|bandaged|bandaging|dress(?:es|ed|ing)?\s+(?:the\s+)?wound|stitch(?:es|ed|ing)?|splint|splints|splinted|splinting|medicine|medic|salve|ointment|poultice|stabili[sz](?:e|es|ed|ing))\b/;
+    const isHealing = healingWords.test(source);
+    const ability = semantic?.userAbilityUse || {};
+    const abilityUsed = bool(ability.Used) || bool(ability.Available) || bool(ability.Attempted);
+    const magicWords = /\b(?:magic|magical|spell|cast|casts|casting|mana|divine|holy|prayer|miracle|ritual|regeneration|regenerate|restoration|healing\s+light|healing\s+spell)\b/;
+    const isMagic = isHealing && (abilityUsed || magicWords.test(source));
+    return { isHealing, isMagic };
+}
+
+function resolveHealingHealthTargets(semantic, resolutionPacket, healthBefore, context) {
+    const source = [
+        semanticSourceText(semantic),
+        getLatestUserTextFromContext(context),
+    ].filter(Boolean).join(' ').toLowerCase();
+    const targets = [];
+    const addUser = () => targets.push({
+        targetType: 'user',
+        name: '',
+        treatmentKey: healingTreatmentKeyForTarget(healthBefore, { targetType: 'user' }),
+    });
+    const addNpc = name => {
+        if (!isReal(name)) return;
+        if (targets.some(item => item.targetType === 'npc' && sameName(item.name, name))) return;
+        targets.push({
+            targetType: 'npc',
+            name,
+            treatmentKey: healingTreatmentKeyForTarget(healthBefore, { targetType: 'npc', name }),
+        });
+    };
+
+    if (/\b(?:my|myself|me|own)\b.{0,80}\b(?:wound|injur|hurt|bleed|burn|poison|pain|bruise|cut|broken|fracture|sprain|heal|cure|treat|bandage|first[-\s]?aid)\b/.test(source)
+        || /\b(?:heal|cure|treat|bandage|stabiliz|mend|restore)\b.{0,80}\b(?:my|myself|me|own)\b/.test(source)) {
+        addUser();
+    }
+
+    for (const name of toRealArray(resolutionPacket?.ActionTargets)) {
+        addNpc(name);
+    }
+
+    if (!targets.length) {
+        const health = normalizeHiddenHealth(healthBefore);
+        if (health.user.currentHp < health.user.maxHp || source.includes('{{user}}')) addUser();
+    }
+
+    return targets.slice(0, 3);
+}
+
+function healingTreatmentKeyForTarget(healthBefore, target) {
+    const health = normalizeHiddenHealth(healthBefore);
+    const actor = target?.targetType === 'user'
+        ? health.user
+        : health.npcs?.[target?.name];
+    if (!actor) return 'unknown';
+    return [actor.currentHp, actor.maxHp, actor.lastDamageStateKey || 'state'].join(':');
+}
+
+function isNaturalRecoveryTurn(ledger, context) {
+    const source = [
+        getLatestUserTextFromContext(context),
+        ledger?.resolutionEngine?.identifyGoal,
+        ledger?.resolutionEngine?.identifyChallenge,
+        ledger?.resolutionEngine?.explicitMeans,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return /\b(?:rest(?:s|ed|ing)?|sleep(?:s|ing)?|slept|camp(?:s|ed|ing)?|make\s+camp|long\s+rest|recover(?:s|ed|ing)?|recuperat(?:e|es|ed|ing)|overnight|next\s+(?:day|morning)|after\s+(?:a|one)\s+day|for\s+(?:a|one|the)\s+day|day\s+passes|night\s+passes)\b/.test(source);
 }
 
 function repairLivingOppositionTargets(targets, classifier, options = {}, audit) {
@@ -4436,7 +4827,7 @@ function mergeNpcResultInjuryDelta(npcs, trackerSnapshot, npcName, injury) {
 }
 
 function worseTrackerCondition(current, next) {
-    const order = ['healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead'];
+    const order = ['healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead'];
     const currentIndex = Math.max(0, order.indexOf(normalizeTrackerCondition(current)));
     const nextIndex = Math.max(0, order.indexOf(normalizeTrackerCondition(next)));
     return order[Math.max(currentIndex, nextIndex)] || 'healthy';
@@ -4556,6 +4947,73 @@ function noNpcImpairment(reason = 'no relevant tracked NPC condition, wound, or 
     };
 }
 
+function actionBlockingUserImpairment(user, actionFunctions, rollNeeded) {
+    const condition = normalizeBlockingCondition(user?.condition);
+    if (!isActionBlockingCondition(condition)) return null;
+    if (condition === 'incapacitated' && actionIsPermittedIncapacitatedSpeech(actionFunctions, user)) return null;
+    return {
+        Relevant: 'Y',
+        Stage: 'critical',
+        RollPenalty: rollNeeded === 'Y' ? -999 : 0,
+        AppliedToRoll: rollNeeded === 'Y' ? 'Y' : 'N',
+        AutoFail: 'Y',
+        Source: condition,
+        SourceType: 'condition',
+        AffectedFunction: 'meaningful voluntary action',
+        MatchedActionFunction: unique(actionFunctions).join(', ') || 'action',
+        Reason: condition === 'dead'
+            ? '{{user}} is dead and cannot act'
+            : '{{user}} is incapacitated and cannot complete meaningful voluntary actions',
+        NarrationRule: condition === 'dead'
+            ? '{{user}} is dead; the attempted action cannot occur.'
+            : '{{user}} is incapacitated; the attempted action cannot succeed or meaningfully progress unless it is limited permitted speech.',
+    };
+}
+
+function actionBlockingNpcImpairment(npcName, state, actionFunctions, rollNeeded) {
+    const condition = normalizeBlockingCondition(state?.condition);
+    if (!isActionBlockingCondition(condition)) return null;
+    if (condition === 'incapacitated' && actionIsPermittedIncapacitatedSpeech(actionFunctions, state)) return null;
+    return {
+        Relevant: 'Y',
+        NPC: npcName || NONE,
+        Stage: 'critical',
+        RollPenalty: rollNeeded === 'Y' ? -999 : 0,
+        AppliedToRoll: rollNeeded === 'Y' ? 'Y' : 'N',
+        AutoFail: 'Y',
+        Source: condition,
+        SourceType: 'condition',
+        AffectedFunction: 'meaningful voluntary action',
+        MatchedActionFunction: unique(actionFunctions).join(', ') || 'action',
+        Reason: condition === 'dead'
+            ? `${npcName || 'NPC'} is dead and cannot act`
+            : `${npcName || 'NPC'} is incapacitated and cannot complete meaningful voluntary actions`,
+        NarrationRule: condition === 'dead'
+            ? `${npcName || 'NPC'} is dead; their attempted action cannot occur.`
+            : `${npcName || 'NPC'} is incapacitated; their attempted action cannot succeed or meaningfully progress unless it is limited permitted speech.`,
+    };
+}
+
+function normalizeBlockingCondition(value) {
+    const text = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (text === 'defeated') return 'incapacitated';
+    return text;
+}
+
+function isActionBlockingCondition(condition) {
+    return condition === 'dead' || condition === 'incapacitated';
+}
+
+function actionIsPermittedIncapacitatedSpeech(actionFunctions = [], state = {}) {
+    const functions = unique(actionFunctions);
+    if (!functions.length || !functions.every(item => item === 'speech')) return false;
+    const text = [
+        ...(Array.isArray(state?.wounds) ? state.wounds : []),
+        ...(Array.isArray(state?.statusEffects) ? state.statusEffects : []),
+    ].join(' ').toLowerCase();
+    return !/\b(unconscious|knocked out|asleep|sedated|drugged|gagged|mouth covered|muzzled|silenced|mute|voiceless|paraly[sz]ed|paralysis|frozen|stasis)\b/.test(text);
+}
+
 function evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded) {
     const user = getEffectiveUserImpairmentState(ledger, context);
     const sources = collectImpairmentSources(user, true);
@@ -4569,6 +5027,8 @@ function evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollN
         getLatestUserTextFromContext(context),
     ].filter(Boolean).join(' ');
     const actionFunctions = classifyUserActionFunctions(actionText, userStat);
+    const actionBlock = actionBlockingUserImpairment(user, actionFunctions, rollNeeded);
+    if (actionBlock) return actionBlock;
     if (!actionFunctions.length) return noUserImpairment('current action has no classifiable injured function');
 
     const matches = sources
@@ -4581,7 +5041,9 @@ function evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollN
 
     matches.sort((a, b) => USER_IMPAIRMENT_STAGE[b.source.stage].rank - USER_IMPAIRMENT_STAGE[a.source.stage].rank);
     const best = matches[0];
-    const penalty = USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
+    const penalty = best.source.type === 'condition'
+        ? hiddenHealthPenaltyForCondition(best.source.label)
+        : USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
     const applied = rollNeeded === 'Y' && penalty < 0 ? 'Y' : 'N';
     const matchedText = unique(best.matched).join(', ');
     const affectedText = unique(best.source.functions).join(', ');
@@ -4617,6 +5079,8 @@ function evaluateNpcImpairment(npcName, ledger, trackerSnapshot, semantic, goal,
         npcStat === 'CHA' ? 'speak negotiate resist socially presence composure' : '',
     ].filter(Boolean).join(' ');
     const actionFunctions = classifyUserActionFunctions(actionText, npcStat);
+    const actionBlock = actionBlockingNpcImpairment(npcName, npc, actionFunctions, rollNeeded);
+    if (actionBlock) return actionBlock;
     if (!actionFunctions.length) return noNpcImpairment('current NPC opposition has no classifiable injured function');
 
     const matches = sources
@@ -4629,7 +5093,9 @@ function evaluateNpcImpairment(npcName, ledger, trackerSnapshot, semantic, goal,
 
     matches.sort((a, b) => USER_IMPAIRMENT_STAGE[b.source.stage].rank - USER_IMPAIRMENT_STAGE[a.source.stage].rank);
     const best = matches[0];
-    const penalty = USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
+    const penalty = best.source.type === 'condition'
+        ? hiddenHealthPenaltyForCondition(best.source.label)
+        : USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
     const applied = rollNeeded === 'Y' && penalty < 0 ? 'Y' : 'N';
     const matchedText = unique(best.matched).join(', ');
     const affectedText = unique(best.source.functions).join(', ');
@@ -4664,6 +5130,8 @@ function evaluateNpcAggressionImpairment(npcName, trackerUpdate, trackerSnapshot
             : 'attack strike shove grab grapple weapon physical combat',
     ].filter(Boolean).join(' ');
     const actionFunctions = classifyUserActionFunctions(actionText, stat);
+    const actionBlock = actionBlockingNpcImpairment(npcName, state, actionFunctions, 'Y');
+    if (actionBlock) return actionBlock;
 
     const matches = sources
         .map(source => ({
@@ -4675,7 +5143,9 @@ function evaluateNpcAggressionImpairment(npcName, trackerUpdate, trackerSnapshot
 
     matches.sort((a, b) => USER_IMPAIRMENT_STAGE[b.source.stage].rank - USER_IMPAIRMENT_STAGE[a.source.stage].rank);
     const best = matches[0];
-    const penalty = USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
+    const penalty = best.source.type === 'condition'
+        ? hiddenHealthPenaltyForCondition(best.source.label)
+        : USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
     const matchedText = unique(best.matched).join(', ');
     const affectedText = unique(best.source.functions).join(', ');
 
@@ -4730,6 +5200,8 @@ function evaluateNpcDefenseImpairment(npcName, trackerUpdate, trackerSnapshot, p
         proactivityResult?.Impulse,
     ].filter(Boolean).join(' ');
     const actionFunctions = classifyUserActionFunctions(actionText, stat);
+    const actionBlock = actionBlockingNpcImpairment(npcName, state, actionFunctions, 'Y');
+    if (actionBlock) return actionBlock;
 
     const matches = sources
         .map(source => ({
@@ -4741,7 +5213,9 @@ function evaluateNpcDefenseImpairment(npcName, trackerUpdate, trackerSnapshot, p
 
     matches.sort((a, b) => USER_IMPAIRMENT_STAGE[b.source.stage].rank - USER_IMPAIRMENT_STAGE[a.source.stage].rank);
     const best = matches[0];
-    const penalty = USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
+    const penalty = best.source.type === 'condition'
+        ? hiddenHealthPenaltyForCondition(best.source.label)
+        : USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
     const matchedText = unique(best.matched).join(', ');
     const affectedText = unique(best.source.functions).join(', ');
 
@@ -4799,9 +5273,9 @@ function collectImpairmentSources(state, includePlayerFields) {
             type: 'condition',
             label: user.condition,
             stage: stageFromCondition(user.condition),
-            functions: user.condition === 'critical' || user.condition === 'dead'
-                ? ['whole_body', 'physical_exertion', 'stamina', 'focus']
-                : ['physical_exertion', 'stamina'],
+            functions: isActionBlockingCondition(user.condition)
+                ? ['whole_body']
+                : ['physical_exertion', 'stamina', 'mobility', 'combat', 'grip', 'balance', 'aim', 'breath'],
         });
     }
     for (const wound of user.wounds || []) {
@@ -4831,7 +5305,7 @@ function stageFromCondition(condition) {
     if (condition === 'bruised') return 'minor';
     if (condition === 'wounded') return 'moderate';
     if (condition === 'badly_wounded') return 'severe';
-    if (condition === 'critical' || condition === 'dead') return 'critical';
+    if (condition === 'critical' || condition === 'incapacitated' || condition === 'dead') return 'critical';
     return 'none';
 }
 
@@ -4915,7 +5389,7 @@ function matchedImpairmentFunctions(sourceFunctions, actionFunctions) {
     return unique(matched);
 }
 
-function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, context, audit, userResultDelta = null, npcResultDeltas = []) {
+function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, context, audit, userResultDelta = null, npcResultDeltas = [], hiddenHealthAfter = null) {
     const semantic = ledger.trackerUpdateEngine || {};
     const userBefore = buildPlayerTrackerSnapshot(context);
     let user = applyTrackerDeltaToState(userBefore, semantic.user, true);
@@ -4947,6 +5421,23 @@ function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, c
     for (const item of npcResultDeltas || []) {
         if (!shouldApplyDeterministicResultInjury(item?.injury)) continue;
         mergeNpcResultInjuryDelta(npcs, trackerSnapshot, item?.NPC, item?.injury);
+    }
+    if (hiddenHealthAfter) {
+        const adjusted = applyHiddenHealthToTrackerState({ user, npcs }, hiddenHealthAfter);
+        user = normalizeTrackerUserState({
+            ...user,
+            condition: adjusted.user?.condition || user.condition,
+            wounds: Array.isArray(adjusted.user?.wounds) ? adjusted.user.wounds : user.wounds,
+            statusEffects: Array.isArray(adjusted.user?.statusEffects) ? adjusted.user.statusEffects : user.statusEffects,
+        });
+        for (const [name, entry] of Object.entries(adjusted.npcs || {})) {
+            npcs[name] = normalizeTrackerEntry({
+                ...(npcs[name] || {}),
+                condition: entry?.condition || npcs[name]?.condition,
+                wounds: Array.isArray(entry?.wounds) ? entry.wounds : npcs[name]?.wounds,
+                statusEffects: Array.isArray(entry?.statusEffects) ? entry.statusEffects : npcs[name]?.statusEffects,
+            });
+        }
     }
 
     audit.push('STEP 6.5: EXECUTE TrackerUpdateEngine EXPLICIT DELTAS');
@@ -5046,7 +5537,8 @@ function applyTrackerDeltaToState(before, delta, includePlayerFields) {
 
 function normalizeTrackerDeltaCondition(value) {
     const text = String(value ?? 'unchanged').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    return ['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'dead'].includes(text) ? text : 'unchanged';
+    if (text === 'defeated') return 'incapacitated';
+    return ['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead'].includes(text) ? text : 'unchanged';
 }
 
 function applyListDelta(current, add, remove) {
@@ -5791,7 +6283,7 @@ function canCompanionRetreatInCrisis(handoff, fin, dire) {
 
 function isNpcBadlyWoundedOrIncapacitated(handoff) {
     const condition = String(handoff?.Condition || '').toLowerCase();
-    if (['badly_wounded', 'critical', 'dead'].includes(condition)) return true;
+    if (['badly_wounded', 'critical', 'incapacitated', 'dead'].includes(condition)) return true;
     const text = [
         ...(Array.isArray(handoff?.Wounds) ? handoff.Wounds : []),
         ...(Array.isArray(handoff?.StatusEffects) ? handoff.StatusEffects : []),
