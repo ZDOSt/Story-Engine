@@ -256,22 +256,6 @@ Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, 
 
 const DEFAULT_WRITING_STYLE_REMINDER_PROMPT = String.raw`FINAL WRITING STYLE REMINDER:
 Write clear, grounded narration while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with concrete environmental detail; dialogue should stay close to the active participants and immediate exchange, using observable behavior only and object or environmental interaction only when a character is actively using it, reacting to it, or when it materially affects the exchange; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
-const DEFAULT_PROSE_GUARD_FORMATTING_PROMPT = String.raw`FORMATTING CONTROL:
-Preserve and repair required display formatting without changing scene content, events, order, dialogue meaning, speaker identity, or mechanics.
-
-UNDERLINE RULE:
-- Underline all character names, placeholder names, location names, unnamed scene roles, scene placeholders, and role references with double underscores.
-- This includes proper names and descriptive references such as __Seraphina__, __Urakami Village__, __the guard__, __the innkeeper__, __the shopkeeper__, __the teacher__, __the student__, __the girl__, or __the merchant__.
-- Preserve existing valid __underlines__.
-- Add missing underlines only around the exact name, location, placeholder, or role phrase already present.
-- Do not invent names, titles, labels, locations, or new role descriptions.
-
-DIALOGUE RULE:
-- All spoken dialogue must be inside quotation marks.
-- Preserve speaker identity and dialogue meaning exactly.
-- Add quotation marks only around dialogue that is already present.
-
-Formatting violations are invalid. Repair required underlines and dialogue quotation before output.`;
 
 const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES = String.raw`cheeks flush
 cheeks flushed
@@ -537,8 +521,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
     postNarrationProseGuardEnabled: true,
-    proseGuardFormattingEnabled: true,
-    proseGuardFormattingPrompt: DEFAULT_PROSE_GUARD_FORMATTING_PROMPT,
     proseGuardStrictBehaviorismBannedPhrases: DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES,
     proseGuardDenotativePhysicalityBannedPhrases: DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES,
     proseGuardInanimateObjectivityBannedPhrases: DEFAULT_PROSE_GUARD_INANIMATE_OBJECTIVITY_BANNED_PHRASES,
@@ -684,6 +666,8 @@ function getSettings() {
     delete extension_settings[SETTINGS_KEY].writingStylePlacement;
     delete extension_settings[SETTINGS_KEY].writingStyleDepth;
     delete extension_settings[SETTINGS_KEY].writingStyleRole;
+    delete extension_settings[SETTINGS_KEY].proseGuardFormattingEnabled;
+    delete extension_settings[SETTINGS_KEY].proseGuardFormattingPrompt;
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = value;
@@ -1170,9 +1154,6 @@ function refreshSettingsControls() {
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardEnabledCheckbox = document.getElementById('structured_preflight_prose_guard_enabled');
-    const proseGuardFormattingEnabled = document.getElementById('structured_preflight_prose_guard_formatting_enabled');
-    const proseGuardFormattingDrawer = document.getElementById('structured_preflight_prose_guard_formatting_drawer');
-    const proseGuardFormattingPrompt = document.getElementById('structured_preflight_prose_guard_formatting_prompt');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
     const proseGuardBanFields = getProseGuardTargetedBanFieldControls();
     const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
@@ -1185,7 +1166,6 @@ function refreshSettingsControls() {
 
     const nameStyleSelect = document.getElementById('structured_preflight_name_style');
     const refreshSemanticButton = document.getElementById('structured_preflight_refresh_semantic_settings');
-    const resetProseGuardFormattingButton = document.getElementById('structured_preflight_reset_prose_guard_formatting');
     const resetProseGuardBanButtons = Array.from(document.querySelectorAll('[data-structured-preflight-reset-prose-guard-bans]'));
     const resetWritingStyleButtons = Array.from(document.querySelectorAll('[data-structured-preflight-reset-writing-style]'));
 
@@ -1194,10 +1174,6 @@ function refreshSettingsControls() {
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (proseGuardEnabledCheckbox) proseGuardEnabledCheckbox.checked = settings.postNarrationProseGuardEnabled !== false;
-    if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.checked = settings.proseGuardFormattingEnabled !== false;
-    if (proseGuardFormattingPrompt && proseGuardFormattingPrompt.value !== settings.proseGuardFormattingPrompt) {
-        proseGuardFormattingPrompt.value = String(settings.proseGuardFormattingPrompt ?? DEFAULT_PROSE_GUARD_FORMATTING_PROMPT);
-    }
     for (const { element, key, defaultValue } of proseGuardBanFields) {
         const value = String(settings[key] ?? defaultValue);
         if (element && element.value !== value) {
@@ -1245,12 +1221,6 @@ function refreshSettingsControls() {
 
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
-    if (proseGuardFormattingEnabled) proseGuardFormattingEnabled.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
-    if (proseGuardFormattingPrompt) proseGuardFormattingPrompt.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
-    if (proseGuardFormattingDrawer) {
-        proseGuardFormattingDrawer.hidden = !engineEnabled || settings.postNarrationProseGuardEnabled === false || settings.proseGuardFormattingEnabled === false;
-        if (proseGuardFormattingDrawer.hidden) proseGuardFormattingDrawer.open = false;
-    }
     for (const { element } of proseGuardBanFields) {
         if (element) element.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
     }
@@ -1274,7 +1244,6 @@ function refreshSettingsControls() {
         writingStyleEnabled,
         nameStyleSelect,
         refreshSemanticButton,
-        resetProseGuardFormattingButton,
         ...resetProseGuardBanButtons,
         ...resetWritingStyleButtons,
     ].forEach(control => {
@@ -1606,20 +1575,6 @@ function renderSettingsPanel() {
                                 <input id="structured_preflight_prose_guard_enabled" type="checkbox">
                                 <span>Enable Prose Guard</span>
                             </label>
-                            <label class="checkbox_label flexNoGap">
-                                <input id="structured_preflight_prose_guard_formatting_enabled" type="checkbox">
-                                <span>Enable Prose Guard formatting rules</span>
-                            </label>
-                            <details id="structured_preflight_prose_guard_formatting_drawer" data-structured-preflight-prompt-drawer>
-                                <summary class="spe-settings-writing-summary">
-                                    <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Formatting Prompt</button>
-                                    <button id="structured_preflight_reset_prose_guard_formatting" class="menu_button" type="button">Reset</button>
-                                </summary>
-                                <div class="spe-settings-body">
-                                    <small class="spe-settings-note">Included only in Prose Guard. It repairs display formatting after narration without changing mechanics or scene content.</small>
-                                    <textarea id="structured_preflight_prose_guard_formatting_prompt" class="text_pole textarea_compact" rows="14" spellcheck="false"></textarea>
-                                </div>
-                            </details>
                             <details id="structured_preflight_prose_guard_bans_drawer" data-structured-preflight-prompt-drawer>
                                 <summary class="spe-settings-writing-summary">
                                     <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Targeted Phrase Bans</button>
@@ -1747,22 +1702,6 @@ function renderSettingsPanel() {
 
     document.getElementById('structured_preflight_prose_guard_enabled')?.addEventListener('change', event => {
         settings.postNarrationProseGuardEnabled = Boolean(event.target?.checked);
-        refreshSettingsControls();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_prose_guard_formatting_enabled')?.addEventListener('change', event => {
-        settings.proseGuardFormattingEnabled = Boolean(event.target?.checked);
-        refreshSettingsControls();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_prose_guard_formatting_prompt')?.addEventListener('input', event => {
-        settings.proseGuardFormattingPrompt = String(event.target?.value ?? '');
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_reset_prose_guard_formatting')?.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        settings.proseGuardFormattingPrompt = DEFAULT_PROSE_GUARD_FORMATTING_PROMPT;
         refreshSettingsControls();
         saveExtensionSettings();
     });
@@ -3803,7 +3742,7 @@ function getMentionedDisplayNpcNames(npcs, assistantText) {
 
 }
 
-function collectNarrationUnderlinePhrases({ trackerDisplaySnapshot = null, context = null } = {}) {
+function collectNarrationUnderlinePhrases({ trackerDisplaySnapshot = null, pendingRun = null, context = null } = {}) {
     const phrases = [];
     const add = value => {
         const text = String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -3820,6 +3759,13 @@ function collectNarrationUnderlinePhrases({ trackerDisplaySnapshot = null, conte
         add(spaced);
         if (spaced && spaced === spaced.toLowerCase()) add(`the ${spaced}`);
     };
+
+    const namePool = pendingRun?.nameGeneration?.namePool;
+    for (const key of ['male', 'female', 'location']) {
+        for (const name of toRealNameArray(namePool?.[key])) {
+            addNameAliases(name);
+        }
+    }
 
     for (const name of Object.keys(normalizeDisplayTrackerNpcs(trackerDisplaySnapshot?.npcs || {}))) {
         addNameAliases(name);
@@ -3862,7 +3808,7 @@ function underlineNarrationPhrases(text, phrases) {
 }
 
 function applyDeterministicNarrationFormatting(narrationText, options = {}) {
-    if (!getSettings().proseGuardFormattingEnabled) return narrationText;
+    if (!isStoryEngineEnabled()) return narrationText;
     const phrases = collectNarrationUnderlinePhrases(options);
     return underlineNarrationPhrases(narrationText, phrases);
 }
@@ -9074,10 +9020,6 @@ async function persistMetadata(context = getContext()) {
 }
 
 function buildProseGuardPrompt(narrationText, latestUserText = '') {
-    const settings = getSettings();
-    const formattingPrompt = settings.proseGuardFormattingEnabled !== false
-        ? String(settings.proseGuardFormattingPrompt ?? DEFAULT_PROSE_GUARD_FORMATTING_PROMPT).trim()
-        : '';
     return [
         'STORY_ENGINE_PROSE_GUARD',
         '',
@@ -9088,7 +9030,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'You are not a style improver, summarizer, censor, or second narrator.',
         'If no violations exist, return TEXT_TO_CHECK unchanged.',
         'If you are uncertain whether text violates a rule, leave it unchanged.',
-        'Prefer narrow rewrites over deletion. Delete only invalid after-beat tailing, duplicated user-input restatement, empty/invalid separators, or text that cannot be repaired without changing facts.',
+        'Prefer narrow rewrites over deletion. Delete only invalid after-beat tailing, duplicated user-input restatement, or text that cannot be repaired without changing facts.',
         'Repair only clear violations of the Prose Guard rules below.',
         '',
         'PROSE_GUARD_RULES:',
@@ -9159,18 +9101,10 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '7. strictEpistemology(response): repair obvious private thoughts, hidden motives, unknown identities, unseen actions, or unrevealed lore only.',
         '8. linearChronology(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
         '9. activeHandoff(response): cut invalid after-beat tailing only.',
-        ...(formattingPrompt ? [
-            '10. formattingControl(response): preserve and repair required markdown formatting only.',
-            '11. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
-        ] : [
-            '10. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
-        ]),
+        '10. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
         '',
         'PROTECTED FACTS / INTEGRITY LOCK:',
         '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
-        ...(formattingPrompt ? [
-            '- Required formatting is protected unless it violates endpoint control: valid __underlined names/roles/locations__ and valid dialogue quotation marks.',
-        ] : []),
         '- Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
         '- Exception: if explicit after-beat tailing is present, remove only the final trailing sentence or tail fragment after the response beat unless it is required by an explicit resolved mechanic.',
         '- Preserve valid explicit, sensual, romantic, violent, tense, atmospheric, environmental, and intimate detail. Do not sanitize, soften, summarize, reduce, or desexualize valid content.',
@@ -9267,23 +9201,12 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Ban explicit waiting, "she waits," "awaits your response," "what do you do," "the choice is yours," all-eyes-on-user framing, mood-only silence, unrelated ambience, outro paragraphs, scene-break tails, and extra narration after the response beat.',
         'Do not replace after-beat tailing with different after-beat tailing. Trim only the final tail fragment.',
         '',
-        ...(formattingPrompt ? [
-            'PASS 10: formattingControl(response)',
-            'Goal: preserve and repair required display formatting without changing scene content.',
-            formattingPrompt,
-            '',
-            'PASS 11: integrityCheck(original, corrected)',
-        ] : [
-            'PASS 10: integrityCheck(original, corrected)',
-        ]),
+        'PASS 10: integrityCheck(original, corrected)',
         'Goal: return only a corrected narration that preserves the resolved scene.',
         'Before answering, verify that the corrected text did not change protected facts, did not add a new scene beat, did not delete a valid pre-boundary scene beat, did not reduce valid intimacy/detail/intensity, and did not reinterpret mechanics or character decisions.',
-        ...(formattingPrompt ? [
-            'Verify that required formatting remains intact after prose corrections. Do not remove valid underlines or dialogue quotation marks.',
-        ] : []),
         'If a proposed correction would change protected facts, keep the original valid content and only remove the prose violation.',
         'If a sentence is both a valid resolved scene beat and contains a prose violation, rewrite the sentence narrowly instead of deleting it.',
-        'Deletion is a last resort except for endpoint tailing, repeated user-action restatement, or unrecoverable invalid formatting.',
+        'Deletion is a last resort except for endpoint tailing or repeated user-action restatement.',
         '',
         'GOOD REPLACEMENT PATTERN:',
         'Invalid: "Her jaw tightened. The word landed flat and hard, dropped like a stone between them."',
