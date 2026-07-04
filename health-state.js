@@ -141,6 +141,10 @@ export function naturalRecoveryAmountPerDay() {
     return 2;
 }
 
+export function naturalFullRecoveryAmount() {
+    return 9999;
+}
+
 export function hiddenHealthPenaltyForCondition(condition) {
     return IMPAIRMENT_BY_CONDITION[normalizeCondition(condition)] ?? 0;
 }
@@ -341,6 +345,9 @@ function applyRecoveryEvent(actor, event = {}) {
     if (actor.currentHp > 0) {
         actor.nonlethalDefeat = false;
         actor.defeatedCondition = 'none';
+    }
+    if (actor.currentHp >= actor.maxHp) {
+        actor.naturalTreatmentKey = '';
     }
 }
 

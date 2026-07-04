@@ -82,8 +82,8 @@ import {
     healingDcForTargets,
     hiddenHealthPenaltyForCondition,
     magicHealAmountForOutcomeTier,
+    naturalFullRecoveryAmount,
     naturalHealAmountForOutcomeTier,
-    naturalRecoveryAmountPerDay,
     normalizeHiddenHealth,
     safeSceneHealingAmount,
 } from './health-state.js';
@@ -375,6 +375,10 @@ export function buildUserKnowledgeSnapshot(context) {
     return normalizeUserKnowledgeLedger(context?.chatMetadata?.structuredPreflightTracker?.userKnowledge || {});
 }
 
+export function buildUserReputationSnapshot(context) {
+    return normalizeUserReputation(context?.chatMetadata?.structuredPreflightTracker?.userReputation || {});
+}
+
 export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (!context?.chatMetadata || !trackerUpdate) return;
 
@@ -383,6 +387,7 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.user = normalizeTrackerUserState(root.user || {});
     root.powerActors = normalizePowerActors(root.powerActors || {});
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
+    root.userReputation = normalizeUserReputation(root.userReputation || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
 
@@ -406,6 +411,9 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     }
     if (trackerUpdate.userKnowledge) {
         root.userKnowledge = normalizeUserKnowledgeLedger(trackerUpdate.userKnowledge);
+    }
+    if (trackerUpdate.userReputation) {
+        root.userReputation = normalizeUserReputation(trackerUpdate.userReputation);
     }
     if (trackerUpdate.health) {
         root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
@@ -464,12 +472,14 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         }, ledger),
     });
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter);
+    const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), ledger?.trackerUpdateEngine?.userReputation || {});
     const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name, playerTrackerSnapshot);
 
     const visibleTrackerUpdate = {
         npcs: trackerDeltas.npcs,
         user: trackerDeltas.user,
         powerActors: powerActors.trackerUpdate,
+        userReputation,
     };
     const trackerUpdate = {
         ...visibleTrackerUpdate,
@@ -1446,6 +1456,125 @@ function userKnowledgeMergeKey(entry) {
     return ['personal', entry.knownBy, entry.scope, entry.topic, entry.truth, normalizeKnowledgeLineKey(entry.line)].join('|');
 }
 
+const USER_REPUTATION_VERSION = 1;
+const USER_REPUTATION_HISTORY_LIMIT = 40;
+
+export function mergeUserReputationLedger(before = {}, delta = {}) {
+    const base = normalizeUserReputation(before);
+    const incoming = normalizeUserReputationDelta(delta);
+    const locations = { ...base.locations };
+    const history = [...base.history];
+    const now = Date.now();
+    let fameAwarded = 0;
+    let infamyAwarded = 0;
+
+    for (const entry of incoming.events) {
+        const location = normalizeReputationLocation(entry.location);
+        if (!location) continue;
+        const locationKey = findExistingReputationLocationKey(locations, location) || location;
+        const previous = normalizeUserReputationLocation(locations[locationKey] || { location: locationKey });
+        const rawFameDelta = clamp(Math.floor(Number(entry.fameDelta || 0)), 0, 1);
+        const rawInfamyDelta = clamp(Math.floor(Number(entry.infamyDelta || 0)), 0, 1);
+        const fameDelta = fameAwarded ? 0 : rawFameDelta;
+        const infamyDelta = infamyAwarded ? 0 : rawInfamyDelta;
+        if (!fameDelta && !infamyDelta) continue;
+        fameAwarded += fameDelta;
+        infamyAwarded += infamyDelta;
+        const next = normalizeUserReputationLocation({
+            ...previous,
+            location: previous.location || locationKey,
+            fame: previous.fame + fameDelta,
+            infamy: previous.infamy + infamyDelta,
+            updatedAt: now,
+        });
+        if (locationKey !== next.location && locations[locationKey]) delete locations[locationKey];
+        locations[next.location] = next;
+        history.push(normalizeUserReputationEvent({
+            ...entry,
+            location: next.location,
+            fameDelta,
+            infamyDelta,
+            createdAt: now,
+        }));
+    }
+
+    return normalizeUserReputation({
+        version: USER_REPUTATION_VERSION,
+        locations,
+        history: history.filter(Boolean).slice(-USER_REPUTATION_HISTORY_LIMIT),
+    });
+}
+
+export function normalizeUserReputation(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const locations = {};
+    const rawLocations = source.locations && typeof source.locations === 'object' ? source.locations : {};
+    for (const [key, entry] of Object.entries(rawLocations)) {
+        const normalized = normalizeUserReputationLocation({ ...(entry || {}), location: entry?.location || key });
+        if (!normalized.location) continue;
+        locations[normalized.location] = normalized;
+    }
+    const history = Array.isArray(source.history)
+        ? source.history.map(normalizeUserReputationEvent).filter(Boolean).slice(-USER_REPUTATION_HISTORY_LIMIT)
+        : [];
+    return {
+        version: USER_REPUTATION_VERSION,
+        locations,
+        history,
+    };
+}
+
+function normalizeUserReputationDelta(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const events = Array.isArray(source.events)
+        ? source.events.map(normalizeUserReputationEvent).filter(Boolean)
+        : [];
+    return { events };
+}
+
+function normalizeUserReputationLocation(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const location = normalizeReputationLocation(source.location);
+    if (!location) return { location: '', fame: 0, infamy: 0, updatedAt: 0 };
+    return {
+        location,
+        fame: clamp(Math.floor(Number(source.fame || 0)), 0, 999),
+        infamy: clamp(Math.floor(Number(source.infamy || 0)), 0, 999),
+        updatedAt: Math.max(0, Math.floor(Number(source.updatedAt || 0))),
+    };
+}
+
+function findExistingReputationLocationKey(locations = {}, location = '') {
+    const wanted = normalizeReputationLocation(location).toLowerCase();
+    if (!wanted) return '';
+    return Object.keys(locations || {}).find(key => normalizeReputationLocation(key).toLowerCase() === wanted)
+        || Object.values(locations || {}).map(entry => normalizeReputationLocation(entry?.location)).find(existing => existing.toLowerCase() === wanted)
+        || '';
+}
+
+function normalizeUserReputationEvent(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const location = normalizeReputationLocation(source.location);
+    if (!location) return null;
+    const fameDelta = clamp(Math.floor(Number(source.fameDelta || 0)), 0, 1);
+    const infamyDelta = clamp(Math.floor(Number(source.infamyDelta || 0)), 0, 1);
+    if (!fameDelta && !infamyDelta) return null;
+    return {
+        location,
+        fameDelta,
+        infamyDelta,
+        reason: cleanKnowledgeScalar(source.reason, 220) || NONE,
+        evidence: cleanKnowledgeScalar(source.evidence, 220) || NONE,
+        createdAt: normalizeKnowledgeTimestamp(source.createdAt),
+    };
+}
+
+function normalizeReputationLocation(value) {
+    const text = cleanKnowledgeScalar(value, 120);
+    if (!text || text === NONE) return '';
+    return text.replace(/\s+/g, ' ').trim();
+}
+
 function normalizeUserKnowledgeScope(value) {
     const text = cleanKnowledgeScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
     return USER_KNOWLEDGE_SCOPES.includes(text) ? text : 'private';
@@ -2391,6 +2520,8 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
     const handoffs = [];
     const trackerUpdate = {};
     const pendingOfferNpcs = npcList.filter(npc => isRomanceMemoryTag(normalizeTrackerEntry(trackerSnapshot[npc] || {}).proactivityMemory.pendingTag));
+    const userReputation = buildUserReputationSnapshot(context);
+    const currentReputationLocation = normalizeReputationLocation(ledger?.engineContext?.userReputationContext?.location);
 
     audit.push('STEP 3: EXECUTE RelationshipEngine(npc, resolutionPacket) USING SEMANTIC_LEDGER');
     audit.push(`3.1 NPC_LIST=[${npcList.join(',') || NONE}]`);
@@ -2455,7 +2586,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         audit.push(`3.3c rapportEligible=${yn(rapportEligible)}`);
 
         if (!currentDisposition) {
-            const init = resolveDeterministicInitPreset(npc, state, sem, audit, `3.3 ${npc}.initPreset`);
+            const init = resolveDeterministicInitPreset(npc, state, sem, audit, `3.3 ${npc}.initPreset`, {
+                userReputation,
+                currentReputationLocation,
+            });
             initMetadata = init;
             currentDisposition = init.disposition;
             audit.push(`3.3d initPreset.userHistory=${compact(init.userHistory)}`);
@@ -2541,13 +2675,21 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             globalActiveMs,
         })}`);
 
+        const suppressFreshNonHumanNoChangeBond = firstTrackedEncounter
+            && ['userNonHuman', 'userNonHumanFame5'].includes(initMetadata?.label || '')
+            && target === 'No Change';
+        if (suppressFreshNonHumanNoChangeBond) {
+            audit.push(`3.4f suppressFreshNonHumanNoChangeBond=${initMetadata.label}`);
+        }
+
         const deltas = hostilePressureResult?.deltas || boundaryPressureResult?.deltas || deriveDirection(target, currentDisposition, currentRapport, auditInteraction, resolutionPacket, {
             allowNoChangeEarlyBond: target === 'No Change'
                 && (relation.isDirect || relation.isBenefited)
                 && !relation.isOpp
                 && !relation.isHarmed
                 && !bool(relationshipContext.explicitIntimidationOrCoercion)
-                && slowBondBlockersNow.length === 0,
+                && slowBondBlockersNow.length === 0
+                && !suppressFreshNonHumanNoChangeBond,
         });
         const updatedDisposition = updateDisposition(currentDisposition, deltas);
         currentDisposition = updatedDisposition;
@@ -4028,11 +4170,10 @@ function collectHiddenHealingEvents({ ledger, resolutionPacket, context, healthB
 }
 
 function collectHiddenNaturalRecoveryEvents({ ledger, resolutionPacket, context, healthBefore }) {
-    if (!isNaturalRecoveryTurn(ledger, context)) return [];
-    if (resolutionPacket?.activeHostileThreat === 'Y') return [];
+    if (!isSafeRecoveryCompleteTurn(ledger, resolutionPacket, context)) return [];
 
     const health = normalizeHiddenHealth(healthBefore);
-    const amount = naturalRecoveryAmountPerDay();
+    const amount = naturalFullRecoveryAmount();
     const events = [];
     if (health.user.currentHp < health.user.maxHp && !health.user.dead) {
         events.push({ kind: 'recovery', targetType: 'user', amount, source: 'natural_recovery' });
@@ -4105,17 +4246,28 @@ function healingTreatmentKeyForTarget(healthBefore, target) {
         ? health.user
         : health.npcs?.[target?.name];
     if (!actor) return 'unknown';
-    return [actor.currentHp, actor.maxHp, actor.lastDamageStateKey || 'state'].join(':');
+    return actor.lastDamageStateKey || 'no-damage';
 }
 
-function isNaturalRecoveryTurn(ledger, context) {
+function isSafeRecoveryCompleteTurn(ledger, resolutionPacket, context) {
+    if (resolutionPacket?.activeHostileThreat === 'Y') return false;
+    const targets = resolutionPacket || {};
+    if (toRealArray(targets?.hostilesInScene?.NPC).length) return false;
+    if (toRealArray(targets?.OppTargets?.NPC).length) return false;
+    if (toRealArray(targets?.OppTargets?.ENV).length) return false;
+
     const source = [
         getLatestUserTextFromContext(context),
         ledger?.resolutionEngine?.identifyGoal,
         ledger?.resolutionEngine?.identifyChallenge,
         ledger?.resolutionEngine?.explicitMeans,
     ].filter(Boolean).join(' ').toLowerCase();
-    return /\b(?:rest(?:s|ed|ing)?|sleep(?:s|ing)?|slept|camp(?:s|ed|ing)?|make\s+camp|long\s+rest|recover(?:s|ed|ing)?|recuperat(?:e|es|ed|ing)|overnight|next\s+(?:day|morning)|after\s+(?:a|one)\s+day|for\s+(?:a|one|the)\s+day|day\s+passes|night\s+passes)\b/.test(source);
+    if (!source) return false;
+    const completedRecoveryTransition = /\b(?:by\s+(?:the\s+)?(?:next\s+)?morning|the\s+next\s+(?:morning|day)|after\s+(?:a|one|the)\s+(?:safe\s+)?(?:night|day)|after\s+(?:several|a few|many)\s+(?:quiet\s+|safe\s+)?(?:hours|days)|overnight|through\s+the\s+night|night\s+passes|day\s+passes|time\s+skip|time\s+passes|safe\s+lodging|safe\s+rest|long\s+rest|full\s+rest|recovery\s+time|downtime|convalesc(?:e|es|ed|ing)|recuperat(?:e|es|ed|ing)|rest(?:s|ed|ing)?\s+(?:safely|undisturbed|without\s+interruption|for\s+the\s+night|until\s+morning)|sleep(?:s|ing)?\s+(?:safely|undisturbed|through\s+the\s+night|until\s+morning))\b/.test(source);
+    if (!completedRecoveryTransition) return false;
+    const unsafeContext = /\b(?:dungeon|battlefield|combat|fight|ambush|pursuit|chase|hostile|enemy|enemies|danger|dangerous|unsafe|threat|threatening|under\s+attack|siege|trap|trapped|monster|monsters|guarded|patrolled|wilderness\s+danger)\b/.test(source)
+        && !/\b(?:safe|safely|secure|secured|protected|sheltered|inn|lodging|town|village|home|sanctuary|healer|clinic|temple|hospital|camp\s+is\s+secure|no\s+danger)\b/.test(source);
+    return !unsafeContext;
 }
 
 function repairLivingOppositionTargets(targets, classifier, options = {}, audit) {
@@ -6901,9 +7053,13 @@ function getCardFields(context) {
     }
 }
 
-function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
+function resolveDeterministicInitPreset(npc, state, sem, audit, label, options = {}) {
     const flags = normalizeSemanticInitPresetFlags(sem?.initPreset);
     const raceProfile = normalizeNpcRaceProfile(state?.raceProfile);
+    const reputationApplication = resolveUserReputationInitApplication(options?.userReputation, {
+        location: options?.currentReputationLocation,
+        userNonHuman: flags.userNonHuman && !flags.fearImmunity,
+    });
 
     let base = { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } };
     if (flags.romanticOpen) {
@@ -6912,8 +7068,10 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
         base = { label: 'userBadRep', disposition: { B: 1, F: 2, H: 3 } };
     } else if (flags.priorUserGoodRep) {
         base = { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 1 } };
+    } else if (reputationApplication?.label) {
+        base = reputationApplication;
     } else if (flags.userNonHuman && !flags.fearImmunity) {
-        base = { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
+        base = { label: 'userNonHuman', disposition: { B: 1, F: 2, H: 2 } };
     }
     const userHistory = initUserHistoryFromFlags(flags, state?.userHistory);
 
@@ -6927,6 +7085,7 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
             fearImmunity: yn(flags.fearImmunity),
         },
         base: base.label,
+        reputation: reputationApplication?.reputation || null,
     })}`);
     return {
         ...base,
@@ -6934,6 +7093,71 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label) {
         userHistory,
         raceProfile,
     };
+}
+
+function resolveUserReputationInitApplication(userReputation, options = {}) {
+    const reputation = selectApplicableUserReputationLocation(userReputation, options?.location);
+    if (!reputation) return null;
+    const fame = Math.max(0, Math.floor(Number(reputation.fame || 0)));
+    const infamy = Math.max(0, Math.floor(Number(reputation.infamy || 0)));
+    const userNonHuman = bool(options?.userNonHuman);
+
+    let label = '';
+    let disposition = null;
+    if (infamy >= 25) {
+        label = 'userInfamy25';
+        disposition = { B: 1, F: 4, H: 4 };
+    } else if (infamy >= 20) {
+        label = 'userInfamy20';
+        disposition = { B: 1, F: 3, H: 4 };
+    } else if (infamy >= 15) {
+        label = 'userInfamy15';
+        disposition = { B: 1, F: 3, H: 3 };
+    } else if (infamy >= 10) {
+        label = 'userInfamy10';
+        disposition = { B: 1, F: 2, H: 3 };
+    } else if (infamy >= 5) {
+        label = 'userInfamy5';
+        disposition = { B: 1, F: 2, H: 2 };
+    }
+
+    if (!disposition) {
+        if (userNonHuman) {
+            if (fame >= 10) {
+                label = 'userNonHumanFame10';
+                disposition = { B: 2, F: 2, H: 2 };
+            } else if (fame >= 5) {
+                label = 'userNonHumanFame5';
+                disposition = { B: 1, F: 2, H: 2 };
+            }
+        } else if (fame >= 10) {
+            label = fame >= 15 ? 'userFame15' : 'userFame10';
+            disposition = { B: 3, F: 1, H: 1 };
+        } else if (fame >= 5) {
+            label = 'userFame5';
+            disposition = { B: 2, F: 2, H: 2 };
+        }
+    }
+
+    if (!disposition) return null;
+    return {
+        label,
+        disposition,
+        reputation: {
+            location: reputation.location,
+            fame,
+            infamy,
+        },
+    };
+}
+
+function selectApplicableUserReputationLocation(userReputation, currentLocation = '') {
+    const ledger = normalizeUserReputation(userReputation || {});
+    const locations = Object.values(ledger.locations || {}).map(normalizeUserReputationLocation).filter(entry => entry.location);
+    if (!locations.length) return null;
+    const wanted = normalizeReputationLocation(currentLocation);
+    if (!wanted) return null;
+    return locations.find(entry => entry.location.toLowerCase() === wanted.toLowerCase()) || null;
 }
 
 function normalizeSemanticInitPresetFlags(value) {

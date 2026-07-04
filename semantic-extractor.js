@@ -694,7 +694,7 @@ function buildSemanticPreflightSchema() {
             engineContext: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['trackerRelevantNPCs'],
+                required: ['trackerRelevantNPCs', 'userReputationContext'],
                 properties: {
                     trackerRelevantNPCs: {
                         type: 'array',
@@ -704,6 +704,17 @@ function buildSemanticPreflightSchema() {
                             required: ['NPC'],
                             properties: {
                                 NPC: { type: 'string' },
+                            },
+                        },
+                    },
+                    userReputationContext: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['location'],
+                        properties: {
+                            location: {
+                                type: 'string',
+                                description: 'Current settlement/community/route/region for deterministic fame/infamy lookup, or (none). Do not decide reputation effects here.',
                             },
                         },
                     },
@@ -875,15 +886,15 @@ function buildSemanticPreflightSchema() {
                                 },
                                 userBadRep: {
                                     type: 'boolean',
-                                    description: 'Y only for explicit prior hate, distrust, enemy status, pursuit, betrayal, harm, or bad reputation with this NPC; not current-scene conflict alone.',
+                                    description: 'Y only for explicit authored prior hate, distrust, enemy status, pursuit, betrayal, harm, or negative relationship with this NPC from character card, lore, scenario, or pre-existing relationship context; not current-scene conflict or broad public infamy.',
                                 },
                                 priorUserGoodRep: {
                                     type: 'boolean',
-                                    description: 'Y only for explicit established favorable or trust-normalizing prior history/reputation/trust/gratitude/safe familiarity with this NPC; not kindness or good impressions only in this interaction.',
+                                    description: 'Y only for explicit authored established favorable or trust-normalizing prior history, trust, gratitude, safe familiarity, vouching, friendship, or relationship with this NPC from character card, lore, scenario, or pre-existing relationship context; not kindness, good impressions, or broad public fame.',
                                 },
                                 userNonHuman: {
                                     type: 'boolean',
-                                    description: 'Y only for a fear-coded initial context: explicit established fearsome/dangerous user reputation known to this NPC, or explicitly visible demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural user form when this is a fresh or unnormalized exposure. Do not use for normal fantasy peoples, hidden ancestry, or an NPC who already has prior familiarity/ordinary context/trusted introduction that makes user known rather than shocking.',
+                                    description: 'Y for visibly demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural user form when this is a fresh or unnormalized exposure, or explicit authored fear-coded relationship context with this NPC. Do not use broad public infamy here; deterministic fame/infamy handles that.',
                                 },
                                 fearImmunity: {
                                     type: 'boolean',
@@ -1220,7 +1231,8 @@ const COMPACT_LEDGER_CONTRACT = [
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
     '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer/awareness lists.',
     '- If no living NPC is in those target/observer/awareness lists, output RelationshipEngine.count=0 and no RelationshipEngine[index] lines.',
-    '- RelationshipEngine[index].initPreset is only "how this NPC initially feels toward {{user}}" when currentDisposition is missing. Check all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. The semantic pass chooses only these Y/N tags; deterministic code assigns B/F/H stats. romanticOpen=Y when prior card/lore/scenario/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward {{user}}. This can be stated directly or shown through clearly romantic behavior, gestures, plans, keepsakes, letters, gifts, jealousy, longing, attempts to be noticed, attempts to spend time alone, or other evidence that the NPC interest in {{user}} is romantic rather than merely friendly. Do not mark romanticOpen for generic friendliness, politeness, casual flirting, shallow physical attraction, ordinary embarrassment, first impressions, vague chemistry, gratitude, or non-romantic loyalty. Do not suppress romanticOpen solely because userNonHuman=Y; set both flags if both are explicit. userBadRep=Y only if {{user}} is hated, distrusted, wanted, enemy-coded, or has a bad prior reputation with this NPC before the current first interaction. priorUserGoodRep=Y only if prior lore/card/scenario/tracker/history or UserKnowledgeApplication explicitly gives {{user}} an established favorable or trust-normalizing reputation with this NPC before the current scene: safe familiarity, credible vouching, ordinary neighbor/customer/guild contact, cleared/cooperative status, prior help, trust, gratitude, or other prior context that makes {{user}} known as safe/cooperative despite unusual nature. First-encounter kindness, rescue, courtesy, friendliness, praise, or warm first impression do not count. userNonHuman=Y only for a fear-coded initial context: either UserKnowledgeApplication or explicit prior context gives {{user}} an established fearsome/dangerous reputation known to this NPC, OR {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like and this NPC lacks prior familiarity, ordinary normalizing context, trusted introduction, or credible knowledge that makes {{user}} known rather than shocking. Do not use userNonHuman merely because the user is a demon/monster if the NPC already knows of them in a neutral or normalizing way; fall through to neutral unless priorUserGoodRep, userBadRep, or userNonHuman fear-coded reputation applies. fearImmunity=Y only if this NPC is the same kind/race category as that user form, a superior or peer supernatural/monstrous being, explicitly immune/naturally resistant to fear or mental fear, or card/lore/scenario explicitly portrays them as an ancient/powerful/non-ordinary being that has faced such horrors and is not meaningfully afraid of them. Title, rank, bravado, posturing, composure, courage, or pretending to be fearless do not count.',
+    '- EngineContext.userReputationContext.location is only the current settlement/community/route/region identifier for deterministic fame/infamy lookup. Use a concise known place/community name when context makes it clear; otherwise (none). Do not decide fame/infamy effects here.',
+    '- RelationshipEngine[index].initPreset is only "how this NPC initially feels toward {{user}}" when currentDisposition is missing. The semantic pass chooses only explicit authored/personal Y/N tags; deterministic code assigns B/F/H stats and separately applies hidden fame/infamy. romanticOpen=Y when prior character card/lore/scenario/pre-existing relationship/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward {{user}}. This can be stated directly or shown through clearly romantic behavior, gestures, plans, keepsakes, letters, gifts, jealousy, longing, attempts to be noticed, attempts to spend time alone, or other evidence that the NPC interest in {{user}} is romantic rather than merely friendly. Do not mark romanticOpen for generic friendliness, politeness, casual flirting, shallow physical attraction, ordinary embarrassment, first impressions, vague chemistry, gratitude, or non-romantic loyalty. Do not suppress romanticOpen solely because userNonHuman=Y; set both flags if both are explicit. userBadRep=Y only if explicit character card/lore/scenario/pre-existing relationship context says {{user}} is hated, distrusted, wanted, enemy-coded, or has a bad personal prior relationship with this NPC before the current first interaction. priorUserGoodRep=Y only if explicit character card/lore/scenario/pre-existing relationship context gives {{user}} safe familiarity, credible vouching, ordinary neighbor/customer/guild contact, cleared/cooperative status, prior help, trust, gratitude, friendship, or other authored prior context that makes {{user}} known as safe/cooperative to this NPC. Do not use broad public fame, public infamy, generic reputationKnowledge, first-encounter kindness, rescue, courtesy, friendliness, praise, or warm first impression for these flags. userNonHuman=Y only when {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural and this NPC lacks prior familiarity, ordinary normalizing context, trusted introduction, or credible knowledge that makes {{user}} known rather than shocking; it can also be Y for explicit authored fear-coded relationship context with this NPC. Do not use broad public infamy as userNonHuman. fearImmunity=Y only if this NPC is the same kind/race category as that user form, a superior or peer supernatural/monstrous being, explicitly immune/naturally resistant to fear or mental fear, or card/lore/scenario explicitly portrays them as an ancient/powerful/non-ordinary being that has faced such horrors and is not meaningfully afraid of them. Title, rank, bravado, posturing, composure, courage, or pretending to be fearless do not count.',
     '- RelationshipEngine[index].establishedRelationship is true only if this NPC already has B4 relationship state and tracker establishedRelationship=Y, or the current explicit scene shows a direct romantic/love/relationship declaration or request from {{user}} accepted by that NPC, or from that NPC accepted by {{user}}. If the immediately previous NPC message contains a clear love/relationship confession or request, and the current user input accepts it verbally or through unmistakable romantic reciprocation such as kissing/embracing without refusal, return true. If the immediately previous user input contains a clear love/relationship confession or request, and the current NPC response accepted it, return true. It must establish an actual romantic relationship, partnership, lovers status, dating/courting bond, or equivalent committed romantic connection. Flirting, attraction, arousal, sex, prior intimacy, affection, kindness, trust, loyalty, closeness, friendship, gratitude, protectiveness, or B4 alone does not count.',
     '- RelationshipEngine[index].romanceStyle is for B4 pre-relationship initiative only. Return nervous if explicit card/lore/context portrays this NPC as shy, reserved, guarded, restrained, formal, awkward, timid, emotionally cautious, or likely to show romantic interest through hesitation. Return flirt if explicit card/lore/context portrays this NPC as bold, outgoing, playful, teasing, direct, seductive, socially confident, or likely to show romantic interest through open flirtation. Return auto if unclear or mixed.',
     '- RelationshipEngine[index].checkThreshold override flags must use all available context: active SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history. CurrentInvitation=Y when this NPC clearly and directly offers, requests, invites, strongly implies, accepts, agrees to, arranges, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene, and has not withdrawn, refused, panicked, or been interrupted by danger. Mark CurrentInvitation=Y when the NPC accepts or agrees to {{user}}\'s explicit sexual/intimate proposal, including agreeing to join, inviting or calling another willing participant, or saying yes to coming over for sex/intimacy. Mark CurrentInvitation=Y for irrefutable sexual invitation hints even when phrased as teasing questions, such as "I wonder how tight I would be for you. Want to find out?" Do not mark CurrentInvitation for ordinary flirting, suggestive banter, compliments, attraction, embarrassment, vague innuendo without an invitation, or a user-originated proposal the NPC has not accepted. Exploitation=Y when card/lore/context explicitly makes this NPC exploitable by {{user}} or the current situation: naive, easily led or persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, sheltered to an unsafe degree, or otherwise unable to safely judge/resist. Do not mark Exploitation for mere innocence, shyness, kindness, friendliness, attraction, low confidence, or normal inexperience without explicit vulnerability/suggestibility. Hedonist=Y only for explicitly sexually open, pleasure-seeking, casual, promiscuous, or eager intimacy context. Transactional=Y only for explicit willingness to exchange intimacy for money, goods, favors, protection, status, or services. Established=Y only for explicit prior/current intimate access with current or recent receptivity toward {{user}}, such as casual lovers, friends with benefits, an ongoing sexual arrangement, or explicit comfort/willingness with renewed intimacy. Do not mark Established for prior intimacy alone when current receptivity is absent, stale, unclear, refused, fearful, hostile, coerced, or boundary-limited. establishedRelationship remains its separate relationship-state mechanic.',
@@ -1260,6 +1272,7 @@ const COMPACT_LEDGER_CONTRACT = [
 ].join('\n');
 
 const COMPACT_LEDGER_TEMPLATE = `BEGIN_SEMANTIC_PREFLIGHT
+EngineContext.userReputationContext.location=(none)
 ResolutionEngine.identifyGoal=Normal_Interaction
 ResolutionEngine.identifyChallenge=Normal_Interaction
 ResolutionEngine.explicitMeans=(none)
@@ -1488,7 +1501,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
         `Disposition continuity context (plain-language tracker state for rollNeeded and social buckets; use this to decide whether a current NPC reaction or negative social contest is already settled):\n${dispositionContinuityContext}\n\n` +
         `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
-        `User knowledge snapshot JSON (hidden memory about what people may know about {{user}}; use only for UserKnowledgeApplication and initPreset reputation tags, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
+        `User knowledge snapshot JSON (hidden memory about authored or personal facts people may know about {{user}}; use for UserKnowledgeApplication context only, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
         'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
@@ -1506,14 +1519,14 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'For each living NPC in relationshipEngine, stakeChangeByOutcome must describe that NPC stakes change for each outcome: benefit means their stakes improve, harm means their stakes worsen, none means no meaningful stake change. For explicit boundary violations toward a direct/opposing NPC target, successful or landed outcomes worsen that NPC boundary/autonomy/trust stakes, so use harm and not none. ' +
         'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC stat seed from explicit portrayal and copy the same Rank/MainStat seed into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
         'Do not leave a named portrayed NPC as Rank none/MainStat none unless the card, scene, and tracker give no explicit portrayal at all. ' +
-        'Apply stored user knowledge before RelationshipEngine initPreset. Fill UserKnowledgeApplication from the hidden User knowledge snapshot only when a stored personal or reputation entry plausibly applies to a present NPC/group or to the current scene. Personal knowledge applies only to the named knownBy NPC/group or a direct institutional/group match. Reputation knowledge applies only when scope and context plausibly reach the present NPC/group: private is not public; local is current settlement/scene community; route follows a road/trade/travel corridor; faction follows that group/institution; regional is broad area; legendary is widely known. effect=priorUserGoodRep for favorable or trust-normalizing reputation that should initialize trust, userBadRep for hostile/distrusting reputation, userNonHuman for fearsome/dangerous reputation that should initialize fear, contextOnly for knowledge that informs narration but should not initialize B/F/H, and none when no current application exists. Do not invent new reputation here; creation happens only in post-narration UserKnowledgeLedger. ' +
+        'Apply stored user knowledge before RelationshipEngine initPreset only when it is authored/personal context, not broad public reputation. Fill UserKnowledgeApplication from the hidden User knowledge snapshot only when a stored personal entry plausibly applies to a present NPC/group or to the current scene. Personal knowledge applies only to the named knownBy NPC/group or a direct institutional/group match. ReputationKnowledge entries are contextOnly unless they are explicit authored pre-existing relationship context for this exact NPC/group; broad public reputation does not set priorUserGoodRep, userBadRep, or userNonHuman because deterministic fame/infamy handles public standing. effect=priorUserGoodRep only for explicit personal/authored favorable relationship knowledge; userBadRep only for explicit personal/authored negative relationship knowledge; userNonHuman only for explicit personal/authored fear-coded relationship knowledge or visible unnormalized nonhuman exposure; contextOnly for knowledge that informs narration but should not initialize B/F/H; none when no current application exists. Do not invent new reputation here; creation happens only in post-narration UserKnowledgeLedger and FameInfamyLedger. ' +
         'Detect user ability/spell attempts before target/risk classification: compare the latest user input against active {{user}}/persona abilities and spells, including the # ABILITIES and # SPELLS character sheet sections, assembled SillyTavern prompt stack, character persona/sheet, scenario, lore/world info, and chat context. Mark ResolutionEngine.userAbilityUse.Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Private delivery phrasing such as "meant only for X", "only X can hear", "whisper so only X hears", "send the words directly/private to X", or "speak into X alone" should match a persona ability/spell whose effect privately carries speech, sound, thought, or message to a target, even if the ability/spell name is not said. Mark Available=Y only if the attempted ability/spell exists in active {{user}} abilities or spells. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability/spell name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect the narrator must preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: ability/spell use is fictional permission/method only, never a bonus, never a dice modifier, never a separate roll, and never a bypass for broader stakes or outcomes. If an available ability/spell is used to deliver a threat, persuasion, attack, escape, healing, or other contested goal, classify and roll the broader goal normally while keeping the ability/spell as delivery/flavor. ' +
         'Detect personal gear/inventory item attempts before target/risk classification. Fill ResolutionEngine.itemUse only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory already carried before the latest input. Personal carried-item signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or equivalent wording that claims {{user}} already has the item on their person or in carried inventory. Mark Available=Y only when that exact attempted personal item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental, scene, or NPC-offered objects, including grabbing, taking, picking up, receiving, finding, searching for, using, breaking, burning, throwing, or moving an object from a table, floor, ground, counter, shelf, corpse, display, container, NPC hand, offered transfer, or any other scene source; those actions remain normal narration/stakes/ENV context, not itemUse. Examples: "I draw my sword" -> Attempted=Y; "I pull my phone from my pocket" -> Attempted=Y; "I grab the sword from the table" -> Attempted=N; "Alice hands me a key and I take it" -> Attempted=N. Do not infer personal item availability from setting likelihood. If Available=N, the personal item effect must not be treated as completed. ' +
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
         'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, actionUnits, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
-        'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, or rewrite stored knowledge in preflight. ' +
+        'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each personal/authored knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, rewrite stored knowledge, or turn broad public reputation into initPreset flags in preflight. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer/awareness living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, accepts, agrees to, arranges, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. This includes the NPC accepting {{user}}\'s explicit sexual/intimate proposal, agreeing to join, inviting or calling another willing participant, or saying yes to coming over for sex/intimacy. Mark RomanticBuildup only when a B4 close-bond scene has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior, no active refusal/withdrawal/fear/hostility/coercion/danger/public interruption/boundary limit, and {{user}}\'s latest intimate advance is a natural continuation; ordinary friendliness, tenderness, warmth, one smile, casual flirting, vague chemistry, or user-only escalation is not enough. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. Name pools are deterministic runtime data and not part of this semantic pass; do not generate name candidates or output name fields. ' +
@@ -1913,6 +1926,7 @@ function parseCompactLedger(text, trackerSnapshot) {
     }
 
     const required = [
+        'EngineContext.userReputationContext.location',
         'ResolutionEngine.identifyGoal',
         'ResolutionEngine.identifyChallenge',
         'ResolutionEngine.explicitMeans',
@@ -2416,6 +2430,9 @@ function parseCompactLedger(text, trackerSnapshot) {
         engineContext: {
             userCoreStats: { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 },
             trackerRelevantNPCs: trackerSnapshotToLedgerEntries(trackerSnapshot),
+            userReputationContext: {
+                location: normalizeReputationLocationText(fields.get('EngineContext.userReputationContext.location')) || '(none)',
+            },
         },
         resolutionEngine,
         relationshipEngine,
@@ -2467,6 +2484,7 @@ function parseNarratorTrackerDeltaText(text) {
         'TrackerUpdateEngine.NPC.count',
         'UserKnowledgeLedger.personal.count',
         'UserKnowledgeLedger.reputation.count',
+        'FameInfamyLedger.count',
     ];
     const missing = required.filter(key => !fields.has(key));
     if (missing.length) throw new Error(`tracker delta block missing required lines: ${missing.join(', ')}`);
@@ -2538,7 +2556,21 @@ function parseNarratorTrackerDeltaText(text) {
         if (entry) userKnowledge.reputation.push(entry);
     }
 
-    return { user, npcs, userKnowledge };
+    const userReputation = { events: [] };
+    const fameInfamyCount = clampNumber(readNumber(fields, 'FameInfamyLedger.count', 0), 0, 2);
+    for (let index = 0; index < fameInfamyCount; index += 1) {
+        const prefix = `FameInfamyLedger[${index}]`;
+        const entry = normalizeFameInfamyDeltaEntry({
+            location: fields.get(`${prefix}.location`),
+            fameDelta: fields.get(`${prefix}.fameDelta`),
+            infamyDelta: fields.get(`${prefix}.infamyDelta`),
+            reason: fields.get(`${prefix}.reason`),
+            evidence: fields.get(`${prefix}.evidence`),
+        });
+        if (entry) userReputation.events.push(entry);
+    }
+
+    return { user, npcs, userKnowledge, userReputation };
 }
 
 function sanitizeNarratorTrackerDelta(delta, narration) {
@@ -2552,6 +2584,7 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
             }))
             : [],
         userKnowledge: normalizeUserKnowledgeDelta(delta?.userKnowledge),
+        userReputation: normalizeFameInfamyDelta(delta?.userReputation),
     };
     cleanDelta.npcs = cleanDelta.npcs.filter(item =>
         item?.NPC
@@ -3230,6 +3263,30 @@ function normalizeTrackerDelta(value, fields) {
     };
 }
 
+function normalizeFameInfamyDelta(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const events = Array.isArray(source.events)
+        ? source.events.map(normalizeFameInfamyDeltaEntry).filter(Boolean).slice(0, 2)
+        : [];
+    return { events };
+}
+
+function normalizeFameInfamyDeltaEntry(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const location = cleanScalar(source.location).replace(/\s+/g, ' ').slice(0, 120);
+    if (!location || isNoneValue(location)) return null;
+    const fameDelta = clampNumber(Math.floor(Number(source.fameDelta || 0)), 0, 1);
+    const infamyDelta = clampNumber(Math.floor(Number(source.infamyDelta || 0)), 0, 1);
+    if (!fameDelta && !infamyDelta) return null;
+    return {
+        location,
+        fameDelta,
+        infamyDelta,
+        reason: cleanScalar(source.reason).replace(/\s+/g, ' ').slice(0, 220) || '(none)',
+        evidence: cleanScalar(source.evidence).replace(/\s+/g, ' ').slice(0, 220) || '(none)',
+    };
+}
+
 function readPlainArray(value) {
     return Array.isArray(value)
         ? value.map(cleanScalar).filter(item => item && !isNoneValue(item)).slice(0, 40)
@@ -3238,6 +3295,12 @@ function readPlainArray(value) {
 
 function normalizeNameKey(name) {
     return cleanScalar(name).toLowerCase();
+}
+
+function normalizeReputationLocationText(value) {
+    const text = cleanScalar(value).replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!text || isNoneValue(text)) return '';
+    return text;
 }
 
 function clampNumber(value, min, max) {
@@ -3250,6 +3313,9 @@ function normalizeLedger(ledger) {
     ledger.engineContext = ledger.engineContext || {};
     ledger.engineContext.userCoreStats = normalizeCore(ledger.engineContext.userCoreStats);
     ledger.engineContext.trackerRelevantNPCs = normalizeTrackerRelevantNPCs(ledger.engineContext.trackerRelevantNPCs);
+    ledger.engineContext.userReputationContext = {
+        location: normalizeReputationLocationText(ledger.engineContext.userReputationContext?.location) || '(none)',
+    };
     ledger.resolutionEngine = ledger.resolutionEngine || {};
     ledger.resolutionEngine.identifyGoal = ledger.resolutionEngine.identifyGoal || 'Normal_Interaction';
     ledger.resolutionEngine.identifyChallenge = ledger.resolutionEngine.identifyChallenge || ledger.resolutionEngine.explicitMeans || ledger.resolutionEngine.identifyGoal;
@@ -3525,6 +3591,7 @@ function applyUserKnowledgeApplicationsToInitPresets(relationshipEngine = [], ap
         if (!targetApplications.length) continue;
         relationship.initPreset = normalizeInitPresetFlags(relationship.initPreset);
         for (const application of targetApplications) {
+            if (application.type !== 'personalKnowledge') continue;
             if (application.effect === 'priorUserGoodRep') relationship.initPreset.priorUserGoodRep = true;
             if (application.effect === 'userBadRep') relationship.initPreset.userBadRep = true;
             if (application.effect === 'userNonHuman') relationship.initPreset.userNonHuman = true;

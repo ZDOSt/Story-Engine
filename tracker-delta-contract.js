@@ -102,6 +102,7 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Preserve the exact item phrase from FINAL_NARRATION when possible, and output only the changed item names. Do not duplicate existing inventory. Use User.gearAdd/gearRemove for visible worn/equipped gear changes when that is the more accurate tracker field.',
     '- Use the latest user input only to identify who the acting user/player/persona is and which described body/item/task belongs to them. Do not extract changes from the latest user input unless the same change also appears in the final assistant narration.',
     '- Remove wounds/status only when the prose explicitly says the injury/status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does NOT remove injuries unless the prose also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing.',
+    '- Natural full recovery should be reflected only when FINAL_NARRATION clearly establishes a completed safe recovery transition: the danger/scene has resolved and time advances through safe lodging, overnight rest, travel downtime, or an explicit recovery time skip. Do not mark full recovery from merely starting to rest, making camp, sleeping in an unsafe area, resting in a dungeon/battlefield/pursuit, or ordinary treatment without completed safe downtime.',
     '- Never rewrite full tracker lists. Return deltas only.',
     '- Use condition=unchanged unless the narration explicitly changes overall condition.',
     '- NPC entries are only for named or currently tracked NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes. NPC inventory is not tracked.',
@@ -120,6 +121,16 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Bad reputation: crimes, betrayal, exposed lies, coercion, harm to innocents, theft, cruelty, dishonor, or helping an audience enemy.',
     '- Fear reputation: dangerous power, killing feared threats, brutal public dominance, surviving impossible danger, or deeds that make strangers cautious rather than admiring.',
     '- If no relevant knowledge or reputation is created, output both counts as 0.',
+    '',
+    'FAME_INFAMY_LEDGER:',
+    '- Also output FameInfamyLedger lines. This hidden ledger tracks simple public/local standing points for {{user}}.',
+    '- Create at most one fame event and at most one infamy event per final narration. fameDelta and infamyDelta are each only 0 or 1.',
+    '- Only award points for resolved, visible, socially meaningful events with a plausible public/community knowledge path: witnesses, officials, guilds, victims, rescued people, patrons, reports, public aftermath, proof, or ordinary rumor channels.',
+    '- Fame examples: rescuing/protecting people, completing a visible public quest, defeating a public threat, showing public mercy, honoring a meaningful promise, helping a respected group, or creating clearly beneficial public order.',
+    '- Infamy examples: crimes, betrayal, harm to innocents, public cruelty/coercion, destructive violence, attacking respected figures, helping a known enemy, terrifying public displays, or visibly dangerous conduct that a community would condemn or fear.',
+    '- Do not award fame/infamy for ordinary conversation, private unknowable acts, harmless weirdness, being nonhuman alone, failed attempts, flavor, routine shopping, flirting, or self-defense unless it is excessive, public, or socially consequential.',
+    '- location must be the current settlement/community/route/region where the social reputation would be remembered, such as a town, village, district, guild, road, camp, or region. If no clear place/community exists, use (none) and deltas 0.',
+    '- reason is a concise stable summary of why the public standing changed. evidence is the exact visible/public fact from FINAL_NARRATION that supports it.',
 ].join('\n');
 
 export const TRACKER_DELTA_TEMPLATE = `${TRACKER_DELTA_FENCE}
@@ -165,5 +176,11 @@ UserKnowledgeLedger.reputation[0].confidence=certain
 UserKnowledgeLedger.reputation[0].line=(none)
 UserKnowledgeLedger.reputation[0].origin=(none)
 UserKnowledgeLedger.reputation[0].reason=(none)
+FameInfamyLedger.count=0
+FameInfamyLedger[0].location=(none)
+FameInfamyLedger[0].fameDelta=0
+FameInfamyLedger[0].infamyDelta=0
+FameInfamyLedger[0].reason=(none)
+FameInfamyLedger[0].evidence=(none)
 ${TRACKER_DELTA_END}
 ${TRACKER_DELTA_FENCE_END}`;
