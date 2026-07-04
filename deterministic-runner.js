@@ -7101,40 +7101,40 @@ function resolveUserReputationInitApplication(userReputation, options = {}) {
     const fame = Math.max(0, Math.floor(Number(reputation.fame || 0)));
     const infamy = Math.max(0, Math.floor(Number(reputation.infamy || 0)));
     const userNonHuman = bool(options?.userNonHuman);
+    const effectiveInfamy = userNonHuman && infamy > 0 ? infamy + 5 : infamy;
+    const effectiveFame = userNonHuman ? Math.max(0, fame - 5) : fame;
+    const labelPrefix = userNonHuman ? 'userNonHuman' : 'user';
 
     let label = '';
     let disposition = null;
-    if (infamy >= 25) {
-        label = 'userInfamy25';
+    if (effectiveInfamy >= 25) {
+        label = `${labelPrefix}Infamy${effectiveInfamy >= 25 ? 25 : effectiveInfamy}`;
         disposition = { B: 1, F: 4, H: 4 };
-    } else if (infamy >= 20) {
-        label = 'userInfamy20';
+    } else if (effectiveInfamy >= 20) {
+        label = `${labelPrefix}Infamy20`;
         disposition = { B: 1, F: 3, H: 4 };
-    } else if (infamy >= 15) {
-        label = 'userInfamy15';
+    } else if (effectiveInfamy >= 15) {
+        label = `${labelPrefix}Infamy15`;
         disposition = { B: 1, F: 3, H: 3 };
-    } else if (infamy >= 10) {
-        label = 'userInfamy10';
+    } else if (effectiveInfamy >= 10) {
+        label = `${labelPrefix}Infamy10`;
         disposition = { B: 1, F: 2, H: 3 };
-    } else if (infamy >= 5) {
-        label = 'userInfamy5';
+    } else if (effectiveInfamy >= 5) {
+        label = `${labelPrefix}Infamy5`;
         disposition = { B: 1, F: 2, H: 2 };
     }
 
     if (!disposition) {
-        if (userNonHuman) {
-            if (fame >= 10) {
-                label = 'userNonHumanFame10';
-                disposition = { B: 2, F: 2, H: 2 };
-            } else if (fame >= 5) {
-                label = 'userNonHumanFame5';
-                disposition = { B: 1, F: 2, H: 2 };
-            }
-        } else if (fame >= 10) {
-            label = fame >= 15 ? 'userFame15' : 'userFame10';
+        if (effectiveFame >= 10) {
+            label = userNonHuman
+                ? (fame >= 20 ? 'userNonHumanFame20' : 'userNonHumanFame15')
+                : (fame >= 15 ? 'userFame15' : 'userFame10');
             disposition = { B: 3, F: 1, H: 1 };
-        } else if (fame >= 5) {
-            label = 'userFame5';
+        } else if (effectiveFame >= 5) {
+            label = userNonHuman ? 'userNonHumanFame10' : 'userFame5';
+            disposition = { B: 2, F: 1, H: 2 };
+        } else if (userNonHuman && fame >= 5) {
+            label = 'userNonHumanFame5';
             disposition = { B: 2, F: 2, H: 2 };
         }
     }
@@ -7147,6 +7147,8 @@ function resolveUserReputationInitApplication(userReputation, options = {}) {
             location: reputation.location,
             fame,
             infamy,
+            effectiveFame,
+            effectiveInfamy,
         },
     };
 }
