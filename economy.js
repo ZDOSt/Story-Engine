@@ -263,7 +263,7 @@ function toBoolean(value) {
 
 function canonicalCurrencyUnit(unit) {
     const text = String(unit ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-    if (['silver', 'silvers'].includes(text)) return 'sv';
+    if (['silver', 'silvers', 'silver coin', 'silver coins'].includes(text)) return 'sv';
     if (['credit', 'credits'].includes(text)) return 'cr';
     if (['crown', 'crowns'].includes(text)) return 'crn';
     if (['dollar', 'dollars', 'usd'].includes(text)) return '$';

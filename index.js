@@ -47,7 +47,7 @@ import {
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
-import { applyCurrencyDelta, applyEconomyDelta, mergePendingPricePaymentCurrencyRemove, normalizeEconomyState, renderEconomyTrackerContext } from './economy.js';
+import { applyCurrencyDelta, applyEconomyDelta, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, renderEconomyTrackerContext } from './economy.js';
 
 
 const EXTENSION_NAME = 'Story Engine';
@@ -2666,7 +2666,7 @@ function getPersonaCoreStats(context = getContext()) {
 function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
     if (!root || root.personaInventorySeeded) return false;
     const user = normalizeTrackerUserState(root.user || {});
-    if (user.gear.length || user.inventory.length) {
+    if (user.gear.length || user.inventory.length || user.currency.length) {
         root.user = user;
         root.personaInventorySeeded = { skipped: true, reason: 'tracker_already_has_items', at: Date.now() };
 
@@ -2680,7 +2680,7 @@ function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
 
     const seed = extractPersonaTrackerSeed(persona);
 
-    if (!seed.gear.length && !seed.inventory.length) return false;
+    if (!seed.gear.length && !seed.inventory.length && !seed.currency.length) return false;
 
 
 
@@ -2691,6 +2691,8 @@ function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
         gear: seed.gear,
 
         inventory: seed.inventory,
+
+        currency: seed.currency,
 
     });
 
@@ -2703,6 +2705,8 @@ function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
         gearCount: seed.gear.length,
 
         inventoryCount: seed.inventory.length,
+
+        currencyCount: seed.currency.length,
 
     };
     return true;
@@ -2717,12 +2721,14 @@ function reseedPlayerTrackerFromPersona(root, context = getContext()) {
         ...user,
         gear: seed.gear,
         inventory: seed.inventory,
+        currency: seed.currency,
     });
     root.personaInventorySeeded = {
         at: Date.now(),
         hash: hashTextForSeed(persona),
         gearCount: seed.gear.length,
         inventoryCount: seed.inventory.length,
+        currencyCount: seed.currency.length,
         forced: true,
     };
     return true;
@@ -2731,7 +2737,9 @@ function reseedPlayerTrackerFromPersona(root, context = getContext()) {
 function extractPersonaTrackerSeed(personaText) {
     const gear = [];
     const inventory = [];
+    const currency = [];
     const explicitGear = extractPersonaListSection(personaText, ['gear', 'equipment', 'equipped']);
+    const explicitCurrency = extractPersonaListSection(personaText, ['currency', 'money', 'coins', 'coin purse', 'funds']);
 
     const explicitInventory = extractPersonaListSection(personaText, ['inventory', 'items', 'carried items']);
 
@@ -2739,7 +2747,15 @@ function extractPersonaTrackerSeed(personaText) {
 
     for (const item of explicitGear) addUniqueTrackerSeedItem(gear, item);
 
+    for (const item of explicitCurrency) addUniqueTrackerSeedItem(currency, item);
+
     for (const item of explicitInventory) {
+
+        if (!explicitCurrency.length && addPersonaCurrencyIfValid(currency, item)) {
+
+            continue;
+
+        }
 
         if (!explicitGear.length && looksLikeEquippedGear(item)) {
 
@@ -2755,8 +2771,17 @@ function extractPersonaTrackerSeed(personaText) {
 
 
 
-    return { gear, inventory };
+    return { gear, inventory, currency: normalizeCurrencyList(currency) };
 
+}
+
+function addPersonaCurrencyIfValid(list, item) {
+    const text = String(item || '').trim();
+    if (!/^(?:\$\s*\d|\d+(?:\.\d{1,2})?\s*(?:sv|silver|silvers|silver coins?|cr|credits?|dollars?|usd|crowns?|crn)\b)/i.test(text)) return false;
+    const normalized = normalizeCurrencyList([item]);
+    if (!normalized.length) return false;
+    addUniqueTrackerSeedItem(list, normalized[0]);
+    return true;
 }
 
 
@@ -8640,7 +8665,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 'This is a playable user character shell, not an authored protagonist. Fill only fixed starting facts the user can step into. ' +
                 'Do not decide future choices, personality, habits, emotional reactions, combat preferences, social strategy, morals, goals, fears, or how the character will behave in play. ' +
                 'The numeric stats are locked and must be copied exactly. Do not reroll, rebalance, or assign new numbers. ' +
-                'Generate flavorful but grounded details. Avoid overpowered abilities. Keep inventory appropriate to the character, genre, and setting.',
+                'Generate flavorful but grounded details with enough specificity to use as a full persona sheet, not a terse summary. Avoid overpowered abilities. Keep starting inventory, currency, and gear appropriate to the character, genre, and setting.',
         },
         {
             role: 'user',
@@ -8649,6 +8674,8 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
                 `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
+                'Use exactly these markdown section headings, in this order: # BASIC INFO, # APPEARANCE, # STATS, # NATURAL WEAPONS, # ABILITIES, # SPELLS, # INVENTORY, # CURRENCY, # GEAR, # CHARACTER ANCHORS.\n' +
+                'Use bold field labels for BASIC INFO, APPEARANCE, and STATS. Use bullets for NATURAL WEAPONS, INVENTORY, CURRENCY, GEAR, and CHARACTER ANCHORS. Named abilities and spells should have a bold name followed by a clear description, limits, range or requirements when relevant, and what the ability permits without granting automatic success.\n\n' +
                 'Required sections:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
@@ -8656,7 +8683,9 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 '# NATURAL WEAPONS: concrete offensive body parts only, if any. Write None when the race/body has no clear natural weapon. Examples: horns, claws, fangs, talons, tusks, stinger, crushing tail, biting jaws. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
                 `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Keep the ability concrete, usable, and distinct from ordinary PHY/MND/CHA action mechanics. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
                 `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Keep the spell concrete, usable, and genre-fitting. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
-                '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
+                '# INVENTORY: carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy here.\n' +
+                '# CURRENCY: money only, using the genre currency when possible. For fantasy and isekai use silver (sv), for modern use dollars ($), for cyberpunk use credits (cr), and otherwise choose a simple fitting currency. Write exact starting money such as 12 sv, $40, or 30 cr. If none, write None. Do not put currency in INVENTORY or GEAR.\n' +
+                '# GEAR: worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, carried supplies, pack contents, natural weapons, or body anatomy here. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
                 '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
         },
     ];
@@ -8858,6 +8887,9 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
                 `USER NON-HUMAN IF KNOWN: ${analysis.UserNonHuman || 'unknown'}\n\n` +
 
+                'Use exactly these markdown section headings, in this order: # BASIC INFO, # APPEARANCE, # STATS, # NATURAL WEAPONS, # ABILITIES, # SPELLS, # INVENTORY, # CURRENCY, # GEAR, # CHARACTER ANCHORS.\n' +
+                'Use bold field labels for BASIC INFO, APPEARANCE, and STATS when the source supports them. Use bullets for NATURAL WEAPONS, INVENTORY, CURRENCY, GEAR, and CHARACTER ANCHORS. Preserve explicit facts exactly in meaning while sorting possessions into the matching tracker-aligned sections.\n\n' +
+
                 'Template requirements:\n' +
 
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and origin/mind notes. Use explicit persona facts only; otherwise write Not specified.\n' +
@@ -8867,8 +8899,10 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 '# NATURAL WEAPONS: preserve explicit offensive body parts only: claws, fangs, horns, talons, tusks, stinger, crushing tail, biting jaws, or similar built-in offensive anatomy. Do not invent missing natural weapons. Do not preserve passive racial traits, anatomy, senses, body texture, vulnerabilities, vague toughness, resistance, immunity, skill boosts, better-at wording, or mechanical advantages here. If none are explicit, write None.\n' +
                 '# ABILITIES: preserve explicit activated non-spell abilities only. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. Do not preserve mundane expertise, combat techniques, hidden bonuses, passive traits, or broad skill competence as abilities. If none are explicit, write Not specified.\n' +
                 '# SPELLS: preserve explicit spells only, maximum 5. If none are explicit, write None. Preserve healing spells, but do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
-                '# INVENTORY: preserve explicit gear/inventory only. Do not list natural weapons or body armaments as inventory, gear, equipment, or held items. If none is explicit, write Not specified.\n' +
-                '# NOTES: preserve all important persona notes, origin facts, limits, fighting style, and secrecy rules.\n\n' +
+                '# INVENTORY: preserve explicit carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, or body armaments here. If none are explicit, write Not specified.\n' +
+                '# CURRENCY: preserve explicit money only. Normalize obvious fantasy money to sv when possible, such as 12 silver coins -> 12 sv. Do not invent money. If none is explicit, write None.\n' +
+                '# GEAR: preserve explicit worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, pack contents, carried supplies, natural weapons, or body anatomy here. If none are explicit, write Not specified.\n' +
+                '# CHARACTER ANCHORS: preserve all important persona notes, origin facts, limits, fighting style, known possessions, and secrecy rules.\n\n' +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
 
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
