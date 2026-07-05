@@ -1,6 +1,6 @@
 import { ENGINE_PROMPT_TEXT, normalizeSocialResolutionMemory } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
-import { getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
+import { canGenerateRawData, generateRawData, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta } from './world-state.js';
 
 export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
@@ -38,7 +38,7 @@ const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
 ]);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
-    if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
+    if (!canGenerateRawData(context) && !options?.semanticProfileId && options?.preferToolCall === false) {
         throw new Error('SillyTavern generateRawData API is unavailable.');
     }
 
@@ -77,7 +77,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
                 throw new Error(`Semantic tool-call pass returned no valid ledger. Generation aborted before narration. ${message}`);
             }
 
-            if (!context?.generateRawData && !options?.semanticProfileId) {
+            if (!canGenerateRawData(context) && !options?.semanticProfileId) {
                 const message = error instanceof Error ? error.message : String(error);
                 throw new Error(`Semantic tool-call transport failed and generateRawData fallback is unavailable. Generation aborted before narration. ${message}`);
             }
@@ -215,14 +215,11 @@ function extractRecentPromptText(promptContext, options = {}) {
 }
 
 async function generateSemanticRaw(context, prompt, responseLength) {
-    if (!context?.generateRawData) {
-        throw new Error('SillyTavern generateRawData API is unavailable.');
-    }
     const options = { prompt };
     if (Number.isFinite(responseLength) && responseLength > 0) {
         options.responseLength = responseLength;
     }
-    return await context.generateRawData(options);
+    return await generateRawData(options, context, { purpose: 'semantic preflight' });
 }
 
 async function generateSemanticRawWithProfile(prompt, responseLength, options = {}) {

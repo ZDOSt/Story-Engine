@@ -3,18 +3,28 @@ import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normali
 import {
     addEphemeralStoppingString,
     applyConnectionProfileName,
+    canSubscribeToEvent,
+    clearNotification,
     extension_settings,
     flushEphemeralStoppingStrings,
+    generateRawData,
     getActiveConnectionProfileName,
     getConnectionProfileByName,
     getConnectionProfileNames,
     getPersonaText,
     getUserName,
+    notifyError,
+    notifyInfo,
+    notifySuccess,
+    offEvent,
+    onEvent,
+    onDomReady,
     persistMetadata as persistAdapterMetadata,
     readActiveConnectionProfileName,
     saveChat,
     saveMetadataDebounced,
     saveSettingsDebounced,
+    stopGeneration,
     writePersonaDescription,
 } from './st-adapter.js';
 import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
@@ -2410,25 +2420,17 @@ function cancelStoryEnginePipeline(reason = 'generation stopped') {
 
 function showProgress(message) {
 
-    try {
+    clearAllProgress();
 
-        if (globalThis.toastr?.info) {
+    const toast = notifyInfo(message, EXTENSION_NAME, { timeOut: 0, extendedTimeOut: 0 });
 
-            clearAllProgress();
+    state.progressToast = toast || null;
 
-            const toast = globalThis.toastr.info(message, EXTENSION_NAME, { timeOut: 0, extendedTimeOut: 0 });
+    if (toast) {
 
-            state.progressToast = toast || null;
+        state.progressToasts.add(toast);
 
-            if (toast) state.progressToasts.add(toast);
-
-            return toast;
-
-        }
-
-    } catch {
-
-        // Progress UI is optional; generation must not depend on it.
+        return toast;
 
     }
 
@@ -2442,11 +2444,7 @@ function clearProgress(toast) {
 
     try {
 
-        if (toast && globalThis.toastr?.clear) {
-
-            globalThis.toastr.clear(toast);
-
-        }
+        clearNotification(toast);
 
         if (toast) {
 
@@ -2512,19 +2510,7 @@ function clearPostNarrationFinalizerTimers() {
 function showBlockingError(error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    try {
-
-        if (globalThis.toastr?.error) {
-
-            globalThis.toastr.error(message, `${EXTENSION_NAME}: generation aborted`, { timeOut: 15000, extendedTimeOut: 15000 });
-
-        }
-
-    } catch {
-
-        // Toasts are best-effort only.
-
-    }
+    notifyError(message, `${EXTENSION_NAME}: generation aborted`, { timeOut: 15000, extendedTimeOut: 15000 });
 
     console.error(`[${EXTENSION_NAME}] generation aborted`, error);
 
@@ -6583,11 +6569,7 @@ function attachTrackerWidgetEditorHandlers(body, context = getContext()) {
                     console.error(`[${EXTENSION_NAME}] failed to save manual tracker edit.`, error);
                     target.disabled = false;
                     target.textContent = 'Save';
-                    try {
-                        globalThis.toastr?.error?.(error instanceof Error ? error.message : String(error), EXTENSION_NAME);
-                    } catch {
-                        // Toasts are optional.
-                    }
+                    notifyError(error instanceof Error ? error.message : String(error), EXTENSION_NAME);
                 });
         }
     };
@@ -7872,7 +7854,7 @@ function syncIdentityInputs(creator) {
 function submitPlayerAdventureStartPrompt(prompt, context = getContext()) {
     const text = String(prompt || '').trim();
     if (!text || typeof context?.generate !== 'function') {
-        globalThis.toastr?.error?.('Could not find SillyTavern generation API to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
+        notifyError('Could not find SillyTavern generation API to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
         return false;
     }
     setTimeout(() => {
@@ -7883,7 +7865,7 @@ function submitPlayerAdventureStartPrompt(prompt, context = getContext()) {
         }).catch(error => {
             console.error(`[${EXTENSION_NAME}] adventure start failed`, error);
             const message = error instanceof Error ? error.message : String(error);
-            globalThis.toastr?.error?.(`Could not start adventure: ${message}`, EXTENSION_NAME, { timeOut: 7000 });
+            notifyError(`Could not start adventure: ${message}`, EXTENSION_NAME, { timeOut: 7000 });
         });
     }, 0);
     return true;
@@ -7929,7 +7911,7 @@ async function approvePlayerSheet(root, context = getContext()) {
         stage: 'approved',
         sheetText,
     };
-    globalThis.toastr?.success?.('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
+    notifySuccess('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
 }
 
 async function applyProgressionStatChoice(root, stat, context = getContext()) {
@@ -8366,13 +8348,10 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
     state.bypassPromptReady = true;
     try {
         return await withStoryEngineModelRequest(async () => {
-            if (!context?.generateRawData) {
-                throw new Error('SillyTavern generateRawData API is unavailable for progression generation.');
-            }
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await context.generateRawData({ prompt: textPrompt, responseLength, ...overridePayload });
+            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'progression generation' });
         });
     } finally {
         state.bypassPromptReady = false;
@@ -8916,13 +8895,10 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
     state.bypassPromptReady = true;
     try {
         return await withStoryEngineModelRequest(async () => {
-            if (!context?.generateRawData) {
-                throw new Error('SillyTavern generateRawData API is unavailable for player setup.');
-            }
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await context.generateRawData({ prompt: textPrompt, responseLength, ...overridePayload });
+            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'player setup' });
         });
     } finally {
         state.bypassPromptReady = false;
@@ -9699,11 +9675,7 @@ async function requestTargetedProseBanRepair(narrationText, findings, latestUser
                     temperature: 0,
                 });
             }
-            const context = getContext();
-            if (!context?.generateRawData) {
-                throw new Error('SillyTavern generateRawData API is unavailable for targeted Prose Guard repair.');
-            }
-            return await context.generateRawData({ prompt, responseLength });
+            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' });
         }));
     } finally {
         state.bypassPromptReady = false;
@@ -9862,11 +9834,7 @@ async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrat
                     temperature: 0,
                 });
             }
-            const context = getContext();
-            if (!context?.generateRawData) {
-                throw new Error('SillyTavern generateRawData API is unavailable for combined post-narration pass.');
-            }
-            return await context.generateRawData({ prompt, responseLength });
+            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'combined post-narration pass' });
         }));
     } finally {
         state.bypassPromptReady = false;
@@ -9887,11 +9855,7 @@ async function requestProseGuardCorrection(narrationText, latestUserText = '') {
                     temperature: 0,
                 });
             }
-            const context = getContext();
-            if (!context?.generateRawData) {
-                throw new Error('SillyTavern generateRawData API is unavailable for Prose Guard.');
-            }
-            return await context.generateRawData({ prompt, responseLength });
+            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'Prose Guard' });
         }));
     } finally {
         state.bypassPromptReady = false;
@@ -10109,13 +10073,7 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
 
             }
 
-            const context = getContext();
-
-            if (!context?.generateRawData) {
-
-                throw new Error('SillyTavern generateRawData API is unavailable for post-narration tracker update.');
-            }
-            return await context.generateRawData({ prompt, responseLength });
+            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' });
         }));
     } finally {
         state.bypassPromptReady = false;
@@ -10617,6 +10575,19 @@ function handleGenerationLifecycleStopped() {
     }, 0);
 }
 
+const STORY_ENGINE_EVENT_HANDLERS = Object.freeze([
+    ['MESSAGE_RECEIVED', prependComputedDebug],
+    ['MESSAGE_DELETED', handleMessageDeleted],
+    ['MESSAGE_SWIPED', handleMessageSwiped],
+    ['CHAT_CHANGED', handleChatChanged],
+    ['CHAT_CREATED', handleChatChanged],
+    ['GENERATION_STARTED', ensureProseGuardDisplayInterceptor],
+    ['GENERATION_ENDED', handleGenerationLifecycleEnd],
+    ['GENERATION_STOPPED', handleGenerationLifecycleStopped],
+    ['CHAT_COMPLETION_SETTINGS_READY', handleChatCompletionSettingsReady],
+    ['CHAT_COMPLETION_PROMPT_READY', handleChatCompletionPromptReady],
+]);
+
 
 function subscribeMessageHandler() {
 
@@ -10626,22 +10597,13 @@ function subscribeMessageHandler() {
 
     const context = getContext();
 
-    if (!context?.eventSource?.on || !context?.eventTypes?.MESSAGE_RECEIVED) return;
+    if (!canSubscribeToEvent('MESSAGE_RECEIVED', context)) return;
 
-
-
-    context.eventSource.on(context.eventTypes.MESSAGE_RECEIVED, prependComputedDebug);
-
-    if (context.eventTypes.MESSAGE_DELETED) context.eventSource.on(context.eventTypes.MESSAGE_DELETED, handleMessageDeleted);
-
-    if (context.eventTypes.MESSAGE_SWIPED) context.eventSource.on(context.eventTypes.MESSAGE_SWIPED, handleMessageSwiped);
-    if (context.eventTypes.CHAT_CHANGED) context.eventSource.on(context.eventTypes.CHAT_CHANGED, handleChatChanged);
-    if (context.eventTypes.CHAT_CREATED) context.eventSource.on(context.eventTypes.CHAT_CREATED, handleChatChanged);
-    if (context.eventTypes.GENERATION_STARTED) context.eventSource.on(context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
-    if (context.eventTypes.GENERATION_ENDED) context.eventSource.on(context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
-    if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleStopped);
-    if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
-    if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
+    const [requiredEvent, requiredHandler] = STORY_ENGINE_EVENT_HANDLERS[0];
+    if (!onEvent(requiredEvent, requiredHandler, context, { warn: false })) return;
+    for (const [eventType, handler] of STORY_ENGINE_EVENT_HANDLERS.slice(1)) {
+        onEvent(eventType, handler, context, { warn: false });
+    }
     state.subscribed = true;
 }
 
@@ -10655,11 +10617,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
     }
 
     if (state.trackerUpdating) {
-        try {
-            globalThis.toastr?.info?.('Story Engine is finalizing narration. Please wait a moment before sending another message.', EXTENSION_NAME, { timeOut: 4000 });
-        } catch {
-            // Toasts are optional.
-        }
+        notifyInfo('Story Engine is finalizing narration. Please wait a moment before sending another message.', EXTENSION_NAME, { timeOut: 4000 });
         if (typeof abort === 'function') abort(true);
 
         return true;
@@ -10754,15 +10712,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
         clearAllProgress();
 
-        try {
-
-            globalThis.toastr?.info?.('Complete Player Setup before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
-
-        } catch {
-
-            // Toasts are optional.
-
-        }
+        notifyInfo('Complete Player Setup before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
 
         if (typeof abort === 'function') abort(true);
         return true;
@@ -10773,11 +10723,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         renderProgressionCard(context);
         clearRuntimePrompts();
         clearAllProgress();
-        try {
-            globalThis.toastr?.info?.('Complete Character Progression before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
-        } catch {
-            // Toasts are optional.
-        }
+        notifyInfo('Complete Character Progression before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
         if (typeof abort === 'function') abort(true);
         return true;
     }
@@ -11042,15 +10988,7 @@ function abortGenerationAfterPromptReady(context) {
     try {
         markInternalGenerationStop();
 
-        if (typeof context?.stopGeneration === 'function') {
-
-            context.stopGeneration();
-
-        } else if (context?.eventSource?.emit && context?.eventTypes?.GENERATION_STOPPED) {
-
-            context.eventSource.emit(context.eventTypes.GENERATION_STOPPED);
-
-        }
+        stopGeneration(context);
 
     } catch {
 
@@ -11086,20 +11024,11 @@ export function onDisable() {
 
     }
 
-    if (state.subscribed && context?.eventSource && context?.eventTypes?.MESSAGE_RECEIVED) {
+    if (state.subscribed) {
 
-        removeEventHandler(context, context.eventTypes.MESSAGE_RECEIVED, prependComputedDebug);
-
-        if (context.eventTypes.MESSAGE_DELETED) removeEventHandler(context, context.eventTypes.MESSAGE_DELETED, handleMessageDeleted);
-
-        if (context.eventTypes.MESSAGE_SWIPED) removeEventHandler(context, context.eventTypes.MESSAGE_SWIPED, handleMessageSwiped);
-        if (context.eventTypes.CHAT_CHANGED) removeEventHandler(context, context.eventTypes.CHAT_CHANGED, handleChatChanged);
-        if (context.eventTypes.CHAT_CREATED) removeEventHandler(context, context.eventTypes.CHAT_CREATED, handleChatChanged);
-        if (context.eventTypes.GENERATION_STARTED) removeEventHandler(context, context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
-        if (context.eventTypes.GENERATION_ENDED) removeEventHandler(context, context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
-        if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleStopped);
-        if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
-        if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
+        for (const [eventType, handler] of STORY_ENGINE_EVENT_HANDLERS) {
+            offEvent(eventType, handler, context, { warn: false });
+        }
         state.subscribed = false;
     }
     releaseProseGuardDisplayIntercept({ restore: true });
@@ -11110,57 +11039,19 @@ export function onDisable() {
 }
 
 
-function removeEventHandler(context, eventName, handler) {
-
-    if (typeof context?.eventSource?.off === 'function') {
-
-        context.eventSource.off(eventName, handler);
-
-    } else if (typeof context?.eventSource?.removeListener === 'function') {
-
-        context.eventSource.removeListener(eventName, handler);
-
-    }
-
-}
-
-
 
 subscribeMessageHandler();
 getSettings();
 ensureStreamingArtifactRegex();
-if (typeof jQuery === 'function') {
-    jQuery(() => {
-        renderSettingsPanel();
-        if (!isStoryEngineEnabled()) {
-            disableStoryEngineRuntime();
-            return;
-        }
-        ensureStreamingArtifactRegex();
-        ensureProseGuardDisplayInterceptor();
-        injectPromptOptionPrompts();
-        setTimeout(() => {
-            if (!isStoryEngineEnabled()) {
-                disableStoryEngineRuntime();
-                return;
-            }
-            getPlayerRoot();
-            restoreTrackerFromLatestDisplaySnapshot();
-            cleanVisibleDebugDisplays();
-            renderAllTrackerDisplayBlocks();
-            renderPlayerSetupCard();
-            renderProgressionCard();
-        }, 0);
-    });
-} else {
+onDomReady(() => {
     renderSettingsPanel();
-    if (isStoryEngineEnabled()) {
-        ensureStreamingArtifactRegex();
-        ensureProseGuardDisplayInterceptor();
-        injectPromptOptionPrompts();
-    } else {
+    if (!isStoryEngineEnabled()) {
         disableStoryEngineRuntime();
+        return;
     }
+    ensureStreamingArtifactRegex();
+    ensureProseGuardDisplayInterceptor();
+    injectPromptOptionPrompts();
     setTimeout(() => {
         if (!isStoryEngineEnabled()) {
             disableStoryEngineRuntime();
@@ -11173,7 +11064,7 @@ if (typeof jQuery === 'function') {
         renderPlayerSetupCard();
         renderProgressionCard();
     }, 0);
-}
+});
 clearRuntimePrompts();
 
 console.info(`[${EXTENSION_NAME}] loaded`);

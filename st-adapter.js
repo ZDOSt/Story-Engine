@@ -195,6 +195,108 @@ export function getRequestHeaders() {
     return {};
 }
 
+export function canGenerateRawData(context = getContext()) {
+    return typeof context?.generateRawData === 'function';
+}
+
+export async function generateRawData(request = {}, context = getContext(), options = {}) {
+    const fn = context?.generateRawData;
+    if (typeof fn === 'function') {
+        return await fn.call(context, request);
+    }
+    const purpose = String(options?.purpose || '').trim();
+    throw new Error(`SillyTavern generateRawData API is unavailable${purpose ? ` for ${purpose}` : ''}.`);
+}
+
+export function canSubscribeToEvent(eventType, context = getContext()) {
+    return Boolean(resolveEventName(eventType, context) && typeof context?.eventSource?.on === 'function');
+}
+
+export function onEvent(eventType, handler, context = getContext(), options = {}) {
+    const eventName = resolveEventName(eventType, context);
+    if (!eventName || typeof handler !== 'function') return false;
+    const source = context?.eventSource;
+    if (typeof source?.on === 'function') {
+        source.on(eventName, handler);
+        return true;
+    }
+    if (options?.warn !== false) {
+        warnOnce(`onEvent:${eventType}`, `SillyTavern event subscription is unavailable for ${eventType}.`);
+    }
+    return false;
+}
+
+export function offEvent(eventType, handler, context = getContext(), options = {}) {
+    const eventName = resolveEventName(eventType, context);
+    if (!eventName || typeof handler !== 'function') return false;
+    const source = context?.eventSource;
+    if (typeof source?.off === 'function') {
+        source.off(eventName, handler);
+        return true;
+    }
+    if (typeof source?.removeListener === 'function') {
+        source.removeListener(eventName, handler);
+        return true;
+    }
+    if (options?.warn !== false) {
+        warnOnce(`offEvent:${eventType}`, `SillyTavern event unsubscription is unavailable for ${eventType}.`);
+    }
+    return false;
+}
+
+export function emitEvent(eventType, context = getContext(), ...args) {
+    const eventName = resolveEventName(eventType, context);
+    const source = context?.eventSource;
+    if (!eventName || typeof source?.emit !== 'function') return false;
+    source.emit(eventName, ...args);
+    return true;
+}
+
+export function stopGeneration(context = getContext()) {
+    const fn = context?.stopGeneration;
+    if (typeof fn === 'function') {
+        fn.call(context);
+        return true;
+    }
+    return emitEvent('GENERATION_STOPPED', context);
+}
+
+export function notifyInfo(message, title = '', options = {}) {
+    return notify('info', message, title, options);
+}
+
+export function notifySuccess(message, title = '', options = {}) {
+    return notify('success', message, title, options);
+}
+
+export function notifyError(message, title = '', options = {}) {
+    return notify('error', message, title, options);
+}
+
+export function clearNotification(notification) {
+    if (!notification) return false;
+    const fn = globalThis.toastr?.clear;
+    if (typeof fn !== 'function') return false;
+    try {
+        fn.call(globalThis.toastr, notification);
+        return true;
+    } catch (error) {
+        warnOnce('clearNotification', 'SillyTavern toast clearing failed.', error);
+        return false;
+    }
+}
+
+export function onDomReady(callback) {
+    if (typeof callback !== 'function') return false;
+    const jq = globalThis.jQuery;
+    if (typeof jq === 'function') {
+        jq(callback);
+        return true;
+    }
+    callback();
+    return false;
+}
+
 export async function getChatCompletionModel(settings = getChatCompletionSettings()) {
     const contextFn = getContext()?.getChatCompletionModel;
     if (typeof contextFn === 'function') return contextFn(settings);
@@ -481,6 +583,25 @@ function getConnectionProfile(profileId) {
         throw adapterTransportError(`Semantic connection profile not found: ${profileId}`, { stage: 'profile' });
     }
     return profile;
+}
+
+function resolveEventName(eventType, context = getContext()) {
+    const key = String(eventType || '').trim();
+    if (!key) return '';
+    const eventTypes = context?.eventTypes;
+    if (!eventTypes || eventTypes[key] === undefined || eventTypes[key] === null) return '';
+    return eventTypes[key] || '';
+}
+
+function notify(kind, message, title = '', options = {}) {
+    const fn = globalThis.toastr?.[kind];
+    if (typeof fn !== 'function') return null;
+    try {
+        return fn.call(globalThis.toastr, message, title, options) || null;
+    } catch (error) {
+        warnOnce(`notify:${kind}`, `SillyTavern ${kind} toast failed.`, error);
+        return null;
+    }
 }
 
 function adapterTransportError(message, details = {}) {
