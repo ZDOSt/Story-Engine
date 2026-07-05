@@ -647,6 +647,7 @@ const state = {
     proseGuardHiddenMessageIds: new Set(),
     postNarrationFinalizers: new Set(),
     postNarrationFinalizerTimers: new Map(),
+    trackerWidgetActiveTab: 'scene',
     trackerWidgetEditingUserItems: false,
 };
 
@@ -4931,6 +4932,57 @@ function trackerEditableUserItemList(label, field, value) {
         </div>`;
 }
 
+const TRACKER_WIDGET_TABS = Object.freeze(['scene', 'inventory', 'tasks', 'player']);
+
+function normalizeTrackerWidgetTab(value) {
+    return TRACKER_WIDGET_TABS.includes(value) ? value : 'scene';
+}
+
+function trackerListItems(value) {
+    return normalizeManualUserItemList(Array.isArray(value) ? value : []);
+}
+
+function trackerListCount(value) {
+    return trackerListItems(value).length;
+}
+
+function trackerTabButton(id, label, count, activeTab) {
+    const active = id === activeTab;
+    const countHtml = Number.isFinite(count) && count > 0
+        ? `<span class="structured-preflight-tracker-tab-count">${escapeHtml(count)}</span>`
+        : '';
+    return `
+        <button class="structured-preflight-tracker-tab${active ? ' structured-preflight-tracker-tab-active' : ''}" type="button" data-spe-tracker-tab="${escapeHtml(id)}" aria-selected="${active ? 'true' : 'false'}">
+            <span>${escapeHtml(label)}</span>
+            ${countHtml}
+        </button>`;
+}
+
+function trackerTabNav(activeTab, counts) {
+    return `
+        <div class="structured-preflight-tracker-tabs" role="tablist" aria-label="Tracker sections">
+            ${trackerTabButton('scene', 'Scene', counts.scene, activeTab)}
+            ${trackerTabButton('inventory', 'Inventory', counts.inventory, activeTab)}
+            ${trackerTabButton('tasks', 'Tasks', counts.tasks, activeTab)}
+            ${trackerTabButton('player', 'Player', counts.player, activeTab)}
+        </div>`;
+}
+
+function trackerDisplayItemList(label, value, options = {}) {
+    const items = trackerListItems(value);
+    const rows = items.length
+        ? items.map(item => `
+            <div class="structured-preflight-tracker-item-row">
+                <span class="structured-preflight-tracker-item-text">${escapeHtml(item)}</span>
+            </div>`).join('')
+        : `<div class="structured-preflight-tracker-muted structured-preflight-tracker-item-empty">${escapeHtml(options.empty || 'None')}</div>`;
+    return `
+        <div class="structured-preflight-tracker-item-list">
+            <div class="structured-preflight-tracker-item-list-label structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(trackerDetailTone(label))}">${escapeHtml(label)}</div>
+            <div class="structured-preflight-tracker-item-rows">${rows}</div>
+        </div>`;
+}
+
 function trackerChipLabelTone(label) {
     const key = String(label || '')
         .toLowerCase()
@@ -5028,6 +5080,8 @@ function buildTrackerDisplayHtml(snapshot) {
     const userCore = snapshot?.userCoreStats;
     const user = normalizeTrackerUserState(snapshot?.user || {});
     const personaName = cleanTrackerDisplayName(getUserName()) || 'User';
+    const activeTab = normalizeTrackerWidgetTab(state.trackerWidgetActiveTab);
+    state.trackerWidgetActiveTab = activeTab;
     const editingUserItems = Boolean(state.trackerWidgetEditingUserItems);
     const userItemControls = editingUserItems
         ? `
@@ -5041,12 +5095,12 @@ function buildTrackerDisplayHtml(snapshot) {
             </div>`;
     const userGearInventoryHtml = editingUserItems
         ? [
-            trackerEditableUserItemList('Gear', 'gear', user.gear),
             trackerEditableUserItemList('Inventory', 'inventory', user.inventory),
+            trackerEditableUserItemList('Gear', 'gear', user.gear),
         ].join('')
         : [
-            trackerDetailLine('Gear', user.gear, { showEmpty: true }),
-            trackerDetailLine('Inventory', user.inventory, { showEmpty: true }),
+            trackerDisplayItemList('Inventory', user.inventory, { empty: 'No inventory items' }),
+            trackerDisplayItemList('Gear', user.gear, { empty: 'No gear items' }),
         ].join('');
 
     const renderNpc = name => {
@@ -5068,7 +5122,7 @@ function buildTrackerDisplayHtml(snapshot) {
                 <div class="structured-preflight-tracker-card-head">
                     <div class="structured-preflight-tracker-name-block">
                         <div class="structured-preflight-tracker-name structured-preflight-tracker-name-npc">${escapeHtml(name)}</div>
-                        <div class="structured-preflight-tracker-role">Active NPC</div>
+                        <div class="structured-preflight-tracker-role">Present NPC</div>
                     </div>
                     <div class="structured-preflight-tracker-chip-row">
                         ${trackerChip('Toward User', relation, trackerDispositionTone(disposition, classified))}
@@ -5105,9 +5159,51 @@ function buildTrackerDisplayHtml(snapshot) {
 
 
 
-    return `
+    const renderScenePanel = () => `
+        <div class="structured-preflight-tracker-tab-panel" data-spe-tracker-panel="scene">
+            <div class="structured-preflight-tracker-scene-strip">
+                <div class="structured-preflight-tracker-scene-pill">
+                    <span>Present</span>
+                    <code>${escapeHtml(active.length)}</code>
+                </div>
+                <div class="structured-preflight-tracker-scene-pill">
+                    <span>Visible</span>
+                    <code>${escapeHtml(names.length)}</code>
+                </div>
+            </div>
+            ${renderSection('Present NPCs', active)}
+        </div>`;
 
-        <div class="structured-preflight-tracker-body">
+    const renderInventoryPanel = () => `
+        <div class="structured-preflight-tracker-tab-panel" data-spe-tracker-panel="inventory">
+            <div class="structured-preflight-tracker-section">
+                <div class="structured-preflight-tracker-section-head">
+                    <div class="structured-preflight-tracker-heading">Inventory & Gear</div>
+                    ${userItemControls}
+                </div>
+                <div class="structured-preflight-tracker-card structured-preflight-tracker-inventory-card">
+                    <div class="structured-preflight-tracker-item-list-grid">
+                        ${userGearInventoryHtml}
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+    const renderTasksPanel = () => `
+        <div class="structured-preflight-tracker-tab-panel" data-spe-tracker-panel="tasks">
+            <div class="structured-preflight-tracker-section">
+                <div class="structured-preflight-tracker-heading">Tasks & Commitments</div>
+                <div class="structured-preflight-tracker-card structured-preflight-tracker-task-card">
+                    <div class="structured-preflight-tracker-item-list-grid">
+                        ${trackerDisplayItemList('Tasks', user.tasks, { empty: 'No tasks' })}
+                        ${trackerDisplayItemList('Commitments', user.commitments, { empty: 'No commitments' })}
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+    const renderPlayerPanel = () => `
+        <div class="structured-preflight-tracker-tab-panel" data-spe-tracker-panel="player">
             <div class="structured-preflight-tracker-section structured-preflight-tracker-user">
                 <div class="structured-preflight-tracker-heading">Player</div>
                 <div class="structured-preflight-tracker-card structured-preflight-tracker-player-card">
@@ -5116,7 +5212,6 @@ function buildTrackerDisplayHtml(snapshot) {
                             <div class="structured-preflight-tracker-title structured-preflight-tracker-name-player">${escapeHtml(personaName)}</div>
                             <div class="structured-preflight-tracker-role">Player</div>
                         </div>
-                        ${userItemControls}
                         <div class="structured-preflight-tracker-chip-row">
                             ${trackerStatCluster(userCore)}
                             ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
@@ -5125,14 +5220,29 @@ function buildTrackerDisplayHtml(snapshot) {
                     <div class="structured-preflight-tracker-detail-grid">
                         ${trackerDetailLine('Wounds', user.wounds, { showEmpty: true })}
                         ${trackerDetailLine('Status', user.statusEffects, { showEmpty: true })}
-                        ${userGearInventoryHtml}
-                        ${trackerDetailLine('Tasks', user.tasks, { showEmpty: true })}
-                        ${trackerDetailLine('Commitments', user.commitments, { showEmpty: true })}
                     </div>
                 </div>
             </div>
-            <div class="structured-preflight-tracker-divider"></div>
-            ${renderSection('Active NPCs', active)}
+        </div>`;
+
+    const counts = {
+        scene: active.length,
+        inventory: trackerListCount(user.inventory) + trackerListCount(user.gear),
+        tasks: trackerListCount(user.tasks) + trackerListCount(user.commitments),
+        player: trackerListCount(user.wounds) + trackerListCount(user.statusEffects),
+    };
+    const panelHtml = {
+        scene: renderScenePanel,
+        inventory: renderInventoryPanel,
+        tasks: renderTasksPanel,
+        player: renderPlayerPanel,
+    }[activeTab]();
+
+    return `
+
+        <div class="structured-preflight-tracker-body">
+            ${trackerTabNav(activeTab, counts)}
+            ${panelHtml}
         </div>`;
 }
 
@@ -5352,6 +5462,90 @@ function ensureTrackerDisplayStyles() {
             margin-top: 0.55rem;
             display: grid;
             gap: 0.75rem;
+        }
+        .structured-preflight-tracker-tabs {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.32rem;
+            padding: 0.25rem;
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.16));
+            border-radius: 7px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 26%, transparent);
+        }
+        .structured-preflight-tracker-tab {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.28rem;
+            min-width: 0;
+            min-height: 1.95rem;
+            padding: 0.22rem 0.42rem;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-weight: 800;
+            line-height: 1.1;
+            text-transform: uppercase;
+        }
+        .structured-preflight-tracker-tab:hover,
+        .structured-preflight-tracker-tab-active {
+            border-color: var(--SmartThemeBorderColor, rgba(255,255,255,0.22));
+            background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 12%, transparent);
+        }
+        .structured-preflight-tracker-tab-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.18rem;
+            min-height: 1.18rem;
+            padding: 0 0.24rem;
+            border-radius: 999px;
+            background: color-mix(in srgb, #73d0ff 38%, transparent);
+            color: var(--SmartThemeBodyColor, #eee);
+            font-size: 0.7rem;
+            line-height: 1;
+        }
+        .structured-preflight-tracker-tab-panel {
+            display: grid;
+            gap: 0.58rem;
+        }
+        .structured-preflight-tracker-section-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .structured-preflight-tracker-scene-strip {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.38rem;
+        }
+        .structured-preflight-tracker-scene-pill {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            min-width: 0;
+            min-height: 2rem;
+            padding: 0.32rem 0.46rem;
+            border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255,255,255,0.22)) 70%, transparent);
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 30%, transparent);
+            font-weight: 800;
+            line-height: 1.15;
+        }
+        .structured-preflight-tracker-scene-pill span {
+            color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 72%, transparent);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+        }
+        .structured-preflight-tracker-scene-pill code {
+            font-size: 0.9rem;
+            font-weight: 900;
         }
         .structured-preflight-tracker-title,
         .structured-preflight-tracker-heading,
@@ -5621,6 +5815,42 @@ function ensureTrackerDisplayStyles() {
             min-width: 0;
             overflow-wrap: anywhere;
         }
+        .structured-preflight-tracker-item-list-grid {
+            display: grid;
+            gap: 0.55rem;
+            grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
+        }
+        .structured-preflight-tracker-item-list {
+            display: grid;
+            align-content: start;
+            gap: 0.32rem;
+            min-width: 0;
+        }
+        .structured-preflight-tracker-item-list-label {
+            justify-self: start;
+        }
+        .structured-preflight-tracker-item-rows {
+            display: grid;
+            gap: 0.26rem;
+            min-width: 0;
+        }
+        .structured-preflight-tracker-item-row {
+            min-width: 0;
+            padding: 0.32rem 0.42rem;
+            border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255,255,255,0.22)) 58%, transparent);
+            border-radius: 5px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 28%, transparent);
+            line-height: 1.28;
+        }
+        .structured-preflight-tracker-item-text {
+            display: block;
+            overflow-wrap: anywhere;
+        }
+        .structured-preflight-tracker-item-empty {
+            padding: 0.32rem 0.42rem;
+            border-radius: 5px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
+        }
         .structured-preflight-tracker-edit-actions {
             display: flex;
             align-items: center;
@@ -5679,6 +5909,12 @@ function ensureTrackerDisplayStyles() {
             opacity: 0.78;
         }
         @media (max-width: 520px) {
+            .structured-preflight-tracker-tabs {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .structured-preflight-tracker-scene-strip {
+                grid-template-columns: 1fr;
+            }
             .structured-preflight-tracker-detail {
                 gap: 0.12rem;
             }
@@ -6216,8 +6452,18 @@ function attachTrackerWidgetEditorHandlers(body, context = getContext()) {
         const target = event.target?.closest?.('button');
         if (!target) return;
 
+        if (target.matches('[data-spe-tracker-tab]')) {
+            event.preventDefault();
+            const nextTab = normalizeTrackerWidgetTab(target.getAttribute('data-spe-tracker-tab'));
+            state.trackerWidgetActiveTab = nextTab;
+            if (nextTab !== 'inventory') state.trackerWidgetEditingUserItems = false;
+            renderTrackerWidget(context);
+            return;
+        }
+
         if (target.matches('[data-spe-tracker-edit-user-items]')) {
             event.preventDefault();
+            state.trackerWidgetActiveTab = 'inventory';
             state.trackerWidgetEditingUserItems = true;
             renderTrackerWidget(context);
             return;
