@@ -5158,7 +5158,7 @@ function buildTrackerDisplayHtml(snapshot) {
                 </div>
                 <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
                     ${trackerDetailLine('Wounds', user.wounds, { showEmpty: true })}
-                    ${trackerDetailLine('Gear', user.gear, { showEmpty: true })}
+                    ${trackerDisplayItemList('Gear', user.gear, { empty: 'No equipped gear' })}
                     ${statusLine}
                 </div>
             </div>`;
@@ -5202,7 +5202,7 @@ function buildTrackerDisplayHtml(snapshot) {
                 </div>
                 <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
                     ${trackerDetailLine('Wounds', entry.wounds)}
-                    ${trackerDetailLine('Gear', entry.gear)}
+                    ${trackerDisplayItemList('Gear', entry.gear, { empty: 'No gear' })}
                     ${statusLine}
                     <div class="structured-preflight-tracker-detail structured-preflight-tracker-detail-wide">
                         <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-personality">Personality</span>
