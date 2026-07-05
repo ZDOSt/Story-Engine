@@ -384,6 +384,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const sceneState = narrativeSceneStateFact(options?.worldState);
     const genreLens = renderGenreLens(options, { prompt });
     const economyLens = renderEconomyAndValueLens(options);
+    const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
         'START_ADVENTURE_PROMPT:',
         'This is the opening turn of a new adventure.',
@@ -394,6 +395,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     if (sceneState) lines.push(`Current broad scene state: ${sceneState}`);
     if (genreLens) lines.push('', genreLens);
     if (economyLens) lines.push('', economyLens);
+    if (nameReveal) lines.push('', 'NAME REVEAL:', nameReveal);
     lines.push('', prompt);
     return lines.join('\n');
 }
@@ -1181,6 +1183,7 @@ function narrativeWorldEventFact(handoff = {}) {
 function narrativeNameRevealFact(nameGeneration = {}) {
     const pool = nameGeneration?.namePool;
     if (!pool) return 'No generated name pool is available; do not invent new proper names unless already established by visible chat, character card, lore, or tracker.';
+    const nameList = value => value.length ? value.join(', ') : 'none';
     const femaleNames = (pool.female || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const maleNames = (pool.male || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
@@ -1188,9 +1191,9 @@ function narrativeNameRevealFact(nameGeneration = {}) {
         'When revealing a new proper name for a person, entity, or location, you MUST choose exactly one unused approved name from the list below.',
         'Do NOT invent, modify, translate, combine, suffix, derive, or add surnames to approved names.',
         '',
-        `Female: ${list(femaleNames)}.`,
-        `Male: ${list(maleNames)}.`,
-        `Location: ${list(locationNames)}.`,
+        `Female: ${nameList(femaleNames)}.`,
+        `Male: ${nameList(maleNames)}.`,
+        `Location: ${nameList(locationNames)}.`,
         '',
         'A new name may ONLY appear after that person, entity, or location is explicitly revealed or discovered in-scene through speech, readable text, self-introduction, direct reference, signage, documents, or clear recognition.',
         'Already revealed names may continue unchanged.',

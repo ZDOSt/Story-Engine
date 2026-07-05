@@ -394,6 +394,21 @@ export function buildEconomySnapshot(context) {
     return normalizeEconomyState(context?.chatMetadata?.structuredPreflightTracker?.economy || {});
 }
 
+export function buildAdventureIntroNameGeneration(context, adventurePrompt = '') {
+    const audit = [];
+    const prompt = String(adventurePrompt || '').trim();
+    const ledger = {
+        chaosSemantic: { sceneSummary: prompt },
+        resolutionEngine: {
+            identifyGoal: 'Adventure intro',
+            identifyChallenge: prompt,
+            explicitMeans: prompt,
+        },
+        relationshipEngine: [],
+    };
+    return runNameGeneration(ledger, audit, context, 'adventure_intro');
+}
+
 export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (!context?.chatMetadata || !trackerUpdate) return;
 

@@ -29,7 +29,7 @@ import {
 } from './st-adapter.js';
 import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildAdventureIntroNameGeneration, buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -3951,6 +3951,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
     const economySnapshot = pendingGeneration?.economySnapshot || buildEconomySnapshot(context);
+    const nameGeneration = pendingGeneration?.nameGenerationSnapshot || {};
     const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
         npcs: trackerSnapshot,
@@ -3975,7 +3976,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             npcHandoffs: [],
             proactivityResults: {},
             aggressionResults: {},
-            nameGeneration: {},
+            nameGeneration,
             sceneState: worldStateSnapshot,
         },
         trackerUpdate: {
@@ -4007,6 +4008,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         worldStateAfter: worldStateSnapshot,
         economyBefore: economySnapshot,
         economyAfter: economySnapshot,
+        nameGeneration,
         resolutionPacket: report.finalNarrativeHandoff.resolutionPacket,
         userCoreStats: playerTrackerSnapshot?.coreStats || null,
         contextualInjuryCaps: [],
@@ -10890,9 +10892,12 @@ async function handleChatCompletionPromptReady(eventData) {
 
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
             const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
+            const nameGeneration = buildAdventureIntroNameGeneration(context, adventurePrompt);
+            state.pendingGeneration.nameGenerationSnapshot = nameGeneration;
             const introOptions = {
                 adventureGenre: state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
                 worldState: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+                nameGeneration,
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
             const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, introOptions);
