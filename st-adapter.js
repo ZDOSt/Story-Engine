@@ -146,6 +146,48 @@ export function saveSettingsDebounced() {
     return undefined;
 }
 
+export function saveMetadataDebounced(context = getContext(), options = {}) {
+    const fn = context?.saveMetadataDebounced;
+    if (typeof fn === 'function') {
+        fn.call(context);
+        return true;
+    }
+    if (options?.warn !== false) {
+        warnOnce('saveMetadataDebounced', 'SillyTavern saveMetadataDebounced is unavailable; chat metadata was not saved.');
+    }
+    return false;
+}
+
+export async function saveMetadata(context = getContext()) {
+    const fn = context?.saveMetadata;
+    if (typeof fn === 'function') {
+        await fn.call(context);
+        return true;
+    }
+    warnOnce('saveMetadata', 'SillyTavern saveMetadata is unavailable; chat metadata was not saved.');
+    return false;
+}
+
+export async function persistMetadata(context = getContext()) {
+    if (typeof context?.saveMetadataDebounced === 'function') {
+        return saveMetadataDebounced(context);
+    }
+    return await saveMetadata(context);
+}
+
+export async function saveChat(context = getContext(), options = {}) {
+    const fn = context?.saveChat;
+    if (typeof fn === 'function') {
+        await fn.call(context);
+        return true;
+    }
+    if (options?.fallbackToMetadata) {
+        return await persistMetadata(context);
+    }
+    warnOnce('saveChat', 'SillyTavern saveChat is unavailable; chat was not saved.');
+    return false;
+}
+
 export function getRequestHeaders() {
     const fn = getContext()?.getRequestHeaders;
     if (typeof fn === 'function') return fn();
@@ -252,7 +294,7 @@ export async function writePersonaDescription(description, context = getContext(
 
     await refreshPersonaDescription();
     saveSettingsDebounced();
-    if (typeof context?.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
+    await persistMetadata(context);
 
     return { previous: current, next: nextDescription };
 }

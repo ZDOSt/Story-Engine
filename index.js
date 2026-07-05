@@ -10,7 +10,10 @@ import {
     getConnectionProfileNames,
     getPersonaText,
     getUserName,
+    persistMetadata as persistAdapterMetadata,
     readActiveConnectionProfileName,
+    saveChat,
+    saveMetadataDebounced,
     saveSettingsDebounced,
     writePersonaDescription,
 } from './st-adapter.js';
@@ -2560,9 +2563,9 @@ function getTrackerRoot(context = getContext()) {
     root.worldState = normalizeWorldState(root.worldState || {});
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
-    if (seededPlayerTracker && typeof context.saveMetadataDebounced === 'function') {
+    if (seededPlayerTracker) {
 
-        context.saveMetadataDebounced();
+        saveMetadataDebounced(context);
 
     }
 
@@ -9153,7 +9156,7 @@ function cleanVisibleDebugDisplays(context = getContext()) {
 
         persistMetadata(context);
 
-        if (typeof context.saveChat === 'function') context.saveChat();
+        saveChat(context);
 
     }
 
@@ -9319,11 +9322,7 @@ function restoreTrackerForRegeneration(type) {
 
 
 async function persistMetadata(context = getContext()) {
-    if (typeof context?.saveMetadataDebounced === 'function') {
-        context.saveMetadataDebounced();
-    } else if (typeof context?.saveMetadata === 'function') {
-        await context.saveMetadata();
-    }
+    return await persistAdapterMetadata(context);
 }
 
 function buildProseGuardPrompt(narrationText, latestUserText = '') {
@@ -10418,14 +10417,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         renderTrackerWidget(context);
         renderProgressionCard(context);
 
-        if (typeof context.saveChat === 'function') {
-            await context.saveChat();
-
-        } else {
-
-            await persistMetadata(context);
-
-        }
+        await saveChat(context, { fallbackToMetadata: true });
 
 
 
