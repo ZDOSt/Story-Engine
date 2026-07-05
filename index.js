@@ -16,7 +16,7 @@ import {
 } from './st-adapter.js';
 import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -33,6 +33,7 @@ import {
 } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
+import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
 
 
 const EXTENSION_NAME = 'Story Engine';
@@ -2556,6 +2557,7 @@ function getTrackerRoot(context = getContext()) {
     root.powerActors = root.powerActors && typeof root.powerActors === 'object' ? root.powerActors : {};
     root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
+    root.worldState = normalizeWorldState(root.worldState || {});
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
     if (seededPlayerTracker && typeof context.saveMetadataDebounced === 'function') {
@@ -3912,6 +3914,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     };
     const userKnowledge = mergeUserKnowledgeLedger(pendingRun?.userKnowledgeBefore || {}, pendingRun?.userKnowledgeAfter || {});
     const userReputation = mergeUserReputationLedger(pendingRun?.userReputationBefore || {}, pendingRun?.userReputationAfter || {});
+    const worldState = normalizeWorldState(pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {});
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -3933,6 +3936,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         powerActors,
         userKnowledge,
         userReputation,
+        worldState,
         npcs: promotionResult.npcs,
     };
     const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
@@ -3952,6 +3956,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const powerActorSnapshot = pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context);
     const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
+    const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
     const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
         npcs: trackerSnapshot,
@@ -3977,6 +3982,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             proactivityResults: {},
             aggressionResults: {},
             nameGeneration: {},
+            sceneState: worldStateSnapshot,
         },
         trackerUpdate: {
             npcs: {},
@@ -3984,6 +3990,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             powerActors: {},
             userKnowledge: {},
             userReputation: {},
+            worldState: worldStateSnapshot,
         },
     };
     return {
@@ -4001,6 +4008,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         userKnowledgeAfter: {},
         userReputationBefore: userReputationSnapshot,
         userReputationAfter: {},
+        worldStateBefore: worldStateSnapshot,
+        worldStateAfter: worldStateSnapshot,
         resolutionPacket: report.finalNarrativeHandoff.resolutionPacket,
         userCoreStats: playerTrackerSnapshot?.coreStats || null,
         contextualInjuryCaps: [],
@@ -4191,6 +4200,7 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null) 
         powerActors: displaySnapshot?.powerActors || {},
         userKnowledge: mergeUserKnowledgeLedger(displaySnapshot?.userKnowledge || {}, {}),
         userReputation: mergeUserReputationLedger(displaySnapshot?.userReputation || {}, {}),
+        worldState: normalizeWorldState(displaySnapshot?.worldState || {}),
     };
     if (hiddenHealth) {
         update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
@@ -4207,6 +4217,9 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     merged.user = applyTrackerDeltaToUserState(merged.user || {}, delta.user || {});
     merged.userKnowledge = mergeUserKnowledgeLedger(merged.userKnowledge || options.userKnowledgeBefore || {}, delta.userKnowledge || {});
     merged.userReputation = mergeUserReputationLedger(merged.userReputation || options.userReputationBefore || {}, delta.userReputation || {});
+    merged.worldState = applyWorldStateDelta(merged.worldState || options.worldStateBefore || {}, delta.worldState || {}, {
+        seed: options.messageKey || options.assistantText || '',
+    });
     const npcs = normalizeDisplayTrackerNpcs(merged.npcs || {});
     for (const npcDelta of delta.npcs || []) {
         const rawName = String(npcDelta?.NPC || '').trim();
@@ -4257,6 +4270,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         userChanged: trackerDeltaHasChanges(delta.user, true),
         npcChanged: (delta.npcs || []).some(item => trackerDeltaHasChanges(item, false)),
         userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
+        worldStateChanged: worldStateDeltaHasChanges(delta.worldState),
     };
     return merged;
 }
@@ -4294,6 +4308,19 @@ function getActiveCardCharacterNames(context = null) {
 
 function userKnowledgeDeltaHasChanges(delta) {
     return Boolean((delta?.personal || []).length || (delta?.reputation || []).length);
+}
+
+function worldStateDeltaHasChanges(delta) {
+    if (!delta || typeof delta !== 'object') return false;
+    return [
+        'reputationLocation',
+        'place',
+        'area',
+        'indoors',
+        'timeOfDay',
+    ].some(key => delta[key] !== null && delta[key] !== undefined && delta[key] !== '')
+        || !['none', undefined, null, ''].includes(delta.timeAdvance)
+        || delta.weatherTick === 'tick';
 }
 
 
@@ -4824,6 +4851,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.powerActors = snapshot.powerActors || root.powerActors || {};
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
+    root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
     root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
@@ -4846,6 +4874,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.powerActors = snapshot.powerActors || root.powerActors || {};
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
+    root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
     root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
@@ -4932,7 +4961,7 @@ function trackerEditableUserItemList(label, field, value) {
         </div>`;
 }
 
-const TRACKER_WIDGET_TABS = Object.freeze(['scene', 'inventory', 'tasks', 'player']);
+const TRACKER_WIDGET_TABS = Object.freeze(['scene', 'inventory', 'tasks']);
 
 function normalizeTrackerWidgetTab(value) {
     return TRACKER_WIDGET_TABS.includes(value) ? value : 'scene';
@@ -4964,7 +4993,14 @@ function trackerTabNav(activeTab, counts) {
             ${trackerTabButton('scene', 'Scene', counts.scene, activeTab)}
             ${trackerTabButton('inventory', 'Inventory', counts.inventory, activeTab)}
             ${trackerTabButton('tasks', 'Tasks', counts.tasks, activeTab)}
-            ${trackerTabButton('player', 'Player', counts.player, activeTab)}
+        </div>`;
+}
+
+function trackerScenePill(label, value) {
+    return `
+        <div class="structured-preflight-tracker-scene-pill">
+            <span>${escapeHtml(label)}</span>
+            <code>${escapeHtml(value)}</code>
         </div>`;
 }
 
@@ -5079,6 +5115,7 @@ function buildTrackerDisplayHtml(snapshot) {
     const active = names.filter(name => npcs[name]?.lifecycle === 'Active');
     const userCore = snapshot?.userCoreStats;
     const user = normalizeTrackerUserState(snapshot?.user || {});
+    const worldDisplay = formatWorldStateForDisplay(snapshot?.worldState || {});
     const personaName = cleanTrackerDisplayName(getUserName()) || 'User';
     const activeTab = normalizeTrackerWidgetTab(state.trackerWidgetActiveTab);
     state.trackerWidgetActiveTab = activeTab;
@@ -5103,6 +5140,30 @@ function buildTrackerDisplayHtml(snapshot) {
             trackerDisplayItemList('Gear', user.gear, { empty: 'No gear items' }),
         ].join('');
 
+    const renderPlayerCard = () => {
+        const statusLine = trackerListCount(user.statusEffects)
+            ? trackerDetailLine('Status', user.statusEffects)
+            : '';
+        return `
+            <div class="structured-preflight-tracker-card structured-preflight-tracker-player-card">
+                <div class="structured-preflight-tracker-card-head">
+                    <div class="structured-preflight-tracker-name-block">
+                        <div class="structured-preflight-tracker-title structured-preflight-tracker-name-player">${escapeHtml(personaName)}</div>
+                        <div class="structured-preflight-tracker-role">Player</div>
+                    </div>
+                    <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-card-top-row">
+                        ${trackerStatCluster(userCore)}
+                        ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
+                    </div>
+                </div>
+                <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
+                    ${trackerDetailLine('Wounds', user.wounds, { showEmpty: true })}
+                    ${trackerDetailLine('Gear', user.gear, { showEmpty: true })}
+                    ${statusLine}
+                </div>
+            </div>`;
+    };
+
     const renderNpc = name => {
 
         const entry = npcs[name];
@@ -5110,13 +5171,11 @@ function buildTrackerDisplayHtml(snapshot) {
         const disposition = entry.currentDisposition;
 
         const classified = disposition ? classifyDisposition(disposition) : { lock: 'None', behavior: 'None' };
-        const pressure = Number(entry.hostilePressure || 0);
-        const landedPressure = Number(entry.hostileLandedPressure || 0);
-        const pressureLine = pressure || landedPressure || entry.dominantLock !== 'None' || entry.pressureMode !== 'none'
-            ? trackerDetailLine('Pressure', `${pressure}/${landedPressure} | Mode ${entry.pressureMode || 'none'} | Dominant ${entry.dominantLock || 'None'}`, { showEmpty: true })
-            : '';
         const relation = relationshipTowardUser(disposition, classified);
         const condition = formatTrackerCondition(entry.condition);
+        const statusLine = trackerListCount(entry.statusEffects)
+            ? trackerDetailLine('Status', entry.statusEffects)
+            : '';
         return `
             <div class="structured-preflight-tracker-card structured-preflight-tracker-npc">
                 <div class="structured-preflight-tracker-card-head">
@@ -5124,37 +5183,41 @@ function buildTrackerDisplayHtml(snapshot) {
                         <div class="structured-preflight-tracker-name structured-preflight-tracker-name-npc">${escapeHtml(name)}</div>
                         <div class="structured-preflight-tracker-role">Present NPC</div>
                     </div>
-                    <div class="structured-preflight-tracker-chip-row">
-                        ${trackerChip('Toward User', relation, trackerDispositionTone(disposition, classified))}
+                    <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-card-top-row">
+                        ${trackerStatCluster(entry.currentCoreStats)}
                         ${trackerChip('Condition', condition, trackerConditionTone(entry.condition))}
                     </div>
                 </div>
-                <div class="structured-preflight-tracker-npc-metrics">
-                    <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-npc-mechanic-row">
+                <div class="structured-preflight-tracker-npc-rows">
+                    <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-npc-row">
                         ${trackerChip('B/F/H', formatDisposition(disposition))}
-                        ${trackerChip('Lock', classified.lock)}
-                        ${trackerChip('Behavior', classified.behavior)}
                         ${trackerChip('Rapport', `${entry.currentRapport}/5`)}
-                        ${trackerChip('Relationship', entry.establishedRelationship || 'N')}
+                        ${trackerChip('Toward User', relation, trackerDispositionTone(disposition, classified))}
                     </div>
-                    ${trackerStatCluster(entry.currentCoreStats)}
+                    <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-npc-row">
+                        ${trackerChip('Relationship', entry.establishedRelationship || 'N')}
+                        ${trackerChip('Behavior', classified.behavior)}
+                        ${trackerChip('Lock', classified.lock)}
+                    </div>
                 </div>
-                <div class="structured-preflight-tracker-detail-grid">
-                    ${trackerDetailLine('Personality', entry.personalitySummary || 'Developing', { showEmpty: true })}
+                <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
                     ${trackerDetailLine('Wounds', entry.wounds)}
-                    ${trackerDetailLine('Status', entry.statusEffects)}
                     ${trackerDetailLine('Gear', entry.gear)}
-                    ${pressureLine}
+                    ${statusLine}
+                    <div class="structured-preflight-tracker-detail structured-preflight-tracker-detail-wide">
+                        <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-personality">Personality</span>
+                        <span class="structured-preflight-tracker-detail-value">${escapeHtml(entry.personalitySummary || 'Developing')}</span>
+                    </div>
                 </div>
             </div>`;
     };
 
-    const renderSection = (title, sectionNames) => `
+    const renderNpcSection = sectionNames => `
         <div class="structured-preflight-tracker-section">
-            <div class="structured-preflight-tracker-heading">${title}</div>
-
-            ${sectionNames.length ? sectionNames.map(renderNpc).join('') : '<div class="structured-preflight-tracker-empty">None</div>'}
-
+            <div class="structured-preflight-tracker-heading">Present NPCs</div>
+            <div class="structured-preflight-tracker-npc-scroll">
+                ${sectionNames.length ? sectionNames.map(renderNpc).join('') : '<div class="structured-preflight-tracker-empty">None</div>'}
+            </div>
         </div>`;
 
 
@@ -5162,16 +5225,18 @@ function buildTrackerDisplayHtml(snapshot) {
     const renderScenePanel = () => `
         <div class="structured-preflight-tracker-tab-panel" data-spe-tracker-panel="scene">
             <div class="structured-preflight-tracker-scene-strip">
-                <div class="structured-preflight-tracker-scene-pill">
-                    <span>Present</span>
-                    <code>${escapeHtml(active.length)}</code>
-                </div>
-                <div class="structured-preflight-tracker-scene-pill">
-                    <span>Visible</span>
-                    <code>${escapeHtml(names.length)}</code>
-                </div>
+                ${trackerScenePill('Place', worldDisplay.place)}
+                ${trackerScenePill('Area', worldDisplay.area)}
+                ${trackerScenePill('Time', `${worldDisplay.day} / ${worldDisplay.timeOfDay}`)}
+                ${trackerScenePill('Weather', worldDisplay.weather)}
+                ${trackerScenePill('Present', active.length)}
+                ${trackerScenePill('Visible', names.length)}
             </div>
-            ${renderSection('Present NPCs', active)}
+            <div class="structured-preflight-tracker-section structured-preflight-tracker-user">
+                <div class="structured-preflight-tracker-heading">Player</div>
+                ${renderPlayerCard()}
+            </div>
+            ${renderNpcSection(active)}
         </div>`;
 
     const renderInventoryPanel = () => `
@@ -5202,40 +5267,15 @@ function buildTrackerDisplayHtml(snapshot) {
             </div>
         </div>`;
 
-    const renderPlayerPanel = () => `
-        <div class="structured-preflight-tracker-tab-panel" data-spe-tracker-panel="player">
-            <div class="structured-preflight-tracker-section structured-preflight-tracker-user">
-                <div class="structured-preflight-tracker-heading">Player</div>
-                <div class="structured-preflight-tracker-card structured-preflight-tracker-player-card">
-                    <div class="structured-preflight-tracker-card-head">
-                        <div class="structured-preflight-tracker-name-block">
-                            <div class="structured-preflight-tracker-title structured-preflight-tracker-name-player">${escapeHtml(personaName)}</div>
-                            <div class="structured-preflight-tracker-role">Player</div>
-                        </div>
-                        <div class="structured-preflight-tracker-chip-row">
-                            ${trackerStatCluster(userCore)}
-                            ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
-                        </div>
-                    </div>
-                    <div class="structured-preflight-tracker-detail-grid">
-                        ${trackerDetailLine('Wounds', user.wounds, { showEmpty: true })}
-                        ${trackerDetailLine('Status', user.statusEffects, { showEmpty: true })}
-                    </div>
-                </div>
-            </div>
-        </div>`;
-
     const counts = {
         scene: active.length,
         inventory: trackerListCount(user.inventory) + trackerListCount(user.gear),
         tasks: trackerListCount(user.tasks) + trackerListCount(user.commitments),
-        player: trackerListCount(user.wounds) + trackerListCount(user.statusEffects),
     };
     const panelHtml = {
         scene: renderScenePanel,
         inventory: renderInventoryPanel,
         tasks: renderTasksPanel,
-        player: renderPlayerPanel,
     }[activeTab]();
 
     return `
@@ -5465,7 +5505,7 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-tabs {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.32rem;
             padding: 0.25rem;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.16));
@@ -5521,7 +5561,7 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-scene-strip {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.38rem;
         }
         .structured-preflight-tracker-scene-pill {
@@ -5607,6 +5647,10 @@ function ensureTrackerDisplayStyles() {
             gap: 0.55rem;
             flex-wrap: wrap;
         }
+        .structured-preflight-tracker-card-top-row {
+            justify-content: flex-end;
+            flex: 1 1 18rem;
+        }
         .structured-preflight-tracker-chip-row {
             display: flex;
             align-items: center;
@@ -5617,12 +5661,12 @@ function ensureTrackerDisplayStyles() {
         .structured-preflight-tracker-stat-row {
             padding-top: 0.1rem;
         }
-        .structured-preflight-tracker-npc-metrics {
+        .structured-preflight-tracker-npc-rows {
             display: grid;
-            gap: 0.38rem;
+            gap: 0.32rem;
             padding-top: 0.02rem;
         }
-        .structured-preflight-tracker-npc-mechanic-row {
+        .structured-preflight-tracker-npc-row {
             padding: 0.28rem 0.32rem;
             border-radius: 6px;
             background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 20%, transparent);
@@ -5758,6 +5802,9 @@ function ensureTrackerDisplayStyles() {
             gap: 0.32rem;
             grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
         }
+        .structured-preflight-tracker-detail-grid-compact {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
         .structured-preflight-tracker-detail {
             display: flex;
             flex-direction: column;
@@ -5768,6 +5815,9 @@ function ensureTrackerDisplayStyles() {
             border-radius: 5px;
             background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 22%, transparent);
             line-height: 1.35;
+        }
+        .structured-preflight-tracker-detail-wide {
+            grid-column: 1 / -1;
         }
         .structured-preflight-tracker-detail-label {
             display: inline-flex;
@@ -5901,6 +5951,14 @@ function ensureTrackerDisplayStyles() {
             background: var(--SmartThemeBorderColor, rgba(255,255,255,0.22));
             opacity: 0.9;
         }
+        .structured-preflight-tracker-npc-scroll {
+            display: grid;
+            gap: 0.5rem;
+            max-height: clamp(13rem, 42vh, 24rem);
+            min-height: 0;
+            overflow-y: auto;
+            padding-right: 0.16rem;
+        }
         .structured-preflight-tracker-npc {
             border-left: 4px solid #6a56a5;
         }
@@ -5910,9 +5968,12 @@ function ensureTrackerDisplayStyles() {
         }
         @media (max-width: 520px) {
             .structured-preflight-tracker-tabs {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
+                grid-template-columns: repeat(3, minmax(0, 1fr));
             }
             .structured-preflight-tracker-scene-strip {
+                grid-template-columns: 1fr;
+            }
+            .structured-preflight-tracker-detail-grid-compact {
                 grid-template-columns: 1fr;
             }
             .structured-preflight-tracker-detail {
@@ -9881,11 +9942,13 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         user: pendingRun?.userBefore || {},
         npcs: pendingRun?.trackerBefore || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
+        worldState: pendingRun?.worldStateBefore || {},
     };
     const mechanicalAfter = {
         user: pendingRun?.userAfter || {},
         npcs: pendingRun?.trackerAfter || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
+        worldState: pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
     };
     const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
 
@@ -9925,6 +9988,8 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         contextualInjuryCaps: pendingRun?.contextualInjuryCaps || [],
 
         nameGeneration: handoff.nameGeneration || {},
+
+        sceneState: handoff.sceneState || pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
 
         activeNpcNames,
     };
@@ -10269,6 +10334,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     beforeNpcs: pendingRun.trackerBefore,
                     userKnowledgeBefore: pendingRun.userKnowledgeBefore,
                     userReputationBefore: pendingRun.userReputationBefore,
+                    worldStateBefore: pendingRun.worldStateBefore,
                     pendingRun,
                     context,
                 });
@@ -10296,12 +10362,14 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforePowerActors: clone(pendingRun.powerActorsBefore),
                 beforeUserKnowledge: clone(pendingRun.userKnowledgeBefore || {}),
                 beforeUserReputation: clone(pendingRun.userReputationBefore || {}),
+                beforeWorldState: clone(pendingRun.worldStateBefore || {}),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
                 afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
                 afterPowerActors: clone(trackerDisplaySnapshot.powerActors || {}),
                 afterUserKnowledge: clone(trackerDisplaySnapshot.userKnowledge || {}),
                 afterUserReputation: clone(trackerDisplaySnapshot.userReputation || {}),
+                afterWorldState: clone(trackerDisplaySnapshot.worldState || {}),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
 
@@ -10406,7 +10474,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState };
             }
             delete root.snapshots[key];
             removeProgressionRecordsForMessage(key, context);
@@ -10432,6 +10500,7 @@ async function handleMessageDeleted(newLength) {
         root.powerActors = restoreCandidate.beforePowerActors || {};
         root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(restoreCandidate.beforeUserReputation || {}, {});
+        root.worldState = normalizeWorldState(restoreCandidate.beforeWorldState || root.worldState || {});
         await persistMetadata(context);
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${Math.min(chatLength, firstAffectedIndex)}`);
 
@@ -10738,6 +10807,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         powerActorSnapshot: buildPowerActorSnapshot(context),
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         userReputationSnapshot: buildUserReputationSnapshot(context),
+        worldStateSnapshot: buildWorldStateSnapshot(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
         writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
         contextSize,
@@ -10803,8 +10873,11 @@ async function handleChatCompletionPromptReady(eventData) {
 
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
             const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
-            const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt);
-            const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt);
+            const introOptions = {
+                worldState: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            };
+            const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
+            const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, introOptions);
             state.pendingRun = buildAdventureIntroPendingRun(context, state.pendingGeneration, narratorModelContext);
             state.lastNarratorHandoff = narratorContext;
             beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
@@ -10837,6 +10910,7 @@ async function handleChatCompletionPromptReady(eventData) {
 
         const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, state.pendingGeneration.type, {
             playerTrackerSnapshot: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+            worldStateSnapshot: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
         });
 
 
@@ -10863,6 +10937,8 @@ async function handleChatCompletionPromptReady(eventData) {
             userKnowledgeAfter: report.trackerUpdate?.userKnowledge || {},
             userReputationBefore: state.pendingGeneration.userReputationSnapshot || buildUserReputationSnapshot(context),
             userReputationAfter: report.trackerUpdate?.userReputation || {},
+            worldStateBefore: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            worldStateAfter: report.trackerUpdate?.worldState || state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
@@ -10931,6 +11007,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             powerActorSnapshot: state.pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
             userKnowledgeSnapshot: state.pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userReputationSnapshot: state.pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
+            worldStateSnapshot: state.pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             nameStyle: getSettings().nameStyle,

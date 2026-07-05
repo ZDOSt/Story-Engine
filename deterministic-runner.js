@@ -87,6 +87,7 @@ import {
     normalizeHiddenHealth,
     safeSceneHealingAmount,
 } from './health-state.js';
+import { normalizeWorldState } from './world-state.js';
 
 const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
@@ -379,6 +380,10 @@ export function buildUserReputationSnapshot(context) {
     return normalizeUserReputation(context?.chatMetadata?.structuredPreflightTracker?.userReputation || {});
 }
 
+export function buildWorldStateSnapshot(context) {
+    return normalizeWorldState(context?.chatMetadata?.structuredPreflightTracker?.worldState || {});
+}
+
 export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (!context?.chatMetadata || !trackerUpdate) return;
 
@@ -388,6 +393,7 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.powerActors = normalizePowerActors(root.powerActors || {});
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.userReputation = normalizeUserReputation(root.userReputation || {});
+    root.worldState = normalizeWorldState(root.worldState || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
 
@@ -415,6 +421,9 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.userReputation) {
         root.userReputation = normalizeUserReputation(trackerUpdate.userReputation);
     }
+    if (trackerUpdate.worldState) {
+        root.worldState = normalizeWorldState(trackerUpdate.worldState);
+    }
     if (trackerUpdate.health) {
         root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
     } else {
@@ -441,6 +450,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const dice = createDice();
     const refereeContext = buildRefereeContext(context);
     const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
+    const worldState = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
     const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger);
     const healthBefore = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
@@ -480,6 +490,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         user: trackerDeltas.user,
         powerActors: powerActors.trackerUpdate,
         userReputation,
+        worldState,
     };
     const trackerUpdate = {
         ...visibleTrackerUpdate,
@@ -495,6 +506,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         proactivityResults: proactivity.results,
         aggressionResults: aggression.results,
         powerActorPressure: powerActors.handoff,
+        sceneState: worldState,
         persistencePolicy: buildPersistencePolicy(),
         resultLine: resolution.resultLine,
         narrationGuidance: buildNarrationGuidance(narrativeResolutionPacket, relationships.handoffs, chaos.handoff, proactivity.results, aggression.results),
@@ -2521,7 +2533,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
     const trackerUpdate = {};
     const pendingOfferNpcs = npcList.filter(npc => isRomanceMemoryTag(normalizeTrackerEntry(trackerSnapshot[npc] || {}).proactivityMemory.pendingTag));
     const userReputation = buildUserReputationSnapshot(context);
-    const currentReputationLocation = normalizeReputationLocation(ledger?.engineContext?.userReputationContext?.location);
+    const currentWorldState = buildWorldStateSnapshot(context);
+    const currentReputationLocation = normalizeReputationLocation(ledger?.engineContext?.userReputationContext?.location)
+        || normalizeReputationLocation(currentWorldState.reputationLocation)
+        || normalizeReputationLocation(currentWorldState.place);
 
     audit.push('STEP 3: EXECUTE RelationshipEngine(npc, resolutionPacket) USING SEMANTIC_LEDGER');
     audit.push(`3.1 NPC_LIST=[${npcList.join(',') || NONE}]`);

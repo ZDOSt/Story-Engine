@@ -1,3 +1,5 @@
+import { normalizeWorldState, summarizeWorldStateForNarration } from './world-state.js';
+
 export function formatPreFlightPending() {
     return String.raw`<pre_flight>
 [STRUCTURED_PREFLIGHT_RUNTIME v0.3 - AUDIT ONLY]
@@ -378,12 +380,14 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
 
 export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
+    const sceneState = narrativeSceneStateFact(options?.worldState);
     return [
         'START_ADVENTURE_PROMPT:',
         'This is the opening turn of a new adventure.',
         'Narrate the opening scene immediately.',
         'Do not mention readiness, instructions, process, analysis, or meta commentary.',
         'Use only the already-established context, the selected genre, and the scene as it is shown right now.',
+        sceneState ? `Current broad scene state: ${sceneState}` : '',
         '',
         prompt,
     ].join('\n');
@@ -518,6 +522,7 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         ['attemptedActions', narrativeAttemptedActions(resolution, summary)],
         ['attemptedActionResults', narrativeAttemptedActionResults(resolution)],
         ['sceneContinuity', 'Continue from the visible scene state. Do not replay prior NPC actions, world actions, object movement, delivered items, opened/closed access, or already-completed events.'],
+        ['sceneState', narrativeSceneStateFact(handoff?.sceneState || options?.worldState)],
         ['presentCharacters', narrativePresentCharacters(resolution, handoff)],
         ['npcResponse', narrativeNpcResponseFact(handoff)],
         ['boundaryPressure', narrativeBoundaryFact(resolution, handoff)],
@@ -613,6 +618,13 @@ function successfulActionUnitCount(resolution = {}, total = 0) {
     if (tier === 'Success') return total;
     const landed = Number(resolution?.LandedActions);
     return Number.isFinite(landed) ? Math.max(0, Math.min(total, landed)) : 0;
+}
+
+function narrativeSceneStateFact(worldState = {}) {
+    const state = normalizeWorldState(worldState || {});
+    const summary = summarizeWorldStateForNarration(state);
+    if (!summary) return '';
+    return `${summary}. Treat this as authoritative continuity for current place, broad time, and weather. Preserve it unless another narrativeFact explicitly changes the scene; do not choose new weather or time changes on your own.`;
 }
 
 function narrativePresentCharacters(resolution = {}, handoff = {}) {

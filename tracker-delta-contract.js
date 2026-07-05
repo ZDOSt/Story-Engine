@@ -131,6 +131,14 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Do not award fame/infamy for ordinary conversation, private unknowable acts, harmless weirdness, being nonhuman alone, failed attempts, flavor, routine shopping, flirting, or self-defense unless it is excessive, public, or socially consequential.',
     '- location must be the current settlement/community/route/region where the social reputation would be remembered, such as a town, village, district, guild, road, camp, or region. If no clear place/community exists, use (none) and deltas 0.',
     '- reason is a concise stable summary of why the public standing changed. evidence is the exact visible/public fact from FINAL_NARRATION that supports it.',
+    '',
+    'WORLD_STATE_DELTA:',
+    '- Also output WorldStateDelta lines. This hidden state tracks broad scene continuity: current settlement/community, specific place, area, indoor/outdoor state, broad time of day, and deterministic weather.',
+    '- Update location only from explicit FINAL_NARRATION facts. reputationLocation is the settlement/community/route/region used for fame/infamy lookup. place is the specific location/building/site. area is the room, street section, counter, field, campsite, road segment, or local sub-area.',
+    '- Use unchanged for any field not explicitly changed or clarified. Use (none) only when the narration explicitly leaves the prior place/community behind and no replacement is knowable.',
+    '- timeAdvance is none unless FINAL_NARRATION completes a meaningful transition: travel, waiting, sleep/rest, a completed long activity, later that day, overnight rest, or explicit time skip. Use slot for movement to the next broad time period, overnight for a completed overnight stay, day for a full-day or longer skip, and explicit only when timeOfDay is directly stated without implying a slot advance.',
+    '- timeOfDay must be unchanged, morning, afternoon, evening, or night. Use it only when explicitly stated or implied by a completed transition such as dawn, noon, dusk, nightfall, or morning after rest.',
+    '- Do not choose weather. Weather is deterministic code-owned. Set weatherTick=tick only when a completed time/location transition should allow the stored weather pattern to advance; otherwise use auto or none.',
 ].join('\n');
 
 export const TRACKER_DELTA_TEMPLATE = `${TRACKER_DELTA_FENCE}
@@ -182,5 +190,12 @@ FameInfamyLedger[0].fameDelta=0
 FameInfamyLedger[0].infamyDelta=0
 FameInfamyLedger[0].reason=(none)
 FameInfamyLedger[0].evidence=(none)
+WorldStateDelta.reputationLocation=unchanged
+WorldStateDelta.place=unchanged
+WorldStateDelta.area=unchanged
+WorldStateDelta.indoors=unchanged
+WorldStateDelta.timeAdvance=none
+WorldStateDelta.timeOfDay=unchanged
+WorldStateDelta.weatherTick=auto
 ${TRACKER_DELTA_END}
 ${TRACKER_DELTA_FENCE_END}`;
