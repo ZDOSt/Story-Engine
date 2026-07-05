@@ -100,6 +100,12 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Remove inventoryRemove when FINAL_NARRATION explicitly establishes that an item leaves {{user}} possession/control or is no longer usable/available to them, including being dropped, left behind, handed away, given away, spent, consumed, lost, destroyed, discarded, seized, or broken beyond use.',
     '- Do not add inventory merely because an item is visible, nearby, mentioned, reachable, desired, attempted, requested, or offered. Add it only when FINAL_NARRATION confirms possession/control. Do not remove inventory merely because an item is drawn, held, inspected, used, shown, referenced, or briefly handled unless FINAL_NARRATION confirms it no longer remains with {{user}}.',
     '- Preserve the exact item phrase from FINAL_NARRATION when possible, and output only the changed item names. Do not duplicate existing inventory. Use User.gearAdd/gearRemove for visible worn/equipped gear changes when that is the more accurate tracker field.',
+    '- USER CURRENCY DELTA: update TrackerUpdateEngine.User.currencyAdd and currencyRemove from completed money/currency changes in FINAL_NARRATION. A stored ECONOMY_CONTEXT.pendingPrice may also supply the amount for a payment that FINAL_NARRATION confirms but does not restate.',
+    '- Add currencyAdd when FINAL_NARRATION explicitly establishes that {{user}} receives, earns, is paid, loots, finds, pockets, wins, or otherwise gains currency. Remove currencyRemove when FINAL_NARRATION explicitly establishes that {{user}} pays, spends, gives, loses, is robbed of, has seized, or otherwise loses currency.',
+    '- Price quote only: when FINAL_NARRATION establishes a concrete cost, fee, wage, price, fare, bribe amount, contract pay, or other quoted amount but no completed payment/exchange happens yet, do not change currency. Instead set EconomyState.pendingPriceAmount, pendingPriceItem, pendingPricePayee, and pendingPriceEvidence for the most immediate actionable price.',
+    '- Pending price payment: if ECONOMY_CONTEXT.pendingPrice exists and the latest user input plus FINAL_NARRATION semantically confirm that {{user}} delivers/authorizes the payment for that pending price, set EconomyState.payPendingPrice=Y, set TrackerUpdateEngine.User.currencyRemove to the pending amount if no more specific paid amount is stated, and set EconomyState.clearPendingPrice=Y. This is semantic payment confirmation, not keyword matching: do not mark it for asking about price, promising future payment, agreeing to a deal without payment delivery, attempted/refused payment, credit/debt, or ambiguous handling of coins.',
+    '- Clear pending price without payment only when FINAL_NARRATION clearly abandons, refuses, replaces, completes through credit/debt instead of immediate payment, or leaves the transaction/scene behind. Then set EconomyState.clearPendingPrice=Y and do not remove currency.',
+    '- Preserve the exact amount and currency phrase from FINAL_NARRATION or ECONOMY_CONTEXT.pendingPrice when possible, such as "50 sv", "$20", "12 cr", "3 spirit stones", or "two ration chits". Prefer the default/current tracker currency abbreviation when the narration uses the currency name, such as "5 sv" for "5 silver". Do not infer prices, wages, fees, rewards, loot value, balances, conversions, debt, or change unless the final narration or pendingPrice states the amount.',
     '- Use the latest user input only to identify who the acting user/player/persona is and which described body/item/task belongs to them. Do not extract changes from the latest user input unless the same change also appears in the final assistant narration.',
     '- Remove wounds/status only when the prose explicitly says the injury/status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does NOT remove injuries unless the prose also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing.',
     '- Natural full recovery should be reflected only when FINAL_NARRATION clearly establishes a completed safe recovery transition: the danger/scene has resolved and time advances through safe lodging, overnight rest, travel downtime, or an explicit recovery time skip. Do not mark full recovery from merely starting to rest, making camp, sleeping in an unsafe area, resting in a dungeon/battlefield/pursuit, or ordinary treatment without completed safe downtime.',
@@ -152,6 +158,14 @@ TrackerUpdateEngine.User.gearAdd=(none)
 TrackerUpdateEngine.User.gearRemove=(none)
 TrackerUpdateEngine.User.inventoryAdd=(none)
 TrackerUpdateEngine.User.inventoryRemove=(none)
+TrackerUpdateEngine.User.currencyAdd=(none)
+TrackerUpdateEngine.User.currencyRemove=(none)
+EconomyState.payPendingPrice=N
+EconomyState.pendingPriceAmount=(none)
+EconomyState.pendingPriceItem=(none)
+EconomyState.pendingPricePayee=(none)
+EconomyState.pendingPriceEvidence=(none)
+EconomyState.clearPendingPrice=N
 TrackerUpdateEngine.User.tasksAdd=(none)
 TrackerUpdateEngine.User.tasksRemove=(none)
 TrackerUpdateEngine.User.commitmentsAdd=(none)

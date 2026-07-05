@@ -2,6 +2,7 @@ import { ENGINE_PROMPT_TEXT, normalizeSocialResolutionMemory } from './engines.j
 import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import { canGenerateRawData, generateRawData, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta } from './world-state.js';
+import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
 
 export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
 export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES };
@@ -13,7 +14,7 @@ const SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
-const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
+const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
 const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
 const POWER_ACTOR_SEVERITIES = Object.freeze(['none', 'minor', 'meaningful', 'major']);
 const POWER_ACTOR_ASSESSMENT_SCOPES = Object.freeze(['individual', 'organization', 'institution', 'group', 'unknown']);
@@ -508,6 +509,8 @@ function buildSemanticPreflightSchema() {
             gearRemove: stringListSchema,
             inventoryAdd: stringListSchema,
             inventoryRemove: stringListSchema,
+            currencyAdd: stringListSchema,
+            currencyRemove: stringListSchema,
             tasksAdd: stringListSchema,
             tasksRemove: stringListSchema,
             commitmentsAdd: stringListSchema,
@@ -1343,6 +1346,8 @@ TrackerUpdateEngine.User.gearAdd=(none)
 TrackerUpdateEngine.User.gearRemove=(none)
 TrackerUpdateEngine.User.inventoryAdd=(none)
 TrackerUpdateEngine.User.inventoryRemove=(none)
+TrackerUpdateEngine.User.currencyAdd=(none)
+TrackerUpdateEngine.User.currencyRemove=(none)
 TrackerUpdateEngine.User.tasksAdd=(none)
 TrackerUpdateEngine.User.tasksRemove=(none)
 TrackerUpdateEngine.User.commitmentsAdd=(none)
@@ -1537,9 +1542,10 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. Mark knownToActor=Y only for that concrete knowledge path. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
         'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
-        'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
+        'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. Currency changes are finalized post-narration only, so semantic preflight must keep currencyAdd=(none) and currencyRemove=(none). TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
         'Use condition=unchanged unless the latest user input or immediate visible context explicitly establishes a completed/current health state as healthy, bruised, wounded, badly_wounded, critical, incapacitated, or dead. Use incapacitated for explicit nonlethal outcomes where the character is alive but cannot meaningfully act. Do not set condition from a desired/requested future injury or from an attempted action before narration confirms the result. ' +
         'Use Add only for explicit gains/new injuries/new effects/new obligations. Use Remove only for explicit dropping, spending, losing, completing, canceling, failing, or abandoning. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does not remove injuries unless the text also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing. Never infer unchanged lists from silence and never output a full replacement list. ' +
+        'For semantic preflight, always output currencyAdd=(none) and currencyRemove=(none). Currency spending/gain, price quotes, and pending-price payment confirmation are handled only by the post-narration tracker pass after FINAL_NARRATION exists. ' +
         'Do not mark wounds/status/condition from requested, intended, commanded, allowed, promised, predicted, or pending attempted actions before deterministic resolution; only track state already explicit as current/completed in context. ' +
         'Do not track momentary pain, impact, knockdown, stagger, breath loss, winded reaction, or temporary shock as wounds/status/condition unless an ongoing injury or continuing status is explicitly stated. ' +
         'For TrackerUpdateEngine NPC revealedName, use semantic identity resolution: when final narration reveals that an existing tracked generic NPC/person/role is named, keep NPC as the existing tracker label and write revealedName as the proper name. This is for renaming generic entries such as bystander, man, stranger, guard, raider, or Unknown Woman once their name is revealed. If several tracked generic NPCs could match and the narration does not clearly identify which one, use (none). For NPC personalitySummary, use stable personality memory only. If this is first meaningful tracking or the current summary is empty, write a compact natural-language seed when explicit card/context or the scene reveals enduring temperament or interaction style. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerism: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. Mannerism is one optional flexible, scene-valid habit, not a fixed gesture, prop, location, or repeated required beat. If an NPC already has a summary, leave unchanged unless durable evidence clearly refines it. Do not summarize mood, attraction, relationship score, fear/hostility, injuries, or temporary reactions. Personality internal pattern glossary: ' + PERSONALITY_ARCHETYPE_GLOSSARY.replace(/\n/g, ' ') + ' ' +
@@ -2006,6 +2012,8 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.User.gearRemove',
         'TrackerUpdateEngine.User.inventoryAdd',
         'TrackerUpdateEngine.User.inventoryRemove',
+        'TrackerUpdateEngine.User.currencyAdd',
+        'TrackerUpdateEngine.User.currencyRemove',
         'TrackerUpdateEngine.User.tasksAdd',
         'TrackerUpdateEngine.User.tasksRemove',
         'TrackerUpdateEngine.User.commitmentsAdd',
@@ -2419,6 +2427,8 @@ function parseCompactLedger(text, trackerSnapshot) {
             gearRemove: readList(fields, 'TrackerUpdateEngine.User.gearRemove'),
             inventoryAdd: readList(fields, 'TrackerUpdateEngine.User.inventoryAdd'),
             inventoryRemove: readList(fields, 'TrackerUpdateEngine.User.inventoryRemove'),
+            currencyAdd: readList(fields, 'TrackerUpdateEngine.User.currencyAdd'),
+            currencyRemove: readList(fields, 'TrackerUpdateEngine.User.currencyRemove'),
             tasksAdd: readList(fields, 'TrackerUpdateEngine.User.tasksAdd'),
             tasksRemove: readList(fields, 'TrackerUpdateEngine.User.tasksRemove'),
             commitmentsAdd: readList(fields, 'TrackerUpdateEngine.User.commitmentsAdd'),
@@ -2495,6 +2505,8 @@ function parseNarratorTrackerDeltaText(text) {
         'TrackerUpdateEngine.User.gearRemove',
         'TrackerUpdateEngine.User.inventoryAdd',
         'TrackerUpdateEngine.User.inventoryRemove',
+        'TrackerUpdateEngine.User.currencyAdd',
+        'TrackerUpdateEngine.User.currencyRemove',
         'TrackerUpdateEngine.User.tasksAdd',
         'TrackerUpdateEngine.User.tasksRemove',
         'TrackerUpdateEngine.User.commitmentsAdd',
@@ -2517,11 +2529,23 @@ function parseNarratorTrackerDeltaText(text) {
         gearRemove: readList(fields, 'TrackerUpdateEngine.User.gearRemove'),
         inventoryAdd: readList(fields, 'TrackerUpdateEngine.User.inventoryAdd'),
         inventoryRemove: readList(fields, 'TrackerUpdateEngine.User.inventoryRemove'),
+        currencyAdd: readList(fields, 'TrackerUpdateEngine.User.currencyAdd'),
+        currencyRemove: readList(fields, 'TrackerUpdateEngine.User.currencyRemove'),
         tasksAdd: readList(fields, 'TrackerUpdateEngine.User.tasksAdd'),
         tasksRemove: readList(fields, 'TrackerUpdateEngine.User.tasksRemove'),
         commitmentsAdd: readList(fields, 'TrackerUpdateEngine.User.commitmentsAdd'),
         commitmentsRemove: readList(fields, 'TrackerUpdateEngine.User.commitmentsRemove'),
     };
+    const economy = normalizeEconomyDelta({
+        payPendingPrice: fields.get('EconomyState.payPendingPrice'),
+        clearPendingPrice: fields.get('EconomyState.clearPendingPrice'),
+        pendingPrice: {
+            amount: normalizeCurrencyList([fields.get('EconomyState.pendingPriceAmount')])[0] || '',
+            item: fields.get('EconomyState.pendingPriceItem'),
+            payee: fields.get('EconomyState.pendingPricePayee'),
+            evidence: fields.get('EconomyState.pendingPriceEvidence'),
+        },
+    });
 
     const npcs = [];
     const trackerNpcCount = clampNumber(readNumber(fields, 'TrackerUpdateEngine.NPC.count', 0), 0, 12);
@@ -2598,7 +2622,7 @@ function parseNarratorTrackerDeltaText(text) {
         weatherTick: fields.get('WorldStateDelta.weatherTick'),
     });
 
-    return { user, npcs, userKnowledge, userReputation, worldState };
+    return { user, npcs, userKnowledge, userReputation, worldState, economy };
 }
 
 function sanitizeNarratorTrackerDelta(delta, narration) {
@@ -2614,6 +2638,7 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
         userKnowledge: normalizeUserKnowledgeDelta(delta?.userKnowledge),
         userReputation: normalizeFameInfamyDelta(delta?.userReputation),
         worldState: normalizeWorldStateDelta(delta?.worldState),
+        economy: normalizeEconomyDelta(delta?.economy),
     };
     cleanDelta.npcs = cleanDelta.npcs.filter(item =>
         item?.NPC
@@ -3462,6 +3487,8 @@ function normalizeLedger(ledger) {
         : [];
     ledger.trackerUpdateEngine = ledger.trackerUpdateEngine || {};
     ledger.trackerUpdateEngine.user = normalizeTrackerDelta(ledger.trackerUpdateEngine.user, TRACKER_USER_DELTA_FIELDS);
+    ledger.trackerUpdateEngine.user.currencyAdd = [];
+    ledger.trackerUpdateEngine.user.currencyRemove = [];
     ledger.trackerUpdateEngine.npcs = Array.isArray(ledger.trackerUpdateEngine.npcs)
         ? ledger.trackerUpdateEngine.npcs.map(item => {
             const npc = cleanScalar(item?.NPC);

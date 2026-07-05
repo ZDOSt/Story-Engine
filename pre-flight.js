@@ -1,4 +1,5 @@
 import { normalizeWorldState, summarizeWorldStateForNarration } from './world-state.js';
+import { renderEconomyAndValueLens } from './economy.js';
 
 export function formatPreFlightPending() {
     return String.raw`<pre_flight>
@@ -382,6 +383,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const prompt = valueOrNone(adventurePrompt);
     const sceneState = narrativeSceneStateFact(options?.worldState);
     const genreLens = renderGenreLens(options, { prompt });
+    const economyLens = renderEconomyAndValueLens(options);
     const lines = [
         'START_ADVENTURE_PROMPT:',
         'This is the opening turn of a new adventure.',
@@ -391,6 +393,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     ];
     if (sceneState) lines.push(`Current broad scene state: ${sceneState}`);
     if (genreLens) lines.push('', genreLens);
+    if (economyLens) lines.push('', economyLens);
     lines.push('', prompt);
     return lines.join('\n');
 }
@@ -407,6 +410,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         renderControlEngineNarrativeContract(),
         '',
         ...renderGenreLensSection(options),
+        ...renderEconomyLensSection(options),
         renderFinalWritingStyleReminder(options),
         '',
         '#2 - RESOLVED FACTS',
@@ -433,6 +437,11 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
 function renderGenreLensSection(options = {}) {
     const lens = renderGenreLens(options);
     return lens ? ['#1.5 - GENRE LENS', lens, ''] : [];
+}
+
+function renderEconomyLensSection(options = {}) {
+    const lens = renderEconomyAndValueLens(options);
+    return lens ? ['#1.6 - ECONOMY AND VALUE', lens, ''] : [];
 }
 
 function renderGenreLens(options = {}, context = {}) {

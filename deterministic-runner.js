@@ -88,6 +88,7 @@ import {
     safeSceneHealingAmount,
 } from './health-state.js';
 import { normalizeWorldState } from './world-state.js';
+import { normalizeEconomyState } from './economy.js';
 import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
 
 const NONE = '(none)';
@@ -389,6 +390,10 @@ export function buildWorldStateSnapshot(context) {
     return normalizeWorldState(context?.chatMetadata?.structuredPreflightTracker?.worldState || {});
 }
 
+export function buildEconomySnapshot(context) {
+    return normalizeEconomyState(context?.chatMetadata?.structuredPreflightTracker?.economy || {});
+}
+
 export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (!context?.chatMetadata || !trackerUpdate) return;
 
@@ -399,6 +404,7 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.userReputation = normalizeUserReputation(root.userReputation || {});
     root.worldState = normalizeWorldState(root.worldState || {});
+    root.economy = normalizeEconomyState(root.economy || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
 
@@ -428,6 +434,9 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     }
     if (trackerUpdate.worldState) {
         root.worldState = normalizeWorldState(trackerUpdate.worldState);
+    }
+    if (trackerUpdate.economy) {
+        root.economy = normalizeEconomyState(trackerUpdate.economy);
     }
     if (trackerUpdate.health) {
         root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
@@ -5682,6 +5691,7 @@ function applyTrackerDeltaToState(before, delta, includePlayerFields) {
     };
     if (includePlayerFields) {
         result.inventory = [...source.inventory];
+        result.currency = [...source.currency];
         result.tasks = [...source.tasks];
         result.commitments = [...source.commitments];
     }

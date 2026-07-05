@@ -29,7 +29,7 @@ import {
 } from './st-adapter.js';
 import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -47,6 +47,7 @@ import {
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
+import { applyCurrencyDelta, applyEconomyDelta, mergePendingPricePaymentCurrencyRemove, normalizeEconomyState, renderEconomyTrackerContext } from './economy.js';
 
 
 const EXTENSION_NAME = 'Story Engine';
@@ -2547,6 +2548,7 @@ function getTrackerRoot(context = getContext()) {
     root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
     root.worldState = normalizeWorldState(root.worldState || {});
+    root.economy = normalizeEconomyState(root.economy || {});
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
     if (seededPlayerTracker) {
@@ -3904,6 +3906,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     const userKnowledge = mergeUserKnowledgeLedger(pendingRun?.userKnowledgeBefore || {}, pendingRun?.userKnowledgeAfter || {});
     const userReputation = mergeUserReputationLedger(pendingRun?.userReputationBefore || {}, pendingRun?.userReputationAfter || {});
     const worldState = normalizeWorldState(pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {});
+    const economy = normalizeEconomyState(pendingRun?.economyAfter || pendingRun?.economyBefore || {});
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -3926,6 +3929,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         userKnowledge,
         userReputation,
         worldState,
+        economy,
         npcs: promotionResult.npcs,
     };
     const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
@@ -3946,6 +3950,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
+    const economySnapshot = pendingGeneration?.economySnapshot || buildEconomySnapshot(context);
     const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
         npcs: trackerSnapshot,
@@ -3980,6 +3985,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             userKnowledge: {},
             userReputation: {},
             worldState: worldStateSnapshot,
+            economy: economySnapshot,
         },
     };
     return {
@@ -3999,6 +4005,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         userReputationAfter: {},
         worldStateBefore: worldStateSnapshot,
         worldStateAfter: worldStateSnapshot,
+        economyBefore: economySnapshot,
+        economyAfter: economySnapshot,
         resolutionPacket: report.finalNarrativeHandoff.resolutionPacket,
         userCoreStats: playerTrackerSnapshot?.coreStats || null,
         contextualInjuryCaps: [],
@@ -4191,6 +4199,7 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null) 
         userKnowledge: mergeUserKnowledgeLedger(displaySnapshot?.userKnowledge || {}, {}),
         userReputation: mergeUserReputationLedger(displaySnapshot?.userReputation || {}, {}),
         worldState: normalizeWorldState(displaySnapshot?.worldState || {}),
+        economy: normalizeEconomyState(displaySnapshot?.economy || {}),
     };
     if (hiddenHealth) {
         update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
@@ -4204,11 +4213,20 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     if (!snapshot || !delta) return snapshot;
 
     const merged = clone(snapshot);
-    merged.user = applyTrackerDeltaToUserState(merged.user || {}, delta.user || {});
+    const economyBefore = normalizeEconomyState(merged.economy || options.economyBefore || {});
+    const economyDelta = delta.economy || {};
+    const userDelta = {
+        ...(delta.user || {}),
+        currencyRemove: mergePendingPricePaymentCurrencyRemove(delta.user?.currencyRemove || [], economyBefore, economyDelta),
+    };
+    merged.user = applyTrackerDeltaToUserState(merged.user || {}, userDelta);
     merged.userKnowledge = mergeUserKnowledgeLedger(merged.userKnowledge || options.userKnowledgeBefore || {}, delta.userKnowledge || {});
     merged.userReputation = mergeUserReputationLedger(merged.userReputation || options.userReputationBefore || {}, delta.userReputation || {});
     merged.worldState = applyWorldStateDelta(merged.worldState || options.worldStateBefore || {}, delta.worldState || {}, {
         seed: options.messageKey || options.assistantText || '',
+    });
+    merged.economy = applyEconomyDelta(economyBefore, economyDelta, {
+        messageKey: options.messageKey || '',
     });
     const npcs = normalizeDisplayTrackerNpcs(merged.npcs || {});
     for (const npcDelta of delta.npcs || []) {
@@ -4257,10 +4275,11 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
 
     merged.postNarrationTrackerDelta = {
         updatedAt: Date.now(),
-        userChanged: trackerDeltaHasChanges(delta.user, true),
+        userChanged: trackerDeltaHasChanges(userDelta, true),
         npcChanged: (delta.npcs || []).some(item => trackerDeltaHasChanges(item, false)),
         userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
         worldStateChanged: worldStateDeltaHasChanges(delta.worldState),
+        economyChanged: economyDeltaHasChanges(economyDelta),
     };
     return merged;
 }
@@ -4313,6 +4332,11 @@ function worldStateDeltaHasChanges(delta) {
         || delta.weatherTick === 'tick';
 }
 
+function economyDeltaHasChanges(delta) {
+    if (!delta || typeof delta !== 'object') return false;
+    return Boolean(delta.payPendingPrice || delta.clearPendingPrice || delta.pendingPrice);
+}
+
 
 function findExistingTrackerName(npcs, wantedName) {
     const wanted = String(wantedName || '').trim().toLowerCase();
@@ -4337,7 +4361,7 @@ function trackerDeltaHasChanges(delta, includePlayerFields) {
 
     const fields = includePlayerFields
 
-        ? ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']
+        ? ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']
 
         : ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove'];
 
@@ -4363,6 +4387,8 @@ function applyTrackerDeltaToUserState(before, delta) {
 
         inventory: [...source.inventory],
 
+        currency: [...source.currency],
+
         tasks: [...source.tasks],
 
         commitments: [...source.commitments],
@@ -4380,6 +4406,8 @@ function applyTrackerDeltaToUserState(before, delta) {
     result.gear = applyTrackerListDelta(result.gear, delta?.gearAdd, delta?.gearRemove);
 
     result.inventory = applyTrackerListDelta(result.inventory, delta?.inventoryAdd, delta?.inventoryRemove);
+
+    result.currency = applyCurrencyDelta(result.currency, delta?.currencyAdd, delta?.currencyRemove);
 
     result.tasks = applyTrackerListDelta(result.tasks, delta?.tasksAdd, delta?.tasksRemove);
 
@@ -5122,10 +5150,12 @@ function buildTrackerDisplayHtml(snapshot) {
             </div>`;
     const userGearInventoryHtml = editingUserItems
         ? [
+            trackerDisplayItemList('Currency', user.currency, { empty: 'No currency tracked' }),
             trackerEditableUserItemList('Inventory', 'inventory', user.inventory),
             trackerEditableUserItemList('Gear', 'gear', user.gear),
         ].join('')
         : [
+            trackerDisplayItemList('Currency', user.currency, { empty: 'No currency tracked' }),
             trackerDisplayItemList('Inventory', user.inventory, { empty: 'No inventory items' }),
             trackerDisplayItemList('Gear', user.gear, { empty: 'No gear items' }),
         ].join('');
@@ -5233,7 +5263,7 @@ function buildTrackerDisplayHtml(snapshot) {
         <div class="structured-preflight-tracker-tab-panel" data-spe-tracker-panel="inventory">
             <div class="structured-preflight-tracker-section">
                 <div class="structured-preflight-tracker-section-head">
-                    <div class="structured-preflight-tracker-heading">Inventory & Gear</div>
+                    <div class="structured-preflight-tracker-heading">Currency, Inventory & Gear</div>
                     ${userItemControls}
                 </div>
                 <div class="structured-preflight-tracker-card structured-preflight-tracker-inventory-card">
@@ -5259,7 +5289,7 @@ function buildTrackerDisplayHtml(snapshot) {
 
     const counts = {
         scene: active.length,
-        inventory: trackerListCount(user.inventory) + trackerListCount(user.gear),
+        inventory: trackerListCount(user.currency) + trackerListCount(user.inventory) + trackerListCount(user.gear),
         tasks: trackerListCount(user.tasks) + trackerListCount(user.commitments),
     };
     const panelHtml = {
@@ -9937,14 +9967,21 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         npcs: pendingRun?.trackerBefore || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateBefore || {},
+        economy: pendingRun?.economyBefore || {},
     };
     const mechanicalAfter = {
         user: pendingRun?.userAfter || {},
         npcs: pendingRun?.trackerAfter || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
+        economy: pendingRun?.economyAfter || pendingRun?.economyBefore || {},
     };
     const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
+    const economyContext = renderEconomyTrackerContext({
+        adventureGenre: pendingRun?.adventureGenre || getActiveAdventureGenre(),
+        economyState: pendingRun?.economyAfter || pendingRun?.economyBefore || {},
+        userCurrency: trackerDisplaySnapshot?.user?.currency || pendingRun?.userAfter?.currency || pendingRun?.userBefore?.currency || [],
+    });
 
     const authority = {
         messageKey,
@@ -9985,6 +10022,8 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
 
         sceneState: handoff.sceneState || pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
 
+        economy: economyContext,
+
         activeNpcNames,
     };
     const firstContactPersonalitySeeds = (handoff.npcHandoffs || [])
@@ -10024,6 +10063,10 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         introTrackerInstruction,
         'Use this exact shape:',
         TRACKER_DELTA_TEMPLATE,
+        '',
+
+        '==ECONOMY_CONTEXT==',
+        JSON.stringify(economyContext),
         '',
 
         '==PREVIOUS_TRACKER_SNAPSHOT==',
@@ -10351,6 +10394,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforeUserKnowledge: clone(pendingRun.userKnowledgeBefore || {}),
                 beforeUserReputation: clone(pendingRun.userReputationBefore || {}),
                 beforeWorldState: clone(pendingRun.worldStateBefore || {}),
+                beforeEconomy: clone(pendingRun.economyBefore || {}),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
                 afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
@@ -10358,6 +10402,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterUserKnowledge: clone(trackerDisplaySnapshot.userKnowledge || {}),
                 afterUserReputation: clone(trackerDisplaySnapshot.userReputation || {}),
                 afterWorldState: clone(trackerDisplaySnapshot.worldState || {}),
+                afterEconomy: clone(trackerDisplaySnapshot.economy || {}),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
 
@@ -10778,6 +10823,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
+        economySnapshot: buildEconomySnapshot(context),
         adventureGenre: getActiveAdventureGenre(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
         writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
@@ -10911,6 +10957,8 @@ async function handleChatCompletionPromptReady(eventData) {
             userReputationAfter: report.trackerUpdate?.userReputation || {},
             worldStateBefore: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             worldStateAfter: report.trackerUpdate?.worldState || state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            economyBefore: state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
+            economyAfter: report.trackerUpdate?.economy || state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),

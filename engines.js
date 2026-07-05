@@ -1,3 +1,5 @@
+import { normalizeCurrencyList } from './economy.js';
+
 export const ENGINE_PROMPT_TEXT = String.raw`[STRUCTURED_PREFLIGHT_ENGINE_EXTENSION v0.1 - SOURCE: EXTENSION ONLY]
 
 function ResolutionEngine(input) {
@@ -1759,6 +1761,7 @@ export function normalizeTrackerUserState(value) {
         statusEffects: normalizeTrackerStringList(value?.statusEffects),
         gear: normalizeTrackerStringList(value?.gear),
         inventory: normalizeTrackerStringList(value?.inventory),
+        currency: normalizeCurrencyList(value?.currency),
         tasks: normalizeTrackerStringList(value?.tasks),
         commitments: normalizeTrackerStringList(value?.commitments),
     };
