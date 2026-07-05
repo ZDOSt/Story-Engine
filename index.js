@@ -9028,10 +9028,35 @@ function detectStructuredUserInputMode(text) {
 
     }
 
+    if (/^ooc\s*:?\s*$/i.test(trimmed)) {
+
+        return { mode: 'ooc', innerText: '' };
+
+    }
+
+    const oocPrefix = trimmed.match(/^ooc(?:\s*:\s*|\s+)([\s\S]*)$/i);
+    if (oocPrefix) {
+
+        return { mode: 'ooc', innerText: oocPrefix[1].trim() };
+
+    }
 
 
-    return { mode: 'normal', innerText: trimmed };
 
+    return { mode: 'normal', innerText: trimmed, inlineProxyInstructions: extractInlineProxyInstructions(trimmed) };
+
+}
+
+
+function extractInlineProxyInstructions(text) {
+    const instructions = [];
+    const source = String(text ?? '');
+    for (const match of source.matchAll(/\[\[([\s\S]*?)\]\]/g)) {
+        const instruction = match[1]?.trim();
+        if (instruction) instructions.push(instruction);
+        if (instructions.length >= 5) break;
+    }
+    return instructions;
 }
 
 
@@ -10739,6 +10764,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         rawUserText: latestUserText,
 
         latestUserText: userInputMode.innerText || latestUserText,
+        inlineProxyInstructions: userInputMode.inlineProxyInstructions || [],
 
         trackerSnapshot: buildTrackerSnapshot(context),
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
@@ -10951,6 +10977,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             nameStyle: getSettings().nameStyle,
             userInputMode: state.pendingGeneration?.mode || 'normal',
             proxyUserAction: state.pendingGeneration?.mode === 'proxy' ? state.pendingGeneration?.latestUserText : '',
+            inlineProxyInstructions: state.pendingGeneration?.inlineProxyInstructions || [],
         })));
     } finally {
 

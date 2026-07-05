@@ -1493,6 +1493,9 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     const proxyAction = options?.userInputMode === 'proxy'
         ? String(options?.proxyUserAction || '').trim()
         : '';
+    const inlineProxyInstructions = options?.userInputMode === 'proxy'
+        ? []
+        : normalizeInlineProxyInstructions(options?.inlineProxyInstructions);
     const powerActorSnapshot = sanitizePowerActorSnapshotForSemantic(options?.powerActorSnapshot || {});
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const worldStateSnapshot = normalizeWorldState(options?.worldStateSnapshot || {});
@@ -1507,6 +1510,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
         'Do not narrate. Do not roll dice. Do not calculate outcomes. ' +
         (proxyAction ? `The latest user message used double square brackets for proxy action mode. Treat the inner instruction as {{user}}'s actual attempted action for semantic classification: "${clip(proxyAction, 800)}". Ignore the wrapper brackets themselves. ` : '') +
+        (inlineProxyInstructions.length ? `The latest user message contains inline double square bracket proxy instructions in addition to ordinary user text: ${formatInlineProxyInstructionsForSemantic(inlineProxyInstructions)}. Treat each inline instruction as explicit {{user}}-declared action detail, intent, or conditional reaction for semantic classification. If an inline instruction is conditional, classify it as a prepared conditional action; do not assume the conditioned action occurs, lands, or succeeds unless the condition is satisfied by this turn's scene facts and the action is supported by resolved mechanics. Ignore the wrapper brackets themselves. ` : '') +
         'Classify only contextual/semantic predicates needed by the engines. Use EXPLICIT-ONLY and FIRST-YES-WINS from the engine reference. ' +
         'The semantic/contextual fields you return are authoritative; the deterministic runner should not reinterpret them. ' +
         'rollNeeded is the sole semantic roll gate and directly applies DEF.STAKES. Return rollNeeded=true only for fresh unresolved stakes: success/failure would materially change risk, harm, danger, detection, resources, trust/status/authority, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacles, or explicit goal advancement. Return rollNeeded=false when there are no material stakes, when the only relevant NPC reaction is already settled by saved fear/terror, hostility/hatred, or persisted intimacy boundary, or when the latest input repeats a resolved same-bucket negative social attempt against the same NPC/goal under unchanged disposition. Still return true for separate combat, pursuit, restraint, theft, bargaining, new deception, access, resources, secrets, environmental obstacles, or new material pressure. Failed/resolved Bluff blocks repeated Bluff; failed/resolved Intimidate blocks repeated Intimidate. Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff. Do not treat repeated same-bucket threats, stronger insults, rephrased same-bucket bluffs, renewed same-bucket coercion, or dramatic display after refusal/failure as a fresh social contest. rollReason must be a concise explanation that agrees with rollNeeded: rollNeeded=true requires fresh unresolved stakes, and rollNeeded=false requires no fresh unresolved stakes. ' +
@@ -1725,6 +1729,20 @@ function clip(value, maxLength) {
     const text = String(value ?? '').trim();
     if (text.length <= maxLength) return text;
     return `${text.slice(0, maxLength)}\n[truncated]`;
+}
+
+function normalizeInlineProxyInstructions(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map(item => String(item ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 5);
+}
+
+function formatInlineProxyInstructionsForSemantic(instructions) {
+    return normalizeInlineProxyInstructions(instructions)
+        .map((instruction, index) => `${index + 1}. "${clip(instruction, 300)}"`)
+        .join(' ');
 }
 
 function stripStructuredDebug(text) {

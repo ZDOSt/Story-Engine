@@ -3581,7 +3581,10 @@ function unwrapStructuredUserInputText(text) {
     if (trimmed.length >= 4 && trimmed.startsWith('((') && trimmed.endsWith('))')) {
         return trimmed.slice(2, -2).trim();
     }
-    return trimmed;
+    return trimmed
+        .replace(/\[\[([\s\S]*?)\]\]/g, (_match, inner) => ` ${String(inner ?? '').trim()} `)
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function normalizeNameSeed(seed) {
