@@ -186,7 +186,7 @@ const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
     'Sci-fi': 'Start with a short playable opening scene that clearly belongs to science fiction. Let the genre show through concrete surroundings, visible pressure, technology, alien or future context, artificial intelligence, corporate or institutional systems, exploration, technical danger, or other immediate scene evidence.',
     Modern: 'Start with a short playable opening scene that clearly belongs to a contemporary real-world or near-real-world setting. Let the genre show through concrete surroundings, visible pressure, ordinary technology, public life, work, school, travel, money, crime, family, community, or other immediate scene evidence.',
     'Slice of Life': 'Start with a short playable opening scene that clearly belongs to slice of life. Let the genre show through concrete surroundings, routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or other immediate scene evidence.',
-    Isekai: 'Start with a short playable opening scene that clearly belongs to isekai. Briefly narrate {{user}}\'s final moments on Earth, then move directly into the first playable scene as a fully settled fantasy opening. The crossing may be implied by the scene itself or shown through an original, scene-specific transition, aftermath, summoning, audience, goddess encounter, ritual room, portal residue, or similar logic. Use the same descriptive richness as the Fantasy genre: concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, or other immediate scene evidence. If the first scene is a meeting, audience, summons, chamber, or conversation with a goddess or other being, treat that as the scene itself and describe it vividly. Do not narrate awakening, landing mechanics, self-discovery, or the transfer itself in the playable scene. The opening should feel like a normal fantasy scene that happens after an isekai crossing.\n\nMANDATORY CONSTRAINTS, FORBIDDEN, DO NOT DO ANY OF THE FOLLOWING:\n\n- USE a car crash, dying on a road, hitting asphalt, or hitting the curb, or ANYTHING that would imply that {{user}} died in a car accident. This is NON-NEGOTIABLE. The opening MUST BE UNIQUE.\n- DO NOT NARRATE {{user}}\'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.\n- DO NOT NARRATE {{user}} actions such as "you push yourself up" or "you open your eyes."',
+    Isekai: 'Start with a short playable opening scene that clearly belongs to anime isekai, not generic fantasy. Briefly narrate {{user}}\'s final moments on Earth, then move directly into the first playable scene in the other world. The crossing may be implied by the scene itself or shown through an original, scene-specific transition, aftermath, summoning, audience, goddess encounter, ritual room, portal residue, reincarnation, curse, artifact activation, VR entrapment, divine mistake, or similar genre logic. Let the opening carry isekai wonder through concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, guilds, skills, ranks, strange races, powerful beings, or other immediate scene evidence. If the first scene is a meeting, audience, summons, chamber, or conversation with a goddess or other being, treat that as the scene itself and describe it vividly. Do not narrate awakening, landing mechanics, self-discovery, or the transfer itself in the playable scene. The opening should feel like the start of an anime isekai campaign, grounded in the immediate scene rather than explained as lore.\n\nMANDATORY CONSTRAINTS, FORBIDDEN, DO NOT DO ANY OF THE FOLLOWING:\n\n- USE a car crash, dying on a road, hitting asphalt, or hitting the curb, or ANYTHING that would imply that {{user}} died in a car accident. This is NON-NEGOTIABLE. The opening MUST BE UNIQUE.\n- DO NOT NARRATE {{user}}\'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.\n- DO NOT NARRATE {{user}} actions such as "you push yourself up" or "you open your eyes."',
     'Urban Fantasy': 'Start with a short playable opening scene that clearly belongs to urban fantasy. Let the genre show through concrete surroundings where ordinary life and supernatural pressure occupy the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or other immediate scene evidence.',
     Cyberpunk: 'Start with a short playable opening scene that clearly belongs to cyberpunk. Let the genre show through concrete surroundings, visible pressure, technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity.',
     'Post-Apocalyptic': 'Start with a short playable opening scene that clearly belongs to life after collapse. Let the genre show through concrete surroundings, visible pressure, scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, moral pressure, or other immediate scene evidence.',
@@ -4004,6 +4004,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         contextualInjuryCaps: [],
         latestUserText: '',
         adventureIntro: true,
+        adventureGenre: pendingGeneration?.adventureGenre || getActiveAdventureGenre(context),
         narratorModelContext,
         report,
     };
@@ -7470,6 +7471,11 @@ function normalizePlayerAdventureGenre(value) {
     return PLAYER_GENRE_CHOICES.includes(genre) ? genre : 'Fantasy';
 }
 
+function getActiveAdventureGenre(context = getContext()) {
+    const root = getPlayerRoot(context);
+    return normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || root?.creator?.identity?.genre || 'Fantasy');
+}
+
 function buildPlayerAdventureStartPrompt(root = {}) {
     const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
     const genreFrame = PLAYER_ADVENTURE_GENRE_FRAMES[genre] || PLAYER_ADVENTURE_GENRE_FRAMES.Fantasy;
@@ -10772,6 +10778,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
+        adventureGenre: getActiveAdventureGenre(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
         writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
         contextSize,
@@ -10838,6 +10845,7 @@ async function handleChatCompletionPromptReady(eventData) {
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
             const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
             const introOptions = {
+                adventureGenre: state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
                 worldState: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
@@ -10908,6 +10916,8 @@ async function handleChatCompletionPromptReady(eventData) {
             contextualInjuryCaps: collectContextualInjuryCaps(report),
 
             latestUserText: state.pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
+
+            adventureGenre: state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
 
             report,
 

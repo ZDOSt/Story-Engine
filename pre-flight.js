@@ -381,16 +381,18 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
 export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
     const sceneState = narrativeSceneStateFact(options?.worldState);
-    return [
+    const genreLens = renderGenreLens(options, { prompt });
+    const lines = [
         'START_ADVENTURE_PROMPT:',
         'This is the opening turn of a new adventure.',
         'Narrate the opening scene immediately.',
         'Do not mention readiness, instructions, process, analysis, or meta commentary.',
         'Use only the already-established context, the selected genre, and the scene as it is shown right now.',
-        sceneState ? `Current broad scene state: ${sceneState}` : '',
-        '',
-        prompt,
-    ].join('\n');
+    ];
+    if (sceneState) lines.push(`Current broad scene state: ${sceneState}`);
+    if (genreLens) lines.push('', genreLens);
+    lines.push('', prompt);
+    return lines.join('\n');
 }
 
 function formatNarrativeContract({ summary, handoff, resolution, ledger, options = {} }) {
@@ -404,6 +406,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '',
         renderControlEngineNarrativeContract(),
         '',
+        ...renderGenreLensSection(options),
         renderFinalWritingStyleReminder(options),
         '',
         '#2 - RESOLVED FACTS',
@@ -425,6 +428,31 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
         '}',
     ].join('\n');
+}
+
+function renderGenreLensSection(options = {}) {
+    const lens = renderGenreLens(options);
+    return lens ? ['#1.5 - GENRE LENS', lens, ''] : [];
+}
+
+function renderGenreLens(options = {}, context = {}) {
+    if (!isIsekaiGenre(options?.adventureGenre) && !promptLooksIsekai(context?.prompt)) return '';
+    return String.raw`ISEKAI GENRE LENS:
+This campaign remains anime isekai, not generic fantasy. Use anime isekai as the ongoing genre language: progression, guilds, ranks, skills, dungeons, factions, rivals, companions, social consequences, comedy, danger, wonder, dramatic reveals, romance tension, strange races, powerful beings, and larger story arcs.
+
+Keep the world grounded. Characters have motives, limits, pride, duties, loyalties, fears, desires, and agency. Do not force tropes, instant devotion, harem dynamics, rescues, rivals, romantic interest, or overpowered reveals unless the scene and relationship development naturally support them.
+
+The anime aesthetic may be described directly only once: the first time {{user}} perceives the new world or first clearly sees a person from it. Establish that the world has an animated, colorful, anime-like visual reality. If visible chat already established this aesthetic, keep it implicit. After that, do not keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels directly.
+
+This genre lens never overrides narrativeFacts(input), {{user}} agency, relationship state, consent, mechanics, or prose rules.`;
+}
+
+function isIsekaiGenre(value) {
+    return String(value || '').trim().toLowerCase() === 'isekai';
+}
+
+function promptLooksIsekai(prompt = '') {
+    return /\bselected genre:\s*isekai\b/i.test(String(prompt || ''));
 }
 
 const DEFAULT_FINAL_WRITING_STYLE_REMINDER = String.raw`FINAL WRITING STYLE REMINDER:
