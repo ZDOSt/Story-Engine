@@ -9065,16 +9065,20 @@ function hasVisibleUserMessage(context = getContext()) {
     });
 }
 
+function buildCurrentAdventureStartPrompt(context = getContext()) {
+    const root = getPlayerRoot(context);
+    if (!root?.adventureStarted) return '';
+    return buildPlayerAdventureStartPrompt(root);
+}
+
 function getBeginningAdventureStartPrompt(context = getContext(), type = '') {
     if (!['normal', 'swipe', 'regenerate'].includes(String(type || ''))) return '';
     if (hasVisibleUserMessage(context)) return '';
-    const root = getPlayerRoot(context);
-    if (!root?.adventureStarted) return '';
-    return String(root.adventureStartPrompt || '').trim();
+    return buildCurrentAdventureStartPrompt(context);
 }
 
 function getActiveAdventureIntroPrompt(pendingGeneration = state.pendingGeneration, context = getContext()) {
-    return String(pendingGeneration?.adventureStartPrompt || getPlayerRoot(context)?.adventureStartPrompt || '').trim();
+    return String(buildCurrentAdventureStartPrompt(context) || pendingGeneration?.adventureStartPrompt || getPlayerRoot(context)?.adventureStartPrompt || '').trim();
 }
 
 function isBeginningAdventureIntroGeneration(pendingGeneration = state.pendingGeneration, context = getContext()) {
