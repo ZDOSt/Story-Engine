@@ -383,6 +383,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const prompt = valueOrNone(adventurePrompt);
     const sceneState = narrativeSceneStateFact(options?.worldState);
     const genreLens = renderGenreLens(options, { prompt });
+    const isekaiOpeningSeed = renderIsekaiOpeningSeed(options?.isekaiOpeningSeed);
     const economyLens = renderEconomyAndValueLens(options);
     const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
@@ -394,10 +395,307 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     ];
     if (sceneState) lines.push(`Current broad scene state: ${sceneState}`);
     if (genreLens) lines.push('', genreLens);
+    if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
     if (economyLens) lines.push('', economyLens);
     if (nameReveal) lines.push('', 'NAME REVEAL:', nameReveal);
     lines.push('', prompt);
     return lines.join('\n');
+}
+
+const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
+    {
+        key: 'traffic_rescue_accident',
+        label: 'Traffic Fatality / Rescue Accident',
+        guidance: 'Use a brief Earth-side final moment involving sudden traffic danger, collision, or an attempted rescue. Keep it compact and avoid making the vehicle itself the point of the scene.',
+    },
+    {
+        key: 'public_disaster',
+        label: 'Public Disaster',
+        guidance: 'Use a sudden public catastrophe such as a collapse, crash, fire, flood, quake, or crowded emergency. The disaster should be immediate pressure, not a long disaster story.',
+    },
+    {
+        key: 'medical_death',
+        label: 'Medical Death',
+        guidance: 'Use illness, surgery, hospital crisis, sudden collapse, or a final medical moment. Keep the Earth side restrained and move quickly to the crossing.',
+    },
+    {
+        key: 'violent_death',
+        label: 'Violent Death',
+        guidance: 'Use murder, robbery, attack, shooting, stabbing, or another direct act of violence. Do not linger on gore; use it as the transfer trigger.',
+    },
+    {
+        key: 'heroic_sacrifice',
+        label: 'Heroic Sacrifice',
+        guidance: 'Use a final moment where the character protects, rescues, shields, or trades their safety for someone else. Keep the sacrifice clear but brief.',
+    },
+    {
+        key: 'overwork_collapse',
+        label: 'Overwork / Burnout Collapse',
+        guidance: 'Use exhaustion, office collapse, study pressure, marathon gaming, or sleep deprivation as the final Earth-side pressure.',
+    },
+    {
+        key: 'domestic_accident',
+        label: 'Accidental Death at Home',
+        guidance: 'Use a grounded home accident such as a fall, electrical fault, gas leak, bath incident, or appliance mishap. Keep it short and avoid slapstick unless the tone supports it.',
+    },
+    {
+        key: 'game_vr_entrapment',
+        label: 'Gaming / VR Entrapment',
+        guidance: 'Use a game, MMO, VR capsule, login failure, server event, or avatar boundary failure. If {{user}} has a premade character, that character may be the avatar that becomes real.',
+    },
+    {
+        key: 'digital_system_anomaly',
+        label: 'Digital / System Glitch',
+        guidance: 'Use a phone, computer, mysterious app, corrupted menu, system prompt, or impossible software event as the crossing trigger.',
+    },
+    {
+        key: 'summoned_from_earth',
+        label: 'Summoning From Earth',
+        guidance: 'Use a magic circle, ritual pull, classroom light, office interruption, or unseen summoning force that removes the character from Earth.',
+    },
+    {
+        key: 'portal_rift_incident',
+        label: 'Portal / Rift Incident',
+        guidance: 'Use a door, mirror, elevator, alley, shrine gate, storm, tunnel, train station, or spatial tear as the Earth-side crossing.',
+    },
+    {
+        key: 'dream_coma_crossing',
+        label: 'Dream / Coma Crossing',
+        guidance: 'Use sleep, coma, lucid dream, fever vision, or a dream that becomes physically real. Do not over-explain whether it is dream or reality.',
+    },
+    {
+        key: 'divine_selection',
+        label: 'Divine Selection',
+        guidance: 'Use a god, spirit, administrator, cosmic clerk, angelic figure, or judging entity choosing the character after death or near death.',
+    },
+    {
+        key: 'mistaken_summons',
+        label: 'Mistaken Summons',
+        guidance: 'Use wrong target, wrong ritual, wrong world, clerical error, divine mistake, or a summons meant for someone else.',
+    },
+    {
+        key: 'group_transfer',
+        label: 'Class / Group Transfer',
+        guidance: 'Use classmates, coworkers, passengers, a party, a convention crowd, or strangers pulled at the same time. The group can be nearby, separated, or only partly visible.',
+    },
+    {
+        key: 'object_triggered_transfer',
+        label: 'Object-Triggered Transfer',
+        guidance: 'Use a book, relic, ring, sword, coin, capsule toy, antique, vending machine, cursed item, or other object as the crossing trigger.',
+    },
+    {
+        key: 'wish_contract_backfire',
+        label: 'Wish / Contract Gone Wrong',
+        guidance: 'Use a desperate wish, pact, occult ritual, questionnaire, restart prompt, bargain, or careless agreement that takes effect too literally.',
+    },
+    {
+        key: 'scientific_experiment',
+        label: 'Scientific Experiment',
+        guidance: 'Use a lab accident, teleport test, particle event, experimental neural tech, or failed research device as the transfer trigger.',
+    },
+    {
+        key: 'apocalypse_crossover',
+        label: 'Apocalypse Crossover',
+        guidance: 'Use Earth entering crisis through monsters, invasion, dimensional collapse, disaster, or world-ending pressure as the final Earth context.',
+    },
+    {
+        key: 'sudden_displacement',
+        label: 'No Earth Death / Sudden Displacement',
+        guidance: 'Use a clean disappearance from Earth without confirmed death. The crossing may remain unexplained at first.',
+    },
+]);
+
+const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
+    {
+        key: 'organized_faction_summons',
+        label: 'Organized Faction Summons',
+        guidance: 'Begin inside a controlled ritual, official chamber, temple, guild hall, military site, or similar summoning location. Let the summoners react to the character as they are.',
+    },
+    {
+        key: 'desperate_village_summons',
+        label: 'Desperate Village Summons',
+        guidance: 'Begin with ordinary people, village elders, minor priests, or local survivors attempting a crude or desperate summons for protection.',
+    },
+    {
+        key: 'enemy_cult_summons',
+        label: 'Enemy or Cult Summons',
+        guidance: 'Begin with hostile, secretive, or morally suspect summoners who may have expected a weapon, sacrifice, demon, hero, servant, or omen.',
+    },
+    {
+        key: 'pulled_with_classmates_or_strangers',
+        label: 'Pulled With Classmates or Strangers',
+        guidance: 'Begin with several Earth people arriving together or in the same aftermath. Preserve {{user}} as the premade character while others may be confused, missing, or nearby.',
+    },
+    {
+        key: 'pulled_with_party_or_team',
+        label: 'Pulled With Party or Team',
+        guidance: 'Begin with a small group, party, raid team, coworkers, passengers, or companions arriving together or being sorted by the new world.',
+    },
+    {
+        key: 'wildland_awakening',
+        label: 'Wildland Awakening',
+        guidance: 'Begin in forest, grassland, mountain pass, shoreline, swamp, snowy road, or another natural place with immediate sensory contrast and a playable next step.',
+    },
+    {
+        key: 'ancient_ruin_awakening',
+        label: 'Ancient Ruin Awakening',
+        guidance: 'Begin among old stones, sealed halls, shrine remains, broken statues, inscriptions, or ruins that imply the world without explaining it.',
+    },
+    {
+        key: 'dungeon_threshold',
+        label: 'Dungeon Threshold',
+        guidance: 'Begin at or near a dungeon entrance, first chamber, labyrinth threshold, monster nest, trial door, or abandoned underground route.',
+    },
+    {
+        key: 'prison_or_holding_cell',
+        label: 'Prison or Holding Cell',
+        guidance: 'Begin with confinement, chains, a guarded room, slave pen, cell, wagon cage, or holding chamber. Do not assume guilt or permanent status unless established.',
+    },
+    {
+        key: 'trade_road_portal_arrival',
+        label: 'Trade Road Portal Arrival',
+        guidance: 'Begin on a road, bridge, milestone, ferry path, or crossroads where travelers, guards, monsters, weather, or distance create immediate context.',
+    },
+    {
+        key: 'city_alley_or_market_arrival',
+        label: 'City Alley or Market Arrival',
+        guidance: 'Begin in an alley, market, plaza, station-like gate, festival lane, or crowded city space where local reactions can reveal the setting.',
+    },
+    {
+        key: 'village_outskirts',
+        label: 'Village Outskirts',
+        guidance: 'Begin near fields, fences, watch posts, mills, livestock, smoke, or a small settlement edge, with locals able to notice or react.',
+    },
+    {
+        key: 'fortified_town_gate',
+        label: 'Fortified Town Gate',
+        guidance: 'Begin near guards, walls, banners, inspection lines, refugees, merchants, or an entry checkpoint.',
+    },
+    {
+        key: 'caravan_or_travelers',
+        label: 'Caravan or Traveling Company',
+        guidance: 'Begin near wagons, merchants, pilgrims, guards, refugees, performers, or travelers already moving through the world.',
+    },
+    {
+        key: 'avatar_body_login_failure',
+        label: 'Game-Trapped Avatar Body',
+        guidance: 'Begin with the premade character as the avatar/body that has become real. The world treats that body and identity as physically present.',
+    },
+    {
+        key: 'guild_base_materialization',
+        label: 'Game Guild Base Materialization',
+        guidance: 'Begin in a player base, guild hall, safe room, clan estate, headquarters, inventory room, or familiar game-like location that has become real.',
+    },
+    {
+        key: 'game_dungeon_or_boss_arena',
+        label: 'Game Dungeon or Boss Arena',
+        guidance: 'Begin where a game encounter, dungeon floor, raid arena, or boss chamber has become real and immediately dangerous or strange.',
+    },
+    {
+        key: 'deity_audience',
+        label: 'Liminal Deity Audience',
+        guidance: 'Begin in a threshold place with a deity, spirit, goddess, demon lord, angel, or world envoy. Treat the meeting as the playable first scene, not a waiting room.',
+    },
+    {
+        key: 'administrator_chamber',
+        label: 'Administrator or Cosmic Clerk Chamber',
+        guidance: 'Begin in an otherworldly administrative, system, tribunal, reincarnation, or sorting space with someone who can explain only what the moment needs.',
+    },
+    {
+        key: 'world_spirit_dispatch',
+        label: 'World Spirit Dispatch',
+        guidance: 'Begin with a world spirit, sealed ancient being, dying guardian, or landscape-scale presence sending or requesting the character into the world.',
+    },
+    {
+        key: 'battlefield_arrival',
+        label: 'Battlefield Arrival Between Factions',
+        guidance: 'Begin amid battle, aftermath, siege, skirmish, war camp pressure, or a line between factions. NPCs may assume allegiance, but do not permanently assign it unless established.',
+    },
+    {
+        key: 'military_or_adventurer_camp',
+        label: 'Military or Adventurer Camp Arrival',
+        guidance: 'Begin in a camp, staging area, guild expedition, mercenary bivouac, patrol stop, or quest muster where armed people immediately assess the character.',
+    },
+    {
+        key: 'noble_court',
+        label: 'Noble Court or Audience Hall',
+        guidance: 'Begin in a court, manor, throne room, embassy, aristocratic event, or formal audience where etiquette and power shape the first reactions.',
+    },
+    {
+        key: 'demon_monster_faction',
+        label: 'Demon or Monster Faction Camp',
+        guidance: 'Begin among demons, monsters, beastfolk, nonhuman soldiers, cultists, or faction agents who may recognize, fear, test, or claim the character.',
+    },
+    {
+        key: 'adventurer_guild_contact',
+        label: 'Adventurer Guild First Contact',
+        guidance: 'Begin at, near, or through an adventurer guild, quest board, registration desk, training yard, or branch office without turning it into paperwork exposition.',
+    },
+    {
+        key: 'academy_training_ground',
+        label: 'Academy or Training Ground',
+        guidance: 'Begin near a magic academy, martial school, exam site, lecture yard, arena, or trial ground where status and skill are being measured.',
+    },
+    {
+        key: 'rebel_safehouse',
+        label: 'Rebel Cell or Safehouse',
+        guidance: 'Begin in a hidden room, resistance hideout, smuggler den, hunted faction shelter, or secret meeting where trust is scarce.',
+    },
+    {
+        key: 'mistaken_prophecy_figure',
+        label: 'Mistaken Prophecy Figure',
+        guidance: 'Begin with locals, priests, soldiers, or monsters believing the character matches a prophecy, omen, old portrait, summoned hero, or taboo sign.',
+    },
+    {
+        key: 'mistaken_enemy_or_calamity',
+        label: 'Mistaken Enemy Commander or Calamity',
+        guidance: 'Begin with fear, alarm, pursuit, worship, military response, or confusion because the character resembles a feared enemy, noble, monster, or disaster figure.',
+    },
+    {
+        key: 'rescue_or_monster_attack',
+        label: 'Rescue Scene or Monster Attack',
+        guidance: 'Begin with someone nearby in immediate danger from monsters, bandits, a magical hazard, collapsing terrain, or pursuit. Do not force {{user}} to help; present the situation.',
+    },
+]);
+
+export function buildIsekaiOpeningSeed(options = {}) {
+    if (!isIsekaiGenre(options?.adventureGenre) && !promptLooksIsekai(options?.prompt)) return null;
+    const rng = typeof options?.rng === 'function' ? options.rng : Math.random;
+    return {
+        type: 'isekaiOpeningSeed',
+        version: 1,
+        earthTransition: pickSeedEntry(ISEKAI_EARTH_TRANSITIONS, rng),
+        newWorldOpening: pickSeedEntry(ISEKAI_NEW_WORLD_OPENINGS, rng),
+    };
+}
+
+function pickSeedEntry(entries, rng) {
+    const value = Number(rng());
+    const normalized = Number.isFinite(value) ? Math.max(0, Math.min(0.999999999, value)) : Math.random();
+    const index = Math.min(entries.length - 1, Math.floor(normalized * entries.length));
+    return { ...entries[index], index };
+}
+
+function renderIsekaiOpeningSeed(seed = null) {
+    const transition = seed?.earthTransition || null;
+    const opening = seed?.newWorldOpening || null;
+    if (!transition?.label || !opening?.label) return '';
+    const transitionGuidance = String(transition.guidance || '').trim();
+    const openingGuidance = String(opening.guidance || '').trim();
+    return [
+        'ISEKAI OPENING SEED:',
+        'The following opening seed was selected before narration. Use it as the concrete Start Adventure structure instead of choosing a different isekai trope for convenience.',
+        '',
+        `Earth Transition: ${transition.label}.`,
+        transitionGuidance ? `Guidance: ${transitionGuidance}` : '',
+        '',
+        `New World Opening: ${opening.label}.`,
+        openingGuidance ? `Guidance: ${openingGuidance}` : '',
+        '',
+        'Premade Character Rule: Preserve {{user}}\'s existing race, body, abilities, gear, identity, backstory, and character-card/lorebook facts. The opening may relocate, summon, reveal, mistake, pressure, or contextualize the character, but it must not rebuild, reroll, overwrite, infantize, or replace them.',
+        '',
+        'Adaptation Rule: If explicit character-card or lorebook facts already establish the exact Earth transition, honor those facts and adapt this seed around them without contradiction. Keep the Earth-side transition brief, then begin play in the selected new-world opening quickly.',
+    ].join('\n');
 }
 
 function formatNarrativeContract({ summary, handoff, resolution, ledger, options = {} }) {

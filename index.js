@@ -27,7 +27,7 @@ import {
     stopGeneration,
     writePersonaDescription,
 } from './st-adapter.js';
-import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
+import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
@@ -187,7 +187,7 @@ const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
     'Sci-fi': 'Start with a short playable opening scene that clearly belongs to science fiction. Let the genre show through concrete surroundings, visible pressure, technology, alien or future context, artificial intelligence, corporate or institutional systems, exploration, technical danger, or other immediate scene evidence.',
     Modern: 'Start with a short playable opening scene that clearly belongs to a contemporary real-world or near-real-world setting. Let the genre show through concrete surroundings, visible pressure, ordinary technology, public life, work, school, travel, money, crime, family, community, or other immediate scene evidence.',
     'Slice of Life': 'Start with a short playable opening scene that clearly belongs to slice of life. Let the genre show through concrete surroundings, routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or other immediate scene evidence.',
-    Isekai: 'Start with a short playable opening scene that clearly belongs to anime isekai, not generic fantasy. Briefly narrate {{user}}\'s final moments on Earth, then move directly into the first playable scene in the other world. The crossing may be implied by the scene itself or shown through an original, scene-specific transition, aftermath, summoning, audience, goddess encounter, ritual room, portal residue, reincarnation, curse, artifact activation, VR entrapment, divine mistake, or similar genre logic. Let the opening carry isekai wonder through concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, guilds, skills, ranks, strange races, powerful beings, or other immediate scene evidence. If the first scene is a meeting, audience, summons, chamber, or conversation with a goddess or other being, treat that as the scene itself and describe it vividly. Do not narrate awakening, landing mechanics, self-discovery, or the transfer itself in the playable scene. The opening should feel like the start of an anime isekai campaign, grounded in the immediate scene rather than explained as lore.\n\nMANDATORY CONSTRAINTS, FORBIDDEN, DO NOT DO ANY OF THE FOLLOWING:\n\n- USE a car crash, dying on a road, hitting asphalt, or hitting the curb, or ANYTHING that would imply that {{user}} died in a car accident. This is NON-NEGOTIABLE. The opening MUST BE UNIQUE.\n- DO NOT NARRATE {{user}}\'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.\n- DO NOT NARRATE {{user}} actions such as "you push yourself up" or "you open your eyes."',
+    Isekai: 'Start with a short playable opening scene that clearly belongs to anime isekai, not generic fantasy. Use the deterministic Isekai Opening Seed supplied in the narrator handoff as the concrete structure: briefly render the selected Earth-side transition, then move directly into the selected first playable scene in the other world. Do not choose a different transfer trope, starting location, or opening setup for narrative convenience when a seed is present. Let the opening carry isekai wonder through concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, guilds, skills, ranks, strange races, powerful beings, or other immediate scene evidence. If the selected opening is a meeting, audience, summons, chamber, or conversation with a goddess or other being, treat that as the playable scene itself and describe it vividly. The opening should feel like the start of an anime isekai campaign, grounded in the immediate scene rather than explained as lore.\n\nDo not narrate {{user}}\'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."',
     'Urban Fantasy': 'Start with a short playable opening scene that clearly belongs to urban fantasy. Let the genre show through concrete surroundings where ordinary life and supernatural pressure occupy the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or other immediate scene evidence.',
     Cyberpunk: 'Start with a short playable opening scene that clearly belongs to cyberpunk. Let the genre show through concrete surroundings, visible pressure, technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity.',
     'Post-Apocalyptic': 'Start with a short playable opening scene that clearly belongs to life after collapse. Let the genre show through concrete surroundings, visible pressure, scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, moral pressure, or other immediate scene evidence.',
@@ -4002,6 +4002,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             proactivityResults: {},
             aggressionResults: {},
             nameGeneration,
+            isekaiOpeningSeed: pendingGeneration?.isekaiOpeningSeed || null,
             sceneState: worldStateSnapshot,
         },
         trackerUpdate: {
@@ -4040,6 +4041,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         latestUserText: '',
         adventureIntro: true,
         adventureGenre: pendingGeneration?.adventureGenre || getActiveAdventureGenre(context),
+        isekaiOpeningSeed: pendingGeneration?.isekaiOpeningSeed || null,
         narratorModelContext,
         report,
     };
@@ -10928,10 +10930,17 @@ async function handleChatCompletionPromptReady(eventData) {
             const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
             const nameGeneration = buildAdventureIntroNameGeneration(context, adventurePrompt);
             state.pendingGeneration.nameGenerationSnapshot = nameGeneration;
+            const adventureGenre = state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context);
+            const isekaiOpeningSeed = state.pendingGeneration.isekaiOpeningSeed || buildIsekaiOpeningSeed({
+                adventureGenre,
+                prompt: adventurePrompt,
+            });
+            state.pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
             const introOptions = {
-                adventureGenre: state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
+                adventureGenre,
                 worldState: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
                 nameGeneration,
+                isekaiOpeningSeed,
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
             const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, introOptions);
