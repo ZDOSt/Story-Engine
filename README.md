@@ -22,8 +22,11 @@ What it does:
 How does it work? 
 
 → The User sends a message. 
+
 → The extension requests a strict ledger from the semantic layer. What is the user trying to do? Does it carry risk? (monetary, physical, etc). Is anyone opposing it? And a few other questions.
+
 → When the ledger is returned, if mechanics are needed, the deterministic engine rolls the dice for both the user and the opposing entity, and determines the outcome. It is at this step where the Random Event and NPC Proactivity Engines run as well. Names are generated, and the scene outcome is decided. The extension then crafts a "Scene Resolution" Prompt for the narrator model. 
+
 → Narrator model receives the prompt, which tells it what the user is trying to do, whether they succeed or fail, how NPCs react, etc. This is usually open-ended. For example: "The user's action is a critical success. It lands with major visible impact according to the action and scene." (There is a lot more guidance in this prompt, since it also accounts for NPCs, too). 
 
 → Model narrates. 
