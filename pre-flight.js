@@ -383,9 +383,7 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
 export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
     const sceneState = narrativeSceneStateFact(options?.worldState);
-    const genreLens = renderGenreLens(options, { prompt });
     const isekaiOpeningSeed = renderIsekaiOpeningSeed(options?.isekaiOpeningSeed);
-    const economyLens = renderEconomyAndValueLens(options);
     const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
         'START_ADVENTURE_PROMPT:',
@@ -395,9 +393,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         'Use only the already-established context, the selected genre, and the scene as it is shown right now.',
     ];
     if (sceneState) lines.push(`Current broad scene state: ${sceneState}`);
-    if (genreLens) lines.push('', genreLens);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
-    if (economyLens) lines.push('', economyLens);
     if (nameReveal) lines.push('', 'NAME REVEAL:', nameReveal);
     lines.push('', prompt);
     return lines.join('\n');
@@ -687,6 +683,8 @@ function renderIsekaiOpeningSeed(seed = null) {
         'ISEKAI OPENING SEED:',
         'The following opening seed was selected before narration. Use it as the concrete Start Adventure structure instead of choosing a different isekai trope for convenience.',
         '',
+        'One-Time Aesthetic Rule: The first visible glimpse of the new world or first clearly seen person from it may establish the colorful, stylized, anime-like visual reality once. After that, keep the aesthetic implicit and do not keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels directly.',
+        '',
         `Earth Transition: ${transition.label}.`,
         transitionGuidance ? `Guidance: ${transitionGuidance}` : '',
         '',
@@ -751,8 +749,6 @@ function renderGenreLens(options = {}, context = {}) {
 This campaign remains anime isekai, not generic fantasy. Use anime isekai as the ongoing genre language: progression, guilds, ranks, skills, dungeons, factions, rivals, companions, social consequences, comedy, danger, wonder, dramatic reveals, romance tension, strange races, powerful beings, and larger story arcs.
 
 Keep the world grounded. Characters have motives, limits, pride, duties, loyalties, fears, desires, and agency. Do not force tropes, instant devotion, harem dynamics, rescues, rivals, romantic interest, or overpowered reveals unless the scene and relationship development naturally support them.
-
-The anime aesthetic may be described directly only once: the first time {{user}} perceives the new world or first clearly sees a person from it. Establish that the world has an animated, colorful, anime-like visual reality. If visible chat already established this aesthetic, keep it implicit. After that, do not keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels directly.
 
 This genre lens never overrides narrativeFacts(input), {{user}} agency, relationship state, consent, mechanics, or prose rules.`;
 }

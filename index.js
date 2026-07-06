@@ -183,20 +183,20 @@ const PLAYER_GENRE_CHOICES = Object.freeze([
     'Wuxia / Xianxia',
 ]);
 const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
-    Fantasy: 'Start with a short playable opening scene that clearly belongs to fantasy. Let the genre show through concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, or other immediate scene evidence.',
-    'Sci-fi': 'Start with a short playable opening scene that clearly belongs to science fiction. Let the genre show through concrete surroundings, visible pressure, technology, alien or future context, artificial intelligence, corporate or institutional systems, exploration, technical danger, or other immediate scene evidence.',
-    Modern: 'Start with a short playable opening scene that clearly belongs to a contemporary real-world or near-real-world setting. Let the genre show through concrete surroundings, visible pressure, ordinary technology, public life, work, school, travel, money, crime, family, community, or other immediate scene evidence.',
-    'Slice of Life': 'Start with a short playable opening scene that clearly belongs to slice of life. Let the genre show through concrete surroundings, routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or other immediate scene evidence.',
-    Isekai: 'Start with a short playable opening scene that clearly belongs to anime isekai, not generic fantasy. Use the deterministic Isekai Opening Seed supplied in the narrator handoff as the concrete structure: briefly render the selected Earth-side transition, then move directly into the selected first playable scene in the other world. Do not choose a different transfer trope, starting location, or opening setup for narrative convenience when a seed is present. Let the opening carry isekai wonder through concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, guilds, skills, ranks, strange races, powerful beings, or other immediate scene evidence. If the selected opening is a meeting, audience, summons, chamber, or conversation with a goddess or other being, treat that as the playable scene itself and describe it vividly. The opening should feel like the start of an anime isekai campaign, grounded in the immediate scene rather than explained as lore.\n\nDo not narrate {{user}}\'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."',
-    'Urban Fantasy': 'Start with a short playable opening scene that clearly belongs to urban fantasy. Let the genre show through concrete surroundings where ordinary life and supernatural pressure occupy the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or other immediate scene evidence.',
-    Cyberpunk: 'Start with a short playable opening scene that clearly belongs to cyberpunk. Let the genre show through concrete surroundings, visible pressure, technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity.',
-    'Post-Apocalyptic': 'Start with a short playable opening scene that clearly belongs to life after collapse. Let the genre show through concrete surroundings, visible pressure, scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, moral pressure, or other immediate scene evidence.',
-    Horror: 'Start with a short playable opening scene that clearly belongs to horror. Let the genre show through concrete surroundings, visible wrongness, damage, sound, absence, distance, blocked access, strange behavior, darkness, threat, mystery, or other immediate scene evidence.',
-    Supernatural: 'Start with a short playable opening scene that clearly belongs to the supernatural. Let the genre show through concrete surroundings, visible pressure, spirits, hauntings, curses, omens, possession, occult evidence, strange powers, liminal places, unseen forces, or other immediate scene evidence.',
-    Superhero: 'Start with a short playable opening scene that clearly belongs to superhero fiction. Let the genre show through concrete surroundings, visible pressure, powers, public danger, secrecy, reputation, law, media, villains, institutions, bystanders, collateral risk, or other immediate scene evidence. Do not narrate {{user}} using powers unless {{user}} chooses to.',
-    Steampunk: 'Start with a short playable opening scene that clearly belongs to steampunk. Let the genre show through concrete surroundings, visible pressure, steam industry, brass machinery, smoke, class, empire, invention, mechanical danger, expedition pressure, or other immediate scene evidence.',
-    Historical: 'Start with a short playable opening scene that clearly belongs to a plausible historical or historically inspired setting. Let the genre show through concrete surroundings, visible pressure, tools, law, custom, class, labor, travel, conflict, technology limits, public life, or other immediate scene evidence.',
-    'Wuxia / Xianxia': 'Start with a short playable opening scene that clearly belongs to martial or cultivation fiction. Let the genre show through concrete surroundings, visible pressure, honor, danger, rivalry, spiritual pressure, sect or clan influence, debt, beasts, duels, cultivation, immortal politics, or other immediate scene evidence.',
+    Fantasy: 'Genre flavor: show fantasy through magic, myth, wilderness, old ruins, factions, faith, monsters, danger, opportunity, or social context when scene-valid.',
+    'Sci-fi': 'Genre flavor: show science fiction through technology, alien or future context, artificial intelligence, institutions, exploration, technical danger, or social systems when scene-valid.',
+    Modern: 'Genre flavor: show a contemporary or near-real-world setting through ordinary technology, public life, work, school, travel, money, crime, family, community, or social pressure when scene-valid.',
+    'Slice of Life': 'Genre flavor: show slice of life through routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or everyday detail when scene-valid.',
+    Isekai: 'Genre flavor: show anime isekai through the supplied opening seed, progression, guilds, ranks, skills, dungeons, factions, companions, social consequences, danger, comedy, wonder, romance tension, strange races, and powerful beings when scene-valid. Do not choose a different transfer trope, starting location, or opening setup when an Isekai Opening Seed is present.',
+    'Urban Fantasy': 'Genre flavor: show urban fantasy through ordinary life and supernatural pressure occupying the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or public-world friction when scene-valid.',
+    Cyberpunk: 'Genre flavor: show cyberpunk through technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity when scene-valid.',
+    'Post-Apocalyptic': 'Genre flavor: show life after collapse through scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, or moral pressure when scene-valid.',
+    Horror: 'Genre flavor: show horror through visible wrongness, damage, sound, absence, distance, blocked access, strange behavior, darkness, threat, or mystery when scene-valid.',
+    Supernatural: 'Genre flavor: show the supernatural through spirits, hauntings, curses, omens, possession, occult evidence, strange powers, liminal places, unseen forces, or mortal consequences when scene-valid.',
+    Superhero: 'Genre flavor: show superhero fiction through powers, public danger, secrecy, reputation, law, media, villains, institutions, bystanders, collateral risk, or civic pressure when scene-valid. Do not narrate {{user}} using powers unless {{user}} chooses to.',
+    Steampunk: 'Genre flavor: show steampunk through steam industry, brass machinery, smoke, class, empire, invention, mechanical danger, expedition pressure, or social hierarchy when scene-valid.',
+    Historical: 'Genre flavor: show a plausible historical or historically inspired setting through tools, law, custom, class, labor, travel, conflict, technology limits, public life, or social obligation when scene-valid.',
+    'Wuxia / Xianxia': 'Genre flavor: show martial or cultivation fiction through honor, danger, rivalry, spiritual pressure, sect or clan influence, debt, beasts, duels, cultivation, immortal politics, or mythic stakes when scene-valid.',
 });
 const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`OPENING CONTRACT:
 Keep the opening short: 150-200 words.
@@ -215,10 +215,11 @@ Do not explain the world. Do not summarize lore. Let the scene imply the genre.
 End at the first concrete moment where {{user}} can act.`;
 
 const PLAYER_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMINDER:
-This is the opening of a new adventure.
-Narrate the opening scene immediately.
-Do not mention readiness, instructions, process, or meta commentary.
-Use the selected genre and the surrounding context already provided.`;
+Begin the opening scene now. Do not explain the setup, instructions, process, or reasoning.
+
+Use the selected genre and surrounding context already provided. If an Isekai Opening Seed is present, use that seed as the concrete opening structure; do not choose a different transfer or starting setup.
+
+Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
@@ -7539,11 +7540,11 @@ function buildPlayerAdventureStartPrompt(root = {}) {
     const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
     const genreFrame = PLAYER_ADVENTURE_GENRE_FRAMES[genre] || PLAYER_ADVENTURE_GENRE_FRAMES.Fantasy;
     return [
-        PLAYER_ADVENTURE_START_REMINDER,
-        '',
         genreFrame,
         '',
         `Begin the adventure for this character in the selected genre: ${genre}.`,
+        '',
+        PLAYER_ADVENTURE_START_REMINDER,
     ].join('\n');
 }
 
