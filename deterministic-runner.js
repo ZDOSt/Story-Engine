@@ -2820,6 +2820,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const handoff = {
             NPC: npc,
             FinalState: `B${currentDisposition.B}/F${currentDisposition.F}/H${currentDisposition.H}`,
+            InitPreset: initMetadata?.label || 'existing',
             Lock: classified.lock,
             Behavior: classified.behavior,
             Target: target,

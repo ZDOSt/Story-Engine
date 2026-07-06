@@ -188,6 +188,7 @@ function buildReadableDeterministicDebug(handoff) {
         ...npcs.flatMap((npc, index) => [
             `npcHandoffs[${index}].NPC=${valueOrNone(npc.NPC)}`,
             `npcHandoffs[${index}].FinalState=${valueOrNone(npc.FinalState)}`,
+            `npcHandoffs[${index}].InitPreset=${valueOrNone(npc.InitPreset)}`,
             `npcHandoffs[${index}].Lock=${valueOrNone(npc.Lock)}`,
             `npcHandoffs[${index}].Behavior=${valueOrNone(npc.Behavior)}`,
             `npcHandoffs[${index}].PersonalitySummary=${valueOrNone(npc.PersonalitySummary)}`,
@@ -1029,7 +1030,7 @@ function narrativeNpcDispositionAndStyleEntry(npc = {}) {
 
 function npcPersonalityNarrativeGuide(npc = {}) {
     if (npc?.PersonalitySummary && !isNoneText(npc.PersonalitySummary)) {
-        return `${npc.PersonalitySummary}. Use this only for speech style, demeanor, and interaction flavor. Do not force mannerisms, props, locations, or repeated beats. It never overrides narrativeFacts.`;
+        return `${npc.PersonalitySummary}. Use this only for speech style, demeanor, interaction flavor, and occasional visible physical habits. A mannerism is a specific observable physical tell or habit, not a generic attitude, courtesy, decision, or social behavior. Do not force mannerisms, props, locations, or repeated beats. It never overrides narrativeFacts.`;
     }
     return 'No fixed personality profile is listed; infer only from established visible behavior, role, and current scene. Do not invent a new defining trait.';
 }
@@ -1046,12 +1047,18 @@ function npcDispositionBehaviorGuide(npc = {}) {
 function relationshipDispositionNarrativeGuide(npc = {}) {
     const state = parseRelationshipState(npc?.FinalState);
     if (!state) return 'Neutral default: practical, reserved, context-led behavior; no default trust, vulnerability, hostility, fear, romance, or intimacy.';
+    const initPreset = String(npc?.InitPreset || '').trim();
+    const nonHumanCaution = initPreset.startsWith('userNonHuman')
+        && state.B <= 2
+        && state.F <= 2
+        && state.H <= 2;
     if (state.F >= 4) return 'Terror-led: prioritize escape, surrender, help-seeking, freezing, pleading, or desperate self-protection; compliance is fear management, not consent, comfort, or trust.';
     if (state.H >= 4) return 'Hatred-led: wants harm, removal, exposure, humiliation, sabotage, defeat, or driving away.';
     if (state.F >= 3) return 'Fear-led: wants distance, safety, witnesses, or an exit; staying, answering, or complying is defensive appeasement or caution, not comfort, attraction, trust, or willingness.';
     if (state.H >= 3) return 'Hostility-led: argues, refuses, obstructs, challenges, mocks, threatens, or interferes.';
     if (state.B >= 4) return 'Close trust: may confide, seek closeness, show loyalty, support, vulnerability, and deep personal investment; still not automatic romance or intimacy.';
     if (state.B >= 3) return 'Friendly comfort: cooperative, relaxed, warm; ordinary closeness can fit when context supports it, but not automatic romance or intimacy.';
+    if (nonHumanCaution) return 'Visible-nonhuman caution: low trust because {{user}} appears inhuman, monstrous, demonic, undead, bestial, eldritch, construct-like, or otherwise supernatural. NPCs may express this unease differently by personality, culture, role, and local history: wary distance, professional caution, prejudice, religious suspicion, curiosity, fascination, social avoidance, quiet resentment, guarded politeness, or mild fear. This is not default panic, open hatred, violence, or automatic refusal unless other facts support that escalation.';
     if (state.B <= 1) return 'Low trust: keeps distance, avoids vulnerability and private closeness, cautious or transactional if engagement is necessary.';
     return 'Neutral default: polite, practical, reserved, curious, formal, businesslike, or situationally cooperative; no default vulnerability or personal closeness.';
 }
