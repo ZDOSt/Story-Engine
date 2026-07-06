@@ -382,17 +382,16 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
 
 export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
-    const sceneState = narrativeSceneStateFact(options?.worldState);
     const isekaiOpeningSeed = renderIsekaiOpeningSeed(options?.isekaiOpeningSeed);
+    const isIsekaiOpening = Boolean(isekaiOpeningSeed) || isIsekaiGenre(options?.adventureGenre) || promptLooksIsekai(prompt);
     const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
         'START_ADVENTURE_PROMPT:',
-        'This is the opening turn of a new adventure.',
-        'Narrate the opening scene immediately.',
+        isIsekaiOpening ? 'This is the opening turn of a new isekai adventure.' : 'This is the opening turn of a new adventure.',
+        'Narrate the opening immediately.',
         'Do not mention readiness, instructions, process, analysis, or meta commentary.',
-        'Use only the already-established context, the selected genre, and the scene as it is shown right now.',
+        isekaiOpeningSeed ? 'Use the established character/context and the required seeds below.' : 'Use the established character/context and selected genre.',
     ];
-    if (sceneState) lines.push(`Current broad scene state: ${sceneState}`);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
     if (nameReveal) lines.push('', 'NAME REVEAL:', nameReveal);
     lines.push('', prompt);
@@ -680,16 +679,21 @@ function renderIsekaiOpeningSeed(seed = null) {
     const transitionGuidance = String(transition.guidance || '').trim();
     const openingGuidance = String(opening.guidance || '').trim();
     return [
-        'ISEKAI OPENING SEED:',
-        'The following opening seed was selected before narration. Use it as the concrete Start Adventure structure instead of choosing a different isekai trope for convenience.',
+        'ISEKAI TRANSITION AND OPENING SEED:',
+        'You MUST narrate BOTH required beats below, in order.',
+        '#1: Earth Transition',
+        '#2: New World Opening',
         '',
-        'One-Time Aesthetic Rule: The first visible glimpse of the new world or first clearly seen person from it may establish the colorful, stylized, anime-like visual reality once. After that, keep the aesthetic implicit and do not keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels directly.',
+        'Do NOT skip either beat.',
+        'Do NOT choose a different transfer, trope, starting location, or opening setup.',
         '',
-        `Earth Transition: ${transition.label}.`,
+        `#1 - EARTH TRANSITION: ${transition.label}.`,
         transitionGuidance ? `Guidance: ${transitionGuidance}` : '',
         '',
-        `New World Opening: ${opening.label}.`,
+        `#2 - NEW WORLD OPENING: ${opening.label}.`,
         openingGuidance ? `Guidance: ${openingGuidance}` : '',
+        '',
+        'One-Time Aesthetic Rule: The first visible glimpse of the new world or first clearly seen person from it may establish the colorful, stylized, anime-like visual reality once. After that, keep the aesthetic implicit and do not keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels directly.',
         '',
         'Premade Character Rule: Preserve {{user}}\'s existing race, body, abilities, gear, identity, backstory, and character-card/lorebook facts. The opening may relocate, summon, reveal, mistake, pressure, or contextualize the character, but it must not rebuild, reroll, overwrite, infantize, or replace them.',
         '',

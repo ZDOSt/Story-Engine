@@ -187,7 +187,7 @@ const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
     'Sci-fi': 'Genre flavor: show science fiction through technology, alien or future context, artificial intelligence, institutions, exploration, technical danger, or social systems when scene-valid.',
     Modern: 'Genre flavor: show a contemporary or near-real-world setting through ordinary technology, public life, work, school, travel, money, crime, family, community, or social pressure when scene-valid.',
     'Slice of Life': 'Genre flavor: show slice of life through routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or everyday detail when scene-valid.',
-    Isekai: 'Genre flavor: show anime isekai through the supplied opening seed, progression, guilds, ranks, skills, dungeons, factions, companions, social consequences, danger, comedy, wonder, romance tension, strange races, and powerful beings when scene-valid. Do not choose a different transfer trope, starting location, or opening setup when an Isekai Opening Seed is present.',
+    Isekai: 'Genre flavor: show anime isekai through progression, guilds, ranks, skills, dungeons, factions, companions, social consequences, danger, comedy, wonder, romance tension, strange races, and powerful beings when scene-valid.',
     'Urban Fantasy': 'Genre flavor: show urban fantasy through ordinary life and supernatural pressure occupying the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or public-world friction when scene-valid.',
     Cyberpunk: 'Genre flavor: show cyberpunk through technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity when scene-valid.',
     'Post-Apocalyptic': 'Genre flavor: show life after collapse through scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, or moral pressure when scene-valid.',
@@ -217,7 +217,14 @@ End at the first concrete moment where {{user}} can act.`;
 const PLAYER_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMINDER:
 Begin the opening scene now. Do not explain the setup, instructions, process, or reasoning.
 
-Use the selected genre and surrounding context already provided. If an Isekai Opening Seed is present, use that seed as the concrete opening structure; do not choose a different transfer or starting setup.
+Use the selected genre and surrounding context already provided.
+
+Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
+
+const PLAYER_ISEKAI_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMINDER:
+Begin the Earth transition, then continue directly into the new-world opening. Do not explain the setup, instructions, process, or reasoning.
+
+Do NOT skip the required isekai seeds. Do NOT choose a different transfer or starting setup.
 
 Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
@@ -7538,6 +7545,9 @@ function getActiveAdventureGenre(context = getContext()) {
 
 function buildPlayerAdventureStartPrompt(root = {}) {
     const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
+    if (genre === 'Isekai') {
+        return PLAYER_ISEKAI_ADVENTURE_START_REMINDER;
+    }
     const genreFrame = PLAYER_ADVENTURE_GENRE_FRAMES[genre] || PLAYER_ADVENTURE_GENRE_FRAMES.Fantasy;
     return [
         genreFrame,
