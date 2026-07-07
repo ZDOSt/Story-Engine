@@ -219,12 +219,16 @@ Begin the opening scene now. Do not explain the setup, instructions, process, or
 
 Use the selected genre and surrounding context already provided.
 
+If NAME REVEAL is present, follow it strictly: use the generated names listed there; do NOT invent replacement names.
+
 Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
 
 const PLAYER_ISEKAI_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMINDER:
 Begin the Earth transition, then continue directly into the new-world opening. Do not explain the setup, instructions, process, or reasoning.
 
 Do NOT skip the required isekai seeds. Do NOT choose a different transfer or starting setup.
+
+If NAME REVEAL is present, follow it strictly: use the generated names listed there; do NOT invent replacement names.
 
 Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
