@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, boundCompanionDeltaHasChanges, classifyDisposition, normalizeBoundCompanionState, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
+import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
 
 import {
     addEphemeralStoppingString,
@@ -29,7 +29,7 @@ import {
 } from './st-adapter.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildAdventureIntroNameGeneration, buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -2557,7 +2557,6 @@ function getTrackerRoot(context = getContext()) {
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
     root.worldState = normalizeWorldState(root.worldState || {});
     root.economy = normalizeEconomyState(root.economy || {});
-    root.boundCompanion = normalizeBoundCompanionState(root.boundCompanion || {});
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
     if (seededPlayerTracker) {
@@ -3941,7 +3940,6 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     const userReputation = mergeUserReputationLedger(pendingRun?.userReputationBefore || {}, pendingRun?.userReputationAfter || {});
     const worldState = normalizeWorldState(pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {});
     const economy = normalizeEconomyState(pendingRun?.economyAfter || pendingRun?.economyBefore || {});
-    const boundCompanion = normalizeBoundCompanionState(pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {});
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -3965,7 +3963,6 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         userReputation,
         worldState,
         economy,
-        boundCompanion,
         npcs: promotionResult.npcs,
     };
     const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
@@ -3987,7 +3984,6 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
     const economySnapshot = pendingGeneration?.economySnapshot || buildEconomySnapshot(context);
-    const boundCompanionSnapshot = pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context);
     const nameGeneration = pendingGeneration?.nameGenerationSnapshot || {};
     const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
@@ -4025,7 +4021,6 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             userReputation: {},
             worldState: worldStateSnapshot,
             economy: economySnapshot,
-            boundCompanion: boundCompanionSnapshot,
         },
     };
     return {
@@ -4047,8 +4042,6 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         worldStateAfter: worldStateSnapshot,
         economyBefore: economySnapshot,
         economyAfter: economySnapshot,
-        boundCompanionBefore: boundCompanionSnapshot,
-        boundCompanionAfter: boundCompanionSnapshot,
         nameGeneration,
         resolutionPacket: report.finalNarrativeHandoff.resolutionPacket,
         userCoreStats: playerTrackerSnapshot?.coreStats || null,
@@ -4244,7 +4237,6 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null) 
         userReputation: mergeUserReputationLedger(displaySnapshot?.userReputation || {}, {}),
         worldState: normalizeWorldState(displaySnapshot?.worldState || {}),
         economy: normalizeEconomyState(displaySnapshot?.economy || {}),
-        boundCompanion: normalizeBoundCompanionState(displaySnapshot?.boundCompanion || {}),
     };
     if (hiddenHealth) {
         update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
@@ -4273,7 +4265,6 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     merged.economy = applyEconomyDelta(economyBefore, economyDelta, {
         messageKey: options.messageKey || '',
     });
-    merged.boundCompanion = applyBoundCompanionDelta(merged.boundCompanion || options.boundCompanionBefore || {}, delta.boundCompanion || {});
     const npcs = normalizeDisplayTrackerNpcs(merged.npcs || {});
     for (const npcDelta of delta.npcs || []) {
         const rawName = String(npcDelta?.NPC || '').trim();
@@ -4326,7 +4317,6 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
         worldStateChanged: worldStateDeltaHasChanges(delta.worldState),
         economyChanged: economyDeltaHasChanges(economyDelta),
-        boundCompanionChanged: boundCompanionDeltaHasChanges(delta.boundCompanion),
     };
     return merged;
 }
@@ -4917,8 +4907,6 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
-    root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
-    root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
@@ -4942,8 +4930,6 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
-    root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
-    root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
@@ -5127,34 +5113,6 @@ function trackerStatCluster(core) {
         </div>`;
 }
 
-function formatBoundCompanionType(value) {
-    return String(value || 'other')
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, letter => letter.toUpperCase());
-}
-
-function formatBoundCompanionVessel(value, personaName) {
-    const text = String(value || '').trim();
-    if (!text) return '{{user}}';
-    const normalized = text.replace(/[’‘]/g, "'");
-    const lower = normalized.toLowerCase();
-    const persona = String(personaName || '').trim().replace(/[’‘]/g, "'").toLowerCase();
-    const userVesselPattern = /^(?:the\s+)?(?:\{\{user\}\}|user|player|player character|you|your|his|her|their|body|mind|head|vessel)(?:'s)?(?:\s+(?:body|mind|head|vessel|soul|spirit))?$/i;
-    if (userVesselPattern.test(normalized)) return '{{user}}';
-    if (persona && (
-        lower === persona
-        || lower === `${persona}'s body`
-        || lower === `${persona}'s mind`
-        || lower === `${persona}'s head`
-        || lower === `${persona}'s vessel`
-        || lower === `${persona}'s soul`
-        || lower === `${persona}'s spirit`
-    )) {
-        return '{{user}}';
-    }
-    return text;
-}
-
 function trackerConditionTone(value) {
     const text = String(value || '').toLowerCase();
     if (!text || text === 'healthy' || text === 'unchanged') return 'good';
@@ -5206,14 +5164,8 @@ function buildTrackerDisplayHtml(snapshot) {
     const visibleNames = Array.isArray(snapshot?.visibleNpcNames) && snapshot.visibleNpcNames.length
         ? new Set(snapshot.visibleNpcNames.map(name => String(name).toLowerCase()))
         : null;
-    const boundCompanion = normalizeBoundCompanionState(snapshot?.boundCompanion || {});
-    const boundCompanionName = cleanTrackerDisplayName(boundCompanion.name);
-    const boundCompanionTrackerName = boundCompanion.active ? findExistingTrackerName(npcs, boundCompanionName) : '';
-    const boundCompanionNpc = boundCompanionTrackerName ? npcs[boundCompanionTrackerName] : null;
-    const boundCompanionExcludedName = (boundCompanionTrackerName || boundCompanionName).toLowerCase();
     const names = Object.keys(npcs)
         .filter(name => !visibleNames || visibleNames.has(name.toLowerCase()))
-        .filter(name => !boundCompanionExcludedName || name.toLowerCase() !== boundCompanionExcludedName)
         .sort((a, b) => a.localeCompare(b));
     const active = names.filter(name => npcs[name]?.lifecycle === 'Active');
     const userCore = snapshot?.userCoreStats;
@@ -5245,57 +5197,6 @@ function buildTrackerDisplayHtml(snapshot) {
             trackerDisplayItemList('Gear', user.gear, { empty: 'No gear items' }),
         ].join('');
 
-    const renderBoundCompanionSection = () => {
-        if (!boundCompanion.active) return '';
-        const name = boundCompanionTrackerName || boundCompanionName || '(unnamed)';
-        const disposition = boundCompanionNpc?.currentDisposition;
-        const classified = disposition ? classifyDisposition(disposition) : { lock: 'None', behavior: 'None' };
-        const relation = relationshipTowardUser(disposition, classified);
-        const relationshipRows = boundCompanionNpc
-            ? `
-                <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
-                    ${trackerChip('B/F/H', formatDisposition(disposition))}
-                    ${trackerChip('Rapport', `${boundCompanionNpc.currentRapport}/5`)}
-                    ${trackerChip('Toward User', relation, trackerDispositionTone(disposition, classified))}
-                </div>
-                <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
-                    ${trackerChip('Relationship', boundCompanionNpc.establishedRelationship || 'N')}
-                    ${trackerChip('Behavior', classified.behavior)}
-                    ${trackerChip('Lock', classified.lock)}
-                </div>`
-            : `
-                <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
-                    ${trackerChip('Relationship', 'Untracked')}
-                    ${trackerChip('Toward User', 'Developing')}
-                </div>`;
-        const stateLine = trackerChip('State', 'Present, internal');
-        const voiceLine = boundCompanion.voice
-            ? trackerDetailLine('Voice', boundCompanion.voice, { showEmpty: true })
-            : '';
-        return `
-            <details class="structured-preflight-tracker-bound-companion">
-                <summary>
-                    <span>Bound Companion</span>
-                    <code>${escapeHtml(name)}</code>
-                </summary>
-                <div class="structured-preflight-tracker-bound-body">
-                    <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
-                        ${trackerChip('Type', formatBoundCompanionType(boundCompanion.type))}
-                        ${stateLine}
-                        ${trackerChip('Vessel', formatBoundCompanionVessel(boundCompanion.vessel, personaName))}
-                    </div>
-                    ${relationshipRows}
-                    <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
-                        <div class="structured-preflight-tracker-detail structured-preflight-tracker-detail-wide">
-                            <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-personality">Personality</span>
-                            <span class="structured-preflight-tracker-detail-value">${escapeHtml(boundCompanionNpc?.personalitySummary || 'Developing')}</span>
-                        </div>
-                        ${voiceLine}
-                    </div>
-                </div>
-            </details>`;
-    };
-
     const renderPlayerCard = () => {
         const statusLine = trackerListCount(user.statusEffects)
             ? trackerDetailLine('Status', user.statusEffects)
@@ -5317,7 +5218,6 @@ function buildTrackerDisplayHtml(snapshot) {
                     ${trackerDisplayItemList('Gear', user.gear, { empty: 'No equipped gear' })}
                     ${statusLine}
                 </div>
-                ${renderBoundCompanionSection()}
             </div>`;
     };
 
@@ -5796,58 +5696,6 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-player-card {
             border-left: 4px solid #1f7a8c;
-        }
-        .structured-preflight-tracker-bound-companion {
-            margin-top: 0.05rem;
-            padding: 0.38rem 0.44rem;
-            border: 1px solid color-mix(in srgb, #73d0ff 34%, var(--SmartThemeBorderColor, rgba(255,255,255,0.2)));
-            border-radius: 6px;
-            background: color-mix(in srgb, #1f7a8c 16%, var(--SmartThemeBlurTintColor, #000) 24%);
-        }
-        .structured-preflight-tracker-bound-companion > summary {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.5rem;
-            cursor: pointer;
-            list-style: none;
-            user-select: none;
-            font-weight: 800;
-            line-height: 1.15;
-        }
-        .structured-preflight-tracker-bound-companion > summary::-webkit-details-marker {
-            display: none;
-        }
-        .structured-preflight-tracker-bound-companion > summary::before {
-            content: ">";
-            color: color-mix(in srgb, #73d0ff 84%, var(--SmartThemeBodyColor, #eee));
-            font-weight: 900;
-        }
-        .structured-preflight-tracker-bound-companion[open] > summary::before {
-            content: "v";
-        }
-        .structured-preflight-tracker-bound-companion > summary span {
-            flex: 1 1 auto;
-            min-width: 0;
-            color: color-mix(in srgb, #73d0ff 84%, var(--SmartThemeBodyColor, #eee));
-            text-transform: uppercase;
-            font-size: 0.72rem;
-        }
-        .structured-preflight-tracker-bound-companion > summary code {
-            min-width: 0;
-            overflow-wrap: anywhere;
-            font-size: 0.82rem;
-            font-weight: 900;
-        }
-        .structured-preflight-tracker-bound-body {
-            display: grid;
-            gap: 0.38rem;
-            margin-top: 0.45rem;
-        }
-        .structured-preflight-tracker-bound-row {
-            padding: 0.28rem 0.32rem;
-            border-radius: 6px;
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
         }
         .structured-preflight-tracker-card-head {
             display: flex;
@@ -6605,8 +6453,6 @@ function buildCurrentTrackerWidgetSnapshot(context = getContext()) {
         userCoreStats: getPersonaCoreStats(context),
 
         user: normalizeTrackerUserState(root.user || {}),
-
-        boundCompanion: normalizeBoundCompanionState(root.boundCompanion || {}),
 
         npcs: normalizeDisplayTrackerNpcs(root.npcs || {}),
 
@@ -9548,9 +9394,6 @@ function restoreTrackerForRegeneration(type) {
         root.powerActors = root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforePowerActors || root.powerActors || {};
         root.userKnowledge = mergeUserKnowledgeLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserKnowledge || root.userKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserReputation || root.userReputation || {}, {});
-        root.worldState = normalizeWorldState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeWorldState || root.worldState || {});
-        root.economy = normalizeEconomyState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeEconomy || root.economy || {});
-        root.boundCompanion = normalizeBoundCompanionState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeBoundCompanion || root.boundCompanion || {});
         root.rapportClock = rapportClock;
         root.snapshots[getMessageKey(targetMessageId, context)].restoredForRegeneration = Date.now();
 
@@ -10178,7 +10021,6 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateBefore || {},
         economy: pendingRun?.economyBefore || {},
-        boundCompanion: pendingRun?.boundCompanionBefore || {},
     };
     const mechanicalAfter = {
         user: pendingRun?.userAfter || {},
@@ -10186,7 +10028,6 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
         economy: pendingRun?.economyAfter || pendingRun?.economyBefore || {},
-        boundCompanion: pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {},
     };
     const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
     const economyContext = renderEconomyTrackerContext({
@@ -10235,7 +10076,6 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         sceneState: handoff.sceneState || pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
 
         economy: economyContext,
-        boundCompanion: pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {},
 
         activeNpcNames,
     };
@@ -10579,8 +10419,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     userKnowledgeBefore: pendingRun.userKnowledgeBefore,
                     userReputationBefore: pendingRun.userReputationBefore,
                     worldStateBefore: pendingRun.worldStateBefore,
-                    economyBefore: pendingRun.economyBefore,
-                    boundCompanionBefore: pendingRun.boundCompanionBefore,
                     pendingRun,
                     context,
                 });
@@ -10610,7 +10448,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforeUserReputation: clone(pendingRun.userReputationBefore || {}),
                 beforeWorldState: clone(pendingRun.worldStateBefore || {}),
                 beforeEconomy: clone(pendingRun.economyBefore || {}),
-                beforeBoundCompanion: clone(pendingRun.boundCompanionBefore || {}),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
                 afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
@@ -10619,7 +10456,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterUserReputation: clone(trackerDisplaySnapshot.userReputation || {}),
                 afterWorldState: clone(trackerDisplaySnapshot.worldState || {}),
                 afterEconomy: clone(trackerDisplaySnapshot.economy || {}),
-                afterBoundCompanion: clone(trackerDisplaySnapshot.boundCompanion || {}),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
 
@@ -10717,7 +10553,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState };
             }
             delete root.snapshots[key];
             removeProgressionRecordsForMessage(key, context);
@@ -10744,8 +10580,6 @@ async function handleMessageDeleted(newLength) {
         root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(restoreCandidate.beforeUserReputation || {}, {});
         root.worldState = normalizeWorldState(restoreCandidate.beforeWorldState || root.worldState || {});
-        root.economy = normalizeEconomyState(restoreCandidate.beforeEconomy || root.economy || {});
-        root.boundCompanion = normalizeBoundCompanionState(restoreCandidate.beforeBoundCompanion || root.boundCompanion || {});
         await persistMetadata(context);
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${Math.min(chatLength, firstAffectedIndex)}`);
 
@@ -11043,7 +10877,6 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
         economySnapshot: buildEconomySnapshot(context),
-        boundCompanionSnapshot: buildBoundCompanionSnapshot(context),
         adventureGenre: getActiveAdventureGenre(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
         writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
@@ -11159,7 +10992,6 @@ async function handleChatCompletionPromptReady(eventData) {
         const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, state.pendingGeneration.type, {
             playerTrackerSnapshot: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             worldStateSnapshot: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
-            boundCompanionSnapshot: state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
         });
 
 
@@ -11190,8 +11022,6 @@ async function handleChatCompletionPromptReady(eventData) {
             worldStateAfter: report.trackerUpdate?.worldState || state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             economyBefore: state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
             economyAfter: report.trackerUpdate?.economy || state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
-            boundCompanionBefore: state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
-            boundCompanionAfter: report.trackerUpdate?.boundCompanion || state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
@@ -11263,7 +11093,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             userKnowledgeSnapshot: state.pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userReputationSnapshot: state.pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
             worldStateSnapshot: state.pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),
-            boundCompanionSnapshot: state.pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             nameStyle: getSettings().nameStyle,

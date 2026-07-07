@@ -145,13 +145,6 @@ export const TRACKER_DELTA_CONTRACT = [
     '- timeAdvance is none unless FINAL_NARRATION completes a meaningful transition: travel, waiting, sleep/rest, a completed long activity, later that day, overnight rest, or explicit time skip. Use slot for movement to the next broad time period, overnight for a completed overnight stay, day for a full-day or longer skip, and explicit only when timeOfDay is directly stated without implying a slot advance.',
     '- timeOfDay must be unchanged, morning, afternoon, evening, or night. Use it only when explicitly stated or implied by a completed transition such as dawn, noon, dusk, nightfall, or morning after rest.',
     '- Do not choose weather. Weather is deterministic code-owned. Set weatherTick=tick only when a completed time/location transition should allow the stored weather pattern to advance; otherwise use auto or none.',
-    '',
-    'BOUND_COMPANION_STATE:',
-    '- Also output BoundCompanionState lines. This hidden state tracks only explicitly established inner companions, possession/shared-vessel entities, intelligent weapons/items, bound spirits/artifacts, or implants that can communicate with {{user}}.',
-    '- Set status=active only when FINAL_NARRATION or already-established context explicitly confirms the bond/possession/shared vessel/intelligent item is active, accepted, completed, awakened, or already part of {{user}} and able to communicate internally or through the item.',
-    '- Set status=inactive only when an established companion is explicitly severed, removed, dismissed, destroyed, permanently silenced, or no longer connected.',
-    '- Set status=unchanged for pending offers, invitations, bargaining, incomplete rituals, "do you accept?" moments, unaccepted possession proposals, unclear voices, dreams, hallucination ambiguity, metaphors, rumors, or no explicit change.',
-    '- Do not invent a companion. If active, name/type/vessel/voice/evidence must come from explicit narration or established context. Use (none) for unknown optional fields. Evidence is the concrete text fact that establishes the active/inactive change.',
 ].join('\n');
 
 export const TRACKER_DELTA_TEMPLATE = `${TRACKER_DELTA_FENCE}
@@ -218,11 +211,5 @@ WorldStateDelta.indoors=unchanged
 WorldStateDelta.timeAdvance=none
 WorldStateDelta.timeOfDay=unchanged
 WorldStateDelta.weatherTick=auto
-BoundCompanionState.status=unchanged
-BoundCompanionState.name=(none)
-BoundCompanionState.type=none
-BoundCompanionState.vessel=(none)
-BoundCompanionState.voice=(none)
-BoundCompanionState.evidence=(none)
 ${TRACKER_DELTA_END}
 ${TRACKER_DELTA_FENCE_END}`;

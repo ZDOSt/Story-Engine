@@ -38,8 +38,6 @@ import {
     normalizeNpcRaceProfile,
     normalizeProactivityMemory,
     normalizeTrackerUserState,
-    normalizeBoundCompanionState,
-    applyBoundCompanionDelta,
     normalizeTrackerCondition,
     normalizeTargets,
     sanitizeTargets,
@@ -396,10 +394,6 @@ export function buildEconomySnapshot(context) {
     return normalizeEconomyState(context?.chatMetadata?.structuredPreflightTracker?.economy || {});
 }
 
-export function buildBoundCompanionSnapshot(context) {
-    return normalizeBoundCompanionState(context?.chatMetadata?.structuredPreflightTracker?.boundCompanion || {});
-}
-
 export function buildAdventureIntroNameGeneration(context, adventurePrompt = '') {
     const audit = [];
     const prompt = String(adventurePrompt || '').trim();
@@ -426,7 +420,6 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.userReputation = normalizeUserReputation(root.userReputation || {});
     root.worldState = normalizeWorldState(root.worldState || {});
     root.economy = normalizeEconomyState(root.economy || {});
-    root.boundCompanion = normalizeBoundCompanionState(root.boundCompanion || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
 
@@ -460,9 +453,6 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.economy) {
         root.economy = normalizeEconomyState(trackerUpdate.economy);
     }
-    if (trackerUpdate.boundCompanion) {
-        root.boundCompanion = normalizeBoundCompanionState(trackerUpdate.boundCompanion);
-    }
     if (trackerUpdate.health) {
         root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
     } else {
@@ -486,7 +476,6 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const refereeContext = buildRefereeContext(context);
     const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
     const worldState = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
-    const boundCompanionBefore = normalizeBoundCompanionState(options?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context));
     const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger);
     const healthBefore = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
@@ -520,17 +509,6 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter);
     const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), ledger?.trackerUpdateEngine?.userReputation || {});
     const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name, playerTrackerSnapshot);
-    const boundCompanion = runBoundCompanionEngine({
-        before: boundCompanionBefore,
-        semanticDelta: ledger?.trackerUpdateEngine?.boundCompanion,
-        resolutionPacket: resolution.packet,
-        worldState,
-        relationships: relationships.handoffs,
-        context,
-        rapportClock,
-        dice,
-        audit,
-    });
 
     const visibleTrackerUpdate = {
         npcs: trackerDeltas.npcs,
@@ -542,7 +520,6 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const trackerUpdate = {
         ...visibleTrackerUpdate,
         health: healthAfter,
-        boundCompanion: boundCompanion.state,
     };
     const narrativeResolutionPacket = applyHiddenHealthToResolutionPacket(resolution.packet, healthAfter);
     const finalNarrativeHandoff = {
@@ -554,7 +531,6 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         proactivityResults: proactivity.results,
         aggressionResults: aggression.results,
         powerActorPressure: powerActors.handoff,
-        boundCompanion: boundCompanion.handoff,
         sceneState: worldState,
         persistencePolicy: buildPersistencePolicy(),
         resultLine: resolution.resultLine,
@@ -576,179 +552,6 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
             events: healthEvents,
         },
     };
-}
-
-const BOUND_COMPANION_COOLDOWN_ACTIVE_MS = 20 * 60 * 1000;
-
-function runBoundCompanionEngine({ before = {}, semanticDelta = {}, resolutionPacket = {}, worldState = {}, relationships = [], context = {}, rapportClock = {}, dice = null, audit = [] } = {}) {
-    let state = applyBoundCompanionDelta(before, semanticDelta);
-    if (!state.active) {
-        audit.push('STEP 6.8 BOUND_COMPANION=absent');
-        return { state, handoff: null };
-    }
-
-    const directAddress = isBoundCompanionDirectAddress(state, resolutionPacket);
-    const triggers = directAddress
-        ? ['direct_address']
-        : collectBoundCompanionTriggers({ resolutionPacket, worldState, relationships });
-    const activeMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
-
-    if (directAddress) {
-        audit.push(`STEP 6.8 BOUND_COMPANION=direct_response triggers=${compact(triggers)}`);
-        return {
-            state,
-            handoff: buildBoundCompanionHandoff(state, {
-                mode: 'direct_response',
-                triggers,
-                reason: 'The latest user input directly addressed the established bound companion.',
-            }),
-        };
-    }
-
-    if (!triggers.length) {
-        audit.push('STEP 6.8 BOUND_COMPANION=silence reason=no_trigger');
-        return {
-            state,
-            handoff: buildBoundCompanionHandoff(state, {
-                mode: 'silence',
-                triggers,
-                reason: 'No safe scene trigger for unsolicited inner commentary is active.',
-            }),
-        };
-    }
-
-    const cooldownUntil = Math.max(0, Number(state.lastInterjectionAtActiveMs || 0) + BOUND_COMPANION_COOLDOWN_ACTIVE_MS);
-    if (state.lastInterjectionAtActiveMs > 0 && activeMs < cooldownUntil) {
-        audit.push(`STEP 6.8 BOUND_COMPANION=silence reason=cooldown activeMs=${activeMs} cooldownUntil=${cooldownUntil}`);
-        return {
-            state,
-            handoff: buildBoundCompanionHandoff(state, {
-                mode: 'silence',
-                triggers,
-                reason: 'The active bound companion is on cooldown and does not initiate dialogue this beat.',
-            }),
-        };
-    }
-
-    const threshold = boundCompanionInterjectionThreshold(triggers);
-    const die = typeof dice?.d100 === 'function' ? dice.d100() : Math.floor(Math.random() * 100) + 1;
-    if (die > threshold) {
-        audit.push(`STEP 6.8 BOUND_COMPANION=silence die=${die} threshold=${threshold} triggers=${compact(triggers)}`);
-        return {
-            state,
-            handoff: buildBoundCompanionHandoff(state, {
-                mode: 'silence',
-                triggers,
-                reason: 'A safe trigger exists, but the deterministic interjection roll did not fire.',
-            }),
-        };
-    }
-
-    state = normalizeBoundCompanionState({
-        ...state,
-        lastInterjectionAtActiveMs: activeMs,
-        lastInterjectionKey: boundCompanionTriggerKey(triggers, context),
-    });
-    audit.push(`STEP 6.8 BOUND_COMPANION=interjection die=${die} threshold=${threshold} triggers=${compact(triggers)}`);
-    return {
-        state,
-        handoff: buildBoundCompanionHandoff(state, {
-            mode: 'interjection',
-            triggers,
-            reason: 'A safe scene trigger fired the deterministic unsolicited interjection gate.',
-        }),
-    };
-}
-
-function buildBoundCompanionHandoff(state = {}, options = {}) {
-    const companion = normalizeBoundCompanionState(state);
-    if (!companion.active) return null;
-    return {
-        active: 'Y',
-        mode: options.mode || 'silence',
-        name: companion.name || '(unnamed bound companion)',
-        type: companion.type || 'other',
-        vessel: companion.vessel || '{{user}}',
-        voice: companion.voice || '(none)',
-        evidence: companion.evidence || '(none)',
-        triggers: Array.isArray(options.triggers) ? options.triggers : [],
-        reason: options.reason || '(none)',
-    };
-}
-
-function boundCompanionInterjectionThreshold(triggers = []) {
-    const set = new Set(triggers);
-    if (set.has('danger_or_combat')) return 25;
-    if (set.has('strange_magic_or_lore') || set.has('moral_choice_or_temptation')) return 20;
-    if (set.has('social_stakes')) return 15;
-    if (set.has('new_place') || set.has('new_notable_npc')) return 12;
-    return 10;
-}
-
-function boundCompanionTriggerKey(triggers = [], context = {}) {
-    const chatLength = Array.isArray(context?.chat) ? context.chat.length : 0;
-    return `${chatLength}:${triggers.join('|')}`.slice(0, 120);
-}
-
-function isBoundCompanionDirectAddress(state = {}, resolutionPacket = {}) {
-    const source = boundCompanionSourceText(resolutionPacket);
-    if (!source) return false;
-    const name = String(state.name || '').trim();
-    if (name && new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(source)) {
-        return /\b(?:ask|asks|asked|say|says|said|tell|tells|told|speak|speaks|spoke|call|calls|called|answer|answers|answered|reply|replies|replied|whisper|whispers|whispered|think|thinks|thought)\b/i.test(source)
-            || /["']/.test(source);
-    }
-    const vessel = String(state.vessel || '').trim();
-    const vesselAddressed = vessel
-        && vessel.length <= 60
-        && !/\{\{user\}\}|user|body|mind|head/i.test(vessel)
-        && new RegExp(`\\b${escapeRegExp(vessel)}\\b`, 'i').test(source);
-    return (vesselAddressed || /\b(?:inner voice|voice in my head|voice inside|inside my head|inside my mind|in my mind|mentally)\b/i.test(source))
-        && /\b(?:ask|say|tell|speak|call|answer|reply|whisper|think)\b/i.test(source);
-}
-
-function collectBoundCompanionTriggers({ resolutionPacket = {}, relationships = [] } = {}) {
-    const source = boundCompanionSourceText(resolutionPacket);
-    const triggers = [];
-    const add = trigger => {
-        if (!triggers.includes(trigger)) triggers.push(trigger);
-    };
-
-    if (resolutionPacket?.activeHostileThreat === 'Y'
-        || resolutionPacket?.ActionBucket === 'Combat'
-        || toRealArray(resolutionPacket?.hostilesInScene?.NPC).length > 0) {
-        add('danger_or_combat');
-    }
-    if (resolutionPacket?.ActionBucket === 'Social'
-        && (resolutionPacket?.RollNeeded === 'Y' || toRealArray(resolutionPacket?.OppTargets?.NPC).length > 0)) {
-        add('social_stakes');
-    }
-    if (Array.isArray(relationships) && relationships.some(item => item?.InitPreset && item.InitPreset !== 'existing')) {
-        add('new_notable_npc');
-    } else if (toRealArray(resolutionPacket?.NPCAwareOfUser).length || toRealArray(resolutionPacket?.NPCInScene).length) {
-        add('new_notable_npc');
-    }
-    if (/\b(?:enter|enters|entered|arrive|arrives|arrived|reach|reaches|reached|approach|approaches|approached|walk into|step into|come to|came to|cross into)\b.{0,80}\b(?:city|town|village|settlement|camp|guild|inn|tavern|shop|market|temple|shrine|church|castle|fort|gate|dungeon|ruin|tower|estate|manor|palace|road|forest|cave|cell|prison|arena|district|harbor|port)\b/i.test(source)) {
-        add('new_place');
-    }
-    if (/\b(?:spell|magic|mana|arcane|ritual|sigil|rune|curse|divine|demon|spirit|soul|artifact|relic|ancient|lore|prophecy|goddess|god|temple|shrine|monster|nonhuman|portal|summon|summoning)\b/i.test(source)) {
-        add('strange_magic_or_lore');
-    }
-    if (/\b(?:tempt|temptation|mercy|spare|execute|betray|sacrifice|oath|promise|corrupt|forgive|vengeance|revenge|deal|pact|offer|choice|choose|refuse|accept)\b/i.test(source)) {
-        add('moral_choice_or_temptation');
-    }
-    return triggers.slice(0, 4);
-}
-
-function boundCompanionSourceText(resolutionPacket = {}) {
-    return [
-        resolutionPacket?.GOAL,
-        resolutionPacket?.RollReason,
-        resolutionPacket?.UserAbilityUse?.Evidence,
-        resolutionPacket?.UserAbilityUse?.NarrativeEffect,
-        resolutionPacket?.ClaimCheck?.Claim,
-        ...(Array.isArray(resolutionPacket?.actionUnits) ? resolutionPacket.actionUnits.flatMap(unit => [unit?.action, unit?.evidence]) : []),
-    ].filter(Boolean).join(' ');
 }
 
 function buildHiddenHealthNpcRefs(trackerSnapshot = {}, ledger = {}) {

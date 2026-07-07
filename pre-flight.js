@@ -870,7 +870,6 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         ['limitations', narrativeLimitationsFact(resolution)],
         ['boundaryPressure', narrativeBoundaryFact(resolution, handoff)],
         ['companionCommand', narrativeCompanionCommandFact(resolution)],
-        ['boundCompanion', narrativeBoundCompanionFact(handoff?.boundCompanion)],
         ['npcDispositionAndStyle', narrativeNpcDispositionAndStyleFact(handoff)],
         ['npcInitiative', narrativeNpcInitiativeFact(handoff)],
         ['relationshipState', narrativeRelationshipFact(handoff)],
@@ -1123,25 +1122,6 @@ function narrativeCompanionCommandFact(resolution = {}) {
         ? ` Command text: ${command.Commands.map(item => `"${item}"`).join('; ')}.`
         : '';
     return `Treat the addressed companion command to ${npcs} as spoken tactical input only, not as resolved obedience or a completed companion action.${commands} The companion may respond autonomously only if npcInitiative or npcAggressionResult says so. If no such fact lists a companion attack, do not narrate the companion striking, pinning, disabling, injuring, killing, or successfully controlling a target.`;
-}
-
-function narrativeBoundCompanionFact(boundCompanion = null) {
-    if (!boundCompanion || boundCompanion.active !== 'Y') return '';
-    const name = valueOrNone(boundCompanion.name || '(unnamed bound companion)');
-    const type = valueOrNone(boundCompanion.type || 'other');
-    const vessel = valueOrNone(boundCompanion.vessel || '{{user}}');
-    const voice = isNoneText(boundCompanion.voice) ? '' : ` Voice/style: ${valueOrNone(boundCompanion.voice)}.`;
-    const triggers = Array.isArray(boundCompanion.triggers) && boundCompanion.triggers.length
-        ? ` Scene trigger: ${list(boundCompanion.triggers)}.`
-        : '';
-    const sharedLimits = 'The companion shares only {{user}}\'s available senses, established memory, and visible scene context. It has no hidden knowledge, trap detection, secret motive access, offscreen awareness, or authority to reveal facts not established in narrativeFacts(input). Do NOT let it control {{user}}, narrate {{user}} thoughts/feelings/decisions, move {{user}}, use {{user}} abilities, override mechanics, or become a physical NPC in the scene.';
-    if (boundCompanion.mode === 'direct_response') {
-        return `${name}: DIRECT RESPONSE ALLOWED. {{user}} directly addressed this established bound companion/intelligent item (${type}, vessel: ${vessel}). The companion may answer privately inside {{user}}'s mind or through the item in this beat.${voice}${triggers} Keep it distinct from {{user}} and limit it to a brief response grounded in established facts. ${sharedLimits}`;
-    }
-    if (boundCompanion.mode === 'interjection') {
-        return `${name}: ONE UNSOLICITED PRIVATE INTERJECTION ALLOWED. The established bound companion/intelligent item (${type}, vessel: ${vessel}) may speak once, briefly, inside {{user}}'s mind or through the item in this beat.${voice}${triggers} The line should be flavor, advice, caution, opinion, or reaction to established visible facts only. ${sharedLimits}`;
-    }
-    return `${name}: BOUND COMPANION SILENCE. An established bound companion/intelligent item exists (${type}, vessel: ${vessel}), but it does NOT initiate dialogue this beat. Do NOT invent inner-voice comments, item speech, possession dialogue, private advice, warnings, hints, or commentary from it unless {{user}} directly addresses it in the visible user input. ${sharedLimits}`;
 }
 
 function narrativeAggressionEntry(name, value = {}) {
