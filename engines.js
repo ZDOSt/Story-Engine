@@ -1778,6 +1778,110 @@ export function normalizeTrackerUserState(value) {
     };
 }
 
+const BOUND_COMPANION_TYPES = Object.freeze(['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other']);
+const BOUND_COMPANION_STATUSES = Object.freeze(['unchanged', 'active', 'inactive']);
+
+export function normalizeBoundCompanionState(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const active = bool(source.active) || normalizeBoundCompanionStatus(source.status) === 'active';
+    return {
+        active,
+        name: active ? cleanBoundCompanionText(source.name, 80) : '',
+        type: active ? normalizeBoundCompanionType(source.type) : 'none',
+        vessel: active ? cleanBoundCompanionText(source.vessel, 120) : '',
+        voice: active ? cleanBoundCompanionText(source.voice, 220) : '',
+        evidence: active ? cleanBoundCompanionText(source.evidence, 260) : '',
+        lastInterjectionAtActiveMs: Math.max(0, Math.floor(Number(source.lastInterjectionAtActiveMs || 0))),
+        lastInterjectionKey: cleanBoundCompanionText(source.lastInterjectionKey, 120),
+    };
+}
+
+export function normalizeBoundCompanionDelta(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const status = normalizeBoundCompanionStatus(source.status ?? source.Status ?? (source.active === true ? 'active' : source.active === false ? 'inactive' : 'unchanged'));
+    return {
+        status,
+        name: cleanBoundCompanionDeltaText(source.name ?? source.Name, 80),
+        type: normalizeBoundCompanionDeltaType(source.type ?? source.Type),
+        vessel: cleanBoundCompanionDeltaText(source.vessel ?? source.Vessel, 120),
+        voice: cleanBoundCompanionDeltaText(source.voice ?? source.Voice, 220),
+        evidence: cleanBoundCompanionDeltaText(source.evidence ?? source.Evidence, 260),
+    };
+}
+
+export function applyBoundCompanionDelta(before = {}, delta = {}) {
+    const current = normalizeBoundCompanionState(before);
+    const patch = normalizeBoundCompanionDelta(delta);
+    if (patch.status === 'inactive') {
+        return normalizeBoundCompanionState({
+            active: false,
+            lastInterjectionAtActiveMs: current.lastInterjectionAtActiveMs,
+            lastInterjectionKey: current.lastInterjectionKey,
+        });
+    }
+    if (patch.status === 'unchanged' && !current.active) return current;
+    const active = patch.status === 'active' || current.active;
+    const next = {
+        ...current,
+        active,
+        name: patch.name !== null ? patch.name : current.name,
+        type: patch.type !== null ? patch.type : current.type,
+        vessel: patch.vessel !== null ? patch.vessel : current.vessel,
+        voice: patch.voice !== null ? patch.voice : current.voice,
+        evidence: patch.evidence !== null ? patch.evidence : current.evidence,
+    };
+    if (!next.active) return normalizeBoundCompanionState(next);
+    if (!next.type || next.type === 'none') next.type = 'other';
+    return normalizeBoundCompanionState(next);
+}
+
+export function boundCompanionDeltaHasChanges(value = {}) {
+    const delta = normalizeBoundCompanionDelta(value);
+    return delta.status !== 'unchanged'
+        || delta.name !== null
+        || delta.type !== null
+        || delta.vessel !== null
+        || delta.voice !== null
+        || delta.evidence !== null;
+}
+
+function normalizeBoundCompanionStatus(value) {
+    const text = String(value ?? 'unchanged').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (['y', 'yes', 'true', 'active', 'activated', 'established'].includes(text)) return 'active';
+    if (['n', 'no', 'false', 'inactive', 'absent', 'removed', 'dismissed', 'severed', 'none'].includes(text)) return 'inactive';
+    return BOUND_COMPANION_STATUSES.includes(text) ? text : 'unchanged';
+}
+
+function normalizeBoundCompanionType(value) {
+    const text = String(value ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (text === 'sentient_item' || text === 'sentient_weapon' || text === 'intelligent_weapon') return 'intelligent_item';
+    if (text === 'spirit' || text === 'bound_entity') return 'bound_spirit';
+    if (text === 'shared_body') return 'shared_vessel';
+    return BOUND_COMPANION_TYPES.includes(text) ? text : 'other';
+}
+
+function normalizeBoundCompanionDeltaType(value) {
+    const text = cleanBoundCompanionDeltaText(value, 80);
+    if (text === null) return null;
+    const normalized = normalizeBoundCompanionType(text);
+    return normalized === 'none' ? null : normalized;
+}
+
+function cleanBoundCompanionText(value, maxLength) {
+    const text = String(value ?? '')
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
+    return text.slice(0, maxLength);
+}
+
+function cleanBoundCompanionDeltaText(value, maxLength) {
+    const text = cleanBoundCompanionText(value, maxLength);
+    return text || null;
+}
+
 export function normalizeTrackerCondition(value) {
     const text = String(value ?? 'healthy').trim().toLowerCase().replace(/[\s-]+/g, '_');
     if (text === 'defeated') return 'incapacitated';

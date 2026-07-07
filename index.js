@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
+import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, boundCompanionDeltaHasChanges, classifyDisposition, normalizeBoundCompanionState, normalizeTrackerEntry, normalizeTrackerUserState } from './engines.js';
 
 import {
     addEphemeralStoppingString,
@@ -29,7 +29,7 @@ import {
 } from './st-adapter.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -2557,6 +2557,7 @@ function getTrackerRoot(context = getContext()) {
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
     root.worldState = normalizeWorldState(root.worldState || {});
     root.economy = normalizeEconomyState(root.economy || {});
+    root.boundCompanion = normalizeBoundCompanionState(root.boundCompanion || {});
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
     if (seededPlayerTracker) {
@@ -3940,6 +3941,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     const userReputation = mergeUserReputationLedger(pendingRun?.userReputationBefore || {}, pendingRun?.userReputationAfter || {});
     const worldState = normalizeWorldState(pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {});
     const economy = normalizeEconomyState(pendingRun?.economyAfter || pendingRun?.economyBefore || {});
+    const boundCompanion = normalizeBoundCompanionState(pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {});
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -3963,6 +3965,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         userReputation,
         worldState,
         economy,
+        boundCompanion,
         npcs: promotionResult.npcs,
     };
     const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
@@ -3984,6 +3987,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
     const economySnapshot = pendingGeneration?.economySnapshot || buildEconomySnapshot(context);
+    const boundCompanionSnapshot = pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context);
     const nameGeneration = pendingGeneration?.nameGenerationSnapshot || {};
     const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
@@ -4021,6 +4025,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             userReputation: {},
             worldState: worldStateSnapshot,
             economy: economySnapshot,
+            boundCompanion: boundCompanionSnapshot,
         },
     };
     return {
@@ -4042,6 +4047,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         worldStateAfter: worldStateSnapshot,
         economyBefore: economySnapshot,
         economyAfter: economySnapshot,
+        boundCompanionBefore: boundCompanionSnapshot,
+        boundCompanionAfter: boundCompanionSnapshot,
         nameGeneration,
         resolutionPacket: report.finalNarrativeHandoff.resolutionPacket,
         userCoreStats: playerTrackerSnapshot?.coreStats || null,
@@ -4237,6 +4244,7 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null) 
         userReputation: mergeUserReputationLedger(displaySnapshot?.userReputation || {}, {}),
         worldState: normalizeWorldState(displaySnapshot?.worldState || {}),
         economy: normalizeEconomyState(displaySnapshot?.economy || {}),
+        boundCompanion: normalizeBoundCompanionState(displaySnapshot?.boundCompanion || {}),
     };
     if (hiddenHealth) {
         update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
@@ -4265,6 +4273,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     merged.economy = applyEconomyDelta(economyBefore, economyDelta, {
         messageKey: options.messageKey || '',
     });
+    merged.boundCompanion = applyBoundCompanionDelta(merged.boundCompanion || options.boundCompanionBefore || {}, delta.boundCompanion || {});
     const npcs = normalizeDisplayTrackerNpcs(merged.npcs || {});
     for (const npcDelta of delta.npcs || []) {
         const rawName = String(npcDelta?.NPC || '').trim();
@@ -4317,6 +4326,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
         worldStateChanged: worldStateDeltaHasChanges(delta.worldState),
         economyChanged: economyDeltaHasChanges(economyDelta),
+        boundCompanionChanged: boundCompanionDeltaHasChanges(delta.boundCompanion),
     };
     return merged;
 }
@@ -4907,6 +4917,8 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
+    root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
+    root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
@@ -4930,6 +4942,8 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
+    root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
+    root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
@@ -9394,6 +9408,9 @@ function restoreTrackerForRegeneration(type) {
         root.powerActors = root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforePowerActors || root.powerActors || {};
         root.userKnowledge = mergeUserKnowledgeLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserKnowledge || root.userKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserReputation || root.userReputation || {}, {});
+        root.worldState = normalizeWorldState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeWorldState || root.worldState || {});
+        root.economy = normalizeEconomyState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeEconomy || root.economy || {});
+        root.boundCompanion = normalizeBoundCompanionState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeBoundCompanion || root.boundCompanion || {});
         root.rapportClock = rapportClock;
         root.snapshots[getMessageKey(targetMessageId, context)].restoredForRegeneration = Date.now();
 
@@ -10021,6 +10038,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateBefore || {},
         economy: pendingRun?.economyBefore || {},
+        boundCompanion: pendingRun?.boundCompanionBefore || {},
     };
     const mechanicalAfter = {
         user: pendingRun?.userAfter || {},
@@ -10028,6 +10046,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
         economy: pendingRun?.economyAfter || pendingRun?.economyBefore || {},
+        boundCompanion: pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {},
     };
     const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
     const economyContext = renderEconomyTrackerContext({
@@ -10076,6 +10095,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         sceneState: handoff.sceneState || pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
 
         economy: economyContext,
+        boundCompanion: pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {},
 
         activeNpcNames,
     };
@@ -10419,6 +10439,8 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     userKnowledgeBefore: pendingRun.userKnowledgeBefore,
                     userReputationBefore: pendingRun.userReputationBefore,
                     worldStateBefore: pendingRun.worldStateBefore,
+                    economyBefore: pendingRun.economyBefore,
+                    boundCompanionBefore: pendingRun.boundCompanionBefore,
                     pendingRun,
                     context,
                 });
@@ -10448,6 +10470,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforeUserReputation: clone(pendingRun.userReputationBefore || {}),
                 beforeWorldState: clone(pendingRun.worldStateBefore || {}),
                 beforeEconomy: clone(pendingRun.economyBefore || {}),
+                beforeBoundCompanion: clone(pendingRun.boundCompanionBefore || {}),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
                 afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
@@ -10456,6 +10479,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterUserReputation: clone(trackerDisplaySnapshot.userReputation || {}),
                 afterWorldState: clone(trackerDisplaySnapshot.worldState || {}),
                 afterEconomy: clone(trackerDisplaySnapshot.economy || {}),
+                afterBoundCompanion: clone(trackerDisplaySnapshot.boundCompanion || {}),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
 
@@ -10553,7 +10577,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion };
             }
             delete root.snapshots[key];
             removeProgressionRecordsForMessage(key, context);
@@ -10580,6 +10604,8 @@ async function handleMessageDeleted(newLength) {
         root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(restoreCandidate.beforeUserReputation || {}, {});
         root.worldState = normalizeWorldState(restoreCandidate.beforeWorldState || root.worldState || {});
+        root.economy = normalizeEconomyState(restoreCandidate.beforeEconomy || root.economy || {});
+        root.boundCompanion = normalizeBoundCompanionState(restoreCandidate.beforeBoundCompanion || root.boundCompanion || {});
         await persistMetadata(context);
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${Math.min(chatLength, firstAffectedIndex)}`);
 
@@ -10877,6 +10903,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
         economySnapshot: buildEconomySnapshot(context),
+        boundCompanionSnapshot: buildBoundCompanionSnapshot(context),
         adventureGenre: getActiveAdventureGenre(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
         writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
@@ -10992,6 +11019,7 @@ async function handleChatCompletionPromptReady(eventData) {
         const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, state.pendingGeneration.type, {
             playerTrackerSnapshot: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             worldStateSnapshot: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            boundCompanionSnapshot: state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
         });
 
 
@@ -11022,6 +11050,8 @@ async function handleChatCompletionPromptReady(eventData) {
             worldStateAfter: report.trackerUpdate?.worldState || state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             economyBefore: state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
             economyAfter: report.trackerUpdate?.economy || state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
+            boundCompanionBefore: state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
+            boundCompanionAfter: report.trackerUpdate?.boundCompanion || state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
@@ -11093,6 +11123,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             userKnowledgeSnapshot: state.pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userReputationSnapshot: state.pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
             worldStateSnapshot: state.pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),
+            boundCompanionSnapshot: state.pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             nameStyle: getSettings().nameStyle,

@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, normalizeSocialResolutionMemory } from './engines.js';
+import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizeSocialResolutionMemory } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import { canGenerateRawData, generateRawData, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta } from './world-state.js';
@@ -517,6 +517,23 @@ function buildSemanticPreflightSchema() {
             commitmentsRemove: stringListSchema,
         },
     };
+    const boundCompanionDeltaSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['status', 'name', 'type', 'vessel', 'voice', 'evidence'],
+        properties: {
+            status: {
+                type: 'string',
+                enum: ['unchanged', 'active', 'inactive'],
+                description: 'active only when the assembled context explicitly establishes an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant as already active/completed/accepted. inactive only when an established companion is explicitly severed, dismissed, removed, silenced permanently, or destroyed. unchanged for offers, pending pacts, invitations, unclear voices, metaphors, rumors, or no change.',
+            },
+            name: { type: 'string' },
+            type: { type: 'string', enum: ['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other'] },
+            vessel: { type: 'string' },
+            voice: { type: 'string' },
+            evidence: { type: 'string' },
+        },
+    };
     const injuryEffectSchema = {
         type: 'object',
         additionalProperties: false,
@@ -1010,13 +1027,14 @@ function buildSemanticPreflightSchema() {
             trackerUpdateEngine: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['user', 'npcs'],
+                required: ['user', 'npcs', 'boundCompanion'],
                 properties: {
                     user: trackerUserDeltaSchema,
                     npcs: {
                         type: 'array',
                         items: trackerNpcDeltaSchema,
                     },
+                    boundCompanion: boundCompanionDeltaSchema,
                 },
             },
             chaosSemantic: {
@@ -1262,6 +1280,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- TrackerUpdateEngine NPC personalitySummary is optional stable personality memory. If this is the first meaningful tracking of an NPC or the existing personalitySummary is empty, assign a compact natural-language personality seed when card/lore/scenario/context or visible behavior supports one. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerism: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. A mannerism is one optional specific observable physical tell or habit, such as fidgeting with a sleeve, angling toward exits, tapping a finger while thinking, or touching a charm before speaking. It is not attitude, etiquette, strategy, kindness, politeness, holding a door, asking questions, offering help, making decisions, or any other generic social behavior. Mannerism is flexible, scene-valid, and never a mandatory repeated beat. If personalitySummary already exists, use unchanged unless durable context clearly contradicts or refines it. Do not write mood, temporary emotion, injuries, relationship state, attraction, fear/hostility level, or what happened this turn.',
     'PERSONALITY_ARCHETYPE_GLOSSARY:',
     PERSONALITY_ARCHETYPE_GLOSSARY,
+    '- TrackerUpdateEngine.BoundCompanionState is hidden user state. It may read the entire assembled context: active SillyTavern prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when context explicitly establishes an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant as already active/completed/accepted and able to communicate with {{user}} internally or through the carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Set status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also set status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, "do you accept?" proposals, unclear voices, metaphors, rumors, dreams, hallucination ambiguity, or no change. Do not invent an inner entity. If active, fill name/type/vessel/voice/evidence from explicit context when known; otherwise use (none) for unknown optional fields. Evidence must cite the explicit context fact that makes it established, not a guess.',
     '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory is not tracked. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
     '- PowerActorEnmity is hidden power-actor memory. First assess power candidates semantically, not by keyword/title. A power actor is any entity with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. Ordinary people with only personal reaction are not power actors even if they have a job title.',
@@ -1365,6 +1384,12 @@ TrackerUpdateEngine.NPC[0].statusAdd=(none)
 TrackerUpdateEngine.NPC[0].statusRemove=(none)
 TrackerUpdateEngine.NPC[0].gearAdd=(none)
 TrackerUpdateEngine.NPC[0].gearRemove=(none)
+TrackerUpdateEngine.BoundCompanionState.status=unchanged
+TrackerUpdateEngine.BoundCompanionState.name=(none)
+TrackerUpdateEngine.BoundCompanionState.type=none
+TrackerUpdateEngine.BoundCompanionState.vessel=(none)
+TrackerUpdateEngine.BoundCompanionState.voice=(none)
+TrackerUpdateEngine.BoundCompanionState.evidence=(none)
 PowerActorAssessment.count=0
 PowerActorAssessment[0].actor=(none)
 PowerActorAssessment[0].scope=unknown
@@ -1506,12 +1531,14 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     const powerActorSnapshot = sanitizePowerActorSnapshotForSemantic(options?.powerActorSnapshot || {});
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const worldStateSnapshot = normalizeWorldState(options?.worldStateSnapshot || {});
+    const boundCompanionSnapshot = normalizeBoundCompanionState(options?.boundCompanionSnapshot || {});
     const dispositionContinuityContext = buildDispositionContinuityContext(trackerSnapshot);
     return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
         `Disposition continuity context (plain-language tracker state for rollNeeded and social buckets; use this to decide whether a current NPC reaction or negative social contest is already settled):\n${dispositionContinuityContext}\n\n` +
         `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
         `User knowledge snapshot JSON (hidden memory about authored or personal facts people may know about {{user}}; use for UserKnowledgeApplication context only, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         `World state snapshot JSON (hidden current scene continuity; use reputationLocation/place as the default current community for EngineContext.userReputationContext.location when applicable):\n${JSON.stringify(worldStateSnapshot, null, 2)}\n\n` +
+        `Bound companion snapshot JSON (hidden user state; current established inner companion, possession/shared vessel, intelligent item/weapon, bound spirit/artifact, or implant if any):\n${JSON.stringify(boundCompanionSnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
         'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
@@ -1546,6 +1573,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
         'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. Currency changes are finalized post-narration only, so semantic preflight must keep currencyAdd=(none) and currencyRemove=(none). TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
+        'TrackerUpdateEngine.BoundCompanionState reads the full assembled context, not only persona: active prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when explicit established context says an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant is already active/completed/accepted and can communicate with {{user}} internally or through a carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Use status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also use status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, proposals, unclear voices, dreams, hallucination ambiguity, metaphor, rumor, or no explicit change. Do not invent a companion. ' +
         'Use condition=unchanged unless the latest user input or immediate visible context explicitly establishes a completed/current health state as healthy, bruised, wounded, badly_wounded, critical, incapacitated, or dead. Use incapacitated for explicit nonlethal outcomes where the character is alive but cannot meaningfully act. Do not set condition from a desired/requested future injury or from an attempted action before narration confirms the result. ' +
         'Use Add only for explicit gains/new injuries/new effects/new obligations. Use Remove only for explicit dropping, spending, losing, completing, canceling, failing, or abandoning. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does not remove injuries unless the text also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing. Never infer unchanged lists from silence and never output a full replacement list. ' +
         'For semantic preflight, always output currencyAdd=(none) and currencyRemove=(none). Currency spending/gain, price quotes, and pending-price payment confirmation are handled only by the post-narration tracker pass after FINAL_NARRATION exists. ' +
@@ -1909,6 +1937,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger?.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
+    if (!ledger?.trackerUpdateEngine?.boundCompanion) missing.push('trackerUpdateEngine.boundCompanion');
     if (!ledger?.chaosSemantic) missing.push('chaosSemantic');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
@@ -2022,6 +2051,12 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.User.commitmentsAdd',
         'TrackerUpdateEngine.User.commitmentsRemove',
         'TrackerUpdateEngine.NPC.count',
+        'TrackerUpdateEngine.BoundCompanionState.status',
+        'TrackerUpdateEngine.BoundCompanionState.name',
+        'TrackerUpdateEngine.BoundCompanionState.type',
+        'TrackerUpdateEngine.BoundCompanionState.vessel',
+        'TrackerUpdateEngine.BoundCompanionState.voice',
+        'TrackerUpdateEngine.BoundCompanionState.evidence',
         'PowerActorAssessment.count',
         'PowerActorEnmity.count',
         'PowerEventShape.count',
@@ -2438,6 +2473,14 @@ function parseCompactLedger(text, trackerSnapshot) {
             commitmentsRemove: readList(fields, 'TrackerUpdateEngine.User.commitmentsRemove'),
         },
         npcs: [],
+        boundCompanion: normalizeBoundCompanionDelta({
+            status: fields.get('TrackerUpdateEngine.BoundCompanionState.status'),
+            name: fields.get('TrackerUpdateEngine.BoundCompanionState.name'),
+            type: fields.get('TrackerUpdateEngine.BoundCompanionState.type'),
+            vessel: fields.get('TrackerUpdateEngine.BoundCompanionState.vessel'),
+            voice: fields.get('TrackerUpdateEngine.BoundCompanionState.voice'),
+            evidence: fields.get('TrackerUpdateEngine.BoundCompanionState.evidence'),
+        }),
     };
     for (let index = 0; index < trackerNpcCount; index += 1) {
         const prefix = `TrackerUpdateEngine.NPC[${index}]`;
@@ -2518,6 +2561,12 @@ function parseNarratorTrackerDeltaText(text) {
         'UserKnowledgeLedger.personal.count',
         'UserKnowledgeLedger.reputation.count',
         'FameInfamyLedger.count',
+        'BoundCompanionState.status',
+        'BoundCompanionState.name',
+        'BoundCompanionState.type',
+        'BoundCompanionState.vessel',
+        'BoundCompanionState.voice',
+        'BoundCompanionState.evidence',
     ];
     const missing = required.filter(key => !fields.has(key));
     if (missing.length) throw new Error(`tracker delta block missing required lines: ${missing.join(', ')}`);
@@ -2624,8 +2673,16 @@ function parseNarratorTrackerDeltaText(text) {
         timeOfDay: fields.get('WorldStateDelta.timeOfDay'),
         weatherTick: fields.get('WorldStateDelta.weatherTick'),
     });
+    const boundCompanion = normalizeBoundCompanionDelta({
+        status: fields.get('BoundCompanionState.status'),
+        name: fields.get('BoundCompanionState.name'),
+        type: fields.get('BoundCompanionState.type'),
+        vessel: fields.get('BoundCompanionState.vessel'),
+        voice: fields.get('BoundCompanionState.voice'),
+        evidence: fields.get('BoundCompanionState.evidence'),
+    });
 
-    return { user, npcs, userKnowledge, userReputation, worldState, economy };
+    return { user, npcs, userKnowledge, userReputation, worldState, economy, boundCompanion };
 }
 
 function sanitizeNarratorTrackerDelta(delta, narration) {
@@ -2642,6 +2699,7 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
         userReputation: normalizeFameInfamyDelta(delta?.userReputation),
         worldState: normalizeWorldStateDelta(delta?.worldState),
         economy: normalizeEconomyDelta(delta?.economy),
+        boundCompanion: normalizeBoundCompanionDelta(delta?.boundCompanion),
     };
     cleanDelta.npcs = cleanDelta.npcs.filter(item =>
         item?.NPC
@@ -3502,6 +3560,7 @@ function normalizeLedger(ledger) {
         };
         }).filter(Boolean)
         : [];
+    ledger.trackerUpdateEngine.boundCompanion = normalizeBoundCompanionDelta(ledger.trackerUpdateEngine.boundCompanion);
     ledger.chaosSemantic = ledger.chaosSemantic || { sceneSummary: '' };
     ledger.proactivitySemantic = {};
     return ledger;
@@ -3993,6 +4052,7 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
+    if (!ledger.trackerUpdateEngine?.boundCompanion) missing.push('trackerUpdateEngine.boundCompanion');
     if (!ledger.chaosSemantic) missing.push('chaosSemantic');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
