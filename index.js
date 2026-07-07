@@ -5127,6 +5127,20 @@ function trackerStatCluster(core) {
         </div>`;
 }
 
+function formatBoundCompanionType(value) {
+    return String(value || 'other')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function formatBoundCompanionVessel(value, personaName) {
+    const text = String(value || '').trim();
+    if (!text || ['{{user}}', 'user', 'body', 'mind', 'head'].includes(text.toLowerCase())) {
+        return personaName || '{{user}}';
+    }
+    return text;
+}
+
 function trackerConditionTone(value) {
     const text = String(value || '').toLowerCase();
     if (!text || text === 'healthy' || text === 'unchanged') return 'good';
@@ -5178,8 +5192,14 @@ function buildTrackerDisplayHtml(snapshot) {
     const visibleNames = Array.isArray(snapshot?.visibleNpcNames) && snapshot.visibleNpcNames.length
         ? new Set(snapshot.visibleNpcNames.map(name => String(name).toLowerCase()))
         : null;
+    const boundCompanion = normalizeBoundCompanionState(snapshot?.boundCompanion || {});
+    const boundCompanionName = cleanTrackerDisplayName(boundCompanion.name);
+    const boundCompanionTrackerName = boundCompanion.active ? findExistingTrackerName(npcs, boundCompanionName) : '';
+    const boundCompanionNpc = boundCompanionTrackerName ? npcs[boundCompanionTrackerName] : null;
+    const boundCompanionExcludedName = (boundCompanionTrackerName || boundCompanionName).toLowerCase();
     const names = Object.keys(npcs)
         .filter(name => !visibleNames || visibleNames.has(name.toLowerCase()))
+        .filter(name => !boundCompanionExcludedName || name.toLowerCase() !== boundCompanionExcludedName)
         .sort((a, b) => a.localeCompare(b));
     const active = names.filter(name => npcs[name]?.lifecycle === 'Active');
     const userCore = snapshot?.userCoreStats;
@@ -5211,6 +5231,67 @@ function buildTrackerDisplayHtml(snapshot) {
             trackerDisplayItemList('Gear', user.gear, { empty: 'No gear items' }),
         ].join('');
 
+    const renderBoundCompanionSection = () => {
+        if (!boundCompanion.active) return '';
+        const name = boundCompanionTrackerName || boundCompanionName || '(unnamed)';
+        const disposition = boundCompanionNpc?.currentDisposition;
+        const classified = disposition ? classifyDisposition(disposition) : { lock: 'None', behavior: 'None' };
+        const relation = relationshipTowardUser(disposition, classified);
+        const relationshipRows = boundCompanionNpc
+            ? `
+                <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
+                    ${trackerChip('B/F/H', formatDisposition(disposition))}
+                    ${trackerChip('Rapport', `${boundCompanionNpc.currentRapport}/5`)}
+                    ${trackerChip('Toward User', relation, trackerDispositionTone(disposition, classified))}
+                </div>
+                <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
+                    ${trackerChip('Relationship', boundCompanionNpc.establishedRelationship || 'N')}
+                    ${trackerChip('Behavior', classified.behavior)}
+                    ${trackerChip('Lock', classified.lock)}
+                </div>`
+            : `
+                <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
+                    ${trackerChip('Relationship', 'Untracked')}
+                    ${trackerChip('Toward User', 'Developing')}
+                </div>`;
+        const conditionLine = boundCompanionNpc
+            ? trackerChip('Condition', formatTrackerCondition(boundCompanionNpc.condition), trackerConditionTone(boundCompanionNpc.condition))
+            : trackerChip('State', 'Present, internal');
+        const statusLine = boundCompanionNpc && trackerListCount(boundCompanionNpc.statusEffects)
+            ? trackerDetailLine('Status', boundCompanionNpc.statusEffects)
+            : '';
+        const woundsLine = boundCompanionNpc && trackerListCount(boundCompanionNpc.wounds)
+            ? trackerDetailLine('Wounds', boundCompanionNpc.wounds)
+            : '';
+        const voiceLine = boundCompanion.voice
+            ? trackerDetailLine('Voice', boundCompanion.voice, { showEmpty: true })
+            : '';
+        return `
+            <details class="structured-preflight-tracker-bound-companion">
+                <summary>
+                    <span>Bound Companion</span>
+                    <code>${escapeHtml(name)}</code>
+                </summary>
+                <div class="structured-preflight-tracker-bound-body">
+                    <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
+                        ${trackerChip('Type', formatBoundCompanionType(boundCompanion.type))}
+                        ${conditionLine}
+                        ${trackerChip('Vessel', formatBoundCompanionVessel(boundCompanion.vessel, personaName))}
+                    </div>
+                    ${relationshipRows}
+                    <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
+                        ${woundsLine}
+                        ${statusLine}
+                        <div class="structured-preflight-tracker-detail structured-preflight-tracker-detail-wide">
+                            <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-personality">Personality</span>
+                            <span class="structured-preflight-tracker-detail-value">${escapeHtml(boundCompanionNpc?.personalitySummary || 'Developing')}</span>
+                        </div>
+                        ${voiceLine}
+                    </div>
+                </div>
+            </details>`;
+    };
+
     const renderPlayerCard = () => {
         const statusLine = trackerListCount(user.statusEffects)
             ? trackerDetailLine('Status', user.statusEffects)
@@ -5232,6 +5313,7 @@ function buildTrackerDisplayHtml(snapshot) {
                     ${trackerDisplayItemList('Gear', user.gear, { empty: 'No equipped gear' })}
                     ${statusLine}
                 </div>
+                ${renderBoundCompanionSection()}
             </div>`;
     };
 
@@ -5710,6 +5792,58 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-player-card {
             border-left: 4px solid #1f7a8c;
+        }
+        .structured-preflight-tracker-bound-companion {
+            margin-top: 0.05rem;
+            padding: 0.38rem 0.44rem;
+            border: 1px solid color-mix(in srgb, #73d0ff 34%, var(--SmartThemeBorderColor, rgba(255,255,255,0.2)));
+            border-radius: 6px;
+            background: color-mix(in srgb, #1f7a8c 16%, var(--SmartThemeBlurTintColor, #000) 24%);
+        }
+        .structured-preflight-tracker-bound-companion > summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            cursor: pointer;
+            list-style: none;
+            user-select: none;
+            font-weight: 800;
+            line-height: 1.15;
+        }
+        .structured-preflight-tracker-bound-companion > summary::-webkit-details-marker {
+            display: none;
+        }
+        .structured-preflight-tracker-bound-companion > summary::before {
+            content: ">";
+            color: color-mix(in srgb, #73d0ff 84%, var(--SmartThemeBodyColor, #eee));
+            font-weight: 900;
+        }
+        .structured-preflight-tracker-bound-companion[open] > summary::before {
+            content: "v";
+        }
+        .structured-preflight-tracker-bound-companion > summary span {
+            flex: 1 1 auto;
+            min-width: 0;
+            color: color-mix(in srgb, #73d0ff 84%, var(--SmartThemeBodyColor, #eee));
+            text-transform: uppercase;
+            font-size: 0.72rem;
+        }
+        .structured-preflight-tracker-bound-companion > summary code {
+            min-width: 0;
+            overflow-wrap: anywhere;
+            font-size: 0.82rem;
+            font-weight: 900;
+        }
+        .structured-preflight-tracker-bound-body {
+            display: grid;
+            gap: 0.38rem;
+            margin-top: 0.45rem;
+        }
+        .structured-preflight-tracker-bound-row {
+            padding: 0.28rem 0.32rem;
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 18%, transparent);
         }
         .structured-preflight-tracker-card-head {
             display: flex;
@@ -6467,6 +6601,8 @@ function buildCurrentTrackerWidgetSnapshot(context = getContext()) {
         userCoreStats: getPersonaCoreStats(context),
 
         user: normalizeTrackerUserState(root.user || {}),
+
+        boundCompanion: normalizeBoundCompanionState(root.boundCompanion || {}),
 
         npcs: normalizeDisplayTrackerNpcs(root.npcs || {}),
 
