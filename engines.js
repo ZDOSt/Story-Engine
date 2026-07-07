@@ -1,3 +1,5 @@
+import { normalizeCurrencyList } from './economy.js';
+
 export const ENGINE_PROMPT_TEXT = String.raw`[STRUCTURED_PREFLIGHT_ENGINE_EXTENSION v0.1 - SOURCE: EXTENSION ONLY]
 
 function ResolutionEngine(input) {
@@ -13,6 +15,8 @@ function ResolutionEngine(input) {
   identifyGoal(input):
     policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
     finalGoal: return a short, plain description of {{user}}'s finalGoal/intent in the last input
+    rule: first-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are user-authored context only, not external actions
+    rule: when input mixes introspection with external action or speech, extract only the concrete present external actions, spoken dialogue, object/ability use, movement, attack, or interaction as finalGoal
     rule: ignore setup, movement, intermediary steps, and post-action flavor unless they are themselves separate consequential actions
     rule: romantic, flirtatious, affectionate, suggestive, sexual, or intimate talk/contact is not a special roll category by itself. Describe the finalGoal plainly without using an intimacy gate label.
     rule: asking permission, flirting, teasing, reciprocating NPC-initiated flirtation, declarations of love, kisses, embraces, or intimate proposals are ordinary social/scene actions unless the current user input also contains explicit coercion, force, threat, pressure after refusal, or boundary violation.
@@ -23,6 +27,7 @@ function ResolutionEngine(input) {
     rule: return the decisive action, challenge, or explicit attack sequence within {{user}}'s input that carries risk, uncertainty, resistance, or stakes for {{user}}'s finalGoal
     rule: this is the decisive action, challenge, or explicit attack sequence that determines whether {{user}}'s finalGoal succeeds or fails
     rule: copy the concrete action or challenge from {{user}}'s input when possible
+    rule: do not use internal dialogue, remembered events, metaphor, subjective sensation, self-perception, uncertainty, or questions to self as the challenge unless they explicitly declare a present external action or objective scene fact
     rule: ignore incidental gestures, flavor, delivery method, setup, movement, or positioning unless that act itself carries stakes or resistance
     rule: if no distinct stakes-bearing challenge exists, return finalGoal
 
@@ -129,15 +134,23 @@ function ResolutionEngine(input) {
     rule: every resolved action has at least one action marker
     rule: non-combat actions return exactly one action marker: [a1]
     rule: combat sequences may return up to three action markers
-    rule: do not count setup, movement, repositioning, defense, recovery, or non-attack flavor as additional actions
-    rule: each individual combat attack/effect within a sequence counts as one action, including physical attacks, spells, status effects, or mixed sequences
-    rule: return one action marker per attack: [a1], [a1,a2], or [a1,a2,a3]
+    rule: count one marker per explicit discrete attack/effect that could separately land, miss, be blocked, be dodged, be deflected, or apply an effect
+    rule: count separate attack verbs/effects even when {{user}} does not provide a number. Examples include swing, slash, stab, punch, kick, knee, bite, claw, shoot, fire, throw, blast, bolt, cast, strike, shove-to-harm, slam, tackle, restrain-by-force, curse, paralyze, burn, freeze, poison, or drain
+    rule: do NOT collapse an attack chain into one action merely because the attacks share one target, one goal, one sentence, one ability name, or one overall combo
+    rule: do NOT collapse repeated uses of the same attack, spell, projectile, strike, shot, bite, claw swipe, or harmful effect into one action merely because they are similar
+    rule: explicit count words or sequence words create separate combat actions when they describe separate attacks/effects: "two", "three", "twice", "again", "another", "second", "in succession", "one after another", "separate", "rapid succession", "then", "before", "after", "and", "as I", "while I"
+    rule: examples: "two bolts" -> [a1,a2]; "two separate bolts in succession" -> [a1,a2]; "one bolt, then another" -> [a1,a2]; "I swing the sword, pivot, punch them, then knee their stomach" -> [a1,a2,a3]; "slash, kick, and blast him" -> [a1,a2,a3]
+    rule: if more than three attacks/effects are explicitly attempted, cap at [a1,a2,a3]
+    rule: do not count setup, aiming, drawing, focusing, chanting, movement, pivoting, repositioning, defense, recovery, or non-attack flavor as additional actions unless that act itself is a separate stakes-bearing attack/effect
+    rule: a single named attack, area effect, burst, wave, sweep, or volley with no explicit discrete attack count is one action marker unless the wording clearly states separate attacks/effects
+    rule: return one action marker per counted attack/effect: [a1], [a1,a2], or [a1,a2,a3]
 
   actionUnits(input, challenge, actionCount):
     policy: LOCKED, EXPLICIT-ONLY, SEMANTIC-ONLY
     rule: break the latest explicit {{user}} attempt into the same mechanically counted actions represented by actionCount
     rule: output one short clean action description and one brief evidence phrase for each marker in actionCount
     rule: each unit is one mechanically counted action; it does not decide success, failure, outcome, injury, counterattack, or narration
+    rule: each actionUnit must correspond to exactly one counted attack/effect in order. For attack chains, preserve order and split by the separate attacks/effects actually declared by {{user}}
     rule: include setup or movement only when it is inseparable from the counted action
     rule: do not split setup, repositioning, defense, recovery, or flavor into separate units
     rule: a compound dependent action may be one unit when it functions as one resolved attempt
@@ -1759,9 +1772,114 @@ export function normalizeTrackerUserState(value) {
         statusEffects: normalizeTrackerStringList(value?.statusEffects),
         gear: normalizeTrackerStringList(value?.gear),
         inventory: normalizeTrackerStringList(value?.inventory),
+        currency: normalizeCurrencyList(value?.currency),
         tasks: normalizeTrackerStringList(value?.tasks),
         commitments: normalizeTrackerStringList(value?.commitments),
     };
+}
+
+const BOUND_COMPANION_TYPES = Object.freeze(['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other']);
+const BOUND_COMPANION_STATUSES = Object.freeze(['unchanged', 'active', 'inactive']);
+
+export function normalizeBoundCompanionState(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const active = bool(source.active) || normalizeBoundCompanionStatus(source.status) === 'active';
+    return {
+        active,
+        name: active ? cleanBoundCompanionText(source.name, 80) : '',
+        type: active ? normalizeBoundCompanionType(source.type) : 'none',
+        vessel: active ? cleanBoundCompanionText(source.vessel, 120) : '',
+        voice: active ? cleanBoundCompanionText(source.voice, 220) : '',
+        evidence: active ? cleanBoundCompanionText(source.evidence, 260) : '',
+        lastInterjectionAtActiveMs: Math.max(0, Math.floor(Number(source.lastInterjectionAtActiveMs || 0))),
+        lastInterjectionKey: cleanBoundCompanionText(source.lastInterjectionKey, 120),
+    };
+}
+
+export function normalizeBoundCompanionDelta(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const status = normalizeBoundCompanionStatus(source.status ?? source.Status ?? (source.active === true ? 'active' : source.active === false ? 'inactive' : 'unchanged'));
+    return {
+        status,
+        name: cleanBoundCompanionDeltaText(source.name ?? source.Name, 80),
+        type: normalizeBoundCompanionDeltaType(source.type ?? source.Type),
+        vessel: cleanBoundCompanionDeltaText(source.vessel ?? source.Vessel, 120),
+        voice: cleanBoundCompanionDeltaText(source.voice ?? source.Voice, 220),
+        evidence: cleanBoundCompanionDeltaText(source.evidence ?? source.Evidence, 260),
+    };
+}
+
+export function applyBoundCompanionDelta(before = {}, delta = {}) {
+    const current = normalizeBoundCompanionState(before);
+    const patch = normalizeBoundCompanionDelta(delta);
+    if (patch.status === 'inactive') {
+        return normalizeBoundCompanionState({
+            active: false,
+            lastInterjectionAtActiveMs: current.lastInterjectionAtActiveMs,
+            lastInterjectionKey: current.lastInterjectionKey,
+        });
+    }
+    if (patch.status === 'unchanged' && !current.active) return current;
+    const active = patch.status === 'active' || current.active;
+    const next = {
+        ...current,
+        active,
+        name: patch.name !== null ? patch.name : current.name,
+        type: patch.type !== null ? patch.type : current.type,
+        vessel: patch.vessel !== null ? patch.vessel : current.vessel,
+        voice: patch.voice !== null ? patch.voice : current.voice,
+        evidence: patch.evidence !== null ? patch.evidence : current.evidence,
+    };
+    if (!next.active) return normalizeBoundCompanionState(next);
+    if (!next.type || next.type === 'none') next.type = 'other';
+    return normalizeBoundCompanionState(next);
+}
+
+export function boundCompanionDeltaHasChanges(value = {}) {
+    const delta = normalizeBoundCompanionDelta(value);
+    return delta.status !== 'unchanged'
+        || delta.name !== null
+        || delta.type !== null
+        || delta.vessel !== null
+        || delta.voice !== null
+        || delta.evidence !== null;
+}
+
+function normalizeBoundCompanionStatus(value) {
+    const text = String(value ?? 'unchanged').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (['y', 'yes', 'true', 'active', 'activated', 'established'].includes(text)) return 'active';
+    if (['n', 'no', 'false', 'inactive', 'absent', 'removed', 'dismissed', 'severed', 'none'].includes(text)) return 'inactive';
+    return BOUND_COMPANION_STATUSES.includes(text) ? text : 'unchanged';
+}
+
+function normalizeBoundCompanionType(value) {
+    const text = String(value ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (text === 'sentient_item' || text === 'sentient_weapon' || text === 'intelligent_weapon') return 'intelligent_item';
+    if (text === 'spirit' || text === 'bound_entity') return 'bound_spirit';
+    if (text === 'shared_body') return 'shared_vessel';
+    return BOUND_COMPANION_TYPES.includes(text) ? text : 'other';
+}
+
+function normalizeBoundCompanionDeltaType(value) {
+    const text = cleanBoundCompanionDeltaText(value, 80);
+    if (text === null) return null;
+    const normalized = normalizeBoundCompanionType(text);
+    return normalized === 'none' ? null : normalized;
+}
+
+function cleanBoundCompanionText(value, maxLength) {
+    const text = String(value ?? '')
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
+    return text.slice(0, maxLength);
+}
+
+function cleanBoundCompanionDeltaText(value, maxLength) {
+    const text = cleanBoundCompanionText(value, maxLength);
+    return text || null;
 }
 
 export function normalizeTrackerCondition(value) {

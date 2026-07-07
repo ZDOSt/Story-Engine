@@ -1,7 +1,8 @@
-import { ENGINE_PROMPT_TEXT, normalizeSocialResolutionMemory } from './engines.js';
+import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizeSocialResolutionMemory } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
-import { getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
+import { canGenerateRawData, generateRawData, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta } from './world-state.js';
+import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
 
 export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
 export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES };
@@ -13,7 +14,7 @@ const SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
-const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
+const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
 const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
 const POWER_ACTOR_SEVERITIES = Object.freeze(['none', 'minor', 'meaningful', 'major']);
 const POWER_ACTOR_ASSESSMENT_SCOPES = Object.freeze(['individual', 'organization', 'institution', 'group', 'unknown']);
@@ -38,7 +39,7 @@ const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
 ]);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
-    if (!context?.generateRawData && !options?.semanticProfileId && options?.preferToolCall === false) {
+    if (!canGenerateRawData(context) && !options?.semanticProfileId && options?.preferToolCall === false) {
         throw new Error('SillyTavern generateRawData API is unavailable.');
     }
 
@@ -77,7 +78,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
                 throw new Error(`Semantic tool-call pass returned no valid ledger. Generation aborted before narration. ${message}`);
             }
 
-            if (!context?.generateRawData && !options?.semanticProfileId) {
+            if (!canGenerateRawData(context) && !options?.semanticProfileId) {
                 const message = error instanceof Error ? error.message : String(error);
                 throw new Error(`Semantic tool-call transport failed and generateRawData fallback is unavailable. Generation aborted before narration. ${message}`);
             }
@@ -215,14 +216,11 @@ function extractRecentPromptText(promptContext, options = {}) {
 }
 
 async function generateSemanticRaw(context, prompt, responseLength) {
-    if (!context?.generateRawData) {
-        throw new Error('SillyTavern generateRawData API is unavailable.');
-    }
     const options = { prompt };
     if (Number.isFinite(responseLength) && responseLength > 0) {
         options.responseLength = responseLength;
     }
-    return await context.generateRawData(options);
+    return await generateRawData(options, context, { purpose: 'semantic preflight' });
 }
 
 async function generateSemanticRawWithProfile(prompt, responseLength, options = {}) {
@@ -511,10 +509,29 @@ function buildSemanticPreflightSchema() {
             gearRemove: stringListSchema,
             inventoryAdd: stringListSchema,
             inventoryRemove: stringListSchema,
+            currencyAdd: stringListSchema,
+            currencyRemove: stringListSchema,
             tasksAdd: stringListSchema,
             tasksRemove: stringListSchema,
             commitmentsAdd: stringListSchema,
             commitmentsRemove: stringListSchema,
+        },
+    };
+    const boundCompanionDeltaSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['status', 'name', 'type', 'vessel', 'voice', 'evidence'],
+        properties: {
+            status: {
+                type: 'string',
+                enum: ['unchanged', 'active', 'inactive'],
+                description: 'active only when the assembled context explicitly establishes an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant as already active/completed/accepted. inactive only when an established companion is explicitly severed, dismissed, removed, silenced permanently, or destroyed. unchanged for offers, pending pacts, invitations, unclear voices, metaphors, rumors, or no change.',
+            },
+            name: { type: 'string' },
+            type: { type: 'string', enum: ['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other'] },
+            vessel: { type: 'string' },
+            voice: { type: 'string' },
+            evidence: { type: 'string' },
         },
     };
     const injuryEffectSchema = {
@@ -1010,13 +1027,14 @@ function buildSemanticPreflightSchema() {
             trackerUpdateEngine: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['user', 'npcs'],
+                required: ['user', 'npcs', 'boundCompanion'],
                 properties: {
                     user: trackerUserDeltaSchema,
                     npcs: {
                         type: 'array',
                         items: trackerNpcDeltaSchema,
                     },
+                    boundCompanion: boundCompanionDeltaSchema,
                 },
             },
             chaosSemantic: {
@@ -1224,9 +1242,11 @@ const COMPACT_LEDGER_CONTRACT = [
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
     '- Use comma-separated names or (none) for lists. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest, speed contest, or another explicit stakes-bearing objective.',
+    '- ResolutionEngine must separate user-authored internal prose from external action. First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction. When mixed, extract only concrete present external actions and spoken dialogue for identifyGoal, identifyChallenge, targets, actionBucket, actionCount, and actionUnits.',
     '- ResolutionEngine.rollNeeded is the sole semantic roll gate and directly applies DEF.STAKES. Return Y only when success/failure of the latest explicit user goal or challenge creates fresh unresolved stakes: physical risk, harm, danger, detection, material gain/loss, significant trust/status/authority shift, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacle resolution, or explicit goal advancement/failure. Return N for ordinary continuity, no material stakes, a reaction already decided by saved fear/terror, hostility/hatred, persisted intimacy boundary, or a repeated resolved same-bucket negative social attempt against the same NPC/goal under unchanged disposition. Failed/resolved Bluff blocks repeated Bluff; failed/resolved Intimidate blocks repeated Intimidate. Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff. Repeated wording, stronger insults, renewed same-bucket threats, rephrased same-bucket bluffs, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. ResolutionEngine.rollReason must briefly explain why rollNeeded is Y or N and must not contradict the flag: rollNeeded=Y requires fresh unresolved stakes; rollNeeded=N requires no fresh unresolved stakes.',
     '- ResolutionEngine.actionBucket is the roll shape, not a stat choice. Use None when rollNeeded=N. Use Social only for fresh unresolved NPC-facing social pressure, with socialBucket=Diplomacy for good-faith persuasion/negotiation/reassurance, Bluff for deception/lying/misleading/material false claims, and Intimidate for threats/coercion/blackmail/fear-based demands. Use Combat for direct violence or harmful supernatural attacks; combatType=Mundane for bodily/weapon/natural-weapon/ordinary force, and SpellOrSupernatural for the primary attack being a spell, power, curse, elemental blast, psychic attack, or similar. Use Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. If not Social, socialBucket=None. If not Combat, combatType=None.',
-    '- ResolutionEngine.actionUnits breaks the latest explicit {{user}} attempt into the same mechanically counted actions represented by actionCount. actionUnits.count must match actionCount length after the three-action cap. Each action is short clean wording of that action unit; evidence is brief latest-user-text audit evidence. actionUnits does not decide success, failure, outcome, injury, counterattack, or narration.',
+    '- ResolutionEngine.actionCount counts combat attack/effect instances, not sentences or ability names. Count separate attacks/effects even when they share one target, one goal, one sentence, one ability, or one combo, and even when {{user}} gives no number. Repeated same-spell/projectile/strike wording such as "two bolts", "twice", "again", "another", "in succession", "then", "and", or "swing, punch, then knee" must produce separate markers up to the three-action cap. Do not count setup, aiming, focusing, movement, pivoting, defense, or flavor unless that act itself is a separate stakes-bearing attack/effect.',
+    '- ResolutionEngine.actionUnits breaks the latest explicit {{user}} attempt into the same mechanically counted actions represented by actionCount. actionUnits.count must match actionCount length after the three-action cap. Each action is short clean wording of that action unit; evidence is brief latest-user-text audit evidence. Each actionUnit must correspond to exactly one counted attack/effect in order; do not merge attack chains or repeated same-ability attacks into one summary unit. actionUnits does not decide success, failure, outcome, injury, counterattack, or narration.',
     '- ResolutionEngine.identifyTargets.ActionTargets is the direct interaction list. Include every living NPC the latest user input directly addresses, speaks to, answers, asks, thanks, reassures, requests, warns, commands, helps, treats, touches, accompanies, follows, trades with, gives something to, receives something from, attacks, restrains, deceives, negotiates with, or otherwise directly interacts with this turn, whether rollNeeded is Y or N. ActionTargets are broader than OppTargets.NPC. If the latest user input directly involves a living NPC, that NPC belongs in ActionTargets even when the scene is ordinary continuity and OppTargets.NPC is (none). Do not include bystanders, background crowds, inferred listeners, offscreen entities, or hostilesInScene-only NPCs unless the latest user input directly involves them.',
     '- ResolutionEngine.identifyTargets.NPCAwareOfUser is the individual-awareness list. Include only named or clearly individual living NPCs who are present and directly become aware of {{user}} by noticing, looking at, addressing, gesturing to, reacting to, or otherwise individually interacting with {{user}} in the current scene/context, even if {{user}} has not directly acted on them. Exclude groups, crowds, factions, unnamed plural background NPCs, inferred listeners, offscreen entities, and generic bystanders. Example: "the innkeeper looks at {{user}}" belongs in NPCAwareOfUser; "the patrons turn toward the newcomer" does not.',
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
@@ -1254,12 +1274,13 @@ const COMPACT_LEDGER_CONTRACT = [
     '- InjuryEffectEngine target must be the entity actually receiving the impairing effect. HarmedObservers may appear only if they are directly affected by the injury/status effect, not merely emotionally harmed by seeing or caring about another target. Use persistence=lasting and affectsAction=Y only for effects that should impair later action if applied.',
     '- TrackerUpdateEngine is explicit-only visual state tracking. Output deltas only from the latest user input and immediate visible context. Use condition=unchanged, personalitySummary=unchanged, and (none) lists unless a change is explicitly stated.',
     '- TrackerUpdateEngine must never rewrite full inventories, gear, wounds, status, tasks, or commitments from silence. Add only explicit new items/effects/tasks. Remove only explicit dropped/spent/used-up/lost/completed/canceled/failed/abandoned entries. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing.',
-    '- TrackerUpdateEngine must not treat a requested, intended, commanded, allowed, promised, predicted, or pending attempted action as an established wound/status/condition change. "I tell him to hit my arm hard enough to bruise it", "I stab him", or "I let the blow land" is not woundsAdd/statusAdd/condition by itself. "My arm is already bruised", "his arm is bleeding", or "I am poisoned" is.',
+    '- TrackerUpdateEngine must not treat a requested, intended, commanded, allowed, promised, predicted, pending attempted action, remembered event, metaphor, internal sensation, hypothetical, uncertainty, self-question, or subjective self-description as an established wound/status/condition change. "I tell him to hit my arm hard enough to bruise it", "I stab him", "I let the blow land", "I remember being gutted", or "my brain tries to breathe" is not woundsAdd/statusAdd/condition by itself. "My arm is already bruised", "his arm is bleeding", or "I am poisoned" is.',
     '- TrackerUpdateEngine must track only current lasting injuries/status. Do not track momentary pain, impact, a hit landing, being knocked back/down, being winded, losing breath, flinching, staggering, or temporary shock unless the text explicitly establishes an ongoing bruise, cut, bleeding, sprain, break, fracture, poison, sickness, restraint, exhaustion, unconsciousness, or similar continuing state.',
     '- TrackerUpdateEngine NPC revealedName is identity tracking only. If final narration explicitly reveals that an already tracked generic NPC/person/role is actually named something, set NPC to the existing tracker label and revealedName to the revealed proper name. Example: tracked NPC "bystander" says "Torvinash." as an introduction -> NPC=bystander and revealedName=Torvinash. Use revealedName only when the narration semantically identifies which tracked generic NPC received the name; if multiple possible generic NPCs exist and identity is unclear, use (none).',
-    '- TrackerUpdateEngine NPC personalitySummary is optional stable personality memory. If this is the first meaningful tracking of an NPC or the existing personalitySummary is empty, assign a compact natural-language personality seed when card/lore/scenario/context or visible behavior supports one. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerism: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. Mannerism is one optional flexible, scene-valid habit, not a fixed gesture, prop, location, or mandatory repeated beat. If personalitySummary already exists, use unchanged unless durable context clearly contradicts or refines it. Do not write mood, temporary emotion, injuries, relationship state, attraction, fear/hostility level, or what happened this turn.',
+    '- TrackerUpdateEngine NPC personalitySummary is optional stable personality memory. If this is the first meaningful tracking of an NPC or the existing personalitySummary is empty, assign a compact natural-language personality seed when card/lore/scenario/context or visible behavior supports one. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerism: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. A mannerism is one optional specific observable physical tell or habit, such as fidgeting with a sleeve, angling toward exits, tapping a finger while thinking, or touching a charm before speaking. It is not attitude, etiquette, strategy, kindness, politeness, holding a door, asking questions, offering help, making decisions, or any other generic social behavior. Mannerism is flexible, scene-valid, and never a mandatory repeated beat. If personalitySummary already exists, use unchanged unless durable context clearly contradicts or refines it. Do not write mood, temporary emotion, injuries, relationship state, attraction, fear/hostility level, or what happened this turn.',
     'PERSONALITY_ARCHETYPE_GLOSSARY:',
     PERSONALITY_ARCHETYPE_GLOSSARY,
+    '- TrackerUpdateEngine.BoundCompanionState is hidden user state. It may read the entire assembled context: active SillyTavern prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when context explicitly establishes an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant as already active/completed/accepted and able to communicate with {{user}} internally or through the carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Set status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also set status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, "do you accept?" proposals, unclear voices, metaphors, rumors, dreams, hallucination ambiguity, or no change. Do not invent an inner entity. If active, fill name/type/vessel/voice/evidence from explicit context when known; otherwise use (none) for unknown optional fields. Evidence must cite the explicit context fact that makes it established, not a guess.',
     '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory is not tracked. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
     '- PowerActorEnmity is hidden power-actor memory. First assess power candidates semantically, not by keyword/title. A power actor is any entity with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. Ordinary people with only personal reaction are not power actors even if they have a job title.',
@@ -1346,6 +1367,8 @@ TrackerUpdateEngine.User.gearAdd=(none)
 TrackerUpdateEngine.User.gearRemove=(none)
 TrackerUpdateEngine.User.inventoryAdd=(none)
 TrackerUpdateEngine.User.inventoryRemove=(none)
+TrackerUpdateEngine.User.currencyAdd=(none)
+TrackerUpdateEngine.User.currencyRemove=(none)
 TrackerUpdateEngine.User.tasksAdd=(none)
 TrackerUpdateEngine.User.tasksRemove=(none)
 TrackerUpdateEngine.User.commitmentsAdd=(none)
@@ -1361,6 +1384,12 @@ TrackerUpdateEngine.NPC[0].statusAdd=(none)
 TrackerUpdateEngine.NPC[0].statusRemove=(none)
 TrackerUpdateEngine.NPC[0].gearAdd=(none)
 TrackerUpdateEngine.NPC[0].gearRemove=(none)
+TrackerUpdateEngine.BoundCompanionState.status=unchanged
+TrackerUpdateEngine.BoundCompanionState.name=(none)
+TrackerUpdateEngine.BoundCompanionState.type=none
+TrackerUpdateEngine.BoundCompanionState.vessel=(none)
+TrackerUpdateEngine.BoundCompanionState.voice=(none)
+TrackerUpdateEngine.BoundCompanionState.evidence=(none)
 PowerActorAssessment.count=0
 PowerActorAssessment[0].actor=(none)
 PowerActorAssessment[0].scope=unknown
@@ -1496,20 +1525,26 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     const proxyAction = options?.userInputMode === 'proxy'
         ? String(options?.proxyUserAction || '').trim()
         : '';
+    const inlineProxyInstructions = options?.userInputMode === 'proxy'
+        ? []
+        : normalizeInlineProxyInstructions(options?.inlineProxyInstructions);
     const powerActorSnapshot = sanitizePowerActorSnapshotForSemantic(options?.powerActorSnapshot || {});
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const worldStateSnapshot = normalizeWorldState(options?.worldStateSnapshot || {});
+    const boundCompanionSnapshot = normalizeBoundCompanionState(options?.boundCompanionSnapshot || {});
     const dispositionContinuityContext = buildDispositionContinuityContext(trackerSnapshot);
     return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
         `Disposition continuity context (plain-language tracker state for rollNeeded and social buckets; use this to decide whether a current NPC reaction or negative social contest is already settled):\n${dispositionContinuityContext}\n\n` +
         `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
         `User knowledge snapshot JSON (hidden memory about authored or personal facts people may know about {{user}}; use for UserKnowledgeApplication context only, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         `World state snapshot JSON (hidden current scene continuity; use reputationLocation/place as the default current community for EngineContext.userReputationContext.location when applicable):\n${JSON.stringify(worldStateSnapshot, null, 2)}\n\n` +
+        `Bound companion snapshot JSON (hidden user state; current established inner companion, possession/shared vessel, intelligent item/weapon, bound spirit/artifact, or implant if any):\n${JSON.stringify(boundCompanionSnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
         'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
         'Do not narrate. Do not roll dice. Do not calculate outcomes. ' +
         (proxyAction ? `The latest user message used double square brackets for proxy action mode. Treat the inner instruction as {{user}}'s actual attempted action for semantic classification: "${clip(proxyAction, 800)}". Ignore the wrapper brackets themselves. ` : '') +
+        (inlineProxyInstructions.length ? `The latest user message contains inline double square bracket proxy instructions in addition to ordinary user text: ${formatInlineProxyInstructionsForSemantic(inlineProxyInstructions)}. Treat each inline instruction as explicit {{user}}-declared action detail, intent, or conditional reaction for semantic classification. If an inline instruction is conditional, classify it as a prepared conditional action; do not assume the conditioned action occurs, lands, or succeeds unless the condition is satisfied by this turn's scene facts and the action is supported by resolved mechanics. Ignore the wrapper brackets themselves. ` : '') +
         'Classify only contextual/semantic predicates needed by the engines. Use EXPLICIT-ONLY and FIRST-YES-WINS from the engine reference. ' +
         'The semantic/contextual fields you return are authoritative; the deterministic runner should not reinterpret them. ' +
         'rollNeeded is the sole semantic roll gate and directly applies DEF.STAKES. Return rollNeeded=true only for fresh unresolved stakes: success/failure would materially change risk, harm, danger, detection, resources, trust/status/authority, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacles, or explicit goal advancement. Return rollNeeded=false when there are no material stakes, when the only relevant NPC reaction is already settled by saved fear/terror, hostility/hatred, or persisted intimacy boundary, or when the latest input repeats a resolved same-bucket negative social attempt against the same NPC/goal under unchanged disposition. Still return true for separate combat, pursuit, restraint, theft, bargaining, new deception, access, resources, secrets, environmental obstacles, or new material pressure. Failed/resolved Bluff blocks repeated Bluff; failed/resolved Intimidate blocks repeated Intimidate. Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff. Do not treat repeated same-bucket threats, stronger insults, rephrased same-bucket bluffs, renewed same-bucket coercion, or dramatic display after refusal/failure as a fresh social contest. rollReason must be a concise explanation that agrees with rollNeeded: rollNeeded=true requires fresh unresolved stakes, and rollNeeded=false requires no fresh unresolved stakes. ' +
@@ -1526,6 +1561,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Detect user ability/spell attempts before target/risk classification: compare the latest user input against active {{user}}/persona abilities and spells, including the # ABILITIES and # SPELLS character sheet sections, assembled SillyTavern prompt stack, character persona/sheet, scenario, lore/world info, and chat context. Mark ResolutionEngine.userAbilityUse.Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Private delivery phrasing such as "meant only for X", "only X can hear", "whisper so only X hears", "send the words directly/private to X", or "speak into X alone" should match a persona ability/spell whose effect privately carries speech, sound, thought, or message to a target, even if the ability/spell name is not said. Mark Available=Y only if the attempted ability/spell exists in active {{user}} abilities or spells. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability/spell name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect the narrator must preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: ability/spell use is fictional permission/method only, never a bonus, never a dice modifier, never a separate roll, and never a bypass for broader stakes or outcomes. If an available ability/spell is used to deliver a threat, persuasion, attack, escape, healing, or other contested goal, classify and roll the broader goal normally while keeping the ability/spell as delivery/flavor. ' +
         'Detect personal gear/inventory item attempts before target/risk classification. Fill ResolutionEngine.itemUse only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory already carried before the latest input. Personal carried-item signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or equivalent wording that claims {{user}} already has the item on their person or in carried inventory. Mark Available=Y only when that exact attempted personal item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental, scene, or NPC-offered objects, including grabbing, taking, picking up, receiving, finding, searching for, using, breaking, burning, throwing, or moving an object from a table, floor, ground, counter, shelf, corpse, display, container, NPC hand, offered transfer, or any other scene source; those actions remain normal narration/stakes/ENV context, not itemUse. Examples: "I draw my sword" -> Attempted=Y; "I pull my phone from my pocket" -> Attempted=Y; "I grab the sword from the table" -> Attempted=N; "Alice hands me a key and I take it" -> Attempted=N. Do not infer personal item availability from setting likelihood. If Available=N, the personal item effect must not be treated as completed. ' +
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
+        'Separate user-authored internal prose from external action before ResolutionEngine classification. First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction. When mixed, extract only concrete present external actions and spoken dialogue for identifyGoal, identifyChallenge, targets, actionBucket, actionCount, and actionUnits. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
         'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, actionUnits, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
@@ -1536,12 +1572,14 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. Mark knownToActor=Y only for that concrete knowledge path. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
         'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
-        'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
+        'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. Currency changes are finalized post-narration only, so semantic preflight must keep currencyAdd=(none) and currencyRemove=(none). TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
+        'TrackerUpdateEngine.BoundCompanionState reads the full assembled context, not only persona: active prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when explicit established context says an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant is already active/completed/accepted and can communicate with {{user}} internally or through a carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Use status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also use status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, proposals, unclear voices, dreams, hallucination ambiguity, metaphor, rumor, or no explicit change. Do not invent a companion. ' +
         'Use condition=unchanged unless the latest user input or immediate visible context explicitly establishes a completed/current health state as healthy, bruised, wounded, badly_wounded, critical, incapacitated, or dead. Use incapacitated for explicit nonlethal outcomes where the character is alive but cannot meaningfully act. Do not set condition from a desired/requested future injury or from an attempted action before narration confirms the result. ' +
         'Use Add only for explicit gains/new injuries/new effects/new obligations. Use Remove only for explicit dropping, spending, losing, completing, canceling, failing, or abandoning. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does not remove injuries unless the text also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing. Never infer unchanged lists from silence and never output a full replacement list. ' +
-        'Do not mark wounds/status/condition from requested, intended, commanded, allowed, promised, predicted, or pending attempted actions before deterministic resolution; only track state already explicit as current/completed in context. ' +
+        'For semantic preflight, always output currencyAdd=(none) and currencyRemove=(none). Currency spending/gain, price quotes, and pending-price payment confirmation are handled only by the post-narration tracker pass after FINAL_NARRATION exists. ' +
+        'Do not mark wounds/status/condition from requested, intended, commanded, allowed, promised, predicted, pending attempted actions, remembered events, metaphors, internal sensations, hypotheticals, uncertainty, self-questions, or subjective self-description before deterministic resolution; only track state already explicit as current/completed in context. ' +
         'Do not track momentary pain, impact, knockdown, stagger, breath loss, winded reaction, or temporary shock as wounds/status/condition unless an ongoing injury or continuing status is explicitly stated. ' +
-        'For TrackerUpdateEngine NPC revealedName, use semantic identity resolution: when final narration reveals that an existing tracked generic NPC/person/role is named, keep NPC as the existing tracker label and write revealedName as the proper name. This is for renaming generic entries such as bystander, man, stranger, guard, raider, or Unknown Woman once their name is revealed. If several tracked generic NPCs could match and the narration does not clearly identify which one, use (none). For NPC personalitySummary, use stable personality memory only. If this is first meaningful tracking or the current summary is empty, write a compact natural-language seed when explicit card/context or the scene reveals enduring temperament or interaction style. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerism: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. Mannerism is one optional flexible, scene-valid habit, not a fixed gesture, prop, location, or repeated required beat. If an NPC already has a summary, leave unchanged unless durable evidence clearly refines it. Do not summarize mood, attraction, relationship score, fear/hostility, injuries, or temporary reactions. Personality internal pattern glossary: ' + PERSONALITY_ARCHETYPE_GLOSSARY.replace(/\n/g, ' ') + ' ' +
+        'For TrackerUpdateEngine NPC revealedName, use semantic identity resolution: when final narration reveals that an existing tracked generic NPC/person/role is named, keep NPC as the existing tracker label and write revealedName as the proper name. This is for renaming generic entries such as bystander, man, stranger, guard, raider, or Unknown Woman once their name is revealed. If several tracked generic NPCs could match and the narration does not clearly identify which one, use (none). For NPC personalitySummary, use stable personality memory only. If this is first meaningful tracking or the current summary is empty, write a compact natural-language seed when explicit card/context or the scene reveals enduring temperament or interaction style. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; mannerism: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. A mannerism is one optional specific observable physical tell or habit, such as fidgeting with a sleeve, angling toward exits, tapping a finger while thinking, or touching a charm before speaking. It is not attitude, etiquette, strategy, kindness, politeness, holding a door, asking questions, offering help, making decisions, or any other generic social behavior. Mannerism is flexible, scene-valid, and never a mandatory repeated beat. If an NPC already has a summary, leave unchanged unless durable evidence clearly refines it. Do not summarize mood, attraction, relationship score, fear/hostility, injuries, or temporary reactions. Personality internal pattern glossary: ' + PERSONALITY_ARCHETYPE_GLOSSARY.replace(/\n/g, ' ') + ' ' +
         'NPC proactivity cap is deterministic; do not output semantic lines for it. ' +
         'Tie rule override: exact roll ties are cinematic stalemates/struggles, not defender wins; include stakeChangeByOutcome.struggle accordingly. ' +
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
@@ -1730,6 +1768,20 @@ function clip(value, maxLength) {
     return `${text.slice(0, maxLength)}\n[truncated]`;
 }
 
+function normalizeInlineProxyInstructions(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map(item => String(item ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 5);
+}
+
+function formatInlineProxyInstructionsForSemantic(instructions) {
+    return normalizeInlineProxyInstructions(instructions)
+        .map((instruction, index) => `${index + 1}. "${clip(instruction, 300)}"`)
+        .join(' ');
+}
+
 function stripStructuredDebug(text) {
     return String(text ?? '')
         .replace(/````text\s*&lt;pre_flight&gt;[\s\S]*?&lt;\/pre_flight&gt;\s*````\s*/g, '')
@@ -1885,6 +1937,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger?.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
+    if (!ledger?.trackerUpdateEngine?.boundCompanion) missing.push('trackerUpdateEngine.boundCompanion');
     if (!ledger?.chaosSemantic) missing.push('chaosSemantic');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
@@ -1991,11 +2044,19 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.User.gearRemove',
         'TrackerUpdateEngine.User.inventoryAdd',
         'TrackerUpdateEngine.User.inventoryRemove',
+        'TrackerUpdateEngine.User.currencyAdd',
+        'TrackerUpdateEngine.User.currencyRemove',
         'TrackerUpdateEngine.User.tasksAdd',
         'TrackerUpdateEngine.User.tasksRemove',
         'TrackerUpdateEngine.User.commitmentsAdd',
         'TrackerUpdateEngine.User.commitmentsRemove',
         'TrackerUpdateEngine.NPC.count',
+        'TrackerUpdateEngine.BoundCompanionState.status',
+        'TrackerUpdateEngine.BoundCompanionState.name',
+        'TrackerUpdateEngine.BoundCompanionState.type',
+        'TrackerUpdateEngine.BoundCompanionState.vessel',
+        'TrackerUpdateEngine.BoundCompanionState.voice',
+        'TrackerUpdateEngine.BoundCompanionState.evidence',
         'PowerActorAssessment.count',
         'PowerActorEnmity.count',
         'PowerEventShape.count',
@@ -2404,12 +2465,22 @@ function parseCompactLedger(text, trackerSnapshot) {
             gearRemove: readList(fields, 'TrackerUpdateEngine.User.gearRemove'),
             inventoryAdd: readList(fields, 'TrackerUpdateEngine.User.inventoryAdd'),
             inventoryRemove: readList(fields, 'TrackerUpdateEngine.User.inventoryRemove'),
+            currencyAdd: readList(fields, 'TrackerUpdateEngine.User.currencyAdd'),
+            currencyRemove: readList(fields, 'TrackerUpdateEngine.User.currencyRemove'),
             tasksAdd: readList(fields, 'TrackerUpdateEngine.User.tasksAdd'),
             tasksRemove: readList(fields, 'TrackerUpdateEngine.User.tasksRemove'),
             commitmentsAdd: readList(fields, 'TrackerUpdateEngine.User.commitmentsAdd'),
             commitmentsRemove: readList(fields, 'TrackerUpdateEngine.User.commitmentsRemove'),
         },
         npcs: [],
+        boundCompanion: normalizeBoundCompanionDelta({
+            status: fields.get('TrackerUpdateEngine.BoundCompanionState.status'),
+            name: fields.get('TrackerUpdateEngine.BoundCompanionState.name'),
+            type: fields.get('TrackerUpdateEngine.BoundCompanionState.type'),
+            vessel: fields.get('TrackerUpdateEngine.BoundCompanionState.vessel'),
+            voice: fields.get('TrackerUpdateEngine.BoundCompanionState.voice'),
+            evidence: fields.get('TrackerUpdateEngine.BoundCompanionState.evidence'),
+        }),
     };
     for (let index = 0; index < trackerNpcCount; index += 1) {
         const prefix = `TrackerUpdateEngine.NPC[${index}]`;
@@ -2480,6 +2551,8 @@ function parseNarratorTrackerDeltaText(text) {
         'TrackerUpdateEngine.User.gearRemove',
         'TrackerUpdateEngine.User.inventoryAdd',
         'TrackerUpdateEngine.User.inventoryRemove',
+        'TrackerUpdateEngine.User.currencyAdd',
+        'TrackerUpdateEngine.User.currencyRemove',
         'TrackerUpdateEngine.User.tasksAdd',
         'TrackerUpdateEngine.User.tasksRemove',
         'TrackerUpdateEngine.User.commitmentsAdd',
@@ -2488,6 +2561,12 @@ function parseNarratorTrackerDeltaText(text) {
         'UserKnowledgeLedger.personal.count',
         'UserKnowledgeLedger.reputation.count',
         'FameInfamyLedger.count',
+        'BoundCompanionState.status',
+        'BoundCompanionState.name',
+        'BoundCompanionState.type',
+        'BoundCompanionState.vessel',
+        'BoundCompanionState.voice',
+        'BoundCompanionState.evidence',
     ];
     const missing = required.filter(key => !fields.has(key));
     if (missing.length) throw new Error(`tracker delta block missing required lines: ${missing.join(', ')}`);
@@ -2502,11 +2581,23 @@ function parseNarratorTrackerDeltaText(text) {
         gearRemove: readList(fields, 'TrackerUpdateEngine.User.gearRemove'),
         inventoryAdd: readList(fields, 'TrackerUpdateEngine.User.inventoryAdd'),
         inventoryRemove: readList(fields, 'TrackerUpdateEngine.User.inventoryRemove'),
+        currencyAdd: readList(fields, 'TrackerUpdateEngine.User.currencyAdd'),
+        currencyRemove: readList(fields, 'TrackerUpdateEngine.User.currencyRemove'),
         tasksAdd: readList(fields, 'TrackerUpdateEngine.User.tasksAdd'),
         tasksRemove: readList(fields, 'TrackerUpdateEngine.User.tasksRemove'),
         commitmentsAdd: readList(fields, 'TrackerUpdateEngine.User.commitmentsAdd'),
         commitmentsRemove: readList(fields, 'TrackerUpdateEngine.User.commitmentsRemove'),
     };
+    const economy = normalizeEconomyDelta({
+        payPendingPrice: fields.get('EconomyState.payPendingPrice'),
+        clearPendingPrice: fields.get('EconomyState.clearPendingPrice'),
+        pendingPrice: {
+            amount: normalizeCurrencyList([fields.get('EconomyState.pendingPriceAmount')])[0] || '',
+            item: fields.get('EconomyState.pendingPriceItem'),
+            payee: fields.get('EconomyState.pendingPricePayee'),
+            evidence: fields.get('EconomyState.pendingPriceEvidence'),
+        },
+    });
 
     const npcs = [];
     const trackerNpcCount = clampNumber(readNumber(fields, 'TrackerUpdateEngine.NPC.count', 0), 0, 12);
@@ -2582,8 +2673,16 @@ function parseNarratorTrackerDeltaText(text) {
         timeOfDay: fields.get('WorldStateDelta.timeOfDay'),
         weatherTick: fields.get('WorldStateDelta.weatherTick'),
     });
+    const boundCompanion = normalizeBoundCompanionDelta({
+        status: fields.get('BoundCompanionState.status'),
+        name: fields.get('BoundCompanionState.name'),
+        type: fields.get('BoundCompanionState.type'),
+        vessel: fields.get('BoundCompanionState.vessel'),
+        voice: fields.get('BoundCompanionState.voice'),
+        evidence: fields.get('BoundCompanionState.evidence'),
+    });
 
-    return { user, npcs, userKnowledge, userReputation, worldState };
+    return { user, npcs, userKnowledge, userReputation, worldState, economy, boundCompanion };
 }
 
 function sanitizeNarratorTrackerDelta(delta, narration) {
@@ -2599,6 +2698,8 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
         userKnowledge: normalizeUserKnowledgeDelta(delta?.userKnowledge),
         userReputation: normalizeFameInfamyDelta(delta?.userReputation),
         worldState: normalizeWorldStateDelta(delta?.worldState),
+        economy: normalizeEconomyDelta(delta?.economy),
+        boundCompanion: normalizeBoundCompanionDelta(delta?.boundCompanion),
     };
     cleanDelta.npcs = cleanDelta.npcs.filter(item =>
         item?.NPC
@@ -3447,6 +3548,8 @@ function normalizeLedger(ledger) {
         : [];
     ledger.trackerUpdateEngine = ledger.trackerUpdateEngine || {};
     ledger.trackerUpdateEngine.user = normalizeTrackerDelta(ledger.trackerUpdateEngine.user, TRACKER_USER_DELTA_FIELDS);
+    ledger.trackerUpdateEngine.user.currencyAdd = [];
+    ledger.trackerUpdateEngine.user.currencyRemove = [];
     ledger.trackerUpdateEngine.npcs = Array.isArray(ledger.trackerUpdateEngine.npcs)
         ? ledger.trackerUpdateEngine.npcs.map(item => {
             const npc = cleanScalar(item?.NPC);
@@ -3457,6 +3560,7 @@ function normalizeLedger(ledger) {
         };
         }).filter(Boolean)
         : [];
+    ledger.trackerUpdateEngine.boundCompanion = normalizeBoundCompanionDelta(ledger.trackerUpdateEngine.boundCompanion);
     ledger.chaosSemantic = ledger.chaosSemantic || { sceneSummary: '' };
     ledger.proactivitySemantic = {};
     return ledger;
@@ -3948,6 +4052,7 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.trackerUpdateEngine) missing.push('trackerUpdateEngine');
     if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
+    if (!ledger.trackerUpdateEngine?.boundCompanion) missing.push('trackerUpdateEngine.boundCompanion');
     if (!ledger.chaosSemantic) missing.push('chaosSemantic');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
