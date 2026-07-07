@@ -7,9 +7,11 @@ function ResolutionEngine(input) {
     UNIVERSAL:
 'EXPLICIT-ONLY. MUST be stated in Character Card / Lore / Scene text / tracker. NO invention. Uncertain = N or default. FIRST-YES-WINS = first matching explicit rule becomes final. No reconsideration. NEVER invent targets, actions, obstacles, or outcomes. MAX 3 ACTIONS. The semantic pass classifies context only; deterministic code rolls dice, assigns numeric generated stats, calculates margins, landed actions, counter potential, and final outcomes.',
     BUCKETS:
-'Roll buckets are semantic action shapes only. None = ordinary/no-roll scene continuity. Social = NPC-facing social pressure, split into Diplomacy, Bluff, or Intimidate. Combat = direct violence or harmful supernatural attack, split into Mundane or SpellOrSupernatural by the primary attack. Challenge = physical/environmental obstacles, stealth, pursuit, locks, traps, terrain, weather, barriers, or hazards. Deterministic code maps buckets to stats and rolls.',
-    STAKES:
-'Stakes are meaningful possible consequences tied to success or failure. Stakes include physical risk, harm, danger, detection, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Minor mood, flavor, casual rudeness, weak preference, or trivial convenience alone is not stakes. Only new unresolved stakes require a roll. If success/failure would not materially change the outcome, the relevant NPC reaction is already decided by saved disposition/intimacy state, or the same failed/resolved negative social bucket is merely being repeated against the same target for the same goal in the same scene, no roll is needed. Bluff and Intimidate are remembered separately.'
+'Roll buckets are semantic action shapes only. None = ordinary/no-roll scene continuity. Social = NPC-facing social pressure, split into Diplomacy, Bluff, or Intimidate. Combat = direct violence or harmful supernatural attack, split into Mundane or SpellOrSupernatural by the primary attack. Challenge = physical/environmental obstacles, stealth/tailing, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. Deterministic code maps buckets to stats and rolls.',
+    STAKES_POSITIVE:
+'These create stakes when fresh and unresolved: physical risk, harm, danger, risk of being detected, noticed, heard, discovered, identified, exposed, tracked, or followed back, stealth/tailing, infiltration, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, access, secrets, pursuit, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Stealth/tailing attempts such as following someone quietly, trailing at a distance, avoiding notice, staying hidden, sneaking, hiding, or moving without being seen/heard create positive stealth/tailing stakes when success or failure involves risk of being detected, noticed, heard, discovered, identified, exposed, tracked, or followed back.',
+    NO_STAKES:
+'These do not create stakes by themselves: minor mood, flavor, casual rudeness, weak preference, trivial convenience, ordinary scene continuity, already-decided saved disposition/intimacy reactions, or a repeated failed/resolved negative social bucket against the same target and same goal in the same scene under unchanged disposition. Only new unresolved stakes require a roll. If both STAKES_POSITIVE and NO_STAKES appear to apply, STAKES_POSITIVE wins unless the matching positive stake is explicitly already resolved or suppressed by saved/repeated-state rules. Bluff and Intimidate are remembered separately.'
   });
 
   identifyGoal(input):
@@ -17,7 +19,7 @@ function ResolutionEngine(input) {
     finalGoal: return a short, plain description of {{user}}'s finalGoal/intent in the last input
     rule: first-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are user-authored context only, not external actions
     rule: when input mixes introspection with external action or speech, extract only the concrete present external actions, spoken dialogue, object/ability use, movement, attack, or interaction as finalGoal
-    rule: ignore setup, movement, intermediary steps, and post-action flavor unless they are themselves separate consequential actions
+    rule: ignore setup, intermediary steps, and post-action flavor; ignore movement unless it is itself a separate consequential action such as stealth/tailing, chase, escape, forced movement, dangerous terrain, contested access, or positioning under immediate danger
     rule: romantic, flirtatious, affectionate, suggestive, sexual, or intimate talk/contact is not a special roll category by itself. Describe the finalGoal plainly without using an intimacy gate label.
     rule: asking permission, flirting, teasing, reciprocating NPC-initiated flirtation, declarations of love, kisses, embraces, or intimate proposals are ordinary social/scene actions unless the current user input also contains explicit coercion, force, threat, pressure after refusal, or boundary violation.
     rule: otherwise return finalGoal
@@ -27,6 +29,7 @@ function ResolutionEngine(input) {
     rule: return the decisive action, challenge, or explicit attack sequence within {{user}}'s input that carries risk, uncertainty, resistance, or stakes for {{user}}'s finalGoal
     rule: this is the decisive action, challenge, or explicit attack sequence that determines whether {{user}}'s finalGoal succeeds or fails
     rule: copy the concrete action or challenge from {{user}}'s input when possible
+    rule: following, tailing, shadowing, sneaking after, hiding from, avoiding notice, staying unseen/unheard, or moving without being noticed/heard is a stealth/tailing challenge when success or failure creates risk of being detected, noticed, heard, discovered, identified, exposed, tracked, or followed back
     rule: do not use internal dialogue, remembered events, metaphor, subjective sensation, self-perception, uncertainty, or questions to self as the challenge unless they explicitly declare a present external action or objective scene fact
     rule: ignore incidental gestures, flavor, delivery method, setup, movement, or positioning unless that act itself carries stakes or resistance
     rule: if no distinct stakes-bearing challenge exists, return finalGoal
@@ -71,9 +74,9 @@ function ResolutionEngine(input) {
     hostilesInScene.NPC = ALL established, present, living hostile entities in the current scene, whether or not they directly oppose {{user}}'s current action
     ActionTargets = LIVING entities {{user}} directly tries to affect as the main resolution target
     OppTargets.NPC = LIVING entities whose stakes are at risk and who actively or passively oppose, contest, or resist {{user}}'s current action
-    OppTargets.ENV = NON-LIVING environmental or terrain feature, hazard, object, or other obstacle directly obstructing {{user}}'s actions
-    BenefitedObservers = THIRD-PARTY LIVING entities present in scene, not ActionTargets and not OppTargets.NPC, whose stakes materially improve as a result of {{user}}'s actions, as per DEF.STAKES. Protective/rescue contact with an ally, shielding them, pulling/pushing them out of danger, or standing between them and harm makes them BenefitedObservers when {{user}} is not contesting their will, harming them, restraining them, or making them the main opposed challenge. Example: {{user}} pushes a woman out of danger and stands between her and a harasser. Harasser = ActionTargets and OppTargets.NPC; woman = BenefitedObservers.
-    HarmedObservers = THIRD-PARTY LIVING entities present in scene, not ActionTargets and not OppTargets.NPC, whose stakes materially worsen as a result of {{user}}'s actions, as per DEF.STAKES. This requires an explicit material stake, relationship, duty, protection role, authority role, or similar; mere witnessing alone is not enough. Example: {{user}} hurts an NPC while that NPC's father witnesses it. Hurt NPC = ActionTargets and OppTargets.NPC; witnessing father = HarmedObservers.
+    OppTargets.ENV = NON-LIVING obstacle or condition that makes {{user}}'s current goal fail-able, such as locked doors, barriers, terrain, weather, darkness, distance, noise, wards, traps, hazards, objects, or environmental pressure
+    BenefitedObservers = THIRD-PARTY LIVING entities present in scene, not ActionTargets and not OppTargets.NPC, whose stakes materially improve as a result of {{user}}'s actions, as per DEF.STAKES_POSITIVE and DEF.NO_STAKES. Protective/rescue contact with an ally, shielding them, pulling/pushing them out of danger, or standing between them and harm makes them BenefitedObservers when {{user}} is not contesting their will, harming them, restraining them, or making them the main opposed challenge. Example: {{user}} pushes a woman out of danger and stands between her and a harasser. Harasser = ActionTargets and OppTargets.NPC; woman = BenefitedObservers.
+    HarmedObservers = THIRD-PARTY LIVING entities present in scene, not ActionTargets and not OppTargets.NPC, whose stakes materially worsen as a result of {{user}}'s actions, as per DEF.STAKES_POSITIVE and DEF.NO_STAKES. This requires an explicit material stake, relationship, duty, protection role, authority role, or similar; mere witnessing alone is not enough. Example: {{user}} hurts an NPC while that NPC's father witnesses it. Hurt NPC = ActionTargets and OppTargets.NPC; witnessing father = HarmedObservers.
     rule: identify hostilesInScene.NPC before OppTargets.NPC; then identify which of those, if any, directly oppose {{user}}'s current action
     rule: hostilesInScene.NPC is a scene-level hostile pool only; it does not create relationship changes, rolls, NPCInScene entries, or OppTargets.NPC by itself
     rule: hostilesInScene.NPC may include hostile enemies threatening {{user}}, companions, protected NPCs, bystanders, or the scene generally, as long as they are established and present
@@ -97,8 +100,11 @@ function ResolutionEngine(input) {
   rollNeeded(input, finalGoal, challenge, targets, boundaryViolationExplicit, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/proposals/contact are not stakes by themselves.
-    rule: if boundaryViolationExplicit=Y, evaluate stakes normally under DEF.STAKES; boundary violation usually affects autonomy, trust, safety, or social standing.
-    rule: return Y only if success or failure of finalGoal or explicit challenge creates new unresolved stakes for {{user}} or a living entity, as per DEF.STAKES
+    rule: if boundaryViolationExplicit=Y, evaluate stakes normally under DEF.STAKES_POSITIVE and DEF.NO_STAKES; boundary violation usually affects autonomy, trust, safety, or social standing.
+    rule: return Y if success or failure of finalGoal or explicit challenge creates a fresh unresolved positive stake for {{user}} or a living entity, as per DEF.STAKES_POSITIVE
+    rule: return Y for fresh unresolved stealth/tailing goals when success or failure creates risk of being detected, noticed, heard, discovered, identified, exposed, tracked, or followed back, including following someone quietly, trailing them at a distance, avoiding notice, staying hidden, sneaking after them, shadowing them, or moving without being seen/heard
+    rule: return N only when no DEF.STAKES_POSITIVE item is present, or when the matching positive stake is already resolved/suppressed by the saved/repeated-state rules in DEF.NO_STAKES
+    rule: if DEF.STAKES_POSITIVE and DEF.NO_STAKES both seem relevant, DEF.STAKES_POSITIVE wins unless the exact positive stake is explicitly already resolved
     rule: return N if the only relevant NPC reaction is already decided by saved fear/terror, hostility/hatred, or persisted intimacy boundary
     rule: return N for repeated/rephrased/intensified negative social attempts only when the same socialBucket was already resolved against the same target for the same goal in the current scene under unchanged disposition
     rule: Bluff memory blocks repeated Bluff; Intimidate memory blocks repeated Intimidate. Bluff does not block a later Intimidate, and Intimidate does not block a later Bluff.
@@ -110,7 +116,7 @@ function ResolutionEngine(input) {
     rule: None for ordinary roleplay, flavor, conversation, scene state, already-decided disposition reactions, harmless utility ability/spell use outside combat, or any action where rollNeeded=N
     rule: Social when the fresh unresolved challenge is convincing, bargaining, persuading, deceiving, misleading, bluffing, intimidating, threatening, coercing, or otherwise socially pressuring a living NPC
     rule: Combat when {{user}} directly attacks, harms, restrains violently, or uses a harmful spell/supernatural effect as the primary contested action against a living target
-    rule: Challenge for physical/environmental obstacles, stealth, escape, chase, locks, traps, terrain, weather, barriers, hazards, or non-living opposition
+    rule: Challenge for physical/environmental obstacles, stealth/tailing, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, or non-living opposition
     return None|Social|Combat|Challenge
 
   socialBucket(input, finalGoal, challenge, targets, context):
@@ -159,7 +165,7 @@ function ResolutionEngine(input) {
   environmentDifficultyTier(actionBucket, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: applies only when actionBucket=Challenge and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure
-    rule: easy = easy/trivial/routine/weak/lightly obstructed; if no real stakes exist, use rollNeeded=N instead of an ENV tier
+    rule: easy = easy/trivial/routine/weak/lightly obstructed; if no fresh unresolved positive stake exists, use rollNeeded=N instead of an ENV tier
     rule: average = meaningful obstacle a capable person could plausibly fail
     rule: hard = serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk
     rule: extreme = exceptional, dangerous, fortified, overwhelming, or near-impossible environmental opposition
@@ -272,8 +278,8 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   stakeChangeByOutcome(npc, resolutionPacket):
     policy: EO, FYW
-    rule: for each possible resolution outcome, return benefit only if that outcome significantly and concretely improves this NPC's stakes as per DEF.STAKES
-    rule: return harm if that outcome materially worsens this NPC's stakes as per DEF.STAKES
+    rule: for each possible resolution outcome, return benefit only if that outcome significantly and concretely improves this NPC's stakes as per DEF.STAKES_POSITIVE and DEF.NO_STAKES
+    rule: return harm if that outcome materially worsens this NPC's stakes as per DEF.STAKES_POSITIVE and DEF.NO_STAKES
     rule: return none if that outcome does not materially change this NPC's stakes
     rule: do NOT return benefit merely because {{user}} succeeds at {{user}}'s own goal, negotiates successfully for {{user}}, chooses not to harm the NPC, fails to harm the NPC, de-escalates without giving the NPC a concrete gain, or because the NPC remains unharmed/safe
     rule: if resolutionPacket.boundaryViolationExplicit=Y and this NPC is the direct/opposing boundary target, successful or landed outcomes [success, dominant_impact, solid_impact, light_impact] worsen this NPC's boundary/autonomy/trust stakes; return harm, not none
