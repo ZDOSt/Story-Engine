@@ -88,8 +88,6 @@ import {
     safeSceneHealingAmount,
 } from './health-state.js';
 import { normalizeWorldState } from './world-state.js';
-import { normalizeEconomyState } from './economy.js';
-import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
 
 const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
@@ -141,10 +139,6 @@ function normalizeEnvironmentDifficultyForRoll(value) {
     }
     const number = Number(value);
     return [0, 4, 8, 12].includes(number) ? number : 0;
-}
-
-function woundPenaltyAppliesToResolution(actionBucket, oppStat) {
-    return actionBucket === 'Combat' || oppStat === 'ENV';
 }
 
 function environmentDifficultySource(semantic = {}) {
@@ -390,25 +384,6 @@ export function buildWorldStateSnapshot(context) {
     return normalizeWorldState(context?.chatMetadata?.structuredPreflightTracker?.worldState || {});
 }
 
-export function buildEconomySnapshot(context) {
-    return normalizeEconomyState(context?.chatMetadata?.structuredPreflightTracker?.economy || {});
-}
-
-export function buildAdventureIntroNameGeneration(context, adventurePrompt = '') {
-    const audit = [];
-    const prompt = String(adventurePrompt || '').trim();
-    const ledger = {
-        chaosSemantic: { sceneSummary: prompt },
-        resolutionEngine: {
-            identifyGoal: 'Adventure intro',
-            identifyChallenge: prompt,
-            explicitMeans: prompt,
-        },
-        relationshipEngine: [],
-    };
-    return runNameGeneration(ledger, audit, context, 'adventure_intro');
-}
-
 export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (!context?.chatMetadata || !trackerUpdate) return;
 
@@ -419,7 +394,6 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.userReputation = normalizeUserReputation(root.userReputation || {});
     root.worldState = normalizeWorldState(root.worldState || {});
-    root.economy = normalizeEconomyState(root.economy || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
 
@@ -450,9 +424,6 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.worldState) {
         root.worldState = normalizeWorldState(trackerUpdate.worldState);
     }
-    if (trackerUpdate.economy) {
-        root.economy = normalizeEconomyState(trackerUpdate.economy);
-    }
     if (trackerUpdate.health) {
         root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
     } else {
@@ -463,7 +434,11 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
 
     if (options.save === false) return;
 
-    await persistMetadata(context);
+    if (typeof context.saveMetadataDebounced === 'function') {
+        context.saveMetadataDebounced();
+    } else if (typeof context.saveMetadata === 'function') {
+        await context.saveMetadata();
+    }
 }
 
 export function normalizeRapportClockState(value = {}) {
@@ -2424,11 +2399,10 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             }
         }
 
-        const woundPenaltyApplies = woundPenaltyAppliesToResolution(actionBucket, oppStat);
-        userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded, { allowRollPenalty: woundPenaltyApplies });
+        userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded);
         const impairmentPenalty = Number(userImpairment?.AppliedToRoll === 'Y' ? userImpairment.RollPenalty : 0);
         npcImpairment = oppStat !== 'ENV' && oppTargetsNpcFirst
-            ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, rollNeeded, { allowRollPenalty: actionBucket === 'Combat' })
+            ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, rollNeeded)
             : noNpcImpairment('no opposing NPC roll');
         const npcImpairmentPenalty = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
         const atkDie = rollPool[0];
@@ -2820,7 +2794,6 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         const handoff = {
             NPC: npc,
             FinalState: `B${currentDisposition.B}/F${currentDisposition.F}/H${currentDisposition.H}`,
-            InitPreset: initMetadata?.label || 'existing',
             Lock: classified.lock,
             Behavior: classified.behavior,
             Target: target,
@@ -3606,10 +3579,7 @@ function unwrapStructuredUserInputText(text) {
     if (trimmed.length >= 4 && trimmed.startsWith('((') && trimmed.endsWith('))')) {
         return trimmed.slice(2, -2).trim();
     }
-    return trimmed
-        .replace(/\[\[([\s\S]*?)\]\]/g, (_match, inner) => ` ${String(inner ?? '').trim()} `)
-        .replace(/\s+/g, ' ')
-        .trim();
+    return trimmed;
 }
 
 function normalizeNameSeed(seed) {
@@ -3999,7 +3969,7 @@ function registerGeneratedName(context, name, meta) {
         savedAt: Date.now(),
     };
     context.chatMetadata[NAME_REGISTRY_KEY] = root;
-    saveMetadataDebounced(context, { warn: false });
+    if (typeof context.saveMetadataDebounced === 'function') context.saveMetadataDebounced();
 }
 
 function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, nonLethal = 'N', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
@@ -5211,11 +5181,10 @@ function actionIsPermittedIncapacitatedSpeech(actionFunctions = [], state = {}) 
     return !/\b(unconscious|knocked out|asleep|sedated|drugged|gagged|mouth covered|muzzled|silenced|mute|voiceless|paraly[sz]ed|paralysis|frozen|stasis)\b/.test(text);
 }
 
-function evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded, options = {}) {
+function evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded) {
     const user = getEffectiveUserImpairmentState(ledger, context);
     const sources = collectImpairmentSources(user, true);
     if (!sources.length) return noUserImpairment();
-    const allowRollPenalty = options?.allowRollPenalty !== false;
 
     const actionText = [
         semantic?.identifyGoal,
@@ -5242,7 +5211,7 @@ function evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollN
     const penalty = best.source.type === 'condition'
         ? hiddenHealthPenaltyForCondition(best.source.label)
         : USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
-    const applied = rollNeeded === 'Y' && allowRollPenalty && penalty < 0 ? 'Y' : 'N';
+    const applied = rollNeeded === 'Y' && penalty < 0 ? 'Y' : 'N';
     const matchedText = unique(best.matched).join(', ');
     const affectedText = unique(best.source.functions).join(', ');
 
@@ -5260,12 +5229,11 @@ function evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollN
     };
 }
 
-function evaluateNpcImpairment(npcName, ledger, trackerSnapshot, semantic, goal, npcStat, rollNeeded, options = {}) {
+function evaluateNpcImpairment(npcName, ledger, trackerSnapshot, semantic, goal, npcStat, rollNeeded) {
     if (!isReal(npcName)) return noNpcImpairment('no NPC named');
     const npc = getEffectiveNpcImpairmentState(npcName, ledger, trackerSnapshot);
     const sources = collectImpairmentSources(npc, false);
     if (!sources.length) return noNpcImpairment();
-    const allowRollPenalty = options?.allowRollPenalty !== false;
 
     const actionText = [
         semantic?.identifyGoal,
@@ -5295,7 +5263,7 @@ function evaluateNpcImpairment(npcName, ledger, trackerSnapshot, semantic, goal,
     const penalty = best.source.type === 'condition'
         ? hiddenHealthPenaltyForCondition(best.source.label)
         : USER_IMPAIRMENT_STAGE[best.source.stage]?.penalty ?? 0;
-    const applied = rollNeeded === 'Y' && allowRollPenalty && penalty < 0 ? 'Y' : 'N';
+    const applied = rollNeeded === 'Y' && penalty < 0 ? 'Y' : 'N';
     const matchedText = unique(best.matched).join(', ');
     const affectedText = unique(best.source.functions).join(', ');
 
@@ -5707,7 +5675,6 @@ function applyTrackerDeltaToState(before, delta, includePlayerFields) {
     };
     if (includePlayerFields) {
         result.inventory = [...source.inventory];
-        result.currency = [...source.currency];
         result.tasks = [...source.tasks];
         result.commitments = [...source.commitments];
     }

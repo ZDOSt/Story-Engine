@@ -3,33 +3,20 @@ import { ENGINE_PROMPT_TEXT, classifyDisposition, normalizeTrackerEntry, normali
 import {
     addEphemeralStoppingString,
     applyConnectionProfileName,
-    canSubscribeToEvent,
-    clearNotification,
     extension_settings,
     flushEphemeralStoppingStrings,
-    generateRawData,
     getActiveConnectionProfileName,
     getConnectionProfileByName,
     getConnectionProfileNames,
     getPersonaText,
     getUserName,
-    notifyError,
-    notifyInfo,
-    notifySuccess,
-    offEvent,
-    onEvent,
-    onDomReady,
-    persistMetadata as persistAdapterMetadata,
     readActiveConnectionProfileName,
-    saveChat,
-    saveMetadataDebounced,
     saveSettingsDebounced,
-    stopGeneration,
     writePersonaDescription,
 } from './st-adapter.js';
-import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
+import { formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildEconomySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -47,7 +34,6 @@ import {
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
-import { applyCurrencyDelta, applyEconomyDelta, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, renderEconomyTrackerContext } from './economy.js';
 
 
 const EXTENSION_NAME = 'Story Engine';
@@ -183,20 +169,20 @@ const PLAYER_GENRE_CHOICES = Object.freeze([
     'Wuxia / Xianxia',
 ]);
 const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
-    Fantasy: 'Genre flavor: show fantasy through magic, myth, wilderness, old ruins, factions, faith, monsters, danger, opportunity, or social context when scene-valid.',
-    'Sci-fi': 'Genre flavor: show science fiction through technology, alien or future context, artificial intelligence, institutions, exploration, technical danger, or social systems when scene-valid.',
-    Modern: 'Genre flavor: show a contemporary or near-real-world setting through ordinary technology, public life, work, school, travel, money, crime, family, community, or social pressure when scene-valid.',
-    'Slice of Life': 'Genre flavor: show slice of life through routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or everyday detail when scene-valid.',
-    Isekai: 'Genre flavor: show anime isekai through progression, guilds, ranks, skills, dungeons, factions, companions, social consequences, danger, comedy, wonder, romance tension, strange races, and powerful beings when scene-valid.',
-    'Urban Fantasy': 'Genre flavor: show urban fantasy through ordinary life and supernatural pressure occupying the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or public-world friction when scene-valid.',
-    Cyberpunk: 'Genre flavor: show cyberpunk through technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity when scene-valid.',
-    'Post-Apocalyptic': 'Genre flavor: show life after collapse through scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, or moral pressure when scene-valid.',
-    Horror: 'Genre flavor: show horror through visible wrongness, damage, sound, absence, distance, blocked access, strange behavior, darkness, threat, or mystery when scene-valid.',
-    Supernatural: 'Genre flavor: show the supernatural through spirits, hauntings, curses, omens, possession, occult evidence, strange powers, liminal places, unseen forces, or mortal consequences when scene-valid.',
-    Superhero: 'Genre flavor: show superhero fiction through powers, public danger, secrecy, reputation, law, media, villains, institutions, bystanders, collateral risk, or civic pressure when scene-valid. Do not narrate {{user}} using powers unless {{user}} chooses to.',
-    Steampunk: 'Genre flavor: show steampunk through steam industry, brass machinery, smoke, class, empire, invention, mechanical danger, expedition pressure, or social hierarchy when scene-valid.',
-    Historical: 'Genre flavor: show a plausible historical or historically inspired setting through tools, law, custom, class, labor, travel, conflict, technology limits, public life, or social obligation when scene-valid.',
-    'Wuxia / Xianxia': 'Genre flavor: show martial or cultivation fiction through honor, danger, rivalry, spiritual pressure, sect or clan influence, debt, beasts, duels, cultivation, immortal politics, or mythic stakes when scene-valid.',
+    Fantasy: 'Start with a short playable opening scene that clearly belongs to fantasy. Let the genre show through concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, or other immediate scene evidence.',
+    'Sci-fi': 'Start with a short playable opening scene that clearly belongs to science fiction. Let the genre show through concrete surroundings, visible pressure, technology, alien or future context, artificial intelligence, corporate or institutional systems, exploration, technical danger, or other immediate scene evidence.',
+    Modern: 'Start with a short playable opening scene that clearly belongs to a contemporary real-world or near-real-world setting. Let the genre show through concrete surroundings, visible pressure, ordinary technology, public life, work, school, travel, money, crime, family, community, or other immediate scene evidence.',
+    'Slice of Life': 'Start with a short playable opening scene that clearly belongs to slice of life. Let the genre show through concrete surroundings, routine pressure, social contact, obligation, inconvenience, interruption, opportunity, awkwardness, small conflict, or other immediate scene evidence.',
+    Isekai: 'Start with a short playable opening scene that clearly belongs to isekai. Briefly narrate {{user}}\'s final moments on Earth, then move directly into the first playable scene as a fully settled fantasy opening. The crossing may be implied by the scene itself or shown through an original, scene-specific transition, aftermath, summoning, audience, goddess encounter, ritual room, portal residue, or similar logic. Use the same descriptive richness as the Fantasy genre: concrete surroundings, visible pressure, social context, danger, opportunity, magic, myth, monsters, politics, faith, wilderness, settlement life, old ruins, or other immediate scene evidence. If the first scene is a meeting, audience, summons, chamber, or conversation with a goddess or other being, treat that as the scene itself and describe it vividly. Do not narrate awakening, landing mechanics, self-discovery, or the transfer itself in the playable scene. The opening should feel like a normal fantasy scene that happens after an isekai crossing.\n\nMANDATORY CONSTRAINTS, FORBIDDEN, DO NOT DO ANY OF THE FOLLOWING:\n\n- USE a car crash, dying on a road, hitting asphalt, or hitting the curb, or ANYTHING that would imply that {{user}} died in a car accident. This is NON-NEGOTIABLE. The opening MUST BE UNIQUE.\n- DO NOT NARRATE {{user}}\'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.\n- DO NOT NARRATE {{user}} actions such as "you push yourself up" or "you open your eyes."',
+    'Urban Fantasy': 'Start with a short playable opening scene that clearly belongs to urban fantasy. Let the genre show through concrete surroundings where ordinary life and supernatural pressure occupy the same scene: magic, creatures, curses, occult politics, hidden societies, paranormal intrusion, or other immediate scene evidence.',
+    Cyberpunk: 'Start with a short playable opening scene that clearly belongs to cyberpunk. Let the genre show through concrete surroundings, visible pressure, technology, surveillance, corporate power, street life, debt, crime, body modification, data, machinery, social inequality, danger, or opportunity.',
+    'Post-Apocalyptic': 'Start with a short playable opening scene that clearly belongs to life after collapse. Let the genre show through concrete surroundings, visible pressure, scarcity, shelter, ruined infrastructure, fragile communities, weather exposure, failing supplies, distant threat, moral pressure, or other immediate scene evidence.',
+    Horror: 'Start with a short playable opening scene that clearly belongs to horror. Let the genre show through concrete surroundings, visible wrongness, damage, sound, absence, distance, blocked access, strange behavior, darkness, threat, mystery, or other immediate scene evidence.',
+    Supernatural: 'Start with a short playable opening scene that clearly belongs to the supernatural. Let the genre show through concrete surroundings, visible pressure, spirits, hauntings, curses, omens, possession, occult evidence, strange powers, liminal places, unseen forces, or other immediate scene evidence.',
+    Superhero: 'Start with a short playable opening scene that clearly belongs to superhero fiction. Let the genre show through concrete surroundings, visible pressure, powers, public danger, secrecy, reputation, law, media, villains, institutions, bystanders, collateral risk, or other immediate scene evidence. Do not narrate {{user}} using powers unless {{user}} chooses to.',
+    Steampunk: 'Start with a short playable opening scene that clearly belongs to steampunk. Let the genre show through concrete surroundings, visible pressure, steam industry, brass machinery, smoke, class, empire, invention, mechanical danger, expedition pressure, or other immediate scene evidence.',
+    Historical: 'Start with a short playable opening scene that clearly belongs to a plausible historical or historically inspired setting. Let the genre show through concrete surroundings, visible pressure, tools, law, custom, class, labor, travel, conflict, technology limits, public life, or other immediate scene evidence.',
+    'Wuxia / Xianxia': 'Start with a short playable opening scene that clearly belongs to martial or cultivation fiction. Let the genre show through concrete surroundings, visible pressure, honor, danger, rivalry, spiritual pressure, sect or clan influence, debt, beasts, duels, cultivation, immortal politics, or other immediate scene evidence.',
 });
 const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`OPENING CONTRACT:
 Keep the opening short: 150-200 words.
@@ -215,18 +201,10 @@ Do not explain the world. Do not summarize lore. Let the scene imply the genre.
 End at the first concrete moment where {{user}} can act.`;
 
 const PLAYER_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMINDER:
-Begin the opening scene now. Do not explain the setup, instructions, process, or reasoning.
-
-Use the selected genre and surrounding context already provided.
-
-Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
-
-const PLAYER_ISEKAI_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMINDER:
-Begin the Earth transition, then continue directly into the new-world opening. Do not explain the setup, instructions, process, or reasoning.
-
-Do NOT skip the required isekai seeds. Do NOT choose a different transfer or starting setup.
-
-Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
+This is the opening of a new adventure.
+Narrate the opening scene immediately.
+Do not mention readiness, instructions, process, or meta commentary.
+Use the selected genre and the surrounding context already provided.`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;
 const PLAYER_SETUP_SHEET_RESPONSE_LENGTH = 3600;
 const NAME_STYLE_OPTIONS = Object.freeze([
@@ -2429,17 +2407,25 @@ function cancelStoryEnginePipeline(reason = 'generation stopped') {
 
 function showProgress(message) {
 
-    clearAllProgress();
+    try {
 
-    const toast = notifyInfo(message, EXTENSION_NAME, { timeOut: 0, extendedTimeOut: 0 });
+        if (globalThis.toastr?.info) {
 
-    state.progressToast = toast || null;
+            clearAllProgress();
 
-    if (toast) {
+            const toast = globalThis.toastr.info(message, EXTENSION_NAME, { timeOut: 0, extendedTimeOut: 0 });
 
-        state.progressToasts.add(toast);
+            state.progressToast = toast || null;
 
-        return toast;
+            if (toast) state.progressToasts.add(toast);
+
+            return toast;
+
+        }
+
+    } catch {
+
+        // Progress UI is optional; generation must not depend on it.
 
     }
 
@@ -2453,7 +2439,11 @@ function clearProgress(toast) {
 
     try {
 
-        clearNotification(toast);
+        if (toast && globalThis.toastr?.clear) {
+
+            globalThis.toastr.clear(toast);
+
+        }
 
         if (toast) {
 
@@ -2519,7 +2509,19 @@ function clearPostNarrationFinalizerTimers() {
 function showBlockingError(error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    notifyError(message, `${EXTENSION_NAME}: generation aborted`, { timeOut: 15000, extendedTimeOut: 15000 });
+    try {
+
+        if (globalThis.toastr?.error) {
+
+            globalThis.toastr.error(message, `${EXTENSION_NAME}: generation aborted`, { timeOut: 15000, extendedTimeOut: 15000 });
+
+        }
+
+    } catch {
+
+        // Toasts are best-effort only.
+
+    }
 
     console.error(`[${EXTENSION_NAME}] generation aborted`, error);
 
@@ -2556,12 +2558,11 @@ function getTrackerRoot(context = getContext()) {
     root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
     root.worldState = normalizeWorldState(root.worldState || {});
-    root.economy = normalizeEconomyState(root.economy || {});
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
-    if (seededPlayerTracker) {
+    if (seededPlayerTracker && typeof context.saveMetadataDebounced === 'function') {
 
-        saveMetadataDebounced(context);
+        context.saveMetadataDebounced();
 
     }
 
@@ -2674,7 +2675,7 @@ function getPersonaCoreStats(context = getContext()) {
 function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
     if (!root || root.personaInventorySeeded) return false;
     const user = normalizeTrackerUserState(root.user || {});
-    if (user.gear.length || user.inventory.length || user.currency.length) {
+    if (user.gear.length || user.inventory.length) {
         root.user = user;
         root.personaInventorySeeded = { skipped: true, reason: 'tracker_already_has_items', at: Date.now() };
 
@@ -2688,7 +2689,7 @@ function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
 
     const seed = extractPersonaTrackerSeed(persona);
 
-    if (!seed.gear.length && !seed.inventory.length && !seed.currency.length) return false;
+    if (!seed.gear.length && !seed.inventory.length) return false;
 
 
 
@@ -2699,8 +2700,6 @@ function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
         gear: seed.gear,
 
         inventory: seed.inventory,
-
-        currency: seed.currency,
 
     });
 
@@ -2713,8 +2712,6 @@ function seedPlayerTrackerFromPersonaIfEmpty(root, context = getContext()) {
         gearCount: seed.gear.length,
 
         inventoryCount: seed.inventory.length,
-
-        currencyCount: seed.currency.length,
 
     };
     return true;
@@ -2729,14 +2726,12 @@ function reseedPlayerTrackerFromPersona(root, context = getContext()) {
         ...user,
         gear: seed.gear,
         inventory: seed.inventory,
-        currency: seed.currency,
     });
     root.personaInventorySeeded = {
         at: Date.now(),
         hash: hashTextForSeed(persona),
         gearCount: seed.gear.length,
         inventoryCount: seed.inventory.length,
-        currencyCount: seed.currency.length,
         forced: true,
     };
     return true;
@@ -2745,9 +2740,7 @@ function reseedPlayerTrackerFromPersona(root, context = getContext()) {
 function extractPersonaTrackerSeed(personaText) {
     const gear = [];
     const inventory = [];
-    const currency = [];
     const explicitGear = extractPersonaListSection(personaText, ['gear', 'equipment', 'equipped']);
-    const explicitCurrency = extractPersonaListSection(personaText, ['currency', 'money', 'coins', 'coin purse', 'funds']);
 
     const explicitInventory = extractPersonaListSection(personaText, ['inventory', 'items', 'carried items']);
 
@@ -2755,15 +2748,7 @@ function extractPersonaTrackerSeed(personaText) {
 
     for (const item of explicitGear) addUniqueTrackerSeedItem(gear, item);
 
-    for (const item of explicitCurrency) addUniqueTrackerSeedItem(currency, item);
-
     for (const item of explicitInventory) {
-
-        if (!explicitCurrency.length && addPersonaCurrencyIfValid(currency, item)) {
-
-            continue;
-
-        }
 
         if (!explicitGear.length && looksLikeEquippedGear(item)) {
 
@@ -2779,17 +2764,8 @@ function extractPersonaTrackerSeed(personaText) {
 
 
 
-    return { gear, inventory, currency: normalizeCurrencyList(currency) };
+    return { gear, inventory };
 
-}
-
-function addPersonaCurrencyIfValid(list, item) {
-    const text = String(item || '').trim();
-    if (!/^(?:\$\s*\d|\d+(?:\.\d{1,2})?\s*(?:sv|silver|silvers|silver coins?|cr|credits?|dollars?|usd|crowns?|crn)\b)/i.test(text)) return false;
-    const normalized = normalizeCurrencyList([item]);
-    if (!normalized.length) return false;
-    addUniqueTrackerSeedItem(list, normalized[0]);
-    return true;
 }
 
 
@@ -3939,7 +3915,6 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     const userKnowledge = mergeUserKnowledgeLedger(pendingRun?.userKnowledgeBefore || {}, pendingRun?.userKnowledgeAfter || {});
     const userReputation = mergeUserReputationLedger(pendingRun?.userReputationBefore || {}, pendingRun?.userReputationAfter || {});
     const worldState = normalizeWorldState(pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {});
-    const economy = normalizeEconomyState(pendingRun?.economyAfter || pendingRun?.economyBefore || {});
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -3962,7 +3937,6 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         userKnowledge,
         userReputation,
         worldState,
-        economy,
         npcs: promotionResult.npcs,
     };
     const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
@@ -3983,8 +3957,6 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
-    const economySnapshot = pendingGeneration?.economySnapshot || buildEconomySnapshot(context);
-    const nameGeneration = pendingGeneration?.nameGenerationSnapshot || {};
     const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
         npcs: trackerSnapshot,
@@ -4009,8 +3981,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             npcHandoffs: [],
             proactivityResults: {},
             aggressionResults: {},
-            nameGeneration,
-            isekaiOpeningSeed: pendingGeneration?.isekaiOpeningSeed || null,
+            nameGeneration: {},
             sceneState: worldStateSnapshot,
         },
         trackerUpdate: {
@@ -4020,7 +3991,6 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             userKnowledge: {},
             userReputation: {},
             worldState: worldStateSnapshot,
-            economy: economySnapshot,
         },
     };
     return {
@@ -4040,16 +4010,11 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         userReputationAfter: {},
         worldStateBefore: worldStateSnapshot,
         worldStateAfter: worldStateSnapshot,
-        economyBefore: economySnapshot,
-        economyAfter: economySnapshot,
-        nameGeneration,
         resolutionPacket: report.finalNarrativeHandoff.resolutionPacket,
         userCoreStats: playerTrackerSnapshot?.coreStats || null,
         contextualInjuryCaps: [],
         latestUserText: '',
         adventureIntro: true,
-        adventureGenre: pendingGeneration?.adventureGenre || getActiveAdventureGenre(context),
-        isekaiOpeningSeed: pendingGeneration?.isekaiOpeningSeed || null,
         narratorModelContext,
         report,
     };
@@ -4236,7 +4201,6 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null) 
         userKnowledge: mergeUserKnowledgeLedger(displaySnapshot?.userKnowledge || {}, {}),
         userReputation: mergeUserReputationLedger(displaySnapshot?.userReputation || {}, {}),
         worldState: normalizeWorldState(displaySnapshot?.worldState || {}),
-        economy: normalizeEconomyState(displaySnapshot?.economy || {}),
     };
     if (hiddenHealth) {
         update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
@@ -4250,20 +4214,11 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     if (!snapshot || !delta) return snapshot;
 
     const merged = clone(snapshot);
-    const economyBefore = normalizeEconomyState(merged.economy || options.economyBefore || {});
-    const economyDelta = delta.economy || {};
-    const userDelta = {
-        ...(delta.user || {}),
-        currencyRemove: mergePendingPricePaymentCurrencyRemove(delta.user?.currencyRemove || [], economyBefore, economyDelta),
-    };
-    merged.user = applyTrackerDeltaToUserState(merged.user || {}, userDelta);
+    merged.user = applyTrackerDeltaToUserState(merged.user || {}, delta.user || {});
     merged.userKnowledge = mergeUserKnowledgeLedger(merged.userKnowledge || options.userKnowledgeBefore || {}, delta.userKnowledge || {});
     merged.userReputation = mergeUserReputationLedger(merged.userReputation || options.userReputationBefore || {}, delta.userReputation || {});
     merged.worldState = applyWorldStateDelta(merged.worldState || options.worldStateBefore || {}, delta.worldState || {}, {
         seed: options.messageKey || options.assistantText || '',
-    });
-    merged.economy = applyEconomyDelta(economyBefore, economyDelta, {
-        messageKey: options.messageKey || '',
     });
     const npcs = normalizeDisplayTrackerNpcs(merged.npcs || {});
     for (const npcDelta of delta.npcs || []) {
@@ -4312,11 +4267,10 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
 
     merged.postNarrationTrackerDelta = {
         updatedAt: Date.now(),
-        userChanged: trackerDeltaHasChanges(userDelta, true),
+        userChanged: trackerDeltaHasChanges(delta.user, true),
         npcChanged: (delta.npcs || []).some(item => trackerDeltaHasChanges(item, false)),
         userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
         worldStateChanged: worldStateDeltaHasChanges(delta.worldState),
-        economyChanged: economyDeltaHasChanges(economyDelta),
     };
     return merged;
 }
@@ -4369,11 +4323,6 @@ function worldStateDeltaHasChanges(delta) {
         || delta.weatherTick === 'tick';
 }
 
-function economyDeltaHasChanges(delta) {
-    if (!delta || typeof delta !== 'object') return false;
-    return Boolean(delta.payPendingPrice || delta.clearPendingPrice || delta.pendingPrice);
-}
-
 
 function findExistingTrackerName(npcs, wantedName) {
     const wanted = String(wantedName || '').trim().toLowerCase();
@@ -4398,7 +4347,7 @@ function trackerDeltaHasChanges(delta, includePlayerFields) {
 
     const fields = includePlayerFields
 
-        ? ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']
+        ? ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']
 
         : ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove'];
 
@@ -4424,8 +4373,6 @@ function applyTrackerDeltaToUserState(before, delta) {
 
         inventory: [...source.inventory],
 
-        currency: [...source.currency],
-
         tasks: [...source.tasks],
 
         commitments: [...source.commitments],
@@ -4443,8 +4390,6 @@ function applyTrackerDeltaToUserState(before, delta) {
     result.gear = applyTrackerListDelta(result.gear, delta?.gearAdd, delta?.gearRemove);
 
     result.inventory = applyTrackerListDelta(result.inventory, delta?.inventoryAdd, delta?.inventoryRemove);
-
-    result.currency = applyCurrencyDelta(result.currency, delta?.currencyAdd, delta?.currencyRemove);
 
     result.tasks = applyTrackerListDelta(result.tasks, delta?.tasksAdd, delta?.tasksRemove);
 
@@ -5187,12 +5132,10 @@ function buildTrackerDisplayHtml(snapshot) {
             </div>`;
     const userGearInventoryHtml = editingUserItems
         ? [
-            trackerDisplayItemList('Currency', user.currency, { empty: 'No currency tracked' }),
             trackerEditableUserItemList('Inventory', 'inventory', user.inventory),
             trackerEditableUserItemList('Gear', 'gear', user.gear),
         ].join('')
         : [
-            trackerDisplayItemList('Currency', user.currency, { empty: 'No currency tracked' }),
             trackerDisplayItemList('Inventory', user.inventory, { empty: 'No inventory items' }),
             trackerDisplayItemList('Gear', user.gear, { empty: 'No gear items' }),
         ].join('');
@@ -5300,7 +5243,7 @@ function buildTrackerDisplayHtml(snapshot) {
         <div class="structured-preflight-tracker-tab-panel" data-spe-tracker-panel="inventory">
             <div class="structured-preflight-tracker-section">
                 <div class="structured-preflight-tracker-section-head">
-                    <div class="structured-preflight-tracker-heading">Currency, Inventory & Gear</div>
+                    <div class="structured-preflight-tracker-heading">Inventory & Gear</div>
                     ${userItemControls}
                 </div>
                 <div class="structured-preflight-tracker-card structured-preflight-tracker-inventory-card">
@@ -5326,7 +5269,7 @@ function buildTrackerDisplayHtml(snapshot) {
 
     const counts = {
         scene: active.length,
-        inventory: trackerListCount(user.currency) + trackerListCount(user.inventory) + trackerListCount(user.gear),
+        inventory: trackerListCount(user.inventory) + trackerListCount(user.gear),
         tasks: trackerListCount(user.tasks) + trackerListCount(user.commitments),
     };
     const panelHtml = {
@@ -6637,7 +6580,11 @@ function attachTrackerWidgetEditorHandlers(body, context = getContext()) {
                     console.error(`[${EXTENSION_NAME}] failed to save manual tracker edit.`, error);
                     target.disabled = false;
                     target.textContent = 'Save';
-                    notifyError(error instanceof Error ? error.message : String(error), EXTENSION_NAME);
+                    try {
+                        globalThis.toastr?.error?.(error instanceof Error ? error.message : String(error), EXTENSION_NAME);
+                    } catch {
+                        // Toasts are optional.
+                    }
                 });
         }
     };
@@ -7538,23 +7485,15 @@ function normalizePlayerAdventureGenre(value) {
     return PLAYER_GENRE_CHOICES.includes(genre) ? genre : 'Fantasy';
 }
 
-function getActiveAdventureGenre(context = getContext()) {
-    const root = getPlayerRoot(context);
-    return normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || root?.creator?.identity?.genre || 'Fantasy');
-}
-
 function buildPlayerAdventureStartPrompt(root = {}) {
     const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
-    if (genre === 'Isekai') {
-        return PLAYER_ISEKAI_ADVENTURE_START_REMINDER;
-    }
     const genreFrame = PLAYER_ADVENTURE_GENRE_FRAMES[genre] || PLAYER_ADVENTURE_GENRE_FRAMES.Fantasy;
     return [
+        PLAYER_ADVENTURE_START_REMINDER,
+        '',
         genreFrame,
         '',
         `Begin the adventure for this character in the selected genre: ${genre}.`,
-        '',
-        PLAYER_ADVENTURE_START_REMINDER,
     ].join('\n');
 }
 
@@ -7930,7 +7869,7 @@ function syncIdentityInputs(creator) {
 function submitPlayerAdventureStartPrompt(prompt, context = getContext()) {
     const text = String(prompt || '').trim();
     if (!text || typeof context?.generate !== 'function') {
-        notifyError('Could not find SillyTavern generation API to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
+        globalThis.toastr?.error?.('Could not find SillyTavern generation API to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
         return false;
     }
     setTimeout(() => {
@@ -7941,7 +7880,7 @@ function submitPlayerAdventureStartPrompt(prompt, context = getContext()) {
         }).catch(error => {
             console.error(`[${EXTENSION_NAME}] adventure start failed`, error);
             const message = error instanceof Error ? error.message : String(error);
-            notifyError(`Could not start adventure: ${message}`, EXTENSION_NAME, { timeOut: 7000 });
+            globalThis.toastr?.error?.(`Could not start adventure: ${message}`, EXTENSION_NAME, { timeOut: 7000 });
         });
     }, 0);
     return true;
@@ -7987,7 +7926,7 @@ async function approvePlayerSheet(root, context = getContext()) {
         stage: 'approved',
         sheetText,
     };
-    notifySuccess('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
+    globalThis.toastr?.success?.('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
 }
 
 async function applyProgressionStatChoice(root, stat, context = getContext()) {
@@ -8424,10 +8363,13 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
     state.bypassPromptReady = true;
     try {
         return await withStoryEngineModelRequest(async () => {
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for progression generation.');
+            }
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'progression generation' });
+            return await context.generateRawData({ prompt: textPrompt, responseLength, ...overridePayload });
         });
     } finally {
         state.bypassPromptReady = false;
@@ -8678,7 +8620,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 'This is a playable user character shell, not an authored protagonist. Fill only fixed starting facts the user can step into. ' +
                 'Do not decide future choices, personality, habits, emotional reactions, combat preferences, social strategy, morals, goals, fears, or how the character will behave in play. ' +
                 'The numeric stats are locked and must be copied exactly. Do not reroll, rebalance, or assign new numbers. ' +
-                'Generate flavorful but grounded details with enough specificity to use as a full persona sheet, not a terse summary. Avoid overpowered abilities. Keep starting inventory, currency, and gear appropriate to the character, genre, and setting.',
+                'Generate flavorful but grounded details. Avoid overpowered abilities. Keep inventory appropriate to the character, genre, and setting.',
         },
         {
             role: 'user',
@@ -8687,8 +8629,6 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
                 `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
-                'Use exactly these markdown section headings, in this order: # BASIC INFO, # APPEARANCE, # STATS, # NATURAL WEAPONS, # ABILITIES, # SPELLS, # INVENTORY, # CURRENCY, # GEAR, # CHARACTER ANCHORS.\n' +
-                'Use bold field labels for BASIC INFO, APPEARANCE, and STATS. Use bullets for NATURAL WEAPONS, INVENTORY, CURRENCY, GEAR, and CHARACTER ANCHORS. Named abilities and spells should have a bold name followed by a clear description, limits, range or requirements when relevant, and what the ability permits without granting automatic success.\n\n' +
                 'Required sections:\n' +
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
@@ -8696,9 +8636,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 '# NATURAL WEAPONS: concrete offensive body parts only, if any. Write None when the race/body has no clear natural weapon. Examples: horns, claws, fangs, talons, tusks, stinger, crushing tail, biting jaws. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
                 `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. Each ability must be something the character deliberately uses that ordinary PHY/MND/CHA action mechanics would not already cover. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact ability. Keep the ability concrete, usable, and distinct from ordinary PHY/MND/CHA action mechanics. Do not return sight-based or detection-only abilities such as see invisibility, thermal sight, x-ray vision, or other passive perception powers. The user does not need to name the ability; if the user describes an action that clearly uses it, treat that as ability use. Each ability grants fictional permission to attempt that effect, but it does not grant mechanical advantage or guaranteed success. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. If there is combat, active danger, pursuit, stealth pressure, opposition, risk, harm, defense, coercion, uncertainty, an unwilling target, healing, or any meaningful consequence, normal scene resolution decides the result. Do not write spells here. Do not write mundane competence, professional expertise, combat techniques, harder hits, stronger shoves, weak-point targeting, surgery skill, intimidation aura, toughness, resistance, immunity, broad mastery, automatic combat success, guaranteed escape, guaranteed control, automatic solutions, numerical bonuses, dice modifiers, HP rules, advantage/disadvantage, cooldowns, uses per day, measurements, or anything normal stats already resolve.\n` +
                 `# SPELLS: maximum ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell, and only if MND is 7 or higher and the selected genre/concept supports magic; otherwise write None. Spells are activated magical permissions with one concrete effect. Draw from fantasy, anime, isekai, and fiction for inspiration, but create a fresh result each time. Do not rely on a fixed list of examples or templates; invent the exact spell. Keep the spell concrete, usable, and genre-fitting. Healing spells permit an attempt to mend injury, poison, illness, curse, or similar physical harm; meaningful healing still requires normal scene resolution against the wound or condition. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. Do not write resurrection, time magic, fate magic, luck manipulation, mind control, charm, automatic invulnerability, guaranteed protection, guaranteed escape, broad spell schools, magic mastery, vague categories, numerical bonuses, dice modifiers, guaranteed healing, or automatic solutions.\n` +
-                '# INVENTORY: carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy here.\n' +
-                '# CURRENCY: money only, using the genre currency when possible. For fantasy and isekai use silver (sv), for modern use dollars ($), for cyberpunk use credits (cr), and otherwise choose a simple fitting currency. Write exact starting money such as 12 sv, $40, or 30 cr. If none, write None. Do not put currency in INVENTORY or GEAR.\n' +
-                '# GEAR: worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, carried supplies, pack contents, natural weapons, or body anatomy here. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
+                '# INVENTORY: setting-appropriate starting gear only. Do not list natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy as inventory, gear, equipment, or held items. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
                 '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
         },
     ];
@@ -8900,9 +8838,6 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
                 `USER NON-HUMAN IF KNOWN: ${analysis.UserNonHuman || 'unknown'}\n\n` +
 
-                'Use exactly these markdown section headings, in this order: # BASIC INFO, # APPEARANCE, # STATS, # NATURAL WEAPONS, # ABILITIES, # SPELLS, # INVENTORY, # CURRENCY, # GEAR, # CHARACTER ANCHORS.\n' +
-                'Use bold field labels for BASIC INFO, APPEARANCE, and STATS when the source supports them. Use bullets for NATURAL WEAPONS, INVENTORY, CURRENCY, GEAR, and CHARACTER ANCHORS. Preserve explicit facts exactly in meaning while sorting possessions into the matching tracker-aligned sections.\n\n' +
-
                 'Template requirements:\n' +
 
                 '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and origin/mind notes. Use explicit persona facts only; otherwise write Not specified.\n' +
@@ -8912,10 +8847,8 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 '# NATURAL WEAPONS: preserve explicit offensive body parts only: claws, fangs, horns, talons, tusks, stinger, crushing tail, biting jaws, or similar built-in offensive anatomy. Do not invent missing natural weapons. Do not preserve passive racial traits, anatomy, senses, body texture, vulnerabilities, vague toughness, resistance, immunity, skill boosts, better-at wording, or mechanical advantages here. If none are explicit, write None.\n' +
                 '# ABILITIES: preserve explicit activated non-spell abilities only. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. Do not preserve mundane expertise, combat techniques, hidden bonuses, passive traits, or broad skill competence as abilities. If none are explicit, write Not specified.\n' +
                 '# SPELLS: preserve explicit spells only, maximum 5. If none are explicit, write None. Preserve healing spells, but do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
-                '# INVENTORY: preserve explicit carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, or body armaments here. If none are explicit, write Not specified.\n' +
-                '# CURRENCY: preserve explicit money only. Normalize obvious fantasy money to sv when possible, such as 12 silver coins -> 12 sv. Do not invent money. If none is explicit, write None.\n' +
-                '# GEAR: preserve explicit worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, pack contents, carried supplies, natural weapons, or body anatomy here. If none are explicit, write Not specified.\n' +
-                '# CHARACTER ANCHORS: preserve all important persona notes, origin facts, limits, fighting style, known possessions, and secrecy rules.\n\n' +
+                '# INVENTORY: preserve explicit gear/inventory only. Do not list natural weapons or body armaments as inventory, gear, equipment, or held items. If none is explicit, write Not specified.\n' +
+                '# NOTES: preserve all important persona notes, origin facts, limits, fighting style, and secrecy rules.\n\n' +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
 
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
@@ -8980,10 +8913,13 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
     state.bypassPromptReady = true;
     try {
         return await withStoryEngineModelRequest(async () => {
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for player setup.');
+            }
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'player setup' });
+            return await context.generateRawData({ prompt: textPrompt, responseLength, ...overridePayload });
         });
     } finally {
         state.bypassPromptReady = false;
@@ -9076,20 +9012,16 @@ function hasVisibleUserMessage(context = getContext()) {
     });
 }
 
-function buildCurrentAdventureStartPrompt(context = getContext()) {
-    const root = getPlayerRoot(context);
-    if (!root?.adventureStarted) return '';
-    return buildPlayerAdventureStartPrompt(root);
-}
-
 function getBeginningAdventureStartPrompt(context = getContext(), type = '') {
     if (!['normal', 'swipe', 'regenerate'].includes(String(type || ''))) return '';
     if (hasVisibleUserMessage(context)) return '';
-    return buildCurrentAdventureStartPrompt(context);
+    const root = getPlayerRoot(context);
+    if (!root?.adventureStarted) return '';
+    return String(root.adventureStartPrompt || '').trim();
 }
 
 function getActiveAdventureIntroPrompt(pendingGeneration = state.pendingGeneration, context = getContext()) {
-    return String(buildCurrentAdventureStartPrompt(context) || pendingGeneration?.adventureStartPrompt || getPlayerRoot(context)?.adventureStartPrompt || '').trim();
+    return String(pendingGeneration?.adventureStartPrompt || getPlayerRoot(context)?.adventureStartPrompt || '').trim();
 }
 
 function isBeginningAdventureIntroGeneration(pendingGeneration = state.pendingGeneration, context = getContext()) {
@@ -9117,35 +9049,10 @@ function detectStructuredUserInputMode(text) {
 
     }
 
-    if (/^ooc\s*:?\s*$/i.test(trimmed)) {
-
-        return { mode: 'ooc', innerText: '' };
-
-    }
-
-    const oocPrefix = trimmed.match(/^ooc(?:\s*:\s*|\s+)([\s\S]*)$/i);
-    if (oocPrefix) {
-
-        return { mode: 'ooc', innerText: oocPrefix[1].trim() };
-
-    }
 
 
+    return { mode: 'normal', innerText: trimmed };
 
-    return { mode: 'normal', innerText: trimmed, inlineProxyInstructions: extractInlineProxyInstructions(trimmed) };
-
-}
-
-
-function extractInlineProxyInstructions(text) {
-    const instructions = [];
-    const source = String(text ?? '');
-    for (const match of source.matchAll(/\[\[([\s\S]*?)\]\]/g)) {
-        const instruction = match[1]?.trim();
-        if (instruction) instructions.push(instruction);
-        if (instructions.length >= 5) break;
-    }
-    return instructions;
 }
 
 
@@ -9246,7 +9153,7 @@ function cleanVisibleDebugDisplays(context = getContext()) {
 
         persistMetadata(context);
 
-        saveChat(context);
+        if (typeof context.saveChat === 'function') context.saveChat();
 
     }
 
@@ -9412,7 +9319,11 @@ function restoreTrackerForRegeneration(type) {
 
 
 async function persistMetadata(context = getContext()) {
-    return await persistAdapterMetadata(context);
+    if (typeof context?.saveMetadataDebounced === 'function') {
+        context.saveMetadataDebounced();
+    } else if (typeof context?.saveMetadata === 'function') {
+        await context.saveMetadata();
+    }
 }
 
 function buildProseGuardPrompt(narrationText, latestUserText = '') {
@@ -9789,7 +9700,11 @@ async function requestTargetedProseBanRepair(narrationText, findings, latestUser
                     temperature: 0,
                 });
             }
-            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' });
+            const context = getContext();
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for targeted Prose Guard repair.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
         }));
     } finally {
         state.bypassPromptReady = false;
@@ -9948,7 +9863,11 @@ async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrat
                     temperature: 0,
                 });
             }
-            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'combined post-narration pass' });
+            const context = getContext();
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for combined post-narration pass.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
         }));
     } finally {
         state.bypassPromptReady = false;
@@ -9969,7 +9888,11 @@ async function requestProseGuardCorrection(narrationText, latestUserText = '') {
                     temperature: 0,
                 });
             }
-            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'Prose Guard' });
+            const context = getContext();
+            if (!context?.generateRawData) {
+                throw new Error('SillyTavern generateRawData API is unavailable for Prose Guard.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
         }));
     } finally {
         state.bypassPromptReady = false;
@@ -10020,21 +9943,14 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         npcs: pendingRun?.trackerBefore || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateBefore || {},
-        economy: pendingRun?.economyBefore || {},
     };
     const mechanicalAfter = {
         user: pendingRun?.userAfter || {},
         npcs: pendingRun?.trackerAfter || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
-        economy: pendingRun?.economyAfter || pendingRun?.economyBefore || {},
     };
     const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
-    const economyContext = renderEconomyTrackerContext({
-        adventureGenre: pendingRun?.adventureGenre || getActiveAdventureGenre(),
-        economyState: pendingRun?.economyAfter || pendingRun?.economyBefore || {},
-        userCurrency: trackerDisplaySnapshot?.user?.currency || pendingRun?.userAfter?.currency || pendingRun?.userBefore?.currency || [],
-    });
 
     const authority = {
         messageKey,
@@ -10075,8 +9991,6 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
 
         sceneState: handoff.sceneState || pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
 
-        economy: economyContext,
-
         activeNpcNames,
     };
     const firstContactPersonalitySeeds = (handoff.npcHandoffs || [])
@@ -10116,10 +10030,6 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         introTrackerInstruction,
         'Use this exact shape:',
         TRACKER_DELTA_TEMPLATE,
-        '',
-
-        '==ECONOMY_CONTEXT==',
-        JSON.stringify(economyContext),
         '',
 
         '==PREVIOUS_TRACKER_SNAPSHOT==',
@@ -10200,7 +10110,13 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
 
             }
 
-            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' });
+            const context = getContext();
+
+            if (!context?.generateRawData) {
+
+                throw new Error('SillyTavern generateRawData API is unavailable for post-narration tracker update.');
+            }
+            return await context.generateRawData({ prompt, responseLength });
         }));
     } finally {
         state.bypassPromptReady = false;
@@ -10447,7 +10363,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforeUserKnowledge: clone(pendingRun.userKnowledgeBefore || {}),
                 beforeUserReputation: clone(pendingRun.userReputationBefore || {}),
                 beforeWorldState: clone(pendingRun.worldStateBefore || {}),
-                beforeEconomy: clone(pendingRun.economyBefore || {}),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
                 afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
@@ -10455,7 +10370,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterUserKnowledge: clone(trackerDisplaySnapshot.userKnowledge || {}),
                 afterUserReputation: clone(trackerDisplaySnapshot.userReputation || {}),
                 afterWorldState: clone(trackerDisplaySnapshot.worldState || {}),
-                afterEconomy: clone(trackerDisplaySnapshot.economy || {}),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
 
@@ -10504,7 +10418,14 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         renderTrackerWidget(context);
         renderProgressionCard(context);
 
-        await saveChat(context, { fallbackToMetadata: true });
+        if (typeof context.saveChat === 'function') {
+            await context.saveChat();
+
+        } else {
+
+            await persistMetadata(context);
+
+        }
 
 
 
@@ -10704,19 +10625,6 @@ function handleGenerationLifecycleStopped() {
     }, 0);
 }
 
-const STORY_ENGINE_EVENT_HANDLERS = Object.freeze([
-    ['MESSAGE_RECEIVED', prependComputedDebug],
-    ['MESSAGE_DELETED', handleMessageDeleted],
-    ['MESSAGE_SWIPED', handleMessageSwiped],
-    ['CHAT_CHANGED', handleChatChanged],
-    ['CHAT_CREATED', handleChatChanged],
-    ['GENERATION_STARTED', ensureProseGuardDisplayInterceptor],
-    ['GENERATION_ENDED', handleGenerationLifecycleEnd],
-    ['GENERATION_STOPPED', handleGenerationLifecycleStopped],
-    ['CHAT_COMPLETION_SETTINGS_READY', handleChatCompletionSettingsReady],
-    ['CHAT_COMPLETION_PROMPT_READY', handleChatCompletionPromptReady],
-]);
-
 
 function subscribeMessageHandler() {
 
@@ -10726,13 +10634,22 @@ function subscribeMessageHandler() {
 
     const context = getContext();
 
-    if (!canSubscribeToEvent('MESSAGE_RECEIVED', context)) return;
+    if (!context?.eventSource?.on || !context?.eventTypes?.MESSAGE_RECEIVED) return;
 
-    const [requiredEvent, requiredHandler] = STORY_ENGINE_EVENT_HANDLERS[0];
-    if (!onEvent(requiredEvent, requiredHandler, context, { warn: false })) return;
-    for (const [eventType, handler] of STORY_ENGINE_EVENT_HANDLERS.slice(1)) {
-        onEvent(eventType, handler, context, { warn: false });
-    }
+
+
+    context.eventSource.on(context.eventTypes.MESSAGE_RECEIVED, prependComputedDebug);
+
+    if (context.eventTypes.MESSAGE_DELETED) context.eventSource.on(context.eventTypes.MESSAGE_DELETED, handleMessageDeleted);
+
+    if (context.eventTypes.MESSAGE_SWIPED) context.eventSource.on(context.eventTypes.MESSAGE_SWIPED, handleMessageSwiped);
+    if (context.eventTypes.CHAT_CHANGED) context.eventSource.on(context.eventTypes.CHAT_CHANGED, handleChatChanged);
+    if (context.eventTypes.CHAT_CREATED) context.eventSource.on(context.eventTypes.CHAT_CREATED, handleChatChanged);
+    if (context.eventTypes.GENERATION_STARTED) context.eventSource.on(context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
+    if (context.eventTypes.GENERATION_ENDED) context.eventSource.on(context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
+    if (context.eventTypes.GENERATION_STOPPED) context.eventSource.on(context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleStopped);
+    if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
+    if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) context.eventSource.on(context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
     state.subscribed = true;
 }
 
@@ -10746,7 +10663,11 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
     }
 
     if (state.trackerUpdating) {
-        notifyInfo('Story Engine is finalizing narration. Please wait a moment before sending another message.', EXTENSION_NAME, { timeOut: 4000 });
+        try {
+            globalThis.toastr?.info?.('Story Engine is finalizing narration. Please wait a moment before sending another message.', EXTENSION_NAME, { timeOut: 4000 });
+        } catch {
+            // Toasts are optional.
+        }
         if (typeof abort === 'function') abort(true);
 
         return true;
@@ -10841,7 +10762,15 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
         clearAllProgress();
 
-        notifyInfo('Complete Player Setup before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
+        try {
+
+            globalThis.toastr?.info?.('Complete Player Setup before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
+
+        } catch {
+
+            // Toasts are optional.
+
+        }
 
         if (typeof abort === 'function') abort(true);
         return true;
@@ -10852,7 +10781,11 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         renderProgressionCard(context);
         clearRuntimePrompts();
         clearAllProgress();
-        notifyInfo('Complete Character Progression before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
+        try {
+            globalThis.toastr?.info?.('Complete Character Progression before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
+        } catch {
+            // Toasts are optional.
+        }
         if (typeof abort === 'function') abort(true);
         return true;
     }
@@ -10868,7 +10801,6 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         rawUserText: latestUserText,
 
         latestUserText: userInputMode.innerText || latestUserText,
-        inlineProxyInstructions: userInputMode.inlineProxyInstructions || [],
 
         trackerSnapshot: buildTrackerSnapshot(context),
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
@@ -10876,8 +10808,6 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
-        economySnapshot: buildEconomySnapshot(context),
-        adventureGenre: getActiveAdventureGenre(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
         writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
         contextSize,
@@ -10943,19 +10873,8 @@ async function handleChatCompletionPromptReady(eventData) {
 
         if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
             const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
-            const nameGeneration = buildAdventureIntroNameGeneration(context, adventurePrompt);
-            state.pendingGeneration.nameGenerationSnapshot = nameGeneration;
-            const adventureGenre = state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context);
-            const isekaiOpeningSeed = state.pendingGeneration.isekaiOpeningSeed || buildIsekaiOpeningSeed({
-                adventureGenre,
-                prompt: adventurePrompt,
-            });
-            state.pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
             const introOptions = {
-                adventureGenre,
                 worldState: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
-                nameGeneration,
-                isekaiOpeningSeed,
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
             const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, introOptions);
@@ -11020,15 +10939,11 @@ async function handleChatCompletionPromptReady(eventData) {
             userReputationAfter: report.trackerUpdate?.userReputation || {},
             worldStateBefore: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             worldStateAfter: report.trackerUpdate?.worldState || state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
-            economyBefore: state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
-            economyAfter: report.trackerUpdate?.economy || state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
 
             latestUserText: state.pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
-
-            adventureGenre: state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
 
             report,
 
@@ -11098,7 +11013,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             nameStyle: getSettings().nameStyle,
             userInputMode: state.pendingGeneration?.mode || 'normal',
             proxyUserAction: state.pendingGeneration?.mode === 'proxy' ? state.pendingGeneration?.latestUserText : '',
-            inlineProxyInstructions: state.pendingGeneration?.inlineProxyInstructions || [],
         })));
     } finally {
 
@@ -11136,7 +11050,15 @@ function abortGenerationAfterPromptReady(context) {
     try {
         markInternalGenerationStop();
 
-        stopGeneration(context);
+        if (typeof context?.stopGeneration === 'function') {
+
+            context.stopGeneration();
+
+        } else if (context?.eventSource?.emit && context?.eventTypes?.GENERATION_STOPPED) {
+
+            context.eventSource.emit(context.eventTypes.GENERATION_STOPPED);
+
+        }
 
     } catch {
 
@@ -11172,11 +11094,20 @@ export function onDisable() {
 
     }
 
-    if (state.subscribed) {
+    if (state.subscribed && context?.eventSource && context?.eventTypes?.MESSAGE_RECEIVED) {
 
-        for (const [eventType, handler] of STORY_ENGINE_EVENT_HANDLERS) {
-            offEvent(eventType, handler, context, { warn: false });
-        }
+        removeEventHandler(context, context.eventTypes.MESSAGE_RECEIVED, prependComputedDebug);
+
+        if (context.eventTypes.MESSAGE_DELETED) removeEventHandler(context, context.eventTypes.MESSAGE_DELETED, handleMessageDeleted);
+
+        if (context.eventTypes.MESSAGE_SWIPED) removeEventHandler(context, context.eventTypes.MESSAGE_SWIPED, handleMessageSwiped);
+        if (context.eventTypes.CHAT_CHANGED) removeEventHandler(context, context.eventTypes.CHAT_CHANGED, handleChatChanged);
+        if (context.eventTypes.CHAT_CREATED) removeEventHandler(context, context.eventTypes.CHAT_CREATED, handleChatChanged);
+        if (context.eventTypes.GENERATION_STARTED) removeEventHandler(context, context.eventTypes.GENERATION_STARTED, ensureProseGuardDisplayInterceptor);
+        if (context.eventTypes.GENERATION_ENDED) removeEventHandler(context, context.eventTypes.GENERATION_ENDED, handleGenerationLifecycleEnd);
+        if (context.eventTypes.GENERATION_STOPPED) removeEventHandler(context, context.eventTypes.GENERATION_STOPPED, handleGenerationLifecycleStopped);
+        if (context.eventTypes.CHAT_COMPLETION_SETTINGS_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_SETTINGS_READY, handleChatCompletionSettingsReady);
+        if (context.eventTypes.CHAT_COMPLETION_PROMPT_READY) removeEventHandler(context, context.eventTypes.CHAT_COMPLETION_PROMPT_READY, handleChatCompletionPromptReady);
         state.subscribed = false;
     }
     releaseProseGuardDisplayIntercept({ restore: true });
@@ -11187,19 +11118,57 @@ export function onDisable() {
 }
 
 
+function removeEventHandler(context, eventName, handler) {
+
+    if (typeof context?.eventSource?.off === 'function') {
+
+        context.eventSource.off(eventName, handler);
+
+    } else if (typeof context?.eventSource?.removeListener === 'function') {
+
+        context.eventSource.removeListener(eventName, handler);
+
+    }
+
+}
+
+
 
 subscribeMessageHandler();
 getSettings();
 ensureStreamingArtifactRegex();
-onDomReady(() => {
+if (typeof jQuery === 'function') {
+    jQuery(() => {
+        renderSettingsPanel();
+        if (!isStoryEngineEnabled()) {
+            disableStoryEngineRuntime();
+            return;
+        }
+        ensureStreamingArtifactRegex();
+        ensureProseGuardDisplayInterceptor();
+        injectPromptOptionPrompts();
+        setTimeout(() => {
+            if (!isStoryEngineEnabled()) {
+                disableStoryEngineRuntime();
+                return;
+            }
+            getPlayerRoot();
+            restoreTrackerFromLatestDisplaySnapshot();
+            cleanVisibleDebugDisplays();
+            renderAllTrackerDisplayBlocks();
+            renderPlayerSetupCard();
+            renderProgressionCard();
+        }, 0);
+    });
+} else {
     renderSettingsPanel();
-    if (!isStoryEngineEnabled()) {
+    if (isStoryEngineEnabled()) {
+        ensureStreamingArtifactRegex();
+        ensureProseGuardDisplayInterceptor();
+        injectPromptOptionPrompts();
+    } else {
         disableStoryEngineRuntime();
-        return;
     }
-    ensureStreamingArtifactRegex();
-    ensureProseGuardDisplayInterceptor();
-    injectPromptOptionPrompts();
     setTimeout(() => {
         if (!isStoryEngineEnabled()) {
             disableStoryEngineRuntime();
@@ -11212,7 +11181,7 @@ onDomReady(() => {
         renderPlayerSetupCard();
         renderProgressionCard();
     }, 0);
-});
+}
 clearRuntimePrompts();
 
 console.info(`[${EXTENSION_NAME}] loaded`);
