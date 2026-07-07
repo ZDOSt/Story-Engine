@@ -5135,8 +5135,22 @@ function formatBoundCompanionType(value) {
 
 function formatBoundCompanionVessel(value, personaName) {
     const text = String(value || '').trim();
-    if (!text || ['{{user}}', 'user', 'body', 'mind', 'head'].includes(text.toLowerCase())) {
-        return personaName || '{{user}}';
+    if (!text) return '{{user}}';
+    const normalized = text.replace(/[’‘]/g, "'");
+    const lower = normalized.toLowerCase();
+    const persona = String(personaName || '').trim().replace(/[’‘]/g, "'").toLowerCase();
+    const userVesselPattern = /^(?:the\s+)?(?:\{\{user\}\}|user|player|player character|you|your|his|her|their|body|mind|head|vessel)(?:'s)?(?:\s+(?:body|mind|head|vessel|soul|spirit))?$/i;
+    if (userVesselPattern.test(normalized)) return '{{user}}';
+    if (persona && (
+        lower === persona
+        || lower === `${persona}'s body`
+        || lower === `${persona}'s mind`
+        || lower === `${persona}'s head`
+        || lower === `${persona}'s vessel`
+        || lower === `${persona}'s soul`
+        || lower === `${persona}'s spirit`
+    )) {
+        return '{{user}}';
     }
     return text;
 }
@@ -5254,15 +5268,7 @@ function buildTrackerDisplayHtml(snapshot) {
                     ${trackerChip('Relationship', 'Untracked')}
                     ${trackerChip('Toward User', 'Developing')}
                 </div>`;
-        const conditionLine = boundCompanionNpc
-            ? trackerChip('Condition', formatTrackerCondition(boundCompanionNpc.condition), trackerConditionTone(boundCompanionNpc.condition))
-            : trackerChip('State', 'Present, internal');
-        const statusLine = boundCompanionNpc && trackerListCount(boundCompanionNpc.statusEffects)
-            ? trackerDetailLine('Status', boundCompanionNpc.statusEffects)
-            : '';
-        const woundsLine = boundCompanionNpc && trackerListCount(boundCompanionNpc.wounds)
-            ? trackerDetailLine('Wounds', boundCompanionNpc.wounds)
-            : '';
+        const stateLine = trackerChip('State', 'Present, internal');
         const voiceLine = boundCompanion.voice
             ? trackerDetailLine('Voice', boundCompanion.voice, { showEmpty: true })
             : '';
@@ -5275,13 +5281,11 @@ function buildTrackerDisplayHtml(snapshot) {
                 <div class="structured-preflight-tracker-bound-body">
                     <div class="structured-preflight-tracker-chip-row structured-preflight-tracker-bound-row">
                         ${trackerChip('Type', formatBoundCompanionType(boundCompanion.type))}
-                        ${conditionLine}
+                        ${stateLine}
                         ${trackerChip('Vessel', formatBoundCompanionVessel(boundCompanion.vessel, personaName))}
                     </div>
                     ${relationshipRows}
                     <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
-                        ${woundsLine}
-                        ${statusLine}
                         <div class="structured-preflight-tracker-detail structured-preflight-tracker-detail-wide">
                             <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-personality">Personality</span>
                             <span class="structured-preflight-tracker-detail-value">${escapeHtml(boundCompanionNpc?.personalitySummary || 'Developing')}</span>
