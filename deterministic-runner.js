@@ -104,6 +104,7 @@ const ENVIRONMENT_DIFFICULTY_BONUSES = Object.freeze({
     hard: 8,
     extreme: 12,
 });
+const HARM_MODES = Object.freeze(['lethal', 'nonlethal', 'restraint_control', 'none']);
 const GENERATED_CORE_RANGES = Object.freeze({
     Weak: [1, 2],
     Average: [2, 5],
@@ -115,6 +116,46 @@ const GENERATED_CORE_RANGES = Object.freeze({
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
 const RAPPORT_COOLDOWN_MS = 30 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
+
+function normalizeResolutionHarmMode(value, semantic = {}) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const aliases = {
+        lethal: 'lethal',
+        deadly: 'lethal',
+        fatal: 'lethal',
+        lethal_attack: 'lethal',
+        nonlethal: 'nonlethal',
+        non_lethal: 'nonlethal',
+        nonfatal: 'nonlethal',
+        non_fatal: 'nonlethal',
+        unarmed: 'nonlethal',
+        brawl: 'nonlethal',
+        restraint: 'restraint_control',
+        control: 'restraint_control',
+        restraint_control: 'restraint_control',
+        control_restraint: 'restraint_control',
+        grapple: 'restraint_control',
+        grappling: 'restraint_control',
+        pin: 'restraint_control',
+        pinned: 'restraint_control',
+        none: 'none',
+        no_harm: 'none',
+        noharm: 'none',
+    };
+    if (aliases[text] && aliases[text] !== 'none') return aliases[text];
+    if (bool(semantic?.classifyPhysicalBoundaryPressure)) return 'restraint_control';
+    if (bool(semantic?.nonLethal)) return 'nonlethal';
+    if (normalizeActionBucket(semantic?.actionBucket, semantic?.rollNeeded ?? semantic?.RollNeeded ?? 'Y') === 'Combat') return 'nonlethal';
+    return 'none';
+}
+
+function harmModeAllowsHpDamage(harmMode) {
+    return harmMode === 'lethal' || harmMode === 'nonlethal';
+}
+
+function harmModeCompatibilityNonLethal(harmMode) {
+    return harmMode === 'nonlethal' || harmMode === 'restraint_control';
+}
 const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
@@ -2671,6 +2712,14 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         hostilePhysical,
         goal,
     }, audit);
+    const harmMode = normalizeResolutionHarmMode(semantic.harmMode, {
+        ...semantic,
+        actionBucket,
+        rollNeeded,
+        classifyPhysicalBoundaryPressure: boundaryReferee.value,
+    });
+    const nonLethal = harmModeCompatibilityNonLethal(harmMode) ? 'Y' : 'N';
+    audit.push(`2.7o.1 harmMode=${harmMode} nonLethal=${nonLethal} gate=downstream_damage_only`);
 
     const inflictedInjuries = deriveInflictedNpcInjuries({
         semantic,
@@ -2680,7 +2729,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         rollNeeded,
         combatActionSequence,
         userAttackDie,
-        nonLethal: bool(semantic.nonLethal) ? 'Y' : 'N',
+        harmMode,
+        nonLethal,
         primaryTarget: primaryOppTarget,
         primaryTargetCore: targetCore,
         trackerSnapshot,
@@ -2697,7 +2747,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         actionUnits,
         intimacyAdvanceExplicit,
         boundaryViolationExplicit,
-        nonLethal: bool(semantic.nonLethal) ? 'Y' : 'N',
+        harmMode,
+        nonLethal,
         RollNeeded: rollNeeded,
         RollReason: rollReason,
         ActionBucket: actionBucket,
@@ -4199,14 +4250,20 @@ function registerGeneratedName(context, name, meta) {
     saveMetadataDebounced(context, { warn: false });
 }
 
-function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, nonLethal = 'N', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
+function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, harmMode = 'none', nonLethal = 'N', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
     if (rollNeeded !== 'Y') return [];
     if (!effectOutcomeLanded(outcome)) return [];
+    const mode = normalizeResolutionHarmMode(harmMode, { nonLethal, actionBucket: combatActionSequence ? 'Combat' : 'None', rollNeeded });
+    if (mode === 'none') return [];
+    if (mode === 'restraint_control') {
+        return deriveRestraintControlNpcEffects({ injuryEffectEngine, targets, outcome, primaryTarget, audit });
+    }
 
     const fatalInjury = deriveUserAttackFatalInjury({
         outcome,
         combatActionSequence,
         userAttackDie,
+        harmMode: mode,
         nonLethal,
         primaryTarget,
         primaryTargetCore,
@@ -4228,7 +4285,7 @@ function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, roll
         .map(effect => buildInflictedInjuryFromSemanticEffect(effect, outcome))
         .filter(Boolean);
     if (!injuries.length) {
-        const fallback = buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, nonLethal });
+        const fallback = buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, harmMode: mode, nonLethal });
         if (fallback) {
             audit?.push(`2.7p.1 fallbackCombatInjury=${compact(fallback)}`);
             injuries.push(fallback);
@@ -4237,14 +4294,60 @@ function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, roll
     return mergeInflictedInjuries(injuries);
 }
 
+function deriveRestraintControlNpcEffects({ injuryEffectEngine, targets, outcome, primaryTarget = null, audit = null }) {
+    const landedCount = Number(outcome?.LandedActions ?? 0);
+    const effects = normalizeInjuryEffectCandidates(injuryEffectEngine)
+        .filter(effect => injuryEffectTargetAllowed(effect, targets))
+        .filter(effect => ['restraint', 'physical_injury', 'other_status'].includes(effect.effectType))
+        .slice(0, Math.max(0, landedCount))
+        .map(buildRestraintControlInflictedEffect)
+        .filter(Boolean);
+    if (effects.length) {
+        audit?.push(`2.7p.0 restraintControlNoHpDamage=${compact(effects)}`);
+        return mergeInflictedInjuries(effects);
+    }
+    if (isReal(primaryTarget)) {
+        audit?.push(`2.7p.0 restraintControlNoHpDamage=${primaryTarget}/no lasting injury candidate`);
+    }
+    return [];
+}
+
+function buildRestraintControlInflictedEffect(effect) {
+    if (!isReal(effect?.target)) return null;
+    const status = restraintControlStatusFromEffect(effect);
+    return {
+        NPC: effect.target,
+        condition: 'healthy',
+        woundsAdd: [],
+        statusAdd: status ? [status] : [],
+        severity: 'minor',
+        bodyPart: effect.bodyPart || 'body',
+        effectType: 'restraint',
+        sourceAction: compactAttackSource(effect.description),
+        NoHpDamage: 'Y',
+        HarmMode: 'restraint_control',
+        NarrationRule: `${effect.target} is affected only by restraint/control from the landed user action. Do NOT narrate HP damage, serious injury, death, unconsciousness, or a damaging attack from this control. At most, render minor bruising/pressure and the listed control status.`,
+    };
+}
+
+function restraintControlStatusFromEffect(effect = {}) {
+    const text = `${effect.effectType || ''} ${effect.description || ''} ${effect.bodyPart || ''}`.toLowerCase();
+    if (/\b(bound|bind|binds|binding|tied|ties|chain|chained|roped)\b/.test(text)) return 'bound';
+    if (/\b(pin|pins|pinned|press(?:es|ed)? down|hold(?:s|ing)? down)\b/.test(text)) return 'pinned';
+    if (/\b(immobiliz|immobilis|paralyz|paralys)\b/.test(text)) return 'immobilized';
+    if (/\b(drag|drags|dragged|carry|carries|carried|force(?:s|d)? position)\b/.test(text)) return 'forced position';
+    return 'restrained';
+}
+
 function effectOutcomeLanded(outcome) {
     const landedCount = Number(outcome?.LandedActions ?? 0);
     return Number.isFinite(landedCount) && landedCount > 0;
 }
 
-function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttackDie, nonLethal, primaryTarget, primaryTargetCore, trackerSnapshot, hiddenHealthSnapshot }) {
+function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttackDie, harmMode = 'none', nonLethal, primaryTarget, primaryTargetCore, trackerSnapshot, hiddenHealthSnapshot }) {
     if (!combatActionSequence) return null;
     if (!isReal(primaryTarget)) return null;
+    if (normalizeResolutionHarmMode(harmMode, { nonLethal, actionBucket: 'Combat', rollNeeded: 'Y' }) !== 'lethal') return null;
     const nonlethal = String(nonLethal ?? 'N').trim().toUpperCase() === 'Y';
     if (nonlethal) return null;
 
@@ -4297,8 +4400,10 @@ function bossAtOrBelowHalfHealth(primaryTarget, hiddenHealthSnapshot) {
     return currentHp <= Math.floor(maxHp / 2);
 }
 
-function buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, nonLethal = 'N' }) {
+function buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, harmMode = 'none', nonLethal = 'N' }) {
     if (!combatActionSequence || !isReal(primaryTarget) || !effectOutcomeLanded(outcome)) return null;
+    const mode = normalizeResolutionHarmMode(harmMode, { nonLethal, actionBucket: 'Combat', rollNeeded: 'Y' });
+    if (!harmModeAllowsHpDamage(mode)) return null;
     const severity = severityFromOutcomeAndText(outcome, '');
     const condition = conditionFromInflictedSeverity(severity);
     return {
@@ -4310,19 +4415,23 @@ function buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, pri
         bodyPart: 'body',
         effectType: 'physical_injury',
         sourceAction: 'fallback_combat_damage',
+        HarmMode: mode,
         InjuryDetailMode: 'narrator_contextual',
         InjurySeverityLimit: severity,
-        NarrationRule: `${primaryTarget} takes deterministic combat damage from the landed user attack. Narrate a concrete physical hit and impairment appropriate to the attack context, but do not exceed ${severity} severity. ${String(nonLethal).toUpperCase() === 'Y' ? 'This is nonlethal pressure; if the target drops, render defeat or incapacitation rather than death.' : 'If the target drops, render death only when the resolved outcome makes it lethal.'}`,
+        NarrationRule: `${primaryTarget} takes deterministic combat damage from the landed user attack. Narrate a concrete physical hit and impairment appropriate to the attack context, but do not exceed ${severity} severity. ${mode === 'nonlethal' ? 'This is nonlethal damage; if the target drops, render defeat or incapacitation rather than death.' : 'This is lethal damage; if the target drops from this damage, death is allowed only when injuryOrDeath and hidden health establish it.'}`,
     };
 }
 
 function collectHiddenHealthEvents({ ledger, resolutionPacket, aggression, context, healthBefore }) {
     const events = [];
-    const nonlethal = String(resolutionPacket?.nonLethal || 'N').toUpperCase() === 'Y';
+    const harmMode = normalizeResolutionHarmMode(resolutionPacket?.harmMode, resolutionPacket);
+    const userActionDealsHpDamage = harmModeAllowsHpDamage(harmMode);
+    const userActionNonlethalDamage = harmMode === 'nonlethal';
 
     for (const injury of resolutionPacket?.InflictedInjuries || []) {
         if (!isReal(injury?.NPC)) continue;
-        const fatal = injury?.condition === 'dead' || injury?.severity === 'fatal';
+        if (!userActionDealsHpDamage || injury?.NoHpDamage === 'Y') continue;
+        const fatal = harmMode === 'lethal' && (injury?.condition === 'dead' || injury?.severity === 'fatal');
         const damageOverride = Math.max(0, Math.floor(Number(injury?.DamageAmount || injury?.damageAmount || 0)));
         const amount = fatal
             ? 999
@@ -4334,7 +4443,7 @@ function collectHiddenHealthEvents({ ledger, resolutionPacket, aggression, conte
             target: injury.NPC,
             amount,
             fatal,
-            nonlethal,
+            nonlethal: userActionNonlethalDamage,
             defeatedCondition: 'incapacitated',
             source: 'user_action',
         });

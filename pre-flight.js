@@ -156,6 +156,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.ClaimCheck=' + claimCheckSummary(resolution.ClaimCheck),
         'resolutionPacket.intimacyAdvanceExplicit=' + valueOrNone(resolution.intimacyAdvanceExplicit),
         'resolutionPacket.boundaryViolationExplicit=' + valueOrNone(resolution.boundaryViolationExplicit),
+        'resolutionPacket.harmMode=' + valueOrNone(resolution.harmMode),
         'resolutionPacket.nonLethal=' + valueOrNone(resolution.nonLethal),
         'resolutionPacket.RollNeeded=' + valueOrNone(resolution.RollNeeded),
         'resolutionPacket.RollReason=' + valueOrNone(resolution.RollReason),
@@ -260,6 +261,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.actionCount', summary.actionCount],
         ['resolution.actionUnits', actionUnitsSummary(resolution.actionUnits, { includeEvidence: true })],
         ['resolution.rollFull', summary.rollFull],
+        ['resolution.harmMode', valueOrNone(resolution.harmMode)],
         ['resolution.nonLethal', valueOrNone(resolution.nonLethal)],
         ['resolution.outcome', summary.outcome],
         ['resolution.outcomeMeaning', summary.result],
@@ -1317,6 +1319,19 @@ function narrativeEnvironmentFact(resolution = {}) {
 }
 
 function narrativeHarmLimitFact(resolution = {}) {
+    const harmMode = String(resolution?.harmMode || '').trim().toLowerCase();
+    if (harmMode === 'lethal') {
+        return '{{user}}\'s harmful method is LETHAL. Still obey injuryOrDeath exactly: death occurs only if injuryOrDeath says death occurs. Do NOT add extra wounds, extra damage, or extra death beyond the listed facts.';
+    }
+    if (harmMode === 'nonlethal') {
+        return '{{user}}\'s harmful method is NONLETHAL. It may cause listed injury or incapacitation, but it does NOT kill. If the target drops, render unconsciousness, incapacitation, surrender, or defeat instead of death. Do NOT narrate a killing blow from {{user}}.';
+    }
+    if (harmMode === 'restraint_control') {
+        return '{{user}}\'s physical result is RESTRAINT/CONTROL, not a damaging attack. Do NOT narrate HP damage, serious injury, unconsciousness, death, or a damaging blow from this control. At most, render the restraint/control status or minor pressure/bruising explicitly listed by injuryOrDeath.';
+    }
+    if (harmMode === 'none') {
+        return 'No bodily harm mode is active for {{user}} in this beat. Do not invent injury, HP damage, unconsciousness, or death from {{user}}.';
+    }
     if (isNoneText(resolution?.nonLethal)) return 'No special harm limit is listed beyond injuryOrDeath and npcAggressionResult.';
     if (String(resolution.nonLethal).toUpperCase() === 'Y') {
         return `Keep {{user}}'s harmful result nonlethal unless injuryOrDeath explicitly says otherwise. Do not narrate a killing blow from {{user}} in this beat.`;
@@ -1373,6 +1388,7 @@ function narrativeInflictedNpcInjuries(injuries = []) {
         wounds: injury?.woundsAdd,
         status: injury?.statusAdd,
         effectType: injury?.effectType,
+        noHpDamage: injury?.NoHpDamage === 'Y',
         rule: injury?.NarrationRule,
     }));
 }
@@ -1410,13 +1426,17 @@ function narrativeAggressionTargetInjuries(aggressionResults = {}) {
     return entries;
 }
 
-function narrativeInjuryEntry({ target, source, condition, severity, wounds, status, effectType, rule }) {
+function narrativeInjuryEntry({ target, source, condition, severity, wounds, status, effectType, noHpDamage = false, rule }) {
     const targetText = narratorTargetText(target);
     const sourceText = !isNoneText(source) ? ` from ${valueOrNone(source)}` : '';
     const conditionText = valueOrNone(condition);
     const severityText = valueOrNone(severity);
     const woundText = list(wounds);
     const statusText = list(status);
+    if (noHpDamage) {
+        const statusDetail = !isNoneText(statusText) ? ` status: ${statusText}.` : ' control/restraint applies only if established by attemptedActionResults.';
+        return `${targetText} receives restraint/control only${sourceText}.${statusDetail} This is NOT HP damage, serious injury, unconsciousness, death, or a damaging attack. ${!isNoneText(rule) ? valueOrNone(rule) : ''}`.trim();
+    }
     const details = [
         !isNoneText(conditionText) ? conditionText : '',
         !isNoneText(severityText) ? severityText : '',

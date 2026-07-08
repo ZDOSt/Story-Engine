@@ -30,6 +30,7 @@ const ENVIRONMENT_DIFFICULTY_TIERS = Object.freeze(['none', 'easy', 'average', '
 const ACTION_BUCKETS = Object.freeze(['None', 'Social', 'Combat', 'Challenge']);
 const SOCIAL_BUCKETS = Object.freeze(['None', 'Diplomacy', 'Bluff', 'Intimidate']);
 const COMBAT_TYPES = Object.freeze(['None', 'Mundane', 'SpellOrSupernatural']);
+const HARM_MODES = Object.freeze(['lethal', 'nonlethal', 'restraint_control', 'none']);
 const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
     'RenderControlEngine',
     'sceneStyleProfile',
@@ -751,6 +752,7 @@ function buildSemanticPreflightSchema() {
                     'identifyTargets',
                     'intimacyAdvanceExplicit',
                     'boundaryViolationExplicit',
+                    'harmMode',
                     'nonLethal',
                     'rollNeeded',
                     'rollReason',
@@ -830,9 +832,14 @@ function buildSemanticPreflightSchema() {
                     },
                     intimacyAdvanceExplicit: { type: 'boolean' },
                     boundaryViolationExplicit: { type: 'boolean' },
+                    harmMode: {
+                        type: 'string',
+                        enum: HARM_MODES,
+                        description: 'Downstream damage/death gate only. lethal for weapon/improvised/natural weapon, dangerous tool, projectile, destructive magic, poison, fire/electricity, or any method that could reasonably kill/maim if it lands decisively. nonlethal for ordinary unarmed attacks, brawling, sparring/training, pulled blows, pommel/flat strikes, practice weapons, or clearly controlled force; it can deal HP damage but HP 0 means incapacitated, not dead. restraint_control for holding, pinning, grabbing, dragging, blocking, binding, immobilizing, carrying, forced positioning, or preventing movement without a separate injuring attack; no HP damage and bruised at most. none for no bodily attack/harm/control. If mixed, choose lethal > nonlethal > restraint_control > none. This must not decide rollNeeded, boundary pressure, hostility, or relationship harm.',
+                    },
                     nonLethal: {
                         type: 'boolean',
-                        description: 'Y only for explicitly nonlethal violence or contests: sparring, training, practice combat, fistfights, barehanded brawls, nonlethal grappling/restraint, capture-only attempts, or stated intent to avoid serious/fatal harm. N for weapons, improvised weapons, claws, teeth, horns, natural weapons, lethal magic, body-damaging supernatural effects, or uncertain cases.',
+                        description: 'Compatibility mirror derived from harmMode. Y when harmMode is nonlethal or restraint_control. N when harmMode is lethal or none.',
                     },
                     rollNeeded: {
                         type: 'boolean',
@@ -1268,7 +1275,8 @@ const COMPACT_LEDGER_CONTRACT = [
     '- ResolutionEngine.activeHostileThreat is strict. Return Y only if the current scene contains an immediate hostile danger from an NPC/entity: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster/hostile creature engagement, armed standoff, capture attempt, or imminent physical/supernatural harm. Return N for negotiation, refusal, bargaining, argument, social resistance, authority denial, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger.',
     '- ResolutionEngine.intimacyAdvanceExplicit is strict. Return Y only if {{user}} explicitly attempts, requests, accepts, or reciprocates actual intimate escalation with a specific NPC: kissing, making out, sexual touch, undressing toward intimacy, asking to sleep together, asking for sex, moving to bed, or clearly initiating romantic/sexual physical closeness. Return Y for accepting or reciprocating a prior explicit NPC-initiated intimacy invitation or action. Return N for flirting, teasing, compliments, romantic banter, suggestive jokes, vague innuendo, "what did you have in mind", declarations of love, asking for a date, emotional confession, hand-holding, casual proximity, or ordinary affection that does not clearly escalate into kissing or sexual/intimate contact. This is only an intimacy permission/boundary signal and does not create stakes, rolls, landed actions, Bond loss, Fear, or Hostility by itself.',
     '- ResolutionEngine.boundaryViolationExplicit is strict. Return Y only if the current user input explicitly violates, ignores, or pressures past a clear refusal, stated boundary, withdrawal, fear, incapacitation, explicitly established lack of consent, or prior denial from this specific NPC. Return Y for coercion, threats, force, unwanted restraint/contact after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no. Return N for flirting, teasing, romantic talk, asking permission, accepting or reciprocating NPC-initiated flirtation/intimacy, backing off/respecting a boundary, or ordinary romantic/sexual ambiguity where no refusal/boundary/incapacity has been explicitly established.',
-    '- ResolutionEngine.nonLethal is strict. Return Y only for explicitly nonlethal violence or contests: sparring, training, practice combat, fistfights, barehanded brawls, wrestling/grappling without lethal force, restraint-only takedowns, capture-only attempts, or stated intent to avoid serious/fatal harm. Return Y when scene rules, an instructor, an arena, duel terms, or {{user}} explicitly frame the current physical conflict as nonlethal. Return N for weapons, blades, arrows, spears, axes, clubs, improvised weapons, claws, teeth, horns, natural weapons, lethal magic, body-damaging supernatural effects, or any uncertain attack.',
+    '- ResolutionEngine.harmMode is a downstream damage/death gate only. It must NOT decide rollNeeded, actionBucket, boundary pressure, hostile intent, or relationship harm. Set lethal when the current action attacks a living body using a weapon, improvised weapon, natural weapon, dangerous tool, projectile, firearm, blade, fang, claw, horn, crushing object, lethal/destructive magic, poison, fire, electricity, or another method that could reasonably kill or maim if it lands decisively. {{user}} does not need to say "kill"; infer from the physical method and context. Set nonlethal when the current action attacks a living body with ordinary unarmed force or explicitly controlled force: punches, kicks, elbows, knees, brawling, tackles meant as attacks, training, sparring, pulled blows, pommel strikes, flat-of-blade strikes, practice weapons, or a clearly stated attempt to avoid serious/fatal harm. Nonlethal can deal HP damage, but HP 0 means unconscious/incapacitated, not dead. Set restraint_control when the current action controls, holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a living body without a separate attack meant to injure. Restraint/control does not deal HP damage; it can cause bruising at most and restraint/control statuses if scene-valid. Set none when there is no bodily attack, harmful effect, or restraint/control. If the turn mixes methods, choose the most dangerous active mode: lethal > nonlethal > restraint_control > none. Ambiguous ordinary bodily force without weapons or inherently dangerous methods is nonlethal by default; mere restraint/control remains restraint_control.',
+    '- ResolutionEngine.nonLethal is a compatibility mirror derived from harmMode. Return Y when harmMode=nonlethal or restraint_control. Return N when harmMode=lethal or none.',
     '- All genStats groups must include only Rank and MainStat. Use genStats only when the relevant NPC currentCoreStats are missing in the tracker snapshot. The semantic pass identifies Rank and MainStat from explicit portrayal; deterministic code assigns numeric PHY/MND/CHA values within the Rank range and saves them once.',
     '- InjuryEffectEngine is semantic-only candidate extraction for effects the user action would cause if deterministic mechanics say the action lands. It does not roll and does not decide success. Include physical injuries and impairing magical/status effects regardless of source: burns, poison, paralysis, sickness, blindness, fear/panic, restraint, curses, lightning/electrical effects, exhaustion, mental effects, or other ongoing impairing states. Exclude purely emotional/social harm, mere witnessing, momentary pain, intended/requested future injuries, or effects that would not persist or impair later action.',
     '- InjuryEffectEngine target must be the entity actually receiving the impairing effect. HarmedObservers may appear only if they are directly affected by the injury/status effect, not merely emotionally harmed by seeing or caring about another target. Use persistence=lasting and affectsAction=Y only for effects that should impair later action if applied.',
@@ -1329,6 +1337,7 @@ ResolutionEngine.identifyTargets.NPCAwareOfUser=(none)
 ResolutionEngine.identifyTargets.PowerActors=(none)
 ResolutionEngine.intimacyAdvanceExplicit=N
 ResolutionEngine.boundaryViolationExplicit=N
+ResolutionEngine.harmMode=none
 ResolutionEngine.nonLethal=N
 ResolutionEngine.rollNeeded=N
 ResolutionEngine.rollReason=(none)
@@ -1563,7 +1572,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Separate user-authored internal prose from external action before ResolutionEngine classification. First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction. When mixed, extract only concrete present external actions and spoken dialogue for identifyGoal, identifyChallenge, targets, actionBucket, actionCount, and actionUnits. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, actionUnits, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, identifyTargets, classifyHostilePhysicalIntent, activeHostileThreat, classifyPhysicalBoundaryPressure, intimacyAdvanceExplicit, boundaryViolationExplicit, harmMode, nonLethal, rollNeeded, rollReason, actionBucket, socialBucket, combatType, actionCount, actionUnits, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
         'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each personal/authored knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, rewrite stored knowledge, or turn broad public reputation into initPreset flags in preflight. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer/awareness living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, accepts, agrees to, arranges, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. This includes the NPC accepting {{user}}\'s explicit sexual/intimate proposal, agreeing to join, inviting or calling another willing participant, or saying yes to coming over for sex/intimacy. Mark RomanticBuildup only when a B4 close-bond scene has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior, no active refusal/withdrawal/fear/hostility/coercion/danger/public interruption/boundary limit, and {{user}}\'s latest intimate advance is a natural continuation; ordinary friendliness, tenderness, warmth, one smile, casual flirting, vague chemistry, or user-only escalation is not enough. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
@@ -1914,6 +1923,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ACTION_BUCKETS.includes(ledger?.resolutionEngine?.actionBucket)) missing.push('resolutionEngine.actionBucket');
     if (!SOCIAL_BUCKETS.includes(ledger?.resolutionEngine?.socialBucket)) missing.push('resolutionEngine.socialBucket');
     if (!COMBAT_TYPES.includes(ledger?.resolutionEngine?.combatType)) missing.push('resolutionEngine.combatType');
+    if (!HARM_MODES.includes(ledger?.resolutionEngine?.harmMode)) missing.push('resolutionEngine.harmMode');
     if (typeof ledger?.resolutionEngine?.nonLethal !== 'boolean') missing.push('resolutionEngine.nonLethal:boolean');
     if (!Array.isArray(ledger?.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
     if (!Array.isArray(ledger?.resolutionEngine?.actionUnits)) missing.push('resolutionEngine.actionUnits');
@@ -2017,6 +2027,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.identifyTargets.PowerActors',
         'ResolutionEngine.intimacyAdvanceExplicit',
         'ResolutionEngine.boundaryViolationExplicit',
+        'ResolutionEngine.harmMode',
         'ResolutionEngine.nonLethal',
         'ResolutionEngine.rollNeeded',
         'ResolutionEngine.rollReason',
@@ -2321,6 +2332,14 @@ function parseCompactLedger(text, trackerSnapshot) {
     const actionBucket = normalizeActionBucket(fields.get('ResolutionEngine.actionBucket'), rollNeeded);
     const socialBucket = normalizeSocialBucket(fields.get('ResolutionEngine.socialBucket'), actionBucket);
     const combatType = normalizeCombatType(fields.get('ResolutionEngine.combatType'), actionBucket);
+    const rawNonLethal = readBoolean(fields, 'ResolutionEngine.nonLethal', false);
+    const classifyPhysicalBoundaryPressure = readBoolean(fields, 'ResolutionEngine.classifyPhysicalBoundaryPressure', false);
+    const harmMode = normalizeHarmMode(fields.get('ResolutionEngine.harmMode'), {
+        nonLethal: rawNonLethal,
+        actionBucket,
+        rollNeeded,
+        classifyPhysicalBoundaryPressure,
+    });
 
     const resolutionEngine = {
         identifyGoal: cleanScalar(fields.get('ResolutionEngine.identifyGoal')) || 'Normal_Interaction',
@@ -2369,7 +2388,8 @@ function parseCompactLedger(text, trackerSnapshot) {
         },
         intimacyAdvanceExplicit: readBoolean(fields, 'ResolutionEngine.intimacyAdvanceExplicit', false),
         boundaryViolationExplicit: readBoolean(fields, 'ResolutionEngine.boundaryViolationExplicit', false),
-        nonLethal: readBoolean(fields, 'ResolutionEngine.nonLethal', false),
+        harmMode,
+        nonLethal: harmMode === 'nonlethal' || harmMode === 'restraint_control',
         rollNeeded,
         rollReason: cleanScalar(fields.get('ResolutionEngine.rollReason')) || '(none)',
         actionBucket,
@@ -2383,7 +2403,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         ),
         classifyHostilePhysicalIntent: readBoolean(fields, 'ResolutionEngine.classifyHostilePhysicalIntent', false),
         activeHostileThreat: readBoolean(fields, 'ResolutionEngine.activeHostileThreat', false),
-        classifyPhysicalBoundaryPressure: readBoolean(fields, 'ResolutionEngine.classifyPhysicalBoundaryPressure', false),
+        classifyPhysicalBoundaryPressure,
         genStats: readGeneratedStatsSeed(fields, 'ResolutionEngine.genStats'),
     };
     resolutionEngine.environmentDifficulty = environmentDifficultyFromTier(
@@ -3247,6 +3267,38 @@ function normalizeCombatType(value, actionBucket = 'None') {
     return 'Mundane';
 }
 
+function normalizeHarmMode(value, semantic = {}) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    const aliases = {
+        lethal: 'lethal',
+        deadly: 'lethal',
+        fatal: 'lethal',
+        lethal_attack: 'lethal',
+        nonlethal: 'nonlethal',
+        non_lethal: 'nonlethal',
+        nonfatal: 'nonlethal',
+        non_fatal: 'nonlethal',
+        unarmed: 'nonlethal',
+        brawl: 'nonlethal',
+        restraint: 'restraint_control',
+        control: 'restraint_control',
+        restraint_control: 'restraint_control',
+        control_restraint: 'restraint_control',
+        grapple: 'restraint_control',
+        grappling: 'restraint_control',
+        pin: 'restraint_control',
+        pinned: 'restraint_control',
+        none: 'none',
+        no_harm: 'none',
+        noharm: 'none',
+    };
+    if (aliases[text] && aliases[text] !== 'none') return aliases[text];
+    if (toBoolean(semantic?.classifyPhysicalBoundaryPressure, false)) return 'restraint_control';
+    if (toBoolean(semantic?.nonLethal, false)) return 'nonlethal';
+    if (normalizeActionBucket(semantic?.actionBucket, semantic?.rollNeeded ?? true) === 'Combat') return 'nonlethal';
+    return 'none';
+}
+
 function normalizeEnvironmentDifficulty(value, actionBucket = 'Challenge') {
     if (actionBucket !== 'Challenge') return 0;
     const number = Number(cleanScalar(value));
@@ -3471,10 +3523,11 @@ function normalizeLedger(ledger) {
     );
     ledger.resolutionEngine.intimacyAdvanceExplicit = toBoolean(ledger.resolutionEngine.intimacyAdvanceExplicit, false);
     ledger.resolutionEngine.boundaryViolationExplicit = toBoolean(ledger.resolutionEngine.boundaryViolationExplicit, false);
-    ledger.resolutionEngine.nonLethal = toBoolean(ledger.resolutionEngine.nonLethal, false);
     ledger.resolutionEngine.classifyHostilePhysicalIntent = toBoolean(ledger.resolutionEngine.classifyHostilePhysicalIntent, false);
     ledger.resolutionEngine.activeHostileThreat = toBoolean(ledger.resolutionEngine.activeHostileThreat, false);
     ledger.resolutionEngine.classifyPhysicalBoundaryPressure = toBoolean(ledger.resolutionEngine.classifyPhysicalBoundaryPressure, false);
+    ledger.resolutionEngine.harmMode = normalizeHarmMode(ledger.resolutionEngine.harmMode, ledger.resolutionEngine);
+    ledger.resolutionEngine.nonLethal = ledger.resolutionEngine.harmMode === 'nonlethal' || ledger.resolutionEngine.harmMode === 'restraint_control';
     delete ledger.resolutionEngine.hostilePhysicalIntent;
     delete ledger.resolutionEngine.primaryOppTarget;
     delete ledger.resolutionEngine.primaryOpposition;
@@ -4024,6 +4077,8 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ACTION_BUCKETS.includes(ledger.resolutionEngine?.actionBucket)) missing.push('resolutionEngine.actionBucket');
     if (!SOCIAL_BUCKETS.includes(ledger.resolutionEngine?.socialBucket)) missing.push('resolutionEngine.socialBucket');
     if (!COMBAT_TYPES.includes(ledger.resolutionEngine?.combatType)) missing.push('resolutionEngine.combatType');
+    if (!HARM_MODES.includes(ledger.resolutionEngine?.harmMode)) missing.push('resolutionEngine.harmMode');
+    if (typeof ledger.resolutionEngine?.nonLethal !== 'boolean') missing.push('resolutionEngine.nonLethal:boolean');
     if (typeof ledger.resolutionEngine?.intimacyAdvanceExplicit !== 'boolean') missing.push('resolutionEngine.intimacyAdvanceExplicit:boolean');
     if (typeof ledger.resolutionEngine?.boundaryViolationExplicit !== 'boolean') missing.push('resolutionEngine.boundaryViolationExplicit:boolean');
     if (!Array.isArray(ledger.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');

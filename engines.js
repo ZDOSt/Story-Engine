@@ -62,12 +62,21 @@ function ResolutionEngine(input) {
     else -> N
 
   nonLethal(input, finalGoal, challenge, targets, context):
-    policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
-    rule: return Y only for explicitly nonlethal violence or contests: sparring, training, practice combat, fistfights, barehanded brawls, wrestling/grappling without lethal force, restraint-only takedowns, capture-only attempts, or stated intent to avoid serious/fatal harm
-    rule: return Y when the scene rules, instructor, arena, duel terms, or {{user}} explicitly frame the current physical conflict as nonlethal
-    rule: return N for weapons, blades, arrows, spears, axes, clubs, improvised weapons, claws, teeth, horns, natural weapons, lethal magic, body-damaging supernatural effects, or any attack not explicitly framed as nonlethal
-    rule: uncertain = N
+    policy: COMPATIBILITY FIELD, DERIVED FROM harmMode
+    rule: return Y when harmMode is nonlethal or restraint_control
+    rule: return N when harmMode is lethal or none
     else -> N
+
+  harmMode(input, finalGoal, challenge, targets, context):
+    policy: DOWNSTREAM DAMAGE/DEATH GATE ONLY
+    rule: this field never creates rollNeeded=Y, never changes actionBucket, never turns boundary pressure into hostile intent, and never creates relationship harm by itself
+    rule: lethal = the current action attacks a living body using a weapon, improvised weapon, natural weapon, dangerous tool, projectile, firearm, blade, fang, claw, horn, crushing object, lethal/destructive magic, poison, fire, electricity, or any method that could reasonably kill or maim if it lands decisively. {{user}} does not need to say "kill"; judge from the physical method and context.
+    rule: nonlethal = the current action attacks a living body with ordinary unarmed force or explicitly controlled force: punches, kicks, elbows, knees, brawling, tackles meant as attacks, training, sparring, pulled blows, pommel strikes, flat-of-blade strikes, practice weapons, or a clearly stated attempt to avoid serious/fatal harm. It can deal HP damage, but HP 0 means unconscious/incapacitated, not dead.
+    rule: restraint_control = the current action controls, holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a living body without a separate attack meant to injure. It does not deal HP damage. It can cause bruising at most and restraint/control statuses when scene-valid.
+    rule: none = no bodily attack, harmful effect, or restraint/control is attempted in the current user input.
+    rule: if a turn mixes methods, choose the most dangerous active mode in this order: lethal > nonlethal > restraint_control > none.
+    rule: ambiguous ordinary bodily force without weapons or inherently dangerous methods is nonlethal by default. Mere restraint/control remains restraint_control.
+    return one of: lethal, nonlethal, restraint_control, none
 
   identifyTargets(input, challenge, finalGoal, context):
     policy: LOCKED, EXPLICIT-ONLY
@@ -198,6 +207,7 @@ function ResolutionEngine(input) {
     activeHostileThreat = activeHostileThreat(input, finalGoal, targets, context)
     intimacyAdvanceExplicit = intimacyAdvanceExplicit(input, finalGoal, challenge, targets, context)
     boundaryViolationExplicit = boundaryViolationExplicit(input, finalGoal, challenge, targets, context)
+    harmMode = harmMode(input, finalGoal, challenge, targets, context)
     nonLethal = nonLethal(input, finalGoal, challenge, targets, context)
     rollNeeded = rollNeeded(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
     rollReason = short explanation for rollNeeded
@@ -215,7 +225,7 @@ function ResolutionEngine(input) {
         generatedStatsSeed = genStats(first OppTargets.NPC, context)
       deterministic code resolves dice, numeric stats, margins, landed actions, counter potential, and outcome after semantic extraction
     NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, actions:actions, actionBucket:actionBucket, socialBucket:socialBucket, combatType:combatType, rollNeeded:rollNeeded, rollReason:rollReason, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, nonLethal:nonLethal, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
+    return {GOAL:finalGoal, actions:actions, actionBucket:actionBucket, socialBucket:socialBucket, combatType:combatType, rollNeeded:rollNeeded, rollReason:rollReason, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, harmMode:harmMode, nonLethal:nonLethal, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {
@@ -1524,7 +1534,7 @@ export function buildPersistencePolicy() {
         npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
-        perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
+        perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'harmMode', 'nonLethal', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
 }
 
