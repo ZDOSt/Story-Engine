@@ -465,16 +465,19 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
         key: 'game_vr_entrapment',
         label: 'Gaming / VR Entrapment',
         guidance: 'Use a game, MMO, VR capsule, login failure, server event, or avatar boundary failure. If {{user}} has a premade character, that character may be the avatar that becomes real.',
+        requiredOpeningTags: ['game'],
     },
     {
         key: 'digital_system_anomaly',
         label: 'Digital / System Glitch',
         guidance: 'Use a phone, computer, mysterious app, corrupted menu, system prompt, or impossible software event as the crossing trigger.',
+        requiredOpeningTags: ['game', 'system'],
     },
     {
         key: 'summoned_from_earth',
         label: 'Summoning From Earth',
         guidance: 'Use a magic circle, ritual pull, classroom light, office interruption, or unseen summoning force that removes the character from Earth.',
+        requiredOpeningTags: ['summon'],
     },
     {
         key: 'portal_rift_incident',
@@ -487,19 +490,21 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
         guidance: 'Use sleep, coma, lucid dream, fever vision, or a dream that becomes physically real. Do not over-explain whether it is dream or reality.',
     },
     {
-        key: 'divine_selection',
-        label: 'Divine Selection',
-        guidance: 'Use a god, spirit, administrator, cosmic clerk, angelic figure, or judging entity choosing the character after death or near death.',
+        key: 'unexplained_blackout',
+        label: 'Unexplained Death / Blackout',
+        guidance: 'Use a sudden blackout, vanishing heartbeat, ordinary moment cutting off, unexplained collapse, or abrupt loss of Earth-side continuity. Keep the cause unresolved unless already established.',
     },
     {
         key: 'mistaken_summons',
         label: 'Mistaken Summons',
-        guidance: 'Use wrong target, wrong ritual, wrong world, clerical error, divine mistake, or a summons meant for someone else.',
+        guidance: 'Use a wrong target, wrong ritual, wrong world, ritual error, or summons meant for someone else. Keep the Earth-side moment focused on being pulled away, not on a divine audience.',
+        requiredOpeningTags: ['summon'],
     },
     {
         key: 'group_transfer',
         label: 'Class / Group Transfer',
         guidance: 'Use classmates, coworkers, passengers, a party, a convention crowd, or strangers pulled at the same time. The group can be nearby, separated, or only partly visible.',
+        requiredOpeningTags: ['group'],
     },
     {
         key: 'object_triggered_transfer',
@@ -533,26 +538,31 @@ const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
         key: 'organized_faction_summons',
         label: 'Organized Faction Summons',
         guidance: 'Begin inside a controlled ritual, official chamber, temple, guild hall, military site, or similar summoning location. Let the summoners react to the character as they are.',
+        tags: ['summon'],
     },
     {
         key: 'desperate_village_summons',
         label: 'Desperate Village Summons',
         guidance: 'Begin with ordinary people, village elders, minor priests, or local survivors attempting a crude or desperate summons for protection.',
+        tags: ['summon'],
     },
     {
         key: 'enemy_cult_summons',
         label: 'Enemy or Cult Summons',
         guidance: 'Begin with hostile, secretive, or morally suspect summoners who may have expected a weapon, sacrifice, demon, hero, servant, or omen.',
+        tags: ['summon'],
     },
     {
         key: 'pulled_with_classmates_or_strangers',
         label: 'Pulled With Classmates or Strangers',
         guidance: 'Begin with several Earth people arriving together or in the same aftermath. Preserve {{user}} as the premade character while others may be confused, missing, or nearby.',
+        tags: ['group', 'summon'],
     },
     {
         key: 'pulled_with_party_or_team',
         label: 'Pulled With Party or Team',
         guidance: 'Begin with a small group, party, raid team, coworkers, passengers, or companions arriving together or being sorted by the new world.',
+        tags: ['group', 'summon'],
     },
     {
         key: 'wildland_awakening',
@@ -603,16 +613,19 @@ const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
         key: 'avatar_body_login_failure',
         label: 'Game-Trapped Avatar Body',
         guidance: 'Begin with the premade character as the avatar/body that has become real. The world treats that body and identity as physically present.',
+        tags: ['game'],
     },
     {
         key: 'guild_base_materialization',
         label: 'Game Guild Base Materialization',
         guidance: 'Begin in a player base, guild hall, safe room, clan estate, headquarters, inventory room, or familiar game-like location that has become real.',
+        tags: ['game'],
     },
     {
         key: 'game_dungeon_or_boss_arena',
         label: 'Game Dungeon or Boss Arena',
         guidance: 'Begin where a game encounter, dungeon floor, raid arena, or boss chamber has become real and immediately dangerous or strange.',
+        tags: ['game'],
     },
     {
         key: 'deity_audience',
@@ -623,6 +636,7 @@ const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
         key: 'administrator_chamber',
         label: 'Administrator or Cosmic Clerk Chamber',
         guidance: 'Begin in an otherworldly administrative, system, tribunal, reincarnation, or sorting space with someone who can explain only what the moment needs.',
+        tags: ['system'],
     },
     {
         key: 'world_spirit_dispatch',
@@ -684,11 +698,12 @@ const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
 export function buildIsekaiOpeningSeed(options = {}) {
     if (!isIsekaiGenre(options?.adventureGenre) && !promptLooksIsekai(options?.prompt)) return null;
     const rng = typeof options?.rng === 'function' ? options.rng : Math.random;
+    const earthTransition = pickSeedEntry(ISEKAI_EARTH_TRANSITIONS, rng);
     return {
         type: 'isekaiOpeningSeed',
         version: 1,
-        earthTransition: pickSeedEntry(ISEKAI_EARTH_TRANSITIONS, rng),
-        newWorldOpening: pickSeedEntry(ISEKAI_NEW_WORLD_OPENINGS, rng),
+        earthTransition,
+        newWorldOpening: pickSeedEntry(compatibleIsekaiOpeningsForEarthSeed(earthTransition), rng),
     };
 }
 
@@ -699,6 +714,25 @@ function pickSeedEntry(entries, rng) {
     return { ...entries[index], index };
 }
 
+function compatibleIsekaiOpeningsForEarthSeed(earthTransition = {}) {
+    const requiredTags = normalizeSeedTagList(earthTransition.requiredOpeningTags);
+    const excludedTags = normalizeSeedTagList(earthTransition.excludedOpeningTags);
+    const permitsGameOpening = earthTransition.allowGameOpenings === true || requiredTags.includes('game') || requiredTags.includes('system');
+    if (!permitsGameOpening && !excludedTags.includes('game')) excludedTags.push('game');
+    const compatible = ISEKAI_NEW_WORLD_OPENINGS.filter(opening => {
+        const openingTags = normalizeSeedTagList(opening.tags);
+        if (excludedTags.some(tag => openingTags.includes(tag))) return false;
+        if (requiredTags.length && !requiredTags.some(tag => openingTags.includes(tag))) return false;
+        return true;
+    });
+    return compatible.length ? compatible : ISEKAI_NEW_WORLD_OPENINGS;
+}
+
+function normalizeSeedTagList(value) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.map(tag => String(tag || '').trim().toLowerCase()).filter(Boolean))];
+}
+
 function renderIsekaiOpeningSeed(seed = null) {
     const transition = seed?.earthTransition || null;
     const opening = seed?.newWorldOpening || null;
@@ -707,14 +741,14 @@ function renderIsekaiOpeningSeed(seed = null) {
     const openingGuidance = String(opening.guidance || '').trim();
     return [
         'You MUST narrate BOTH required beats below, in order.',
-        'Do NOT skip either beat. Do NOT choose a different transfer trope or starting setup.',
+        'Do NOT skip either beat. Do NOT choose a different Earth last moment or Isekai opening.',
         '',
-        'BEAT #1: EARTH LAST MOMENTS AND TRANSITION',
-        `Selected Earth Transition: ${transition.label}.`,
+        'BEAT #1: EARTH LAST MOMENTS',
+        `Selected Earth Last Moment: ${transition.label}.`,
         transitionGuidance ? `Guidance: ${transitionGuidance}` : '',
         '',
-        'BEAT #2: NEW WORLD OPENING',
-        `Selected New World Opening: ${opening.label}.`,
+        'BEAT #2: ISEKAI OPENING',
+        `Selected Isekai Opening: ${opening.label}.`,
         openingGuidance ? `Guidance: ${openingGuidance}` : '',
         '',
         'ONE-TIME AESTHETIC RULE:',
@@ -724,7 +758,7 @@ function renderIsekaiOpeningSeed(seed = null) {
         'PRESERVE {{user}}\'s existing race, body, abilities, gear, identity, backstory, and character-card/lorebook facts. The opening may relocate, summon, reveal, mistake, pressure, or contextualize the character, but it must not rebuild, reroll, overwrite, infantize, or replace them.',
         '',
         'ADAPTATION RULE:',
-        'If explicit character-card or lorebook facts already establish the exact Earth transition, honor those facts and adapt this seed without contradiction.',
+        'If explicit character-card or lorebook facts already establish the exact Earth last moment, honor those facts and adapt this seed without contradiction.',
     ].join('\n');
 }
 
