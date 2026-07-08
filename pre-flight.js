@@ -386,18 +386,43 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const prompt = valueOrNone(adventurePrompt);
     const isekaiOpeningSeed = renderIsekaiOpeningSeed(options?.isekaiOpeningSeed);
     const isIsekaiOpening = Boolean(isekaiOpeningSeed) || isIsekaiGenre(options?.adventureGenre) || promptLooksIsekai(prompt);
+    const genreLabel = formatAdventureIntroGenreLabel(options?.adventureGenre);
+    const promptHeaderGenre = isIsekaiOpening ? 'ISEKAI' : genreLabel ? genreLabel.toUpperCase() : '';
     const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
-        'START_ADVENTURE_PROMPT:',
-        isIsekaiOpening ? 'This is the opening turn of a new isekai adventure.' : 'This is the opening turn of a new adventure.',
-        'Narrate the opening immediately.',
-        'Do not mention readiness, instructions, process, analysis, or meta commentary.',
-        isekaiOpeningSeed ? 'Use the established character/context and the required seeds below.' : 'Use the established character/context and selected genre.',
+        promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
+        isIsekaiOpening
+            ? 'This is the opening turn of a new isekai adventure.'
+            : genreLabel
+                ? `This is the opening turn of a new ${genreLabel} adventure.`
+                : 'This is the opening turn of a new adventure.',
     ];
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
-    if (nameReveal) lines.push('', 'NAME REVEAL:', nameReveal);
-    lines.push('', prompt);
+    if (isekaiOpeningSeed) {
+        if (nameReveal) lines.push('', 'NAME REVEAL:', nameReveal);
+        lines.push('', prompt);
+    } else if (nameReveal) {
+        lines.push('', ...insertAdventureIntroNameReveal(prompt, nameReveal));
+    } else {
+        lines.push('', prompt);
+    }
     return lines.join('\n');
+}
+
+function formatAdventureIntroGenreLabel(value) {
+    const genre = String(value || '').trim();
+    return genre && !isNoneText(genre) ? genre : '';
+}
+
+function insertAdventureIntroNameReveal(prompt = '', nameReveal = '') {
+    const promptText = valueOrNone(prompt);
+    const marker = 'START ADVENTURE REMINDER:';
+    const index = promptText.indexOf(marker);
+    const nameRevealBlock = ['NAME REVEAL:', nameReveal].join('\n');
+    if (index < 0) return [nameRevealBlock, '', promptText];
+    const before = promptText.slice(0, index).trimEnd();
+    const after = promptText.slice(index).trimStart();
+    return before ? [before, '', nameRevealBlock, '', after] : [nameRevealBlock, '', after];
 }
 
 const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
@@ -681,25 +706,25 @@ function renderIsekaiOpeningSeed(seed = null) {
     const transitionGuidance = String(transition.guidance || '').trim();
     const openingGuidance = String(opening.guidance || '').trim();
     return [
-        'ISEKAI TRANSITION AND OPENING SEED:',
         'You MUST narrate BOTH required beats below, in order.',
-        '#1: Earth Transition',
-        '#2: New World Opening',
+        'Do NOT skip either beat. Do NOT choose a different transfer trope or starting setup.',
         '',
-        'Do NOT skip either beat.',
-        'Do NOT choose a different transfer, trope, starting location, or opening setup.',
-        '',
-        `#1 - EARTH TRANSITION: ${transition.label}.`,
+        'BEAT #1: EARTH LAST MOMENTS AND TRANSITION',
+        `Selected Earth Transition: ${transition.label}.`,
         transitionGuidance ? `Guidance: ${transitionGuidance}` : '',
         '',
-        `#2 - NEW WORLD OPENING: ${opening.label}.`,
+        'BEAT #2: NEW WORLD OPENING',
+        `Selected New World Opening: ${opening.label}.`,
         openingGuidance ? `Guidance: ${openingGuidance}` : '',
         '',
-        'One-Time Aesthetic Rule: The first visible glimpse of the new world or first clearly seen person from it may establish the colorful, stylized, anime-like visual reality once. After that, keep the aesthetic implicit and do not keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels directly.',
+        'ONE-TIME AESTHETIC RULE:',
+        'The first visible glimpse of the new world, or the first clearly seen person from it, may establish the colorful, stylized, anime-like visual reality of this world ONLY ONCE. After that, keep the aesthetic implicit. Do NOT keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels.',
         '',
-        'Premade Character Rule: Preserve {{user}}\'s existing race, body, abilities, gear, identity, backstory, and character-card/lorebook facts. The opening may relocate, summon, reveal, mistake, pressure, or contextualize the character, but it must not rebuild, reroll, overwrite, infantize, or replace them.',
+        'PREMADE CHARACTER RULE:',
+        'PRESERVE {{user}}\'s existing race, body, abilities, gear, identity, backstory, and character-card/lorebook facts. The opening may relocate, summon, reveal, mistake, pressure, or contextualize the character, but it must not rebuild, reroll, overwrite, infantize, or replace them.',
         '',
-        'Adaptation Rule: If explicit character-card or lorebook facts already establish the exact Earth transition, honor those facts and adapt this seed around them without contradiction. Keep the Earth-side transition brief, then begin play in the selected new-world opening quickly.',
+        'ADAPTATION RULE:',
+        'If explicit character-card or lorebook facts already establish the exact Earth transition, honor those facts and adapt this seed without contradiction.',
     ].join('\n');
 }
 
@@ -779,85 +804,60 @@ function renderFinalWritingStyleReminder(options = {}) {
 function renderControlEngineNarrativeContract() {
     return String.raw`renderControlEngine(input): {
 
-itemAvailability:
-Execute itemAvailability(response, context).
-mandate: Obey listed personal item availability exactly.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. Unavailable items must not appear possessed or usable.
-
-diegeticPhysicality:
-Execute diegeticPhysicality(response, context).
-mandate: Render abilities and unusual effects through observable consequences only.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not name or explain powers unless spoken in dialogue.
-
-strictEpistemology:
-Execute strictEpistemology(response, context).
-mandate: Keep information locked until directly evidenced in-scene.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not reveal unknown identities, motives, lore, or private thoughts.
-
-inanimateObjectivity:
-Execute inanimateObjectivity(response, context).
-mandate: Give agency only to beings, forces, mechanisms, and processes capable of physical action.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not attribute will, awareness, or emotion to objects, weather, or abstractions.
-
-denotativePhysicality:
-Execute denotativePhysicality(response, context).
-mandate: Keep prose literal, physically clear, and directly perceivable.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. No figurative language. Rooms do not breathe. Silence does not stretch. Words do not hang, land, hit, cut, or fall flat. Rewrite any figurative line as literal physical description. Ban canned quiet-voice phrasing and its equivalents, including "barely above a whisper" and "barely above a breath."
-
-embodiedPerception:
-Execute embodiedPerception(response, context).
-mandate: Narrate through concrete physical evidence from {{user}}'s position. Keep positions, distance, facing, occlusion, and barriers consistent.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not use smell or taste as ambient scene dressing. Do not let {{user}} perceive, reach, or interact through walls, doors, distance, cover, or other barriers unless the scene explicitly opens that path.
-Do not say that the air smells, the room smells, the place smells, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.
-Do not say that the air tastes, the room tastes, the place tastes, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.
-
-strictBehaviorism:
-Execute strictBehaviorism(response, context).
-Render character state and emotion through EXTERNAL BEHAVIOR AND ACTION ONLY. For example: speech, chosen action, posture, movement, object use, and spatial positioning.
-NON-NEGOTIABLE BAN: Do NOT use involuntary physiology such as skin/facial flushing, blushing, or color change. Do NOT use eye language, micro-expressions, body-cue shorthand, or autonomic tells to express emotion, attraction, embarrassment, fear, anger, arousal, hesitation, or tension.
-NEVER NARRATE: skin, face, or cheeks blushing, flushing, reddening, turning pink or red; heat in the face; color rising; faint flush; deep flush; breath hitching; breath catching; voice hitching; voice catching; throat working; jaw working; pulse jumping; stomach dropping; knuckle whitening or paling; mouth or jaw opening and closing loops.
-ALWAYS narrate character state and emotion through PHYSICAL BEHAVIOR / ACTION.
-
-agencySeparation:
-Execute agencySeparation(response, input, context).
-mandate: You control only the world, NPCs, hazards, objects, and consequences. Narrate TO {{user}}, not AS {{user}}.
-PROHIBITED: Never write {{user}}'s speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement. If the player did not explicitly declare a voluntary action, that voluntary action did not happen. External physical effects on {{user}} may be narrated only when imposed by the scene, NPCs, hazards, or resolved facts.
-
-linearChronology:
-Execute linearChronology(response, input, context).
-mandate: {{user}}'s input is already complete and in the past. Start after it with external results, resistance, failure points, NPC responses, or consequences.
-NON-NEGOTIABLE PROHIBITION:
-- NEVER repeat, paraphrase, summarize, restage, or narrate ANY part of {{user}}'s actions or dialogue.
-- Do NOT start with {{user}}'s declared action. Start with what happens next.
-
-hypotacticSceneBeats:
-Execute hypotacticSceneBeats(response, context).
-mandate: Write cohesive scene beats.
-ABSOLUTELY-FORBIDDEN: Never do any of the following. Do not break one beat into staccato action stacking or body-cue pileups.
+activeHandoff:
+Execute activeHandoff(response, context).
+mandate: YOU MUST END EVERY RESPONSE on one active, concrete beat that {{user}} can immediately respond to.
+HARD LIMIT: Do not prompt {{user}}, end on waiting/silence/filler, or continue past the handoff beat.
 
 characterTurnPacing:
 Execute characterTurnPacing(response, context).
-mandate: Write exactly one cohesive NPC dialogue turn with a natural, connected flow: immediate reaction, conversational dialogue, brief directly related supporting actions, and brief descriptive framing only when it supports dialogue/action. Maximum 8 sentences, maximum 1 question, maximum 1 clear user-facing handoff beat.
-ABSOLUTELY-FORBIDDEN:
-- Multiple questions.
-- Second NPC turn, chain reaction sequence, self-answer, follow-up clarification, or exposition dump.
-- Repeated body language, filler micro-actions, or canned reaction loops.
-- Continuing after a question or action that clearly requires {{user}}'s response.
-Endpoint quality is governed by activeHandoff(response, context).
+mandate: EACH CHARACTER/NPC is entitled to NO MORE THAN ONE COHESIVE TURN PER RESPONSE. A turn MAY include INTERCONNECTED dialogue, actions, reaction beats, and gestures.
+HARD LIMIT: Do not give the same NPC a second turn, chain NPC turns/questions, dump exposition, or use filler reaction loops.
 
-activeHandoff:
-Execute activeHandoff(response, context).
-mandate: End on an active, concrete beat that {{user}} can immediately respond to. (Dialogue or action directed at {{user}}, or a visible scene change that immediately requires a response)
-NEVER:
-- Continue past the handoff beat
-- Prompt {{user}} to respond or ask direct questions such as "what do you do?" or "the ball is in your court."
-- End on explicit waiting, staring, silence, or all-eyes-on-user framing.
-- End on filler background, ambient, or environmental details that are irrelevant to the ongoing interaction.
+hypotacticSceneBeats:
+Execute hypotacticSceneBeats(response, context).
+mandate: Hypotactic Narration: Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
+HARD LIMIT: Do not break one beat into staccato action stacking, micro-reaction loops, or body-cue pileups.
 
-applicationContract:
-Before writing the final, in-character response, treat these constraints as binding: activeHandoff, characterTurnPacing, hypotacticSceneBeats, linearChronology, strictBehaviorism, embodiedPerception, denotativePhysicality, inanimateObjectivity, strictEpistemology, and diegeticPhysicality.
-The response must be fully filtered through them and remain compliant with all of them.
-Any failure invalidates the response.
+linearChronology:
+Execute linearChronology(response, input, context).
+mandate: You MUST ONLY narrate the EXTERNAL CONSEQUENTIAL RESULTS, RESISTANCE, FAILURE POINTS, REACTIONS, AND RESPONSES TO {{user}}'s actions and dialogue. {{user}}'s input is IN THE PAST. Narrate ONLY what comes after.
+HARD LIMIT: Do not repeat, paraphrase, summarize, re-stage, or narrate any part of {{user}}'s input.
+
+agencySeparation:
+Execute agencySeparation(response, input, context).
+mandate: You control ONLY the world, NPCs, hazards, objects, and consequences. {{user}} is EXCLUSIVELY controlled by the human player. YOUR TASK is to narrate TO {{user}}, not AS {{user}}.
+HARD LIMIT: Do not narrate {{user}}'s thoughts, feelings, choices, decisions, voluntary actions, dialogue, intent, or undeclared behavior.
+
+strictBehaviorism:
+Execute strictBehaviorism(response, context).
+mandate: You MUST render character/NPC state through EXTERNAL BEHAVIOR/ACTION ONLY. Narrate REAL, VISIBLE BEHAVIORAL GESTURES that clearly express the NPC's current state without naming their internal feelings.
+HARD LIMIT: Do not reveal internal states or use invisible eye-language, micro-expressions, skin color changes, autonomic/body-cue shortcuts, or mouth/jaw loops as emotional shorthand.
+
+embodiedPerception:
+Execute embodiedPerception(response, context).
+mandate: ALWAYS narrate the scene using CONCRETE PHYSICAL EVIDENCE from {{user}}'s physical position.
+HARD LIMIT: Do not use ambient smell/taste as scene dressing or let {{user}} perceive, reach, or interact through barriers unless the scene explicitly opens that path.
+
+denotativePhysicality:
+Execute denotativePhysicality(response, context).
+mandate: You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE.
+HARD LIMIT: Do not use metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.
+
+inanimateObjectivity:
+Execute inanimateObjectivity(response, context).
+mandate: ONLY living beings, physical forces, mechanisms, and active processes can take actions. ONLY living beings can have emotions, intentions, or awareness.
+HARD LIMIT: Do not attribute will, awareness, memory, intention, or emotion to objects, weather, architecture, mood, atmosphere, or abstractions.
+
+strictEpistemology:
+Execute strictEpistemology(response, context).
+mandate: Information remains LOCKED until it is EARNED THROUGH DIRECT sensory evidence, dialogue, readable text, or previously established scene fact.
+HARD LIMIT: Do not reveal unknown names, identities, roles, hidden causes, thoughts, unseen actions, background lore, or {{user}} cognition.
+
+diegeticPhysicality:
+Execute diegeticPhysicality(response, context).
+mandate: Abilities MUST be narrated THROUGH OBSERVABLE CONSEQUENCES IN THE SCENE.
+HARD LIMIT: Do not label, announce, name, or explain abilities, spells, powers, traits, activation, casting, or system mechanics unless spoken in dialogue.
 }`;
 }
 
