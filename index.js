@@ -416,10 +416,12 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
 
     mandate:
-      You MUST ONLY narrate what follows AFTER {{user}}'s input. Narrate the external reactions, response, or consequence of {{user}}'s actions or dialogue.
+      You MUST ONLY narrate the EXTERNAL results, resistance, failure points, reactions, responses, and consequences of {{user}}'s actions or dialogue.
+      {{user}}'s input is already complete and in the PAST. Narrate only what follows.
+      Your job is to narrate the world TO {{user}}, not replay {{user}}.
 
     NON-NEGOTIABLE PROHIBITION:
-      NEVER, UNDER ANY CIRCUMSTANCES, repeat, paraphrase, or narrate ANY part of {{user}}'s actions or dialogue.
+      NEVER repeat, paraphrase, summarize, restage, or narrate ANY part of {{user}}'s actions or dialogue.
 
     Example:
       Sample {{user}} input: "I try to grab the scroll from the desk."
@@ -431,13 +433,14 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     policy: USER-CONTROL-BOUNDARY
 
     mandate:
-      The narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist.
-      Render {{user}}'s voluntary actions only when the latest input explicitly declares them. External physical forces may affect {{user}} when concrete and proportional.
+      You control ONLY the world, NPCs, hazards, objects, and consequences. {{user}} is ONLY controlled by the human player.
+      Your job is to narrate TO {{user}}, not AS {{user}}.
+      You may narrate external physical effects imposed on {{user}} by the scene, NPCs, hazards, or resolved facts. For example: {{user}} is pushed, struck, restrained, dragged, tripped by an external obstacle, knocked down, blocked, grabbed, or awakened by an external event.
+      Remember: If the player did NOT explicitly declare a voluntary action, that voluntary action DID NOT HAPPEN.
 
-    ABSOLUTELY-FORBIDDEN:
-      NEVER DO ANY OF THE FOLLOWING:
-        - Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.
-        - Do not interpret, assume, or complete {{user}}'s intent.
+    PROHIBITED: NON-NEGOTIABLE:
+      - NEVER narrate {{user}}'s speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.
+      - Do NOT interpret, assume, or complete {{user}}'s intent.
   }
 
   function strictBehaviorism(response, context): {
@@ -9608,8 +9611,10 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.',
         '',
         'agencySeparation(response, RECENT_USER_INPUT):',
-        'The narrator controls the world, NPCs, hazards, objects, and consequences. {{user}} controls the protagonist.',
-        'Do not write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.',
+        'You control only the world, NPCs, hazards, objects, and consequences. Narrate TO {{user}}, not AS {{user}}.',
+        'Never write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.',
+        'If the player did not explicitly declare a voluntary action, that voluntary action did not happen.',
+        'External physical effects on {{user}} are allowed only when imposed by the scene, NPCs, hazards, or resolved facts.',
         'Do not interpret, assume, or complete {{user}} intent.',
         '',
         'strictBehaviorism(response):',
@@ -9637,8 +9642,8 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not narrate {{user}} cognition, perception, or internal state.',
         '',
         'linearChronology(response, RECENT_USER_INPUT):',
-        'Narrate in strict linear order. Begin with the immediate consequence of {{user}} latest input.',
-        'Do not echo, summarize, recap, paraphrase, or repeat any part of {{user}} actions or dialogue.',
+        '{{user}} input is already complete and in the past. Begin with the immediate external result, resistance, failure point, NPC response, or consequence.',
+        'Do not echo, summarize, restage, paraphrase, or repeat any part of {{user}} actions or dialogue.',
         'Do not jump ahead, rewind, or insert undeclared intermediate actions.',
         '',
         'activeHandoff(response):',
