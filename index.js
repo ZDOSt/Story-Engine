@@ -10184,8 +10184,6 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
 
             harmMode: resolution.harmMode,
 
-            nonLethal: resolution.nonLethal,
-
             actionTargets: resolution.ActionTargets,
 
             oppTargets: resolution.OppTargets,

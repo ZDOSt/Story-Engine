@@ -108,7 +108,7 @@ function buildReadableSemanticDebug(ledger) {
         'actionBucket=' + valueOrNone(resolution.actionBucket),
         'socialBucket=' + valueOrNone(resolution.socialBucket),
         'combatType=' + valueOrNone(resolution.combatType),
-        'actionCount=' + list(resolution.actionCount),
+        'derivedActions=' + list(resolution.actionCount),
         'actionUnits=' + actionUnitsSummary(resolution.actionUnits, { includeEvidence: true }),
         'environmentDifficultyTier=' + valueOrNone(resolution.environmentDifficultyTier),
         'environmentDifficultyBonus=' + valueOrNone(resolution.environmentDifficulty),
@@ -157,7 +157,6 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.intimacyAdvanceExplicit=' + valueOrNone(resolution.intimacyAdvanceExplicit),
         'resolutionPacket.boundaryViolationExplicit=' + valueOrNone(resolution.boundaryViolationExplicit),
         'resolutionPacket.harmMode=' + valueOrNone(resolution.harmMode),
-        'resolutionPacket.nonLethal=' + valueOrNone(resolution.nonLethal),
         'resolutionPacket.RollNeeded=' + valueOrNone(resolution.RollNeeded),
         'resolutionPacket.RollReason=' + valueOrNone(resolution.RollReason),
         'resolutionPacket.ActionBucket=' + valueOrNone(resolution.ActionBucket),
@@ -258,11 +257,10 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.CombatType', valueOrNone(resolution.CombatType)],
         ['resolution.ResolvedStats', inline(resolution.ResolvedStats ?? {})],
         ['resolution.EnvironmentDifficulty', summary.environmentDifficulty],
-        ['resolution.actionCount', summary.actionCount],
+        ['resolution.actions', summary.actionCount],
         ['resolution.actionUnits', actionUnitsSummary(resolution.actionUnits, { includeEvidence: true })],
         ['resolution.rollFull', summary.rollFull],
         ['resolution.harmMode', valueOrNone(resolution.harmMode)],
-        ['resolution.nonLethal', valueOrNone(resolution.nonLethal)],
         ['resolution.outcome', summary.outcome],
         ['resolution.outcomeMeaning', summary.result],
         ['resolution.landedActions', summary.landedActions],
@@ -1366,11 +1364,7 @@ function narrativeHarmLimitFact(resolution = {}) {
     if (harmMode === 'none') {
         return 'No bodily harm mode is active for {{user}} in this beat. Do not invent injury, HP damage, unconsciousness, or death from {{user}}.';
     }
-    if (isNoneText(resolution?.nonLethal)) return 'No special harm limit is listed beyond injuryOrDeath and npcAggressionResult.';
-    if (String(resolution.nonLethal).toUpperCase() === 'Y') {
-        return `Keep {{user}}'s harmful result nonlethal unless injuryOrDeath explicitly says otherwise. Do not narrate a killing blow from {{user}} in this beat.`;
-    }
-    return 'No nonlethal restriction is listed; still obey injuryOrDeath exactly and do not invent extra injury or death.';
+    return 'Obey harmMode and injuryOrDeath exactly; do not invent extra injury, unconsciousness, or death.';
 }
 
 function narrativeEnvironmentPressure(resolution = {}) {

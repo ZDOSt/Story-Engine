@@ -144,7 +144,6 @@ function normalizeResolutionHarmMode(value, semantic = {}) {
     };
     if (aliases[text] && aliases[text] !== 'none') return aliases[text];
     if (bool(semantic?.classifyPhysicalBoundaryPressure)) return 'restraint_control';
-    if (bool(semantic?.nonLethal)) return 'nonlethal';
     if (normalizeActionBucket(semantic?.actionBucket, semantic?.rollNeeded ?? semantic?.RollNeeded ?? 'Y') === 'Combat') return 'nonlethal';
     return 'none';
 }
@@ -153,9 +152,6 @@ function harmModeAllowsHpDamage(harmMode) {
     return harmMode === 'lethal' || harmMode === 'nonlethal';
 }
 
-function harmModeCompatibilityNonLethal(harmMode) {
-    return harmMode === 'nonlethal' || harmMode === 'restraint_control';
-}
 const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
@@ -217,6 +213,14 @@ function normalizeSemanticActionUnits(units, actions = ['a1'], semantic = {}) {
             evidence,
         };
     });
+}
+
+function deriveResolutionActionMarkers(semantic = {}, actionBucket = 'None') {
+    const unitCount = Array.isArray(semantic.actionUnits) ? semantic.actionUnits.length : 0;
+    const count = actionBucket === 'Combat'
+        ? Math.max(1, Math.min(3, unitCount || 1))
+        : 1;
+    return Array.from({ length: count }, (_, index) => `a${index + 1}`);
 }
 
 function formatActionUnitsAudit(units = []) {
@@ -813,7 +817,6 @@ function buildHiddenHealthNpcRefs(trackerSnapshot = {}, ledger = {}) {
     for (const name of toRealArray(targets.OppTargets?.NPC)) markAdventuringScale(name);
 
     const combatOrHostilePhysical = String(semantic.actionBucket || '') === 'Combat'
-        || bool(semantic.classifyHostilePhysicalIntent)
         || hasCombatActionLanguage([
             semantic.identifyGoal,
             semantic.identifyChallenge,
@@ -2600,7 +2603,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         audit.push(`2.6a.2 NPCImpairmentEngine=${compact(npcImpairment)}`);
         audit.push(`2.6b resolveOutcome=${compact(outcome)}`);
     } else {
-        actions = normalizeActionMarkers(semantic.actionCount);
+        actions = deriveResolutionActionMarkers(semantic, actionBucket);
         actionUnits = normalizeSemanticActionUnits(semantic.actionUnits, actions, semantic);
         let { userStat, oppStat } = deterministicStatsForBucket(actionBucket, socialBucket, combatType);
         let stealthContestOpposition = false;
@@ -2643,7 +2646,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         const currentTargetCore = oppTargetsNpcFirst ? trackerSnapshot[oppTargetsNpcFirst]?.currentCoreStats : null;
 
         audit.push('2.7 rollNeeded=Y');
-        audit.push(`2.7a actionCount=[${actions.join(',')}]`);
+        audit.push(`2.7a actions=[${actions.join(',')}]`);
         audit.push(`2.7a.1 actionUnits=[${formatActionUnitsAudit(actionUnits)}]`);
         audit.push(`2.7b actions=[${actions.join(',')}]`);
         audit.push(`2.7c bucketStats={USER:${userStat},OPP:${oppStat},actionBucket:${actionBucket},socialBucket:${socialBucket},combatType:${combatType}}`);
@@ -2693,9 +2696,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             ? healingStaticDc
             : oppStat === 'ENV' ? defDie + environmentDifficulty : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty;
         const margin = atkTot - defTot;
-        const hostileReferee = applyHostilePhysicalIntentHardRules(semantic, audit);
-        const hostilePhysicalIntent = hostileReferee.value;
-        hostilePhysical = actionBucket === 'Combat' && (combatType === 'Mundane' || hostilePhysicalIntent);
+        hostilePhysical = actionBucket === 'Combat';
         combatActionSequence = actionBucket === 'Combat';
 
         if (combatActionSequence) {
@@ -2733,8 +2734,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         rollNeeded,
         classifyPhysicalBoundaryPressure: boundaryReferee.value,
     });
-    const nonLethal = harmModeCompatibilityNonLethal(harmMode) ? 'Y' : 'N';
-    audit.push(`2.7o.1 harmMode=${harmMode} nonLethal=${nonLethal} gate=downstream_damage_only`);
+    audit.push(`2.7o.1 harmMode=${harmMode} gate=downstream_damage_only`);
 
     const inflictedInjuries = deriveInflictedNpcInjuries({
         semantic,
@@ -2745,7 +2745,6 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         combatActionSequence,
         userAttackDie,
         harmMode,
-        nonLethal,
         primaryTarget: primaryOppTarget,
         primaryTargetCore: targetCore,
         trackerSnapshot,
@@ -2763,7 +2762,6 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         intimacyAdvanceExplicit,
         boundaryViolationExplicit,
         harmMode,
-        nonLethal,
         StealthContest: bool(semantic.stealthContest) ? 'Y' : 'N',
         RollNeeded: rollNeeded,
         RollReason: rollReason,
@@ -4266,10 +4264,10 @@ function registerGeneratedName(context, name, meta) {
     saveMetadataDebounced(context, { warn: false });
 }
 
-function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, harmMode = 'none', nonLethal = 'N', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
+function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, harmMode = 'none', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
     if (rollNeeded !== 'Y') return [];
     if (!effectOutcomeLanded(outcome)) return [];
-    const mode = normalizeResolutionHarmMode(harmMode, { nonLethal, actionBucket: combatActionSequence ? 'Combat' : 'None', rollNeeded });
+    const mode = normalizeResolutionHarmMode(harmMode, { actionBucket: combatActionSequence ? 'Combat' : 'None', rollNeeded });
     if (mode === 'none') return [];
     if (mode === 'restraint_control') {
         return deriveRestraintControlNpcEffects({ injuryEffectEngine, targets, outcome, primaryTarget, audit });
@@ -4280,7 +4278,6 @@ function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, roll
         combatActionSequence,
         userAttackDie,
         harmMode: mode,
-        nonLethal,
         primaryTarget,
         primaryTargetCore,
         trackerSnapshot,
@@ -4301,7 +4298,7 @@ function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, roll
         .map(effect => buildInflictedInjuryFromSemanticEffect(effect, outcome))
         .filter(Boolean);
     if (!injuries.length) {
-        const fallback = buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, harmMode: mode, nonLethal });
+        const fallback = buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, harmMode: mode });
         if (fallback) {
             audit?.push(`2.7p.1 fallbackCombatInjury=${compact(fallback)}`);
             injuries.push(fallback);
@@ -4360,12 +4357,10 @@ function effectOutcomeLanded(outcome) {
     return Number.isFinite(landedCount) && landedCount > 0;
 }
 
-function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttackDie, harmMode = 'none', nonLethal, primaryTarget, primaryTargetCore, trackerSnapshot, hiddenHealthSnapshot }) {
+function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttackDie, harmMode = 'none', primaryTarget, primaryTargetCore, trackerSnapshot, hiddenHealthSnapshot }) {
     if (!combatActionSequence) return null;
     if (!isReal(primaryTarget)) return null;
-    if (normalizeResolutionHarmMode(harmMode, { nonLethal, actionBucket: 'Combat', rollNeeded: 'Y' }) !== 'lethal') return null;
-    const nonlethal = String(nonLethal ?? 'N').trim().toUpperCase() === 'Y';
-    if (nonlethal) return null;
+    if (normalizeResolutionHarmMode(harmMode, { actionBucket: 'Combat', rollNeeded: 'Y' }) !== 'lethal') return null;
 
     const existingCondition = normalizeTrackerCondition(trackerSnapshot?.[primaryTarget]?.condition);
     const targetRank = String(primaryTargetCore?.Rank || trackerSnapshot?.[primaryTarget]?.currentCoreStats?.Rank || 'none');
@@ -4403,7 +4398,7 @@ function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttack
         sourceAction: trigger,
         FatalityTrigger: trigger,
         NarrationRule: instantKill
-            ? `${primaryTarget} is killed by this exceptional user attack result: nonLethal=N, natural 20, and Critical_Success. Render the kill as decisive, cinematic, concrete, and rewarding; do not soften it into a wound, near miss, survival, escape, or unresolved struggle. The target is dead.`
+            ? `${primaryTarget} is killed by this exceptional user attack result: harmMode=lethal, natural 20, and Critical_Success. Render the kill as decisive, cinematic, concrete, and rewarding; do not soften it into a wound, near miss, survival, escape, or unresolved struggle. The target is dead.`
             : `${primaryTarget} was already ${existingCondition}; this landed combat hit deterministically finishes them. Render the result as a clear fatal finish, not another wound or continued fighting. The target is dead.`,
     };
 }
@@ -4416,9 +4411,9 @@ function bossAtOrBelowHalfHealth(primaryTarget, hiddenHealthSnapshot) {
     return currentHp <= Math.floor(maxHp / 2);
 }
 
-function buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, harmMode = 'none', nonLethal = 'N' }) {
+function buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, harmMode = 'none' }) {
     if (!combatActionSequence || !isReal(primaryTarget) || !effectOutcomeLanded(outcome)) return null;
-    const mode = normalizeResolutionHarmMode(harmMode, { nonLethal, actionBucket: 'Combat', rollNeeded: 'Y' });
+    const mode = normalizeResolutionHarmMode(harmMode, { actionBucket: 'Combat', rollNeeded: 'Y' });
     if (!harmModeAllowsHpDamage(mode)) return null;
     const severity = severityFromOutcomeAndText(outcome, '');
     const condition = conditionFromInflictedSeverity(severity);
@@ -7718,33 +7713,6 @@ function escapeRegExp(value) {
 function cleanInitScalar(value) {
     const text = String(value || '').trim().replace(/\s+/g, ' ');
     return text.slice(0, 80);
-}
-
-function applyHostilePhysicalIntentHardRules(semantic, audit) {
-    const semanticValue = bool(semantic.classifyHostilePhysicalIntent);
-    const source = semanticSourceText(semantic);
-
-    if (semanticValue && isBodyBoundaryPressure(source) && !hasDirectBodilyAggression(source)) {
-        audit.push(`2.7o.1 deterministicHostilePhysicalIntentReferee=${compact({
-            hardRule: 'ResolutionEngine.classifyHostilePhysicalIntent: grabbing/catching/holding a wrist/arm/clothing only to stop, delay, or force attention is boundary pressure, not hostile physical intent',
-            from: 'Y',
-            to: 'N',
-            evidence: source.slice(0, 220),
-        })}`);
-        return { value: false };
-    }
-
-    if (semanticValue && isObjectBoundaryContest(source) && !hasDirectBodilyAggression(source)) {
-        audit.push(`2.7o.1 deterministicHostilePhysicalIntentReferee=${compact({
-            hardRule: 'ResolutionEngine.classifyHostilePhysicalIntent: forceful object/possession/space contest is not hostile physical intent unless the NPC body is attacked/restrained/controlled',
-            from: 'Y',
-            to: 'N',
-            evidence: source.slice(0, 220),
-        })}`);
-        return { value: false };
-    }
-
-    return { value: semanticValue };
 }
 
 function applyPhysicalBoundaryPressureHardRules(semantic, targets, options, audit) {
