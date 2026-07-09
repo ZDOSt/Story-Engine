@@ -219,7 +219,7 @@ Begin the selected-genre opening scene now. Do not explain the setup, instructio
 
 Do NOT choose a different genre, premise, or opening setup.
 
-If NAME REVEAL is present, follow it strictly: use the generated names listed there; do NOT invent replacement names.
+If NAME REVEAL is present, follow it strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.
 
 Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
 
@@ -227,6 +227,8 @@ const PLAYER_ISEKAI_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMIND
 Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.
 
 Do NOT skip the required isekai beats. Do NOT choose a different Earth last moment or Isekai opening.
+
+If NAME REVEAL is present, follow it strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.
 
 Do not narrate {{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection. Do not narrate {{user}} actions such as "you push yourself up" or "you open your eyes."`;
 const PLAYER_SETUP_ANALYSIS_RESPONSE_LENGTH = 900;

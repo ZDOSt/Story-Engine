@@ -794,7 +794,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '',
         '#3 - OUTPUT',
         'narrativeFacts(input) is authoritative. You MUST follow these facts strictly. Do NOT change, contradict, soften, intensify, reinterpret, skip, or add outcomes beyond them.',
-        'Follow nameReveal strictly: use generated names when provided; do NOT invent replacement names.',
+        'Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
         '',
         'Your response MUST begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.',
         'Output only final in-character narration between those tags.',
@@ -1574,19 +1574,22 @@ function narrativeNameRevealFact(nameGeneration = {}) {
     const maleNames = (pool.male || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     return [
-        'When the name of a new person, entity, or location is first mentioned or revealed, you are REQUIRED to choose exactly one unused name from the list below.',
-        'DO NOT invent, modify, translate, combine, suffix, derive, ignore, or replace these names. Choose a name from the appropriate category.',
+        'Name reveal is LOCKED and GATED.',
+        '',
+        'DO NOT output any new person, entity, or location name unless that name is explicitly revealed in the current scene through dialogue, self-introduction, direct address, readable text, signage, documents, or clear recognition supported by context.',
+        '',
+        'If a new name IS revealed, you MUST choose exactly one unused name from the appropriate pool below.',
+        '',
+        'DO NOT invent, modify, translate, combine, suffix, derive, surname, ignore, or replace these names. Any new name outside this list makes the response invalid.',
         '',
         `FEMALE: ${nameList(femaleNames)}.`,
         `MALE: ${nameList(maleNames)}.`,
         `LOCATION: ${nameList(locationNames)}.`,
         '',
-        'This is NOT OPTIONAL. If you use any new name outside this list, the response is invalid.',
-        '',
-        'A new name may ONLY appear when a person, entity, or location is explicitly revealed or discovered in-scene through speech, readable text, self-introduction, direct reference, signage, documents, clear recognition, or when someone else mentions it.',
-        'Already revealed names may continue unchanged.',
-        'If no approved listed name fits, leave the person, entity, or location unnamed.',
-        'Do NOT name background, incidental, or unnamed figures unless the scene actually reveals their name.',
+        'If no name is revealed in-scene, leave the person, entity, or location unnamed.',
+        'Do NOT name background, incidental, unseen, or merely described figures.',
+        'Do NOT create a name reveal just because someone or somewhere appears.',
+        'Already revealed names continue unchanged.',
     ].join('\n');
 }
 
