@@ -7,9 +7,9 @@ function ResolutionEngine(input) {
     UNIVERSAL:
 'EXPLICIT-ONLY. MUST be stated in Character Card / Lore / Scene text / tracker. NO invention. Uncertain = N or default. FIRST-YES-WINS = first matching explicit rule becomes final. No reconsideration. NEVER invent targets, actions, obstacles, or outcomes. MAX 3 ACTIONS. The semantic pass classifies context only; deterministic code rolls dice, assigns numeric generated stats, calculates margins, landed actions, counter potential, and final outcomes.',
     BUCKETS:
-'Roll buckets are semantic action shapes only. None = ordinary/no-roll scene continuity. Social = NPC-facing social pressure, split into Diplomacy, Bluff, or Intimidate. Combat = direct violence or harmful supernatural attack, split into Mundane or SpellOrSupernatural by the primary attack. Challenge = physical/environmental obstacles, stealth/tailing, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. Deterministic code maps buckets to stats and rolls.',
+'Roll buckets are semantic action shapes only. None = ordinary/no-roll scene continuity. Social = NPC-facing social pressure, split into Diplomacy, Bluff, or Intimidate. Combat = direct violence or harmful supernatural attack, split into Mundane or SpellOrSupernatural by the primary attack. Challenge = physical/environmental obstacles, stealth contests, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. A stealth contest is Challenge against a living detector/opponent, not ENV. Deterministic code maps buckets to stats and rolls.',
     STAKES_POSITIVE:
-'These create stakes when fresh and unresolved: physical risk, harm, danger, risk of being detected, noticed, heard, discovered, identified, exposed, tracked, or followed back, stealth/tailing, infiltration, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, access, secrets, pursuit, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity. Stealth/tailing attempts such as following someone quietly, trailing at a distance, avoiding notice, staying hidden, sneaking, hiding, or moving without being seen/heard create positive stealth/tailing stakes when success or failure involves risk of being detected, noticed, heard, discovered, identified, exposed, tracked, or followed back.',
+'These create stakes when fresh and unresolved: physical risk, harm, danger, a stealth contest against a specific established living detector/opponent, infiltration, material gain or loss, significant social status/authority/trust shift, loss of autonomy or physical freedom, hostile restraint/immobilization/confinement, access, secrets, pursuit, meaningful obstacle resolution or failure, or explicit finalGoal advancement or failure for {{user}} or a specific living entity.',
     NO_STAKES:
 'These do not create stakes by themselves: minor mood, flavor, casual rudeness, weak preference, trivial convenience, ordinary scene continuity, already-decided saved disposition/intimacy reactions, or a repeated failed/resolved negative social bucket against the same target and same goal in the same scene under unchanged disposition. Only new unresolved stakes require a roll. If both STAKES_POSITIVE and NO_STAKES appear to apply, STAKES_POSITIVE wins unless the matching positive stake is explicitly already resolved or suppressed by saved/repeated-state rules. Bluff and Intimidate are remembered separately.'
   });
@@ -19,7 +19,7 @@ function ResolutionEngine(input) {
     finalGoal: return a short, plain description of {{user}}'s finalGoal/intent in the last input
     rule: first-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are user-authored context only, not external actions
     rule: when input mixes introspection with external action or speech, extract only the concrete present external actions, spoken dialogue, object/ability use, movement, attack, or interaction as finalGoal
-    rule: ignore setup, intermediary steps, and post-action flavor; ignore movement unless it is itself a separate consequential action such as stealth/tailing, chase, escape, forced movement, dangerous terrain, contested access, or positioning under immediate danger
+    rule: ignore setup, intermediary steps, and post-action flavor; ignore movement unless it is itself a separate consequential action such as a stealth contest against a specific established living detector/opponent, chase, escape, forced movement, dangerous terrain, contested access, or positioning under immediate danger
     rule: romantic, flirtatious, affectionate, suggestive, sexual, or intimate talk/contact is not a special roll category by itself. Describe the finalGoal plainly without using an intimacy gate label.
     rule: asking permission, flirting, teasing, reciprocating NPC-initiated flirtation, declarations of love, kisses, embraces, or intimate proposals are ordinary social/scene actions unless the current user input also contains explicit coercion, force, threat, pressure after refusal, or boundary violation.
     rule: otherwise return finalGoal
@@ -29,10 +29,18 @@ function ResolutionEngine(input) {
     rule: return the decisive action, challenge, or explicit attack sequence within {{user}}'s input that carries risk, uncertainty, resistance, or stakes for {{user}}'s finalGoal
     rule: this is the decisive action, challenge, or explicit attack sequence that determines whether {{user}}'s finalGoal succeeds or fails
     rule: copy the concrete action or challenge from {{user}}'s input when possible
-    rule: following, tailing, shadowing, sneaking after, hiding from, avoiding notice, staying unseen/unheard, or moving without being noticed/heard is a stealth/tailing challenge when success or failure creates risk of being detected, noticed, heard, discovered, identified, exposed, tracked, or followed back
+    rule: avoiding a specific established living entity's perception/detection is a stealth challenge; plain movement without a living detector is not a stealth challenge by itself
     rule: do not use internal dialogue, remembered events, metaphor, subjective sensation, self-perception, uncertainty, or questions to self as the challenge unless they explicitly declare a present external action or objective scene fact
     rule: ignore incidental gestures, flavor, delivery method, setup, movement, or positioning unless that act itself carries stakes or resistance
     rule: if no distinct stakes-bearing challenge exists, return finalGoal
+
+  stealthContest(input, finalGoal, challenge, context):
+    policy: LOCKED, EXPLICIT-ONLY, SEMANTIC-ONLY
+    rule: return Y only when {{user}}'s latest explicit goal is to avoid detection/perception by a specific established living entity, follow or shadow a specific established living entity without being noticed, pass a specific living watcher, or remain unseen/unheard from a specific established living detector/opponent
+    rule: the detector/opponent must be established in the current scene, tracker, character/scenario/lore context, or directly named as a present living entity by the latest input
+    rule: return N when no specific established living detector/opponent is present; terrain, darkness, cover, distance, crowds, weather, and noise are scene conditions, not stealth opposition
+    rule: this field never creates a generic ENV roll; if it is Y, target identification must place the living detector/opponent in ActionTargets and OppTargets.NPC
+    else -> N
 
   classifyHostilePhysicalIntent(input, finalGoal, targets):
     policy: LOCKED, EXPLICIT-ONLY, FIRST-YES-WINS
@@ -78,7 +86,7 @@ function ResolutionEngine(input) {
     rule: ambiguous ordinary bodily force without weapons or inherently dangerous methods is nonlethal by default. Mere restraint/control remains restraint_control.
     return one of: lethal, nonlethal, restraint_control, none
 
-  identifyTargets(input, challenge, finalGoal, context):
+  identifyTargets(input, challenge, finalGoal, stealthContest, context):
     policy: LOCKED, EXPLICIT-ONLY
     hostilesInScene.NPC = ALL established, present, living hostile entities in the current scene, whether or not they directly oppose {{user}}'s current action
     ActionTargets = LIVING entities {{user}} directly tries to affect as the main resolution target
@@ -92,6 +100,8 @@ function ResolutionEngine(input) {
     rule: hostilesInScene.NPC must be established by assistant narration, tracker, character/scenario/lore context, or initial test setup; do not create a hostile from the latest user input alone
     rule: hostilesInScene.NPC excludes neutral/friendly NPCs, absent/offscreen entities, incapacitated/dead entities no longer posing danger, and non-living hazards or obstacles
     rule: if rollNeeded=N, OppTargets.NPC must be [(none)]
+    rule: if stealthContest=Y, the specific established living detector/opponent is ActionTargets and OppTargets.NPC because their awareness is the opposition
+    rule: when stealthContest=Y, terrain, darkness, distance, noise, cover, foliage, crowds, or weather are scene conditions; do not use OppTargets.ENV
     rule: a direct ActionTarget can also be OppTargets.NPC only when that target's stakes are meaningfully contested or resisted
     rule: protective/rescue movement of an ally does not make that ally ActionTargets unless {{user}} contests their will, harms them, restrains them, or makes them the main opposed challenge
     rule: ActionTargets, OppTargets.NPC, BenefitedObservers, and HarmedObservers are mutually exclusive observer categories except that direct ActionTargets may also be OppTargets.NPC when they are the resisting/opposing party
@@ -106,12 +116,13 @@ function ResolutionEngine(input) {
     rule: return N when consent/refusal is merely uncertain, unstated, or left to ordinary scene interpretation. Do not turn ordinary flirting, teasing, kissing, embracing, or romantic/sexual proposals into mechanics without an explicit boundary violation.
     else -> N
 
-  rollNeeded(input, finalGoal, challenge, targets, boundaryViolationExplicit, context):
+  rollNeeded(input, finalGoal, challenge, targets, stealthContest, boundaryViolationExplicit, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/proposals/contact are not stakes by themselves.
     rule: if boundaryViolationExplicit=Y, evaluate stakes normally under DEF.STAKES_POSITIVE and DEF.NO_STAKES; boundary violation usually affects autonomy, trust, safety, or social standing.
+    rule: if stealthContest=Y and targets.OppTargets.NPC contains a specific living detector/opponent, return Y
+    rule: if a stealth-style action has no specific established living detector/opponent, return N unless a separate non-stealth obstacle creates fresh unresolved stakes
     rule: return Y if success or failure of finalGoal or explicit challenge creates a fresh unresolved positive stake for {{user}} or a living entity, as per DEF.STAKES_POSITIVE
-    rule: return Y for fresh unresolved stealth/tailing goals when success or failure creates risk of being detected, noticed, heard, discovered, identified, exposed, tracked, or followed back, including following someone quietly, trailing them at a distance, avoiding notice, staying hidden, sneaking after them, shadowing them, or moving without being seen/heard
     rule: return N only when no DEF.STAKES_POSITIVE item is present, or when the matching positive stake is already resolved/suppressed by the saved/repeated-state rules in DEF.NO_STAKES
     rule: if DEF.STAKES_POSITIVE and DEF.NO_STAKES both seem relevant, DEF.STAKES_POSITIVE wins unless the exact positive stake is explicitly already resolved
     rule: return N if the only relevant NPC reaction is already decided by saved fear/terror, hostility/hatred, or persisted intimacy boundary
@@ -125,7 +136,7 @@ function ResolutionEngine(input) {
     rule: None for ordinary roleplay, flavor, conversation, scene state, already-decided disposition reactions, harmless utility ability/spell use outside combat, or any action where rollNeeded=N
     rule: Social when the fresh unresolved challenge is convincing, bargaining, persuading, deceiving, misleading, bluffing, intimidating, threatening, coercing, or otherwise socially pressuring a living NPC
     rule: Combat when {{user}} directly attacks, harms, restrains violently, or uses a harmful spell/supernatural effect as the primary contested action against a living target
-    rule: Challenge for physical/environmental obstacles, stealth/tailing, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, or non-living opposition
+    rule: Challenge for physical/environmental obstacles, stealthContest=Y, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, or non-living opposition
     return None|Social|Combat|Challenge
 
   socialBucket(input, finalGoal, challenge, targets, context):
@@ -171,9 +182,10 @@ function ResolutionEngine(input) {
     rule: a compound dependent action may be one unit when it functions as one resolved attempt
     rule: ids must be A1, A2, and A3 in order, capped to actionCount length
 
-  environmentDifficultyTier(actionBucket, targets, context):
+  environmentDifficultyTier(actionBucket, targets, stealthContest, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: applies only when actionBucket=Challenge and OppTargets.ENV contains a real non-living obstacle, hazard, terrain feature, object, ward, weather condition, or environmental pressure
+    rule: do not apply when stealthContest=Y; that resolves against OppTargets.NPC awareness instead of ENV difficulty
     rule: easy = easy/trivial/routine/weak/lightly obstructed; if no fresh unresolved positive stake exists, use rollNeeded=N instead of an ENV tier
     rule: average = meaningful obstacle a capable person could plausibly fail
     rule: hard = serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk
@@ -203,13 +215,14 @@ function ResolutionEngine(input) {
   execution:
     finalGoal = identifyGoal(input)
     challenge = identifyChallenge(input, finalGoal, context)
-    targets = identifyTargets(input, challenge, finalGoal, context)
+    stealthContest = stealthContest(input, finalGoal, challenge, context)
+    targets = identifyTargets(input, challenge, finalGoal, stealthContest, context)
     activeHostileThreat = activeHostileThreat(input, finalGoal, targets, context)
     intimacyAdvanceExplicit = intimacyAdvanceExplicit(input, finalGoal, challenge, targets, context)
     boundaryViolationExplicit = boundaryViolationExplicit(input, finalGoal, challenge, targets, context)
     harmMode = harmMode(input, finalGoal, challenge, targets, context)
     nonLethal = nonLethal(input, finalGoal, challenge, targets, context)
-    rollNeeded = rollNeeded(input, finalGoal, challenge, targets, boundaryViolationExplicit, context)
+    rollNeeded = rollNeeded(input, finalGoal, challenge, targets, stealthContest, boundaryViolationExplicit, context)
     rollReason = short explanation for rollNeeded
     actionBucket = actionBucket(input, finalGoal, challenge, targets, context)
     socialBucket = socialBucket(input, finalGoal, challenge, targets, context)
@@ -219,13 +232,13 @@ function ResolutionEngine(input) {
     if rollNeeded=N:
       outcome = {OutcomeTier:NONE, LandedActions:(none), Outcome:no_roll, CounterPotential:none}
     else:
-      envDifficultyTier = environmentDifficultyTier(actionBucket, targets, context)
-      deterministic code maps bucket to stats: Diplomacy=CHA vs CHA; Bluff/Intimidate=CHA vs MND; Combat/Mundane=PHY vs PHY; Combat/SpellOrSupernatural=MND vs PHY; Challenge=PHY vs ENV
+      envDifficultyTier = environmentDifficultyTier(actionBucket, targets, stealthContest, context)
+      deterministic code maps bucket to stats: Diplomacy=CHA vs CHA; Bluff/Intimidate=CHA vs MND; Combat/Mundane=PHY vs PHY; Combat/SpellOrSupernatural=MND vs PHY; Challenge=PHY vs ENV; stealthContest=Y Challenge=PHY vs MND
       if deterministic OPP!=ENV and first OppTargets.NPC currentCoreStats missing:
         generatedStatsSeed = genStats(first OppTargets.NPC, context)
       deterministic code resolves dice, numeric stats, margins, landed actions, counter potential, and outcome after semantic extraction
     NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, actions:actions, actionBucket:actionBucket, socialBucket:socialBucket, combatType:combatType, rollNeeded:rollNeeded, rollReason:rollReason, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, harmMode:harmMode, nonLethal:nonLethal, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
+    return {GOAL:finalGoal, actions:actions, actionBucket:actionBucket, socialBucket:socialBucket, combatType:combatType, rollNeeded:rollNeeded, rollReason:rollReason, stealthContest:stealthContest, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, harmMode:harmMode, nonLethal:nonLethal, EnvironmentDifficultyTier:envDifficultyTier, classifyHostilePhysicalIntent:classifyHostilePhysicalIntent, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {

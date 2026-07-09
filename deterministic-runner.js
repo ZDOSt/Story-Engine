@@ -2521,7 +2521,16 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const sanitizedTargets = sanitizeTargets(semanticTargetsForResolution, targetClassifier, { rollNeeded, goal, boundaryViolationExplicit });
     const claimTargets = repairStakeBearingClaimTargets(sanitizedTargets, targetClassifier, semantic, { rollNeeded }, audit);
     const directedCompanionTargets = repairDirectedCompanionAttackHostilePool(claimTargets, ledger, trackerSnapshot, semantic, context, audit);
-    let targets = repairLivingOppositionTargets(directedCompanionTargets, targetClassifier, { rollNeeded, semantic, goal, boundaryViolationExplicit, context }, audit);
+    const stealthContestRepair = repairStealthContestTargets(directedCompanionTargets, targetClassifier, semantic, { rollNeeded, actionBucket, socialBucket, combatType }, audit);
+    if (stealthContestRepair.rollNeeded) {
+        rollNeeded = stealthContestRepair.rollNeeded;
+        stakesRule = stealthContestRepair.rule || stakesRule;
+        rollReason = stealthContestRepair.rollReason || rollReason;
+        actionBucket = stealthContestRepair.actionBucket || actionBucket;
+        socialBucket = stealthContestRepair.socialBucket || socialBucket;
+        combatType = stealthContestRepair.combatType || combatType;
+    }
+    let targets = repairLivingOppositionTargets(stealthContestRepair.targets, targetClassifier, { rollNeeded, semantic, goal, boundaryViolationExplicit, context }, audit);
     const negativeSocialRepeatEvidence = getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socialBucket, targets, trackerSnapshot });
     if (negativeSocialRepeatEvidence) {
         rollNeeded = negativeSocialRepeatEvidence.rollNeeded;
@@ -2594,10 +2603,15 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         actions = normalizeActionMarkers(semantic.actionCount);
         actionUnits = normalizeSemanticActionUnits(semantic.actionUnits, actions, semantic);
         let { userStat, oppStat } = deterministicStatsForBucket(actionBucket, socialBucket, combatType);
+        let stealthContestOpposition = false;
         if (healingAttempt.isHealing) {
             userStat = 'MND';
             oppStat = 'ENV';
             healingStaticDc = healingDcForTargets(hiddenHealthSnapshot, resolveHealingHealthTargets(semantic, { ActionTargets: targets.ActionTargets }, hiddenHealthSnapshot, context));
+        } else if (shouldUseStealthContestOppositionStats(actionBucket, semantic, targets)) {
+            userStat = 'PHY';
+            oppStat = 'MND';
+            stealthContestOpposition = true;
         }
         const userCore = getUserCoreStats(ledger);
         let oppTargetsNpcFirst = firstReal(targets.OppTargets.NPC);
@@ -2633,6 +2647,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         audit.push(`2.7a.1 actionUnits=[${formatActionUnitsAudit(actionUnits)}]`);
         audit.push(`2.7b actions=[${actions.join(',')}]`);
         audit.push(`2.7c bucketStats={USER:${userStat},OPP:${oppStat},actionBucket:${actionBucket},socialBucket:${socialBucket},combatType:${combatType}}`);
+        if (stealthContestOpposition) audit.push('2.7c.0 stealthContestStats=PHY vs MND');
         if (oppStat === 'ENV') audit.push(`2.7c.1 environmentDifficulty=${environmentDifficulty} (${envDifficultySource ?? 'none'})`);
         audit.push(`2.7d getUserCoreStats=${compact(userCore)}`);
         audit.push('2.7e targetCore=(none)');
@@ -2662,11 +2677,11 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             }
         }
 
-        const woundPenaltyApplies = woundPenaltyAppliesToResolution(actionBucket, oppStat);
+        const woundPenaltyApplies = woundPenaltyAppliesToResolution(actionBucket, oppStat) || stealthContestOpposition;
         userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded, { allowRollPenalty: woundPenaltyApplies });
         const impairmentPenalty = Number(userImpairment?.AppliedToRoll === 'Y' ? userImpairment.RollPenalty : 0);
         npcImpairment = oppStat !== 'ENV' && oppTargetsNpcFirst
-            ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, rollNeeded, { allowRollPenalty: actionBucket === 'Combat' })
+            ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, rollNeeded, { allowRollPenalty: actionBucket === 'Combat' || stealthContestOpposition })
             : noNpcImpairment('no opposing NPC roll');
         const npcImpairmentPenalty = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
         const atkDie = rollPool[0];
@@ -2749,6 +2764,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         boundaryViolationExplicit,
         harmMode,
         nonLethal,
+        StealthContest: bool(semantic.stealthContest) ? 'Y' : 'N',
         RollNeeded: rollNeeded,
         RollReason: rollReason,
         ActionBucket: actionBucket,
@@ -4663,6 +4679,92 @@ function repairLivingOppositionTargets(targets, classifier, options = {}, audit)
         target: livingActionTarget,
     })}`);
     return repaired;
+}
+
+function repairStealthContestTargets(targets, classifier, semantic, options = {}, audit) {
+    const repaired = {
+        hostilesInScene: {
+            NPC: toRealArray(targets.hostilesInScene?.NPC),
+        },
+        ActionTargets: toRealArray(targets.ActionTargets),
+        OppTargets: {
+            NPC: toRealArray(targets.OppTargets?.NPC),
+            ENV: toRealArray(targets.OppTargets?.ENV),
+        },
+        BenefitedObservers: toRealArray(targets.BenefitedObservers),
+        HarmedObservers: toRealArray(targets.HarmedObservers),
+        NPCAwareOfUser: toRealArray(targets.NPCAwareOfUser),
+        PowerActors: toRealArray(targets.PowerActors),
+    };
+    if (!bool(semantic?.stealthContest)) return { targets: repaired };
+
+    const before = targetSummary(repaired);
+    const target = firstReal(unique([
+        ...toRealArray(repaired.OppTargets.NPC),
+        ...toRealArray(repaired.ActionTargets),
+    ]).filter(name => classifier.isLiving(name)));
+
+    if (!target) {
+        repaired.OppTargets.NPC = [];
+        repaired.OppTargets.ENV = [];
+        audit?.push(`2.4f.2 deterministicStealthNoVisibleDetectorNoRoll=${compact({
+            hardRule: 'stealthContest requires a specific established living detector/opponent from semantic targets; terrain, darkness, cover, crowds, weather, distance, and noise are not stealth opposition',
+            from: before,
+            to: targetSummary(repaired),
+        })}`);
+        return {
+            targets: repaired,
+            rollNeeded: 'N',
+            rule: 'deterministic_stealth_no_visible_detector',
+            rollReason: 'stealth attempt has no established living detector/opponent; no stealth contest roll',
+            actionBucket: 'None',
+            socialBucket: 'None',
+            combatType: 'None',
+        };
+    }
+
+    let changed = false;
+    if (!repaired.ActionTargets.some(name => sameName(name, target))) {
+        repaired.ActionTargets.push(target);
+        changed = true;
+    }
+    if (!repaired.OppTargets.NPC.some(name => sameName(name, target))) {
+        repaired.OppTargets.NPC.push(target);
+        changed = true;
+    }
+    if (repaired.OppTargets.ENV.length) {
+        repaired.OppTargets.ENV = [];
+        changed = true;
+    }
+    repaired.BenefitedObservers = repaired.BenefitedObservers.filter(name => !sameName(name, target));
+    repaired.HarmedObservers = repaired.HarmedObservers.filter(name => !sameName(name, target));
+    if (changed || options.rollNeeded !== 'Y' || options.actionBucket !== 'Challenge') {
+        audit?.push(`2.4f.2 deterministicStealthContestRepair=${compact({
+            hardRule: 'stealthContest resolves against the specific living detector/opponent, not ENV',
+            target,
+            rollNeeded: `${options.rollNeeded || 'N'}->Y`,
+            actionBucket: `${options.actionBucket || 'None'}->Challenge`,
+            from: before,
+            to: targetSummary(repaired),
+        })}`);
+    }
+    return {
+        targets: repaired,
+        rollNeeded: 'Y',
+        rule: 'deterministic_stealth_contest_living_detector',
+        rollReason: options.rollNeeded === 'Y'
+            ? null
+            : 'stealth contest against an established living detector/opponent',
+        actionBucket: 'Challenge',
+        socialBucket: 'None',
+        combatType: 'None',
+    };
+}
+
+function shouldUseStealthContestOppositionStats(actionBucket, semantic, targets) {
+    return actionBucket === 'Challenge'
+        && bool(semantic?.stealthContest)
+        && firstReal(targets?.OppTargets?.NPC);
 }
 
 function repairStakeBearingClaimTargets(targets, classifier, semantic, options = {}, audit) {
