@@ -50,10 +50,9 @@ import {
     normalizeCore,
     getUserCoreStats,
     statValue,
-    normalizeActionBucket,
-    normalizeSocialBucket,
-    normalizeCombatType,
-    deterministicStatsForBucket,
+    normalizeChallengeType,
+    normalizeSocialTactic,
+    deterministicStatsForChallenge,
     dispositionMemoryKey,
     normalizeSocialResolutionMemory,
     parseFinalState,
@@ -118,6 +117,8 @@ const RAPPORT_COOLDOWN_MS = 30 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
 
 function normalizeResolutionHarmMode(value, semantic = {}) {
+    const challengeType = normalizeChallengeType(semantic?.challengeType, semantic?.rollNeeded ?? semantic?.RollNeeded ?? 'Y');
+    const isCombat = isCombatChallengeType(challengeType);
     const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
     const aliases = {
         lethal: 'lethal',
@@ -142,10 +143,15 @@ function normalizeResolutionHarmMode(value, semantic = {}) {
         no_harm: 'none',
         noharm: 'none',
     };
+    if (!isCombat) return bool(semantic?.classifyPhysicalBoundaryPressure) ? 'restraint_control' : 'none';
     if (aliases[text] && aliases[text] !== 'none') return aliases[text];
     if (bool(semantic?.classifyPhysicalBoundaryPressure)) return 'restraint_control';
-    if (normalizeActionBucket(semantic?.actionBucket, semantic?.rollNeeded ?? semantic?.RollNeeded ?? 'Y') === 'Combat') return 'nonlethal';
+    if (isCombat) return 'nonlethal';
     return 'none';
+}
+
+function isCombatChallengeType(value) {
+    return value === 'mundane_combat' || value === 'supernatural_combat';
 }
 
 function harmModeAllowsHpDamage(harmMode) {
@@ -182,8 +188,8 @@ function normalizeEnvironmentDifficultyForRoll(value) {
     return [0, 4, 8, 12].includes(number) ? number : 0;
 }
 
-function woundPenaltyAppliesToResolution(actionBucket, oppStat) {
-    return actionBucket === 'Combat' || oppStat === 'ENV';
+function woundPenaltyAppliesToResolution(challengeType, oppStat) {
+    return isCombatChallengeType(challengeType) || oppStat === 'ENV';
 }
 
 function environmentDifficultySource(semantic = {}) {
@@ -215,9 +221,9 @@ function normalizeSemanticActionUnits(units, actions = ['a1'], semantic = {}) {
     });
 }
 
-function deriveResolutionActionMarkers(semantic = {}, actionBucket = 'None') {
+function deriveResolutionActionMarkers(semantic = {}, challengeType = 'none') {
     const unitCount = Array.isArray(semantic.actionUnits) ? semantic.actionUnits.length : 0;
-    const count = actionBucket === 'Combat'
+    const count = isCombatChallengeType(challengeType)
         ? Math.max(1, Math.min(3, unitCount || 1))
         : 1;
     return Array.from({ length: count }, (_, index) => `a${index + 1}`);
@@ -760,11 +766,11 @@ function collectBoundCompanionTriggers({ resolutionPacket = {}, relationships = 
     };
 
     if (resolutionPacket?.activeHostileThreat === 'Y'
-        || resolutionPacket?.ActionBucket === 'Combat'
+        || isCombatChallengeType(resolutionPacket?.challengeType)
         || toRealArray(resolutionPacket?.hostilesInScene?.NPC).length > 0) {
         add('danger_or_combat');
     }
-    if (resolutionPacket?.ActionBucket === 'Social'
+    if (resolutionPacket?.challengeType === 'social'
         && (resolutionPacket?.RollNeeded === 'Y' || toRealArray(resolutionPacket?.OppTargets?.NPC).length > 0)) {
         add('social_stakes');
     }
@@ -816,7 +822,7 @@ function buildHiddenHealthNpcRefs(trackerSnapshot = {}, ledger = {}) {
     for (const name of toRealArray(targets.hostilesInScene?.NPC)) markAdventuringScale(name);
     for (const name of toRealArray(targets.OppTargets?.NPC)) markAdventuringScale(name);
 
-    const combatOrHostilePhysical = String(semantic.actionBucket || '') === 'Combat'
+    const combatOrHostilePhysical = isCombatChallengeType(normalizeChallengeType(semantic.challengeType, semantic.rollNeeded ?? 'Y'))
         || hasCombatActionLanguage([
             semantic.identifyGoal,
             semantic.identifyChallenge,
@@ -2213,10 +2219,10 @@ function getAcceptedOfferedObjectNoRollEvidence(semantic, semanticRollNeeded, co
     };
 }
 
-function getFriendlyNpcObjectAccessNoRollEvidence(semantic, semanticRollNeeded, context, trackerSnapshot, targets, bucketContext = {}) {
+function getFriendlyNpcObjectAccessNoRollEvidence(semantic, semanticRollNeeded, context, trackerSnapshot, targets, routeContext = {}) {
     if (semanticRollNeeded !== 'Y') return null;
-    const actionBucket = String(bucketContext.actionBucket || semantic?.actionBucket || '').toLowerCase();
-    if (actionBucket === 'combat') return null;
+    const challengeType = normalizeChallengeType(routeContext.challengeType || semantic?.challengeType, semanticRollNeeded);
+    if (isCombatChallengeType(challengeType)) return null;
     if (toRealArray(targets?.hostilesInScene?.NPC).length || toRealArray(targets?.OppTargets?.ENV).length) return null;
 
     const source = [
@@ -2359,19 +2365,27 @@ function normalizeRollReason(value, fallback = NONE) {
     return isReal(text) ? text.slice(0, 500) : fallback;
 }
 
-function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socialBucket, targets, trackerSnapshot }) {
+function socialTacticMemoryBucket(socialTactic) {
+    if (socialTactic === 'bluff') return 'Bluff';
+    if (socialTactic === 'intimidate') return 'Intimidate';
+    return null;
+}
+
+function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, challengeType, socialTactic, targets, trackerSnapshot }) {
     if (rollNeeded !== 'Y') return null;
-    if (actionBucket !== 'Social' || !['Bluff', 'Intimidate'].includes(socialBucket)) return null;
+    if (challengeType !== 'social') return null;
+    const memoryBucket = socialTacticMemoryBucket(socialTactic);
+    if (!memoryBucket) return null;
     const blocked = [];
     for (const npc of toRealArray(targets?.OppTargets?.NPC)) {
         const state = normalizeTrackerEntry(trackerSnapshot?.[npc] || {});
         const memory = normalizeSocialResolutionMemory(state.socialResolutionMemory);
-        const entry = memory[socialBucket];
+        const entry = memory[memoryBucket];
         const currentDisposition = dispositionMemoryKey(state.currentDisposition);
         if (entry?.resolved === 'Y' && entry.disposition === currentDisposition) {
             blocked.push({
                 NPC: npc,
-                bucket: socialBucket,
+                bucket: memoryBucket,
                 priorOutcome: entry.outcome,
                 disposition: currentDisposition,
             });
@@ -2381,7 +2395,7 @@ function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socia
     const priorOutcome = blocked.every(item => item.priorOutcome === blocked[0].priorOutcome)
         ? blocked[0].priorOutcome
         : 'mixed';
-    const reason = socialBucket === 'Bluff'
+    const reason = memoryBucket === 'Bluff'
         ? priorOutcome === 'success'
             ? 'Bluff was already accepted by the same target under the current disposition; maintain or test that fiction without a new bluff roll.'
             : 'Bluff already failed against the same target under the current disposition; the target remains suspicious and repeated deception does not get a new roll.'
@@ -2408,9 +2422,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const identityTargets = removeUserReferencesFromTargets(rawTargets, refereeContext);
     const goal = String(semantic.identifyGoal || 'Normal_Interaction');
     const semanticRollNeeded = bool(semantic.rollNeeded) ? 'Y' : 'N';
-    let actionBucket = normalizeActionBucket(semantic.actionBucket, semanticRollNeeded);
-    let socialBucket = normalizeSocialBucket(semantic.socialBucket, actionBucket);
-    let combatType = normalizeCombatType(semantic.combatType, actionBucket);
+    let challengeType = normalizeChallengeType(semantic.challengeType, semanticRollNeeded);
+    let socialTactic = normalizeSocialTactic(semantic.socialTactic, challengeType);
     let rollReason = normalizeRollReason(semantic.rollReason);
     const itemUseAudit = [];
     const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, itemUseAudit, playerTrackerSnapshot);
@@ -2453,7 +2466,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const pureLoveDeclarationEvidence = getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext);
     const companionCommandNoRollEvidence = getDirectedCompanionCommandNoRollEvidence(semantic, identityTargets, trackerSnapshot, targetClassifier, context);
     const acceptedOfferedObjectEvidence = getAcceptedOfferedObjectNoRollEvidence(semantic, semanticRollNeeded, context);
-    const friendlyObjectAccessEvidence = getFriendlyNpcObjectAccessNoRollEvidence(semantic, semanticRollNeeded, context, trackerSnapshot, identityTargets, { actionBucket, socialBucket, combatType });
+    const friendlyObjectAccessEvidence = getFriendlyNpcObjectAccessNoRollEvidence(semantic, semanticRollNeeded, context, trackerSnapshot, identityTargets, { challengeType, socialTactic });
     const stakeBearingClaimEvidence = getStakeBearingClaimStakesEvidence(semantic, semanticRollNeeded);
     const stakesOverrideEvidence = companionCommandNoRollEvidence
         || pureLoveDeclarationEvidence
@@ -2466,10 +2479,9 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     if (stakesOverrideEvidence?.reason) {
         rollReason = normalizeRollReason(stakesOverrideEvidence.reason, rollReason);
     }
-    if (stakeBearingClaimEvidence && actionBucket === 'None') {
-        actionBucket = 'Social';
-        socialBucket = 'Bluff';
-        combatType = 'None';
+    if (stakeBearingClaimEvidence && challengeType === 'none') {
+        challengeType = 'social';
+        socialTactic = 'bluff';
         rollReason = normalizeRollReason(rollReason, 'stakes-bearing factual claim');
     }
     const unavailableItemEvidence = getUnavailablePersonalItemNoRollEvidence(itemUse);
@@ -2482,14 +2494,12 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         rollNeeded = 'Y';
         stakesRule = 'deterministic_active_healing_roll';
         rollReason = 'healing or treatment under active danger uses the current injury DC';
-        actionBucket = 'Challenge';
-        socialBucket = 'None';
-        combatType = 'None';
+        challengeType = 'environment';
+        socialTactic = 'none';
     } else if (healingAttempt.isHealing && healingHasActiveStakes && rollNeeded === 'Y') {
         stakesRule = 'deterministic_active_healing_roll';
-        actionBucket = 'Challenge';
-        socialBucket = 'None';
-        combatType = 'None';
+        challengeType = 'environment';
+        socialTactic = 'none';
         rollReason = normalizeRollReason(rollReason, 'healing or treatment under active danger uses the current injury DC');
     } else if (healingAttempt.isHealing && !healingHasActiveStakes) {
         rollNeeded = 'N';
@@ -2501,12 +2511,12 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         })}`);
     }
     if (rollNeeded === 'N') {
-        actionBucket = 'None';
-        socialBucket = 'None';
-        combatType = 'None';
+        challengeType = 'none';
+        socialTactic = 'none';
     }
     audit.push(`2.4a semanticRollNeeded=${semanticRollNeeded}`);
-    audit.push(`2.4a.2 semanticActionBucket=${actionBucket}/${socialBucket}/${combatType}`);
+    audit.push(`2.4a.2 semanticChallengeType=${challengeType}/${socialTactic}`);
+    audit.push(`2.4a.2a semanticChallengeTypeEvidence=${semantic.challengeTypeEvidence || NONE}`);
     audit.push(`2.4a.3 semanticRollReason=${rollReason}`);
     audit.push(`2.4b deterministicStakesRule=${stakesRule}`);
     if (stakesOverrideEvidence) {
@@ -2524,24 +2534,22 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const sanitizedTargets = sanitizeTargets(semanticTargetsForResolution, targetClassifier, { rollNeeded, goal, boundaryViolationExplicit });
     const claimTargets = repairStakeBearingClaimTargets(sanitizedTargets, targetClassifier, semantic, { rollNeeded }, audit);
     const directedCompanionTargets = repairDirectedCompanionAttackHostilePool(claimTargets, ledger, trackerSnapshot, semantic, context, audit);
-    const stealthContestRepair = repairStealthContestTargets(directedCompanionTargets, targetClassifier, semantic, { rollNeeded, actionBucket, socialBucket, combatType }, audit);
-    if (stealthContestRepair.rollNeeded) {
-        rollNeeded = stealthContestRepair.rollNeeded;
-        stakesRule = stealthContestRepair.rule || stakesRule;
-        rollReason = stealthContestRepair.rollReason || rollReason;
-        actionBucket = stealthContestRepair.actionBucket || actionBucket;
-        socialBucket = stealthContestRepair.socialBucket || socialBucket;
-        combatType = stealthContestRepair.combatType || combatType;
+    const stealthRepair = repairStealthTargets(directedCompanionTargets, targetClassifier, semantic, { rollNeeded, challengeType, socialTactic }, audit);
+    if (stealthRepair.rollNeeded) {
+        rollNeeded = stealthRepair.rollNeeded;
+        stakesRule = stealthRepair.rule || stakesRule;
+        rollReason = stealthRepair.rollReason || rollReason;
+        challengeType = stealthRepair.challengeType || challengeType;
+        socialTactic = stealthRepair.socialTactic || socialTactic;
     }
-    let targets = repairLivingOppositionTargets(stealthContestRepair.targets, targetClassifier, { rollNeeded, semantic, goal, boundaryViolationExplicit, context }, audit);
-    const negativeSocialRepeatEvidence = getNegativeSocialRepeatNoRollEvidence({ rollNeeded, actionBucket, socialBucket, targets, trackerSnapshot });
+    let targets = repairLivingOppositionTargets(stealthRepair.targets, targetClassifier, { rollNeeded, semantic, goal, boundaryViolationExplicit, context }, audit);
+    const negativeSocialRepeatEvidence = getNegativeSocialRepeatNoRollEvidence({ rollNeeded, challengeType, socialTactic, targets, trackerSnapshot });
     if (negativeSocialRepeatEvidence) {
         rollNeeded = negativeSocialRepeatEvidence.rollNeeded;
         stakesRule = negativeSocialRepeatEvidence.rule;
         rollReason = negativeSocialRepeatEvidence.reason || 'repeated same-bucket negative social attempt already resolved for current disposition';
-        actionBucket = 'None';
-        socialBucket = 'None';
-        combatType = 'None';
+        challengeType = 'none';
+        socialTactic = 'none';
         targets = sanitizeTargets(targets, targetClassifier, { rollNeeded, goal, boundaryViolationExplicit });
         audit.push(`2.4c.1 deterministicNegativeSocialRepeat=${compact(negativeSocialRepeatEvidence.evidence)}`);
     }
@@ -2603,18 +2611,14 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         audit.push(`2.6a.2 NPCImpairmentEngine=${compact(npcImpairment)}`);
         audit.push(`2.6b resolveOutcome=${compact(outcome)}`);
     } else {
-        actions = deriveResolutionActionMarkers(semantic, actionBucket);
+        actions = deriveResolutionActionMarkers(semantic, challengeType);
         actionUnits = normalizeSemanticActionUnits(semantic.actionUnits, actions, semantic);
-        let { userStat, oppStat } = deterministicStatsForBucket(actionBucket, socialBucket, combatType);
-        let stealthContestOpposition = false;
+        let { userStat, oppStat } = deterministicStatsForChallenge(challengeType, socialTactic);
+        const stealthOpposition = challengeType === 'stealth' && firstReal(targets.OppTargets.NPC);
         if (healingAttempt.isHealing) {
             userStat = 'MND';
             oppStat = 'ENV';
             healingStaticDc = healingDcForTargets(hiddenHealthSnapshot, resolveHealingHealthTargets(semantic, { ActionTargets: targets.ActionTargets }, hiddenHealthSnapshot, context));
-        } else if (shouldUseStealthContestOppositionStats(actionBucket, semantic, targets)) {
-            userStat = 'PHY';
-            oppStat = 'MND';
-            stealthContestOpposition = true;
         }
         const userCore = getUserCoreStats(ledger);
         let oppTargetsNpcFirst = firstReal(targets.OppTargets.NPC);
@@ -2640,7 +2644,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         resolvedOppStat = oppStat;
         resolvedUserStat = userStat;
         const envDifficultySource = environmentDifficultySource(semantic);
-        environmentDifficulty = oppStat === 'ENV' && actionBucket === 'Challenge'
+        environmentDifficulty = oppStat === 'ENV' && challengeType === 'environment'
             ? normalizeEnvironmentDifficultyForRoll(envDifficultySource)
             : 0;
         const currentTargetCore = oppTargetsNpcFirst ? trackerSnapshot[oppTargetsNpcFirst]?.currentCoreStats : null;
@@ -2649,14 +2653,14 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         audit.push(`2.7a actions=[${actions.join(',')}]`);
         audit.push(`2.7a.1 actionUnits=[${formatActionUnitsAudit(actionUnits)}]`);
         audit.push(`2.7b actions=[${actions.join(',')}]`);
-        audit.push(`2.7c bucketStats={USER:${userStat},OPP:${oppStat},actionBucket:${actionBucket},socialBucket:${socialBucket},combatType:${combatType}}`);
-        if (stealthContestOpposition) audit.push('2.7c.0 stealthContestStats=PHY vs MND');
+        audit.push(`2.7c challengeStats={USER:${userStat},OPP:${oppStat},challengeType:${challengeType},socialTactic:${socialTactic}}`);
+        if (stealthOpposition) audit.push('2.7c.0 stealthStats=PHY vs MND');
         if (oppStat === 'ENV') audit.push(`2.7c.1 environmentDifficulty=${environmentDifficulty} (${envDifficultySource ?? 'none'})`);
         audit.push(`2.7d getUserCoreStats=${compact(userCore)}`);
         audit.push('2.7e targetCore=(none)');
 
         if (oppStat !== 'ENV') {
-            audit.push('2.7f bucketStats.OPP!=ENV');
+            audit.push('2.7f challengeStats.OPP!=ENV');
             audit.push(`2.7g OppTargets.NPC[0]=${oppTargetsNpcFirst || NONE}`);
             if (currentTargetCore) {
                 targetCore = normalizeCore(currentTargetCore, { PHY: 1, MND: 1, CHA: 1 });
@@ -2680,11 +2684,11 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             }
         }
 
-        const woundPenaltyApplies = woundPenaltyAppliesToResolution(actionBucket, oppStat) || stealthContestOpposition;
+        const woundPenaltyApplies = woundPenaltyAppliesToResolution(challengeType, oppStat) || stealthOpposition;
         userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, userStat, rollNeeded, { allowRollPenalty: woundPenaltyApplies });
         const impairmentPenalty = Number(userImpairment?.AppliedToRoll === 'Y' ? userImpairment.RollPenalty : 0);
         npcImpairment = oppStat !== 'ENV' && oppTargetsNpcFirst
-            ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, rollNeeded, { allowRollPenalty: actionBucket === 'Combat' || stealthContestOpposition })
+            ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, rollNeeded, { allowRollPenalty: isCombatChallengeType(challengeType) || stealthOpposition })
             : noNpcImpairment('no opposing NPC roll');
         const npcImpairmentPenalty = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
         const atkDie = rollPool[0];
@@ -2696,8 +2700,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             ? healingStaticDc
             : oppStat === 'ENV' ? defDie + environmentDifficulty : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty;
         const margin = atkTot - defTot;
-        hostilePhysical = actionBucket === 'Combat';
-        combatActionSequence = actionBucket === 'Combat';
+        hostilePhysical = isCombatChallengeType(challengeType);
+        combatActionSequence = isCombatChallengeType(challengeType);
 
         if (combatActionSequence) {
             const actionLimit = Math.max(1, actions.length || 0);
@@ -2730,7 +2734,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     }, audit);
     const harmMode = normalizeResolutionHarmMode(semantic.harmMode, {
         ...semantic,
-        actionBucket,
+        challengeType,
         rollNeeded,
         classifyPhysicalBoundaryPressure: boundaryReferee.value,
     });
@@ -2743,6 +2747,8 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         outcome,
         rollNeeded,
         combatActionSequence,
+        challengeType,
+        classifyPhysicalBoundaryPressure: boundaryReferee.value,
         userAttackDie,
         harmMode,
         primaryTarget: primaryOppTarget,
@@ -2762,12 +2768,11 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         intimacyAdvanceExplicit,
         boundaryViolationExplicit,
         harmMode,
-        StealthContest: bool(semantic.stealthContest) ? 'Y' : 'N',
         RollNeeded: rollNeeded,
         RollReason: rollReason,
-        ActionBucket: actionBucket,
-        SocialBucket: socialBucket,
-        CombatType: combatType,
+        challengeType,
+        challengeTypeEvidence: semantic.challengeTypeEvidence || NONE,
+        socialTactic,
         ResolvedStats: {
             USER: resolvedUserStat || 'none',
             OPP: resolvedOppStat || 'none',
@@ -3162,8 +3167,8 @@ function buildSlowBondSceneKey(resolutionPacket, npc) {
 
 function recordNegativeSocialResolutionMemory(memory, npc, resolutionPacket, currentDisposition) {
     const normalized = normalizeSocialResolutionMemory(memory);
-    const bucket = String(resolutionPacket?.SocialBucket || 'None');
-    if (resolutionPacket?.RollNeeded !== 'Y' || !['Bluff', 'Intimidate'].includes(bucket)) {
+    const bucket = socialTacticMemoryBucket(resolutionPacket?.socialTactic);
+    if (resolutionPacket?.RollNeeded !== 'Y' || resolutionPacket?.challengeType !== 'social' || !bucket) {
         return { memory: normalized, changed: 'N', entry: null };
     }
     const isTarget = toRealArray(resolutionPacket?.OppTargets?.NPC).some(name => sameName(name, npc));
@@ -4264,10 +4269,10 @@ function registerGeneratedName(context, name, meta) {
     saveMetadataDebounced(context, { warn: false });
 }
 
-function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, userAttackDie = null, harmMode = 'none', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
+function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, challengeType = 'none', classifyPhysicalBoundaryPressure = false, userAttackDie = null, harmMode = 'none', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
     if (rollNeeded !== 'Y') return [];
     if (!effectOutcomeLanded(outcome)) return [];
-    const mode = normalizeResolutionHarmMode(harmMode, { actionBucket: combatActionSequence ? 'Combat' : 'None', rollNeeded });
+    const mode = normalizeResolutionHarmMode(harmMode, { challengeType: combatActionSequence ? 'mundane_combat' : challengeType, rollNeeded, classifyPhysicalBoundaryPressure });
     if (mode === 'none') return [];
     if (mode === 'restraint_control') {
         return deriveRestraintControlNpcEffects({ injuryEffectEngine, targets, outcome, primaryTarget, audit });
@@ -4360,7 +4365,7 @@ function effectOutcomeLanded(outcome) {
 function deriveUserAttackFatalInjury({ outcome, combatActionSequence, userAttackDie, harmMode = 'none', primaryTarget, primaryTargetCore, trackerSnapshot, hiddenHealthSnapshot }) {
     if (!combatActionSequence) return null;
     if (!isReal(primaryTarget)) return null;
-    if (normalizeResolutionHarmMode(harmMode, { actionBucket: 'Combat', rollNeeded: 'Y' }) !== 'lethal') return null;
+    if (normalizeResolutionHarmMode(harmMode, { challengeType: 'mundane_combat', rollNeeded: 'Y' }) !== 'lethal') return null;
 
     const existingCondition = normalizeTrackerCondition(trackerSnapshot?.[primaryTarget]?.condition);
     const targetRank = String(primaryTargetCore?.Rank || trackerSnapshot?.[primaryTarget]?.currentCoreStats?.Rank || 'none');
@@ -4413,7 +4418,7 @@ function bossAtOrBelowHalfHealth(primaryTarget, hiddenHealthSnapshot) {
 
 function buildFallbackCombatInflictedInjury({ outcome, combatActionSequence, primaryTarget, harmMode = 'none' }) {
     if (!combatActionSequence || !isReal(primaryTarget) || !effectOutcomeLanded(outcome)) return null;
-    const mode = normalizeResolutionHarmMode(harmMode, { actionBucket: 'Combat', rollNeeded: 'Y' });
+    const mode = normalizeResolutionHarmMode(harmMode, { challengeType: 'mundane_combat', rollNeeded: 'Y' });
     if (!harmModeAllowsHpDamage(mode)) return null;
     const severity = severityFromOutcomeAndText(outcome, '');
     const condition = conditionFromInflictedSeverity(severity);
@@ -4676,7 +4681,7 @@ function repairLivingOppositionTargets(targets, classifier, options = {}, audit)
     return repaired;
 }
 
-function repairStealthContestTargets(targets, classifier, semantic, options = {}, audit) {
+function repairStealthTargets(targets, classifier, semantic, options = {}, audit) {
     const repaired = {
         hostilesInScene: {
             NPC: toRealArray(targets.hostilesInScene?.NPC),
@@ -4691,7 +4696,7 @@ function repairStealthContestTargets(targets, classifier, semantic, options = {}
         NPCAwareOfUser: toRealArray(targets.NPCAwareOfUser),
         PowerActors: toRealArray(targets.PowerActors),
     };
-    if (!bool(semantic?.stealthContest)) return { targets: repaired };
+    if (normalizeChallengeType(semantic?.challengeType, options.rollNeeded || 'Y') !== 'stealth') return { targets: repaired };
 
     const before = targetSummary(repaired);
     const target = firstReal(unique([
@@ -4703,7 +4708,7 @@ function repairStealthContestTargets(targets, classifier, semantic, options = {}
         repaired.OppTargets.NPC = [];
         repaired.OppTargets.ENV = [];
         audit?.push(`2.4f.2 deterministicStealthNoVisibleDetectorNoRoll=${compact({
-            hardRule: 'stealthContest requires a specific established living detector/opponent from semantic targets; terrain, darkness, cover, crowds, weather, distance, and noise are not stealth opposition',
+            hardRule: 'stealth requires a specific established living detector/opponent from semantic targets; terrain, darkness, cover, crowds, weather, distance, and noise are not stealth opposition',
             from: before,
             to: targetSummary(repaired),
         })}`);
@@ -4712,9 +4717,8 @@ function repairStealthContestTargets(targets, classifier, semantic, options = {}
             rollNeeded: 'N',
             rule: 'deterministic_stealth_no_visible_detector',
             rollReason: 'stealth attempt has no established living detector/opponent; no stealth contest roll',
-            actionBucket: 'None',
-            socialBucket: 'None',
-            combatType: 'None',
+            challengeType: 'none',
+            socialTactic: 'none',
         };
     }
 
@@ -4733,12 +4737,12 @@ function repairStealthContestTargets(targets, classifier, semantic, options = {}
     }
     repaired.BenefitedObservers = repaired.BenefitedObservers.filter(name => !sameName(name, target));
     repaired.HarmedObservers = repaired.HarmedObservers.filter(name => !sameName(name, target));
-    if (changed || options.rollNeeded !== 'Y' || options.actionBucket !== 'Challenge') {
-        audit?.push(`2.4f.2 deterministicStealthContestRepair=${compact({
-            hardRule: 'stealthContest resolves against the specific living detector/opponent, not ENV',
+    if (changed || options.rollNeeded !== 'Y' || options.challengeType !== 'stealth') {
+        audit?.push(`2.4f.2 deterministicStealthRepair=${compact({
+            hardRule: 'stealth resolves against the specific living detector/opponent, not ENV',
             target,
             rollNeeded: `${options.rollNeeded || 'N'}->Y`,
-            actionBucket: `${options.actionBucket || 'None'}->Challenge`,
+            challengeType: `${options.challengeType || 'none'}->stealth`,
             from: before,
             to: targetSummary(repaired),
         })}`);
@@ -4750,16 +4754,9 @@ function repairStealthContestTargets(targets, classifier, semantic, options = {}
         rollReason: options.rollNeeded === 'Y'
             ? null
             : 'stealth contest against an established living detector/opponent',
-        actionBucket: 'Challenge',
-        socialBucket: 'None',
-        combatType: 'None',
+        challengeType: 'stealth',
+        socialTactic: 'none',
     };
-}
-
-function shouldUseStealthContestOppositionStats(actionBucket, semantic, targets) {
-    return actionBucket === 'Challenge'
-        && bool(semantic?.stealthContest)
-        && firstReal(targets?.OppTargets?.NPC);
 }
 
 function repairStakeBearingClaimTargets(targets, classifier, semantic, options = {}, audit) {

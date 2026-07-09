@@ -5,15 +5,15 @@ export const ENGINE_PROMPT_TEXT = String.raw`[STRUCTURED_PREFLIGHT_ENGINE_EXTENS
 function ResolutionEngine(input) {
   const DEF = Object.freeze({
     UNIVERSAL:
-'EXPLICIT-ONLY. Use only Character Card, Lore, Scene text, tracker, and latest {{user}} input. NO invention. Uncertain = N/default. The semantic pass classifies only; deterministic code rolls dice, assigns stats, calculates margins, landed actions, counter potential, damage, and final outcomes. Never invent targets, actions, obstacles, stakes, or outcomes. MAX 3 ACTIONS.',
+'EXPLICIT-ONLY. Use only Character Card, Lore, Scene text, tracker, and latest {{user}} input. NO invention. Uncertain = N/default. The semantic pass classifies only; deterministic code rolls dice, assigns stats, calculates margins, landed actions, damage, relationship changes, and outcomes. Never invent targets, actions, obstacles, stakes, or outcomes. MAX 3 ACTIONS.',
     PLAYER_TEXT:
 'First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only prose are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction.',
     STAKES:
-'A roll exists only when the latest explicit external action creates fresh unresolved stakes: physical risk, harm, danger, material gain/loss, meaningful access, secrets, pursuit, restraint, loss of autonomy/freedom, significant trust/status/authority shift, meaningful obstacle resolution/failure, stealth against a specific established living detector, or explicit goal advancement/failure for {{user}} or a specific living entity.',
+'A roll exists only when the latest explicit external action creates fresh unresolved success/failure stakes: physical risk, harm, danger, material gain/loss, meaningful access, secrets, pursuit, restraint, loss of autonomy/freedom, significant trust/status/authority shift, meaningful obstacle resolution/failure, stealth against a specific established living detector, or explicit goal advancement/failure for {{user}} or a specific living entity.',
     NO_STAKES:
-'No roll for ordinary continuity, flavor, harmless conversation, minor mood, casual rudeness, weak preference, trivial convenience, introspection-only text, already-decided saved disposition/intimacy reactions, or repeated failed/resolved negative social pressure using the same socialBucket against the same target/goal in the same scene under unchanged disposition. If fresh unresolved STAKES and NO_STAKES both appear to apply, STAKES wins unless that exact stake is already resolved/suppressed. Bluff and Intimidate are remembered separately.',
-    BUCKETS:
-'None = no roll. Social = living NPC-facing social pressure. Combat = direct hostile attack, harmful effect, or forceful bodily control against a living target. Challenge = physical/environmental obstacle, escape, chase/pursuit, locks, traps, barriers, hazards, terrain, weather, boundary/object/access contests, or non-living opposition. Stealth is NOT a bucket by itself: stealthContest=Y routes to Challenge vs a specific living detector/opponent; stealth without a specific living detector does not create a roll by itself.',
+'No roll for ordinary continuity, flavor, harmless conversation, minor mood, casual rudeness, weak preference, trivial convenience, introspection-only text, already-decided saved disposition/intimacy reactions, safe-scene aid/treatment, unavailable item attempts, or repeated failed/resolved negative social pressure using the same socialTactic against the same target/goal under unchanged disposition. If fresh unresolved STAKES and NO_STAKES both appear to apply, STAKES wins unless that exact stake is already resolved/suppressed. Bluff and Intimidate are remembered separately.',
+    CHALLENGE_TYPES:
+'none = no roll. social = fresh unresolved living NPC-facing persuasion, bargaining, deception, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure. mundane_combat = direct bodily, weapon, natural-weapon, tool, projectile, or ordinary physical attack/control against a living target. supernatural_combat = spell, curse, psychic, elemental, magical, divine, demonic, or supernatural harmful effect/control against a living target. stealth = avoiding detection/perception by a specific established living detector. environment = physical/environmental obstacle, escape, chase, lock, trap, terrain, weather, barrier, hazard, object/access/boundary contest, or non-living opposition.',
     TARGETS:
 'ActionTargets are living entities directly involved in the latest user action or dialogue. OppTargets.NPC are living entities directly opposing, resisting, defending against, detecting, or being attacked/challenged by the current action. OppTargets.ENV is only non-living opposition. hostilesInScene is a broad scene pool and does not create rolls, relationships, or OppTargets by itself.'
   });
@@ -33,46 +33,74 @@ function ResolutionEngine(input) {
     rule: if no distinct stakes-bearing challenge exists, return finalGoal
     return challenge
 
-  stealthContest(input, finalGoal, challenge, context):
-    policy: LOCKED, EXPLICIT-ONLY, SEMANTIC-ONLY
-    rule: return Y only when {{user}} explicitly tries to avoid detection/perception by a specific established living entity, follow/shadow a specific living entity unnoticed, pass a specific living watcher, or remain unseen/unheard by that specific detector
-    rule: the detector must be established in scene, tracker, character/scenario/lore context, or clearly present from latest input
-    rule: return N if no specific living detector exists; terrain, darkness, cover, distance, crowds, weather, and noise are scene conditions, not stealth opposition
-    rule: if Y, identifyTargets must place the living detector in ActionTargets and OppTargets.NPC, with OppTargets.ENV=(none)
-    return Y|N
+  userAbilityUse(input, challenge, context):
+    policy: SEMANTIC-ONLY, NO-MECHANICAL-BONUS
+    rule: Attempted=Y when input explicitly names or clearly describes attempting an active {{user}} ability/spell/supernatural effect
+    rule: Available=Y only if that ability/spell exists in active character/persona/lore/context
+    rule: Used=Y only when Attempted=Y and Available=Y
+    rule: abilities can make fictional methods possible, but never change rollNeeded, challengeType, dice, stats, margins, actionUnits, damage, or outcome
+    return {Attempted, Available, Used, AbilityName, Evidence, NarrativeEffect, NoEffectReason, MechanicalScope:flavor_only_no_bonus}
 
-  activeHostileThreat(input, finalGoal, targets, context):
-    policy: LOCKED, EXPLICIT-ONLY
-    rule: return Y only if the current scene contains immediate hostile danger: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster engagement, armed standoff, capture attempt, or imminent physical/supernatural harm
-    rule: return N for negotiation, refusal, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger
-    return Y|N
+  itemUse(input, challenge, context):
+    policy: SEMANTIC-ONLY, INVENTORY-LOCKED
+    rule: Attempted=Y when input uses, consumes, equips, spends, gives, throws, activates, or relies on a personal gear/inventory/currency item
+    rule: Available=Y only if the item exists in saved user gear/inventory/currency or is explicitly present in-scene
+    rule: body parts and natural weapons are not itemUse
+    rule: unavailable item attempts cannot produce the item-dependent effect
+    return {Attempted, Available, Item, Source, Evidence, NoEffectReason}
 
-  intimacyAdvanceExplicit(input, finalGoal, challenge, targets, context):
+  claimCheck(input, challenge, context):
+    policy: SEMANTIC-ONLY
+    rule: Present=Y when {{user}} makes a stakes-relevant factual claim that an NPC may believe, doubt, verify, or disbelieve
+    rule: no-stakes factual chatter does not create a roll by itself
+    return {Present, Claim, TruthStatus, NPCAccess, TargetNPC, StakesImpact, Reason}
+
+  intimacyAdvanceExplicit(input, finalGoal, challenge, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: return Y only for explicit intimate escalation with a specific NPC: kissing, making out, sexual touch, undressing toward intimacy, asking for sex, moving to bed, or accepting/reciprocating a prior explicit NPC intimacy invitation
     rule: return N for flirting, teasing, compliments, dates, love declarations, vague innuendo, hand-holding, casual affection, or asking permission without clear intimate escalation
     rule: this is only an intimacy permission/boundary signal; it does not create rolls, landed actions, Bond loss, Fear, or Hostility by itself
     return Y|N
 
-  boundaryViolationExplicit(input, finalGoal, challenge, targets, context):
+  boundaryViolationExplicit(input, finalGoal, challenge, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: return Y only if current input violates, ignores, or pressures past a clear refusal, stated boundary, withdrawal, fear, incapacitation, established lack of consent, or prior denial from this specific NPC
     rule: return Y for coercion, threats, force, unwanted restraint/contact after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no
     rule: return N when consent/refusal is uncertain, unstated, or left to ordinary scene interpretation
     return Y|N
 
-  harmMode(input, finalGoal, challenge, targets, context):
-    policy: DOWNSTREAM DAMAGE/DEATH GATE ONLY
-    rule: this field never creates rollNeeded=Y, never changes actionBucket, and never creates relationship harm by itself
-    rule: lethal = attack a living body with weapon, improvised weapon, natural weapon, dangerous tool, projectile, firearm, blade, fang, claw, horn, crushing object, destructive magic, poison, fire, electricity, or any method that could reasonably kill/maim if decisive
-    rule: nonlethal = attack a living body with ordinary unarmed force or explicitly controlled force: punches, kicks, elbows, knees, brawling, tackle-as-attack, training, sparring, pulled blows, pommel strikes, flat-of-blade, practice weapons, or clear intent to avoid fatal harm
-    rule: restraint_control = hold, pin, grab, drag, block, bind, immobilize, carry, force position, or prevent movement without a separate injuring attack
-    rule: restraint_control causes no HP damage and at most minor bruising plus control/status when scene-valid
-    rule: none = no bodily attack, harmful effect, or restraint/control
-    rule: if mixed, choose most dangerous active mode: lethal > nonlethal > restraint_control > none
-    return lethal|nonlethal|restraint_control|none
+  rollNeeded(input, finalGoal, challenge, boundaryViolationExplicit, context):
+    policy: ROLL-GATE
+    rule: apply DEF.STAKES and DEF.NO_STAKES
+    rule: return Y only when success/failure of the latest explicit external action creates fresh unresolved stakes
+    rule: return N when no fresh unresolved stake exists or when that exact stake is already resolved/suppressed
+    rule: stealth-style action requires a specific established living detector; without one, return N unless a separate non-stealth obstacle creates stakes
+    rule: saved disposition never suppresses separate combat, pursuit, restraint, theft, bargaining, materially new deception, access, resources, secrets, stealth against a detector, or environmental obstacles
+    return Y|N
 
-  identifyTargets(input, challenge, finalGoal, stealthContest, context):
+  challengeType(input, finalGoal, challenge, rollNeeded, context):
+    policy: ROLL-ROUTE, EXPLICIT-ONLY
+    output: {type, evidence}
+    rule: if rollNeeded=N, return {type:none, evidence:(none)}
+    rule: return social for fresh unresolved NPC-facing persuasion, bargaining, deception, lying, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure
+    rule: return supernatural_combat for a spell, curse, psychic attack, magical restraint, elemental blast, divine/demonic power, or supernatural harmful effect used as the contested attack against a living target
+    rule: return mundane_combat for direct bodily, weapon, natural-weapon, tool, projectile, thrown object, or ordinary physical attack/control against a living target
+    rule: return stealth only when {{user}} tries to avoid detection/perception by a specific established living detector/opponent
+    rule: return environment for physical/environmental obstacles, escape, chase, locks, traps, terrain, weather, barriers, hazards, non-living opposition, or object/access/boundary contests that are not social, combat, or stealth
+    rule: threats of future violence are social; immediate attack/control is combat
+    rule: magic used only to communicate, persuade, deceive, or carry speech remains social unless the magic itself directly harms/controls the target
+    rule: magic used on non-living obstacles is environment unless it directly attacks a living target
+    return {none|social|mundane_combat|supernatural_combat|stealth|environment, evidence}
+
+  socialTactic(input, challenge, challengeType, context):
+    policy: SOCIAL-SUBTYPE, EXPLICIT-ONLY
+    rule: if challengeType!=social, return none
+    rule: diplomacy = good-faith persuasion, negotiation, bargaining, reassurance, appeal, reconciliation, cooperation, or sincere request
+    rule: bluff = deception, lying, false claims, misleading, tricking, disguise claims, forged authority, or concealed truth
+    rule: intimidate = threats, coercion, blackmail, forced submission, interrogation pressure, menacing, or fear-based demands
+    return none|diplomacy|bluff|intimidate
+
+  identifyTargets(input, challenge, finalGoal, rollNeeded, challengeType, context):
     policy: LOCKED, EXPLICIT-ONLY
     hostilesInScene.NPC = all established present living hostile entities in scene
     ActionTargets = living entities {{user}} directly tries to affect, address, follow, help, harm, restrain, deceive, negotiate with, or otherwise directly interact with
@@ -84,57 +112,44 @@ function ResolutionEngine(input) {
     PowerActors = strategic-only organizations, groups, institutions, or potential power figures with credible reach beyond acting alone in the moment
     rule: apply DEF.TARGETS
     rule: hostilesInScene must be established by narration, tracker, character/scenario/lore context, or initial test setup; do not create hostile entities from the latest input alone
-    rule: if no fresh unresolved living opposition exists, OppTargets.NPC must be [(none)]
-    rule: if stealthContest=Y, the specific living detector is ActionTargets and OppTargets.NPC; do not use OppTargets.ENV
+    rule: if rollNeeded=N, OppTargets.NPC=(none) and OppTargets.ENV=(none), but ActionTargets and NPCAwareOfUser may still list direct living interaction/awareness
+    rule: if challengeType=stealth, the specific living detector must be in ActionTargets and OppTargets.NPC; OppTargets.ENV=(none)
+    rule: if challengeType=social, the social target/opponent must be in ActionTargets and usually OppTargets.NPC
+    rule: if challengeType=mundane_combat or supernatural_combat, attacked/challenged living targets must be in ActionTargets and OppTargets.NPC
+    rule: if challengeType=environment, put non-living opposition in OppTargets.ENV when present; include living opposition in OppTargets.NPC only when a specific living NPC directly resists, guards, blocks, controls access, or is the boundary-pressure target
     rule: target/observer categories are mutually exclusive except a direct ActionTarget may also be OppTargets.NPC when they are the resisting party
     return {hostilesInScene, ActionTargets, OppTargets, BenefitedObservers, HarmedObservers, NPCAwareOfUser, PowerActors}
 
-  classifyPhysicalBoundaryPressure(input, finalGoal, challenge, targets, context):
+  activeHostileThreat(input, finalGoal, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
-    rule: return Y only for a stakes-bearing object/space/access/departure/body-adjacent boundary contest against a resisting living NPC, without a direct hostile attack or forceful bodily control
+    rule: return Y only if the current scene contains immediate hostile danger: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster engagement, armed standoff, capture attempt, or imminent physical/supernatural harm
+    rule: return N for negotiation, refusal, suspicion, rivalry, nonviolent obstruction, or ordinary opposition without immediate danger
+    return Y|N
+
+  classifyPhysicalBoundaryPressure(input, finalGoal, challenge, rollNeeded, challengeType, targets, context):
+    policy: LOCKED, EXPLICIT-ONLY
+    rule: return Y only when rollNeeded=Y, challengeType=environment, and {{user}} creates a stakes-bearing object/space/access/departure/body-adjacent boundary contest against a resisting living NPC without a direct attack or harmful bodily control
     rule: examples include taking a guarded item, forcing through a guarded doorway, blocking departure, or catching a sleeve/wrist only to stop departure or force attention
-    rule: return N if the action is Combat, no-stakes, pure social pressure, normal item handling, or direct bodily attack/control
+    rule: return N for combat, no-stakes action, pure social pressure, normal item handling, or direct bodily attack/control
     return Y|N
 
-  rollNeeded(input, finalGoal, challenge, targets, stealthContest, boundaryViolationExplicit, context):
-    policy: LOCKED, EXPLICIT-ONLY
-    rule: apply DEF.STAKES and DEF.NO_STAKES
-    rule: if stealthContest=Y and targets.OppTargets.NPC contains a specific living detector/opponent, return Y
-    rule: if stealth-style action has no specific living detector, return N unless a separate non-stealth obstacle creates fresh unresolved stakes
-    rule: boundaryViolationExplicit=Y is evaluated normally under DEF.STAKES; it usually affects autonomy, safety, trust, or status
-    rule: saved disposition never suppresses separate combat, pursuit, restraint, theft, bargaining, materially new deception, access, resources, secrets, stealth against a detector, or environmental obstacles
-    return Y|N
+  harmMode(input, finalGoal, challenge, challengeType, targets, context):
+    policy: DOWNSTREAM DAMAGE/DEATH GATE ONLY
+    rule: this field never creates rollNeeded=Y, never changes challengeType, and never creates relationship harm by itself
+    rule: lethal = attack a living body with weapon, improvised weapon, natural weapon, dangerous tool, projectile, firearm, blade, fang, claw, horn, crushing object, destructive magic, poison, fire, electricity, or any method that could reasonably kill/maim if decisive
+    rule: nonlethal = attack a living body with ordinary unarmed force or explicitly controlled force: punches, kicks, elbows, knees, brawling, tackle-as-attack, training, sparring, pulled blows, pommel strikes, flat-of-blade, practice weapons, or clear intent to avoid fatal harm
+    rule: restraint_control = hold, pin, grab, drag, block, bind, immobilize, carry, force position, or prevent movement without a separate injuring attack
+    rule: restraint_control causes no HP damage and at most minor bruising plus control/status when scene-valid
+    rule: none = no bodily attack, harmful effect, or restraint/control
+    rule: if mixed, choose most dangerous active mode: lethal > nonlethal > restraint_control > none
+    return lethal|nonlethal|restraint_control|none
 
-  actionBucket(input, finalGoal, challenge, targets, context):
-    policy: LOCKED, EXPLICIT-ONLY
-    rule: if rollNeeded=N, return None
-    rule: Social for fresh unresolved living NPC-facing persuasion, bargaining, deception, misleading, intimidation, threats, coercion, or other social pressure
-    rule: Combat for direct hostile attacks, harmful effects, or forceful bodily control against a living target
-    rule: Challenge for physical/environmental obstacles, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, boundary/object/access contests, non-living opposition, or stealthContest=Y
-    return None|Social|Combat|Challenge
-
-  socialBucket(input, finalGoal, challenge, targets, context):
-    policy: LOCKED, EXPLICIT-ONLY
-    rule: if actionBucket!=Social, return None
-    rule: Diplomacy for good-faith persuasion, negotiation, bargaining, reassurance, appeal, reconciliation, or cooperation
-    rule: Bluff for deception, lying, false claims, misleading, tricking, disguise claims, forged authority, or concealed truth
-    rule: Intimidate for threats, coercion, blackmail, forced submission, interrogation pressure, menacing, or fear-based demands
-    return None|Diplomacy|Bluff|Intimidate
-
-  combatType(input, finalGoal, challenge, targets, context):
-    policy: LOCKED, EXPLICIT-ONLY
-    rule: if actionBucket!=Combat, return None
-    rule: SpellOrSupernatural when the primary combat attack is spell, supernatural power, magical bodily effect, curse, elemental blast, psychic attack, or similar non-mundane force
-    rule: Mundane when the primary combat attack is bodily, weapon, natural weapon, thrown object, firearm, tool, or ordinary physical force
-    rule: if mixed, classify by initial/main attack
-    return None|Mundane|SpellOrSupernatural
-
-  actionUnits(input, challenge, actionBucket):
+  actionUnits(input, challenge, challengeType):
     policy: LOCKED, EXPLICIT-ONLY, SEMANTIC-ONLY, MAX 3 ACTIONS
     output: [{id:A1, action, evidence}, ...]
     rule: actionUnits is the ONLY semantic source for mechanically counted actions
-    rule: if actionBucket!=Combat, return exactly one unit: A1
-    rule: if actionBucket=Combat, return one unit per explicit discrete attack/effect, capped at three
+    rule: if challengeType is not mundane_combat or supernatural_combat, return exactly one unit: A1
+    rule: if challengeType is mundane_combat or supernatural_combat, return one unit per explicit discrete attack/effect, capped at three
     rule: each unit is one mechanically resolved action that could separately land, miss, be blocked, dodged, deflected, or apply an effect
     rule: count separate attacks/effects even when they share target, goal, sentence, ability name, or combo
     rule: count repeated uses of the same attack, spell, projectile, strike, shot, bite, claw swipe, or harmful effect when the wording clearly presents them as separate attempts
@@ -143,10 +158,10 @@ function ResolutionEngine(input) {
     rule: actionUnits do not decide success, failure, outcome, injury, counterattack, or narration
     return [{id:A1,...}] | [{id:A1,...},{id:A2,...}] | [{id:A1,...},{id:A2,...},{id:A3,...}]
 
-  environmentDifficultyTier(actionBucket, targets, stealthContest, context):
+  environmentDifficultyTier(challengeType, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
-    rule: applies only when actionBucket=Challenge and OppTargets.ENV contains real non-living opposition
-    rule: do not apply when stealthContest=Y
+    rule: applies only when challengeType=environment and OppTargets.ENV contains real non-living opposition
+    rule: do not apply to stealth; stealth resolves against a living detector
     rule: easy = trivial/routine/lightly obstructed
     rule: average = meaningful obstacle a capable person could plausibly fail
     rule: hard = serious obstacle requiring strong capability, tools, magic, focus, favorable positioning, or risk
@@ -165,26 +180,27 @@ function ResolutionEngine(input) {
   execution:
     finalGoal = identifyGoal(input)
     challenge = identifyChallenge(input, finalGoal, context)
-    stealthContest = stealthContest(input, finalGoal, challenge, context)
-    targets = identifyTargets(input, challenge, finalGoal, stealthContest, context)
-    activeHostileThreat = activeHostileThreat(input, finalGoal, targets, context)
-    classifyPhysicalBoundaryPressure = classifyPhysicalBoundaryPressure(input, finalGoal, challenge, targets, context)
-    intimacyAdvanceExplicit = intimacyAdvanceExplicit(input, finalGoal, challenge, targets, context)
-    boundaryViolationExplicit = boundaryViolationExplicit(input, finalGoal, challenge, targets, context)
-    harmMode = harmMode(input, finalGoal, challenge, targets, context)
-    rollNeeded = rollNeeded(input, finalGoal, challenge, targets, stealthContest, boundaryViolationExplicit, context)
+    userAbilityUse = userAbilityUse(input, challenge, context)
+    itemUse = itemUse(input, challenge, context)
+    claimCheck = claimCheck(input, challenge, context)
+    intimacyAdvanceExplicit = intimacyAdvanceExplicit(input, finalGoal, challenge, context)
+    boundaryViolationExplicit = boundaryViolationExplicit(input, finalGoal, challenge, context)
+    rollNeeded = rollNeeded(input, finalGoal, challenge, boundaryViolationExplicit, context)
     rollReason = short explanation for rollNeeded
-    actionBucket = actionBucket(input, finalGoal, challenge, targets, context)
-    socialBucket = socialBucket(input, finalGoal, challenge, targets, context)
-    combatType = combatType(input, finalGoal, challenge, targets, context)
-    actionUnits = actionUnits(input, challenge, actionBucket)
+    challengeType = challengeType(input, finalGoal, challenge, rollNeeded, context)
+    socialTactic = socialTactic(input, challenge, challengeType, context)
+    targets = identifyTargets(input, challenge, finalGoal, rollNeeded, challengeType, context)
+    activeHostileThreat = activeHostileThreat(input, finalGoal, targets, context)
+    classifyPhysicalBoundaryPressure = classifyPhysicalBoundaryPressure(input, finalGoal, challenge, rollNeeded, challengeType, targets, context)
+    harmMode = harmMode(input, finalGoal, challenge, challengeType, targets, context)
+    actionUnits = actionUnits(input, challenge, challengeType)
     actions = actionUnits ids
-    envDifficultyTier = rollNeeded=Y ? environmentDifficultyTier(actionBucket, targets, stealthContest, context) : none
-    if deterministic OPP!=ENV and first OppTargets.NPC currentCoreStats missing:
+    envDifficultyTier = rollNeeded=Y ? environmentDifficultyTier(challengeType, targets, context) : none
+    if first OppTargets.NPC currentCoreStats missing:
       generatedStatsSeed = genStats(first OppTargets.NPC, context)
-    deterministic code maps buckets to stats and resolves rolls, margins, landed actions, counter potential, injuries, and outcome
-    NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, actions:actions, actionUnits:actionUnits, actionBucket:actionBucket, socialBucket:socialBucket, combatType:combatType, rollNeeded:rollNeeded, rollReason:rollReason, stealthContest:stealthContest, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, harmMode:harmMode, EnvironmentDifficultyTier:envDifficultyTier, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCInScene:NPCInScene}
+    deterministic code resolves stats, dice, margins, landed actions, counter potential, injuries, relationships, and outcome from challengeType/socialTactic
+    NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, NPCAwareOfUser, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
+    return {GOAL:finalGoal, challenge:challenge, rollNeeded:rollNeeded, rollReason:rollReason, challengeType:challengeType.type, challengeTypeEvidence:challengeType.evidence, socialTactic:socialTactic, userAbilityUse:userAbilityUse, itemUse:itemUse, claimCheck:claimCheck, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, harmMode:harmMode, actions:actions, actionUnits:actionUnits, EnvironmentDifficultyTier:envDifficultyTier, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCAwareOfUser:targets.NPCAwareOfUser, PowerActors:targets.PowerActors, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {
@@ -2047,82 +2063,82 @@ export function statValue(core, stat) {
     return normalizeCore(core, { PHY: 1, MND: 1, CHA: 1 })[stat] || 1;
 }
 
-export function normalizeActionBucket(value, rollNeeded = 'Y') {
+export function normalizeChallengeType(value, rollNeeded = 'Y') {
     const text = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
     const map = {
-        none: 'None',
-        noroll: 'None',
-        social: 'Social',
-        combat: 'Combat',
-        challenge: 'Challenge',
-        physical: 'Challenge',
-        env: 'Challenge',
-        environment: 'Challenge',
-        environmental: 'Challenge',
+        none: 'none',
+        noroll: 'none',
+        social: 'social',
+        diplomacy: 'social',
+        bluff: 'social',
+        intimidate: 'social',
+        mundanecombat: 'mundane_combat',
+        mundane: 'mundane_combat',
+        combat: 'mundane_combat',
+        physicalcombat: 'mundane_combat',
+        physical: 'mundane_combat',
+        weapon: 'mundane_combat',
+        supernaturalcombat: 'supernatural_combat',
+        spellorsupernatural: 'supernatural_combat',
+        spell: 'supernatural_combat',
+        supernatural: 'supernatural_combat',
+        magic: 'supernatural_combat',
+        magical: 'supernatural_combat',
+        stealth: 'stealth',
+        sneak: 'stealth',
+        sneaking: 'stealth',
+        environment: 'environment',
+        environmental: 'environment',
+        env: 'environment',
+        challenge: 'environment',
     };
-    const bucket = map[text] || 'None';
-    return yn(rollNeeded) === 'N' ? 'None' : bucket;
+    const type = map[text] || 'none';
+    return yn(rollNeeded) === 'N' ? 'none' : type;
 }
 
-export function normalizeSocialBucket(value, actionBucket = 'None') {
-    if (actionBucket !== 'Social') return 'None';
+export function normalizeSocialTactic(value, challengeType = 'none') {
+    if (challengeType !== 'social') return 'none';
     const text = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
     const map = {
-        none: 'None',
-        diplomacy: 'Diplomacy',
-        persuade: 'Diplomacy',
-        persuasion: 'Diplomacy',
-        negotiation: 'Diplomacy',
-        negotiate: 'Diplomacy',
-        bargain: 'Diplomacy',
-        bluff: 'Bluff',
-        deception: 'Bluff',
-        deceive: 'Bluff',
-        lie: 'Bluff',
-        lying: 'Bluff',
-        misleading: 'Bluff',
-        mislead: 'Bluff',
-        trick: 'Bluff',
-        intimidate: 'Intimidate',
-        intimidation: 'Intimidate',
-        threat: 'Intimidate',
-        threaten: 'Intimidate',
-        coercion: 'Intimidate',
-        coerce: 'Intimidate',
-        blackmail: 'Intimidate',
+        none: 'none',
+        diplomacy: 'diplomacy',
+        persuade: 'diplomacy',
+        persuasion: 'diplomacy',
+        negotiation: 'diplomacy',
+        negotiate: 'diplomacy',
+        bargain: 'diplomacy',
+        request: 'diplomacy',
+        reassure: 'diplomacy',
+        reassurance: 'diplomacy',
+        bluff: 'bluff',
+        deception: 'bluff',
+        deceive: 'bluff',
+        lie: 'bluff',
+        lying: 'bluff',
+        misleading: 'bluff',
+        mislead: 'bluff',
+        trick: 'bluff',
+        intimidate: 'intimidate',
+        intimidation: 'intimidate',
+        threat: 'intimidate',
+        threaten: 'intimidate',
+        coercion: 'intimidate',
+        coerce: 'intimidate',
+        blackmail: 'intimidate',
     };
-    return map[text] && map[text] !== 'None' ? map[text] : 'Diplomacy';
+    return map[text] && map[text] !== 'none' ? map[text] : 'diplomacy';
 }
 
-export function normalizeCombatType(value, actionBucket = 'None') {
-    if (actionBucket !== 'Combat') return 'None';
-    const text = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
-    const map = {
-        none: 'None',
-        mundane: 'Mundane',
-        physical: 'Mundane',
-        weapon: 'Mundane',
-        spellorsupernatural: 'SpellOrSupernatural',
-        supernatural: 'SpellOrSupernatural',
-        spell: 'SpellOrSupernatural',
-        magic: 'SpellOrSupernatural',
-        magical: 'SpellOrSupernatural',
-    };
-    return map[text] && map[text] !== 'None' ? map[text] : 'Mundane';
-}
-
-export function deterministicStatsForBucket(actionBucket, socialBucket = 'None', combatType = 'None') {
-    if (actionBucket === 'Social') {
-        return socialBucket === 'Diplomacy'
+export function deterministicStatsForChallenge(challengeType, socialTactic = 'none') {
+    if (challengeType === 'social') {
+        return socialTactic === 'diplomacy'
             ? { userStat: 'CHA', oppStat: 'CHA' }
             : { userStat: 'CHA', oppStat: 'MND' };
     }
-    if (actionBucket === 'Combat') {
-        return combatType === 'SpellOrSupernatural'
-            ? { userStat: 'MND', oppStat: 'PHY' }
-            : { userStat: 'PHY', oppStat: 'PHY' };
-    }
-    if (actionBucket === 'Challenge') {
+    if (challengeType === 'supernatural_combat') return { userStat: 'MND', oppStat: 'PHY' };
+    if (challengeType === 'mundane_combat') return { userStat: 'PHY', oppStat: 'PHY' };
+    if (challengeType === 'stealth') return { userStat: 'PHY', oppStat: 'MND' };
+    if (challengeType === 'environment') {
         return { userStat: 'PHY', oppStat: 'ENV' };
     }
     return { userStat: null, oppStat: 'ENV' };

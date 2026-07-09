@@ -88,7 +88,6 @@ function buildReadableSemanticDebug(ledger) {
         'ResolutionEngine:',
         'identifyGoal=' + valueOrNone(resolution.identifyGoal),
         'identifyChallenge=' + valueOrNone(resolution.identifyChallenge),
-        'explicitMeans=' + valueOrNone(resolution.explicitMeans),
         'userAbilityUse=' + userAbilityUseSummary(resolution.userAbilityUse),
         'itemUse=' + itemUseSummary(resolution.itemUse),
         'claimCheck=' + claimCheckSummary(resolution.claimCheck),
@@ -100,19 +99,20 @@ function buildReadableSemanticDebug(ledger) {
         'OppTargets.ENV=' + list(oppTargets.ENV),
         'BenefitedObservers=' + list(targets.BenefitedObservers),
         'HarmedObservers=' + list(targets.HarmedObservers),
+        'NPCAwareOfUser=' + list(targets.NPCAwareOfUser),
         'PowerActors=' + list(targets.PowerActors),
         'intimacyAdvanceExplicit=' + String(Boolean(resolution.intimacyAdvanceExplicit)),
         'boundaryViolationExplicit=' + String(Boolean(resolution.boundaryViolationExplicit)),
         'rollNeeded=' + String(Boolean(resolution.rollNeeded)),
         'rollReason=' + valueOrNone(resolution.rollReason),
-        'actionBucket=' + valueOrNone(resolution.actionBucket),
-        'socialBucket=' + valueOrNone(resolution.socialBucket),
-        'combatType=' + valueOrNone(resolution.combatType),
-        'derivedActions=' + list(resolution.actionCount),
+        'challengeType=' + valueOrNone(resolution.challengeType),
+        'challengeTypeEvidence=' + valueOrNone(resolution.challengeTypeEvidence),
+        'socialTactic=' + valueOrNone(resolution.socialTactic),
+        'derivedActionsFromActionUnits=' + list(resolution.actionCount),
         'actionUnits=' + actionUnitsSummary(resolution.actionUnits, { includeEvidence: true }),
         'environmentDifficultyTier=' + valueOrNone(resolution.environmentDifficultyTier),
         'environmentDifficultyBonus=' + valueOrNone(resolution.environmentDifficulty),
-        'classifyHostilePhysicalIntent=' + String(Boolean(resolution.classifyHostilePhysicalIntent)),
+        'derivedClassifyHostilePhysicalIntent=' + String(Boolean(resolution.classifyHostilePhysicalIntent)),
         'activeHostileThreat=' + String(Boolean(resolution.activeHostileThreat)),
         'classifyPhysicalBoundaryPressure=' + String(Boolean(resolution.classifyPhysicalBoundaryPressure)),
         'genStats=' + coreLine(resolution.genStats),
@@ -159,9 +159,9 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.harmMode=' + valueOrNone(resolution.harmMode),
         'resolutionPacket.RollNeeded=' + valueOrNone(resolution.RollNeeded),
         'resolutionPacket.RollReason=' + valueOrNone(resolution.RollReason),
-        'resolutionPacket.ActionBucket=' + valueOrNone(resolution.ActionBucket),
-        'resolutionPacket.SocialBucket=' + valueOrNone(resolution.SocialBucket),
-        'resolutionPacket.CombatType=' + valueOrNone(resolution.CombatType),
+        'resolutionPacket.challengeType=' + valueOrNone(resolution.challengeType),
+        'resolutionPacket.challengeTypeEvidence=' + valueOrNone(resolution.challengeTypeEvidence),
+        'resolutionPacket.socialTactic=' + valueOrNone(resolution.socialTactic),
         'resolutionPacket.ResolvedStats=' + inline(resolution.ResolvedStats ?? {}),
         'resolutionPacket.actions=' + list(resolution.actions),
         'resolutionPacket.actionUnits=' + actionUnitsSummary(resolution.actionUnits, { includeEvidence: true }),
@@ -169,7 +169,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.Outcome=' + valueOrNone(resolution.Outcome),
         'resolutionPacket.LandedActions=' + valueOrNone(resolution.LandedActions),
         'resolutionPacket.CounterPotential=' + valueOrNone(resolution.CounterPotential),
-        'resolutionPacket.classifyHostilePhysicalIntent=' + valueOrNone(resolution.classifyHostilePhysicalIntent),
+        'resolutionPacket.classifyHostilePhysicalIntent[derived]=' + valueOrNone(resolution.classifyHostilePhysicalIntent),
         'resolutionPacket.activeHostileThreat=' + valueOrNone(resolution.activeHostileThreat),
         'resolutionPacket.classifyPhysicalBoundaryPressure=' + valueOrNone(resolution.classifyPhysicalBoundaryPressure),
         'resolutionPacket.UserImpairment=' + inline(resolution.UserImpairment ?? {}),
@@ -181,6 +181,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.EnvironmentDifficulty=' + environmentDifficultySummary(resolution),
         'resolutionPacket.BenefitedObservers=' + list(resolution.BenefitedObservers),
         'resolutionPacket.HarmedObservers=' + list(resolution.HarmedObservers),
+        'resolutionPacket.NPCAwareOfUser=' + list(resolution.NPCAwareOfUser),
         'resolutionPacket.NPCInScene=' + list(resolution.NPCInScene),
         'resultLine=' + valueOrNone(handoff?.resultLine),
         '',
@@ -252,9 +253,9 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['userKnowledge.application', summary.userKnowledgeApplication],
         ['resolution.RollNeeded', valueOrNone(resolution.RollNeeded)],
         ['resolution.RollReason', valueOrNone(resolution.RollReason)],
-        ['resolution.ActionBucket', valueOrNone(resolution.ActionBucket)],
-        ['resolution.SocialBucket', valueOrNone(resolution.SocialBucket)],
-        ['resolution.CombatType', valueOrNone(resolution.CombatType)],
+        ['resolution.challengeType', valueOrNone(resolution.challengeType)],
+        ['resolution.challengeTypeEvidence', valueOrNone(resolution.challengeTypeEvidence)],
+        ['resolution.socialTactic', valueOrNone(resolution.socialTactic)],
         ['resolution.ResolvedStats', inline(resolution.ResolvedStats ?? {})],
         ['resolution.EnvironmentDifficulty', summary.environmentDifficulty],
         ['resolution.actions', summary.actionCount],
@@ -269,6 +270,10 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.boundaryViolationExplicit', valueOrNone(resolution.boundaryViolationExplicit)],
         ['resolution.counterPotential', summary.counter],
         ['resolution.targets', summary.targets],
+        ['resolution.NPCAwareOfUser', list(resolution.NPCAwareOfUser)],
+        ['resolution.activeHostileThreat', valueOrNone(resolution.activeHostileThreat)],
+        ['resolution.classifyPhysicalBoundaryPressure', valueOrNone(resolution.classifyPhysicalBoundaryPressure)],
+        ['resolution.classifyHostilePhysicalIntent[derived]', valueOrNone(resolution.classifyHostilePhysicalIntent)],
         ['impairment.user', summary.userImpairment],
         ['impairment.npc', summary.npcImpairment],
         ['injury.inflictedNpc', summary.inflictedNpcInjury],
@@ -2059,6 +2064,7 @@ function targetSummary(resolution) {
     const oppEnv = list(resolution.OppTargets?.ENV);
     const benefited = list(resolution.BenefitedObservers);
     const harmed = list(resolution.HarmedObservers);
+    const aware = list(resolution.NPCAwareOfUser);
     const powerActors = list(resolution.PowerActors);
     if (!isNoneText(hostiles)) parts.push(`hostiles:${hostiles}`);
     if (!isNoneText(actionTargets)) parts.push(`action:${actionTargets}`);
@@ -2066,6 +2072,7 @@ function targetSummary(resolution) {
     if (!isNoneText(oppEnv)) parts.push(`env:${oppEnv}`);
     if (!isNoneText(benefited)) parts.push(`benefits:${benefited}`);
     if (!isNoneText(harmed)) parts.push(`harms:${harmed}`);
+    if (!isNoneText(aware)) parts.push(`aware:${aware}`);
     if (!isNoneText(powerActors)) parts.push(`power:${powerActors}`);
     return parts.join('; ') || 'none';
 }
