@@ -152,6 +152,14 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Set status=inactive only when an established companion is explicitly severed, removed, dismissed, destroyed, permanently silenced, or no longer connected.',
     '- Set status=unchanged for pending offers, invitations, bargaining, incomplete rituals, "do you accept?" moments, unaccepted possession proposals, unclear voices, dreams, hallucination ambiguity, metaphors, rumors, or no explicit change.',
     '- Do not invent a companion. If active, name/type/vessel/voice/evidence must come from explicit narration or established context. Use (none) for unknown optional fields. Evidence is the concrete text fact that establishes the active/inactive change.',
+    '',
+    'PENDING_BOUNDARY_STATE:',
+    '- Also output PendingBoundaryState lines. This hidden state tracks an explicit NPC boundary that may matter on the next turn.',
+    '- Set status=set only when FINAL_NARRATION clearly shows a specific NPC setting or renewing a boundary toward {{user}}: telling/asking {{user}} to stop, let go, release, back off, return an item, leave a space, not block departure, not touch/kiss/escalate intimacy, or visibly trying to pull away/leave/keep an item from {{user}}.',
+    '- Set status=clear when the current pending boundary is resolved or no longer applicable: {{user}} releases, returns, backs off, stops the behavior, the NPC accepts/withdraws the boundary, the scene moves away, the target is gone, or the narration makes the boundary moot.',
+    '- Set status=unchanged when FINAL_NARRATION neither establishes/renews nor resolves a boundary. Do not set a boundary merely because mechanics expected one; the NPC must actually show it in the final narration.',
+    '- Type must be restraint, object_access, space_access, departure, intimacy, or none. TargetNPC is the NPC who set the boundary. ObjectOrAccess is the restrained behavior, item, doorway, route, space, departure, or intimate advance being refused.',
+    '- Evidence must cite the visible spoken or behavioral boundary in FINAL_NARRATION. This is hidden bookkeeping only; never add visible tracker text for it.',
 ].join('\n');
 
 export const TRACKER_DELTA_TEMPLATE = `${TRACKER_DELTA_FENCE}
@@ -224,5 +232,10 @@ BoundCompanionState.type=none
 BoundCompanionState.vessel=(none)
 BoundCompanionState.voice=(none)
 BoundCompanionState.evidence=(none)
+PendingBoundaryState.status=unchanged
+PendingBoundaryState.targetNPC=(none)
+PendingBoundaryState.type=none
+PendingBoundaryState.objectOrAccess=(none)
+PendingBoundaryState.evidence=(none)
 ${TRACKER_DELTA_END}
 ${TRACKER_DELTA_FENCE_END}`;

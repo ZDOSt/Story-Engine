@@ -9,11 +9,11 @@ function ResolutionEngine(input) {
     PLAYER_TEXT:
 'First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only prose are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction.',
     STAKES:
-'A roll exists only when the latest explicit external action creates fresh unresolved success/failure stakes: physical risk, harm, danger, material gain/loss, meaningful access, secrets, pursuit, restraint, loss of autonomy/freedom, significant trust/status/authority shift, meaningful obstacle resolution/failure, stealth against a specific established living detector, or explicit goal advancement/failure for {{user}} or a specific living entity.',
+'A roll exists only when the latest explicit external action creates fresh unresolved success/failure stakes: physical risk, harm, danger, material gain/loss outside ordinary boundaryPressure handling, meaningful access outside ordinary boundaryPressure handling, secrets, pursuit/escape, significant trust/status/authority shift, meaningful obstacle resolution/failure, stealth against a specific established living detector, or explicit goal advancement/failure for {{user}} or a specific living entity. Do NOT force rollNeeded=Y solely because {{user}} restrains, grabs, pins, blocks, snatches, takes, holds, or pressures an NPC boundary. Classify those through restraintControl, boundaryPressure, and boundaryBreak; deterministic code decides whether they roll.',
     NO_STAKES:
 'No roll for ordinary continuity, flavor, harmless conversation, minor mood, casual rudeness, weak preference, trivial convenience, introspection-only text, already-decided saved disposition/intimacy reactions, safe-scene aid/treatment, unavailable item attempts, or repeated failed/resolved negative social pressure using the same socialTactic against the same target/goal under unchanged disposition. If fresh unresolved STAKES and NO_STAKES both appear to apply, STAKES wins unless that exact stake is already resolved/suppressed. Bluff and Intimidate are remembered separately.',
     CHALLENGE_TYPES:
-'none = no roll. social = fresh unresolved living NPC-facing persuasion, bargaining, deception, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure. mundane_combat = direct bodily, weapon, natural-weapon, tool, projectile, or ordinary physical attack/control against a living target. supernatural_combat = spell, curse, psychic, elemental, magical, divine, demonic, or supernatural harmful effect/control against a living target. stealth = avoiding detection/perception by a specific established living detector. environment = physical/environmental obstacle, escape, chase, lock, trap, terrain, weather, barrier, hazard, object/access/boundary contest, or non-living opposition.',
+'none = no roll. social = fresh unresolved living NPC-facing persuasion, bargaining, deception, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure. mundane_combat = direct bodily, weapon, natural-weapon, tool, projectile, thrown object, or ordinary physical attack that can injure a living target; restraint/control alone is not combat. supernatural_combat = spell, curse, psychic, elemental, magical, divine, demonic, or supernatural harmful effect against a living target; magical restraint/control alone is handled by restraintControl unless it also harms. restraint = deterministic non-hostile physical restraint contest against a living target. stealth = avoiding detection/perception by a specific established living detector. environment = physical/environmental obstacle, escape, chase, lock, trap, terrain, weather, barrier, hazard, non-living opposition, or object/access/boundary contest not handled by boundaryPressure.',
     TARGETS:
 'ActionTargets are living entities directly involved in the latest user action or dialogue. OppTargets.NPC are living entities directly opposing, resisting, defending against, detecting, or being attacked/challenged by the current action. OppTargets.ENV is only non-living opposition. hostilesInScene is a broad scene pool and does not create rolls, relationships, or OppTargets by itself.'
   });
@@ -62,20 +62,38 @@ function ResolutionEngine(input) {
     rule: this is only an intimacy permission/boundary signal; it does not create rolls, landed actions, Bond loss, Fear, or Hostility by itself
     return Y|N
 
-  boundaryViolationExplicit(input, finalGoal, challenge, context):
+  restraintControl(input, finalGoal, challenge, context):
     policy: LOCKED, EXPLICIT-ONLY
-    rule: return Y only if current input violates, ignores, or pressures past a clear refusal, stated boundary, withdrawal, fear, incapacitation, established lack of consent, or prior denial from this specific NPC
-    rule: return Y for coercion, threats, force, unwanted restraint/contact after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no
-    rule: return N when consent/refusal is uncertain, unstated, or left to ordinary scene interpretation
-    return Y|N
+    rule: return Present=Y only when {{user}} explicitly holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a specific living NPC
+    rule: return N for mere proximity, hand on wall, leaning close, ordinary touch, flirtation, hand-holding, or movement that does not restrict the NPC's body or movement
+    rule: TargetNPC must be the living NPC whose body/movement is controlled, or (none)
+    return {Present, TargetNPC, Evidence}
 
-  rollNeeded(input, finalGoal, challenge, boundaryViolationExplicit, context):
+  boundaryPressure(input, finalGoal, challenge, context):
+    policy: LOCKED, EXPLICIT-ONLY
+    rule: return Present=Y for non-restraint pressure on an NPC-controlled possession, object, space, route, doorway, access point, or departure
+    rule: examples include snatching, taking, grabbing, keeping, or refusing to return an NPC-associated item; pushing through guarded access; blocking an exit; or stopping departure without directly controlling the NPC's body
+    rule: return N for direct bodily restraint/control, combat attacks, pure social pressure, ordinary conversation, or harmless scene handling with no NPC boundary/possession/access pressure
+    rule: Type must be object_access, space_access, departure, or none
+    return {Present, Type, TargetNPC, ObjectOrAccess, Evidence}
+
+  boundaryBreak(input, finalGoal, challenge, context):
+    policy: LOCKED, EXPLICIT-ONLY
+    rule: check hidden tracker pendingBoundary only; if no pendingBoundary is active, return Present=N
+    rule: return Present=Y when latest input continues, escalates, ignores, or refuses to release/return/stop the same boundary behavior after that NPC set a boundary
+    rule: return Present=N when {{user}} releases, returns, backs off, apologizes without continuing, or does something unrelated
+    rule: Response must be released, continued, escalated, unrelated, unclear, or none
+    return {Present, TargetNPC, Type, Response, Evidence}
+
+  rollNeeded(input, finalGoal, challenge, restraintControl, boundaryPressure, boundaryBreak, context):
     policy: ROLL-GATE
     rule: apply DEF.STAKES and DEF.NO_STAKES
     rule: return Y only when success/failure of the latest explicit external action creates fresh unresolved stakes
     rule: return N when no fresh unresolved stake exists or when that exact stake is already resolved/suppressed
+    rule: do not force Y solely from restraintControl or boundaryPressure; deterministic relationship/boundary code decides whether those roll
+    rule: boundaryBreak=Y is a fresh unresolved stake unless deterministic code suppresses it for B4 warning grace
     rule: stealth-style action requires a specific established living detector; without one, return N unless a separate non-stealth obstacle creates stakes
-    rule: saved disposition never suppresses separate combat, pursuit, restraint, theft, bargaining, materially new deception, access, resources, secrets, stealth against a detector, or environmental obstacles
+    rule: saved disposition never suppresses separate combat, pursuit, bargaining, materially new deception, resources, secrets, stealth against a detector, or environmental obstacles
     return Y|N
 
   challengeType(input, finalGoal, challenge, rollNeeded, context):
@@ -83,14 +101,15 @@ function ResolutionEngine(input) {
     output: {type, evidence}
     rule: if rollNeeded=N, return {type:none, evidence:(none)}
     rule: return social for fresh unresolved NPC-facing persuasion, bargaining, deception, lying, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure
-    rule: return supernatural_combat for a spell, curse, psychic attack, magical restraint, elemental blast, divine/demonic power, or supernatural harmful effect used as the contested attack against a living target
-    rule: return mundane_combat for direct bodily, weapon, natural-weapon, tool, projectile, thrown object, or ordinary physical attack/control against a living target
+    rule: return supernatural_combat for a spell, curse, psychic attack, elemental blast, divine/demonic power, or supernatural harmful effect used as the contested attack against a living target
+    rule: return mundane_combat for direct bodily, weapon, natural-weapon, tool, projectile, thrown object, or ordinary physical attack that can injure a living target
+    rule: return restraint only when deterministic boundary/restraint policy requires an actual physical restraint contest; do not use combat for restraint/control alone
     rule: return stealth only when {{user}} tries to avoid detection/perception by a specific established living detector/opponent
     rule: return environment for physical/environmental obstacles, escape, chase, locks, traps, terrain, weather, barriers, hazards, non-living opposition, or object/access/boundary contests that are not social, combat, or stealth
     rule: threats of future violence are social; immediate attack/control is combat
-    rule: magic used only to communicate, persuade, deceive, or carry speech remains social unless the magic itself directly harms/controls the target
+    rule: magic used only to communicate, persuade, deceive, or carry speech remains social unless the magic itself directly harms the target
     rule: magic used on non-living obstacles is environment unless it directly attacks a living target
-    return {none|social|mundane_combat|supernatural_combat|stealth|environment, evidence}
+    return {none|social|mundane_combat|supernatural_combat|restraint|stealth|environment, evidence}
 
   socialTactic(input, challenge, challengeType, context):
     policy: SOCIAL-SUBTYPE, EXPLICIT-ONLY
@@ -116,6 +135,7 @@ function ResolutionEngine(input) {
     rule: if challengeType=stealth, the specific living detector must be in ActionTargets and OppTargets.NPC; OppTargets.ENV=(none)
     rule: if challengeType=social, the social target/opponent must be in ActionTargets and usually OppTargets.NPC
     rule: if challengeType=mundane_combat or supernatural_combat, attacked/challenged living targets must be in ActionTargets and OppTargets.NPC
+    rule: if challengeType=restraint or restraintControl.Present=Y, the restrained living NPC must be in ActionTargets and may be in OppTargets.NPC only when deterministic code requires a roll
     rule: if challengeType=environment, put non-living opposition in OppTargets.ENV when present; include living opposition in OppTargets.NPC only when a specific living NPC directly resists, guards, blocks, controls access, or is the boundary-pressure target
     rule: target/observer categories are mutually exclusive except a direct ActionTarget may also be OppTargets.NPC when they are the resisting party
     return {hostilesInScene, ActionTargets, OppTargets, BenefitedObservers, HarmedObservers, NPCAwareOfUser, PowerActors}
@@ -124,13 +144,6 @@ function ResolutionEngine(input) {
     policy: LOCKED, EXPLICIT-ONLY
     rule: return Y only if the current scene contains immediate hostile danger: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster engagement, armed standoff, capture attempt, or imminent physical/supernatural harm
     rule: return N for negotiation, refusal, suspicion, rivalry, nonviolent obstruction, or ordinary opposition without immediate danger
-    return Y|N
-
-  classifyPhysicalBoundaryPressure(input, finalGoal, challenge, rollNeeded, challengeType, targets, context):
-    policy: LOCKED, EXPLICIT-ONLY
-    rule: return Y only when rollNeeded=Y, challengeType=environment, and {{user}} creates a stakes-bearing object/space/access/departure/body-adjacent boundary contest against a resisting living NPC without a direct attack or harmful bodily control
-    rule: examples include taking a guarded item, forcing through a guarded doorway, blocking departure, or catching a sleeve/wrist only to stop departure or force attention
-    rule: return N for combat, no-stakes action, pure social pressure, normal item handling, or direct bodily attack/control
     return Y|N
 
   harmMode(input, finalGoal, challenge, challengeType, targets, context):
@@ -184,23 +197,24 @@ function ResolutionEngine(input) {
     itemUse = itemUse(input, challenge, context)
     claimCheck = claimCheck(input, challenge, context)
     intimacyAdvanceExplicit = intimacyAdvanceExplicit(input, finalGoal, challenge, context)
-    boundaryViolationExplicit = boundaryViolationExplicit(input, finalGoal, challenge, context)
-    rollNeeded = rollNeeded(input, finalGoal, challenge, boundaryViolationExplicit, context)
+    restraintControl = restraintControl(input, finalGoal, challenge, context)
+    boundaryPressure = boundaryPressure(input, finalGoal, challenge, context)
+    boundaryBreak = boundaryBreak(input, finalGoal, challenge, context)
+    rollNeeded = rollNeeded(input, finalGoal, challenge, restraintControl, boundaryPressure, boundaryBreak, context)
     rollReason = short explanation for rollNeeded
     challengeType = challengeType(input, finalGoal, challenge, rollNeeded, context)
     socialTactic = socialTactic(input, challenge, challengeType, context)
     targets = identifyTargets(input, challenge, finalGoal, rollNeeded, challengeType, context)
     activeHostileThreat = activeHostileThreat(input, finalGoal, targets, context)
-    classifyPhysicalBoundaryPressure = classifyPhysicalBoundaryPressure(input, finalGoal, challenge, rollNeeded, challengeType, targets, context)
     harmMode = harmMode(input, finalGoal, challenge, challengeType, targets, context)
     actionUnits = actionUnits(input, challenge, challengeType)
     actions = actionUnits ids
     envDifficultyTier = rollNeeded=Y ? environmentDifficultyTier(challengeType, targets, context) : none
     if first OppTargets.NPC currentCoreStats missing:
       generatedStatsSeed = genStats(first OppTargets.NPC, context)
-    deterministic code resolves stats, dice, margins, landed actions, counter potential, injuries, relationships, and outcome from challengeType/socialTactic
+    deterministic code may override restraintControl/boundaryPressure/boundaryBreak roll policy from B/F/H, pending boundaries, and active-opposed/crisis context; then resolves stats, dice, margins, landed actions, counter potential, injuries, relationships, and outcome from challengeType/socialTactic
     NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, NPCAwareOfUser, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, challenge:challenge, rollNeeded:rollNeeded, rollReason:rollReason, challengeType:challengeType.type, challengeTypeEvidence:challengeType.evidence, socialTactic:socialTactic, userAbilityUse:userAbilityUse, itemUse:itemUse, claimCheck:claimCheck, intimacyAdvanceExplicit:intimacyAdvanceExplicit, boundaryViolationExplicit:boundaryViolationExplicit, harmMode:harmMode, actions:actions, actionUnits:actionUnits, EnvironmentDifficultyTier:envDifficultyTier, activeHostileThreat:activeHostileThreat, classifyPhysicalBoundaryPressure:classifyPhysicalBoundaryPressure, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCAwareOfUser:targets.NPCAwareOfUser, PowerActors:targets.PowerActors, NPCInScene:NPCInScene}
+    return {GOAL:finalGoal, challenge:challenge, rollNeeded:rollNeeded, rollReason:rollReason, challengeType:challengeType.type, challengeTypeEvidence:challengeType.evidence, socialTactic:socialTactic, userAbilityUse:userAbilityUse, itemUse:itemUse, claimCheck:claimCheck, intimacyAdvanceExplicit:intimacyAdvanceExplicit, restraintControl:restraintControl, boundaryPressure:boundaryPressure, boundaryBreak:boundaryBreak, harmMode:harmMode, actions:actions, actionUnits:actionUnits, EnvironmentDifficultyTier:envDifficultyTier, activeHostileThreat:activeHostileThreat, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCAwareOfUser:targets.NPCAwareOfUser, PowerActors:targets.PowerActors, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {
@@ -210,7 +224,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     FYW:
 'FIRST-YES-WINS. In ordered rule ladders, the first matching explicit rule becomes final.',
     UNIVERSAL:
-'Use resolutionPacket as final for GOAL, intimacyAdvanceExplicit, boundaryViolationExplicit, LandedActions, OutcomeTier, Outcome, ActionTargets, OppTargets, BenefitedObservers, and HarmedObservers.',
+'Use resolutionPacket as final for GOAL, intimacyAdvanceExplicit, restraintControl, boundaryPressure, boundaryBreak, LandedActions, OutcomeTier, Outcome, ActionTargets, OppTargets, BenefitedObservers, and HarmedObservers.',
     BANDS:
 'BOND(B): 1 Low trust/Avoidant (keeps distance, avoids vulnerability and private closeness, cautious or transactional if engagement is necessary). 2 Neutral/Transactional (polite, practical, reserved, curious, formal, situationally cooperative, no default vulnerability or personal closeness). 3 Friendly/Comfortable (cooperative, relaxed, warm, ordinary closeness acceptable when context supports it; not automatic romance or intimacy). 4 Close/Trusting (confides, seeks closeness, shows loyalty, support, vulnerability, and deep personal investment; still not automatic romance or intimacy). FEAR(F): 1 Unshaken (steady, not intimidated). 2 Alert/Wary (cautious, watchful). 3 Afraid/Self-protective (wants distance, safety, witnesses, or an exit; staying, answering, or complying is defensive appeasement/caution, not comfort, attraction, trust, or willingness). 4 Terrified/Panic (escape, surrender, help-seeking, freezing, pleading, or desperate self-protection; compliance is fear management, not consent, comfort, or trust). HOSTILITY(H): 1 Warm/Loyal (supportive, protective). 2 Neutral (no active ill will). 3 Hostile/Obstructive (argues, refuses, obstructs, challenges, mocks, threatens, or interferes). 4 Hatred/Violent (wants harm, removal, exposure, humiliation, sabotage, defeat, or driving away).',
     LOCK:
@@ -267,7 +281,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     rule: return harm if that outcome materially worsens this NPC's stakes as per DEF.STAKES and DEF.NO_STAKES
     rule: return none if that outcome does not materially change this NPC's stakes
     rule: do NOT return benefit merely because {{user}} succeeds at {{user}}'s own goal, negotiates successfully for {{user}}, chooses not to harm the NPC, fails to harm the NPC, de-escalates without giving the NPC a concrete gain, or because the NPC remains unharmed/safe
-    rule: if resolutionPacket.boundaryViolationExplicit=Y and this NPC is the direct/opposing boundary target, successful or landed outcomes [success, dominant_impact, solid_impact, light_impact] worsen this NPC's boundary/autonomy/trust stakes; return harm, not none
+    rule: if resolutionPacket.boundaryBreak.Present=Y and this NPC is the direct/opposing boundary target, successful or landed outcomes [success, dominant_impact, solid_impact, light_impact] worsen this NPC's boundary/autonomy/trust stakes; return harm, not none
     rule: NPC_STAKES=Y when the actual outcome's stakeChangeByOutcome is benefit or harm
     rule: NPC_STAKES=N when the actual outcome's stakeChangeByOutcome is none
 
@@ -286,7 +300,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     if !isDirect && !isOpp && isHarmed:
       if out in [dominant_impact, solid_impact] -> FearHostility
       else -> Hostility
-    if resolutionPacket.boundaryViolationExplicit=Y and (isDirect or isOpp):
+    if resolutionPacket.boundaryBreak.Present=Y and (isDirect or isOpp):
       if explicit goal/challenge is coercion, threat, force, or fear pressure -> FearHostility
       else -> Hostility
     if explicit goal/challenge is intimidation, coercion, menacing threat, forced submission, or terrorizing display:
@@ -301,13 +315,13 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   applyPhysicalBoundaryPressure(npc, resolutionPacket, state):
     policy: LOCKED, FYW
-    rule: use only when resolutionPacket.classifyPhysicalBoundaryPressure=Y, resolutionPacket.classifyHostilePhysicalIntent!=Y, and resolutionPacket.RollNeeded=Y
+    rule: use only when resolutionPacket.boundaryPressure.Present=Y OR resolutionPacket.boundaryBreak.Present=Y OR challengeType=restraint, and resolutionPacket.RollNeeded=Y, without lethal/nonlethal harmMode
     isDirect = resolutionPacket.ActionTargets.includes(npc.name)
     isOpp = resolutionPacket.OppTargets.NPC.includes(npc.name)
     isHarmed = resolutionPacket.HarmedObservers.includes(npc.name)
     if !isDirect && !isOpp && !isHarmed -> none
     rule: boundary pressure is a lower-severity negative social/physical boundary response, not combat
-    rule: apply Hostility pressure by at most +1 H and never raise H above 3 unless H was already 4 from a prior hostilePhysicalIntent state
+    rule: apply Hostility pressure by at most +1 H and never raise H above 3 from boundary/restraint pressure alone
     if state.currentDisposition.H>=3 -> deltas={b:0,f:0,h:0}
     else -> deltas={b:-1,f:0,h:1}
     target = Hostility
@@ -315,7 +329,7 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   applyHostilePhysicalPressure(npc, resolutionPacket, state):
     policy: LOCKED, FYW
-    rule: use only when resolutionPacket.classifyHostilePhysicalIntent=Y and resolutionPacket.RollNeeded=Y
+    rule: use only when resolutionPacket.harmMode is lethal or nonlethal, challengeType is mundane_combat or supernatural_combat, and resolutionPacket.RollNeeded=Y
     isDirect = resolutionPacket.ActionTargets.includes(npc.name)
     isOpp = resolutionPacket.OppTargets.NPC.includes(npc.name)
     isHarmed = resolutionPacket.HarmedObservers.includes(npc.name)
@@ -629,7 +643,7 @@ function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, di
     if relation.isDirect || relation.isOpp || relation.isHarmed -> none
     if relation.isBenefited && handoff.Target=Bond -> DORMANT
     if handoff.NPC_STAKES=Y && handoff.Target=Bond && handoff.Landed=Y -> DORMANT
-    if handoff.Target=Bond && handoff.PressureMode=none && handoff.Lock not in [FREEZE,TERROR,HATRED] && resolutionPacket.classifyHostilePhysicalIntent!=Y -> DORMANT
+    if handoff.Target=Bond && handoff.PressureMode=none && handoff.Lock not in [FREEZE,TERROR,HATRED] && no harmful attack/boundary break/boundary pressure/restraint contest is present -> DORMANT
     else -> none
 
   thresholdFromTier(tier):
@@ -786,7 +800,7 @@ function NPCAggressionResolution(proactivityResults, resolutionPacket, trackerSn
   determineAttackType(resolutionPacket):
     if resolutionPacket.OutcomeTier=Critical_Success -> None
     if resolutionPacket.CounterPotential in [light,medium,severe] -> CounterAttack
-    if resolutionPacket.classifyHostilePhysicalIntent=Y -> Retaliation
+    if resolutionPacket.harmMode in [lethal, nonlethal] and challengeType in [mundane_combat, supernatural_combat] -> Retaliation
     if any proactivityResult has Proactive=Y, ProactivityTarget not (none), and Intent=ESCALATE_VIOLENCE -> ProactiveAttack
     rule: ProactiveAttack is only created by ESCALATE_VIOLENCE. BOUNDARY_PHYSICAL and THREAT_OR_POSTURE may be narrated as proactivity, but they do not create an NPC attack roll unless CounterAttack or Retaliation already applies.
     else -> None
@@ -920,6 +934,33 @@ export function isDefaultGeneratedCore(core) {
         && Number(core.CHA ?? 1) === 1;
 }
 
+function packetNestedPresent(packet, key) {
+    const value = packet?.[key];
+    return value?.Present === 'Y' || value?.present === true;
+}
+
+function packetHarmfulAttackActive(packet) {
+    return packet?.RollNeeded === 'Y'
+        && ['lethal', 'nonlethal'].includes(String(packet?.harmMode || '').toLowerCase())
+        && ['mundane_combat', 'supernatural_combat'].includes(packet?.challengeType);
+}
+
+function packetRestraintActive(packet) {
+    return packetNestedPresent(packet, 'restraintControl') || packet?.challengeType === 'restraint';
+}
+
+function packetRestraintContestActive(packet) {
+    return packet?.RollNeeded === 'Y' && packet?.challengeType === 'restraint';
+}
+
+function packetBoundaryPressureActive(packet) {
+    return packetNestedPresent(packet, 'boundaryPressure');
+}
+
+function packetBoundaryBreakActive(packet) {
+    return packetNestedPresent(packet, 'boundaryBreak');
+}
+
 export function routeDispositionTarget(npc, packet, auditInteraction, sem) {
     const isDirect = includesName(packet.ActionTargets, npc);
     const isOpp = includesName(packet.OppTargets?.NPC, npc);
@@ -940,8 +981,8 @@ export function routeDispositionTarget(npc, packet, auditInteraction, sem) {
         return 'No Change';
     }
     if (!rollNeeded) return softBondAllowedForNoStakes(npc, packet, sem) ? 'Bond' : 'No Change';
-    if (packet.boundaryViolationExplicit === 'Y' && (isDirect || isOpp)) {
-        return bool(sem.explicitIntimidationOrCoercion) || packet.classifyHostilePhysicalIntent === 'Y'
+    if (packetBoundaryBreakActive(packet) && (isDirect || isOpp)) {
+        return bool(sem.explicitIntimidationOrCoercion) || packetHarmfulAttackActive(packet)
             ? 'FearHostility'
             : 'Hostility';
     }
@@ -959,9 +1000,10 @@ export function routeDispositionTarget(npc, packet, auditInteraction, sem) {
 function softBondAllowedForNoStakes(npc, packet, sem = {}) {
     const relation = relationToUserAction(npc, packet);
     if ((!relation.isDirect && !relation.isBenefited) || relation.isOpp || relation.isHarmed) return false;
-    if (packet.classifyHostilePhysicalIntent === 'Y') return false;
-    if (packet.classifyPhysicalBoundaryPressure === 'Y') return false;
-    if (packet.boundaryViolationExplicit === 'Y') return false;
+    if (packetHarmfulAttackActive(packet)) return false;
+    if (packetBoundaryPressureActive(packet)) return false;
+    if (packetBoundaryBreakActive(packet)) return false;
+    if (packetRestraintActive(packet)) return false;
     if (packet.intimacyAdvanceExplicit === 'Y') return false;
     if (packet.activeHostileThreat === 'Y') return false;
     if (bool(sem.explicitIntimidationOrCoercion)) return false;
@@ -973,17 +1015,19 @@ function softBondAllowedForNoStakes(npc, packet, sem = {}) {
 
 function landedActionHarmsRelationship(packet, sem, outcome, isHarmed) {
     if (isHarmed) return true;
-    if (packet.classifyHostilePhysicalIntent === 'Y') return true;
-    if (packet.classifyPhysicalBoundaryPressure === 'Y') return true;
-    if (packet.boundaryViolationExplicit === 'Y') return true;
+    if (packetHarmfulAttackActive(packet)) return true;
+    if (packetBoundaryPressureActive(packet)) return true;
+    if (packetBoundaryBreakActive(packet)) return true;
+    if (packetRestraintContestActive(packet)) return true;
     if (bool(sem.explicitIntimidationOrCoercion)) return true;
     return normalizeStakeChange(sem.stakeChangeByOutcome?.[String(outcome || 'no_roll')]) === 'harm';
 }
 
 function directOrOpposedBenefitAllowed(npc, packet, sem) {
-    if (packet.classifyHostilePhysicalIntent === 'Y') return false;
-    if (packet.classifyPhysicalBoundaryPressure === 'Y') return false;
-    if (packet.boundaryViolationExplicit === 'Y') return false;
+    if (packetHarmfulAttackActive(packet)) return false;
+    if (packetBoundaryPressureActive(packet)) return false;
+    if (packetBoundaryBreakActive(packet)) return false;
+    if (packetRestraintActive(packet)) return false;
     if (bool(sem.explicitIntimidationOrCoercion)) return false;
     const source = relationshipBenefitSourceText(packet, sem);
     return isConcreteAidBenefitForNpc(source, npc);
@@ -1021,10 +1065,11 @@ export function hardStakeChangeFromTargetRole(npc, packet) {
 
     if (relation.isBenefited && !relation.isDirect && !relation.isOpp) return 'benefit';
     if (relation.isHarmed && !relation.isDirect && !relation.isOpp) return 'harm';
-    if ((relation.isDirect || relation.isOpp) && packet.classifyHostilePhysicalIntent === 'Y' && landed) return 'harm';
-    if ((relation.isDirect || relation.isOpp) && packet.classifyPhysicalBoundaryPressure === 'Y' && positiveOutcome) return 'harm';
+    if ((relation.isDirect || relation.isOpp) && packetHarmfulAttackActive(packet) && landed) return 'harm';
+    if ((relation.isDirect || relation.isOpp) && packetBoundaryPressureActive(packet) && positiveOutcome) return 'harm';
+    if ((relation.isDirect || relation.isOpp) && packetRestraintContestActive(packet) && positiveOutcome) return 'harm';
     if ((relation.isDirect || relation.isOpp)
-        && packet.boundaryViolationExplicit === 'Y'
+        && packetBoundaryBreakActive(packet)
         && positiveOutcome) {
         return 'harm';
     }
@@ -1125,7 +1170,10 @@ export function proactivityRefereeGuard(handoff, packet) {
     if (handoff.Target === 'Bond'
         && handoff.PressureMode === 'none'
         && !['FREEZE', 'TERROR', 'HATRED'].includes(handoff.Lock)
-        && packet.classifyHostilePhysicalIntent !== 'Y') {
+        && !packetHarmfulAttackActive(packet)
+        && !packetBoundaryPressureActive(packet)
+        && !packetBoundaryBreakActive(packet)
+        && !packetRestraintContestActive(packet)) {
         return 'Bond-routed non-hostile interaction cannot become hostile proactivity without harm, opposition, lock, or pressure evidence';
     }
     return null;
@@ -1143,8 +1191,8 @@ export function updateRapport(currentRapport, target, rapportEligible = false, m
 }
 
 export function applyPhysicalBoundaryPressure(npc, packet, state) {
-    if (packet.classifyPhysicalBoundaryPressure !== 'Y') return null;
-    if (packet.classifyHostilePhysicalIntent === 'Y') return null;
+    if (!packetBoundaryPressureActive(packet) && !packetBoundaryBreakActive(packet) && !packetRestraintContestActive(packet)) return null;
+    if (packetHarmfulAttackActive(packet)) return null;
     if (packet.RollNeeded !== 'Y') return null;
 
     const isDirect = includesName(packet.ActionTargets, npc);
@@ -1165,7 +1213,7 @@ export function applyPhysicalBoundaryPressure(npc, packet, state) {
 }
 
 export function applyHostilePhysicalPressure(npc, packet, state) {
-    if (packet.classifyHostilePhysicalIntent !== 'Y') return null;
+    if (!packetHarmfulAttackActive(packet)) return null;
     if (packet.RollNeeded !== 'Y') return null;
 
     const isDirect = includesName(packet.ActionTargets, npc);
@@ -1286,9 +1334,10 @@ export function deriveDirection(target, currentDisposition, currentRapport, audi
     const noChangeCanPromoteEarlyBond = target === 'No Change'
         && currentDisposition.B < 3
         && options.allowNoChangeEarlyBond === true
-        && packet.classifyHostilePhysicalIntent !== 'Y'
-        && packet.classifyPhysicalBoundaryPressure !== 'Y'
-        && packet.boundaryViolationExplicit !== 'Y'
+        && !packetHarmfulAttackActive(packet)
+        && !packetBoundaryPressureActive(packet)
+        && !packetBoundaryBreakActive(packet)
+        && !packetRestraintContestActive(packet)
         && packet.intimacyAdvanceExplicit !== 'Y'
         && packet.activeHostileThreat !== 'Y';
 
@@ -1509,7 +1558,7 @@ export function buildPersistencePolicy() {
         npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
-        perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'harmMode', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'classifyHostilePhysicalIntent', 'activeHostileThreat', 'classifyPhysicalBoundaryPressure', 'CHAOS', 'proactivityResults', 'aggressionResults'],
+        perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'harmMode', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'restraintControl', 'boundaryPressure', 'boundaryBreak', 'activeHostileThreat', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
 }
 
@@ -1771,6 +1820,8 @@ export function normalizeTrackerUserState(value) {
 
 const BOUND_COMPANION_TYPES = Object.freeze(['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other']);
 const BOUND_COMPANION_STATUSES = Object.freeze(['unchanged', 'active', 'inactive']);
+const PENDING_BOUNDARY_TYPES = Object.freeze(['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']);
+const PENDING_BOUNDARY_STATUSES = Object.freeze(['unchanged', 'set', 'clear']);
 
 export function normalizeBoundCompanionState(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
@@ -1836,11 +1887,90 @@ export function boundCompanionDeltaHasChanges(value = {}) {
         || delta.evidence !== null;
 }
 
+export function normalizePendingBoundaryState(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const active = bool(source.active) || normalizePendingBoundaryStatus(source.status) === 'set';
+    return {
+        active,
+        targetNPC: active ? cleanPendingBoundaryText(source.targetNPC ?? source.TargetNPC, 100) : '',
+        type: active ? normalizePendingBoundaryType(source.type ?? source.Type) : 'none',
+        objectOrAccess: active ? cleanPendingBoundaryText(source.objectOrAccess ?? source.ObjectOrAccess, 140) : '',
+        evidence: active ? cleanPendingBoundaryText(source.evidence ?? source.Evidence, 260) : '',
+        warnings: active ? clamp(Math.floor(Number(source.warnings ?? source.Warnings ?? 1)), 1, 5) : 0,
+    };
+}
+
+export function normalizePendingBoundaryDelta(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        status: normalizePendingBoundaryStatus(source.status ?? source.Status),
+        targetNPC: cleanPendingBoundaryDeltaText(source.targetNPC ?? source.TargetNPC, 100),
+        type: normalizePendingBoundaryDeltaType(source.type ?? source.Type),
+        objectOrAccess: cleanPendingBoundaryDeltaText(source.objectOrAccess ?? source.ObjectOrAccess, 140),
+        evidence: cleanPendingBoundaryDeltaText(source.evidence ?? source.Evidence, 260),
+    };
+}
+
+export function applyPendingBoundaryDelta(before = {}, delta = {}) {
+    const current = normalizePendingBoundaryState(before);
+    const patch = normalizePendingBoundaryDelta(delta);
+    if (patch.status === 'clear') return normalizePendingBoundaryState({ active: false });
+    if (patch.status !== 'set') return current;
+
+    const targetNPC = patch.targetNPC || current.targetNPC;
+    const type = patch.type || current.type || 'none';
+    const objectOrAccess = patch.objectOrAccess || current.objectOrAccess;
+    const sameBoundary = current.active
+        && sameName(current.targetNPC, targetNPC)
+        && normalizePendingBoundaryType(current.type) === normalizePendingBoundaryType(type)
+        && samePendingBoundaryObject(current.objectOrAccess, objectOrAccess);
+    return normalizePendingBoundaryState({
+        active: true,
+        targetNPC,
+        type,
+        objectOrAccess,
+        evidence: patch.evidence || current.evidence,
+        warnings: sameBoundary ? current.warnings + 1 : 1,
+    });
+}
+
+export function pendingBoundaryDeltaHasChanges(value = {}) {
+    const delta = normalizePendingBoundaryDelta(value);
+    return delta.status !== 'unchanged'
+        || delta.targetNPC !== null
+        || delta.type !== null
+        || delta.objectOrAccess !== null
+        || delta.evidence !== null;
+}
+
 function normalizeBoundCompanionStatus(value) {
     const text = String(value ?? 'unchanged').trim().toLowerCase().replace(/[\s-]+/g, '_');
     if (['y', 'yes', 'true', 'active', 'activated', 'established'].includes(text)) return 'active';
     if (['n', 'no', 'false', 'inactive', 'absent', 'removed', 'dismissed', 'severed', 'none'].includes(text)) return 'inactive';
     return BOUND_COMPANION_STATUSES.includes(text) ? text : 'unchanged';
+}
+
+function normalizePendingBoundaryStatus(value) {
+    const text = String(value ?? 'unchanged').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (['y', 'yes', 'true', 'active', 'set', 'open', 'pending'].includes(text)) return 'set';
+    if (['n', 'no', 'false', 'inactive', 'absent', 'clear', 'cleared', 'closed', 'resolved', 'none'].includes(text)) return 'clear';
+    return PENDING_BOUNDARY_STATUSES.includes(text) ? text : 'unchanged';
+}
+
+function normalizePendingBoundaryType(value) {
+    const text = String(value ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (['object', 'item', 'item_access', 'possession', 'inventory'].includes(text)) return 'object_access';
+    if (['space', 'access', 'entry', 'door', 'doorway'].includes(text)) return 'space_access';
+    if (['leave', 'leaving', 'exit'].includes(text)) return 'departure';
+    if (['physical_restraint', 'grapple', 'pin', 'hold'].includes(text)) return 'restraint';
+    return PENDING_BOUNDARY_TYPES.includes(text) ? text : 'none';
+}
+
+function normalizePendingBoundaryDeltaType(value) {
+    const text = cleanPendingBoundaryDeltaText(value, 80);
+    if (text === null) return null;
+    const normalized = normalizePendingBoundaryType(text);
+    return normalized === 'none' ? null : normalized;
 }
 
 function normalizeBoundCompanionType(value) {
@@ -1871,6 +2001,28 @@ function cleanBoundCompanionText(value, maxLength) {
 function cleanBoundCompanionDeltaText(value, maxLength) {
     const text = cleanBoundCompanionText(value, maxLength);
     return text || null;
+}
+
+function cleanPendingBoundaryText(value, maxLength) {
+    const text = String(value ?? '')
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
+    return text.slice(0, maxLength);
+}
+
+function cleanPendingBoundaryDeltaText(value, maxLength) {
+    const text = cleanPendingBoundaryText(value, maxLength);
+    return text || null;
+}
+
+function samePendingBoundaryObject(a, b) {
+    const left = cleanPendingBoundaryText(a, 140).toLowerCase();
+    const right = cleanPendingBoundaryText(b, 140).toLowerCase();
+    if (!left || !right) return true;
+    return left === right;
 }
 
 export function normalizeTrackerCondition(value) {
@@ -2076,7 +2228,6 @@ export function normalizeChallengeType(value, rollNeeded = 'Y') {
         mundane: 'mundane_combat',
         combat: 'mundane_combat',
         physicalcombat: 'mundane_combat',
-        physical: 'mundane_combat',
         weapon: 'mundane_combat',
         supernaturalcombat: 'supernatural_combat',
         spellorsupernatural: 'supernatural_combat',
@@ -2084,6 +2235,13 @@ export function normalizeChallengeType(value, rollNeeded = 'Y') {
         supernatural: 'supernatural_combat',
         magic: 'supernatural_combat',
         magical: 'supernatural_combat',
+        restraint: 'restraint',
+        restrain: 'restraint',
+        restraintcontrol: 'restraint',
+        grapple: 'restraint',
+        grappling: 'restraint',
+        pin: 'restraint',
+        pinned: 'restraint',
         stealth: 'stealth',
         sneak: 'stealth',
         sneaking: 'stealth',
@@ -2137,6 +2295,7 @@ export function deterministicStatsForChallenge(challengeType, socialTactic = 'no
     }
     if (challengeType === 'supernatural_combat') return { userStat: 'MND', oppStat: 'PHY' };
     if (challengeType === 'mundane_combat') return { userStat: 'PHY', oppStat: 'PHY' };
+    if (challengeType === 'restraint') return { userStat: 'PHY', oppStat: 'PHY' };
     if (challengeType === 'stealth') return { userStat: 'PHY', oppStat: 'MND' };
     if (challengeType === 'environment') {
         return { userStat: 'PHY', oppStat: 'ENV' };

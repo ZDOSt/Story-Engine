@@ -102,7 +102,9 @@ function buildReadableSemanticDebug(ledger) {
         'NPCAwareOfUser=' + list(targets.NPCAwareOfUser),
         'PowerActors=' + list(targets.PowerActors),
         'intimacyAdvanceExplicit=' + String(Boolean(resolution.intimacyAdvanceExplicit)),
-        'boundaryViolationExplicit=' + String(Boolean(resolution.boundaryViolationExplicit)),
+        'restraintControl=' + boundaryObjectSummary(resolution.restraintControl),
+        'boundaryPressure=' + boundaryObjectSummary(resolution.boundaryPressure),
+        'boundaryBreak=' + boundaryObjectSummary(resolution.boundaryBreak),
         'rollNeeded=' + String(Boolean(resolution.rollNeeded)),
         'rollReason=' + valueOrNone(resolution.rollReason),
         'challengeType=' + valueOrNone(resolution.challengeType),
@@ -112,9 +114,7 @@ function buildReadableSemanticDebug(ledger) {
         'actionUnits=' + actionUnitsSummary(resolution.actionUnits, { includeEvidence: true }),
         'environmentDifficultyTier=' + valueOrNone(resolution.environmentDifficultyTier),
         'environmentDifficultyBonus=' + valueOrNone(resolution.environmentDifficulty),
-        'derivedClassifyHostilePhysicalIntent=' + String(Boolean(resolution.classifyHostilePhysicalIntent)),
         'activeHostileThreat=' + String(Boolean(resolution.activeHostileThreat)),
-        'classifyPhysicalBoundaryPressure=' + String(Boolean(resolution.classifyPhysicalBoundaryPressure)),
         'genStats=' + coreLine(resolution.genStats),
         '',
         'RelationshipEngine:',
@@ -155,7 +155,10 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.ItemUse=' + itemUseSummary(resolution.ItemUse),
         'resolutionPacket.ClaimCheck=' + claimCheckSummary(resolution.ClaimCheck),
         'resolutionPacket.intimacyAdvanceExplicit=' + valueOrNone(resolution.intimacyAdvanceExplicit),
-        'resolutionPacket.boundaryViolationExplicit=' + valueOrNone(resolution.boundaryViolationExplicit),
+        'resolutionPacket.restraintControl=' + boundaryObjectSummary(resolution.restraintControl),
+        'resolutionPacket.boundaryPressure=' + boundaryObjectSummary(resolution.boundaryPressure),
+        'resolutionPacket.boundaryBreak=' + boundaryObjectSummary(resolution.boundaryBreak),
+        'resolutionPacket.BoundaryGate=' + inline(resolution.BoundaryGate ?? {}),
         'resolutionPacket.harmMode=' + valueOrNone(resolution.harmMode),
         'resolutionPacket.RollNeeded=' + valueOrNone(resolution.RollNeeded),
         'resolutionPacket.RollReason=' + valueOrNone(resolution.RollReason),
@@ -169,9 +172,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.Outcome=' + valueOrNone(resolution.Outcome),
         'resolutionPacket.LandedActions=' + valueOrNone(resolution.LandedActions),
         'resolutionPacket.CounterPotential=' + valueOrNone(resolution.CounterPotential),
-        'resolutionPacket.classifyHostilePhysicalIntent[derived]=' + valueOrNone(resolution.classifyHostilePhysicalIntent),
         'resolutionPacket.activeHostileThreat=' + valueOrNone(resolution.activeHostileThreat),
-        'resolutionPacket.classifyPhysicalBoundaryPressure=' + valueOrNone(resolution.classifyPhysicalBoundaryPressure),
         'resolutionPacket.UserImpairment=' + inline(resolution.UserImpairment ?? {}),
         'resolutionPacket.NPCImpairment=' + inline(resolution.NPCImpairment ?? {}),
         'resolutionPacket.hostilesInScene.NPC=' + list(resolution.hostilesInScene?.NPC),
@@ -267,13 +268,14 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.landedActions', summary.landedActions],
         ['resolution.intimacyAdvanceExplicit', valueOrNone(resolution.intimacyAdvanceExplicit)],
         ['intimacy.boundary', summary.intimacyBoundary],
-        ['resolution.boundaryViolationExplicit', valueOrNone(resolution.boundaryViolationExplicit)],
+        ['resolution.restraintControl', boundaryObjectSummary(resolution.restraintControl)],
+        ['resolution.boundaryPressure', boundaryObjectSummary(resolution.boundaryPressure)],
+        ['resolution.boundaryBreak', boundaryObjectSummary(resolution.boundaryBreak)],
+        ['resolution.BoundaryGate', inline(resolution.BoundaryGate ?? {})],
         ['resolution.counterPotential', summary.counter],
         ['resolution.targets', summary.targets],
         ['resolution.NPCAwareOfUser', list(resolution.NPCAwareOfUser)],
         ['resolution.activeHostileThreat', valueOrNone(resolution.activeHostileThreat)],
-        ['resolution.classifyPhysicalBoundaryPressure', valueOrNone(resolution.classifyPhysicalBoundaryPressure)],
-        ['resolution.classifyHostilePhysicalIntent[derived]', valueOrNone(resolution.classifyHostilePhysicalIntent)],
         ['impairment.user', summary.userImpairment],
         ['impairment.npc', summary.npcImpairment],
         ['injury.inflictedNpc', summary.inflictedNpcInjury],
@@ -1145,13 +1147,19 @@ function narrativeBoundaryFact(resolution = {}, handoff = {}) {
     const primaryNpc = primaryNarrationNpc(handoff, resolution);
     const guide = primaryNpc ? npcDispositionBehaviorGuide(primaryNpc) : 'Render resistance, refusal, guardedness, withdrawal, anger, fear, or a call for help as the visible situation supports.';
     const parts = [];
-    if (resolution?.classifyPhysicalBoundaryPressure === 'Y') {
-        parts.push('Treat this as physical boundary pressure, not combat: narrate contested possession, space, access, refusal, anger, or resistance without inventing a completed attack.');
+    if (resolution?.restraintControl?.Present === 'Y') {
+        parts.push('Restraint/control is present. Obey RollNeeded and attemptedActionResults: do not turn restraint into HP damage, unconsciousness, death, or a damaging attack unless injuryOrDeath explicitly says so.');
     }
-    if (resolution?.boundaryViolationExplicit === 'Y') {
-        parts.push(`This is an explicit boundary violation or pressure past refusal. Narrate refusal, guardedness, resistance, withdrawal, anger, fear, calling for help, or escalation as fits the NPC and scene. ${guide}`);
+    if (resolution?.boundaryPressure?.Present === 'Y') {
+        parts.push('Boundary pressure is present: narrate contested possession, space, access, departure, refusal, anger, or resistance without inventing a completed attack.');
     }
-    return parts.join(' ') || 'No special physical boundary pressure is active beyond the other listed facts.';
+    if (resolution?.boundaryBreak?.Present === 'Y') {
+        parts.push(`A stored NPC boundary is being continued or escalated. Narrate refusal, guardedness, resistance, withdrawal, anger, fear, calling for help, or escalation as fits the NPC and scene. ${guide}`);
+    }
+    if (resolution?.BoundaryGate?.action === 'second_warning_no_roll') {
+        parts.push('Boundary grace is still active for this trusted NPC. Give a clearer warning or boundary in-character, but do not narrate a mechanics roll outcome.');
+    }
+    return parts.join(' ') || 'No special restraint or boundary pressure is active beyond the other listed facts.';
 }
 
 function narrativeCompanionCommandFact(resolution = {}) {
@@ -2219,6 +2227,24 @@ function claimCheckSummary(value = {}) {
         `stakes:${claim.stakesImpact ? 'Y' : 'N'}`,
         `reason:${claim.reason}`,
     ].join('; ');
+}
+
+function boundaryObjectSummary(value = {}) {
+    if (!value || typeof value !== 'object') return 'none';
+    const present = value.Present ?? value.present ?? 'N';
+    const target = value.TargetNPC ?? value.targetNPC ?? '(none)';
+    const type = value.Type ?? value.type ?? 'none';
+    const response = value.Response ?? value.response;
+    const objectOrAccess = value.ObjectOrAccess ?? value.objectOrAccess;
+    const evidence = value.Evidence ?? value.evidence;
+    return inline({
+        Present: present,
+        TargetNPC: target,
+        Type: type,
+        ...(response ? { Response: response } : {}),
+        ...(objectOrAccess ? { ObjectOrAccess: objectOrAccess } : {}),
+        ...(evidence ? { Evidence: evidence } : {}),
+    });
 }
 
 function claimCheckGuide(value = {}, resolution = {}, rollAudit = {}) {

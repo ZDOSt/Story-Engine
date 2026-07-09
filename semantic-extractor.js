@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizeSocialResolutionMemory } from './engines.js';
+import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import { canGenerateRawData, generateRawData, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta } from './world-state.js';
@@ -27,9 +27,12 @@ const ITEM_USE_SOURCES = Object.freeze(['none', 'gear', 'inventory', 'unavailabl
 const USER_KNOWLEDGE_TYPES = Object.freeze(['personalKnowledge', 'reputationKnowledge']);
 const USER_KNOWLEDGE_APPLICATION_EFFECTS = Object.freeze(['none', 'priorUserGoodRep', 'userBadRep', 'userNonHuman', 'contextOnly']);
 const ENVIRONMENT_DIFFICULTY_TIERS = Object.freeze(['none', 'easy', 'average', 'hard', 'extreme']);
-const CHALLENGE_TYPES = Object.freeze(['none', 'social', 'mundane_combat', 'supernatural_combat', 'stealth', 'environment']);
+const CHALLENGE_TYPES = Object.freeze(['none', 'social', 'mundane_combat', 'supernatural_combat', 'restraint', 'stealth', 'environment']);
 const SOCIAL_TACTICS = Object.freeze(['none', 'diplomacy', 'bluff', 'intimidate']);
 const HARM_MODES = Object.freeze(['lethal', 'nonlethal', 'restraint_control', 'none']);
+const BOUNDARY_PRESSURE_TYPES = Object.freeze(['none', 'object_access', 'space_access', 'departure']);
+const BOUNDARY_BREAK_TYPES = Object.freeze(['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']);
+const BOUNDARY_BREAK_RESPONSES = Object.freeze(['none', 'released', 'continued', 'escalated', 'unrelated', 'unclear']);
 const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
     'RenderControlEngine',
     'sceneStyleProfile',
@@ -534,6 +537,22 @@ function buildSemanticPreflightSchema() {
             evidence: { type: 'string' },
         },
     };
+    const pendingBoundaryDeltaSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['status', 'targetNPC', 'type', 'objectOrAccess', 'evidence'],
+        properties: {
+            status: {
+                type: 'string',
+                enum: ['unchanged', 'set', 'clear'],
+                description: 'Preflight should use unchanged. Post-narration tracker deltas use set only when FINAL_NARRATION explicitly shows an NPC boundary and clear when that stored boundary is resolved.',
+            },
+            targetNPC: { type: 'string' },
+            type: { type: 'string', enum: ['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy'] },
+            objectOrAccess: { type: 'string' },
+            evidence: { type: 'string' },
+        },
+    };
     const injuryEffectSchema = {
         type: 'object',
         additionalProperties: false,
@@ -662,6 +681,49 @@ function buildSemanticPreflightSchema() {
             reason: { type: 'string' },
         },
     };
+    const restraintControlSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['present', 'targetNPC', 'evidence'],
+        properties: {
+            present: {
+                type: 'boolean',
+                description: 'Y only when the latest user input explicitly holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a specific living NPC.',
+            },
+            targetNPC: { type: 'string' },
+            evidence: { type: 'string' },
+        },
+    };
+    const boundaryPressureSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['present', 'type', 'targetNPC', 'objectOrAccess', 'evidence'],
+        properties: {
+            present: {
+                type: 'boolean',
+                description: 'Y for non-restraint pressure on an NPC-controlled possession, object, space, route, doorway, access point, or departure.',
+            },
+            type: { type: 'string', enum: BOUNDARY_PRESSURE_TYPES },
+            targetNPC: { type: 'string' },
+            objectOrAccess: { type: 'string' },
+            evidence: { type: 'string' },
+        },
+    };
+    const boundaryBreakSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['present', 'targetNPC', 'type', 'response', 'evidence'],
+        properties: {
+            present: {
+                type: 'boolean',
+                description: 'Y only when hidden tracker pendingBoundary exists and the latest user input continues, escalates, ignores, or refuses to release/return/stop that same boundary behavior.',
+            },
+            targetNPC: { type: 'string' },
+            type: { type: 'string', enum: BOUNDARY_BREAK_TYPES },
+            response: { type: 'string', enum: BOUNDARY_BREAK_RESPONSES },
+            evidence: { type: 'string' },
+        },
+    };
     const userKnowledgeApplicationSchema = {
         type: 'object',
         additionalProperties: false,
@@ -750,7 +812,9 @@ function buildSemanticPreflightSchema() {
                     'claimCheck',
                     'identifyTargets',
                     'intimacyAdvanceExplicit',
-                    'boundaryViolationExplicit',
+                    'restraintControl',
+                    'boundaryPressure',
+                    'boundaryBreak',
                     'harmMode',
                     'rollNeeded',
                     'rollReason',
@@ -760,7 +824,6 @@ function buildSemanticPreflightSchema() {
                     'actionUnits',
                     'environmentDifficultyTier',
                     'activeHostileThreat',
-                    'classifyPhysicalBoundaryPressure',
                     'genStats',
                 ],
                 properties: {
@@ -827,7 +890,9 @@ function buildSemanticPreflightSchema() {
                         },
                     },
                     intimacyAdvanceExplicit: { type: 'boolean' },
-                    boundaryViolationExplicit: { type: 'boolean' },
+                    restraintControl: restraintControlSchema,
+                    boundaryPressure: boundaryPressureSchema,
+                    boundaryBreak: boundaryBreakSchema,
                     harmMode: {
                         type: 'string',
                         enum: HARM_MODES,
@@ -844,7 +909,7 @@ function buildSemanticPreflightSchema() {
                     challengeType: {
                         type: 'string',
                         enum: CHALLENGE_TYPES,
-                        description: 'none, social, mundane_combat, supernatural_combat, stealth, or environment. Use none when rollNeeded=false.',
+                        description: 'none, social, mundane_combat, supernatural_combat, restraint, stealth, or environment. Use none when rollNeeded=false unless deterministic restraint policy overrides later.',
                     },
                     challengeTypeEvidence: {
                         type: 'string',
@@ -866,7 +931,6 @@ function buildSemanticPreflightSchema() {
                         description: 'Semantic environmental opposition tier only when challengeType=environment and OppTargets.ENV has a non-living obstacle or condition that makes the goal fail-able. Use easy/trivial, average, hard, or extreme; set none otherwise.',
                     },
                     activeHostileThreat: { type: 'boolean' },
-                    classifyPhysicalBoundaryPressure: { type: 'boolean' },
                     genStats: generatedStatsSeedSchema,
                 },
             },
@@ -1023,7 +1087,7 @@ function buildSemanticPreflightSchema() {
             trackerUpdateEngine: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['user', 'npcs', 'boundCompanion'],
+                required: ['user', 'npcs', 'boundCompanion', 'pendingBoundary'],
                 properties: {
                     user: trackerUserDeltaSchema,
                     npcs: {
@@ -1031,6 +1095,7 @@ function buildSemanticPreflightSchema() {
                         items: trackerNpcDeltaSchema,
                     },
                     boundCompanion: boundCompanionDeltaSchema,
+                    pendingBoundary: pendingBoundaryDeltaSchema,
                 },
             },
             chaosSemantic: {
@@ -1239,8 +1304,11 @@ const COMPACT_LEDGER_CONTRACT = [
     '- Use comma-separated names or (none) for lists. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, stealth contest against a specific established living detector/opponent, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest against a specific established living detector/opponent, speed contest, dangerous movement, contested access, or another explicit stakes-bearing objective.',
     '- ResolutionEngine must separate user-authored internal prose from external action. First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction. When mixed, extract only concrete present external actions and spoken dialogue for identifyGoal, identifyChallenge, targets, challengeType, and actionUnits.',
-    '- ResolutionEngine.rollNeeded is the sole semantic roll gate. Apply DEF.STAKES and DEF.NO_STAKES. Return Y when success/failure of the latest explicit user goal or challenge creates fresh unresolved stakes: physical risk, harm, danger, stealth against a specific established living detector/opponent, infiltration, material gain/loss, significant trust/status/authority shift, autonomy/freedom, access, secrets, combat, pursuit, restraint, deception, bargaining, environmental obstacle resolution, or explicit goal advancement/failure. Return N only when no stake is present, when stealth-style action lacks a specific established living detector/opponent and has no separate non-stealth obstacle, or when the exact stake is already resolved/suppressed by saved fear/terror, hostility/hatred, persisted intimacy boundary, unavailable item attempt, safe-scene aid/treatment, or repeated resolved same-tactic negative social attempt rules. If stakes and ordinary continuity/no-stakes wording both seem relevant, stakes win unless already resolved. Failed/resolved bluff blocks repeated bluff; failed/resolved intimidate blocks repeated intimidate. Bluff does not block a later intimidate, and intimidate does not block a later bluff. Repeated wording, stronger insults, renewed same-tactic threats, rephrased same-tactic bluffs, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. ResolutionEngine.rollReason must briefly explain why rollNeeded is Y or N and must not contradict the flag.',
-    '- ResolutionEngine.challengeType is the roll route, not a stat choice. Use none when rollNeeded=N. Use social for fresh unresolved NPC-facing persuasion, bargaining, deception, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure. Use mundane_combat for direct bodily, weapon, natural-weapon, tool, projectile, thrown object, or ordinary physical attack/control against a living target. Use supernatural_combat for spell, curse, psychic, elemental, magical, divine, demonic, or supernatural harmful effect/control against a living target. Use stealth only for avoiding detection/perception by a specific established living detector/opponent. Use environment for physical/environmental obstacles, escape, chase, locks, traps, terrain, weather, barriers, hazards, non-living opposition, or object/access/boundary contests that are not social, combat, or stealth. If challengeType=social, socialTactic must be diplomacy, bluff, or intimidate; otherwise socialTactic=none.',
+    '- ResolutionEngine.restraintControl is a simple fact detector. Mark Present=Y only when the latest user input explicitly holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a specific living NPC. Do not mark it for hand-on-wall proximity, leaning close, flirting, hand-holding, ordinary touch, or movement that does not restrict the NPC body or movement.',
+    '- ResolutionEngine.boundaryPressure is a simple fact detector for non-restraint boundary pressure: NPC-associated object/item access, snatching, taking, keeping, refusing to return, guarded space/access, blocked doorway, or stopping departure without directly controlling the NPC body. It does not decide rollNeeded, hostility, damage, or relationship effects.',
+    '- ResolutionEngine.boundaryBreak checks hidden tracker pendingBoundary only. If no pendingBoundary is active, Present=N. If pendingBoundary exists, mark Present=Y only when the latest user input continues, escalates, ignores, or refuses to release/return/stop that same boundary behavior. Mark Present=N when user releases, returns, backs off, apologizes without continuing, or does something unrelated.',
+    '- ResolutionEngine.rollNeeded is the sole semantic roll gate for ordinary non-boundary stakes. Apply DEF.STAKES and DEF.NO_STAKES. Return Y when success/failure of the latest explicit user goal or challenge creates fresh unresolved stakes: physical risk, harm, danger, stealth against a specific established living detector/opponent, infiltration, material gain/loss outside ordinary boundaryPressure handling, significant trust/status/authority shift, access outside ordinary boundaryPressure handling, secrets, combat, pursuit/escape, deception, bargaining, environmental obstacle resolution, or explicit goal advancement/failure. Do NOT force rollNeeded=Y solely because {{user}} restrains, grabs, pins, blocks, snatches, takes, holds, or pressures an NPC boundary; classify those through restraintControl, boundaryPressure, and boundaryBreak, then deterministic code decides whether they roll. Return N only when no stake is present, when stealth-style action lacks a specific established living detector/opponent and has no separate non-stealth obstacle, or when the exact stake is already resolved/suppressed by saved fear/terror, hostility/hatred, persisted intimacy boundary, unavailable item attempt, safe-scene aid/treatment, or repeated resolved same-tactic negative social attempt rules. If stakes and ordinary continuity/no-stakes wording both seem relevant, stakes win unless already resolved. Failed/resolved bluff blocks repeated bluff; failed/resolved intimidate blocks repeated intimidate. Bluff does not block a later intimidate, and intimidate does not block a later bluff. Repeated wording, stronger insults, renewed same-tactic threats, rephrased same-tactic bluffs, or theatrical display after refusal/failure are aftermath or escalation, not a fresh social contest. ResolutionEngine.rollReason must briefly explain why rollNeeded is Y or N and must not contradict the flag.',
+    '- ResolutionEngine.challengeType is the roll route, not a stat choice. Use none when rollNeeded=N. Use social for fresh unresolved NPC-facing persuasion, bargaining, deception, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure. Use mundane_combat for direct bodily, weapon, natural-weapon, tool, projectile, thrown object, or ordinary physical attack that can injure a living target; restraint/control alone is not combat. Use supernatural_combat for spell, curse, psychic, elemental, magical, divine, demonic, or supernatural harmful effect against a living target; magical restraint/control alone is restraintControl unless it also harms. Use restraint only for an actual restraint contest when deterministic boundary/restraint policy requires a roll. Use stealth only for avoiding detection/perception by a specific established living detector/opponent. Use environment for physical/environmental obstacles, escape, chase, locks, traps, terrain, weather, barriers, hazards, non-living opposition, or object/access/boundary contests not covered by boundaryPressure. If challengeType=social, socialTactic must be diplomacy, bluff, or intimidate; otherwise socialTactic=none.',
     '- ResolutionEngine.actionUnits is the only semantic source for mechanically counted actions. Non-combat challenge types return exactly one A1 unit. Combat challenge types return one unit per explicit discrete attack/effect that could separately land, miss, be blocked, dodged, deflected, or apply an effect, capped at three. Count separate attacks/effects even when they share one target, one goal, one sentence, one ability name, or one combo; do not count setup, aiming, focusing, movement, pivoting, defense, or flavor unless that act itself is a separate stakes-bearing attack/effect. actionUnits does not decide success, failure, outcome, injury, counterattack, or narration.',
     '- ResolutionEngine.identifyTargets.ActionTargets is the direct interaction list. Include every living NPC the latest user input directly addresses, speaks to, answers, asks, thanks, reassures, requests, warns, commands, helps, treats, touches, accompanies, follows, trades with, gives something to, receives something from, attacks, restrains, deceives, negotiates with, or otherwise directly interacts with this turn, whether rollNeeded is Y or N. ActionTargets are broader than OppTargets.NPC. If challengeType=stealth, the specific established living detector/opponent must be ActionTargets and OppTargets.NPC because their awareness is the opposition; terrain, darkness, noise, crowds, cover, distance, foliage, or weather are scene conditions, not OppTargets.ENV. Do not include bystanders, background crowds, inferred listeners, offscreen entities, or hostilesInScene-only NPCs unless the latest user input directly involves them.',
     '- ResolutionEngine.identifyTargets.NPCAwareOfUser is the individual-awareness list. Include only named or clearly individual living NPCs who are present and directly become aware of {{user}} by noticing, looking at, addressing, gesturing to, reacting to, or otherwise individually interacting with {{user}} in the current scene/context, even if {{user}} has not directly acted on them. Exclude groups, crowds, factions, unnamed plural background NPCs, inferred listeners, offscreen entities, and generic bystanders. Example: "the innkeeper looks at {{user}}" belongs in NPCAwareOfUser; "the patrons turn toward the newcomer" does not.',
@@ -1262,8 +1330,6 @@ const COMPACT_LEDGER_CONTRACT = [
     '- ResolutionEngine.identifyTargets.OppTargets.NPC is narrower: list only living entities directly opposing, contesting, resisting, blocking, defending against, acting as the detector/opponent when challengeType=stealth, or being attacked/challenged by {{user}}\'s current action/challenge. Do not put every enemy in OppTargets.NPC just because they are hostile; use hostilesInScene.NPC for the broader hostile pool.',
     '- ResolutionEngine.activeHostileThreat is strict. Return Y only if the current scene contains an immediate hostile danger from an NPC/entity: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster/hostile creature engagement, armed standoff, capture attempt, or imminent physical/supernatural harm. Return N for negotiation, refusal, bargaining, argument, social resistance, authority denial, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger.',
     '- ResolutionEngine.intimacyAdvanceExplicit is strict. Return Y only if {{user}} explicitly attempts, requests, accepts, or reciprocates actual intimate escalation with a specific NPC: kissing, making out, sexual touch, undressing toward intimacy, asking to sleep together, asking for sex, moving to bed, or clearly initiating romantic/sexual physical closeness. Return Y for accepting or reciprocating a prior explicit NPC-initiated intimacy invitation or action. Return N for flirting, teasing, compliments, romantic banter, suggestive jokes, vague innuendo, "what did you have in mind", declarations of love, asking for a date, emotional confession, hand-holding, casual proximity, or ordinary affection that does not clearly escalate into kissing or sexual/intimate contact. This is only an intimacy permission/boundary signal and does not create stakes, rolls, landed actions, Bond loss, Fear, or Hostility by itself.',
-    '- ResolutionEngine.boundaryViolationExplicit is strict. Return Y only if the current user input explicitly violates, ignores, or pressures past a clear refusal, stated boundary, withdrawal, fear, incapacitation, explicitly established lack of consent, or prior denial from this specific NPC. Return Y for coercion, threats, force, unwanted restraint/contact after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no. Return N for flirting, teasing, romantic talk, asking permission, accepting or reciprocating NPC-initiated flirtation/intimacy, backing off/respecting a boundary, or ordinary romantic/sexual ambiguity where no refusal/boundary/incapacity has been explicitly established.',
-    '- ResolutionEngine.classifyPhysicalBoundaryPressure is narrow. Return Y only for a stakes-bearing object/space/access/departure/body-adjacent boundary contest against a resisting living NPC, without a direct hostile attack or forceful bodily control. Return N if the action is Combat, no-stakes, pure social pressure, normal item handling, or direct bodily attack/control.',
     '- ResolutionEngine.harmMode is a downstream damage/death gate only. It must NOT decide rollNeeded, challengeType, boundary pressure, or relationship harm. Set lethal when the current action attacks a living body using a weapon, improvised weapon, natural weapon, dangerous tool, projectile, firearm, blade, fang, claw, horn, crushing object, lethal/destructive magic, poison, fire, electricity, or another method that could reasonably kill or maim if it lands decisively. {{user}} does not need to say "kill"; infer from the physical method and context. Set nonlethal when the current action attacks a living body with ordinary unarmed force or explicitly controlled force: punches, kicks, elbows, knees, brawling, tackles meant as attacks, training, sparring, pulled blows, pommel strikes, flat-of-blade strikes, practice weapons, or a clearly stated attempt to avoid serious/fatal harm. Nonlethal can deal HP damage, but HP 0 means unconscious/incapacitated, not dead. Set restraint_control when the current action controls, holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a living body without a separate attack meant to injure. Restraint/control does not deal HP damage; it can cause bruising at most and restraint/control statuses if scene-valid. Set none when there is no bodily attack, harmful effect, or restraint/control. If the turn mixes methods, choose the most dangerous active mode: lethal > nonlethal > restraint_control > none. Ambiguous ordinary bodily force without weapons or inherently dangerous methods is nonlethal by default; mere restraint/control remains restraint_control.',
     '- All genStats groups must include only Rank and MainStat. Use genStats only when the relevant NPC currentCoreStats are missing in the tracker snapshot. The semantic pass identifies Rank and MainStat from explicit portrayal; deterministic code assigns numeric PHY/MND/CHA values within the Rank range and saves them once.',
     '- InjuryEffectEngine is semantic-only candidate extraction for effects the user action would cause if deterministic mechanics say the action lands. It does not roll and does not decide success. Include physical injuries and impairing magical/status effects regardless of source: burns, poison, paralysis, sickness, blindness, fear/panic, restraint, curses, lightning/electrical effects, exhaustion, mental effects, or other ongoing impairing states. Exclude purely emotional/social harm, mere witnessing, momentary pain, intended/requested future injuries, or effects that would not persist or impair later action.',
@@ -1277,6 +1343,7 @@ const COMPACT_LEDGER_CONTRACT = [
     'PERSONALITY_ARCHETYPE_GLOSSARY:',
     PERSONALITY_ARCHETYPE_GLOSSARY,
     '- TrackerUpdateEngine.BoundCompanionState is hidden user state. It may read the entire assembled context: active SillyTavern prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when context explicitly establishes an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant as already active/completed/accepted and able to communicate with {{user}} internally or through the carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Set status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also set status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, "do you accept?" proposals, unclear voices, metaphors, rumors, dreams, hallucination ambiguity, or no change. Do not invent an inner entity. If active, fill name/type/vessel/voice/evidence from explicit context when known; otherwise use (none) for unknown optional fields. Evidence must cite the explicit context fact that makes it established, not a guess.',
+    '- TrackerUpdateEngine.PendingBoundaryState is post-narration-owned. In semantic preflight, output status=unchanged with placeholder fields. The post-narration tracker delta sets or clears pending boundaries after FINAL_NARRATION exists.',
     '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
     '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory is not tracked. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
     '- PowerActorEnmity is hidden power-actor memory. First assess power candidates semantically, not by keyword/title. A power actor is any entity with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. Ordinary people with only personal reaction are not power actors even if they have a job title.',
@@ -1324,7 +1391,19 @@ ResolutionEngine.identifyTargets.HarmedObservers=(none)
 ResolutionEngine.identifyTargets.NPCAwareOfUser=(none)
 ResolutionEngine.identifyTargets.PowerActors=(none)
 ResolutionEngine.intimacyAdvanceExplicit=N
-ResolutionEngine.boundaryViolationExplicit=N
+ResolutionEngine.restraintControl.Present=N
+ResolutionEngine.restraintControl.TargetNPC=(none)
+ResolutionEngine.restraintControl.Evidence=(none)
+ResolutionEngine.boundaryPressure.Present=N
+ResolutionEngine.boundaryPressure.Type=none
+ResolutionEngine.boundaryPressure.TargetNPC=(none)
+ResolutionEngine.boundaryPressure.ObjectOrAccess=(none)
+ResolutionEngine.boundaryPressure.Evidence=(none)
+ResolutionEngine.boundaryBreak.Present=N
+ResolutionEngine.boundaryBreak.TargetNPC=(none)
+ResolutionEngine.boundaryBreak.Type=none
+ResolutionEngine.boundaryBreak.Response=none
+ResolutionEngine.boundaryBreak.Evidence=(none)
 ResolutionEngine.harmMode=none
 ResolutionEngine.rollNeeded=N
 ResolutionEngine.rollReason=(none)
@@ -1337,7 +1416,6 @@ ResolutionEngine.actionUnits[0].action={{user}} takes the latest explicit action
 ResolutionEngine.actionUnits[0].evidence=(none)
 ResolutionEngine.environmentDifficultyTier=none
 ResolutionEngine.activeHostileThreat=N
-ResolutionEngine.classifyPhysicalBoundaryPressure=N
 ResolutionEngine.genStats.Rank=none
 ResolutionEngine.genStats.MainStat=none
 RelationshipEngine.count=0
@@ -1384,6 +1462,11 @@ TrackerUpdateEngine.BoundCompanionState.type=none
 TrackerUpdateEngine.BoundCompanionState.vessel=(none)
 TrackerUpdateEngine.BoundCompanionState.voice=(none)
 TrackerUpdateEngine.BoundCompanionState.evidence=(none)
+TrackerUpdateEngine.PendingBoundaryState.status=unchanged
+TrackerUpdateEngine.PendingBoundaryState.targetNPC=(none)
+TrackerUpdateEngine.PendingBoundaryState.type=none
+TrackerUpdateEngine.PendingBoundaryState.objectOrAccess=(none)
+TrackerUpdateEngine.PendingBoundaryState.evidence=(none)
 PowerActorAssessment.count=0
 PowerActorAssessment[0].actor=(none)
 PowerActorAssessment[0].scope=unknown
@@ -1526,6 +1609,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const worldStateSnapshot = normalizeWorldState(options?.worldStateSnapshot || {});
     const boundCompanionSnapshot = normalizeBoundCompanionState(options?.boundCompanionSnapshot || {});
+    const pendingBoundarySnapshot = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || {});
     const dispositionContinuityContext = buildDispositionContinuityContext(trackerSnapshot);
     return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(playerTrackerSnapshot, null, 2)}\n\n` +
         `Disposition continuity context (plain-language tracker state for rollNeeded and social buckets; use this to decide whether a current NPC reaction or negative social contest is already settled):\n${dispositionContinuityContext}\n\n` +
@@ -1533,6 +1617,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         `User knowledge snapshot JSON (hidden memory about authored or personal facts people may know about {{user}}; use for UserKnowledgeApplication context only, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         `World state snapshot JSON (hidden current scene continuity; use reputationLocation/place as the default current community for EngineContext.userReputationContext.location when applicable):\n${JSON.stringify(worldStateSnapshot, null, 2)}\n\n` +
         `Bound companion snapshot JSON (hidden user state; current established inner companion, possession/shared vessel, intelligent item/weapon, bound spirit/artifact, or implant if any):\n${JSON.stringify(boundCompanionSnapshot, null, 2)}\n\n` +
+        `Pending boundary snapshot JSON (hidden next-turn boundary memory; use only for ResolutionEngine.boundaryBreak):\n${JSON.stringify(pendingBoundarySnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
         'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
         'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
@@ -1558,7 +1643,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Detect stakes-bearing factual claims before target/risk classification. Fill ResolutionEngine.claimCheck when {{user}} makes a factual claim to a specific NPC that could materially affect that NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes. Compare the claim against established persona, tracker, chat, card, lore, scenario, and prompt-stack facts. Mark known_true only when explicitly supported, known_false only when explicitly contradicted, unsupported when material but not established, unknown when context cannot judge, and none when no relevant claim exists. NPCAccess is how much the target NPC can naturally verify or know the claim; it caps certainty but does not require omniscience. If a known_false or unsupported claim has StakesImpact=Y, classify it as social claim/deception against that living target and use CHA vs MND. Keep harmless or no-stakes claims as Present=N or StakesImpact=N. ' +
         'Separate user-authored internal prose from external action before ResolutionEngine classification. First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction. When mixed, extract only concrete present external actions and spoken dialogue for identifyGoal, identifyChallenge, targets, challengeType, and actionUnits. ' +
         'Mandatory engine execution order for this semantic pass: read the Engine reference above, then execute only the semantic/contextual portions of the engines. ' +
-        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, intimacyAdvanceExplicit, boundaryViolationExplicit, rollNeeded, rollReason, challengeType, socialTactic, identifyTargets, activeHostileThreat, classifyPhysicalBoundaryPressure, harmMode, actionUnits, environmentDifficultyTier, genStats. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
+        'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, claimCheck, intimacyAdvanceExplicit, restraintControl, boundaryPressure, boundaryBreak, rollNeeded, rollReason, challengeType, socialTactic, identifyTargets, activeHostileThreat, harmMode, actionUnits, environmentDifficultyTier, genStats. boundaryBreak must read only the Pending boundary snapshot; if pendingBoundary.active is false, boundaryBreak.Present=N. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
         'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each personal/authored knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, rewrite stored knowledge, or turn broad public reputation into initPreset flags in preflight. ' +
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer/awareness living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, accepts, agrees to, arranges, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. This includes the NPC accepting {{user}}\'s explicit sexual/intimate proposal, agreeing to join, inviting or calling another willing participant, or saying yes to coming over for sex/intimacy. Mark RomanticBuildup only when a B4 close-bond scene has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior, no active refusal/withdrawal/fear/hostility/coercion/danger/public interruption/boundary limit, and {{user}}\'s latest intimate advance is a natural continuation; ordinary friendliness, tenderness, warmth, one smile, casual flirting, vague chemistry, or user-only escalation is not enough. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
@@ -1568,7 +1653,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
         'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. Currency changes are finalized post-narration only, so semantic preflight must keep currencyAdd=(none) and currencyRemove=(none). TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory is not tracked. ' +
-        'TrackerUpdateEngine.BoundCompanionState reads the full assembled context, not only persona: active prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when explicit established context says an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant is already active/completed/accepted and can communicate with {{user}} internally or through a carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Use status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also use status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, proposals, unclear voices, dreams, hallucination ambiguity, metaphor, rumor, or no explicit change. Do not invent a companion. ' +
+        'TrackerUpdateEngine.BoundCompanionState reads the full assembled context, not only persona: active prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when explicit established context says an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant is already active/completed/accepted and can communicate with {{user}} internally or through a carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Use status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also use status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, proposals, unclear voices, dreams, hallucination ambiguity, metaphor, rumor, or no explicit change. Do not invent a companion. TrackerUpdateEngine.PendingBoundaryState is post-narration-owned; in semantic preflight output status=unchanged with placeholder fields. ' +
         'Use condition=unchanged unless the latest user input or immediate visible context explicitly establishes a completed/current health state as healthy, bruised, wounded, badly_wounded, critical, incapacitated, or dead. Use incapacitated for explicit nonlethal outcomes where the character is alive but cannot meaningfully act. Do not set condition from a desired/requested future injury or from an attempted action before narration confirms the result. ' +
         'Use Add only for explicit gains/new injuries/new effects/new obligations. Use Remove only for explicit dropping, spending, losing, completing, canceling, failing, or abandoning. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does not remove injuries unless the text also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing. Never infer unchanged lists from silence and never output a full replacement list. ' +
         'For semantic preflight, always output currencyAdd=(none) and currencyRemove=(none). Currency spending/gain, price quotes, and pending-price payment confirmation are handled only by the post-narration tracker pass after FINAL_NARRATION exists. ' +
@@ -1579,7 +1664,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Tie rule override: exact roll ties are cinematic stalemates/struggles, not defender wins; include stakeChangeByOutcome.struggle accordingly. ' +
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
         'itemUse is only for personal gear/inventory objects; body parts and natural weapons such as claws, fangs, teeth, horns, talons, tusks, tails, stingers, barbs, or jaws are bodily actions/attacks, not itemUse, not inventory, and not equipment. ' +
-        'Important classification reminders: Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/contact is not a special roll category and does not create stakes by itself. intimacyAdvanceExplicit is strict permission/boundary classification for actual intimate escalation only: mark it true for explicit kissing, sexual touch, undressing toward intimacy, asking to sleep together/have sex, or accepting a prior explicit NPC intimacy invitation; keep it false for flirting, teasing, vague innuendo, compliments, declarations of love, dates, hand-holding, ordinary affection, or "what did you have in mind" style banter. boundaryViolationExplicit is the romance/boundary trigger for mechanics: mark it true only for clear coercion, threats, force, unwanted contact/restraint after refusal, repeated pressure after refusal, humiliation, blackmail, or ignoring a clear stop/no. User intent is explicit-only: identifyGoal and identifyChallenge must use only the latest user-declared action, request, target, and explicit objective; do not infer unstated goals from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. Do not carry forward a prior social goal as the current goal after it already failed or resolved; post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath/escalation unless the latest input explicitly creates a new non-social contest or a materially different tactic. challengeType is classification only: social/diplomacy for good-faith persuasion or negotiation, social/bluff for deception or material false claims, social/intimidate for threats/coercion/fear demands, mundane_combat or supernatural_combat for direct hostile bodily/weapon/natural-weapon/magical attacks or forceful bodily control, stealth for avoiding a specific established living detector, and environment for physical/environmental obstacles, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, boundary/object/access contests, or non-living opposition. Object/space/departure/body-adjacent contests without bodily harm or bodily control are classifyPhysicalBoundaryPressure, not combat. challengeType=stealth requires a specific established living detector/opponent in ActionTargets and OppTargets.NPC; if no such detector/opponent exists, use challengeType=none unless a separate non-stealth obstacle creates stakes. Terrain, darkness, cover, distance, crowds, weather, and noise are scene conditions, not stealth opposition. Do not choose stats, dice, bonuses, margins, or outcomes. For each living NPC, mark stakeChangeByOutcome for each possible outcome strictly by DEF.STAKES and DEF.NO_STAKES: benefit only if that outcome significantly and concretely improves their stakes; harm if it materially worsens their stakes; otherwise none. Do not mark benefit for compliments, flirting, mood improvement, politeness, ordinary conversation, user self-advancement, successful negotiation for the user, choosing not to harm the NPC, failing to harm the NPC, de-escalation without a concrete NPC gain, or the NPC merely surviving/remaining safe.\n\n' +
+        'Important classification reminders: Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/contact is not a special roll category and does not create stakes by itself. intimacyAdvanceExplicit is strict permission/boundary classification for actual intimate escalation only: mark it true for explicit kissing, sexual touch, undressing toward intimacy, asking to sleep together/have sex, or accepting a prior explicit NPC intimacy invitation; keep it false for flirting, teasing, vague innuendo, compliments, declarations of love, dates, hand-holding, ordinary affection, or "what did you have in mind" style banter. boundaryBreak is not prediction; mark it true only when hidden tracker pendingBoundary exists and the latest user input continues/escalates/ignores that boundary. User intent is explicit-only: identifyGoal and identifyChallenge must use only the latest user-declared action, request, target, and explicit objective; do not infer unstated goals from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. Do not carry forward a prior social goal as the current goal after it already failed or resolved; post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath/escalation unless the latest input explicitly creates a new non-social contest or a materially different tactic. challengeType is classification only: social/diplomacy for good-faith persuasion or negotiation, social/bluff for deception or material false claims, social/intimidate for threats/coercion/fear demands, mundane_combat or supernatural_combat for direct hostile bodily/weapon/natural-weapon/magical attacks that can injure, restraint for deterministic restraint contests, stealth for avoiding a specific established living detector, and environment for physical/environmental obstacles, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. restraintControl and boundaryPressure identify restraint/object/space/departure pressure; they do not decide dice or relationship effects. challengeType=stealth requires a specific established living detector/opponent in ActionTargets and OppTargets.NPC; if no such detector/opponent exists, use challengeType=none unless a separate non-stealth obstacle creates stakes. Terrain, darkness, cover, distance, crowds, weather, and noise are scene conditions, not stealth opposition. Do not choose stats, dice, bonuses, margins, or outcomes. For each living NPC, mark stakeChangeByOutcome for each possible outcome strictly by DEF.STAKES and DEF.NO_STAKES: benefit only if that outcome significantly and concretely improves their stakes; harm if it materially worsens their stakes; otherwise none. Do not mark benefit for compliments, flirting, mood improvement, politeness, ordinary conversation, user self-advancement, successful negotiation for the user, choosing not to harm the NPC, failing to harm the NPC, de-escalation without a concrete NPC gain, or the NPC merely surviving/remaining safe.\n\n' +
         COMPACT_LEDGER_CONTRACT;
 }
 
@@ -1910,11 +1995,10 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.resolutionEngine?.challengeTypeEvidence) missing.push('resolutionEngine.challengeTypeEvidence');
     if (!SOCIAL_TACTICS.includes(ledger?.resolutionEngine?.socialTactic)) missing.push('resolutionEngine.socialTactic');
     if (!HARM_MODES.includes(ledger?.resolutionEngine?.harmMode)) missing.push('resolutionEngine.harmMode');
+    validateBoundaryObjects(ledger?.resolutionEngine, missing);
     if (!Array.isArray(ledger?.resolutionEngine?.actionUnits)) missing.push('resolutionEngine.actionUnits');
     if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger?.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (typeof ledger?.resolutionEngine?.activeHostileThreat !== 'boolean') missing.push('resolutionEngine.activeHostileThreat:boolean');
-    if (typeof ledger?.resolutionEngine?.classifyPhysicalBoundaryPressure !== 'boolean') missing.push('resolutionEngine.classifyPhysicalBoundaryPressure:boolean');
-    if (Object.prototype.hasOwnProperty.call(ledger?.resolutionEngine || {}, 'hostilePhysicalIntent')) missing.push('forbidden extra field resolutionEngine.hostilePhysicalIntent');
     if (Object.prototype.hasOwnProperty.call(ledger?.resolutionEngine || {}, 'primaryOppTarget')) missing.push('forbidden extra field resolutionEngine.primaryOppTarget');
     if (Object.prototype.hasOwnProperty.call(ledger?.resolutionEngine || {}, 'primaryOpposition')) missing.push('forbidden extra field resolutionEngine.primaryOpposition');
     if (!Array.isArray(ledger?.relationshipEngine)) missing.push('relationshipEngine');
@@ -1931,6 +2015,7 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger?.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
     if (!ledger?.trackerUpdateEngine?.boundCompanion) missing.push('trackerUpdateEngine.boundCompanion');
+    if (!ledger?.trackerUpdateEngine?.pendingBoundary) missing.push('trackerUpdateEngine.pendingBoundary');
     if (!ledger?.chaosSemantic) missing.push('chaosSemantic');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
@@ -2009,7 +2094,19 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.identifyTargets.NPCAwareOfUser',
         'ResolutionEngine.identifyTargets.PowerActors',
         'ResolutionEngine.intimacyAdvanceExplicit',
-        'ResolutionEngine.boundaryViolationExplicit',
+        'ResolutionEngine.restraintControl.Present',
+        'ResolutionEngine.restraintControl.TargetNPC',
+        'ResolutionEngine.restraintControl.Evidence',
+        'ResolutionEngine.boundaryPressure.Present',
+        'ResolutionEngine.boundaryPressure.Type',
+        'ResolutionEngine.boundaryPressure.TargetNPC',
+        'ResolutionEngine.boundaryPressure.ObjectOrAccess',
+        'ResolutionEngine.boundaryPressure.Evidence',
+        'ResolutionEngine.boundaryBreak.Present',
+        'ResolutionEngine.boundaryBreak.TargetNPC',
+        'ResolutionEngine.boundaryBreak.Type',
+        'ResolutionEngine.boundaryBreak.Response',
+        'ResolutionEngine.boundaryBreak.Evidence',
         'ResolutionEngine.harmMode',
         'ResolutionEngine.rollNeeded',
         'ResolutionEngine.rollReason',
@@ -2019,7 +2116,6 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.actionUnits.count',
         'ResolutionEngine.environmentDifficultyTier',
         'ResolutionEngine.activeHostileThreat',
-        'ResolutionEngine.classifyPhysicalBoundaryPressure',
         'ResolutionEngine.genStats.Rank',
         'ResolutionEngine.genStats.MainStat',
         'RelationshipEngine.count',
@@ -2048,6 +2144,11 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.BoundCompanionState.vessel',
         'TrackerUpdateEngine.BoundCompanionState.voice',
         'TrackerUpdateEngine.BoundCompanionState.evidence',
+        'TrackerUpdateEngine.PendingBoundaryState.status',
+        'TrackerUpdateEngine.PendingBoundaryState.targetNPC',
+        'TrackerUpdateEngine.PendingBoundaryState.type',
+        'TrackerUpdateEngine.PendingBoundaryState.objectOrAccess',
+        'TrackerUpdateEngine.PendingBoundaryState.evidence',
         'PowerActorAssessment.count',
         'PowerActorEnmity.count',
         'PowerEventShape.count',
@@ -2311,11 +2412,29 @@ function parseCompactLedger(text, trackerSnapshot) {
     const rollNeeded = readBoolean(fields, 'ResolutionEngine.rollNeeded', false);
     const challengeType = normalizeChallengeType(fields.get('ResolutionEngine.challengeType'), rollNeeded);
     const socialTactic = normalizeSocialTactic(fields.get('ResolutionEngine.socialTactic'), challengeType);
-    const classifyPhysicalBoundaryPressure = readBoolean(fields, 'ResolutionEngine.classifyPhysicalBoundaryPressure', false);
+    const restraintControl = normalizeRestraintControl({
+        present: readBoolean(fields, 'ResolutionEngine.restraintControl.Present', false),
+        targetNPC: cleanScalar(fields.get('ResolutionEngine.restraintControl.TargetNPC')) || '(none)',
+        evidence: cleanScalar(fields.get('ResolutionEngine.restraintControl.Evidence')) || '(none)',
+    });
+    const boundaryPressure = normalizeBoundaryPressure({
+        present: readBoolean(fields, 'ResolutionEngine.boundaryPressure.Present', false),
+        type: cleanScalar(fields.get('ResolutionEngine.boundaryPressure.Type')) || 'none',
+        targetNPC: cleanScalar(fields.get('ResolutionEngine.boundaryPressure.TargetNPC')) || '(none)',
+        objectOrAccess: cleanScalar(fields.get('ResolutionEngine.boundaryPressure.ObjectOrAccess')) || '(none)',
+        evidence: cleanScalar(fields.get('ResolutionEngine.boundaryPressure.Evidence')) || '(none)',
+    });
+    const boundaryBreak = normalizeBoundaryBreak({
+        present: readBoolean(fields, 'ResolutionEngine.boundaryBreak.Present', false),
+        targetNPC: cleanScalar(fields.get('ResolutionEngine.boundaryBreak.TargetNPC')) || '(none)',
+        type: cleanScalar(fields.get('ResolutionEngine.boundaryBreak.Type')) || 'none',
+        response: cleanScalar(fields.get('ResolutionEngine.boundaryBreak.Response')) || 'none',
+        evidence: cleanScalar(fields.get('ResolutionEngine.boundaryBreak.Evidence')) || '(none)',
+    });
     const harmMode = normalizeHarmMode(fields.get('ResolutionEngine.harmMode'), {
         challengeType,
         rollNeeded,
-        classifyPhysicalBoundaryPressure,
+        restraintControl,
     });
     const parsedActionUnits = readActionUnits(fields, actionUnitCount);
     const derivedActionMarkers = deriveActionMarkersFromUnits(parsedActionUnits, challengeType);
@@ -2366,7 +2485,9 @@ function parseCompactLedger(text, trackerSnapshot) {
             PowerActors: readList(fields, 'ResolutionEngine.identifyTargets.PowerActors'),
         },
         intimacyAdvanceExplicit: readBoolean(fields, 'ResolutionEngine.intimacyAdvanceExplicit', false),
-        boundaryViolationExplicit: readBoolean(fields, 'ResolutionEngine.boundaryViolationExplicit', false),
+        restraintControl,
+        boundaryPressure,
+        boundaryBreak,
         harmMode,
         rollNeeded,
         rollReason: cleanScalar(fields.get('ResolutionEngine.rollReason')) || '(none)',
@@ -2379,9 +2500,7 @@ function parseCompactLedger(text, trackerSnapshot) {
             fields.get('ResolutionEngine.environmentDifficultyTier') ?? fields.get('ResolutionEngine.environmentDifficulty'),
             challengeType,
         ),
-        classifyHostilePhysicalIntent: isCombatChallengeType(challengeType),
         activeHostileThreat: readBoolean(fields, 'ResolutionEngine.activeHostileThreat', false),
-        classifyPhysicalBoundaryPressure,
         genStats: readGeneratedStatsSeed(fields, 'ResolutionEngine.genStats'),
     };
     resolutionEngine.environmentDifficulty = environmentDifficultyFromTier(
@@ -2479,6 +2598,13 @@ function parseCompactLedger(text, trackerSnapshot) {
             voice: fields.get('TrackerUpdateEngine.BoundCompanionState.voice'),
             evidence: fields.get('TrackerUpdateEngine.BoundCompanionState.evidence'),
         }),
+        pendingBoundary: normalizePendingBoundaryDelta({
+            status: fields.get('TrackerUpdateEngine.PendingBoundaryState.status'),
+            targetNPC: fields.get('TrackerUpdateEngine.PendingBoundaryState.targetNPC'),
+            type: fields.get('TrackerUpdateEngine.PendingBoundaryState.type'),
+            objectOrAccess: fields.get('TrackerUpdateEngine.PendingBoundaryState.objectOrAccess'),
+            evidence: fields.get('TrackerUpdateEngine.PendingBoundaryState.evidence'),
+        }),
     };
     for (let index = 0; index < trackerNpcCount; index += 1) {
         const prefix = `TrackerUpdateEngine.NPC[${index}]`;
@@ -2565,6 +2691,11 @@ function parseNarratorTrackerDeltaText(text) {
         'BoundCompanionState.vessel',
         'BoundCompanionState.voice',
         'BoundCompanionState.evidence',
+        'PendingBoundaryState.status',
+        'PendingBoundaryState.targetNPC',
+        'PendingBoundaryState.type',
+        'PendingBoundaryState.objectOrAccess',
+        'PendingBoundaryState.evidence',
     ];
     const missing = required.filter(key => !fields.has(key));
     if (missing.length) throw new Error(`tracker delta block missing required lines: ${missing.join(', ')}`);
@@ -2679,8 +2810,15 @@ function parseNarratorTrackerDeltaText(text) {
         voice: fields.get('BoundCompanionState.voice'),
         evidence: fields.get('BoundCompanionState.evidence'),
     });
+    const pendingBoundary = normalizePendingBoundaryDelta({
+        status: fields.get('PendingBoundaryState.status'),
+        targetNPC: fields.get('PendingBoundaryState.targetNPC'),
+        type: fields.get('PendingBoundaryState.type'),
+        objectOrAccess: fields.get('PendingBoundaryState.objectOrAccess'),
+        evidence: fields.get('PendingBoundaryState.evidence'),
+    });
 
-    return { user, npcs, userKnowledge, userReputation, worldState, economy, boundCompanion };
+    return { user, npcs, userKnowledge, userReputation, worldState, economy, boundCompanion, pendingBoundary };
 }
 
 function sanitizeNarratorTrackerDelta(delta, narration) {
@@ -2698,6 +2836,7 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
         worldState: normalizeWorldStateDelta(delta?.worldState),
         economy: normalizeEconomyDelta(delta?.economy),
         boundCompanion: normalizeBoundCompanionDelta(delta?.boundCompanion),
+        pendingBoundary: normalizePendingBoundaryDelta(delta?.pendingBoundary),
     };
     cleanDelta.npcs = cleanDelta.npcs.filter(item =>
         item?.NPC
@@ -3233,7 +3372,6 @@ function normalizeChallengeType(value, rollNeeded = true) {
         mundane: 'mundane_combat',
         combat: 'mundane_combat',
         physicalcombat: 'mundane_combat',
-        physical: 'mundane_combat',
         weapon: 'mundane_combat',
         supernaturalcombat: 'supernatural_combat',
         spellorsupernatural: 'supernatural_combat',
@@ -3241,6 +3379,13 @@ function normalizeChallengeType(value, rollNeeded = true) {
         supernatural: 'supernatural_combat',
         magic: 'supernatural_combat',
         magical: 'supernatural_combat',
+        restraint: 'restraint',
+        restrain: 'restraint',
+        restraintcontrol: 'restraint',
+        grapple: 'restraint',
+        grappling: 'restraint',
+        pin: 'restraint',
+        pinned: 'restraint',
         stealth: 'stealth',
         sneak: 'stealth',
         sneaking: 'stealth',
@@ -3291,7 +3436,7 @@ function normalizeHarmMode(value, semantic = {}) {
         noharm: 'none',
     };
     if (aliases[text] && aliases[text] !== 'none') return aliases[text];
-    if (toBoolean(semantic?.classifyPhysicalBoundaryPressure, false)) return 'restraint_control';
+    if (toBoolean(semantic?.restraintControl?.present ?? semantic?.restraintControl?.Present, false)) return 'restraint_control';
     if (isCombatChallengeType(semantic?.challengeType)) return 'nonlethal';
     return 'none';
 }
@@ -3511,11 +3656,11 @@ function normalizeLedger(ledger) {
         ledger.resolutionEngine.challengeType,
     );
     ledger.resolutionEngine.intimacyAdvanceExplicit = toBoolean(ledger.resolutionEngine.intimacyAdvanceExplicit, false);
-    ledger.resolutionEngine.boundaryViolationExplicit = toBoolean(ledger.resolutionEngine.boundaryViolationExplicit, false);
+    ledger.resolutionEngine.restraintControl = normalizeRestraintControl(ledger.resolutionEngine.restraintControl);
+    ledger.resolutionEngine.boundaryPressure = normalizeBoundaryPressure(ledger.resolutionEngine.boundaryPressure);
+    ledger.resolutionEngine.boundaryBreak = normalizeBoundaryBreak(ledger.resolutionEngine.boundaryBreak);
     ledger.resolutionEngine.activeHostileThreat = toBoolean(ledger.resolutionEngine.activeHostileThreat, false);
-    ledger.resolutionEngine.classifyPhysicalBoundaryPressure = toBoolean(ledger.resolutionEngine.classifyPhysicalBoundaryPressure, false);
     ledger.resolutionEngine.harmMode = normalizeHarmMode(ledger.resolutionEngine.harmMode, ledger.resolutionEngine);
-    ledger.resolutionEngine.classifyHostilePhysicalIntent = isCombatChallengeType(ledger.resolutionEngine.challengeType);
     ledger.resolutionEngine.actionCount = deriveActionMarkersFromUnits(
         ledger.resolutionEngine.actionUnits,
         ledger.resolutionEngine.challengeType,
@@ -3526,8 +3671,6 @@ function normalizeLedger(ledger) {
         ledger.resolutionEngine,
         [],
     );
-    delete ledger.resolutionEngine.nonLethal;
-    delete ledger.resolutionEngine.hostilePhysicalIntent;
     delete ledger.resolutionEngine.primaryOppTarget;
     delete ledger.resolutionEngine.primaryOpposition;
     ledger.resolutionEngine.genStats = normalizeGeneratedStatsSeed(ledger.resolutionEngine.genStats);
@@ -3613,6 +3756,7 @@ function normalizeLedger(ledger) {
         }).filter(Boolean)
         : [];
     ledger.trackerUpdateEngine.boundCompanion = normalizeBoundCompanionDelta(ledger.trackerUpdateEngine.boundCompanion);
+    ledger.trackerUpdateEngine.pendingBoundary = normalizePendingBoundaryDelta(ledger.trackerUpdateEngine.pendingBoundary);
     ledger.chaosSemantic = ledger.chaosSemantic || { sceneSummary: '' };
     ledger.proactivitySemantic = {};
     return ledger;
@@ -3685,6 +3829,74 @@ function normalizeClaimCheck(value) {
         stakesImpact: present && stakesImpact,
         reason: present && !isNoneValue(reason) ? reason : '(none)',
     };
+}
+
+function normalizeBoundaryPressureType(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return BOUNDARY_PRESSURE_TYPES.includes(text) ? text : 'none';
+}
+
+function normalizeBoundaryBreakType(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return BOUNDARY_BREAK_TYPES.includes(text) ? text : 'none';
+}
+
+function normalizeBoundaryBreakResponse(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return BOUNDARY_BREAK_RESPONSES.includes(text) ? text : 'none';
+}
+
+function normalizeRestraintControl(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const present = toBoolean(source.present ?? source.Present, false);
+    const targetNPC = cleanScalar(source.targetNPC ?? source.TargetNPC) || '(none)';
+    const evidence = cleanScalar(source.evidence ?? source.Evidence) || '(none)';
+    return {
+        present,
+        targetNPC: present && !isNoneValue(targetNPC) ? targetNPC : '(none)',
+        evidence: present && !isNoneValue(evidence) ? evidence : '(none)',
+    };
+}
+
+function normalizeBoundaryPressure(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const present = toBoolean(source.present ?? source.Present, false);
+    const type = normalizeBoundaryPressureType(source.type ?? source.Type);
+    const targetNPC = cleanScalar(source.targetNPC ?? source.TargetNPC) || '(none)';
+    const objectOrAccess = cleanScalar(source.objectOrAccess ?? source.ObjectOrAccess) || '(none)';
+    const evidence = cleanScalar(source.evidence ?? source.Evidence) || '(none)';
+    return {
+        present,
+        type: present ? type : 'none',
+        targetNPC: present && !isNoneValue(targetNPC) ? targetNPC : '(none)',
+        objectOrAccess: present && !isNoneValue(objectOrAccess) ? objectOrAccess : '(none)',
+        evidence: present && !isNoneValue(evidence) ? evidence : '(none)',
+    };
+}
+
+function normalizeBoundaryBreak(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const present = toBoolean(source.present ?? source.Present, false);
+    const targetNPC = cleanScalar(source.targetNPC ?? source.TargetNPC) || '(none)';
+    const type = normalizeBoundaryBreakType(source.type ?? source.Type);
+    const response = normalizeBoundaryBreakResponse(source.response ?? source.Response);
+    const evidence = cleanScalar(source.evidence ?? source.Evidence) || '(none)';
+    return {
+        present,
+        targetNPC: present && !isNoneValue(targetNPC) ? targetNPC : '(none)',
+        type: present ? type : 'none',
+        response: present ? response : 'none',
+        evidence: present && !isNoneValue(evidence) ? evidence : '(none)',
+    };
+}
+
+function validateBoundaryObjects(resolutionEngine, missing) {
+    if (!resolutionEngine?.restraintControl || typeof resolutionEngine.restraintControl.present !== 'boolean') missing.push('resolutionEngine.restraintControl');
+    if (!resolutionEngine?.boundaryPressure || typeof resolutionEngine.boundaryPressure.present !== 'boolean') missing.push('resolutionEngine.boundaryPressure');
+    if (!BOUNDARY_PRESSURE_TYPES.includes(resolutionEngine?.boundaryPressure?.type)) missing.push('resolutionEngine.boundaryPressure.type');
+    if (!resolutionEngine?.boundaryBreak || typeof resolutionEngine.boundaryBreak.present !== 'boolean') missing.push('resolutionEngine.boundaryBreak');
+    if (!BOUNDARY_BREAK_TYPES.includes(resolutionEngine?.boundaryBreak?.type)) missing.push('resolutionEngine.boundaryBreak.type');
+    if (!BOUNDARY_BREAK_RESPONSES.includes(resolutionEngine?.boundaryBreak?.response)) missing.push('resolutionEngine.boundaryBreak.response');
 }
 
 function normalizeUserKnowledgeApplication(value) {
@@ -4086,7 +4298,7 @@ function validateNormalizedLedger(ledger, raw) {
     if (!SOCIAL_TACTICS.includes(ledger.resolutionEngine?.socialTactic)) missing.push('resolutionEngine.socialTactic');
     if (!HARM_MODES.includes(ledger.resolutionEngine?.harmMode)) missing.push('resolutionEngine.harmMode');
     if (typeof ledger.resolutionEngine?.intimacyAdvanceExplicit !== 'boolean') missing.push('resolutionEngine.intimacyAdvanceExplicit:boolean');
-    if (typeof ledger.resolutionEngine?.boundaryViolationExplicit !== 'boolean') missing.push('resolutionEngine.boundaryViolationExplicit:boolean');
+    validateBoundaryObjects(ledger.resolutionEngine, missing);
     if (!Array.isArray(ledger.resolutionEngine?.actionCount)) missing.push('resolutionEngine.actionCount');
     if (!Array.isArray(ledger.resolutionEngine?.actionUnits)) missing.push('resolutionEngine.actionUnits');
     if (Array.isArray(ledger.resolutionEngine?.actionCount) && Array.isArray(ledger.resolutionEngine?.actionUnits) && ledger.resolutionEngine.actionUnits.length !== ledger.resolutionEngine.actionCount.length) {
@@ -4094,10 +4306,7 @@ function validateNormalizedLedger(ledger, raw) {
     }
     if (!ENVIRONMENT_DIFFICULTY_TIERS.includes(ledger.resolutionEngine?.environmentDifficultyTier)) missing.push('resolutionEngine.environmentDifficultyTier');
     if (![0, 4, 8, 12].includes(ledger.resolutionEngine?.environmentDifficulty)) missing.push('resolutionEngine.environmentDifficulty');
-    if (typeof ledger.resolutionEngine?.classifyHostilePhysicalIntent !== 'boolean') missing.push('resolutionEngine.classifyHostilePhysicalIntent:boolean');
     if (typeof ledger.resolutionEngine?.activeHostileThreat !== 'boolean') missing.push('resolutionEngine.activeHostileThreat:boolean');
-    if (typeof ledger.resolutionEngine?.classifyPhysicalBoundaryPressure !== 'boolean') missing.push('resolutionEngine.classifyPhysicalBoundaryPressure:boolean');
-    if (Object.prototype.hasOwnProperty.call(ledger.resolutionEngine || {}, 'hostilePhysicalIntent')) missing.push('forbidden extra field resolutionEngine.hostilePhysicalIntent');
     if (Object.prototype.hasOwnProperty.call(ledger.resolutionEngine || {}, 'primaryOppTarget')) missing.push('forbidden extra field resolutionEngine.primaryOppTarget');
     if (Object.prototype.hasOwnProperty.call(ledger.resolutionEngine || {}, 'primaryOpposition')) missing.push('forbidden extra field resolutionEngine.primaryOpposition');
     if (!Array.isArray(ledger.relationshipEngine)) missing.push('relationshipEngine');
@@ -4114,6 +4323,7 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.trackerUpdateEngine?.user) missing.push('trackerUpdateEngine.user');
     if (!Array.isArray(ledger.trackerUpdateEngine?.npcs)) missing.push('trackerUpdateEngine.npcs');
     if (!ledger.trackerUpdateEngine?.boundCompanion) missing.push('trackerUpdateEngine.boundCompanion');
+    if (!ledger.trackerUpdateEngine?.pendingBoundary) missing.push('trackerUpdateEngine.pendingBoundary');
     if (!ledger.chaosSemantic) missing.push('chaosSemantic');
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);

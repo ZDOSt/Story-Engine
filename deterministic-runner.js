@@ -40,6 +40,7 @@ import {
     normalizeTrackerUserState,
     normalizeBoundCompanionState,
     applyBoundCompanionDelta,
+    normalizePendingBoundaryState,
     normalizeTrackerCondition,
     normalizeTargets,
     sanitizeTargets,
@@ -143,9 +144,10 @@ function normalizeResolutionHarmMode(value, semantic = {}) {
         no_harm: 'none',
         noharm: 'none',
     };
-    if (!isCombat) return bool(semantic?.classifyPhysicalBoundaryPressure) ? 'restraint_control' : 'none';
+    if (bool(semantic?.restraintControl?.present ?? semantic?.restraintControl?.Present)) return 'restraint_control';
+    if (challengeType === 'restraint') return 'restraint_control';
+    if (!isCombat) return 'none';
     if (aliases[text] && aliases[text] !== 'none') return aliases[text];
-    if (bool(semantic?.classifyPhysicalBoundaryPressure)) return 'restraint_control';
     if (isCombat) return 'nonlethal';
     return 'none';
 }
@@ -154,8 +156,159 @@ function isCombatChallengeType(value) {
     return value === 'mundane_combat' || value === 'supernatural_combat';
 }
 
+function isAttackChallengeType(value) {
+    return isCombatChallengeType(value);
+}
+
+function normalizeBoundaryObject(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        Present: bool(source.present ?? source.Present) ? 'Y' : 'N',
+        TargetNPC: String(source.targetNPC ?? source.TargetNPC ?? '(none)').trim() || '(none)',
+        Type: String(source.type ?? source.Type ?? 'none').trim() || 'none',
+        Response: String(source.response ?? source.Response ?? 'none').trim() || 'none',
+        ObjectOrAccess: String(source.objectOrAccess ?? source.ObjectOrAccess ?? '(none)').trim() || '(none)',
+        Evidence: String(source.evidence ?? source.Evidence ?? '(none)').trim() || '(none)',
+    };
+}
+
+function restraintTargetName(semantic, targets = {}) {
+    const restraint = normalizeBoundaryObject(semantic?.restraintControl);
+    if (restraint.Present === 'Y' && isReal(restraint.TargetNPC)) return restraint.TargetNPC;
+    return firstReal(targets.ActionTargets) || firstReal(targets.OppTargets?.NPC) || '(none)';
+}
+
+function boundaryPressureTargetName(semantic, targets = {}) {
+    const pressure = normalizeBoundaryObject(semantic?.boundaryPressure);
+    if (pressure.Present === 'Y' && isReal(pressure.TargetNPC)) return pressure.TargetNPC;
+    return firstReal(targets.ActionTargets) || firstReal(targets.OppTargets?.NPC) || '(none)';
+}
+
+function boundaryBreakTargetName(semantic, targets = {}) {
+    const boundaryBreak = normalizeBoundaryObject(semantic?.boundaryBreak);
+    if (boundaryBreak.Present === 'Y' && isReal(boundaryBreak.TargetNPC)) return boundaryBreak.TargetNPC;
+    return restraintTargetName(semantic, targets);
+}
+
+function dispositionForTarget(name, trackerSnapshot = {}) {
+    const entry = normalizeTrackerEntry(trackerSnapshot?.[name] || {});
+    return entry.currentDisposition || { B: 2, F: 2, H: 2 };
+}
+
+function isCrisisDisposition(disposition = {}) {
+    return Number(disposition.F || 0) >= 3 || Number(disposition.H || 0) >= 3;
+}
+
+function isImmediateOpposedBoundaryContext({ target, targets, semantic, trackerSnapshot }) {
+    if (!isReal(target)) return false;
+    const disposition = dispositionForTarget(target, trackerSnapshot);
+    if (Number(disposition.B || 0) <= 1) return true;
+    if (isCrisisDisposition(disposition)) return true;
+    if (bool(semantic?.activeHostileThreat)) return true;
+    if (toRealArray(targets.hostilesInScene?.NPC).some(name => sameName(name, target))) return true;
+    return false;
+}
+
+function boundaryWarningThresholdForTarget(name, trackerSnapshot = {}) {
+    const disposition = dispositionForTarget(name, trackerSnapshot);
+    return Number(disposition.B || 0) >= 4 && !isCrisisDisposition(disposition) ? 2 : 1;
+}
+
+function applyRestraintBoundaryGate({ semantic, targets, rollNeeded, challengeType, socialTactic, rollReason, stakesRule, trackerSnapshot, pendingBoundarySnapshot = {}, audit }) {
+    const restraint = normalizeBoundaryObject(semantic?.restraintControl);
+    const pressure = normalizeBoundaryObject(semantic?.boundaryPressure);
+    const boundaryBreak = normalizeBoundaryObject(semantic?.boundaryBreak);
+    const pendingBoundary = normalizePendingBoundaryState(pendingBoundarySnapshot);
+    if (boundaryBreak.Present === 'Y' && !pendingBoundary.active) {
+        boundaryBreak.Present = 'N';
+        boundaryBreak.TargetNPC = '(none)';
+        boundaryBreak.Type = 'none';
+        boundaryBreak.Response = 'none';
+        boundaryBreak.Evidence = '(none)';
+    }
+    const hasRestraint = restraint.Present === 'Y';
+    const hasBoundaryPressure = pressure.Present === 'Y';
+    const hasBoundaryBreak = boundaryBreak.Present === 'Y' && pendingBoundary.active;
+    if (!hasRestraint && !hasBoundaryPressure && !hasBoundaryBreak) {
+        return { rollNeeded, challengeType, socialTactic, rollReason, stakesRule, restraint, boundaryPressure: pressure, boundaryBreak, gate: null };
+    }
+
+    const target = hasBoundaryBreak
+        ? boundaryBreakTargetName(semantic, targets)
+        : hasRestraint ? restraintTargetName(semantic, targets) : boundaryPressureTargetName(semantic, targets);
+    const immediateContest = (hasRestraint || hasBoundaryPressure) && isImmediateOpposedBoundaryContext({ target, targets, semantic, trackerSnapshot });
+    const threshold = boundaryWarningThresholdForTarget(target, trackerSnapshot);
+    const warnings = pendingBoundary.active ? pendingBoundary.warnings : 0;
+    const breakForcesRoll = hasBoundaryBreak && warnings >= threshold;
+    const breakGetsWarning = hasBoundaryBreak && !breakForcesRoll;
+    const gate = {
+        target,
+        restraint: hasRestraint ? 'Y' : 'N',
+        boundaryPressure: hasBoundaryPressure ? 'Y' : 'N',
+        boundaryBreak: hasBoundaryBreak ? 'Y' : 'N',
+        immediateContest: immediateContest ? 'Y' : 'N',
+        warnings,
+        threshold,
+        pendingBoundary: pendingBoundary.active ? 'Y' : 'N',
+    };
+
+    if (immediateContest || breakForcesRoll) {
+        const nextRollReason = immediateContest
+            ? 'restraint targets an enemy/crisis/opposing NPC and is immediately contested'
+            : 'user continues or escalates after a stored NPC boundary';
+        audit.push(`2.4g boundaryRestraintGate=${compact({ ...gate, action: 'force_roll' })}`);
+        return {
+            rollNeeded: 'Y',
+            challengeType: hasRestraint ? 'restraint' : 'environment',
+            socialTactic: 'none',
+            rollReason: normalizeRollReason(rollReason, nextRollReason),
+            stakesRule: 'deterministic_boundary_restraint_gate',
+            restraint,
+            boundaryPressure: pressure,
+            boundaryBreak,
+            gate: { ...gate, action: 'force_roll' },
+        };
+    }
+
+    if (hasRestraint || hasBoundaryPressure || breakGetsWarning) {
+        audit.push(`2.4g boundaryRestraintGate=${compact({ ...gate, action: breakGetsWarning ? 'second_warning_no_roll' : 'grace_no_roll' })}`);
+        return {
+            rollNeeded: 'N',
+            challengeType: 'none',
+            socialTactic: 'none',
+            rollReason: breakGetsWarning
+                ? 'trusted boundary grace gives one more warning before a roll'
+                : 'restraint/boundary pressure is handled by relationship boundary grace unless opposed or broken',
+            stakesRule: 'deterministic_boundary_restraint_grace',
+            restraint,
+            boundaryPressure: pressure,
+            boundaryBreak,
+            gate: { ...gate, action: breakGetsWarning ? 'second_warning_no_roll' : 'grace_no_roll' },
+        };
+    }
+
+    return { rollNeeded, challengeType, socialTactic, rollReason, stakesRule, restraint, boundaryPressure: pressure, boundaryBreak, gate };
+}
+
 function harmModeAllowsHpDamage(harmMode) {
     return harmMode === 'lethal' || harmMode === 'nonlethal';
+}
+
+function packetNestedPresent(packet, key) {
+    const value = packet?.[key];
+    return value?.Present === 'Y' || value?.present === true;
+}
+
+function packetHarmfulAttackActive(packet) {
+    return packet?.RollNeeded === 'Y'
+        && ['lethal', 'nonlethal'].includes(String(packet?.harmMode || '').toLowerCase())
+        && ['mundane_combat', 'supernatural_combat'].includes(packet?.challengeType);
+}
+
+function packetBoundaryActivityActive(packet) {
+    return packetNestedPresent(packet, 'boundaryPressure')
+        || packetNestedPresent(packet, 'boundaryBreak')
+        || (packet?.RollNeeded === 'Y' && packet?.challengeType === 'restraint');
 }
 
 const NPC_PROACTIVITY_CAP = 3;
@@ -451,6 +604,10 @@ export function buildBoundCompanionSnapshot(context) {
     return normalizeBoundCompanionState(context?.chatMetadata?.structuredPreflightTracker?.boundCompanion || {});
 }
 
+export function buildPendingBoundarySnapshot(context) {
+    return normalizePendingBoundaryState(context?.chatMetadata?.structuredPreflightTracker?.pendingBoundary || {});
+}
+
 export function buildAdventureIntroNameGeneration(context, adventurePrompt = '') {
     const audit = [];
     const prompt = String(adventurePrompt || '').trim();
@@ -478,6 +635,7 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.worldState = normalizeWorldState(root.worldState || {});
     root.economy = normalizeEconomyState(root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(root.boundCompanion || {});
+    root.pendingBoundary = normalizePendingBoundaryState(root.pendingBoundary || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
 
@@ -514,6 +672,9 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.boundCompanion) {
         root.boundCompanion = normalizeBoundCompanionState(trackerUpdate.boundCompanion);
     }
+    if (trackerUpdate.pendingBoundary) {
+        root.pendingBoundary = normalizePendingBoundaryState(trackerUpdate.pendingBoundary);
+    }
     if (trackerUpdate.health) {
         root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
     } else {
@@ -538,13 +699,14 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
     const worldState = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
     const boundCompanionBefore = normalizeBoundCompanionState(options?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context));
+    const pendingBoundaryBefore = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context));
     const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger);
     const healthBefore = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
         npcs: healthNpcRefsBefore,
     });
     const rapportClock = advanceRapportClock(context, audit);
-    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot, healthBefore);
+    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot, healthBefore, pendingBoundaryBefore);
     const relationships = runRelationships(ledger, trackerSnapshot, resolution.packet, audit, refereeContext, context, rapportClock, dice);
     const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
     const name = runNameGeneration(ledger, audit, context, type);
@@ -594,6 +756,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         ...visibleTrackerUpdate,
         health: healthAfter,
         boundCompanion: boundCompanion.state,
+        pendingBoundary: pendingBoundaryBefore,
     };
     const narrativeResolutionPacket = applyHiddenHealthToResolutionPacket(resolution.packet, healthAfter);
     const finalNarrativeHandoff = {
@@ -2221,6 +2384,7 @@ function getAcceptedOfferedObjectNoRollEvidence(semantic, semanticRollNeeded, co
 
 function getFriendlyNpcObjectAccessNoRollEvidence(semantic, semanticRollNeeded, context, trackerSnapshot, targets, routeContext = {}) {
     if (semanticRollNeeded !== 'Y') return null;
+    if (normalizeBoundaryObject(semantic?.boundaryBreak).Present === 'Y') return null;
     const challengeType = normalizeChallengeType(routeContext.challengeType || semantic?.challengeType, semanticRollNeeded);
     if (isCombatChallengeType(challengeType)) return null;
     if (toRealArray(targets?.hostilesInScene?.NPC).length || toRealArray(targets?.OppTargets?.ENV).length) return null;
@@ -2415,7 +2579,7 @@ function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, challengeType, soci
     };
 }
 
-function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot = null, hiddenHealthSnapshot = null) {
+function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot = null, hiddenHealthSnapshot = null, pendingBoundarySnapshot = {}) {
     const semantic = ledger.resolutionEngine || {};
     const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, refereeContext);
     const rawTargets = normalizeTargets(semantic.identifyTargets);
@@ -2428,7 +2592,17 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const itemUseAudit = [];
     const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, itemUseAudit, playerTrackerSnapshot);
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
-    const boundaryViolationExplicit = bool(semantic.boundaryViolationExplicit) ? 'Y' : 'N';
+    let restraintControl = normalizeBoundaryObject(semantic.restraintControl);
+    let boundaryPressure = normalizeBoundaryObject(semantic.boundaryPressure);
+    let boundaryBreak = normalizeBoundaryObject(semantic.boundaryBreak);
+    const pendingBoundaryForResolution = normalizePendingBoundaryState(pendingBoundarySnapshot);
+    if (boundaryBreak.Present === 'Y' && !pendingBoundaryForResolution.active) {
+        boundaryBreak.Present = 'N';
+        boundaryBreak.TargetNPC = '(none)';
+        boundaryBreak.Type = 'none';
+        boundaryBreak.Response = 'none';
+        boundaryBreak.Evidence = '(none)';
+    }
     const healingAttempt = classifyHealingAttempt(semantic, goal, context);
     const healingHasActiveStakes = healingAttempt.isHealing && bool(semantic.activeHostileThreat);
     let healingStaticDc = null;
@@ -2461,7 +2635,9 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     }
 
     audit.push(`2.3 intimacyAdvanceExplicit=${intimacyAdvanceExplicit}`);
-    audit.push(`2.3a boundaryViolationExplicit=${boundaryViolationExplicit}`);
+    audit.push(`2.3a restraintControl=${compact(restraintControl)}`);
+    audit.push(`2.3b boundaryPressure=${compact(boundaryPressure)}`);
+    audit.push(`2.3c boundaryBreak=${compact(boundaryBreak)}`);
     audit.push(`2.3b healingAttempt=${healingAttempt.isHealing ? (healingAttempt.isMagic ? 'magic' : 'natural') : 'N'} activeStakes=${healingHasActiveStakes ? 'Y' : 'N'}`);
     const pureLoveDeclarationEvidence = getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext);
     const companionCommandNoRollEvidence = getDirectedCompanionCommandNoRollEvidence(semantic, identityTargets, trackerSnapshot, targetClassifier, context);
@@ -2470,7 +2646,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const stakeBearingClaimEvidence = getStakeBearingClaimStakesEvidence(semantic, semanticRollNeeded);
     const stakesOverrideEvidence = companionCommandNoRollEvidence
         || pureLoveDeclarationEvidence
-        || getRomanceNoRollOverrideEvidence(semantic, semanticRollNeeded, boundaryViolationExplicit, intimacyAdvanceExplicit)
+        || getRomanceNoRollOverrideEvidence(semantic, semanticRollNeeded, boundaryBreak.Present, intimacyAdvanceExplicit)
         || acceptedOfferedObjectEvidence
         || friendlyObjectAccessEvidence
         || stakeBearingClaimEvidence;
@@ -2531,7 +2707,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     const semanticTargetsForResolution = companionCommandNoRollEvidence
         ? normalizeDirectedCompanionCommandTargets(identityTargets, targetClassifier, semantic, trackerSnapshot, context, audit)
         : identityTargets;
-    const sanitizedTargets = sanitizeTargets(semanticTargetsForResolution, targetClassifier, { rollNeeded, goal, boundaryViolationExplicit });
+    const sanitizedTargets = sanitizeTargets(semanticTargetsForResolution, targetClassifier, { rollNeeded, goal, boundaryBreak: boundaryBreak.Present });
     const claimTargets = repairStakeBearingClaimTargets(sanitizedTargets, targetClassifier, semantic, { rollNeeded }, audit);
     const directedCompanionTargets = repairDirectedCompanionAttackHostilePool(claimTargets, ledger, trackerSnapshot, semantic, context, audit);
     const stealthRepair = repairStealthTargets(directedCompanionTargets, targetClassifier, semantic, { rollNeeded, challengeType, socialTactic }, audit);
@@ -2542,7 +2718,30 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         challengeType = stealthRepair.challengeType || challengeType;
         socialTactic = stealthRepair.socialTactic || socialTactic;
     }
-    let targets = repairLivingOppositionTargets(stealthRepair.targets, targetClassifier, { rollNeeded, semantic, goal, boundaryViolationExplicit, context }, audit);
+    let targets = repairLivingOppositionTargets(stealthRepair.targets, targetClassifier, { rollNeeded, semantic, goal, boundaryBreak: boundaryBreak.Present, context }, audit);
+    const boundaryGate = applyRestraintBoundaryGate({
+        semantic,
+        targets,
+        rollNeeded,
+        challengeType,
+        socialTactic,
+        rollReason,
+        stakesRule,
+        trackerSnapshot,
+        pendingBoundarySnapshot,
+        audit,
+    });
+    rollNeeded = boundaryGate.rollNeeded;
+    challengeType = boundaryGate.challengeType;
+    socialTactic = boundaryGate.socialTactic;
+    rollReason = boundaryGate.rollReason;
+    stakesRule = boundaryGate.stakesRule;
+    restraintControl = boundaryGate.restraint;
+    boundaryPressure = boundaryGate.boundaryPressure;
+    boundaryBreak = boundaryGate.boundaryBreak;
+    if (rollNeeded === 'N') {
+        targets = sanitizeTargets(targets, targetClassifier, { rollNeeded, goal, boundaryBreak: boundaryBreak.Present });
+    }
     const negativeSocialRepeatEvidence = getNegativeSocialRepeatNoRollEvidence({ rollNeeded, challengeType, socialTactic, targets, trackerSnapshot });
     if (negativeSocialRepeatEvidence) {
         rollNeeded = negativeSocialRepeatEvidence.rollNeeded;
@@ -2550,7 +2749,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         rollReason = negativeSocialRepeatEvidence.reason || 'repeated same-bucket negative social attempt already resolved for current disposition';
         challengeType = 'none';
         socialTactic = 'none';
-        targets = sanitizeTargets(targets, targetClassifier, { rollNeeded, goal, boundaryViolationExplicit });
+        targets = sanitizeTargets(targets, targetClassifier, { rollNeeded, goal, boundaryBreak: boundaryBreak.Present });
         audit.push(`2.4c.1 deterministicNegativeSocialRepeat=${compact(negativeSocialRepeatEvidence.evidence)}`);
     }
     audit.push(`2.4d identifyTargets.final=${formatTargets(targets)}`);
@@ -2587,7 +2786,6 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         CounterPotential: 'none',
     };
     let resultLine = 'No roll';
-    let hostilePhysical = false;
     let combatActionSequence = false;
     let userImpairment = noUserImpairment();
     let npcImpairment = noNpcImpairment();
@@ -2700,7 +2898,6 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             ? healingStaticDc
             : oppStat === 'ENV' ? defDie + environmentDifficulty : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty;
         const margin = atkTot - defTot;
-        hostilePhysical = isCombatChallengeType(challengeType);
         combatActionSequence = isCombatChallengeType(challengeType);
 
         if (combatActionSequence) {
@@ -2715,7 +2912,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
 
         audit.push(`2.7n.1 UserImpairmentEngine=${compact(userImpairment)}`);
         audit.push(`2.7n.2 NPCImpairmentEngine=${compact(npcImpairment)}`);
-        audit.push(`2.7o resolveOutcome=atkDie:${atkDie}, atkTot:${atkTot}, ${healingStaticDc ? `healingDC:${healingStaticDc}` : `defDie:${defDie}`}, defTot:${defTot}, margin:${margin}, classifyHostilePhysicalIntent:${hostilePhysical ? 'Y' : 'N'}, classifyCombatActionSequence:${combatActionSequence ? 'Y' : 'N'} -> ${compact(outcome)}`);
+        audit.push(`2.7o resolveOutcome=atkDie:${atkDie}, atkTot:${atkTot}, ${healingStaticDc ? `healingDC:${healingStaticDc}` : `defDie:${defDie}`}, defTot:${defTot}, margin:${margin}, classifyCombatActionSequence:${combatActionSequence ? 'Y' : 'N'} -> ${compact(outcome)}`);
         const impairmentText = impairmentPenalty ? ` + impairment(${impairmentPenalty})` : '';
         const npcImpairmentText = npcImpairmentPenalty ? ` + impairment(${npcImpairmentPenalty})` : '';
         const oppStatText = healingStaticDc
@@ -2727,16 +2924,10 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         primaryOppTarget = oppStat !== 'ENV' ? oppTargetsNpcFirst : null;
     }
 
-    const boundaryReferee = applyPhysicalBoundaryPressureHardRules(semantic, targets, {
-        rollNeeded,
-        hostilePhysical,
-        goal,
-    }, audit);
     const harmMode = normalizeResolutionHarmMode(semantic.harmMode, {
         ...semantic,
         challengeType,
         rollNeeded,
-        classifyPhysicalBoundaryPressure: boundaryReferee.value,
     });
     audit.push(`2.7o.1 harmMode=${harmMode} gate=downstream_damage_only`);
 
@@ -2748,7 +2939,6 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         rollNeeded,
         combatActionSequence,
         challengeType,
-        classifyPhysicalBoundaryPressure: boundaryReferee.value,
         userAttackDie,
         harmMode,
         primaryTarget: primaryOppTarget,
@@ -2766,7 +2956,10 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         actions,
         actionUnits,
         intimacyAdvanceExplicit,
-        boundaryViolationExplicit,
+        restraintControl,
+        boundaryPressure,
+        boundaryBreak,
+        BoundaryGate: boundaryGate.gate,
         harmMode,
         RollNeeded: rollNeeded,
         RollReason: rollReason,
@@ -2781,11 +2974,9 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         OutcomeTier: outcome.OutcomeTier,
         Outcome: outcome.Outcome,
         CounterPotential: outcome.CounterPotential,
-        classifyHostilePhysicalIntent: hostilePhysical ? 'Y' : 'N',
         classifyCombatActionSequence: combatActionSequence ? 'Y' : 'N',
         activeHostileThreat: bool(semantic.activeHostileThreat) ? 'Y' : 'N',
         SafeAutomaticHealing: healingAttempt.isHealing && !healingHasActiveStakes ? 'Y' : 'N',
-        classifyPhysicalBoundaryPressure: boundaryReferee.value ? 'Y' : 'N',
         CompanionCommand: companionCommandNoRollEvidence
             ? {
                 Mode: 'REQUEST_ONLY',
@@ -2966,7 +3157,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             })}`);
         }
         if (hostilePressureResult) {
-            audit.push(`3.4c.1 hostilePhysicalPressure=${compact({
+            audit.push(`3.4c.1 harmfulAttackPressure=${compact({
                 target,
                 hostilePressure,
                 hostileLandedPressure,
@@ -4269,10 +4460,10 @@ function registerGeneratedName(context, name, meta) {
     saveMetadataDebounced(context, { warn: false });
 }
 
-function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, challengeType = 'none', classifyPhysicalBoundaryPressure = false, userAttackDie = null, harmMode = 'none', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
+function deriveInflictedNpcInjuries({ injuryEffectEngine, targets, outcome, rollNeeded, combatActionSequence = false, challengeType = 'none', userAttackDie = null, harmMode = 'none', primaryTarget = null, primaryTargetCore = null, trackerSnapshot = {}, hiddenHealthSnapshot = null, audit = null }) {
     if (rollNeeded !== 'Y') return [];
     if (!effectOutcomeLanded(outcome)) return [];
-    const mode = normalizeResolutionHarmMode(harmMode, { challengeType: combatActionSequence ? 'mundane_combat' : challengeType, rollNeeded, classifyPhysicalBoundaryPressure });
+    const mode = normalizeResolutionHarmMode(harmMode, { challengeType: combatActionSequence ? 'mundane_combat' : challengeType, rollNeeded });
     if (mode === 'none') return [];
     if (mode === 'restraint_control') {
         return deriveRestraintControlNpcEffects({ injuryEffectEngine, targets, outcome, primaryTarget, audit });
@@ -6715,18 +6906,18 @@ function sceneHasOtherActiveEvent(context = {}) {
         packet.Outcome,
         packet.OutcomeTier,
         packet.classifyCombatActionSequence,
-        packet.classifyHostilePhysicalIntent,
         packet.activeHostileThreat,
-        packet.classifyPhysicalBoundaryPressure,
-        packet.boundaryViolationExplicit,
+        packet.harmMode,
+        packet.restraintControl?.Present,
+        packet.boundaryPressure?.Present,
+        packet.boundaryBreak?.Present,
     ].filter(Boolean).join(' ').toLowerCase();
     if (!source) return false;
     if (/\b(fight|combat|attack|strike|hit|slash|stab|shoot|charge|pursuit|chase|threat|danger|crisis|battle|duel|ambush|counterattack|retaliat\w*|boundary|refusal|pressure|force|grapple|restrain|pin|drag|hold down|intimacy|sexual|kiss|undress|exposed)\b/.test(source)) return true;
     return Boolean(packet.classifyCombatActionSequence === 'Y'
-        || packet.classifyHostilePhysicalIntent === 'Y'
+        || packetHarmfulAttackActive(packet)
         || packet.activeHostileThreat === 'Y'
-        || packet.classifyPhysicalBoundaryPressure === 'Y'
-        || packet.boundaryViolationExplicit === true
+        || packetBoundaryActivityActive(packet)
         || (context.chaosBand && context.chaosBand !== 'None'));
 }
 
@@ -6894,7 +7085,7 @@ function isNpcBadlyWoundedOrIncapacitated(handoff) {
 function classifyCompanionInitiativeContext(context = {}) {
     const packet = context.resolutionPacket || {};
     if (context.counterPotential && context.counterPotential !== 'none') return 'crisis';
-    if (packet.classifyCombatActionSequence === 'Y' || packet.classifyHostilePhysicalIntent === 'Y' || packet.activeHostileThreat === 'Y') return 'crisis';
+    if (packet.classifyCombatActionSequence === 'Y' || packetHarmfulAttackActive(packet) || packet.activeHostileThreat === 'Y') return 'crisis';
     if (packet.CompanionCommand?.Mode === 'REQUEST_ONLY'
         && toRealArray(packet.CompanionCommand.NPCs).length
         && toRealArray(packet.hostilesInScene?.NPC).length === 1) {
@@ -7107,7 +7298,7 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
     const counterAllowed = ['light', 'medium', 'severe'].includes(counterPotential);
     const counterBonus = counterBonusFromPotential(counterPotential);
     const criticalSuccess = resolutionPacket?.OutcomeTier === 'Critical_Success';
-    const retaliationAllowed = resolutionPacket?.classifyHostilePhysicalIntent === 'Y';
+    const retaliationAllowed = packetHarmfulAttackActive(resolutionPacket);
     const proactivityEntries = Object.entries(proactivityResults || {});
     const isCompanionAttack = result => result?.RomanceInitiativeTag === 'Companion_Attack'
         || result?.PartnerInitiativeTag === 'Companion_Attack'
@@ -7712,39 +7903,6 @@ function cleanInitScalar(value) {
     return text.slice(0, 80);
 }
 
-function applyPhysicalBoundaryPressureHardRules(semantic, targets, options, audit) {
-    const source = semanticSourceText(semantic);
-    const hasLivingOpposition = firstReal(targets.OppTargets?.NPC);
-    let value = bool(semantic.classifyPhysicalBoundaryPressure);
-    const hardBoundary = options.rollNeeded === 'Y'
-        && !options.hostilePhysical
-        && hasLivingOpposition
-        && (isObjectBoundaryContest(source) || isBodyBoundaryPressure(source))
-        && !hasDirectBodilyAggression(source);
-
-    if (value && (options.rollNeeded !== 'Y' || options.hostilePhysical || !hasLivingOpposition)) {
-        audit.push(`2.7p deterministicPhysicalBoundaryPressureReferee=${compact({
-            hardRule: 'ResolutionEngine.classifyPhysicalBoundaryPressure requires stakes-bearing living opposition and no hostilePhysicalIntent',
-            from: 'Y',
-            to: 'N',
-            rollNeeded: options.rollNeeded,
-            hostilePhysical: options.hostilePhysical ? 'Y' : 'N',
-            hasLivingOpposition: hasLivingOpposition ? 'Y' : 'N',
-        })}`);
-        value = false;
-    } else if (!value && hardBoundary) {
-        audit.push(`2.7p deterministicPhysicalBoundaryPressureReferee=${compact({
-            hardRule: 'ResolutionEngine.classifyPhysicalBoundaryPressure: forceful object/space/departure/body-boundary contest against resisting NPC applies boundary pressure',
-            from: 'N',
-            to: 'Y',
-            evidence: source.slice(0, 220),
-        })}`);
-        value = true;
-    }
-
-    return { value };
-}
-
 function getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext = null) {
     const source = semanticSourceText(semantic);
     if (!isPureLoveDeclarationOrReciprocation(source, refereeContext)) return null;
@@ -7760,8 +7918,8 @@ function getPureLoveDeclarationNoRollEvidence(semantic, goal, refereeContext = n
     };
 }
 
-function getRomanceNoRollOverrideEvidence(semantic, semanticRollNeeded, boundaryViolationExplicit, intimacyAdvanceExplicit = 'N') {
-    if (boundaryViolationExplicit === 'Y' || semanticRollNeeded !== 'Y') return null;
+function getRomanceNoRollOverrideEvidence(semantic, semanticRollNeeded, boundaryBreakPresent, intimacyAdvanceExplicit = 'N') {
+    if (boundaryBreakPresent === 'Y' || semanticRollNeeded !== 'Y') return null;
     const source = semanticSourceText(semantic);
     if (isDirectedCompanionAttackCommandText(source) || hasCombatActionLanguage(source) || bool(semantic?.activeHostileThreat)) return null;
     if (!isRomanticOrIntimateConversation(source)) return null;
@@ -7770,7 +7928,7 @@ function getRomanceNoRollOverrideEvidence(semantic, semanticRollNeeded, boundary
         rollNeeded: 'N',
         rule: 'hard_override_romance_conversation_no_roll',
         evidence: {
-            hardRule: 'ResolutionEngine.rollNeeded: flirting, teasing, romantic talk, intimacy proposals, permission asks, or reciprocation are not stakes unless boundaryViolationExplicit=Y or ordinary non-romantic stakes apply; intimacyAdvanceExplicit is handled by IntimacyBoundary without a roll',
+            hardRule: 'ResolutionEngine.rollNeeded: flirting, teasing, romantic talk, intimacy proposals, permission asks, or reciprocation are not stakes unless boundaryBreak=Y or ordinary non-romantic stakes apply; intimacyAdvanceExplicit is handled by IntimacyBoundary without a roll',
             from: 'Y',
             to: 'N',
             intimacyAdvanceExplicit,
