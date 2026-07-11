@@ -297,6 +297,7 @@ function resolveEventTarget(health, event = {}, refs = {}) {
 }
 
 function applyDamageEvent(actor, event = {}) {
+    if (actor.dead === true) return;
     const amount = Math.max(0, Math.floor(Number(event.amount || 0)));
     const fatal = event.fatal === true || String(event.fatal || '').toUpperCase() === 'Y';
     const nonlethal = event.nonlethal === true || String(event.nonlethal || '').toUpperCase() === 'Y';
@@ -309,7 +310,6 @@ function applyDamageEvent(actor, event = {}) {
         actor.nonlethalDefeat = false;
         actor.defeatedCondition = 'dead';
     } else if (actor.currentHp <= 0 && nonlethal) {
-        actor.dead = false;
         actor.nonlethalDefeat = true;
         actor.defeatedCondition = 'incapacitated';
     }

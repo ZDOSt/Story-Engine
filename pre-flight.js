@@ -1031,7 +1031,7 @@ function narrativeSceneStateFact(worldState = {}) {
     const state = normalizeWorldState(worldState || {});
     const summary = summarizeWorldStateForNarration(state);
     if (!summary) return '';
-    return `${summary}. Treat this as authoritative continuity for current place, broad time, and weather. Preserve it unless another narrativeFact explicitly changes the scene; do not choose new weather or time changes on your own.`;
+    return `${summary}. ONLY the listed values are established, authoritative continuity. Omitted position, time, or weather is unknown and must not be inferred from internal defaults. Preserve listed values unless another narrativeFact explicitly changes them; do not choose new weather or time changes on your own.`;
 }
 
 function narrativePresentCharacters(resolution = {}, handoff = {}) {
@@ -2235,6 +2235,7 @@ function claimCheckSummary(value = {}) {
 function boundaryObjectSummary(value = {}) {
     if (!value || typeof value !== 'object') return 'none';
     const present = value.Present ?? value.present ?? 'N';
+    const boundaryId = value.BoundaryId ?? value.boundaryId;
     const target = value.TargetNPC ?? value.targetNPC ?? '(none)';
     const type = value.Type ?? value.type ?? 'none';
     const response = value.Response ?? value.response;
@@ -2242,6 +2243,7 @@ function boundaryObjectSummary(value = {}) {
     const evidence = value.Evidence ?? value.evidence;
     return inline({
         Present: present,
+        ...(boundaryId && boundaryId !== '(none)' ? { BoundaryId: boundaryId } : {}),
         TargetNPC: target,
         Type: type,
         ...(response ? { Response: response } : {}),

@@ -374,14 +374,16 @@ export function getPersonaText(context = getContext()) {
     ].map(value => String(value || '').trim()).find(Boolean) || '';
 }
 
-export async function writePersonaDescription(description, context = getContext()) {
-    const descriptor = getActivePersonaDescriptor();
+export async function writePersonaDescription(description, context = getContext(), options = {}) {
+    const expectedAvatarId = String(options?.avatarId || getActiveUserAvatar() || '').trim();
+    assertPersonaWriteCurrent(expectedAvatarId, options);
+    const descriptor = getActivePersonaDescriptor(expectedAvatarId);
     if (!descriptor) {
         throw new Error('No active SillyTavern persona is selected, so the generated character sheet could not be inserted into persona.');
     }
 
     const powerUser = getPowerUserSettings();
-    const current = String(powerUser?.persona_description || descriptor.description || '').trim();
+    const current = String(descriptor.description || powerUser?.persona_description || '').trim();
     const nextDescription = String(description || '').trim();
     if (!nextDescription) {
         throw new Error('Generated character sheet is empty; persona was not changed.');
@@ -394,11 +396,27 @@ export async function writePersonaDescription(description, context = getContext(
     if (descriptor.role === undefined && powerUser.persona_description_role !== undefined) descriptor.role = powerUser.persona_description_role;
     if (descriptor.lorebook === undefined && powerUser.persona_description_lorebook !== undefined) descriptor.lorebook = powerUser.persona_description_lorebook;
 
-    await refreshPersonaDescription();
-    saveSettingsDebounced();
-    await persistMetadata(context);
-
-    return { previous: current, next: nextDescription };
+    try {
+        await refreshPersonaDescription();
+        assertPersonaWriteCurrent(expectedAvatarId, options);
+        saveSettingsDebounced();
+        await persistMetadata(context);
+        assertPersonaWriteCurrent(expectedAvatarId, options);
+        return { previous: current, next: nextDescription, avatarId: expectedAvatarId };
+    } catch (error) {
+        if (descriptor.description === nextDescription) descriptor.description = current;
+        if (getActiveUserAvatar() === expectedAvatarId && powerUser.persona_description === nextDescription) {
+            powerUser.persona_description = current;
+        }
+        await refreshPersonaDescription();
+        saveSettingsDebounced();
+        try {
+            await persistMetadata(context);
+        } catch (rollbackError) {
+            warnOnce('writePersonaDescriptionRollback', 'Could not persist a rolled-back Story Engine persona write.', rollbackError);
+        }
+        throw error;
+    }
 }
 
 export async function refreshPersonaDescription() {
@@ -421,15 +439,15 @@ function getCharacterCardFieldsSafe(context = getContext()) {
     }
 }
 
-function getActivePersonaDescriptor() {
+function getActivePersonaDescriptor(avatarId = getActiveUserAvatar()) {
     const powerUser = getPowerUserSettings();
     powerUser.persona_descriptions = powerUser.persona_descriptions || {};
 
-    const avatarId = String(getActiveUserAvatar() || '').trim();
-    if (!avatarId) return null;
+    const normalizedAvatarId = String(avatarId || '').trim();
+    if (!normalizedAvatarId) return null;
 
-    if (!powerUser.persona_descriptions[avatarId]) {
-        powerUser.persona_descriptions[avatarId] = {
+    if (!powerUser.persona_descriptions[normalizedAvatarId]) {
+        powerUser.persona_descriptions[normalizedAvatarId] = {
             description: powerUser.persona_description || '',
             position: powerUser.persona_description_position ?? PERSONA_DESCRIPTION_POSITIONS.IN_PROMPT,
             depth: powerUser.persona_description_depth,
@@ -438,7 +456,16 @@ function getActivePersonaDescriptor() {
         };
     }
 
-    return powerUser.persona_descriptions[avatarId];
+    return powerUser.persona_descriptions[normalizedAvatarId];
+}
+
+function assertPersonaWriteCurrent(expectedAvatarId, options = {}) {
+    if (typeof options?.isCurrent === 'function' && !options.isCurrent()) {
+        throw new Error(options.expiredMessage || 'Story Engine persona write expired before completion.');
+    }
+    if (expectedAvatarId && getActiveUserAvatar() !== expectedAvatarId) {
+        throw new Error(options.expiredMessage || 'Story Engine persona write expired because the active persona changed.');
+    }
 }
 
 export async function sendDefaultChatCompletionToolRequest(messages, responseLength, options = {}) {

@@ -164,12 +164,55 @@ function normalizeBoundaryObject(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     return {
         Present: bool(source.present ?? source.Present) ? 'Y' : 'N',
+        BoundaryId: String(source.boundaryId ?? source.BoundaryId ?? '(none)').trim() || '(none)',
         TargetNPC: String(source.targetNPC ?? source.TargetNPC ?? '(none)').trim() || '(none)',
         Type: String(source.type ?? source.Type ?? 'none').trim() || 'none',
         Response: String(source.response ?? source.Response ?? 'none').trim() || 'none',
         ObjectOrAccess: String(source.objectOrAccess ?? source.ObjectOrAccess ?? '(none)').trim() || '(none)',
         Evidence: String(source.evidence ?? source.Evidence ?? '(none)').trim() || '(none)',
     };
+}
+
+function neutralBoundaryBreak() {
+    return {
+        Present: 'N',
+        BoundaryId: '(none)',
+        TargetNPC: '(none)',
+        Type: 'none',
+        Response: 'none',
+        ObjectOrAccess: '(none)',
+        Evidence: '(none)',
+    };
+}
+
+function normalizeBoundaryTypeForMatch(value) {
+    const text = String(value || 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (['object', 'item', 'item_access', 'possession', 'inventory'].includes(text)) return 'object_access';
+    if (['space', 'access', 'entry', 'door', 'doorway'].includes(text)) return 'space_access';
+    if (['leave', 'leaving', 'exit'].includes(text)) return 'departure';
+    if (['physical_restraint', 'grapple', 'pin', 'hold'].includes(text)) return 'restraint';
+    return text;
+}
+
+function validateBoundaryBreakAgainstPending(value, pendingBoundarySnapshot = {}, audit = null) {
+    const boundaryBreak = normalizeBoundaryObject(value);
+    if (boundaryBreak.Present !== 'Y') return boundaryBreak;
+
+    const pendingBoundary = normalizePendingBoundaryState(pendingBoundarySnapshot);
+    const mismatches = [];
+    if (!pendingBoundary.active) mismatches.push('no active pending boundary');
+    if (!isReal(boundaryBreak.BoundaryId) || boundaryBreak.BoundaryId !== pendingBoundary.boundaryId) mismatches.push('boundaryId mismatch');
+    if (!isReal(boundaryBreak.TargetNPC) || !sameName(boundaryBreak.TargetNPC, pendingBoundary.targetNPC)) mismatches.push('target mismatch');
+    if (normalizeBoundaryTypeForMatch(boundaryBreak.Type) !== normalizeBoundaryTypeForMatch(pendingBoundary.type)) mismatches.push('type mismatch');
+    if (!mismatches.length) return boundaryBreak;
+
+    audit?.push(`2.3c.1 rejectedBoundaryBreak=${compact({
+        reasons: mismatches,
+        supplied: boundaryBreak,
+        active: pendingBoundary,
+        result: 'Present=N',
+    })}`);
+    return neutralBoundaryBreak();
 }
 
 function restraintTargetName(semantic, targets = {}) {
@@ -182,12 +225,6 @@ function boundaryPressureTargetName(semantic, targets = {}) {
     const pressure = normalizeBoundaryObject(semantic?.boundaryPressure);
     if (pressure.Present === 'Y' && isReal(pressure.TargetNPC)) return pressure.TargetNPC;
     return firstReal(targets.ActionTargets) || firstReal(targets.OppTargets?.NPC) || '(none)';
-}
-
-function boundaryBreakTargetName(semantic, targets = {}) {
-    const boundaryBreak = normalizeBoundaryObject(semantic?.boundaryBreak);
-    if (boundaryBreak.Present === 'Y' && isReal(boundaryBreak.TargetNPC)) return boundaryBreak.TargetNPC;
-    return restraintTargetName(semantic, targets);
 }
 
 function dispositionForTarget(name, trackerSnapshot = {}) {
@@ -214,18 +251,11 @@ function boundaryWarningThresholdForTarget(name, trackerSnapshot = {}) {
     return Number(disposition.B || 0) >= 4 && !isCrisisDisposition(disposition) ? 2 : 1;
 }
 
-function applyRestraintBoundaryGate({ semantic, targets, rollNeeded, challengeType, socialTactic, rollReason, stakesRule, trackerSnapshot, pendingBoundarySnapshot = {}, audit }) {
-    const restraint = normalizeBoundaryObject(semantic?.restraintControl);
-    const pressure = normalizeBoundaryObject(semantic?.boundaryPressure);
-    const boundaryBreak = normalizeBoundaryObject(semantic?.boundaryBreak);
+function applyRestraintBoundaryGate({ semantic, restraintControl, boundaryPressure, boundaryBreak: suppliedBoundaryBreak, targets, rollNeeded, challengeType, socialTactic, rollReason, stakesRule, trackerSnapshot, pendingBoundarySnapshot = {}, audit }) {
+    const restraint = normalizeBoundaryObject(restraintControl ?? semantic?.restraintControl);
+    const pressure = normalizeBoundaryObject(boundaryPressure ?? semantic?.boundaryPressure);
+    const boundaryBreak = normalizeBoundaryObject(suppliedBoundaryBreak ?? semantic?.boundaryBreak);
     const pendingBoundary = normalizePendingBoundaryState(pendingBoundarySnapshot);
-    if (boundaryBreak.Present === 'Y' && !pendingBoundary.active) {
-        boundaryBreak.Present = 'N';
-        boundaryBreak.TargetNPC = '(none)';
-        boundaryBreak.Type = 'none';
-        boundaryBreak.Response = 'none';
-        boundaryBreak.Evidence = '(none)';
-    }
     const hasRestraint = restraint.Present === 'Y';
     const hasBoundaryPressure = pressure.Present === 'Y';
     const hasBoundaryBreak = boundaryBreak.Present === 'Y' && pendingBoundary.active;
@@ -234,7 +264,7 @@ function applyRestraintBoundaryGate({ semantic, targets, rollNeeded, challengeTy
     }
 
     const target = hasBoundaryBreak
-        ? boundaryBreakTargetName(semantic, targets)
+        ? boundaryBreak.TargetNPC
         : hasRestraint ? restraintTargetName(semantic, targets) : boundaryPressureTargetName(semantic, targets);
     const immediateContest = (hasRestraint || hasBoundaryPressure) && isImmediateOpposedBoundaryContext({ target, targets, semantic, trackerSnapshot });
     const threshold = boundaryWarningThresholdForTarget(target, trackerSnapshot);
@@ -250,6 +280,7 @@ function applyRestraintBoundaryGate({ semantic, targets, rollNeeded, challengeTy
         warnings,
         threshold,
         pendingBoundary: pendingBoundary.active ? 'Y' : 'N',
+        pendingBoundaryId: pendingBoundary.active ? pendingBoundary.boundaryId : '(none)',
     };
 
     if (immediateContest || breakForcesRoll) {
@@ -832,7 +863,7 @@ function runBoundCompanionEngine({ before = {}, semanticDelta = {}, resolutionPa
     }
 
     const cooldownUntil = Math.max(0, Number(state.lastInterjectionAtActiveMs || 0) + BOUND_COMPANION_COOLDOWN_ACTIVE_MS);
-    if (state.lastInterjectionAtActiveMs > 0 && activeMs < cooldownUntil) {
+    if (state.hasInterjected && activeMs < cooldownUntil) {
         audit.push(`STEP 6.8 BOUND_COMPANION=silence reason=cooldown activeMs=${activeMs} cooldownUntil=${cooldownUntil}`);
         return {
             state,
@@ -860,6 +891,7 @@ function runBoundCompanionEngine({ before = {}, semanticDelta = {}, resolutionPa
 
     state = normalizeBoundCompanionState({
         ...state,
+        hasInterjected: true,
         lastInterjectionAtActiveMs: activeMs,
         lastInterjectionKey: boundCompanionTriggerKey(triggers, context),
     });
@@ -938,8 +970,6 @@ function collectBoundCompanionTriggers({ resolutionPacket = {}, relationships = 
         add('social_stakes');
     }
     if (Array.isArray(relationships) && relationships.some(item => item?.InitPreset && item.InitPreset !== 'existing')) {
-        add('new_notable_npc');
-    } else if (toRealArray(resolutionPacket?.NPCAwareOfUser).length || toRealArray(resolutionPacket?.NPCInScene).length) {
         add('new_notable_npc');
     }
     if (/\b(?:enter|enters|entered|arrive|arrives|arrived|reach|reaches|reached|approach|approaches|approached|walk into|step into|come to|came to|cross into)\b.{0,80}\b(?:city|town|village|settlement|camp|guild|inn|tavern|shop|market|temple|shrine|church|castle|fort|gate|dungeon|ruin|tower|estate|manor|palace|road|forest|cave|cell|prison|arena|district|harbor|port)\b/i.test(source)) {
@@ -2581,7 +2611,7 @@ function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, challengeType, soci
 
 function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot = null, hiddenHealthSnapshot = null, pendingBoundarySnapshot = {}) {
     const semantic = ledger.resolutionEngine || {};
-    const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, refereeContext);
+    const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, hiddenHealthSnapshot);
     const rawTargets = normalizeTargets(semantic.identifyTargets);
     const identityTargets = removeUserReferencesFromTargets(rawTargets, refereeContext);
     const goal = String(semantic.identifyGoal || 'Normal_Interaction');
@@ -2596,13 +2626,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let boundaryPressure = normalizeBoundaryObject(semantic.boundaryPressure);
     let boundaryBreak = normalizeBoundaryObject(semantic.boundaryBreak);
     const pendingBoundaryForResolution = normalizePendingBoundaryState(pendingBoundarySnapshot);
-    if (boundaryBreak.Present === 'Y' && !pendingBoundaryForResolution.active) {
-        boundaryBreak.Present = 'N';
-        boundaryBreak.TargetNPC = '(none)';
-        boundaryBreak.Type = 'none';
-        boundaryBreak.Response = 'none';
-        boundaryBreak.Evidence = '(none)';
-    }
+    boundaryBreak = validateBoundaryBreakAgainstPending(boundaryBreak, pendingBoundaryForResolution, audit);
     const healingAttempt = classifyHealingAttempt(semantic, goal, context);
     const healingHasActiveStakes = healingAttempt.isHealing && bool(semantic.activeHostileThreat);
     let healingStaticDc = null;
@@ -2721,6 +2745,9 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let targets = repairLivingOppositionTargets(stealthRepair.targets, targetClassifier, { rollNeeded, semantic, goal, boundaryBreak: boundaryBreak.Present, context }, audit);
     const boundaryGate = applyRestraintBoundaryGate({
         semantic,
+        restraintControl,
+        boundaryPressure,
+        boundaryBreak,
         targets,
         rollNeeded,
         challengeType,
@@ -8032,7 +8059,7 @@ function hasDirectBodilyAggression(source) {
 
 
 
-function buildTargetClassifier(ledger, trackerSnapshot, context) {
+function buildTargetClassifier(ledger, trackerSnapshot, context, hiddenHealthSnapshot = null) {
     const livingNames = new Set();
 
     for (const name of Object.keys(trackerSnapshot || {})) addLivingName(livingNames, name);
@@ -8053,6 +8080,17 @@ function buildTargetClassifier(ledger, trackerSnapshot, context) {
 
     addLivingName(livingNames, context?.name2);
     addLivingName(livingNames, context?.name1);
+
+    for (const [name, entry] of Object.entries(trackerSnapshot || {})) {
+        if (normalizeTrackerCondition(entry?.condition) === 'dead') {
+            livingNames.delete(normalizeNameKey(name));
+        }
+    }
+    for (const [name, actor] of Object.entries(hiddenHealthSnapshot?.npcs || {})) {
+        if (actor?.dead === true || normalizeTrackerCondition(actor?.condition ?? actor?.defeatedCondition) === 'dead') {
+            livingNames.delete(normalizeNameKey(name));
+        }
+    }
 
     return {
         isLiving(name) {

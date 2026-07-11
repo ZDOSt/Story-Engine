@@ -144,7 +144,7 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Use unchanged for any field not explicitly changed or clarified. Use (none) only when the narration explicitly leaves the prior place/community behind and no replacement is knowable.',
     '- timeAdvance is none unless FINAL_NARRATION completes a meaningful transition: travel, waiting, sleep/rest, a completed long activity, later that day, overnight rest, or explicit time skip. Use slot for movement to the next broad time period, overnight for a completed overnight stay, day for a full-day or longer skip, and explicit only when timeOfDay is directly stated without implying a slot advance.',
     '- timeOfDay must be unchanged, morning, afternoon, evening, or night. Use it only when explicitly stated or implied by a completed transition such as dawn, noon, dusk, nightfall, or morning after rest.',
-    '- Do not choose weather. Weather is deterministic code-owned. Set weatherTick=tick only when a completed time/location transition should allow the stored weather pattern to advance; otherwise use auto or none.',
+    '- In ordinary turns, weatherCondition must be unchanged; do not choose weather. A separate ADVENTURE INTRO instruction may allow copying an explicitly narrated opening condition. Weather progression remains deterministic code-owned. Set weatherTick=tick only when a completed time/location transition should allow the stored weather pattern to advance; otherwise use auto or none.',
     '',
     'BOUND_COMPANION_STATE:',
     '- Also output BoundCompanionState lines. This hidden state tracks only explicitly established inner companions, possession/shared-vessel entities, intelligent weapons/items, bound spirits/artifacts, or implants that can communicate with {{user}}.',
@@ -158,6 +158,7 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Set status=set only when FINAL_NARRATION clearly shows a specific NPC setting or renewing a boundary toward {{user}}: telling/asking {{user}} to stop, let go, release, back off, return an item, leave a space, not block departure, not touch/kiss/escalate intimacy, or visibly trying to pull away/leave/keep an item from {{user}}.',
     '- Set status=clear when the current pending boundary is resolved or no longer applicable: {{user}} releases, returns, backs off, stops the behavior, the NPC accepts/withdraws the boundary, the scene moves away, the target is gone, or the narration makes the boundary moot.',
     '- Set status=unchanged when FINAL_NARRATION neither establishes/renews nor resolves a boundary. Do not set a boundary merely because mechanics expected one; the NPC must actually show it in the final narration.',
+    '- boundaryId is code-owned. For renewal or clear, copy the exact active boundaryId from PREVIOUS_STATE. For a genuinely new boundary, use (none); code assigns its ID. Never invent, alter, or reuse an ID from another boundary.',
     '- Type must be restraint, object_access, space_access, departure, intimacy, or none. TargetNPC is the NPC who set the boundary. ObjectOrAccess is the restrained behavior, item, doorway, route, space, departure, or intimate advance being refused.',
     '- Evidence must cite the visible spoken or behavioral boundary in FINAL_NARRATION. This is hidden bookkeeping only; never add visible tracker text for it.',
 ].join('\n');
@@ -225,6 +226,7 @@ WorldStateDelta.area=unchanged
 WorldStateDelta.indoors=unchanged
 WorldStateDelta.timeAdvance=none
 WorldStateDelta.timeOfDay=unchanged
+WorldStateDelta.weatherCondition=unchanged
 WorldStateDelta.weatherTick=auto
 BoundCompanionState.status=unchanged
 BoundCompanionState.name=(none)
@@ -233,6 +235,7 @@ BoundCompanionState.vessel=(none)
 BoundCompanionState.voice=(none)
 BoundCompanionState.evidence=(none)
 PendingBoundaryState.status=unchanged
+PendingBoundaryState.boundaryId=(none)
 PendingBoundaryState.targetNPC=(none)
 PendingBoundaryState.type=none
 PendingBoundaryState.objectOrAccess=(none)

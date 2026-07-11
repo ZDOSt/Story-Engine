@@ -17,28 +17,52 @@ export const DEFAULT_WORLD_STATE = Object.freeze({
     place: '',
     area: '',
     indoors: false,
+    positionEstablished: false,
     dayIndex: 1,
     timeOfDay: 'afternoon',
+    timeEstablished: false,
     weather: Object.freeze({
         condition: 'clear',
         remainingSlots: 2,
     }),
+    weatherEstablished: false,
 });
 
 export function normalizeWorldState(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const weather = source.weather && typeof source.weather === 'object' ? source.weather : {};
+    const reputationLocation = cleanWorldText(source.reputationLocation, 120);
+    const place = cleanWorldText(source.place, 120);
+    const area = cleanWorldText(source.area, 120);
+    const indoors = normalizeWorldBool(source.indoors, DEFAULT_WORLD_STATE.indoors);
+    const dayIndex = clampInt(source.dayIndex, 1, 9999, DEFAULT_WORLD_STATE.dayIndex);
+    const timeOfDay = normalizeTimeOfDay(source.timeOfDay) || DEFAULT_WORLD_STATE.timeOfDay;
+    const weatherCondition = normalizeWeatherCondition(weather.condition ?? source.weatherCondition) || DEFAULT_WORLD_STATE.weather.condition;
+    const weatherRemainingSlots = clampInt(weather.remainingSlots ?? source.weatherRemainingSlots, 0, 8, DEFAULT_WORLD_STATE.weather.remainingSlots);
     return {
-        reputationLocation: cleanWorldText(source.reputationLocation, 120),
-        place: cleanWorldText(source.place, 120),
-        area: cleanWorldText(source.area, 120),
-        indoors: normalizeWorldBool(source.indoors, DEFAULT_WORLD_STATE.indoors),
-        dayIndex: clampInt(source.dayIndex, 1, 9999, DEFAULT_WORLD_STATE.dayIndex),
-        timeOfDay: normalizeTimeOfDay(source.timeOfDay) || DEFAULT_WORLD_STATE.timeOfDay,
+        reputationLocation,
+        place,
+        area,
+        indoors,
+        positionEstablished: normalizeEstablishedFlag(
+            source.positionEstablished ?? source.established?.position,
+            inferLegacyPositionEstablished(source, indoors),
+        ),
+        dayIndex,
+        timeOfDay,
+        timeEstablished: normalizeEstablishedFlag(
+            source.timeEstablished ?? source.established?.time,
+            dayIndex !== DEFAULT_WORLD_STATE.dayIndex || timeOfDay !== DEFAULT_WORLD_STATE.timeOfDay,
+        ),
         weather: {
-            condition: normalizeWeatherCondition(weather.condition ?? source.weatherCondition) || DEFAULT_WORLD_STATE.weather.condition,
-            remainingSlots: clampInt(weather.remainingSlots ?? source.weatherRemainingSlots, 0, 8, DEFAULT_WORLD_STATE.weather.remainingSlots),
+            condition: weatherCondition,
+            remainingSlots: weatherRemainingSlots,
         },
+        weatherEstablished: normalizeEstablishedFlag(
+            source.weatherEstablished ?? source.established?.weather,
+            weatherCondition !== DEFAULT_WORLD_STATE.weather.condition
+                || weatherRemainingSlots !== DEFAULT_WORLD_STATE.weather.remainingSlots,
+        ),
     };
 }
 
@@ -51,6 +75,7 @@ export function normalizeWorldStateDelta(value = {}) {
         indoors: normalizeWorldDeltaBool(source.indoors),
         timeAdvance: normalizeTimeAdvance(source.timeAdvance),
         timeOfDay: normalizeTimeOfDay(source.timeOfDay ?? source.explicitTimeOfDay),
+        weatherCondition: normalizeWeatherCondition(source.weatherCondition) || null,
         weatherTick: normalizeWeatherTick(source.weatherTick),
     };
 }
@@ -66,14 +91,30 @@ export function applyWorldStateDelta(before = {}, delta = {}, options = {}) {
     if (patch.reputationLocation !== null) next.reputationLocation = patch.reputationLocation;
     if (patch.place !== null) next.place = patch.place;
     if (patch.area !== null) next.area = patch.area;
-    if (patch.indoors !== null) next.indoors = patch.indoors;
+    if (patch.indoors !== null) {
+        next.indoors = patch.indoors;
+        next.positionEstablished = true;
+    }
 
     const beforeTimeOfDay = next.timeOfDay;
     applyTimeAdvance(next, patch);
     const timeChanged = beforeTimeOfDay !== next.timeOfDay || patch.timeAdvance !== 'none';
+    if (patch.timeOfDay || patch.timeAdvance === 'overnight' || (next.timeEstablished && timeChanged)) {
+        next.timeEstablished = true;
+    }
 
-    const shouldTickWeather = patch.weatherTick === 'tick'
-        || (patch.weatherTick === 'auto' && (timeChanged || changedPlace || changedReputationLocation));
+    if (options.allowExplicitWeather === true && patch.weatherCondition) {
+        next.weather = {
+            condition: patch.weatherCondition,
+            remainingSlots: clampInt(options.weatherRemainingSlots, 1, 8, DEFAULT_WORLD_STATE.weather.remainingSlots),
+        };
+        next.weatherEstablished = true;
+    }
+
+    const shouldTickWeather = options.adventureIntro !== true
+        && next.weatherEstablished
+        && (patch.weatherTick === 'tick'
+            || (patch.weatherTick === 'auto' && (timeChanged || changedPlace || changedReputationLocation)));
     if (shouldTickWeather) {
         next.weather = advanceWeatherState(next.weather, {
             seed: [
@@ -86,6 +127,7 @@ export function applyWorldStateDelta(before = {}, delta = {}, options = {}) {
                 next.weather.remainingSlots,
             ].join('|'),
         });
+        next.weatherEstablished = true;
     }
 
     return normalizeWorldState(next);
@@ -97,8 +139,9 @@ export function worldStateHasMeaningfulValue(value = {}) {
         state.reputationLocation
         || state.place
         || state.area
-        || state.timeOfDay !== DEFAULT_WORLD_STATE.timeOfDay
-        || state.weather.condition !== DEFAULT_WORLD_STATE.weather.condition
+        || state.positionEstablished
+        || state.timeEstablished
+        || state.weatherEstablished
     );
 }
 
@@ -108,10 +151,10 @@ export function formatWorldStateForDisplay(value = {}) {
         reputationLocation: state.reputationLocation || 'Unknown',
         place: state.place || 'Unknown',
         area: state.area || 'Unknown',
-        indoors: state.indoors ? 'Indoors' : 'Outdoors',
-        day: `Day ${state.dayIndex}`,
-        timeOfDay: titleCase(state.timeOfDay),
-        weather: titleCase(state.weather.condition.replace(/_/g, ' ')),
+        indoors: state.positionEstablished ? (state.indoors ? 'Indoors' : 'Outdoors') : 'Unknown',
+        day: state.timeEstablished ? `Day ${state.dayIndex}` : 'Unknown',
+        timeOfDay: state.timeEstablished ? titleCase(state.timeOfDay) : 'Unknown',
+        weather: state.weatherEstablished ? titleCase(state.weather.condition.replace(/_/g, ' ')) : 'Unknown',
     };
 }
 
@@ -121,10 +164,10 @@ export function summarizeWorldStateForNarration(value = {}) {
         state.reputationLocation ? `reputationLocation=${state.reputationLocation}` : '',
         state.place ? `place=${state.place}` : '',
         state.area ? `area=${state.area}` : '',
-        `position=${state.indoors ? 'indoors' : 'outdoors'}`,
-        `day=${state.dayIndex}`,
-        `timeOfDay=${state.timeOfDay}`,
-        `weather=${state.weather.condition}`,
+        state.positionEstablished ? `position=${state.indoors ? 'indoors' : 'outdoors'}` : '',
+        state.timeEstablished ? `day=${state.dayIndex}` : '',
+        state.timeEstablished ? `timeOfDay=${state.timeOfDay}` : '',
+        state.weatherEstablished ? `weather=${state.weather.condition}` : '',
     ].filter(Boolean);
     return parts.join('; ');
 }
@@ -166,6 +209,20 @@ function normalizeWorldDeltaBool(value) {
     if (['y', 'yes', 'true', '1', 'indoors', 'indoor', 'inside'].includes(text)) return true;
     if (['n', 'no', 'false', '0', 'outdoors', 'outdoor', 'outside'].includes(text)) return false;
     return null;
+}
+
+function normalizeEstablishedFlag(value, fallback = false) {
+    if (typeof value === 'boolean') return value;
+    const text = String(value ?? '').trim().toLowerCase();
+    if (['y', 'yes', 'true', '1'].includes(text)) return true;
+    if (['n', 'no', 'false', '0'].includes(text)) return false;
+    return Boolean(fallback);
+}
+
+function inferLegacyPositionEstablished(source, indoors) {
+    if (!indoors) return false;
+    const text = String(source?.indoors ?? '').trim().toLowerCase();
+    return source?.indoors === true || ['y', 'yes', 'true', '1', 'indoors', 'indoor', 'inside'].includes(text);
 }
 
 function normalizeTimeOfDay(value) {

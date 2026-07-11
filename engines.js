@@ -81,9 +81,10 @@ function ResolutionEngine(input) {
     policy: LOCKED, EXPLICIT-ONLY
     rule: check hidden tracker pendingBoundary only; if no pendingBoundary is active, return Present=N
     rule: return Present=Y when latest input continues, escalates, ignores, or refuses to release/return/stop the same boundary behavior after that NPC set a boundary
+    rule: Present=Y requires the exact pendingBoundary BoundaryId, TargetNPC, and Type; copy them from hidden state and never invent or alter the ID
     rule: return Present=N when {{user}} releases, returns, backs off, apologizes without continuing, or does something unrelated
     rule: Response must be released, continued, escalated, unrelated, unclear, or none
-    return {Present, TargetNPC, Type, Response, Evidence}
+    return {Present, BoundaryId, TargetNPC, Type, Response, Evidence}
 
   rollNeeded(input, finalGoal, challenge, restraintControl, boundaryPressure, boundaryBreak, context):
     policy: ROLL-GATE
@@ -228,7 +229,9 @@ function RelationshipEngine(npc, resolutionPacket) {
     BANDS:
 'BOND(B): 1 Low trust/Avoidant (keeps distance, avoids vulnerability and private closeness, cautious or transactional if engagement is necessary). 2 Neutral/Transactional (polite, practical, reserved, curious, formal, situationally cooperative, no default vulnerability or personal closeness). 3 Friendly/Comfortable (cooperative, relaxed, warm, ordinary closeness acceptable when context supports it; not automatic romance or intimacy). 4 Close/Trusting (confides, seeks closeness, shows loyalty, support, vulnerability, and deep personal investment; still not automatic romance or intimacy). FEAR(F): 1 Unshaken (steady, not intimidated). 2 Alert/Wary (cautious, watchful). 3 Afraid/Self-protective (wants distance, safety, witnesses, or an exit; staying, answering, or complying is defensive appeasement/caution, not comfort, attraction, trust, or willingness). 4 Terrified/Panic (escape, surrender, help-seeking, freezing, pleading, or desperate self-protection; compliance is fear management, not consent, comfort, or trust). HOSTILITY(H): 1 Warm/Loyal (supportive, protective). 2 Neutral (no active ill will). 3 Hostile/Obstructive (argues, refuses, obstructs, challenges, mocks, threatens, or interferes). 4 Hatred/Violent (wants harm, removal, exposure, humiliation, sabotage, defeat, or driving away).',
     LOCK:
-'If F=4 -> TERROR. Else if H=4 -> HATRED. Else if F=3 or H=3 -> FREEZE. If lock is active, behavior must equal lock. Invariant: F>=3 or H>=3 forces B=1.'
+'If F=4 -> TERROR. Else if H=4 -> HATRED. Else if F=3 or H=3 -> FREEZE. If lock is active, behavior must equal lock. Invariant: F>=3 or H>=3 forces B=1.',
+    STAKE_CHANGE:
+'Benefit means an outcome significantly and concretely improves this NPC stakes through rescue from independent danger, protection from an independent threat, meaningful resources, restored autonomy, significant status/standing improvement, prevention of real harm/loss, or explicit goal advancement. Harm means an outcome materially worsens this NPC safety, autonomy, possessions/access, standing, goals, or trust/boundaries. Trivial help, minor convenience, mood improvement, politeness, approval, ordinary cooperation, flirting, compliments, enjoyable conversation, user self-advancement, a negotiation win for the user, choosing or failing to harm the NPC, de-escalation without a concrete NPC gain, or merely remaining safe/unharmed are neither benefit nor harm.'
   });
 
   getCurrentRelationalState(npc):
@@ -277,8 +280,8 @@ function RelationshipEngine(npc, resolutionPacket) {
 
   stakeChangeByOutcome(npc, resolutionPacket):
     policy: EO, FYW
-    rule: for each possible resolution outcome, return benefit only if that outcome significantly and concretely improves this NPC's stakes as per DEF.STAKES and DEF.NO_STAKES
-    rule: return harm if that outcome materially worsens this NPC's stakes as per DEF.STAKES and DEF.NO_STAKES
+    rule: for each possible resolution outcome, return benefit only if that outcome significantly and concretely improves this NPC's stakes as per DEF.STAKE_CHANGE
+    rule: return harm only if that outcome materially worsens this NPC's stakes as per DEF.STAKE_CHANGE
     rule: return none if that outcome does not materially change this NPC's stakes
     rule: do NOT return benefit merely because {{user}} succeeds at {{user}}'s own goal, negotiates successfully for {{user}}, chooses not to harm the NPC, fails to harm the NPC, de-escalates without giving the NPC a concrete gain, or because the NPC remains unharmed/safe
     rule: if resolutionPacket.boundaryBreak.Present=Y and this NPC is the direct/opposing boundary target, successful or landed outcomes [success, dominant_impact, solid_impact, light_impact] worsen this NPC's boundary/autonomy/trust stakes; return harm, not none
@@ -1822,10 +1825,13 @@ const BOUND_COMPANION_TYPES = Object.freeze(['none', 'possession', 'shared_vesse
 const BOUND_COMPANION_STATUSES = Object.freeze(['unchanged', 'active', 'inactive']);
 const PENDING_BOUNDARY_TYPES = Object.freeze(['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']);
 const PENDING_BOUNDARY_STATUSES = Object.freeze(['unchanged', 'set', 'clear']);
+let pendingBoundaryIdSequence = 0;
 
 export function normalizeBoundCompanionState(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const active = bool(source.active) || normalizeBoundCompanionStatus(source.status) === 'active';
+    const lastInterjectionAtActiveMs = Math.max(0, Math.floor(Number(source.lastInterjectionAtActiveMs || 0)));
+    const lastInterjectionKey = cleanBoundCompanionText(source.lastInterjectionKey, 120);
     return {
         active,
         name: active ? cleanBoundCompanionText(source.name, 80) : '',
@@ -1833,8 +1839,9 @@ export function normalizeBoundCompanionState(value = {}) {
         vessel: active ? cleanBoundCompanionText(source.vessel, 120) : '',
         voice: active ? cleanBoundCompanionText(source.voice, 220) : '',
         evidence: active ? cleanBoundCompanionText(source.evidence, 260) : '',
-        lastInterjectionAtActiveMs: Math.max(0, Math.floor(Number(source.lastInterjectionAtActiveMs || 0))),
-        lastInterjectionKey: cleanBoundCompanionText(source.lastInterjectionKey, 120),
+        hasInterjected: source.hasInterjected === true || lastInterjectionAtActiveMs > 0 || Boolean(lastInterjectionKey),
+        lastInterjectionAtActiveMs,
+        lastInterjectionKey,
     };
 }
 
@@ -1857,6 +1864,7 @@ export function applyBoundCompanionDelta(before = {}, delta = {}) {
     if (patch.status === 'inactive') {
         return normalizeBoundCompanionState({
             active: false,
+            hasInterjected: current.hasInterjected,
             lastInterjectionAtActiveMs: current.lastInterjectionAtActiveMs,
             lastInterjectionKey: current.lastInterjectionKey,
         });
@@ -1890,12 +1898,20 @@ export function boundCompanionDeltaHasChanges(value = {}) {
 export function normalizePendingBoundaryState(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const active = bool(source.active) || normalizePendingBoundaryStatus(source.status) === 'set';
+    const targetNPC = active ? cleanPendingBoundaryText(source.targetNPC ?? source.TargetNPC, 100) : '';
+    const type = active ? normalizePendingBoundaryType(source.type ?? source.Type) : 'none';
+    const objectOrAccess = active ? cleanPendingBoundaryText(source.objectOrAccess ?? source.ObjectOrAccess, 140) : '';
+    const evidence = active ? cleanPendingBoundaryText(source.evidence ?? source.Evidence, 260) : '';
+    const boundaryId = active ? cleanPendingBoundaryText(source.boundaryId ?? source.BoundaryId, 100) : '';
     return {
         active,
-        targetNPC: active ? cleanPendingBoundaryText(source.targetNPC ?? source.TargetNPC, 100) : '',
-        type: active ? normalizePendingBoundaryType(source.type ?? source.Type) : 'none',
-        objectOrAccess: active ? cleanPendingBoundaryText(source.objectOrAccess ?? source.ObjectOrAccess, 140) : '',
-        evidence: active ? cleanPendingBoundaryText(source.evidence ?? source.Evidence, 260) : '',
+        boundaryId: active
+            ? boundaryId || createLegacyPendingBoundaryId({ targetNPC, type, objectOrAccess, evidence })
+            : '',
+        targetNPC,
+        type,
+        objectOrAccess,
+        evidence,
         warnings: active ? clamp(Math.floor(Number(source.warnings ?? source.Warnings ?? 1)), 1, 5) : 0,
     };
 }
@@ -1904,6 +1920,7 @@ export function normalizePendingBoundaryDelta(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     return {
         status: normalizePendingBoundaryStatus(source.status ?? source.Status),
+        boundaryId: cleanPendingBoundaryDeltaText(source.boundaryId ?? source.BoundaryId, 100),
         targetNPC: cleanPendingBoundaryDeltaText(source.targetNPC ?? source.TargetNPC, 100),
         type: normalizePendingBoundaryDeltaType(source.type ?? source.Type),
         objectOrAccess: cleanPendingBoundaryDeltaText(source.objectOrAccess ?? source.ObjectOrAccess, 140),
@@ -1914,29 +1931,54 @@ export function normalizePendingBoundaryDelta(value = {}) {
 export function applyPendingBoundaryDelta(before = {}, delta = {}) {
     const current = normalizePendingBoundaryState(before);
     const patch = normalizePendingBoundaryDelta(delta);
-    if (patch.status === 'clear') return normalizePendingBoundaryState({ active: false });
+    if (patch.status === 'clear') {
+        if (!current.active) return current;
+        if (!patch.boundaryId || patch.boundaryId !== current.boundaryId) {
+            warnRejectedPendingBoundaryDelta('clear did not copy the active boundaryId', current, patch);
+            return current;
+        }
+        return normalizePendingBoundaryState({ active: false });
+    }
     if (patch.status !== 'set') return current;
 
-    const targetNPC = patch.targetNPC || current.targetNPC;
-    const type = patch.type || current.type || 'none';
+    const targetNPC = patch.targetNPC || '';
+    const type = patch.type || 'none';
     const objectOrAccess = patch.objectOrAccess || current.objectOrAccess;
+    if (!targetNPC || type === 'none' || !patch.evidence) {
+        warnRejectedPendingBoundaryDelta('set requires targetNPC, a non-none type, and evidence', current, patch);
+        return current;
+    }
     const sameBoundary = current.active
         && sameName(current.targetNPC, targetNPC)
         && normalizePendingBoundaryType(current.type) === normalizePendingBoundaryType(type)
         && samePendingBoundaryObject(current.objectOrAccess, objectOrAccess);
+    if (sameBoundary) {
+        if (!patch.boundaryId || patch.boundaryId !== current.boundaryId) {
+            warnRejectedPendingBoundaryDelta('renewal did not copy the active boundaryId', current, patch);
+            return current;
+        }
+        return normalizePendingBoundaryState({
+            ...current,
+            objectOrAccess,
+            evidence: patch.evidence,
+            warnings: current.warnings + 1,
+        });
+    }
     return normalizePendingBoundaryState({
         active: true,
+        boundaryId: createPendingBoundaryId(),
         targetNPC,
         type,
-        objectOrAccess,
-        evidence: patch.evidence || current.evidence,
-        warnings: sameBoundary ? current.warnings + 1 : 1,
+        objectOrAccess: patch.objectOrAccess || '',
+        evidence: patch.evidence,
+        warnings: 1,
     });
 }
 
 export function pendingBoundaryDeltaHasChanges(value = {}) {
     const delta = normalizePendingBoundaryDelta(value);
     return delta.status !== 'unchanged'
+        || delta.boundaryId !== null
         || delta.targetNPC !== null
         || delta.type !== null
         || delta.objectOrAccess !== null
@@ -2023,6 +2065,32 @@ function samePendingBoundaryObject(a, b) {
     const right = cleanPendingBoundaryText(b, 140).toLowerCase();
     if (!left || !right) return true;
     return left === right;
+}
+
+function createPendingBoundaryId() {
+    pendingBoundaryIdSequence = (pendingBoundaryIdSequence + 1) % Number.MAX_SAFE_INTEGER;
+    return `pb_${Date.now().toString(36)}_${pendingBoundaryIdSequence.toString(36)}`;
+}
+
+function createLegacyPendingBoundaryId(value = {}) {
+    const seed = [value.targetNPC, value.type, value.objectOrAccess, value.evidence]
+        .map(part => String(part || '').trim().toLowerCase())
+        .join('|');
+    let hash = 2166136261;
+    for (let index = 0; index < seed.length; index += 1) {
+        hash ^= seed.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return `pb_legacy_${(hash >>> 0).toString(36)}`;
+}
+
+function warnRejectedPendingBoundaryDelta(reason, current, patch) {
+    console.warn('[Story Engine] rejected pending-boundary delta:', reason, {
+        activeBoundaryId: current?.boundaryId || '(none)',
+        suppliedBoundaryId: patch?.boundaryId || '(none)',
+        targetNPC: patch?.targetNPC || '(none)',
+        type: patch?.type || 'none',
+    });
 }
 
 export function normalizeTrackerCondition(value) {

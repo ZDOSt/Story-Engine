@@ -9,6 +9,7 @@ import {
     flushEphemeralStoppingStrings,
     generateRawData,
     getActiveConnectionProfileName,
+    getActiveUserAvatar,
     getConnectionProfileByName,
     getConnectionProfileNames,
     getPersonaText,
@@ -28,6 +29,8 @@ import {
     writePersonaDescription,
 } from './st-adapter.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
+import { assertValidCharacterSheet } from './character-sheet-validation.js';
+import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
@@ -595,9 +598,9 @@ console.info(`[${EXTENSION_NAME}] module import started`);
 const state = {
 
     runningSemanticPass: false,
-    bypassPromptReady: false,
-    storyEngineModelRequestDepth: 0,
     startAdventureReasoningCleanupPending: false,
+    generationActive: false,
+    runEpoch: 0,
     activeRunId: null,
     lastNarratorHandoff: '',
 
@@ -634,11 +637,18 @@ const state = {
     proseGuardExpectedMessageId: null,
     proseGuardStreamResetting: false,
     proseGuardHiddenMessageIds: new Set(),
-    postNarrationFinalizers: new Set(),
+    postNarrationFinalizers: new Map(),
     postNarrationFinalizerTimers: new Map(),
     trackerWidgetActiveTab: 'scene',
     trackerWidgetEditingUserItems: false,
 };
+
+const semanticStopController = createEphemeralStopController({
+    add: addEphemeralStoppingString,
+    flush: flushEphemeralStoppingStrings,
+});
+const promptReadyBypassGate = createAsyncTokenGate();
+const storyEngineModelRequestGate = createAsyncTokenGate();
 
 
 function getContext() {
@@ -849,19 +859,35 @@ async function waitForStoryEngineModelCallSpacing(label = 'next model call') {
     }
 }
 
-async function withStoryEngineModelRequest(callback) {
+function assertStoryEngineModelRequestCurrent(options = {}) {
+    if (typeof options?.isCurrent !== 'function' || options.isCurrent()) return;
+    throw new Error(options.expiredMessage || 'Story Engine internal model request expired before completion.');
+}
+
+async function withStoryEngineModelRequest(callback, options = {}) {
     await waitForStoryEngineModelCallSpacing('Story Engine model call');
-    state.storyEngineModelRequestDepth += 1;
+    assertStoryEngineModelRequestCurrent(options);
+    const requestToken = storyEngineModelRequestGate.acquire();
+    const releaseRequestToken = () => {
+        if (storyEngineModelRequestGate.release(requestToken)) {
+            state.lastStoryEngineModelCallEndedAt = Date.now();
+        }
+    };
+    const unregisterCancellation = typeof options?.registerCancellation === 'function'
+        ? options.registerCancellation(releaseRequestToken)
+        : null;
     try {
-        return await callback();
+        const result = await callback();
+        assertStoryEngineModelRequestCurrent(options);
+        return result;
     } finally {
-        state.storyEngineModelRequestDepth = Math.max(0, state.storyEngineModelRequestDepth - 1);
-        state.lastStoryEngineModelCallEndedAt = Date.now();
+        unregisterCancellation?.();
+        releaseRequestToken();
     }
 }
 
 function clearThinkingDisableRuntimeState() {
-    state.storyEngineModelRequestDepth = 0;
+    storyEngineModelRequestGate.clear();
     state.startAdventureReasoningCleanupPending = false;
 }
 
@@ -871,11 +897,11 @@ function markNextStartAdventureRequestReasoningCleanup() {
 
 function shouldDisableThinkingForCurrentRequest() {
     return isStoryEngineEnabled()
-        && (state.storyEngineModelRequestDepth > 0 || state.startAdventureReasoningCleanupPending);
+        && (storyEngineModelRequestGate.isActive() || state.startAdventureReasoningCleanupPending);
 }
 
 function consumeStartAdventureReasoningCleanupIfNeeded() {
-    if (state.storyEngineModelRequestDepth <= 0) {
+    if (!storyEngineModelRequestGate.isActive()) {
         state.startAdventureReasoningCleanupPending = false;
     }
 }
@@ -1801,6 +1827,7 @@ function renderSettingsPanel() {
             return;
         }
         const context = getContext();
+        const operationIdentity = createStoryEngineEpochIdentity(context);
         const root = getPlayerRoot(context);
         if (root) {
 
@@ -1820,6 +1847,8 @@ function renderSettingsPanel() {
 
         }
 
+        if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
+
         renderPlayerSetupCard(context);
 
         refreshSettingsControls();
@@ -1833,6 +1862,7 @@ function renderSettingsPanel() {
             return;
         }
         const context = getContext();
+        const operationIdentity = createStoryEngineEpochIdentity(context);
         const root = getPlayerRoot(context);
         if (root) {
 
@@ -1851,6 +1881,8 @@ function renderSettingsPanel() {
             await persistMetadata(context);
 
         }
+
+        if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
 
         renderPlayerSetupCard(context);
 
@@ -2078,12 +2110,26 @@ function armNarratorDepthReplay({ context, pendingGeneration, pendingRun, narrat
     const nativePrompt = setNarratorDepthPrompt(context, narratorModelContext);
     clearNarratorDepthReplayTimer();
 
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const runEpoch = Number(pendingGeneration?.runEpoch ?? state.runEpoch);
+    const chatId = String(pendingGeneration?.chatId ?? getChatId(context));
+    const personaId = String(pendingGeneration?.personaId ?? getActiveUserAvatar() ?? '');
+
     const replay = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id,
+        runEpoch,
+        chatId,
+        personaId,
         phase: 'armed',
         type: pendingGeneration?.type || 'normal',
         mode: generationMode || pendingGeneration?.mode || 'normal',
-        pendingGeneration: clone(pendingGeneration || {}),
+        pendingGeneration: {
+            ...clone(pendingGeneration || {}),
+            runId: id,
+            runEpoch,
+            chatId,
+            personaId,
+        },
         pendingRun,
         narratorContext,
         narratorModelContext: nativePrompt,
@@ -2125,8 +2171,61 @@ function consumeInternalGenerationStop() {
     return true;
 }
 
-function isCurrentStoryEngineRun(runId) {
-    return Boolean(runId) && state.activeRunId === runId;
+function createStoryEngineEpochIdentity(context = getContext()) {
+    return {
+        runEpoch: state.runEpoch,
+        chatId: String(getChatId(context) || ''),
+        personaId: String(getActiveUserAvatar() || ''),
+    };
+}
+
+function createStoryEngineRunIdentity(context = getContext()) {
+    return {
+        ...createStoryEngineEpochIdentity(context),
+        runId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    };
+}
+
+function isCurrentStoryEngineEpoch(runIdentity = {}, context = getContext()) {
+    if (Number(runIdentity?.runEpoch) !== state.runEpoch) return false;
+    const expectedChatId = String(runIdentity?.chatId || '');
+    const expectedPersonaId = String(runIdentity?.personaId || '');
+    const activeContext = getContext() || context;
+    if (expectedChatId && String(getChatId(activeContext) || '') !== expectedChatId) return false;
+    if (expectedPersonaId && String(getActiveUserAvatar() || '') !== expectedPersonaId) return false;
+    return true;
+}
+
+function isCurrentStoryEngineRun(runIdentity = {}, context = getContext()) {
+    return Boolean(runIdentity?.runId)
+        && state.activeRunId === runIdentity.runId
+        && isCurrentStoryEngineEpoch(runIdentity, context);
+}
+
+function assertStoryEngineEpochCurrent(runIdentity, message = 'Story Engine operation expired because the active chat changed.') {
+    if (isCurrentStoryEngineEpoch(runIdentity)) return;
+    throw new Error(message);
+}
+
+function getStoryEngineRunOwnerId(runIdentity = {}) {
+    return [runIdentity.runEpoch, runIdentity.chatId, runIdentity.personaId, runIdentity.runId]
+        .map(value => String(value ?? ''))
+        .join(':');
+}
+
+function failNarratorDepthReplay(replay, error) {
+    if (state.narratorDepthReplay !== replay || !isCurrentStoryEngineEpoch(replay)) return;
+    clearPendingRunCleanupTimer();
+    setChatInputLocked(false);
+    clearRuntimePrompts();
+    state.pendingRun = null;
+    state.lastNarratorHandoff = '';
+    state.pendingGeneration = null;
+    state.activeRunId = null;
+    clearInternalGenerationStopState();
+    releaseProseGuardDisplayIntercept({ restore: true });
+    clearAllProgress();
+    showBlockingError(error);
 }
 
 function scheduleNarratorDepthReplay() {
@@ -2139,6 +2238,7 @@ function scheduleNarratorDepthReplay() {
         if (state.narratorDepthReplay !== replay) return;
 
         const replayContext = getContext();
+        if (!isCurrentStoryEngineEpoch(replay, replayContext)) return;
         try {
             if (!isStoryEngineEnabled()) {
                 clearRuntimePrompts();
@@ -2160,27 +2260,9 @@ function scheduleNarratorDepthReplay() {
                 generateOptions.quietToLoud = true;
             }
             Promise.resolve(replayContext.generate(replay.type || 'normal', generateOptions))
-                .catch(error => {
-                    clearPendingRunCleanupTimer();
-                    setChatInputLocked(false);
-                    clearRuntimePrompts();
-                    state.pendingRun = null;
-                    state.lastNarratorHandoff = '';
-                    state.pendingGeneration = null;
-                    state.activeRunId = null;
-                    clearInternalGenerationStopState();
-                    clearNarratorDepthReplayState();
-                    releaseProseGuardDisplayIntercept({ restore: true });
-                    clearAllProgress();
-                    showBlockingError(error);
-                });
+                .catch(error => failNarratorDepthReplay(replay, error));
         } catch (error) {
-            clearRuntimePrompts();
-            state.pendingRun = null;
-            state.lastNarratorHandoff = '';
-            releaseProseGuardDisplayIntercept({ restore: true });
-            clearAllProgress();
-            showBlockingError(error);
+            failNarratorDepthReplay(replay, error);
         }
     }, 350);
 }
@@ -2197,6 +2279,10 @@ function activateNarratorDepthReplayPass(context, contextSize, type) {
     const replay = state.narratorDepthReplay;
     if (!replay) return false;
 
+    if (!isCurrentStoryEngineEpoch(replay, context)) {
+        throw new Error('Story Engine narrator replay belongs to a different chat or expired run.');
+    }
+
     if (!hasNarratorDepthPrompt(context)) {
         throw new Error('Story Engine native narrator handoff is missing during replay; generation aborted before narration.');
     }
@@ -2205,6 +2291,10 @@ function activateNarratorDepthReplayPass(context, contextSize, type) {
     replay.type = type || replay.type || 'normal';
     replay.pendingGeneration = {
         ...clone(replay.pendingGeneration || {}),
+        runId: replay.id,
+        runEpoch: replay.runEpoch,
+        chatId: replay.chatId,
+        personaId: replay.personaId,
         type: type || replay.type || 'normal',
         contextSize,
     };
@@ -2341,30 +2431,42 @@ function clearRuntimePrompts({ preserveNarratorDepthPrompt = false } = {}) {
     }
 }
 
-function disableStoryEngineRuntime() {
+function invalidateStoryEnginePipeline() {
+    state.runEpoch += 1;
+    void semanticStopController.invalidate();
+    promptReadyBypassGate.clear();
     clearInternalGenerationStopState();
     clearPostNarrationFinalizerTimers();
     clearPendingRunCleanupTimer();
     clearAllProgress();
     clearRuntimePrompts();
-    clearPromptOptionPrompts();
     setChatInputLocked(false);
     releaseProseGuardDisplayIntercept({ restore: true });
-    if (state.proseGuardChatObserver) {
-        state.proseGuardChatObserver.disconnect();
-        state.proseGuardChatObserver = null;
-    }
-    removeStreamingArtifactRegex();
     clearThinkingDisableRuntimeState();
+    state.generationActive = false;
     state.runningSemanticPass = false;
-    state.bypassPromptReady = false;
     state.activeRunId = null;
     state.lastNarratorHandoff = '';
     state.lastNarratorHandoffKey = null;
     state.pendingRun = null;
     state.pendingGeneration = null;
+    state.playerSetupBusy = false;
+    state.progressionBusy = false;
     state.proseGuardHideNextMessage = false;
     state.proseGuardExpectedMessageId = null;
+}
+
+function disableStoryEngineRuntime() {
+    const generationActive = state.generationActive;
+    const context = getContext();
+    invalidateStoryEnginePipeline();
+    if (generationActive) abortGenerationAfterPromptReady(context);
+    clearPromptOptionPrompts();
+    if (state.proseGuardChatObserver) {
+        state.proseGuardChatObserver.disconnect();
+        state.proseGuardChatObserver = null;
+    }
+    removeStreamingArtifactRegex();
     document.querySelectorAll?.(`.${TRACKER_DISPLAY_BLOCK_CLASS}, .${NARRATOR_HANDOFF_BLOCK_CLASS}`)?.forEach(element => element.remove());
     document.getElementById(TRACKER_WIDGET_ID)?.remove();
     document.getElementById(PLAYER_SETUP_CARD_ID)?.remove();
@@ -2372,23 +2474,7 @@ function disableStoryEngineRuntime() {
 }
 
 function cancelStoryEnginePipeline(reason = 'generation stopped') {
-    clearInternalGenerationStopState();
-    clearPostNarrationFinalizerTimers();
-    clearPendingRunCleanupTimer();
-    clearAllProgress();
-    clearRuntimePrompts();
-    setChatInputLocked(false);
-    releaseProseGuardDisplayIntercept({ restore: true });
-    clearThinkingDisableRuntimeState();
-    state.runningSemanticPass = false;
-    state.bypassPromptReady = false;
-    state.activeRunId = null;
-    state.lastNarratorHandoff = '';
-    state.lastNarratorHandoffKey = null;
-    state.pendingRun = null;
-    state.pendingGeneration = null;
-    state.proseGuardHideNextMessage = false;
-    state.proseGuardExpectedMessageId = null;
+    invalidateStoryEnginePipeline();
     console.info(`[${EXTENSION_NAME}] ${reason}; Story Engine pipeline cancelled.`);
 }
 
@@ -3305,8 +3391,15 @@ function buildPersonaPointBuyState(analysis) {
 
 
 
-async function writePlayerSheetToPersona(sheetText, context = getContext()) {
-    return await writePersonaDescription(sheetText, context);
+async function writePlayerSheetToPersona(sheetText, context = getContext(), actionIdentity = null) {
+    if (actionIdentity) {
+        assertStoryEngineEpochCurrent(actionIdentity, 'Persona update expired because the active chat or persona changed.');
+    }
+    return await writePersonaDescription(sheetText, context, actionIdentity ? {
+        avatarId: actionIdentity.personaId,
+        isCurrent: () => isCurrentStoryEngineEpoch(actionIdentity, context),
+        expiredMessage: 'Persona update expired because the active chat or persona changed.',
+    } : {});
 }
 
 function findPersonaSection(text, matcher) {
@@ -4001,6 +4094,9 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     };
     return {
         type: pendingGeneration?.type || 'normal',
+        runEpoch: Number(pendingGeneration?.runEpoch ?? state.runEpoch),
+        chatId: String(pendingGeneration?.chatId ?? getChatId(context)),
+        personaId: String(pendingGeneration?.personaId ?? getActiveUserAvatar() ?? ''),
         mode: 'adventure_intro',
         trackerBefore: trackerSnapshot,
         trackerAfter: {},
@@ -4156,7 +4252,8 @@ function updateLatestTrackerDisplaySnapshotUser(context, user) {
     return false;
 }
 
-async function saveManualUserTrackerItems({ gear, inventory }, context = getContext()) {
+async function saveManualUserTrackerItems({ gear, inventory }, context = getContext(), operationIdentity = createStoryEngineEpochIdentity(context)) {
+    if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return false;
     const root = getTrackerRoot(context);
     if (!root) return false;
     const nextUser = normalizeTrackerUserState({
@@ -4167,6 +4264,7 @@ async function saveManualUserTrackerItems({ gear, inventory }, context = getCont
     root.user = nextUser;
     updateLatestTrackerDisplaySnapshotUser(context, nextUser);
     await persistMetadata(context);
+    if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return false;
     return true;
 }
 
@@ -4243,6 +4341,8 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     merged.userReputation = mergeUserReputationLedger(merged.userReputation || options.userReputationBefore || {}, delta.userReputation || {});
     merged.worldState = applyWorldStateDelta(merged.worldState || options.worldStateBefore || {}, delta.worldState || {}, {
         seed: options.messageKey || options.assistantText || '',
+        adventureIntro: options.pendingRun?.adventureIntro === true,
+        allowExplicitWeather: options.pendingRun?.adventureIntro === true,
     });
     merged.economy = applyEconomyDelta(economyBefore, economyDelta, {
         messageKey: options.messageKey || '',
@@ -4352,6 +4452,7 @@ function worldStateDeltaHasChanges(delta) {
         'timeOfDay',
     ].some(key => delta[key] !== null && delta[key] !== undefined && delta[key] !== '')
         || !['none', undefined, null, ''].includes(delta.timeAdvance)
+        || Boolean(delta.weatherCondition)
         || delta.weatherTick === 'tick';
 }
 
@@ -6757,16 +6858,19 @@ function attachTrackerWidgetEditorHandlers(body, context = getContext()) {
             event.preventDefault();
             target.disabled = true;
             target.textContent = 'Saving...';
+            const operationIdentity = createStoryEngineEpochIdentity(context);
             saveManualUserTrackerItems({
                 gear: collectTrackerWidgetUserItems(body, 'gear'),
                 inventory: collectTrackerWidgetUserItems(body, 'inventory'),
-            }, context)
+            }, context, operationIdentity)
                 .then(saved => {
+                    if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
                     if (!saved) throw new Error('Tracker metadata unavailable.');
                     state.trackerWidgetEditingUserItems = false;
                     renderAllTrackerDisplayBlocks(context);
                 })
                 .catch(error => {
+                    if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
                     console.error(`[${EXTENSION_NAME}] failed to save manual tracker edit.`, error);
                     target.disabled = false;
                     target.textContent = 'Save';
@@ -7784,6 +7888,7 @@ async function handleProgressionAction(action, details = {}, context = getContex
     if (state.progressionBusy) return;
     const root = getProgressionRoot(context);
     if (!root?.pendingAdvancement) return;
+    const actionIdentity = createStoryEngineEpochIdentity(context);
     root.ui = root.ui || {};
     delete root.ui.error;
 
@@ -7803,7 +7908,7 @@ async function handleProgressionAction(action, details = {}, context = getContex
         } else if (action === 'back') {
             root.pendingAdvancement.choice = 'choose';
         } else if (action === 'apply-stat') {
-            await applyProgressionStatChoice(root, details.stat, context);
+            await applyProgressionStatChoice(root, details.stat, context, actionIdentity);
         } else if (action === 'generate-abilities') {
             state.progressionBusy = true;
             root.pendingAdvancement.swapAbilityIndex = getSelectedProgressionSwapAbilityIndex(context);
@@ -7819,19 +7924,23 @@ async function handleProgressionAction(action, details = {}, context = getContex
             if (!Array.isArray(root.pendingAdvancement.abilityOptions) || !root.pendingAdvancement.abilityOptions.length) {
                 root.pendingAdvancement.swapAbilityIndex = getSelectedProgressionSwapAbilityIndex(context);
             }
-            await applyProgressionAbilityChoice(root, Number(details.optionIndex), context);
+            await applyProgressionAbilityChoice(root, Number(details.optionIndex), context, actionIdentity);
         } else if (action === 'choose-spell') {
-            await applyProgressionSpellChoice(root, Number(details.optionIndex), context);
+            await applyProgressionSpellChoice(root, Number(details.optionIndex), context, actionIdentity);
         }
+        assertStoryEngineEpochCurrent(actionIdentity, 'Progression action expired because the active chat changed.');
         await persistMetadata(context);
     } catch (error) {
+        if (!isCurrentStoryEngineEpoch(actionIdentity)) return;
         root.ui.error = error instanceof Error ? error.message : String(error);
         console.error(`[${EXTENSION_NAME}] progression action failed`, error);
         await persistMetadata(context);
     } finally {
-        state.progressionBusy = false;
-        renderProgressionCard(context);
-        refreshSettingsControls();
+        if (isCurrentStoryEngineEpoch(actionIdentity)) {
+            state.progressionBusy = false;
+            renderProgressionCard(context);
+            refreshSettingsControls();
+        }
     }
 }
 
@@ -7854,6 +7963,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
     if (state.playerSetupBusy) return;
     const root = getPlayerRoot(context);
     if (!root) return;
+    const actionIdentity = createStoryEngineEpochIdentity(context);
 
     root.creator = root.creator || { stage: 'offer' };
 
@@ -7953,7 +8063,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
         } else if (action === 'back-to-identity') {
             root.creator.stage = root.creator.flow === 'new' ? 'identity' : 'persona-sheet';
         } else if (action === 'approve-sheet') {
-            await approvePlayerSheet(root, context);
+            await approvePlayerSheet(root, context, actionIdentity);
         } else if (action === 'back-from-adventure-start') {
             const flow = root.creator?.flow || (root.sheet?.source === 'existing_persona_conversion' ? 'persona' : 'new');
             root.ready = false;
@@ -7985,7 +8095,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
             }
         } else if (action === 'start-adventure') {
             const prompt = buildPlayerAdventureStartPrompt(root);
-            if (submitPlayerAdventureStartPrompt(prompt)) {
+            if (submitPlayerAdventureStartPrompt(prompt, context, actionIdentity)) {
                 root.adventureStartPrompt = prompt;
                 root.adventureStarted = true;
                 root.adventureStartPending = false;
@@ -7996,8 +8106,11 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
             root.adventureStartPending = false;
             root.adventureStartDismissedAt = Date.now();
         }
+        assertStoryEngineEpochCurrent(actionIdentity, 'Player setup action expired because the active chat changed.');
         await persistMetadata(context);
     } catch (error) {
+
+        if (!isCurrentStoryEngineEpoch(actionIdentity)) return;
 
         root.creator.error = error instanceof Error ? error.message : String(error);
 
@@ -8006,12 +8119,11 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
         await persistMetadata(context);
 
     } finally {
-
-        state.playerSetupBusy = false;
-
-        renderPlayerSetupCard(context);
-
-        refreshSettingsControls();
+        if (isCurrentStoryEngineEpoch(actionIdentity)) {
+            state.playerSetupBusy = false;
+            renderPlayerSetupCard(context);
+            refreshSettingsControls();
+        }
 
     }
 
@@ -8066,34 +8178,46 @@ function syncIdentityInputs(creator) {
     delete creator.identity.appearance;
 }
 
-function submitPlayerAdventureStartPrompt(prompt, context = getContext()) {
+function submitPlayerAdventureStartPrompt(prompt, context = getContext(), actionIdentity = null) {
     const text = String(prompt || '').trim();
     if (!text || typeof context?.generate !== 'function') {
         notifyError('Could not find SillyTavern generation API to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
         return false;
     }
+    const requestIdentity = actionIdentity || createStoryEngineEpochIdentity(context);
     setTimeout(() => {
-        context.generate('normal', {
-            automatic_trigger: true,
-            quiet_prompt: text,
-            quietToLoud: true,
-        }).catch(error => {
-            console.error(`[${EXTENSION_NAME}] adventure start failed`, error);
-            const message = error instanceof Error ? error.message : String(error);
-            notifyError(`Could not start adventure: ${message}`, EXTENSION_NAME, { timeOut: 7000 });
-        });
+        void (async () => {
+            if (!isStoryEngineEnabled() || !isCurrentStoryEngineEpoch(requestIdentity, context)) return;
+            try {
+                await context.generate('normal', {
+                    automatic_trigger: true,
+                    quiet_prompt: text,
+                    quietToLoud: true,
+                });
+            } catch (error) {
+                if (!isCurrentStoryEngineEpoch(requestIdentity, context)) return;
+                console.error(`[${EXTENSION_NAME}] adventure start failed`, error);
+                const message = error instanceof Error ? error.message : String(error);
+                notifyError(`Could not start adventure: ${message}`, EXTENSION_NAME, { timeOut: 7000 });
+            }
+        })();
     }, 0);
     return true;
 }
 
-async function approvePlayerSheet(root, context = getContext()) {
+async function approvePlayerSheet(root, context = getContext(), actionIdentity = null) {
     const creator = root.creator || {};
     const sheetText = String(creator.sheetText || buildPersonaStatsSheet(creator)).trim();
     if (!isValidCoreStats(creator.stats)) {
         throw new Error('Cannot approve player setup because the stat block is invalid.');
     }
 
-    const personaWrite = await writePlayerSheetToPersona(sheetText, context);
+    validatePlayerCreatorSheet(sheetText, creator);
+
+    const personaWrite = await writePlayerSheetToPersona(sheetText, context, actionIdentity);
+    if (actionIdentity) {
+        assertStoryEngineEpochCurrent(actionIdentity, 'Player sheet approval expired because the active chat changed.');
+    }
 
     root.ready = true;
 
@@ -8129,7 +8253,7 @@ async function approvePlayerSheet(root, context = getContext()) {
     notifySuccess('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
 }
 
-async function applyProgressionStatChoice(root, stat, context = getContext()) {
+async function applyProgressionStatChoice(root, stat, context = getContext(), actionIdentity = null) {
     const statName = String(stat || '').toUpperCase();
     if (!PLAYER_STATS.includes(statName)) throw new Error('Choose a valid stat.');
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
@@ -8142,7 +8266,10 @@ async function applyProgressionStatChoice(root, stat, context = getContext()) {
         [statName]: Number(stats[statName]) + 1,
     });
     const nextText = updatePersonaStatText(getPersonaText(context), statName, nextStats[statName]);
-    await writePlayerSheetToPersona(nextText, context);
+    await writePlayerSheetToPersona(nextText, context, actionIdentity);
+    if (actionIdentity) {
+        assertStoryEngineEpochCurrent(actionIdentity, 'Progression stat update expired because the active chat changed.');
+    }
     syncPlayerRootAfterPersonaEdit(context, nextText, nextStats);
     completeProgressionAdvancement(root, {
         type: 'stat',
@@ -8151,7 +8278,7 @@ async function applyProgressionStatChoice(root, stat, context = getContext()) {
     }, context);
 }
 
-async function applyProgressionAbilityChoice(root, optionIndex, context = getContext()) {
+async function applyProgressionAbilityChoice(root, optionIndex, context = getContext(), actionIdentity = null) {
     const pending = root?.pendingAdvancement;
     const options = Array.isArray(pending?.abilityOptions) ? pending.abilityOptions : [];
     const index = Math.max(0, Math.floor(Number(optionIndex)));
@@ -8168,7 +8295,10 @@ async function applyProgressionAbilityChoice(root, optionIndex, context = getCon
     }
     const nextText = replaceAbilityInPersona(persona, pending.swapAbilityIndex, option);
 
-    await writePlayerSheetToPersona(nextText, context);
+    await writePlayerSheetToPersona(nextText, context, actionIdentity);
+    if (actionIdentity) {
+        assertStoryEngineEpochCurrent(actionIdentity, 'Progression ability update expired because the active chat changed.');
+    }
     syncPlayerRootAfterPersonaEdit(context, nextText, getPersonaCoreStats(context));
     completeProgressionAdvancement(root, {
         type: 'swapAbility',
@@ -8177,7 +8307,7 @@ async function applyProgressionAbilityChoice(root, optionIndex, context = getCon
     }, context);
 }
 
-async function applyProgressionSpellChoice(root, optionIndex, context = getContext()) {
+async function applyProgressionSpellChoice(root, optionIndex, context = getContext(), actionIdentity = null) {
     const pending = root?.pendingAdvancement;
     const options = Array.isArray(pending?.spellOptions) ? pending.spellOptions : [];
     const index = Math.max(0, Math.floor(Number(optionIndex)));
@@ -8194,7 +8324,10 @@ async function applyProgressionSpellChoice(root, optionIndex, context = getConte
     if (spells.length >= PROGRESSION_MAX_SPELLS) throw new Error(`Spell list is already at the maximum of ${PROGRESSION_MAX_SPELLS}.`);
     const nextText = appendSpellToPersona(persona, option);
 
-    await writePlayerSheetToPersona(nextText, context);
+    await writePlayerSheetToPersona(nextText, context, actionIdentity);
+    if (actionIdentity) {
+        assertStoryEngineEpochCurrent(actionIdentity, 'Progression spell update expired because the active chat changed.');
+    }
     syncPlayerRootAfterPersonaEdit(context, nextText, stats);
     completeProgressionAdvancement(root, {
         type: 'learnSpell',
@@ -8560,16 +8693,20 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
         throw new Error('Story Engine is disabled.');
     }
     const context = getContext();
-    state.bypassPromptReady = true;
+    const requestIdentity = createStoryEngineEpochIdentity(context);
+    const bypassToken = promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(async () => {
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
             return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'progression generation' });
+        }, {
+            isCurrent: () => isCurrentStoryEngineEpoch(requestIdentity, context),
+            expiredMessage: 'Progression generation expired because the active chat changed.',
         });
     } finally {
-        state.bypassPromptReady = false;
+        promptReadyBypassGate.release(bypassToken);
     }
 }
 
@@ -8841,11 +8978,13 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
         },
     ];
-    return sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
+    const sheetText = sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
 
         temperature: 0.7,
 
     }));
+    validatePlayerCreatorSheet(sheetText, creator);
+    return sheetText;
 
 }
 
@@ -9063,11 +9202,13 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
     ];
 
-    return sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
+    const sheetText = sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
 
         temperature: 0.1,
 
     }));
+    validatePlayerCreatorSheet(sheetText, creator);
+    return sheetText;
 
 }
 
@@ -9087,6 +9228,22 @@ function sanitizeGeneratedSheet(raw) {
 
     return text;
 
+}
+
+function validatePlayerCreatorSheet(sheetText, creator = {}) {
+    const identity = creator.identity || {};
+    const expectedRace = creator.flow === 'new'
+        ? identity.raceMode === 'specify'
+            ? String(identity.specifiedRace || '').trim()
+            : identity.raceMode === 'pick'
+                ? String(identity.pickedRace || 'Human').trim()
+                : ''
+        : '';
+    return assertValidCharacterSheet(sheetText, {
+        stats: normalizeCoreStats(creator.stats || {}),
+        expectedRace,
+        genre: creator.flow === 'new' ? normalizePlayerAdventureGenre(identity.genre || 'Fantasy') : 'Fantasy',
+    });
 }
 
 
@@ -9116,16 +9273,20 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
         throw new Error('Story Engine is disabled.');
     }
     const context = getContext();
-    state.bypassPromptReady = true;
+    const requestIdentity = createStoryEngineEpochIdentity(context);
+    const bypassToken = promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(async () => {
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
             return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'player setup' });
+        }, {
+            isCurrent: () => isCurrentStoryEngineEpoch(requestIdentity, context),
+            expiredMessage: 'Player setup generation expired because the active chat changed.',
         });
     } finally {
-        state.bypassPromptReady = false;
+        promptReadyBypassGate.release(bypassToken);
     }
 }
 
@@ -9920,13 +10081,13 @@ function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserTe
     ].join('\n');
 }
 
-async function requestTargetedProseBanRepair(narrationText, findings, latestUserText = '') {
+async function requestTargetedProseBanRepair(narrationText, findings, latestUserText = '', requestOptions = {}) {
     if (!isStoryEngineEnabled()) {
         throw new Error('Story Engine is disabled.');
     }
     const prompt = buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserText);
     const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 600));
-    state.bypassPromptReady = true;
+    const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
             if (settings?.semanticProfileId) {
@@ -9935,21 +10096,22 @@ async function requestTargetedProseBanRepair(narrationText, findings, latestUser
                 });
             }
             return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' });
-        }));
+        }), requestOptions);
     } finally {
-        state.bypassPromptReady = false;
+        promptReadyBypassGate.release(bypassToken);
     }
 }
 
-async function requestTargetedProseBanRepairWithTimeout(narrationText, findings, latestUserText = '') {
+async function requestTargetedProseBanRepairWithTimeout(narrationText, findings, latestUserText = '', requestOptions = {}) {
     let timeoutId = null;
+    const requestControl = createTimedInternalRequestControl(requestOptions);
     try {
         return await Promise.race([
-            requestTargetedProseBanRepair(narrationText, findings, latestUserText),
+            requestTargetedProseBanRepair(narrationText, findings, latestUserText, requestControl.options),
             new Promise((_, reject) => {
                 timeoutId = setTimeout(
                     () => {
-                        state.bypassPromptReady = false;
+                        requestControl.cancel();
                         reject(new Error(`Targeted Prose Guard repair timed out after ${Math.round(PROSE_GUARD_TIMEOUT_MS / 1000)} seconds.`));
                     },
                     PROSE_GUARD_TIMEOUT_MS,
@@ -9958,17 +10120,18 @@ async function requestTargetedProseBanRepairWithTimeout(narrationText, findings,
         ]);
     } finally {
         if (timeoutId != null) clearTimeout(timeoutId);
+        requestControl.release();
     }
 }
 
-async function applyTargetedProseBanRepairIfNeeded(narrationText, latestUserText = '') {
+async function applyTargetedProseBanRepairIfNeeded(narrationText, latestUserText = '', requestOptions = {}) {
     const findings = collectTargetedProseBanFindings(narrationText);
     if (!findings.length) {
         return { narrationText, changed: false, findings, remainingFindings: [] };
     }
 
     try {
-        const repairRaw = await requestTargetedProseBanRepairWithTimeout(narrationText, findings, latestUserText);
+        const repairRaw = await requestTargetedProseBanRepairWithTimeout(narrationText, findings, latestUserText, requestOptions);
         const repairedText = sanitizeProseGuardResponse(repairRaw, narrationText);
         const remainingFindings = collectTargetedProseBanFindings(repairedText);
         if (remainingFindings.length) {
@@ -10077,7 +10240,7 @@ function parseCombinedPostNarrationResponse(raw, fallbackText) {
     return { correctedNarration, trackerDelta };
 }
 
-async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }, requestOptions = {}) {
     if (!isStoryEngineEnabled()) {
         throw new Error('Story Engine is disabled.');
     }
@@ -10085,7 +10248,7 @@ async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrat
     const proseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
     const trackerLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
     const responseLength = Math.min(9000, proseLength + trackerLength + 700);
-    state.bypassPromptReady = true;
+    const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
             if (settings?.semanticProfileId) {
@@ -10094,19 +10257,41 @@ async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrat
                 });
             }
             return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'combined post-narration pass' });
-        }));
+        }), requestOptions);
     } finally {
-        state.bypassPromptReady = false;
+        promptReadyBypassGate.release(bypassToken);
     }
 }
 
-async function requestProseGuardCorrection(narrationText, latestUserText = '') {
+async function requestCombinedPostNarrationPassWithTimeout(args, requestOptions = {}) {
+    let timeoutId = null;
+    const requestControl = createTimedInternalRequestControl(requestOptions);
+    try {
+        return await Promise.race([
+            requestCombinedPostNarrationPass(args, requestControl.options),
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => {
+                        requestControl.cancel();
+                        reject(new Error(`Combined post-narration pass timed out after ${Math.round(PROSE_GUARD_TIMEOUT_MS / 1000)} seconds.`));
+                    },
+                    PROSE_GUARD_TIMEOUT_MS,
+                );
+            }),
+        ]);
+    } finally {
+        if (timeoutId != null) clearTimeout(timeoutId);
+        requestControl.release();
+    }
+}
+
+async function requestProseGuardCorrection(narrationText, latestUserText = '', requestOptions = {}) {
     if (!isStoryEngineEnabled()) {
         throw new Error('Story Engine is disabled.');
     }
     const prompt = buildProseGuardPrompt(narrationText, latestUserText);
     const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
-    state.bypassPromptReady = true;
+    const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
             if (settings?.semanticProfileId) {
@@ -10115,9 +10300,9 @@ async function requestProseGuardCorrection(narrationText, latestUserText = '') {
                 });
             }
             return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'Prose Guard' });
-        }));
+        }), requestOptions);
     } finally {
-        state.bypassPromptReady = false;
+        promptReadyBypassGate.release(bypassToken);
     }
 }
 
@@ -10125,15 +10310,16 @@ function deferForProseGuardFinalization() {
     return new Promise(resolve => setTimeout(resolve, PROSE_GUARD_DEFER_MS));
 }
 
-async function requestProseGuardCorrectionWithTimeout(narrationText, latestUserText = '') {
+async function requestProseGuardCorrectionWithTimeout(narrationText, latestUserText = '', requestOptions = {}) {
     let timeoutId = null;
+    const requestControl = createTimedInternalRequestControl(requestOptions);
     try {
         return await Promise.race([
-            requestProseGuardCorrection(narrationText, latestUserText),
+            requestProseGuardCorrection(narrationText, latestUserText, requestControl.options),
             new Promise((_, reject) => {
                 timeoutId = setTimeout(
                     () => {
-                        state.bypassPromptReady = false;
+                        requestControl.cancel();
                         reject(new Error(`Prose Guard timed out after ${Math.round(PROSE_GUARD_TIMEOUT_MS / 1000)} seconds.`));
                     },
                     PROSE_GUARD_TIMEOUT_MS,
@@ -10142,12 +10328,50 @@ async function requestProseGuardCorrectionWithTimeout(narrationText, latestUserT
         ]);
     } finally {
         if (timeoutId != null) clearTimeout(timeoutId);
+        requestControl.release();
     }
+}
+
+function createTimedInternalRequestControl(requestOptions = {}) {
+    let cancelled = false;
+    const cancellationHandlers = new Set();
+    const bypassToken = promptReadyBypassGate.acquire();
+    const release = () => promptReadyBypassGate.release(bypassToken);
+    const parentIsCurrent = typeof requestOptions?.isCurrent === 'function'
+        ? requestOptions.isCurrent
+        : () => true;
+    return {
+        options: {
+            ...requestOptions,
+            bypassToken,
+            isCurrent: () => !cancelled && parentIsCurrent(),
+            registerCancellation(handler) {
+                if (typeof handler !== 'function') return () => {};
+                if (cancelled) {
+                    handler();
+                    return () => {};
+                }
+                cancellationHandlers.add(handler);
+                return () => cancellationHandlers.delete(handler);
+            },
+        },
+        cancel() {
+            if (cancelled) return;
+            cancelled = true;
+            for (const handler of cancellationHandlers) handler();
+            cancellationHandlers.clear();
+            release();
+        },
+        release() {
+            cancellationHandlers.clear();
+            release();
+        },
+    };
 }
 
 function isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured = {}) {
     if (!context || !Array.isArray(context.chat)) return false;
-    if (captured?.chatId && getChatId(context) !== captured.chatId) return false;
+    if (!isCurrentStoryEngineEpoch(captured, context)) return false;
     if (getMessageKey(messageId, context) !== messageKey) return false;
     const message = context.chat[messageId];
     return Boolean(message && !message.is_user);
@@ -10251,7 +10475,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         semanticTrackerNpcs,
     });
     const introTrackerInstruction = pendingRun?.adventureIntro
-        ? 'ADVENTURE INTRO ONLY: No semantic or deterministic mechanics ran for this opening. Use FINAL_NARRATION to add tracker entries for named or foreground NPCs who are concretely present, speaking, acting, blocking access, offering help, threatening, guiding, or otherwise relevant to the first playable scene. Do not add background crowds, unnamed passersby, atmospheric groups, offscreen figures, lore-only names, or speculative NPCs. If a new foreground NPC is added and no stronger personality evidence exists, assign a compact stable personalitySummary from their visible behavior or a grounded deterministic-style profile.'
+        ? 'ADVENTURE INTRO ONLY: No semantic or deterministic mechanics ran for this opening. Use FINAL_NARRATION to add tracker entries for named or foreground NPCs who are concretely present, speaking, acting, blocking access, offering help, threatening, guiding, or otherwise relevant to the first playable scene. Do not add background crowds, unnamed passersby, atmospheric groups, offscreen figures, lore-only names, or speculative NPCs. If a new foreground NPC is added and no stronger personality evidence exists, assign a compact stable personalitySummary from their visible behavior or a grounded deterministic-style profile. For WorldStateDelta.weatherCondition, copy clear, partly_cloudy, cloudy, overcast, light_rain, heavy_rain, or storm ONLY when FINAL_NARRATION explicitly establishes that opening weather; otherwise use unchanged. Set weatherTick=none for this opening.'
         : '';
 
     return [
@@ -10335,13 +10559,13 @@ function buildSemanticPersonalityEvidence({ activeNpcNames, handoff, previousNpc
         .slice(0, 12);
 }
 
-async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
+async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }, requestOptions = {}) {
     if (!isStoryEngineEnabled()) {
         throw new Error('Story Engine is disabled.');
     }
     const prompt = buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot });
     const responseLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
-    state.bypassPromptReady = true;
+    const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withTrackerGenerationSettings(async settings => {
             if (settings?.semanticProfileId) {
@@ -10352,9 +10576,31 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
             }
 
             return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' });
-        }));
+        }), requestOptions);
     } finally {
-        state.bypassPromptReady = false;
+        promptReadyBypassGate.release(bypassToken);
+    }
+}
+
+async function requestPostNarrationTrackerDeltaWithTimeout(args, requestOptions = {}) {
+    let timeoutId = null;
+    const requestControl = createTimedInternalRequestControl(requestOptions);
+    try {
+        return await Promise.race([
+            requestPostNarrationTrackerDelta(args, requestControl.options),
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => {
+                        requestControl.cancel();
+                        reject(new Error(`Post-narration tracker update timed out after ${Math.round(PROSE_GUARD_TIMEOUT_MS / 1000)} seconds.`));
+                    },
+                    PROSE_GUARD_TIMEOUT_MS,
+                );
+            }),
+        ]);
+    } finally {
+        if (timeoutId != null) clearTimeout(timeoutId);
+        requestControl.release();
     }
 }
 
@@ -10368,6 +10614,11 @@ function prependComputedDebug(messageId, type) {
     }
     const context = getContext();
     const messageKey = getMessageKey(messageId, context);
+
+    if (state.pendingRun && !isCurrentStoryEngineEpoch(state.pendingRun, context)) {
+        invalidateStoryEnginePipeline();
+        return;
+    }
 
     if (!state.lastNarratorHandoff || state.lastNarratorHandoffKey === messageKey || type === 'impersonate') {
         releaseProseGuardDisplayIntercept({ restore: true, messageId });
@@ -10393,11 +10644,17 @@ function prependComputedDebug(messageId, type) {
     setChatInputLocked(true, 'Finalizing narration...');
     const finalizingToast = showProgress('Finalizing narration...');
     const captured = {
-        chatId: getChatId(context),
+        ...createStoryEngineEpochIdentity(context),
         narratorHandoff: state.lastNarratorHandoff,
         pendingRun: state.pendingRun,
     };
-    state.postNarrationFinalizers.add(messageKey);
+    const finalizerOwner = Symbol(messageKey);
+    const releaseFinalizerOwnership = () => {
+        if (state.postNarrationFinalizers.get(messageKey) === finalizerOwner) {
+            state.postNarrationFinalizers.delete(messageKey);
+        }
+    };
+    state.postNarrationFinalizers.set(messageKey, finalizerOwner);
 
     const finalize = () => {
         state.postNarrationFinalizerTimers.delete(messageKey);
@@ -10405,9 +10662,7 @@ function prependComputedDebug(messageId, type) {
             .catch(error => {
                 console.error(`[${EXTENSION_NAME}] post-narration finalization failed.`, error);
             })
-            .finally(() => {
-                state.postNarrationFinalizers.delete(messageKey);
-            });
+            .finally(releaseFinalizerOwnership);
     };
 
     if (proseGuardEnabled) {
@@ -10420,9 +10675,7 @@ function prependComputedDebug(messageId, type) {
         .catch(error => {
             console.error(`[${EXTENSION_NAME}] post-narration finalization failed.`, error);
         })
-        .finally(() => {
-            state.postNarrationFinalizers.delete(messageKey);
-        });
+        .finally(releaseFinalizerOwnership);
 }
 
 async function finalizePostNarrationMessage(messageId, type, messageKey, finalizingToast = null, captured = {}) {
@@ -10436,9 +10689,12 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         }
         const context = getContext();
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
-            clearRuntimePrompts();
             return;
         }
+        const requestOptions = {
+            isCurrent: () => isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured),
+            expiredMessage: 'Post-narration model request expired because its chat or message changed.',
+        };
 
         const message = context?.chat?.[messageId];
         if (!message || message.is_user || type === 'impersonate') {
@@ -10465,16 +10721,18 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         let finalTrackerDisplaySnapshot = null;
 
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
-            clearRuntimePrompts();
             return;
         }
 
         if (!(root && pendingRun) && proseGuardEnabled && narrationText) {
             try {
                 await deferForProseGuardFinalization();
-                const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
+                if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
+                const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '', requestOptions);
+                if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                 narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
-                const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '');
+                const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '', requestOptions);
+                if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                 narrationText = targetedRepair.narrationText;
             } catch (error) {
                 console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
@@ -10496,17 +10754,20 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             if (combinedPostPassEnabled) {
                 try {
                     await deferForProseGuardFinalization();
-                    const combinedRaw = await requestCombinedPostNarrationPass({
+                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
+                    const combinedRaw = await requestCombinedPostNarrationPassWithTimeout({
                         pendingRun,
                         messageKey,
                         narrationText,
                         trackerDisplaySnapshot,
-                    });
+                    }, requestOptions);
+                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                     const combinedResult = parseCombinedPostNarrationResponse(combinedRaw, narrationText);
                     narrationText = combinedResult.correctedNarration;
                     combinedTrackerDelta = combinedResult.trackerDelta;
                     broadProseGuardAlreadyApplied = true;
-                    const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '');
+                    const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '', requestOptions);
+                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                     narrationText = targetedRepair.narrationText;
                     if (targetedRepair.changed) {
                         combinedTrackerDelta = null;
@@ -10526,9 +10787,12 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             if (!combinedTrackerDelta && proseGuardEnabled && narrationText && !broadProseGuardAlreadyApplied) {
                 try {
                     await deferForProseGuardFinalization();
-                    const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '');
+                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
+                    const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '', requestOptions);
+                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                     narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
-                    const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '');
+                    const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '', requestOptions);
+                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                     narrationText = targetedRepair.narrationText;
                     trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
                         messageKey,
@@ -10545,7 +10809,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
                 let postNarrationDelta = combinedTrackerDelta;
                 if (!postNarrationDelta) {
-                    const trackerRaw = await requestPostNarrationTrackerDelta({
+                    const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout({
 
                         pendingRun,
 
@@ -10555,7 +10819,8 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
                         trackerDisplaySnapshot,
 
-                    });
+                    }, requestOptions);
+                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                     const trackerDeltaText = extractTrackerDeltaText(trackerRaw) || String(trackerRaw || '');
                     postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
                 }
@@ -10590,7 +10855,9 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 ? normalizeHiddenHealth(pendingRun.healthAfter, { user: trackerDisplaySnapshot.user, npcs: trackerDisplaySnapshot.npcs })
                 : null;
 
+            if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
             await saveTrackerUpdate(context, buildTrackerUpdateForPersistence(trackerDisplaySnapshot, hiddenHealthAfter), { save: false });
+            if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
 
             root.snapshots[messageKey] = {
 
@@ -10629,7 +10896,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         }
 
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
-            clearRuntimePrompts();
             return;
         }
 
@@ -10662,16 +10928,18 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         renderTrackerWidget(context);
         renderProgressionCard(context);
 
+        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
         await saveChat(context, { fallbackToMetadata: true });
 
-
-
+        if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
         clearRuntimePrompts();
         state.chatSignature = captureChatSignature(context);
     } finally {
-        releaseProseGuardDisplayIntercept({ restore: !finalNarrationRendered, messageId });
         clearProgress(finalizingToast);
-        setChatInputLocked(false);
+        if (isCurrentStoryEngineEpoch(captured)) {
+            releaseProseGuardDisplayIntercept({ restore: !finalNarrationRendered, messageId });
+            setChatInputLocked(false);
+        }
     }
 }
 
@@ -10682,7 +10950,9 @@ async function handleMessageDeleted(newLength) {
         state.chatSignature = captureChatSignature();
         return;
     }
+    invalidateStoryEnginePipeline();
     const context = getContext();
+    const operationIdentity = createStoryEngineEpochIdentity(context);
     const root = getTrackerRoot(context);
 
     if (!root) return;
@@ -10711,7 +10981,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
             }
             delete root.snapshots[key];
             removeProgressionRecordsForMessage(key, context);
@@ -10742,18 +11012,25 @@ async function handleMessageDeleted(newLength) {
         root.boundCompanion = normalizeBoundCompanionState(restoreCandidate.beforeBoundCompanion || root.boundCompanion || {});
         root.pendingBoundary = normalizePendingBoundaryState(restoreCandidate.beforePendingBoundary || root.pendingBoundary || {});
         await persistMetadata(context);
+        if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${Math.min(chatLength, firstAffectedIndex)}`);
 
     } else if (restoreTrackerFromLatestDisplaySnapshot(context)) {
 
         await persistMetadata(context);
+        if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
 
         console.info(`[${EXTENSION_NAME}] restored tracker display snapshot after message deletion.`);
 
     }
 
-    setTimeout(() => renderAllTrackerDisplayBlocks(context), 0);
-    setTimeout(() => renderProgressionCard(context), 0);
+    if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
+    setTimeout(() => {
+        if (isCurrentStoryEngineEpoch(operationIdentity, context)) renderAllTrackerDisplayBlocks(context);
+    }, 0);
+    setTimeout(() => {
+        if (isCurrentStoryEngineEpoch(operationIdentity, context)) renderProgressionCard(context);
+    }, 0);
 }
 
 
@@ -10763,51 +11040,51 @@ async function handleMessageSwiped(messageId) {
         state.chatSignature = captureChatSignature();
         return;
     }
+    invalidateStoryEnginePipeline();
     const context = getContext();
+    const operationIdentity = createStoryEngineEpochIdentity(context);
     const resolvedMessageId = Number.isFinite(Number(messageId)) ? Number(messageId) : null;
 
     if (resolvedMessageId != null && restoreTrackerFromMessageDisplaySnapshot(resolvedMessageId, context)) {
 
         await persistMetadata(context);
+        if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
 
     } else if (restoreTrackerFromLatestDisplaySnapshot(context)) {
         await persistMetadata(context);
+        if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
     }
+    if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
     state.lastNarratorHandoffKey = null;
     state.chatSignature = captureChatSignature();
     clearRuntimePrompts();
-    setTimeout(() => renderAllTrackerDisplayBlocks(context), 0);
-    setTimeout(() => renderProgressionCard(context), 0);
+    setTimeout(() => {
+        if (isCurrentStoryEngineEpoch(operationIdentity, context)) renderAllTrackerDisplayBlocks(context);
+    }, 0);
+    setTimeout(() => {
+        if (isCurrentStoryEngineEpoch(operationIdentity, context)) renderProgressionCard(context);
+    }, 0);
 }
 
 
 function handleChatChanged() {
-    clearPendingRunCleanupTimer();
-    clearPostNarrationFinalizerTimers();
-    clearAllProgress();
-    setChatInputLocked(false);
-    releaseProseGuardDisplayIntercept();
     if (!isStoryEngineEnabled()) {
         disableStoryEngineRuntime();
         state.chatSignature = captureChatSignature();
         return;
     }
+    const generationActive = state.generationActive;
+    invalidateStoryEnginePipeline();
     const context = getContext();
+    if (generationActive) abortGenerationAfterPromptReady(context);
     injectPromptOptionPrompts();
     getPlayerRoot(context);
     restoreTrackerFromLatestDisplaySnapshot(context);
     cleanVisibleDebugDisplays(context);
-    state.lastNarratorHandoffKey = null;
-
-    state.lastNarratorHandoff = '';
-
-    state.pendingRun = null;
-
     state.chatSignature = captureChatSignature();
-
-    clearRuntimePrompts();
-
+    const renderIdentity = createStoryEngineEpochIdentity(context);
     setTimeout(() => {
+        if (!isCurrentStoryEngineEpoch(renderIdentity)) return;
         renderAllTrackerDisplayBlocks(context);
         renderPlayerSetupCard(context);
         renderProgressionCard(context);
@@ -10815,7 +11092,34 @@ function handleChatChanged() {
 }
 
 
+function handlePersonaChanged() {
+    if (!isStoryEngineEnabled()) {
+        disableStoryEngineRuntime();
+        return;
+    }
+    const generationActive = state.generationActive;
+    invalidateStoryEnginePipeline();
+    const context = getContext();
+    if (generationActive) abortGenerationAfterPromptReady(context);
+    injectPromptOptionPrompts();
+    getPlayerRoot(context);
+    const renderIdentity = createStoryEngineEpochIdentity(context);
+    setTimeout(() => {
+        if (!isCurrentStoryEngineEpoch(renderIdentity, context)) return;
+        renderPlayerSetupCard(context);
+        renderProgressionCard(context);
+    }, 0);
+}
+
+
+function handleGenerationLifecycleStart(type, params, dryRun) {
+    state.generationActive = isStoryEngineEnabled() && dryRun !== true;
+    ensureProseGuardDisplayInterceptor(type, params, dryRun);
+}
+
+
 function handleGenerationLifecycleEnd() {
+    state.generationActive = false;
     if (!isStoryEngineEnabled()) {
         disableStoryEngineRuntime();
         return;
@@ -10835,9 +11139,15 @@ function handleGenerationLifecycleEnd() {
         releaseProseGuardDisplayIntercept({ restore: true });
     } else if (!state.pendingRunCleanupTimer) {
         setChatInputLocked(true, 'Finalizing narration...');
+        const pendingRun = state.pendingRun;
+        const cleanupIdentity = {
+            runEpoch: pendingRun.runEpoch,
+            chatId: pendingRun.chatId,
+            personaId: pendingRun.personaId,
+        };
         state.pendingRunCleanupTimer = setTimeout(() => {
             state.pendingRunCleanupTimer = null;
-            if (!state.pendingRun) return;
+            if (!isCurrentStoryEngineEpoch(cleanupIdentity) || state.pendingRun !== pendingRun) return;
             state.pendingRun = null;
             state.lastNarratorHandoff = '';
             state.lastNarratorHandoffKey = null;
@@ -10853,6 +11163,7 @@ function handleGenerationLifecycleEnd() {
 }
 
 function handleGenerationLifecycleStopped() {
+    state.generationActive = false;
     if (consumeInternalGenerationStop()) {
         handleGenerationLifecycleEnd();
         return;
@@ -10871,7 +11182,8 @@ const STORY_ENGINE_EVENT_HANDLERS = Object.freeze([
     ['MESSAGE_SWIPED', handleMessageSwiped],
     ['CHAT_CHANGED', handleChatChanged],
     ['CHAT_CREATED', handleChatChanged],
-    ['GENERATION_STARTED', ensureProseGuardDisplayInterceptor],
+    ['PERSONA_CHANGED', handlePersonaChanged],
+    ['GENERATION_STARTED', handleGenerationLifecycleStart],
     ['GENERATION_ENDED', handleGenerationLifecycleEnd],
     ['GENERATION_STOPPED', handleGenerationLifecycleStopped],
     ['CHAT_COMPLETION_SETTINGS_READY', handleChatCompletionSettingsReady],
@@ -10944,6 +11256,8 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
     }
 
+    const interceptorIdentity = createStoryEngineEpochIdentity(context);
+
     if (isNarratorDepthReplayPromptPass()) {
         try {
             injectPromptOptionPrompts();
@@ -10970,7 +11284,9 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
         clearRuntimePrompts();
         injectPromptOptionPrompts();
+        const runIdentity = createStoryEngineRunIdentity(context);
         state.pendingGeneration = {
+            ...runIdentity,
             type: type || 'normal',
 
             mode: 'ooc',
@@ -10982,7 +11298,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
             createdAt: Date.now(),
 
         };
-        state.activeRunId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        state.activeRunId = runIdentity.runId;
         releaseProseGuardDisplayIntercept();
         showProgress('Handling out-of-character reply...');
         return false;
@@ -10997,6 +11313,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         const root = getPlayerRoot(context);
         root.creator = root.creator || { stage: 'offer' };
         await persistMetadata(context);
+        if (!isCurrentStoryEngineEpoch(interceptorIdentity)) return true;
         renderPlayerSetupCard(context);
         clearRuntimePrompts();
 
@@ -11010,6 +11327,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
     if (progressionPending(context)) {
         await persistMetadata(context);
+        if (!isCurrentStoryEngineEpoch(interceptorIdentity)) return true;
         renderProgressionCard(context);
         clearRuntimePrompts();
         clearAllProgress();
@@ -11023,7 +11341,9 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
     getTrackerRoot(context);
 
+    const runIdentity = createStoryEngineRunIdentity(context);
     state.pendingGeneration = {
+        ...runIdentity,
         type: type || 'normal',
         mode: userInputMode.mode === 'proxy' ? 'proxy' : 'normal',
         rawUserText: latestUserText,
@@ -11046,7 +11366,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         contextSize,
         createdAt: Date.now(),
     };
-    state.activeRunId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    state.activeRunId = runIdentity.runId;
     releaseProseGuardDisplayIntercept({ restore: true });
     showProgress('Computing structured pre-flight...');
 
@@ -11056,12 +11376,10 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
 async function handleChatCompletionPromptReady(eventData) {
     if (!isStoryEngineEnabled()) {
-        clearRuntimePrompts();
-        clearPromptOptionPrompts();
-        state.pendingGeneration = null;
+        disableStoryEngineRuntime();
         return;
     }
-    if (state.bypassPromptReady || state.runningSemanticPass) return;
+    if (promptReadyBypassGate.isActive() || state.runningSemanticPass) return;
     if (!eventData || eventData.dryRun || !Array.isArray(eventData.chat)) return;
 
     if (!state.pendingGeneration) return;
@@ -11072,18 +11390,25 @@ async function handleChatCompletionPromptReady(eventData) {
 
     if (!context) return;
 
-    const runId = state.activeRunId;
+    const pendingGeneration = state.pendingGeneration;
+    const runIdentity = {
+        runId: pendingGeneration.runId || state.activeRunId,
+        runEpoch: Number(pendingGeneration.runEpoch ?? state.runEpoch),
+        chatId: String(pendingGeneration.chatId ?? getChatId(context)),
+        personaId: String(pendingGeneration.personaId ?? getActiveUserAvatar() ?? ''),
+    };
+    if (!isCurrentStoryEngineRun(runIdentity, context)) return;
 
 
     try {
 
-        const generationMode = state.pendingGeneration.mode || 'normal';
+        const generationMode = pendingGeneration.mode || 'normal';
 
         if (generationMode === 'ooc') {
             clearRuntimePrompts();
             eventData.chat.push({
                 role: 'system',
-                content: buildOocResponsePrompt(state.pendingGeneration.latestUserText || getLatestUserText(eventData.chat)),
+                content: buildOocResponsePrompt(pendingGeneration.latestUserText || getLatestUserText(eventData.chat)),
 
             });
             state.lastNarratorHandoff = '';
@@ -11096,108 +11421,119 @@ async function handleChatCompletionPromptReady(eventData) {
             if (!hasNarratorDepthPrompt(context) || !chatHasNarratorDepthPrompt(eventData.chat)) {
                 throw new Error('Story Engine native narrator handoff was not injected at depth 0; generation aborted before narration.');
             }
-            beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
+            beginProseGuardDisplayIntercept(pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
             await waitForStoryEngineModelCallSpacing(state.narratorDepthReplay?.spacingLabel || 'narrator model call');
-            if (!isCurrentStoryEngineRun(runId)) return;
+            if (!isCurrentStoryEngineRun(runIdentity)) return;
             clearAllProgress();
             return;
         }
 
-        if (isBeginningAdventureIntroGeneration(state.pendingGeneration, context)) {
-            const adventurePrompt = getActiveAdventureIntroPrompt(state.pendingGeneration, context);
+        if (isBeginningAdventureIntroGeneration(pendingGeneration, context)) {
+            const adventurePrompt = getActiveAdventureIntroPrompt(pendingGeneration, context);
             const nameGeneration = buildAdventureIntroNameGeneration(context, adventurePrompt);
-            state.pendingGeneration.nameGenerationSnapshot = nameGeneration;
-            const adventureGenre = state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context);
-            const isekaiOpeningSeed = state.pendingGeneration.isekaiOpeningSeed || buildIsekaiOpeningSeed({
+            pendingGeneration.nameGenerationSnapshot = nameGeneration;
+            const adventureGenre = pendingGeneration.adventureGenre || getActiveAdventureGenre(context);
+            const isekaiOpeningSeed = pendingGeneration.isekaiOpeningSeed || buildIsekaiOpeningSeed({
                 adventureGenre,
                 prompt: adventurePrompt,
             });
-            state.pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
+            pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
             const introOptions = {
                 adventureGenre,
-                worldState: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+                worldState: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
                 nameGeneration,
                 isekaiOpeningSeed,
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
             const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, introOptions);
-            state.pendingRun = buildAdventureIntroPendingRun(context, state.pendingGeneration, narratorModelContext);
+            state.pendingRun = buildAdventureIntroPendingRun(context, pendingGeneration, narratorModelContext);
             state.lastNarratorHandoff = narratorContext;
-            beginProseGuardDisplayIntercept(state.pendingGeneration.type || 'normal');
+            beginProseGuardDisplayIntercept(pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
             appendNarratorContextToPrompt(eventData.chat, narratorModelContext);
             markNextStartAdventureRequestReasoningCleanup();
             await waitForStoryEngineModelCallSpacing('adventure intro model call');
+            if (!isCurrentStoryEngineRun(runIdentity)) return;
             clearAllProgress();
             return;
         }
 
         state.runningSemanticPass = true;
-        const trackerSnapshot = state.pendingGeneration.trackerSnapshot || buildTrackerSnapshot(context);
+        const trackerSnapshot = pendingGeneration.trackerSnapshot || buildTrackerSnapshot(context);
         const semanticLedger = await runSemanticPassWithPromptReadyBypass(
             context,
 
             eventData.chat,
 
-            state.pendingGeneration.type,
+            pendingGeneration.type,
 
             trackerSnapshot,
 
+            pendingGeneration,
+
+            runIdentity,
+
         );
 
-        if (!isCurrentStoryEngineRun(runId) || !state.pendingGeneration) return;
+        if (!isCurrentStoryEngineRun(runIdentity) || state.pendingGeneration !== pendingGeneration) return;
 
         applyPlayerCoreStatsOverride(semanticLedger, context);
 
         context.structuredPreflightSettings = getSettings();
 
-        const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, state.pendingGeneration.type, {
-            playerTrackerSnapshot: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
-            worldStateSnapshot: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
-            boundCompanionSnapshot: state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
-            pendingBoundarySnapshot: state.pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+        const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, pendingGeneration.type, {
+            playerTrackerSnapshot: pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+            worldStateSnapshot: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
+            pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
         });
 
 
-        const narratorContext = formatNarratorPromptContext(report, state.pendingGeneration);
+        const narratorContext = formatNarratorPromptContext(report, pendingGeneration);
 
-        const narratorModelContext = formatNarratorModelPromptContext(report, state.pendingGeneration);
+        const narratorModelContext = formatNarratorModelPromptContext(report, pendingGeneration);
 
         state.pendingRun = {
 
-            type: state.pendingGeneration.type || 'normal',
+            type: pendingGeneration.type || 'normal',
+
+            runEpoch: runIdentity.runEpoch,
+
+            chatId: runIdentity.chatId,
+
+            personaId: runIdentity.personaId,
 
             mode: generationMode,
 
             trackerBefore: trackerSnapshot,
 
             trackerAfter: report.trackerUpdate?.npcs || {},
-            userBefore: state.pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+            userBefore: pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             userAfter: report.trackerUpdate?.user || {},
             healthBefore: report.hiddenHealth?.before || null,
             healthAfter: report.hiddenHealth?.after || report.trackerUpdate?.health || null,
-            powerActorsBefore: state.pendingGeneration.powerActorSnapshot || buildPowerActorSnapshot(context),
+            powerActorsBefore: pendingGeneration.powerActorSnapshot || buildPowerActorSnapshot(context),
             powerActorsAfter: report.trackerUpdate?.powerActors || {},
-            userKnowledgeBefore: state.pendingGeneration.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
+            userKnowledgeBefore: pendingGeneration.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userKnowledgeAfter: report.trackerUpdate?.userKnowledge || {},
-            userReputationBefore: state.pendingGeneration.userReputationSnapshot || buildUserReputationSnapshot(context),
+            userReputationBefore: pendingGeneration.userReputationSnapshot || buildUserReputationSnapshot(context),
             userReputationAfter: report.trackerUpdate?.userReputation || {},
-            worldStateBefore: state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
-            worldStateAfter: report.trackerUpdate?.worldState || state.pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
-            economyBefore: state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
-            economyAfter: report.trackerUpdate?.economy || state.pendingGeneration.economySnapshot || buildEconomySnapshot(context),
-            boundCompanionBefore: state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
-            boundCompanionAfter: report.trackerUpdate?.boundCompanion || state.pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
-            pendingBoundaryBefore: state.pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
-            pendingBoundaryAfter: report.trackerUpdate?.pendingBoundary || state.pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+            worldStateBefore: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            worldStateAfter: report.trackerUpdate?.worldState || pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            economyBefore: pendingGeneration.economySnapshot || buildEconomySnapshot(context),
+            economyAfter: report.trackerUpdate?.economy || pendingGeneration.economySnapshot || buildEconomySnapshot(context),
+            boundCompanionBefore: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
+            boundCompanionAfter: report.trackerUpdate?.boundCompanion || pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
+            pendingBoundaryBefore: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+            pendingBoundaryAfter: report.trackerUpdate?.pendingBoundary || pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
 
-            latestUserText: state.pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
+            latestUserText: pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
 
-            adventureGenre: state.pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
+            adventureGenre: pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
 
             report,
 
@@ -11206,7 +11542,7 @@ async function handleChatCompletionPromptReady(eventData) {
 
         armNarratorDepthReplay({
             context,
-            pendingGeneration: state.pendingGeneration,
+            pendingGeneration,
             pendingRun: state.pendingRun,
             narratorContext,
             narratorModelContext,
@@ -11218,7 +11554,7 @@ async function handleChatCompletionPromptReady(eventData) {
         abortGenerationAfterPromptReady(context);
         scheduleNarratorDepthReplay();
     } catch (error) {
-        if (!isCurrentStoryEngineRun(runId)) return;
+        if (!isCurrentStoryEngineRun(runIdentity)) return;
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
         state.startAdventureReasoningCleanupPending = false;
@@ -11233,7 +11569,7 @@ async function handleChatCompletionPromptReady(eventData) {
 
     } finally {
 
-        if (state.activeRunId === runId || state.activeRunId == null) {
+        if (isCurrentStoryEngineRun(runIdentity)) {
             state.runningSemanticPass = false;
 
             state.activeRunId = null;
@@ -11247,35 +11583,48 @@ async function handleChatCompletionPromptReady(eventData) {
 
 
 
-async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type, trackerSnapshot) {
+async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type, trackerSnapshot, pendingGeneration, runIdentity) {
 
-    state.bypassPromptReady = true;
+    const bypassToken = promptReadyBypassGate.acquire();
+    const stopOwnerId = getStoryEngineRunOwnerId(runIdentity);
 
     try {
 
-        await addEphemeralStoppingString(SEMANTIC_PREFLIGHT_STOP_SENTINEL);
+        await semanticStopController.claim(stopOwnerId, SEMANTIC_PREFLIGHT_STOP_SENTINEL);
 
-        return await withStoryEngineModelRequest(() => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
+        if (!isCurrentStoryEngineRun(runIdentity, context)) {
+            throw new Error('Story Engine semantic run expired before model generation.');
+        }
+
+        const semanticLedger = await withStoryEngineModelRequest(() => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
-            playerTrackerSnapshot: state.pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
-            powerActorSnapshot: state.pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
-            userKnowledgeSnapshot: state.pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
-            userReputationSnapshot: state.pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
-            worldStateSnapshot: state.pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),
-            boundCompanionSnapshot: state.pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
-            pendingBoundarySnapshot: state.pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+            playerTrackerSnapshot: pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+            powerActorSnapshot: pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
+            userKnowledgeSnapshot: pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
+            userReputationSnapshot: pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
+            worldStateSnapshot: pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),
+            boundCompanionSnapshot: pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
+            pendingBoundarySnapshot: pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             nameStyle: getSettings().nameStyle,
-            userInputMode: state.pendingGeneration?.mode || 'normal',
-            proxyUserAction: state.pendingGeneration?.mode === 'proxy' ? state.pendingGeneration?.latestUserText : '',
-            inlineProxyInstructions: state.pendingGeneration?.inlineProxyInstructions || [],
-        })));
+            userInputMode: pendingGeneration?.mode || 'normal',
+            proxyUserAction: pendingGeneration?.mode === 'proxy' ? pendingGeneration?.latestUserText : '',
+            inlineProxyInstructions: pendingGeneration?.inlineProxyInstructions || [],
+        })), {
+            isCurrent: () => isCurrentStoryEngineRun(runIdentity, context),
+            expiredMessage: 'Story Engine semantic run expired before its model request completed.',
+        });
+
+        if (!isCurrentStoryEngineRun(runIdentity, context)) {
+            throw new Error('Story Engine semantic run expired during model generation.');
+        }
+        return semanticLedger;
     } finally {
 
-        await flushEphemeralStoppingStrings();
+        await semanticStopController.release(stopOwnerId);
 
-        state.bypassPromptReady = false;
+        promptReadyBypassGate.release(bypassToken);
 
     }
 
@@ -11321,10 +11670,7 @@ function abortGenerationAfterPromptReady(context) {
 
 export function onDisable() {
     const context = getContext();
-    clearPostNarrationFinalizerTimers();
-    clearAllProgress();
-    clearThinkingDisableRuntimeState();
-    setChatInputLocked(false);
+    disableStoryEngineRuntime();
     removeStreamingArtifactRegex();
     if (context?.extensionPrompts) {
 
