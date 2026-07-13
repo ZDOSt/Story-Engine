@@ -243,7 +243,7 @@ async function generateSemanticRawWithProfile(prompt, responseLength, options = 
             stop_sequence: [SEMANTIC_PREFLIGHT_STOP_SENTINEL],
         },
         extractData: true,
-        preparePayload: applySemanticThinkingPayload,
+        preparePayload: applyStoryEngineThinkingDisabledPayload,
     });
     return extractGeneratedText(result);
 }
@@ -452,7 +452,11 @@ export function buildSemanticToolPrompt(prompt) {
     return messages;
 }
 
-function buildSemanticToolChoice(chatCompletionSource) {
+export function buildSemanticToolChoice(chatCompletionSource) {
+    if (String(chatCompletionSource || '').toLowerCase() === DEEPSEEK_CHAT_COMPLETION_SOURCE) {
+        return undefined;
+    }
+
     if (chatCompletionSource === 'claude') {
         return 'any';
     }

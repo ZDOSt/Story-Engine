@@ -486,7 +486,11 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     generateData.stream = false;
     generateData.n = undefined;
     if (tool) generateData.tools = [tool];
-    if (toolChoice) generateData.tool_choice = toolChoice;
+    if (toolChoice) {
+        generateData.tool_choice = toolChoice;
+    } else if (typeof options?.buildToolChoice === 'function') {
+        delete generateData.tool_choice;
+    }
     generateData.enable_web_search = false;
     delete generateData.request_images;
     delete generateData.request_image_resolution;
