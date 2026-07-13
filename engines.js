@@ -1,4 +1,12 @@
-import { normalizeCurrencyList } from './economy.js';
+import {
+    assignEquipmentTier,
+    equipmentTierForCurrencyAmount,
+    getNpcLootRankProfile,
+    normalizeCurrencyList,
+    normalizeEconomyDelta,
+    normalizeEconomyState,
+    normalizeEquipmentTierAssignments,
+} from './economy.js';
 
 export const ENGINE_PROMPT_TEXT = String.raw`[STRUCTURED_PREFLIGHT_ENGINE_EXTENSION v0.1 - SOURCE: EXTENSION ONLY]
 
@@ -1575,10 +1583,19 @@ export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
         npcPersistentRuleMutated: ['aliases', 'currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'slowBondEvidence', 'proactivityMemory', 'currentCoreStats', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'currency', 'lootSearchCompleted'],
-        playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'currency', 'tasks', 'commitments'],
+        playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'equipmentTiers', 'currency', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'harmMode', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'restraintControl', 'boundaryPressure', 'boundaryBreak', 'activeHostileThreat', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
+}
+
+export function sanitizeAggressionResultsForTrackerModel(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).map(([name, result]) => {
+        if (!result || typeof result !== 'object' || Array.isArray(result)) return [name, result];
+        const { TargetEquipmentDefense: _targetEquipmentDefense, ...sanitized } = result;
+        return [name, sanitized];
+    }));
 }
 
 export function trackerSummary(trackerUpdate) {
@@ -1832,16 +1849,24 @@ function normalizeMemoryTagList(value, allowed) {
 }
 
 export function normalizeTrackerUserState(value) {
+    const gear = normalizeTrackerStringList(value?.gear);
+    const inventory = normalizeTrackerStringList(value?.inventory);
     return {
         condition: normalizeTrackerCondition(value?.condition),
         wounds: normalizeTrackerStringList(value?.wounds),
         statusEffects: normalizeTrackerStringList(value?.statusEffects),
-        gear: normalizeTrackerStringList(value?.gear),
-        inventory: normalizeTrackerStringList(value?.inventory),
+        gear,
+        inventory,
+        equipmentTiers: normalizeEquipmentTierAssignments(value?.equipmentTiers, [...gear, ...inventory]),
         currency: normalizeCurrencyList(value?.currency),
         tasks: normalizeTrackerStringList(value?.tasks),
         commitments: normalizeTrackerStringList(value?.commitments),
     };
+}
+
+export function sanitizeTrackerUserStateForModel(value) {
+    const { equipmentTiers: _equipmentTiers, ...visibleState } = normalizeTrackerUserState(value);
+    return visibleState;
 }
 
 export function findTrackerEntryName(npcs = {}, wantedName = '') {
@@ -1894,6 +1919,69 @@ export function reconcileLootPossessionTransfers(snapshot = {}, delta = {}) {
         addUniqueTrackerDeltaItem(npcDelta.currencyRemove, match.item);
     }
     return result;
+}
+
+export function reconcileUserEquipmentTiers({
+    beforeUser = {},
+    afterUser = {},
+    userDelta = {},
+    npcsBefore = {},
+    npcDeltas = [],
+    economyBefore = {},
+    economyDelta = {},
+} = {}) {
+    const before = normalizeTrackerUserState(beforeUser);
+    const after = normalizeTrackerUserState(afterUser);
+    const beforeOwnedKeys = new Set([...before.gear, ...before.inventory].map(normalizePossessionTransferKey));
+    const ownedAfter = [...after.gear, ...after.inventory];
+    const addedItems = normalizeTrackerStringList([
+        ...(Array.isArray(userDelta?.gearAdd) ? userDelta.gearAdd : []),
+        ...(Array.isArray(userDelta?.inventoryAdd) ? userDelta.inventoryAdd : []),
+    ]);
+    let assignments = normalizeEquipmentTierAssignments(after.equipmentTiers, ownedAfter);
+    const economy = normalizeEconomyState(economyBefore);
+    const payment = normalizeEconomyDelta(economyDelta);
+    const pending = economy.pendingPrice;
+
+    for (const item of addedItems) {
+        const itemKey = normalizePossessionTransferKey(item);
+        if (!itemKey || beforeOwnedKeys.has(itemKey)) continue;
+        if (payment.payPendingPrice
+            && pending
+            && normalizePossessionTransferKey(pending.item) === itemKey) {
+            assignments = assignEquipmentTier(
+                assignments,
+                item,
+                equipmentTierForCurrencyAmount(pending.amount),
+                ownedAfter,
+            );
+            continue;
+        }
+
+        const transferMatches = findNpcEquipmentTransferMatches(npcsBefore, npcDeltas, itemKey);
+        if (transferMatches.length === 1) {
+            const source = normalizeTrackerEntry(npcsBefore[transferMatches[0].NPC] || {});
+            const tier = getNpcLootRankProfile(source.currentCoreStats?.Rank).equipmentTier;
+            assignments = assignEquipmentTier(assignments, item, tier, ownedAfter);
+        }
+    }
+
+    return normalizeTrackerUserState({ ...after, equipmentTiers: assignments });
+}
+
+function findNpcEquipmentTransferMatches(npcsBefore, npcDeltas, wantedKey) {
+    const matches = new Map();
+    for (const delta of Array.isArray(npcDeltas) ? npcDeltas : []) {
+        const NPC = findTrackerEntryName(npcsBefore, delta?.NPC);
+        if (!NPC) continue;
+        for (const field of ['gearRemove', 'inventoryRemove']) {
+            for (const item of Array.isArray(delta?.[field]) ? delta[field] : []) {
+                if (normalizePossessionTransferKey(item) !== wantedKey) continue;
+                matches.set(normalizeNameKey(NPC), { NPC });
+            }
+        }
+    }
+    return [...matches.values()];
 }
 
 export function finalizeLootSearchCompletion(npcs = {}, discovery = null) {

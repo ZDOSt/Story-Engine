@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, applyPendingBoundaryDelta, boundCompanionDeltaHasChanges, classifyDisposition, finalizeLootSearchCompletion, findTrackerEntryName, normalizeBoundCompanionState, normalizePendingBoundaryState, normalizeTrackerEntry, normalizeTrackerUserState, pendingBoundaryDeltaHasChanges, reconcileLootPossessionTransfers } from './engines.js';
+import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, applyPendingBoundaryDelta, boundCompanionDeltaHasChanges, classifyDisposition, finalizeLootSearchCompletion, findTrackerEntryName, normalizeBoundCompanionState, normalizePendingBoundaryState, normalizeTrackerEntry, normalizeTrackerUserState, pendingBoundaryDeltaHasChanges, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel } from './engines.js';
 
 import {
     addEphemeralStoppingString,
@@ -4353,7 +4353,17 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         ...(delta.user || {}),
         currencyRemove: mergePendingPricePaymentCurrencyRemove(delta.user?.currencyRemove || [], economyBefore, economyDelta),
     };
-    merged.user = applyTrackerDeltaToUserState(merged.user || {}, userDelta);
+    const userBefore = normalizeTrackerUserState(merged.user || {});
+    const userAfter = applyTrackerDeltaToUserState(userBefore, userDelta);
+    merged.user = reconcileUserEquipmentTiers({
+        beforeUser: userBefore,
+        afterUser: userAfter,
+        userDelta,
+        npcsBefore: merged.npcs || {},
+        npcDeltas: delta.npcs || [],
+        economyBefore,
+        economyDelta,
+    });
     merged.userKnowledge = mergeUserKnowledgeLedger(merged.userKnowledge || options.userKnowledgeBefore || {}, delta.userKnowledge || {});
     merged.userReputation = mergeUserReputationLedger(merged.userReputation || options.userReputationBefore || {}, delta.userReputation || {});
     merged.worldState = applyWorldStateDelta(merged.worldState || options.worldStateBefore || {}, delta.worldState || {}, {
@@ -4523,6 +4533,8 @@ function applyTrackerDeltaToUserState(before, delta) {
         gear: [...source.gear],
 
         inventory: [...source.inventory],
+
+        equipmentTiers: source.equipmentTiers.map(entry => ({ ...entry })),
 
         currency: [...source.currency],
 
@@ -10532,7 +10544,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         ? report.semanticLedger.trackerUpdateEngine.npcs
         : [];
     const previous = {
-        user: pendingRun?.userBefore || {},
+        user: sanitizeTrackerUserStateForModel(pendingRun?.userBefore || {}),
         npcs: pendingRun?.trackerBefore || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateBefore || {},
@@ -10541,7 +10553,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         pendingBoundary: pendingRun?.pendingBoundaryBefore || {},
     };
     const mechanicalAfter = {
-        user: pendingRun?.userAfter || {},
+        user: sanitizeTrackerUserStateForModel(pendingRun?.userAfter || {}),
         npcs: pendingRun?.trackerAfter || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
@@ -10591,7 +10603,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
 
         proactivityResults: handoff.proactivityResults || {},
 
-        aggressionResults: handoff.aggressionResults || {},
+        aggressionResults: sanitizeAggressionResultsForTrackerModel(handoff.aggressionResults),
 
         contextualInjuryCaps: pendingRun?.contextualInjuryCaps || [],
 

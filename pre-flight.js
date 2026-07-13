@@ -178,6 +178,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.activeHostileThreat=' + valueOrNone(resolution.activeHostileThreat),
         'resolutionPacket.UserImpairment=' + inline(resolution.UserImpairment ?? {}),
         'resolutionPacket.NPCImpairment=' + inline(resolution.NPCImpairment ?? {}),
+        'resolutionPacket.EquipmentDefense=' + inline(resolution.EquipmentDefense ?? {}),
         'resolutionPacket.hostilesInScene.NPC=' + list(resolution.hostilesInScene?.NPC),
         'resolutionPacket.ActionTargets=' + list(resolution.ActionTargets),
         'resolutionPacket.OppTargets.NPC=' + list(resolution.OppTargets?.NPC),
@@ -285,6 +286,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.activeHostileThreat', valueOrNone(resolution.activeHostileThreat)],
         ['impairment.user', summary.userImpairment],
         ['impairment.npc', summary.npcImpairment],
+        ['equipmentDefense.target', inline(resolution.EquipmentDefense ?? {})],
         ['injury.inflictedNpc', summary.inflictedNpcInjury],
         ['injury.inflictedUser', summary.inflictedUserInjury],
         ['npc.state', summary.npc],
@@ -328,6 +330,7 @@ function formatAggressionDebugLines(aggression = {}) {
             counterBonus: value.CounterBonus ?? 0,
             npcImpairment: value.NPCImpairment,
             targetImpairment: value.TargetImpairment || value.UserImpairment,
+            equipmentDefense: value.TargetEquipmentDefense,
         });
         lines.push(`aggression.roll.${name}=${attackRoll}`);
         lines.push(`aggression.result.${name}=${inline(value)}`);
@@ -353,13 +356,14 @@ function formatAggressionMechanicsEntries(aggression = {}) {
             counterBonus: value.CounterBonus ?? 0,
             npcImpairment: value.NPCImpairment,
             targetImpairment: value.TargetImpairment || value.UserImpairment,
+            equipmentDefense: value.TargetEquipmentDefense,
         })]);
         entries.push([`aggression.result.${name}`, inline(value)]);
     }
     return entries;
 }
 
-function buildAggressionRollLine({ npc, attackType, attackStat, defenseStat, attackDie, defenseDie, attackTotal, defenseTotal, margin, outcome, counterBonus, npcImpairment, targetImpairment }) {
+function buildAggressionRollLine({ npc, attackType, attackStat, defenseStat, attackDie, defenseDie, attackTotal, defenseTotal, margin, outcome, counterBonus, npcImpairment, targetImpairment, equipmentDefense }) {
     const attackDieText = Number.isFinite(Number(attackDie)) ? Number(attackDie) : '?';
     const defenseDieText = Number.isFinite(Number(defenseDie)) ? Number(defenseDie) : '?';
     const attackTotalText = Number.isFinite(Number(attackTotal)) ? Number(attackTotal) : '?';
@@ -367,11 +371,13 @@ function buildAggressionRollLine({ npc, attackType, attackStat, defenseStat, att
     const attackImpairText = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
     const targetImpairText = Number(targetImpairment?.AppliedToRoll === 'Y' ? targetImpairment.RollPenalty : 0);
     const attackBonusText = Number(counterBonus || 0);
+    const equipmentBonusText = Number(equipmentDefense?.AppliedToRoll === 'Y' ? equipmentDefense.Bonus : 0);
     const attackImpairSuffix = attackImpairText ? `+impairment(${attackImpairText})` : '';
     const defenseImpairSuffix = targetImpairText ? `+impairment(${targetImpairText})` : '';
+    const equipmentDefenseSuffix = equipmentBonusText ? `+equipment(${valueOrNone(equipmentDefense?.Tier)}:${equipmentBonusText})` : '';
     const attackStatValue = valueOrNone(attackStat);
     const defenseStatValue = valueOrNone(defenseStat);
-    return `${npc || '(unknown)'} ${valueOrNone(attackType)}: 1d20(${attackDieText}) + ${attackStatValue} + bonus(${attackBonusText})${attackImpairSuffix} = ${attackTotalText} vs 1d20(${defenseDieText}) + ${defenseStatValue}${defenseImpairSuffix} = ${defenseTotalText} (${valueOrNone(margin)} - ${valueOrNone(outcome)})`;
+    return `${npc || '(unknown)'} ${valueOrNone(attackType)}: 1d20(${attackDieText}) + ${attackStatValue} + bonus(${attackBonusText})${attackImpairSuffix} = ${attackTotalText} vs 1d20(${defenseDieText}) + ${defenseStatValue}${defenseImpairSuffix}${equipmentDefenseSuffix} = ${defenseTotalText} (${valueOrNone(margin)} - ${valueOrNone(outcome)})`;
 }
 
 export function formatNarratorModelPromptContext(report, options = {}) {

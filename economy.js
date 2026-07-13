@@ -24,6 +24,19 @@ const VALUE_TIER_BASES = Object.freeze([
     { name: 'elite', range: [5000, null], examples: 'magic items, property, ships, expeditions, major bribes, rare artifacts' },
 ]);
 
+const EQUIPMENT_DEFENSE_BONUSES = Object.freeze({
+    trivial: 0,
+    cheap: 0,
+    standard: 1,
+    expensive: 2,
+    luxury: 3,
+    elite: 4,
+});
+
+const PROTECTIVE_EQUIPMENT_PATTERN = /\b(?:armor|armour|body\s+armor|body\s+armour|mail|chainmail|chain\s+mail|ring\s+mail|scale\s+mail|plate\s+(?:armor|armour|mail|carrier)|coat\s+of\s+plates|hauberk|cuirass|breastplate|brigandine|gambeson|lamellar|shield|buckler|helmet|helm|gauntlets?|bracers?|greaves?|ballistic\s+vest|bulletproof\s+vest|armou?red\s+vest|flak\s+(?:vest|jacket)|riot\s+(?:armor|armour|shield|gear)|combat\s+(?:armor|armour|suit)|power(?:ed)?\s+(?:armor|armour)|armou?red\s+(?:suit|exoskeleton)|protective\s+suit|hardsuit|exosuit)\b/i;
+const DISABLED_PROTECTIVE_EQUIPMENT_PATTERN = /\b(?:broken|destroyed|ruined|shattered|unusable)\b/i;
+const NON_PROTECTIVE_EQUIPMENT_CONTEXT_PATTERN = /\b(?:anti[-\s]+armou?r|armou?r[-\s]+piercing|armou?r\s+(?:repair|maintenance|cleaning|crafting|smithing)|(?:armou?r|shield|helmet)\s+(?:manual|guide|handbook|blueprint|schematic|diagram|pattern|kit|tools?|parts?|scraps?|stand|rack|generator|emitter|projector))\b/i;
+
 const NPC_LOOT_RANK_PROFILES = Object.freeze({
     Weak: Object.freeze({ equipmentTier: 'cheap', currencyTier: 'trivial', currencyChance: 40 }),
     Average: Object.freeze({ equipmentTier: 'standard', currencyTier: 'cheap', currencyChance: 55 }),
@@ -78,6 +91,108 @@ export function getNpcLootRankProfile(rank = 'Average', genre = 'Fantasy') {
         currencyValueRange: currencyTier.range,
         currencyChance: profile.currencyChance,
         materialGuidance: NPC_EQUIPMENT_MATERIAL_GUIDANCE[normalizedRank],
+    };
+}
+
+export function normalizeEquipmentValueTier(value, fallback = 'standard') {
+    const normalizedFallback = Object.prototype.hasOwnProperty.call(EQUIPMENT_DEFENSE_BONUSES, fallback)
+        ? fallback
+        : 'standard';
+    const tier = String(value || '').trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(EQUIPMENT_DEFENSE_BONUSES, tier)
+        ? tier
+        : normalizedFallback;
+}
+
+export function equipmentDefenseBonusForTier(value) {
+    return EQUIPMENT_DEFENSE_BONUSES[normalizeEquipmentValueTier(value)] || 0;
+}
+
+export function equipmentTierForCurrencyAmount(value) {
+    const parsed = parseCurrencyAmount(value);
+    if (!parsed) return 'standard';
+    let matched = VALUE_TIER_BASES[0];
+    for (const tier of VALUE_TIER_BASES) {
+        if (parsed.amount < Number(tier.range[0] || 0)) break;
+        matched = tier;
+    }
+    return matched.name;
+}
+
+export function isProtectiveEquipmentItem(value) {
+    const item = cleanEquipmentItem(value);
+    return Boolean(item
+        && PROTECTIVE_EQUIPMENT_PATTERN.test(item)
+        && !DISABLED_PROTECTIVE_EQUIPMENT_PATTERN.test(item)
+        && !NON_PROTECTIVE_EQUIPMENT_CONTEXT_PATTERN.test(item));
+}
+
+export function normalizeEquipmentTierAssignments(value, ownedItems = [], defaultTier = 'standard') {
+    const owned = normalizeEquipmentItems(ownedItems);
+    const fallbackTier = normalizeEquipmentValueTier(defaultTier);
+    const ownedByKey = new Map(owned.map(item => [equipmentItemKey(item), item]));
+    const supplied = new Map();
+    const source = Array.isArray(value)
+        ? value
+        : value && typeof value === 'object'
+            ? Object.entries(value).map(([item, tier]) => ({ item, tier }))
+            : [];
+    for (const entry of source) {
+        const item = cleanEquipmentItem(entry?.item ?? entry?.Item);
+        const key = equipmentItemKey(item);
+        if (!key || !ownedByKey.has(key) || supplied.has(key)) continue;
+        supplied.set(key, normalizeEquipmentValueTier(entry?.tier ?? entry?.Tier));
+    }
+    return owned.map(item => ({
+        item,
+        tier: supplied.get(equipmentItemKey(item)) || fallbackTier,
+    }));
+}
+
+export function assignEquipmentTier(assignments, item, tier, ownedItems = []) {
+    const owned = normalizeEquipmentItems(ownedItems);
+    const wantedKey = equipmentItemKey(item);
+    if (!wantedKey || !owned.some(candidate => equipmentItemKey(candidate) === wantedKey)) {
+        return normalizeEquipmentTierAssignments(assignments, owned);
+    }
+    const current = normalizeEquipmentTierAssignments(assignments, owned);
+    return current.map(entry => equipmentItemKey(entry.item) === wantedKey
+        ? { ...entry, tier: normalizeEquipmentValueTier(tier) }
+        : entry);
+}
+
+export function resolveEquipmentDefense({ gear = [], equipmentTiers = [], defaultTier = 'standard' } = {}) {
+    const equipped = normalizeEquipmentItems(gear);
+    const fallbackTier = normalizeEquipmentValueTier(defaultTier);
+    const assignments = new Map(normalizeEquipmentTierAssignments(equipmentTiers, equipped, fallbackTier)
+        .map(entry => [equipmentItemKey(entry.item), entry.tier]));
+    const candidates = equipped
+        .filter(isProtectiveEquipmentItem)
+        .map(item => {
+            const tier = assignments.get(equipmentItemKey(item)) || fallbackTier;
+            return { item, tier, bonus: equipmentDefenseBonusForTier(tier) };
+        })
+        .sort((left, right) => right.bonus - left.bonus);
+    const best = candidates[0];
+    if (!best) {
+        return {
+            Eligible: 'N',
+            AppliedToRoll: 'N',
+            Item: '(none)',
+            Tier: 'none',
+            Bonus: 0,
+            Reason: 'no equipped protective gear',
+        };
+    }
+    return {
+        Eligible: 'Y',
+        AppliedToRoll: best.bonus > 0 ? 'Y' : 'N',
+        Item: best.item,
+        Tier: best.tier,
+        Bonus: best.bonus,
+        Reason: best.bonus > 0
+            ? 'highest-tier equipped protective item'
+            : 'equipped protective gear has no defense bonus at this tier',
     };
 }
 
@@ -292,6 +407,41 @@ function cleanLootSeedPart(value) {
     return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, 180);
 }
 
+function normalizeEquipmentItems(value) {
+    const source = Array.isArray(value) ? value : [value];
+    const result = [];
+    const seen = new Set();
+    for (const raw of source) {
+        const item = cleanEquipmentItem(raw);
+        const key = equipmentItemKey(item);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        result.push(item);
+    }
+    return result.slice(-80);
+}
+
+function cleanEquipmentItem(value) {
+    const text = String(value ?? '')
+        .trim()
+        .replace(/^\[/, '')
+        .replace(/\]$/, '')
+        .replace(/^["']|["']$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unchanged'].includes(text.toLowerCase())) return '';
+    return text.slice(0, 140);
+}
+
+function equipmentItemKey(value) {
+    return cleanEquipmentItem(value)
+        .toLowerCase()
+        .replace(/[`*_~]/g, '')
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
 function stableLootPercent(seed) {
     return (stableLootHash(seed) % 100) + 1;
 }
@@ -313,14 +463,16 @@ function formatCurrencyValue(value, unit) {
 function parseCurrencyAmount(value) {
     const text = cleanCurrencyText(value);
     if (!text) return null;
-    let match = text.match(/^\$\s*(-?\d+(?:\.\d{1,2})?)$/);
-    if (match) return parsedCurrency(Number(match[1]), '$');
-    match = text.match(/^(-?\d+(?:\.\d{1,2})?)\s*(?:dollars?|usd)$/i);
-    if (match) return parsedCurrency(Number(match[1]), '$');
-    match = text.match(/^(-?\d+(?:\.\d{1,2})?)\s+([a-z][a-z0-9_-]*(?:\s+[a-z][a-z0-9_-]*){0,2})$/i);
-    if (match) return parsedCurrency(Number(match[1]), canonicalCurrencyUnit(match[2]));
-    match = text.match(/^([a-z][a-z0-9_-]*(?:\s+[a-z][a-z0-9_-]*){0,2})\s+(-?\d+(?:\.\d{1,2})?)$/i);
-    if (match) return parsedCurrency(Number(match[2]), canonicalCurrencyUnit(match[1]));
+    const amountPattern = '-?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d{1,2})?';
+    const parseAmount = amount => Number(String(amount).replace(/,/g, ''));
+    let match = text.match(new RegExp(`^\\$\\s*(${amountPattern})$`));
+    if (match) return parsedCurrency(parseAmount(match[1]), '$');
+    match = text.match(new RegExp(`^(${amountPattern})\\s*(?:dollars?|usd)$`, 'i'));
+    if (match) return parsedCurrency(parseAmount(match[1]), '$');
+    match = text.match(new RegExp(`^(${amountPattern})\\s+([a-z][a-z0-9_-]*(?:\\s+[a-z][a-z0-9_-]*){0,2})$`, 'i'));
+    if (match) return parsedCurrency(parseAmount(match[1]), canonicalCurrencyUnit(match[2]));
+    match = text.match(new RegExp(`^([a-z][a-z0-9_-]*(?:\\s+[a-z][a-z0-9_-]*){0,2})\\s+(${amountPattern})$`, 'i'));
+    if (match) return parsedCurrency(parseAmount(match[2]), canonicalCurrencyUnit(match[1]));
     return null;
 }
 

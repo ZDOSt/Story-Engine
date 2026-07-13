@@ -92,7 +92,7 @@ import {
     safeSceneHealingAmount,
 } from './health-state.js';
 import { normalizeWorldState } from './world-state.js';
-import { buildDeterministicLootEnvelope, getNpcLootRankProfile, normalizeEconomyState } from './economy.js';
+import { buildDeterministicLootEnvelope, getNpcLootRankProfile, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
 
 const NONE = '(none)';
@@ -926,7 +926,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const injuryTrackerUpdate = applyInflictedNpcInjuriesToTrackerUpdate(resolution.packet, relationships.trackerUpdate, trackerSnapshot, audit);
     const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit, refereeContext, context, rapportClock);
     applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit, rapportClock);
-    const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext);
+    const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext, playerTrackerSnapshot);
     const healthEvents = collectHiddenHealthEvents({
         ledger,
         resolutionPacket: resolution.packet,
@@ -961,7 +961,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         audit,
     });
     if (lootDiscovery.packet) resolution.packet.LootDiscovery = lootDiscovery.packet;
-    const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter);
+    const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter, playerTrackerSnapshot);
     const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), ledger?.trackerUpdateEngine?.userReputation || {});
     const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name, playerTrackerSnapshot);
     const boundCompanion = runBoundCompanionEngine({
@@ -3076,6 +3076,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let resolvedUserStat = null;
     let environmentDifficulty = 0;
     let targetCore = null;
+    let equipmentDefense = noEquipmentDefense('no qualifying mundane physical defender roll');
     const generatedNpcStats = [];
 
     if (rollNeeded === 'N') {
@@ -3169,6 +3170,10 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             ? evaluateNpcImpairment(oppTargetsNpcFirst, ledger, trackerSnapshot, semantic, goal, oppStat, rollNeeded, { allowRollPenalty: isCombatChallengeType(challengeType) || stealthOpposition })
             : noNpcImpairment('no opposing NPC roll');
         const npcImpairmentPenalty = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
+        equipmentDefense = challengeType === 'mundane_combat' && oppStat === 'PHY' && oppTargetsNpcFirst
+            ? resolveNpcEquipmentDefense(oppTargetsNpcFirst, null, trackerSnapshot, targetCore)
+            : noEquipmentDefense('equipment defense applies only to a living defender in mundane physical combat');
+        const equipmentDefenseBonus = appliedEquipmentDefenseBonus(equipmentDefense);
         const atkDie = rollPool[0];
         userAttackDie = atkDie;
         const defDie = healingStaticDc ? null : rollPool[1];
@@ -3176,7 +3181,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         const atkTot = atkDie + userStatValue + impairmentPenalty;
         const defTot = healingStaticDc
             ? healingStaticDc
-            : oppStat === 'ENV' ? defDie + environmentDifficulty : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty;
+            : oppStat === 'ENV' ? defDie + environmentDifficulty : defDie + statValue(targetCore, oppStat) + npcImpairmentPenalty + equipmentDefenseBonus;
         const margin = atkTot - defTot;
         combatActionSequence = isCombatChallengeType(challengeType);
 
@@ -3192,12 +3197,14 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
 
         audit.push(`2.7n.1 UserImpairmentEngine=${compact(userImpairment)}`);
         audit.push(`2.7n.2 NPCImpairmentEngine=${compact(npcImpairment)}`);
+        audit.push(`2.7n.3 EquipmentDefenseEngine=${compact(equipmentDefense)}`);
         audit.push(`2.7o resolveOutcome=atkDie:${atkDie}, atkTot:${atkTot}, ${healingStaticDc ? `healingDC:${healingStaticDc}` : `defDie:${defDie}`}, defTot:${defTot}, margin:${margin}, classifyCombatActionSequence:${combatActionSequence ? 'Y' : 'N'} -> ${compact(outcome)}`);
         const impairmentText = impairmentPenalty ? ` + impairment(${impairmentPenalty})` : '';
         const npcImpairmentText = npcImpairmentPenalty ? ` + impairment(${npcImpairmentPenalty})` : '';
+        const equipmentDefenseText = equipmentDefenseBonus ? ` + equipment(${equipmentDefense.Tier}:${equipmentDefenseBonus})` : '';
         const oppStatText = healingStaticDc
             ? `healingDC(${healingStaticDc})`
-            : oppStat === 'ENV' ? `1d20(${defDie}) + ENV(${environmentDifficulty})` : `1d20(${defDie}) + ${oppStat}(${statValue(targetCore, oppStat)})${npcImpairmentText}`;
+            : oppStat === 'ENV' ? `1d20(${defDie}) + ENV(${environmentDifficulty})` : `1d20(${defDie}) + ${oppStat}(${statValue(targetCore, oppStat)})${npcImpairmentText}${equipmentDefenseText}`;
         resultLine = userImpairment?.AutoFail === 'Y'
             ? `Automatic failure: ${userImpairment.Reason}`
             : `1d20(${atkDie}) + ${userStat}(${userStatValue})${impairmentText} = ${atkTot} vs ${oppStatText} = ${defTot} (${margin} - ${outcome.OutcomeTier})`;
@@ -3277,6 +3284,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         NPCInScene: showNone(npcInScene),
         UserImpairment: userImpairment,
         NPCImpairment: npcImpairment,
+        EquipmentDefense: equipmentDefense,
         InflictedInjuries: inflictedInjuries,
     };
 
@@ -6335,6 +6343,43 @@ function getEffectiveNpcImpairmentState(npcName, ledger, trackerSnapshot) {
     return applyTrackerDeltaToState(saved, delta, false);
 }
 
+function noEquipmentDefense(reason = 'equipment defense does not apply') {
+    return {
+        Eligible: 'N',
+        AppliedToRoll: 'N',
+        Item: NONE,
+        Tier: 'none',
+        Bonus: 0,
+        Reason: reason,
+    };
+}
+
+function appliedEquipmentDefenseBonus(value) {
+    return Number(value?.AppliedToRoll === 'Y' ? value.Bonus : 0) || 0;
+}
+
+function resolveUserEquipmentDefense(userState = {}) {
+    const user = normalizeTrackerUserState(userState);
+    return resolveEquipmentDefense({
+        gear: user.gear,
+        equipmentTiers: user.equipmentTiers,
+        defaultTier: 'standard',
+    });
+}
+
+function resolveNpcEquipmentDefense(npcName, trackerUpdate = null, trackerSnapshot = {}, coreOverride = null) {
+    const updatedName = findTrackerEntryName(trackerUpdate || {}, npcName);
+    const snapshotName = findTrackerEntryName(trackerSnapshot || {}, npcName);
+    const state = normalizeTrackerEntry(
+        (updatedName && trackerUpdate?.[updatedName])
+        || (snapshotName && trackerSnapshot?.[snapshotName])
+        || {},
+    );
+    const rank = coreOverride?.Rank || state.currentCoreStats?.Rank;
+    const tier = getNpcLootRankProfile(rank).equipmentTier;
+    return resolveEquipmentDefense({ gear: state.gear, defaultTier: tier });
+}
+
 function collectImpairmentSources(state, includePlayerFields) {
     const user = includePlayerFields
         ? normalizeTrackerUserState(state || {})
@@ -6461,9 +6506,9 @@ function matchedImpairmentFunctions(sourceFunctions, actionFunctions) {
     return unique(matched);
 }
 
-function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, context, audit, userResultDelta = null, npcResultDeltas = [], hiddenHealthAfter = null) {
+function runTrackerUpdates(ledger, trackerSnapshot, relationshipTrackerUpdate, context, audit, userResultDelta = null, npcResultDeltas = [], hiddenHealthAfter = null, playerTrackerSnapshot = null) {
     const semantic = ledger.trackerUpdateEngine || {};
-    const userBefore = buildPlayerTrackerSnapshot(context);
+    const userBefore = normalizeTrackerUserState(playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
     let user = applyTrackerDeltaToState(userBefore, semantic.user, true);
     if (shouldApplyDeterministicResultInjury(userResultDelta)) {
         user = applyUserResultInjuryDeltaToState(user, userResultDelta);
@@ -6580,6 +6625,7 @@ function applyTrackerDeltaToState(before, delta, includePlayerFields) {
     };
     if (includePlayerFields) {
         result.inventory = [...source.inventory];
+        result.equipmentTiers = source.equipmentTiers.map(entry => ({ ...entry }));
         result.currency = [...source.currency];
         result.tasks = [...source.tasks];
         result.commitments = [...source.commitments];
@@ -7574,8 +7620,9 @@ function deriveProactivityTarget(handoff, resolutionPacket, intent) {
     return USER_PROACTIVITY_TARGET;
 }
 
-function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResults, resolutionPacket, dice, audit, context, refereeContext) {
+function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResults, resolutionPacket, dice, audit, context, refereeContext, playerTrackerSnapshot = null) {
     const userCore = getUserCoreStats(ledger);
+    const userEquipmentState = normalizeTrackerUserState(playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
     const counterPotential = resolutionPacket?.CounterPotential || 'none';
     const counterAllowed = ['light', 'medium', 'severe'].includes(counterPotential);
     const counterBonus = counterBonusFromPotential(counterPotential);
@@ -7679,8 +7726,14 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
         const defenderDie = dice.d20();
         const npcStatValue = statValue(npcCore, attackStat);
         const defenderStatValue = statValue(defenderCore, defenseStat);
+        const targetEquipmentDefense = attackStat === 'PHY'
+            ? targetIsUser
+                ? resolveUserEquipmentDefense(userEquipmentState)
+                : resolveNpcEquipmentDefense(target, trackerUpdate, trackerSnapshot, defenderCore)
+            : noEquipmentDefense('ordinary protective equipment does not defend against magical, mental, or supernatural aggression');
+        const targetEquipmentDefenseBonus = appliedEquipmentDefenseBonus(targetEquipmentDefense);
         const npcTotal = npcDie + npcStatValue + counterBonus + npcImpairmentPenalty;
-        const defenderTotal = defenderDie + defenderStatValue + targetImpairmentPenalty;
+        const defenderTotal = defenderDie + defenderStatValue + targetImpairmentPenalty + targetEquipmentDefenseBonus;
         const margin = npcTotal - defenderTotal;
         const ReactionOutcome = aggressionReactionOutcome(margin);
         const inflictedTargetInjury = deriveInflictedTargetInjuryFromAggression({
@@ -7703,13 +7756,14 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
         if (inflictedNpcInjury) {
             npcTrackerDeltas.push({ NPC: target, injury: inflictedNpcInjury });
         }
-        results[npc] = { AttackType: resultAttackType, AttackIntent: proactivityResult.Intent, ProactivityTarget: target, AttackStat: attackStat, AttackStatValue: npcStatValue, DefenseStat: defenseStat, DefenseStatValue: defenderStatValue, AttackStyle: aggressionStatStyle(attackStat), CounterPotential: counterPotential, CounterBonus: counterBonus, ReactionOutcome, Margin: margin, NpcDie: npcDie, DefenderDie: defenderDie, NpcTotal: npcTotal, DefenderTotal: defenderTotal, NPCImpairment: npcImpairment, UserImpairment: targetIsUser ? targetImpairment : null, TargetImpairment: targetImpairment, InflictedUserInjury: inflictedUserInjury || null, InflictedTargetInjury: inflictedTargetInjury || null };
+        results[npc] = { AttackType: resultAttackType, AttackIntent: proactivityResult.Intent, ProactivityTarget: target, AttackStat: attackStat, AttackStatValue: npcStatValue, DefenseStat: defenseStat, DefenseStatValue: defenderStatValue, AttackStyle: aggressionStatStyle(attackStat), CounterPotential: counterPotential, CounterBonus: counterBonus, ReactionOutcome, Margin: margin, NpcDie: npcDie, DefenderDie: defenderDie, NpcTotal: npcTotal, DefenderTotal: defenderTotal, NPCImpairment: npcImpairment, UserImpairment: targetIsUser ? targetImpairment : null, TargetImpairment: targetImpairment, TargetEquipmentDefense: targetEquipmentDefense, InflictedUserInjury: inflictedUserInjury || null, InflictedTargetInjury: inflictedTargetInjury || null };
         audit.push(`7.5 ${npc}.npcCore=${compact(npcCore)}`);
         audit.push(`7.5c ${npc}.AggressionStats=${compact({ AttackStat: attackStat, DefenseStat: defenseStat, AttackStyle: aggressionStatStyle(attackStat) })}`);
         audit.push(`7.5d ${npc}.NPCImpairmentEngine=${compact(npcImpairment)}`);
         audit.push(`7.5e npcTotal=${npcDie}+${attackStat}(${npcStatValue})+${counterBonus}${npcImpairmentPenalty ? `+impairment(${npcImpairmentPenalty})` : ''}=${npcTotal}`);
         audit.push(`7.5f ${npc}.TargetDefenseImpairmentEngine=${compact(targetImpairment)}`);
-        audit.push(`7.5g targetTotal=${defenderDie}+${defenseStat}(${defenderStatValue})${targetImpairmentPenalty ? `+impairment(${targetImpairmentPenalty})` : ''}=${defenderTotal}`);
+        audit.push(`7.5f.1 ${npc}.TargetEquipmentDefenseEngine=${compact(targetEquipmentDefense)}`);
+        audit.push(`7.5g targetTotal=${defenderDie}+${defenseStat}(${defenderStatValue})${targetImpairmentPenalty ? `+impairment(${targetImpairmentPenalty})` : ''}${targetEquipmentDefenseBonus ? `+equipment(${targetEquipmentDefenseBonus})` : ''}=${defenderTotal}`);
         audit.push(`7.5h ${npc}.InflictedUserInjury=${compact(inflictedUserInjury || {})}`);
         audit.push(`7.5i ${npc}.InflictedTargetInjury=${compact(inflictedTargetInjury || {})}`);
         audit.push(`7.5j ${npc}.ProactivityTarget=${target}`);
@@ -7742,8 +7796,12 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
             const counterDefenderDie = dice.d20();
             const counterNpcStatValue = statValue(counterNpcCore, counterAttackStat);
             const counterDefenderStatValue = statValue(counterDefenderCore, counterDefenseStat);
+            const counterTargetEquipmentDefense = counterAttackStat === 'PHY'
+                ? resolveNpcEquipmentDefense(npc, trackerUpdate, trackerSnapshot, counterDefenderCore)
+                : noEquipmentDefense('ordinary protective equipment does not defend against magical, mental, or supernatural aggression');
+            const counterTargetEquipmentDefenseBonus = appliedEquipmentDefenseBonus(counterTargetEquipmentDefense);
             const counterNpcTotal = counterNpcDie + counterNpcStatValue + counterBonus + counterNpcImpairmentPenalty;
-            const counterDefenderTotal = counterDefenderDie + counterDefenderStatValue + counterTargetImpairmentPenalty;
+            const counterDefenderTotal = counterDefenderDie + counterDefenderStatValue + counterTargetImpairmentPenalty + counterTargetEquipmentDefenseBonus;
             const counterMargin = counterNpcTotal - counterDefenderTotal;
             const counterReactionOutcome = aggressionReactionOutcome(counterMargin);
             const counterPacket = { ...resolutionPacket, CounterPotential: companionCounterPotential };
@@ -7780,6 +7838,7 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
                 NPCImpairment: counterNpcImpairment,
                 UserImpairment: null,
                 TargetImpairment: counterTargetImpairment,
+                TargetEquipmentDefense: counterTargetEquipmentDefense,
                 InflictedUserInjury: null,
                 InflictedTargetInjury: counterInflictedTargetInjury || null,
             };
@@ -7787,8 +7846,9 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
             audit.push(`7.6b ${target}.counterNpcCore=${compact(counterNpcCore)}`);
             audit.push(`7.6b.1 ${target}.CounterAggressionStats=${compact({ AttackStat: counterAttackStat, DefenseStat: counterDefenseStat, AttackStyle: aggressionStatStyle(counterAttackStat) })}`);
             audit.push(`7.6c ${target}.CounterTargetDefenseImpairmentEngine=${compact(counterTargetImpairment)}`);
+            audit.push(`7.6c.1 ${target}.CounterTargetEquipmentDefenseEngine=${compact(counterTargetEquipmentDefense)}`);
             audit.push(`7.6d ${target}.counterTotal=${counterNpcDie}+${counterAttackStat}(${counterNpcStatValue})+${counterBonus}${counterNpcImpairmentPenalty ? `+impairment(${counterNpcImpairmentPenalty})` : ''}=${counterNpcTotal}`);
-            audit.push(`7.6e ${npc}.counterDefenseTotal=${counterDefenderDie}+${counterDefenseStat}(${counterDefenderStatValue})${counterTargetImpairmentPenalty ? `+impairment(${counterTargetImpairmentPenalty})` : ''}=${counterDefenderTotal}`);
+            audit.push(`7.6e ${npc}.counterDefenseTotal=${counterDefenderDie}+${counterDefenseStat}(${counterDefenderStatValue})${counterTargetImpairmentPenalty ? `+impairment(${counterTargetImpairmentPenalty})` : ''}${counterTargetEquipmentDefenseBonus ? `+equipment(${counterTargetEquipmentDefenseBonus})` : ''}=${counterDefenderTotal}`);
             audit.push(`7.6f COMPANION_COUNTER_RESULT=${compact(results[target])}`);
         }
     }
