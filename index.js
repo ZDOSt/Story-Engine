@@ -31,7 +31,7 @@ import {
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
-import { applySemanticThinkingPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
+import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -911,7 +911,7 @@ function consumeStartAdventureReasoningCleanupIfNeeded() {
 
 function handleChatCompletionSettingsReady(generateData) {
     if (!shouldDisableThinkingForCurrentRequest()) return;
-    applySemanticThinkingPayload(generateData);
+    applyStoryEngineThinkingDisabledPayload(generateData);
     consumeStartAdventureReasoningCleanupIfNeeded();
 }
 

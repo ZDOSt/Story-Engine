@@ -12,6 +12,8 @@ const SEMANTIC_RESPONSE_LENGTH_MAX = 16384;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
+const DEEPSEEK_CHAT_COMPLETION_SOURCE = 'deepseek';
+const DEEPSEEK_SEMANTIC_REASONING_EFFORT = 'high';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_NARRATOR_NPC_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove']);
@@ -347,7 +349,7 @@ export async function sendSemanticProfileTextRequest(prompt, responseLength, opt
         responseLength,
         overridePayload,
         extractData: true,
-        preparePayload: applySemanticThinkingPayload,
+        preparePayload: applyStoryEngineThinkingDisabledPayload,
     });
     return extractGeneratedText(result);
 }
@@ -361,15 +363,41 @@ export function applySemanticThinkingPayload(payload) {
     if (!payload || typeof payload !== 'object') {
         return payload;
     }
+
+    removeCustomThinkingOverride(payload);
+    if (String(payload.chat_completion_source || '').toLowerCase() === DEEPSEEK_CHAT_COMPLETION_SOURCE) {
+        payload.include_reasoning = true;
+        payload.reasoning_effort = DEEPSEEK_SEMANTIC_REASONING_EFFORT;
+        const currentMaxTokens = Number(payload.max_tokens);
+        payload.max_tokens = Number.isFinite(currentMaxTokens)
+            ? Math.max(currentMaxTokens, SEMANTIC_RESPONSE_LENGTH_MAX)
+            : SEMANTIC_RESPONSE_LENGTH_MAX;
+        return payload;
+    }
+
     payload.include_reasoning = false;
+    delete payload.reasoning_effort;
+    return payload;
+}
+
+export function applyStoryEngineThinkingDisabledPayload(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return payload;
+    }
+
+    payload.include_reasoning = false;
+    removeCustomThinkingOverride(payload);
+    delete payload.reasoning_effort;
+    return payload;
+}
+
+function removeCustomThinkingOverride(payload) {
     const customIncludeBody = removeTopLevelYamlKey(payload.custom_include_body, 'thinking').trim();
     if (customIncludeBody) {
         payload.custom_include_body = customIncludeBody;
     } else {
         delete payload.custom_include_body;
     }
-    delete payload.reasoning_effort;
-    return payload;
 }
 
 function removeTopLevelYamlKey(value, keyName) {
@@ -389,13 +417,14 @@ function removeTopLevelYamlKey(value, keyName) {
     return kept.join('\n').trim();
 }
 
-function buildSemanticToolPrompt(prompt) {
+export function buildSemanticToolPrompt(prompt) {
     const messages = Array.isArray(prompt)
         ? prompt.map(message => ({ ...message }))
         : [];
     let contractIndex = -1;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
-        if (typeof messages[index]?.content === 'string' && /MANDATORY OUTPUT CONTRACT/i.test(messages[index].content)) {
+        if (typeof messages[index]?.content === 'string'
+            && /(?:MANDATORY OUTPUT CONTRACT|STRICT COMPACT PREFLIGHT LEDGER CONTRACT)/i.test(messages[index].content)) {
             contractIndex = index;
             break;
         }
@@ -404,10 +433,10 @@ function buildSemanticToolPrompt(prompt) {
         `MANDATORY OUTPUT CONTRACT: Call the function tool ${SEMANTIC_TOOL_NAME} exactly once.`,
         'Do not output narration, prose, markdown, visible JSON, or a compact text ledger.',
         'Fill every required tool argument from the semantic/contextual engine outputs.',
+        'The Engine reference and semantic field guidance are authoritative for every argument.',
         'The tool argument paths mirror the engine function names: resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.challengeType = ResolutionEngine.challengeType, resolutionEngine.socialTactic = ResolutionEngine.socialTactic, relationshipEngine[index].initPreset = RelationshipEngine.initPreset semantic tags, relationshipEngine[index] = RelationshipEngine(npc), and chaosSemantic = CHAOS_INTERRUPT.',
         'Use empty arrays for no targets/obstacles/observers. Use "none" string values only for enum/string fields that require none.',
         'engineContext.trackerRelevantNPCs may be an empty array; the extension already has the canonical tracker snapshot locally.',
-        'The compact ledger wording elsewhere in the prompt is the fallback representation of the same fields; for this request, the forced tool call is the only valid output.',
     ].join('\n');
 
     if (contractIndex >= 0) {
@@ -435,7 +464,7 @@ function buildSemanticToolChoice(chatCompletionSource) {
 }
 
 function buildSemanticPreflightTool(chatCompletionSource) {
-    const strictSource = ['openai', 'azure_openai'].includes(chatCompletionSource);
+    const strictSource = ['openai', 'azure_openai', DEEPSEEK_CHAT_COMPLETION_SOURCE].includes(chatCompletionSource);
     const parameters = buildSemanticPreflightSchema();
     if (!strictSource) {
         removeStrictOnlySchemaKeywords(parameters);
@@ -1324,7 +1353,7 @@ function balanceJsonDelimiters(text) {
     return balanced;
 }
 
-const COMPACT_LEDGER_CONTRACT = [
+const COMPACT_LEDGER_OUTPUT_CONTRACT = [
     'STRICT COMPACT PREFLIGHT LEDGER CONTRACT:',
     '- Output only the ledger block. No markdown. No prose. No JSON. No comments. No explanations.',
     '- Begin with BEGIN_SEMANTIC_PREFLIGHT and end the ledger with END_SEMANTIC_PREFLIGHT.',
@@ -1332,6 +1361,9 @@ const COMPACT_LEDGER_CONTRACT = [
     '- Fill every required line exactly once. Keep the exact function/key names shown below.',
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
     '- Use comma-separated names or (none) for lists. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
+].join('\n');
+
+const SEMANTIC_FIELD_GUIDANCE = [
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, stealth contest against a specific established living detector/opponent, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest against a specific established living detector/opponent, speed contest, dangerous movement, contested access, or another explicit stakes-bearing objective.',
     '- ResolutionEngine must separate user-authored internal prose from external action. First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction. When mixed, extract only concrete present external actions and spoken dialogue for identifyGoal, identifyChallenge, targets, challengeType, and actionUnits.',
     '- ResolutionEngine.restraintControl is a simple fact detector. Mark Present=Y only when the latest user input explicitly holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a specific living NPC. Do not mark it for hand-on-wall proximity, leaning close, flirting, hand-holding, ordinary touch, or movement that does not restrict the NPC body or movement.',
@@ -1593,7 +1625,7 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTra
         {
             role: 'user',
             content:
-                `MANDATORY OUTPUT CONTRACT: Return one compact ledger block with these exact field names, then ${SEMANTIC_PREFLIGHT_STOP_SENTINEL} on its own final line. Do not output anything before BEGIN_SEMANTIC_PREFLIGHT or after ${SEMANTIC_PREFLIGHT_STOP_SENTINEL}. Your first visible output token must be BEGIN_SEMANTIC_PREFLIGHT.\n` +
+                `${COMPACT_LEDGER_OUTPUT_CONTRACT}\n` +
                 compactTemplate,
         },
     ];
@@ -1625,7 +1657,7 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
         {
             role: 'user',
             content:
-                `MANDATORY OUTPUT CONTRACT: Return one compact ledger block with these exact field names, then ${SEMANTIC_PREFLIGHT_STOP_SENTINEL} on its own final line. Do not output anything before BEGIN_SEMANTIC_PREFLIGHT or after ${SEMANTIC_PREFLIGHT_STOP_SENTINEL}. Your first visible output token must be BEGIN_SEMANTIC_PREFLIGHT.\n` +
+                `${COMPACT_LEDGER_OUTPUT_CONTRACT}\n` +
                 compactTemplate,
         },
     ];
@@ -1657,8 +1689,6 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         `Bound companion snapshot JSON (hidden user state; current established inner companion, possession/shared vessel, intelligent item/weapon, bound spirit/artifact, or implant if any):\n${JSON.stringify(boundCompanionSnapshot, null, 2)}\n\n` +
         `Pending boundary snapshot JSON (hidden next-turn boundary memory; use only for ResolutionEngine.boundaryBreak):\n${JSON.stringify(pendingBoundarySnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
-        'The output contract is mandatory and non-negotiable: return exactly one compact preflight ledger block matching the supplied engine-name-anchored lines. ' +
-        'Any response that renames fields, returns JSON, returns prose, returns markdown fences, returns an empty block, or leaves required lines missing is completely invalid and will be discarded. ' +
         'Do not narrate. Do not roll dice. Do not calculate outcomes. ' +
         (proxyAction ? `The latest user message used double square brackets for proxy action mode. Treat the inner instruction as {{user}}'s actual attempted action for semantic classification: "${clip(proxyAction, 800)}". Ignore the wrapper brackets themselves. ` : '') +
         (inlineProxyInstructions.length ? `The latest user message contains inline double square bracket proxy instructions in addition to ordinary user text: ${formatInlineProxyInstructionsForSemantic(inlineProxyInstructions)}. Treat each inline instruction as explicit {{user}}-declared action detail, intent, or conditional reaction for semantic classification. If an inline instruction is conditional, classify it as a prepared conditional action; do not assume the conditioned action occurs, lands, or succeeds unless the condition is satisfied by this turn's scene facts and the action is supported by resolved mechanics. Ignore the wrapper brackets themselves. ` : '') +
@@ -1704,7 +1734,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Do not use deterministic outcomes, dice, or guesses to change semantic stakes. ' +
         'itemUse is only for personal gear/inventory objects; body parts and natural weapons such as claws, fangs, teeth, horns, talons, tusks, tails, stingers, barbs, or jaws are bodily actions/attacks, not itemUse, not inventory, and not equipment. ' +
         'Important classification reminders: Romantic, flirtatious, affectionate, suggestive, sexual, or intimate conversation/contact is not a special roll category and does not create stakes by itself. intimacyAdvanceExplicit is strict permission/boundary classification for actual intimate escalation only: mark it true for explicit kissing, sexual touch, undressing toward intimacy, asking to sleep together/have sex, or accepting a prior explicit NPC intimacy invitation; keep it false for flirting, teasing, vague innuendo, compliments, declarations of love, dates, hand-holding, ordinary affection, or "what did you have in mind" style banter. boundaryBreak is not prediction; mark it true only when hidden tracker pendingBoundary exists and the latest user input continues/escalates/ignores that boundary, and copy the exact stored boundaryId/targetNPC/type. User intent is explicit-only: identifyGoal and identifyChallenge must use only the latest user-declared action, request, target, and explicit objective; do not infer unstated goals from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. Do not carry forward a prior social goal as the current goal after it already failed or resolved; post-failure phrases such as accepting refusal, declaring consequence, or escalating toward violence are aftermath/escalation unless the latest input explicitly creates a new non-social contest or a materially different tactic. challengeType is classification only: social/diplomacy for good-faith persuasion or negotiation, social/bluff for deception or material false claims, social/intimidate for threats/coercion/fear demands, mundane_combat or supernatural_combat for direct hostile bodily/weapon/natural-weapon/magical attacks that can injure, restraint for deterministic restraint contests, stealth for avoiding a specific established living detector, and environment for physical/environmental obstacles, escape, chase/pursuit, locks, traps, terrain, weather, barriers, hazards, or non-living opposition. restraintControl and boundaryPressure identify restraint/object/space/departure pressure; they do not decide dice or relationship effects. challengeType=stealth requires a specific established living detector/opponent in ActionTargets and OppTargets.NPC; if no such detector/opponent exists, use challengeType=none unless a separate non-stealth obstacle creates stakes. Terrain, darkness, cover, distance, crowds, weather, and noise are scene conditions, not stealth opposition. Do not choose stats, dice, bonuses, margins, or outcomes. For each living NPC, mark stakeChangeByOutcome for each possible outcome strictly by RelationshipEngine DEF.STAKE_CHANGE: benefit only if that outcome significantly and concretely improves their stakes; harm if it materially worsens their stakes; otherwise none. Do not mark benefit for compliments, flirting, mood improvement, politeness, ordinary conversation, user self-advancement, successful negotiation for the user, choosing not to harm the NPC, failing to harm the NPC, de-escalation without a concrete NPC gain, or the NPC merely surviving/remaining safe.\n\n' +
-        COMPACT_LEDGER_CONTRACT;
+        SEMANTIC_FIELD_GUIDANCE;
 }
 
 function normalizeAssembledPromptMessages(assembledChat) {

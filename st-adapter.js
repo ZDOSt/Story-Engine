@@ -487,7 +487,6 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     generateData.n = undefined;
     if (tool) generateData.tools = [tool];
     if (toolChoice) generateData.tool_choice = toolChoice;
-    options?.preparePayload?.(generateData);
     generateData.enable_web_search = false;
     delete generateData.request_images;
     delete generateData.request_image_resolution;
@@ -502,6 +501,8 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
             generateData.max_tokens = responseLength;
         }
     }
+
+    options?.preparePayload?.(generateData);
 
     if (Object.prototype.hasOwnProperty.call(generateData, 'temperature')) {
         generateData.temperature = 0;
