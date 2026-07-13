@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, applyPendingBoundaryDelta, boundCompanionDeltaHasChanges, classifyDisposition, normalizeBoundCompanionState, normalizePendingBoundaryState, normalizeTrackerEntry, normalizeTrackerUserState, pendingBoundaryDeltaHasChanges } from './engines.js';
+import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, applyPendingBoundaryDelta, boundCompanionDeltaHasChanges, classifyDisposition, finalizeLootSearchCompletion, findTrackerEntryName, normalizeBoundCompanionState, normalizePendingBoundaryState, normalizeTrackerEntry, normalizeTrackerUserState, pendingBoundaryDeltaHasChanges, reconcileLootPossessionTransfers } from './engines.js';
 
 import {
     addEphemeralStoppingString,
@@ -4217,6 +4217,8 @@ function promoteTrackerEntry(npcs, oldName, newName) {
 
         ...(newEntry || {}),
 
+        aliases: [...(oldEntry.aliases || []), oldName, ...(newEntry?.aliases || [])],
+
         lifecycle: 'Active',
 
     });
@@ -4478,11 +4480,7 @@ function economyDeltaHasChanges(delta) {
 
 
 function findExistingTrackerName(npcs, wantedName) {
-    const wanted = String(wantedName || '').trim().toLowerCase();
-
-    if (!wanted) return '';
-
-    return Object.keys(npcs || {}).find(name => name.toLowerCase() === wanted) || '';
+    return findTrackerEntryName(npcs, wantedName);
 
 }
 
@@ -4502,7 +4500,7 @@ function trackerDeltaHasChanges(delta, includePlayerFields) {
 
         ? ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']
 
-        : ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove'];
+        : ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove'];
 
     return fields.some(field => Array.isArray(delta[field]) && delta[field].length > 0);
 
@@ -4578,6 +4576,10 @@ function applyTrackerDeltaToNpcState(before, delta) {
 
         gear: [...source.gear],
 
+        inventory: [...source.inventory],
+
+        currency: [...source.currency],
+
     };
 
     const personalitySummary = cleanPersonalitySummary(delta?.personalitySummary);
@@ -4593,6 +4595,10 @@ function applyTrackerDeltaToNpcState(before, delta) {
     result.statusEffects = applyTrackerListDelta(result.statusEffects, delta?.statusAdd, delta?.statusRemove);
 
     result.gear = applyTrackerListDelta(result.gear, delta?.gearAdd, delta?.gearRemove);
+
+    result.inventory = applyTrackerListDelta(result.inventory, delta?.inventoryAdd, delta?.inventoryRemove);
+
+    result.currency = applyCurrencyDelta(result.currency, delta?.currencyAdd, delta?.currencyRemove);
 
     return result;
 
@@ -5502,6 +5508,12 @@ function buildTrackerDisplayHtml(snapshot) {
         const statusLine = trackerListCount(entry.statusEffects)
             ? trackerDetailLine('Status', entry.statusEffects)
             : '';
+        const inventoryLine = trackerListCount(entry.inventory)
+            ? trackerDisplayItemList('Inventory', entry.inventory, { empty: 'No revealed possessions' })
+            : '';
+        const currencyLine = trackerListCount(entry.currency)
+            ? trackerDisplayItemList('Currency', entry.currency, { empty: 'No revealed currency' })
+            : '';
         return `
             <div class="structured-preflight-tracker-card structured-preflight-tracker-npc">
                 <div class="structured-preflight-tracker-card-head">
@@ -5529,6 +5541,8 @@ function buildTrackerDisplayHtml(snapshot) {
                 <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
                     ${trackerDetailLine('Wounds', entry.wounds)}
                     ${trackerDisplayItemList('Gear', entry.gear, { empty: 'No gear' })}
+                    ${inventoryLine}
+                    ${currencyLine}
                     ${statusLine}
                     <div class="structured-preflight-tracker-detail structured-preflight-tracker-detail-wide">
                         <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-personality">Personality</span>
@@ -10567,6 +10581,10 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
 
             inflictedInjuries: resolution.InflictedInjuries,
 
+            lootSearch: resolution.LootSearch,
+
+            lootDiscovery: resolution.LootDiscovery,
+
         },
 
         npcHandoffs: handoff.npcHandoffs || [],
@@ -10578,6 +10596,8 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         contextualInjuryCaps: pendingRun?.contextualInjuryCaps || [],
 
         nameGeneration: handoff.nameGeneration || {},
+
+        npcEquipmentProfiles: handoff.npcEquipmentProfiles || [],
 
         sceneState: handoff.sceneState || pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
 
@@ -10959,8 +10979,8 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 }
 
                 const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
-
-                trackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, clampedTrackerDelta, {
+                const reconciledTrackerDelta = reconcileLootPossessionTransfers(trackerDisplaySnapshot, clampedTrackerDelta);
+                const mergedTrackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, reconciledTrackerDelta, {
                     messageKey,
                     latestUserText: pendingRun.latestUserText,
                     assistantText: narrationText,
@@ -10974,6 +10994,15 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     pendingRun,
                     context,
                 });
+                const lootCompletion = finalizeLootSearchCompletion(
+                    mergedTrackerDisplaySnapshot.npcs,
+                    pendingRun.resolutionPacket?.LootDiscovery,
+                );
+                if (lootCompletion.required && !lootCompletion.completed) {
+                    throw new Error(`Loot tracker transaction was incomplete: ${lootCompletion.reason}.`);
+                }
+                mergedTrackerDisplaySnapshot.npcs = lootCompletion.npcs;
+                trackerDisplaySnapshot = mergedTrackerDisplaySnapshot;
             } catch (error) {
 
                 trackerDeltaWarning = error instanceof Error ? error.message : String(error);
@@ -11628,6 +11657,7 @@ async function handleChatCompletionPromptReady(eventData) {
             worldStateSnapshot: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+            adventureGenre: pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
         });
 
 

@@ -90,6 +90,7 @@ function buildReadableSemanticDebug(ledger) {
         'identifyChallenge=' + valueOrNone(resolution.identifyChallenge),
         'userAbilityUse=' + userAbilityUseSummary(resolution.userAbilityUse),
         'itemUse=' + itemUseSummary(resolution.itemUse),
+        'lootSearch=' + inline(resolution.lootSearch ?? {}),
         'claimCheck=' + claimCheckSummary(resolution.claimCheck),
         'userKnowledgeApplication=' + userKnowledgeApplicationSummary(userKnowledgeApplications),
         'identifyTargets:',
@@ -153,6 +154,8 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.GOAL=' + valueOrNone(resolution.GOAL),
         'resolutionPacket.UserAbilityUse=' + userAbilityUseSummary(resolution.UserAbilityUse),
         'resolutionPacket.ItemUse=' + itemUseSummary(resolution.ItemUse),
+        'resolutionPacket.LootSearch=' + inline(resolution.LootSearch ?? {}),
+        'resolutionPacket.LootDiscovery=' + inline(resolution.LootDiscovery ?? {}),
         'resolutionPacket.ClaimCheck=' + claimCheckSummary(resolution.ClaimCheck),
         'resolutionPacket.intimacyAdvanceExplicit=' + valueOrNone(resolution.intimacyAdvanceExplicit),
         'resolutionPacket.restraintControl=' + boundaryObjectSummary(resolution.restraintControl),
@@ -185,6 +188,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.NPCAwareOfUser=' + list(resolution.NPCAwareOfUser),
         'resolutionPacket.NPCInScene=' + list(resolution.NPCInScene),
         'generatedNpcStats=' + (handoff?.generatedNpcStats?.length ? inline(handoff.generatedNpcStats) : 'none'),
+        'npcEquipmentProfiles=' + (handoff?.npcEquipmentProfiles?.length ? inline(handoff.npcEquipmentProfiles) : 'none'),
         'resultLine=' + valueOrNone(handoff?.resultLine),
         '',
         'npcHandoffs=' + (npcs.length ? '' : 'none'),
@@ -251,6 +255,8 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['resolution.GOAL', valueOrNone(resolution.GOAL)],
         ['resolution.UserAbilityUse', userAbilityUseSummary(resolution.UserAbilityUse)],
         ['resolution.ItemUse', itemUseSummary(resolution.ItemUse)],
+        ['resolution.LootSearch', inline(resolution.LootSearch ?? {})],
+        ['resolution.LootDiscovery', inline(resolution.LootDiscovery ?? {})],
         ['resolution.ClaimCheck', claimCheckSummary(resolution.ClaimCheck)],
         ['userKnowledge.application', summary.userKnowledgeApplication],
         ['resolution.RollNeeded', valueOrNone(resolution.RollNeeded)],
@@ -283,6 +289,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['injury.inflictedUser', summary.inflictedUserInjury],
         ['npc.state', summary.npc],
         ['npc.generatedStats', handoff?.generatedNpcStats?.length ? inline(handoff.generatedNpcStats) : 'none'],
+        ['npc.equipmentProfiles', handoff?.npcEquipmentProfiles?.length ? inline(handoff.npcEquipmentProfiles) : 'none'],
         ['relationship.result', summary.relationshipResult],
         ['chaos.result', summary.chaos],
         ['proactivity.result', summary.proactive],
@@ -1039,11 +1046,13 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         ['companionCommand', narrativeCompanionCommandFact(resolution)],
         ['boundCompanion', narrativeBoundCompanionFact(handoff?.boundCompanion)],
         ['npcDispositionAndStyle', narrativeNpcDispositionAndStyleFact(handoff)],
+        ['npcEquipmentQuality', narrativeNpcEquipmentQualityFact(handoff?.npcEquipmentProfiles)],
         ['npcInitiative', narrativeNpcInitiativeFact(handoff)],
         ['relationshipState', narrativeRelationshipFact(handoff)],
         ['intimacyAndConsent', narrativeIntimacyFact(handoff)],
         ['abilityUse', narrativeAbilityFact(resolution.UserAbilityUse)],
         ['itemUse', narrativeItemFact(resolution.ItemUse)],
+        ['lootDiscovery', narrativeLootDiscoveryFact(resolution.LootDiscovery)],
         ['claimOrDeception', narrativeClaimFact(resolution.ClaimCheck, resolution, summary)],
         ['environment', narrativeEnvironmentFact(resolution)],
         ['sceneState', narrativeSceneStateFact(handoff?.sceneState || options?.worldState)],
@@ -1187,6 +1196,22 @@ function narrativeNpcDispositionAndStyleFact(handoff = {}) {
         return 'No specific existing NPC disposition or personality guidance is required by this fact. This fact does not introduce an NPC response, environmental event, consequence, or new figure.';
     }
     return npcs.map(narrativeNpcDispositionAndStyleEntry).join('\n');
+}
+
+function narrativeNpcEquipmentQualityFact(profiles = []) {
+    const entries = Array.isArray(profiles) ? profiles : [];
+    if (!entries.length) return '(none)';
+    const guidance = entries.map(profile => {
+        const name = valueOrNone(profile?.NPC);
+        const continuity = [`established gear=${list(profile?.EstablishedGear)}`];
+        if (Array.isArray(profile?.EstablishedInventory) && profile.EstablishedInventory.some(item => !isNoneText(item))) continuity.push(`established revealed possessions=${list(profile.EstablishedInventory)}`);
+        if (Array.isArray(profile?.EstablishedCurrency) && profile.EstablishedCurrency.some(item => !isNoneText(item))) continuity.push(`established revealed currency=${list(profile.EstablishedCurrency)}`);
+        return `${name}: ${continuity.join('; ')}; if new visible equipment is described, its materials and workmanship MUST match: ${valueOrNone(profile?.MaterialGuidance)}`;
+    });
+    return [
+        ...guidance,
+        'This is continuity only and does not establish presence or require mentioning possessions. Preserve established gear, inventory, and currency; use them only when the current scene naturally involves them. Do not replace or transfer them, invent magical properties/bonuses, or mention rank, tier, value band, or mechanics.',
+    ].join('\n');
 }
 
 function narrativeNpcDispositionAndStyleEntry(npc = {}) {
@@ -1426,6 +1451,44 @@ function narrativeItemFact(value = {}) {
         return `${attemptedItem} Availability: available from ${item.source}.${state} Narrate the attempt and its immediate result. Do not skip, gloss over, or replace the attempt. Item availability is not automatic success, extra impact, or bypassed consequence.`;
     }
     return `${attemptedItem} Availability: unavailable. No item effect occurs. Narrate the attempt and its immediate result: the item is absent, unreachable, or not in the claimed place. Do not skip, gloss over, or replace the attempt. The item must not appear, be drawn, be wielded, be consumed, unlock anything, or enter {{user}} possession. Visible reactions may follow naturally.`;
+}
+
+function narrativeLootDiscoveryFact(value = null) {
+    if (!value || value.Attempted !== 'Y') return '(none)';
+    const target = valueOrNone(value.Target);
+    if (value.Status === 'unknown_target') {
+        return `${target}: No deterministic loot may be generated because this is not a tracked body/remains. Do not invent possessions, currency, equipment, magic stones, containers, clues, or ownership transfer.`;
+    }
+    if (value.Status === 'target_not_dead') {
+        return `${target}: This target is not deterministically dead. Do not generate corpse loot. Any attempt to access this living target's possessions remains governed by ordinary scene, boundary, and resolved-action facts.`;
+    }
+    if (value.Status === 'already_searched') {
+        return `${target}: These remains have already been searched. Reveal NO new possessions, currency, equipment, magic stones, containers, documents, clues, or keys. Only already-established remaining gear/inventory/currency may still be present: gear=${list(value.ExistingGear)}, inventory=${list(value.ExistingInventory)}, currency=${list(value.ExistingCurrency)}.`;
+    }
+    if (value.Status !== 'reveal_once') return 'No deterministic loot may be generated from this search.';
+
+    const lines = [
+        `${target}: REVEAL LOOT ONCE from the searched dead body/remains.`,
+        `Preserve established possessions exactly: gear=${list(value.ExistingGear)}, inventory=${list(value.ExistingInventory)}, currency=${list(value.ExistingCurrency)}.`,
+    ];
+    const maxNewMundaneItems = Math.max(0, Number(value.MaxNewMundaneItems || 0));
+    if (maxNewMundaneItems > 0) {
+        lines.push(`New mundane possessions, including any newly revealed gear: reveal at most ${maxNewMundaneItems} total, concise and role-appropriate. Their physical materials and workmanship MUST follow: ${valueOrNone(value.MaterialGuidance)} Value envelope: ${valueOrNone(value.EquipmentValueRange)}.`);
+    } else if (value.TargetKind === 'other') {
+        lines.push('No newly generated possessions are authorized for this target kind; preserve only established possessions listed above.');
+    }
+    if (!isNoneText(value.CurrencyAmount)) {
+        lines.push(`Currency: reveal exactly ${value.CurrencyAmount} still carried by or remaining with ${target}. Do not transfer it to {{user}}.`);
+    } else {
+        lines.push('Currency: reveal no newly generated currency; preserve only established currency listed above.');
+    }
+    if (value.MagicStone) {
+        lines.push(`Monster drop: reveal exactly one magic stone, physically ${valueOrNone(value.MagicStone.physicalGuidance)}, with value consistent with ${valueOrNone(value.MagicStone.valueRange)}. It is a recoverable commodity only; do not give it powers, bonuses, abilities, or system effects.`);
+    } else if (value.TargetKind === 'monster') {
+        lines.push('Monster drop: do not generate another magic stone; preserve any already-established magic stone listed above.');
+    }
+    lines.push('Do NOT create magical equipment, powers, bonuses, rarity labels, plot-critical clues, secret documents, or keys unless already established. Do NOT mention ranks, tiers, value-band labels, mechanics, or this instruction. Discovery does NOT place anything in {{user}} possession; items remain with the body/remains or visibly beside them until the human player explicitly takes them.');
+    return lines.join('\n');
 }
 
 function narrativeClaimFact(value = {}, resolution = {}, summary = {}) {

@@ -9,9 +9,9 @@ function ResolutionEngine(input) {
     PLAYER_TEXT:
 'First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only prose are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction.',
     STAKES:
-'A roll exists only when the latest explicit external action creates fresh unresolved success/failure stakes: physical risk, harm, danger, material gain/loss outside ordinary boundaryPressure handling, meaningful access outside ordinary boundaryPressure handling, secrets, pursuit/escape, significant trust/status/authority shift, meaningful obstacle resolution/failure, stealth against a specific established living detector, or explicit goal advancement/failure for {{user}} or a specific living entity. Do NOT force rollNeeded=Y solely because {{user}} restrains, grabs, pins, blocks, snatches, takes, holds, or pressures an NPC boundary. Classify those through restraintControl, boundaryPressure, and boundaryBreak; deterministic code decides whether they roll.',
+'A roll exists only when the latest explicit external action creates fresh unresolved success/failure stakes: physical risk, harm, danger, contested material gain/loss outside ordinary boundaryPressure handling, meaningful access outside ordinary boundaryPressure handling, secrets, pursuit/escape, significant trust/status/authority shift, meaningful obstacle resolution/failure, stealth against a specific established living detector, or explicit goal advancement/failure for {{user}} or a specific living entity. Do NOT force rollNeeded=Y solely because {{user}} restrains, grabs, pins, blocks, snatches, takes, holds, pressures an NPC boundary, or searches established dead remains for possessions. Classify those through restraintControl, boundaryPressure, boundaryBreak, or lootSearch; deterministic code decides the result.',
     NO_STAKES:
-'No roll for ordinary continuity, flavor, harmless conversation, minor mood, casual rudeness, weak preference, trivial convenience, introspection-only text, already-decided saved disposition/intimacy reactions, safe-scene aid/treatment, unavailable item attempts, or repeated failed/resolved negative social pressure using the same socialTactic against the same target/goal under unchanged disposition. If fresh unresolved STAKES and NO_STAKES both appear to apply, STAKES wins unless that exact stake is already resolved/suppressed. Bluff and Intimidate are remembered separately.',
+'No roll for ordinary continuity, flavor, harmless conversation, minor mood, casual rudeness, weak preference, trivial convenience, introspection-only text, already-decided saved disposition/intimacy reactions, safe-scene aid/treatment, unavailable item attempts, searching established dead remains without a separate hazard/contest, or repeated failed/resolved negative social pressure using the same socialTactic against the same target/goal under unchanged disposition. If fresh unresolved STAKES and NO_STAKES both appear to apply, STAKES wins unless that exact stake is already resolved/suppressed. Bluff and Intimidate are remembered separately.',
     CHALLENGE_TYPES:
 'none = no roll. social = fresh unresolved living NPC-facing persuasion, bargaining, deception, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure. mundane_combat = direct bodily, weapon, natural-weapon, tool, projectile, thrown object, or ordinary physical attack that can injure a living target; restraint/control alone is not combat. supernatural_combat = spell, curse, psychic, elemental, magical, divine, demonic, or supernatural harmful effect against a living target; magical restraint/control alone is handled by restraintControl unless it also harms. restraint = deterministic non-hostile physical restraint contest against a living target. stealth = avoiding detection/perception by a specific established living detector. environment = physical/environmental obstacle, escape, chase, lock, trap, terrain, weather, barrier, hazard, non-living opposition, or object/access/boundary contest not handled by boundaryPressure.',
     TARGETS:
@@ -48,6 +48,15 @@ function ResolutionEngine(input) {
     rule: body parts and natural weapons are not itemUse
     rule: unavailable item attempts cannot produce the item-dependent effect
     return {Attempted, Available, Item, Source, Evidence, NoEffectReason}
+
+  lootSearch(input, context):
+    policy: SEMANTIC-ONLY, EXPLICIT-ONLY
+    rule: Attempted=Y only when the latest input explicitly searches, loots, rummages through, checks, or examines a specific body, corpse, remains, or defeated target for carried/recoverable possessions
+    rule: when the target matches a tracked NPC, Target MUST copy that NPC's exact current tracker key; do not add articles, death descriptors, possessives, "body", "corpse", or "remains"
+    rule: do not decide whether the target is truly dead, what loot exists, its value, or whether it was searched before; deterministic code owns those decisions
+    rule: return N for searching an area/container, merely looking at a target, taking an already-visible item, or searching a living NPC's possessions
+    rule: TargetKind=humanoid for personlike/civilized equipment-bearing remains, monster for creature/monster remains expected to yield a magic stone, and other when neither clearly applies
+    return {Attempted, Target, TargetKind, Evidence}
 
   claimCheck(input, challenge, context):
     policy: SEMANTIC-ONLY
@@ -86,12 +95,13 @@ function ResolutionEngine(input) {
     rule: Response must be released, continued, escalated, unrelated, unclear, or none
     return {Present, BoundaryId, TargetNPC, Type, Response, Evidence}
 
-  rollNeeded(input, finalGoal, challenge, restraintControl, boundaryPressure, boundaryBreak, context):
+  rollNeeded(input, finalGoal, challenge, lootSearch, restraintControl, boundaryPressure, boundaryBreak, context):
     policy: ROLL-GATE
     rule: apply DEF.STAKES and DEF.NO_STAKES
     rule: return Y only when success/failure of the latest explicit external action creates fresh unresolved stakes
     rule: return N when no fresh unresolved stake exists or when that exact stake is already resolved/suppressed
     rule: do not force Y solely from restraintControl or boundaryPressure; deterministic relationship/boundary code decides whether those roll
+    rule: lootSearch never creates a roll by itself; only a separate explicit hazard, contest, or living opposition can do so
     rule: boundaryBreak=Y is a fresh unresolved stake unless deterministic code suppresses it for B4 warning grace
     rule: stealth-style action requires a specific established living detector; without one, return N unless a separate non-stealth obstacle creates stakes
     rule: saved disposition never suppresses separate combat, pursuit, bargaining, materially new deception, resources, secrets, stealth against a detector, or environmental obstacles
@@ -201,12 +211,13 @@ function ResolutionEngine(input) {
     challenge = identifyChallenge(input, finalGoal, context)
     userAbilityUse = userAbilityUse(input, challenge, context)
     itemUse = itemUse(input, challenge, context)
+    lootSearch = lootSearch(input, context)
     claimCheck = claimCheck(input, challenge, context)
     intimacyAdvanceExplicit = intimacyAdvanceExplicit(input, finalGoal, challenge, context)
     restraintControl = restraintControl(input, finalGoal, challenge, context)
     boundaryPressure = boundaryPressure(input, finalGoal, challenge, context)
     boundaryBreak = boundaryBreak(input, finalGoal, challenge, context)
-    rollNeeded = rollNeeded(input, finalGoal, challenge, restraintControl, boundaryPressure, boundaryBreak, context)
+    rollNeeded = rollNeeded(input, finalGoal, challenge, lootSearch, restraintControl, boundaryPressure, boundaryBreak, context)
     rollReason = short explanation for rollNeeded
     challengeType = challengeType(input, finalGoal, challenge, rollNeeded, context)
     socialTactic = socialTactic(input, challenge, challengeType, context)
@@ -220,7 +231,7 @@ function ResolutionEngine(input) {
       generatedStatsSeed = genStats(first OppTargets.NPC, context)
     deterministic code may override restraintControl/boundaryPressure/boundaryBreak roll policy from B/F/H, pending boundaries, and active-opposed/crisis context; then resolves stats, dice, margins, landed actions, counter potential, injuries, relationships, and outcome from challengeType/socialTactic
     NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, NPCAwareOfUser, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, challenge:challenge, rollNeeded:rollNeeded, rollReason:rollReason, challengeType:challengeType.type, challengeTypeEvidence:challengeType.evidence, socialTactic:socialTactic, userAbilityUse:userAbilityUse, itemUse:itemUse, claimCheck:claimCheck, intimacyAdvanceExplicit:intimacyAdvanceExplicit, restraintControl:restraintControl, boundaryPressure:boundaryPressure, boundaryBreak:boundaryBreak, harmMode:harmMode, actions:actions, actionUnits:actionUnits, EnvironmentDifficultyTier:envDifficultyTier, activeHostileThreat:activeHostileThreat, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCAwareOfUser:targets.NPCAwareOfUser, PowerActors:targets.PowerActors, NPCInScene:NPCInScene}
+    return {GOAL:finalGoal, challenge:challenge, rollNeeded:rollNeeded, rollReason:rollReason, challengeType:challengeType.type, challengeTypeEvidence:challengeType.evidence, socialTactic:socialTactic, userAbilityUse:userAbilityUse, itemUse:itemUse, lootSearch:lootSearch, claimCheck:claimCheck, intimacyAdvanceExplicit:intimacyAdvanceExplicit, restraintControl:restraintControl, boundaryPressure:boundaryPressure, boundaryBreak:boundaryBreak, harmMode:harmMode, actions:actions, actionUnits:actionUnits, EnvironmentDifficultyTier:envDifficultyTier, activeHostileThreat:activeHostileThreat, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCAwareOfUser:targets.NPCAwareOfUser, PowerActors:targets.PowerActors, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {
@@ -1563,7 +1574,7 @@ export function buildNarrationGuidance(resolution, handoffs, chaos, proactivity,
 export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
-        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'slowBondEvidence', 'proactivityMemory', 'currentCoreStats', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
+        npcPersistentRuleMutated: ['aliases', 'currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'slowBondEvidence', 'proactivityMemory', 'currentCoreStats', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'currency', 'lootSearchCompleted'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'currency', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'harmMode', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'restraintControl', 'boundaryPressure', 'boundaryBreak', 'activeHostileThreat', 'CHAOS', 'proactivityResults', 'aggressionResults'],
@@ -1597,6 +1608,9 @@ export function trackerSummary(trackerUpdate) {
             `wounds:${(value?.wounds || []).length}`,
             `status:${(value?.statusEffects || []).length}`,
             `gear:${(value?.gear || []).length}`,
+            `inv:${(value?.inventory || []).length}`,
+            `currency:${(value?.currency || []).length}`,
+            `looted:${value?.lootSearchCompleted ? 'Y' : 'N'}`,
             `pressure:${value?.hostilePressure ?? 0}/${value?.hostileLandedPressure ?? 0}/${value?.dominantLock ?? 'None'}/${value?.pressureMode ?? 'none'}`,
         ].join('/');
     }).join(';');
@@ -1679,6 +1693,7 @@ export function isSlowBondEligible(disposition, rapport, evidence) {
 
 export function normalizeTrackerEntry(value) {
     return {
+        aliases: normalizeTrackerStringList(value?.aliases),
         currentDisposition: normalizeDisposition(value?.currentDisposition),
         currentRapport: clamp(Number(value?.currentRapport ?? 0), 0, 5),
         lastRapportGainActiveMs: Number.isFinite(Number(value?.lastRapportGainActiveMs))
@@ -1702,6 +1717,9 @@ export function normalizeTrackerEntry(value) {
         wounds: normalizeTrackerStringList(value?.wounds),
         statusEffects: normalizeTrackerStringList(value?.statusEffects),
         gear: normalizeTrackerStringList(value?.gear),
+        inventory: normalizeTrackerStringList(value?.inventory),
+        currency: normalizeCurrencyList(value?.currency),
+        lootSearchCompleted: value?.lootSearchCompleted === true || value?.lootSearchCompleted === 'Y',
     };
 }
 
@@ -1824,6 +1842,146 @@ export function normalizeTrackerUserState(value) {
         tasks: normalizeTrackerStringList(value?.tasks),
         commitments: normalizeTrackerStringList(value?.commitments),
     };
+}
+
+export function findTrackerEntryName(npcs = {}, wantedName = '') {
+    const wanted = normalizeNameKey(wantedName);
+    if (!wanted) return '';
+    const exact = Object.keys(npcs || {}).find(name => normalizeNameKey(name) === wanted);
+    if (exact) return exact;
+    const aliases = Object.entries(npcs || {})
+        .filter(([, state]) => normalizeTrackerEntry(state).aliases.some(alias => normalizeNameKey(alias) === wanted))
+        .map(([name]) => name);
+    return aliases.length === 1 ? aliases[0] : '';
+}
+
+export function hasMagicStoneEntry(items = []) {
+    return normalizeTrackerStringList(items)
+        .some(item => /\bmagic(?:[\s-]+)stones?\b/i.test(item));
+}
+
+export function reconcileLootPossessionTransfers(snapshot = {}, delta = {}) {
+    const result = {
+        ...delta,
+        user: cloneTrackerActorDelta(delta?.user),
+        npcs: Array.isArray(delta?.npcs)
+            ? delta.npcs.map(item => cloneTrackerActorDelta(item, item?.NPC))
+            : [],
+    };
+    const searchedCorpses = Object.entries(snapshot?.npcs || {})
+        .map(([name, value]) => [name, normalizeTrackerEntry(value)])
+        .filter(([, state]) => state.condition === 'dead' && state.lootSearchCompleted);
+    for (const npcDelta of result.npcs) {
+        const currentName = findTrackerEntryName(snapshot?.npcs || {}, npcDelta?.NPC);
+        if (currentName) npcDelta.NPC = currentName;
+    }
+
+    for (const addField of ['gearAdd', 'inventoryAdd']) {
+        for (const item of result.user[addField] || []) {
+            const matches = findCorpsePossessionMatches(searchedCorpses, item, ['gear', 'inventory']);
+            if (matches.length !== 1) continue;
+            const match = matches[0];
+            const npcDelta = ensureTrackerNpcDelta(result.npcs, match.NPC);
+            addUniqueTrackerDeltaItem(npcDelta[`${match.field}Remove`], match.item);
+        }
+    }
+
+    for (const amount of result.user.currencyAdd || []) {
+        const matches = findCorpsePossessionMatches(searchedCorpses, amount, ['currency']);
+        if (matches.length !== 1) continue;
+        const match = matches[0];
+        const npcDelta = ensureTrackerNpcDelta(result.npcs, match.NPC);
+        addUniqueTrackerDeltaItem(npcDelta.currencyRemove, match.item);
+    }
+    return result;
+}
+
+export function finalizeLootSearchCompletion(npcs = {}, discovery = null) {
+    const source = npcs && typeof npcs === 'object' ? npcs : {};
+    if (!discovery || discovery.Status !== 'reveal_once') {
+        return { required: false, completed: false, target: '', reason: '', npcs: source };
+    }
+
+    const target = findTrackerEntryName(source, discovery.Target);
+    if (!target) {
+        return { required: true, completed: false, target: '', reason: 'searched target is missing from the post-narration tracker', npcs: source };
+    }
+    const state = normalizeTrackerEntry(source[target]);
+    const preserved = [
+        ['gear', normalizeTrackerStringList(discovery.ExistingGear)],
+        ['inventory', normalizeTrackerStringList(discovery.ExistingInventory)],
+        ['currency', normalizeCurrencyList(discovery.ExistingCurrency)],
+    ];
+    for (const [field, expected] of preserved) {
+        if (expected.some(item => !trackerListIncludes(state[field], item))) {
+            return { required: true, completed: false, target, reason: `established ${field} was not preserved`, npcs: source };
+        }
+    }
+
+    const generatedCurrency = normalizeCurrencyList(discovery.CurrencyAmount);
+    if (generatedCurrency.some(item => !trackerListIncludes(state.currency, item))) {
+        return { required: true, completed: false, target, reason: 'revealed currency was not recorded', npcs: source };
+    }
+    if (discovery.MagicStone && !hasMagicStoneEntry([...state.gear, ...state.inventory])) {
+        return { required: true, completed: false, target, reason: 'revealed magic stone was not recorded', npcs: source };
+    }
+
+    const next = { ...source };
+    next[target] = normalizeTrackerEntry({ ...source[target], lootSearchCompleted: true });
+    return { required: true, completed: true, target, reason: '', npcs: next };
+}
+
+function cloneTrackerActorDelta(value = {}, NPC = undefined) {
+    const source = value && typeof value === 'object' ? value : {};
+    const result = { ...source };
+    for (const field of ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']) {
+        result[field] = Array.isArray(source[field]) ? [...source[field]] : [];
+    }
+    if (NPC !== undefined) result.NPC = NPC;
+    return result;
+}
+
+function findCorpsePossessionMatches(corpses, wantedItem, fields) {
+    const wanted = normalizePossessionTransferKey(wantedItem);
+    if (!wanted) return [];
+    const matches = [];
+    for (const [NPC, state] of corpses) {
+        for (const field of fields) {
+            for (const item of state[field] || []) {
+                if (normalizePossessionTransferKey(item) === wanted) matches.push({ NPC, field, item });
+            }
+        }
+    }
+    return matches;
+}
+
+function ensureTrackerNpcDelta(npcs, NPC) {
+    let entry = npcs.find(item => normalizeNameKey(item?.NPC) === normalizeNameKey(NPC));
+    if (!entry) {
+        entry = cloneTrackerActorDelta({}, NPC);
+        npcs.push(entry);
+    }
+    return entry;
+}
+
+function addUniqueTrackerDeltaItem(list, item) {
+    const key = normalizePossessionTransferKey(item);
+    if (!key || list.some(existing => normalizePossessionTransferKey(existing) === key)) return;
+    list.push(item);
+}
+
+function trackerListIncludes(list, wantedItem) {
+    const wanted = normalizePossessionTransferKey(wantedItem);
+    return Boolean(wanted) && (list || []).some(item => normalizePossessionTransferKey(item) === wanted);
+}
+
+function normalizePossessionTransferKey(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^(?:a|an|the)\s+/, '')
+        .replace(/[.!?]+$/, '')
+        .replace(/\s+/g, ' ');
 }
 
 const BOUND_COMPANION_TYPES = Object.freeze(['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other']);

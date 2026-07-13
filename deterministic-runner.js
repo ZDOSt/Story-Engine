@@ -46,6 +46,8 @@ import {
     sanitizeTargets,
     sameTargets,
     targetSummary,
+    findTrackerEntryName,
+    hasMagicStoneEntry,
     normalizeNameKey,
     normalizeActionMarkers,
     normalizeCore,
@@ -90,7 +92,7 @@ import {
     safeSceneHealingAmount,
 } from './health-state.js';
 import { normalizeWorldState } from './world-state.js';
-import { normalizeEconomyState } from './economy.js';
+import { buildDeterministicLootEnvelope, getNpcLootRankProfile, normalizeEconomyState } from './economy.js';
 import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
 
 const NONE = '(none)';
@@ -659,6 +661,166 @@ export function buildPendingBoundarySnapshot(context) {
     return normalizePendingBoundaryState(context?.chatMetadata?.structuredPreflightTracker?.pendingBoundary || {});
 }
 
+function runDeterministicLootDiscovery({ search = {}, trackerSnapshot = {}, hiddenHealth = null, context = null, adventureGenre = 'Fantasy', audit = [] } = {}) {
+    if (search?.Attempted !== 'Y') return { packet: null };
+
+    const requestedTarget = String(search?.Target || '').trim();
+    const target = findTrackedLootTargetName(trackerSnapshot, requestedTarget);
+    if (!target) {
+        const packet = {
+            Attempted: 'Y',
+            Status: 'unknown_target',
+            Target: requestedTarget || NONE,
+            TargetKind: search?.TargetKind || 'other',
+            Rule: 'No deterministic loot may be generated because the searched target is not a tracked NPC/body.',
+        };
+        audit.push(`2.9 lootDiscovery=${compact(packet)}`);
+        return { packet };
+    }
+
+    const state = normalizeTrackerEntry(trackerSnapshot[target] || {});
+    const healthCondition = getHealthActorCondition(hiddenHealth, { targetType: 'npc', name: target, condition: state.condition });
+    if (state.condition !== 'dead' && healthCondition !== 'dead') {
+        const packet = {
+            Attempted: 'Y',
+            Status: 'target_not_dead',
+            Target: target,
+            TargetKind: search?.TargetKind || 'other',
+            Rule: 'Do not generate corpse loot. The target is not deterministically dead; ordinary living-NPC access and boundary rules remain authoritative.',
+        };
+        audit.push(`2.9 lootDiscovery=${compact(packet)}`);
+        return { packet };
+    }
+
+    if (state.lootSearchCompleted) {
+        const packet = {
+            Attempted: 'Y',
+            Status: 'already_searched',
+            Target: target,
+            TargetKind: search?.TargetKind || 'other',
+            ExistingGear: showNone(state.gear),
+            ExistingInventory: showNone(state.inventory),
+            ExistingCurrency: showNone(state.currency),
+            Rule: 'This body/remains has already been searched. Reveal no new possessions, currency, equipment, magic stones, clues, or containers; only established remaining items may still be present.',
+        };
+        audit.push(`2.9 lootDiscovery=${compact(packet)}`);
+        return { packet };
+    }
+
+    const rank = normalizeLootRank(state.currentCoreStats?.Rank);
+    const envelope = buildDeterministicLootEnvelope({
+        rank,
+        target,
+        targetKind: search?.TargetKind,
+        genre: adventureGenre,
+        seed: hiddenHealth?.seed || context?.chatMetadata?.structuredPreflightTracker?.health?.seed || 'story-engine-loot',
+    });
+    const hasEstablishedMagicStone = hasMagicStoneEntry([...state.gear, ...state.inventory]);
+    const packet = {
+        Attempted: 'Y',
+        Status: 'reveal_once',
+        Target: target,
+        TargetKind: envelope.targetKind,
+        Rank: envelope.rank,
+        EquipmentTier: envelope.equipmentTier,
+        EquipmentValueRange: envelope.equipmentValueRange,
+        MaterialGuidance: envelope.materialGuidance,
+        ExistingGear: showNone(state.gear),
+        ExistingInventory: showNone(state.inventory),
+        ExistingCurrency: showNone(state.currency),
+        CurrencyTier: envelope.currencyTier,
+        CurrencyAmount: state.currency.length ? NONE : (envelope.currencyAmount || NONE),
+        MagicStone: hasEstablishedMagicStone ? null : envelope.magicStone,
+        MaxNewMundaneItems: envelope.maxNewMundaneItems,
+        Rule: 'Reveal this loot only once. Preserve established gear and possessions. The narrator may choose a small number of concrete mundane possessions within the listed physical quality/value envelope. Do not create magical items, powers, bonuses, rarity labels, plot-critical clues, secret documents, or keys unless already established. Discovery does not transfer ownership to {{user}}.',
+    };
+    audit.push(`2.9 lootDiscovery=${compact(packet)}`);
+    return { packet };
+}
+
+function buildNpcEquipmentProfiles({ resolutionPacket = {}, trackerBefore = {}, trackerAfter = {}, generatedNpcStats = [], adventureGenre = 'Fantasy', context = null } = {}) {
+    const generatedByName = new Map((generatedNpcStats || [])
+        .filter(item => isReal(item?.NPC))
+        .map(item => [normalizeNameKey(item.NPC), item]));
+    const tracked = { ...(trackerBefore || {}), ...(trackerAfter || {}) };
+    const latestUserText = getLatestUserTextFromContext(context);
+    const referencedSearchedRemains = Object.entries(tracked)
+        .filter(([name, value]) => {
+            const state = normalizeTrackerEntry(value);
+            return state.condition === 'dead'
+                && state.lootSearchCompleted
+                && searchedRemainsReferencedByInput(name, state, latestUserText);
+        })
+        .map(([name]) => name);
+    const names = unique([
+        ...toRealArray(resolutionPacket?.NPCInScene),
+        ...referencedSearchedRemains,
+    ]);
+    return names.map(name => {
+        const trackedName = findTrackedNpcName(trackerAfter, name) || findTrackedNpcName(trackerBefore, name) || name;
+        const state = normalizeTrackerEntry(trackerAfter?.[trackedName] || trackerBefore?.[trackedName] || {});
+        const generated = generatedByName.get(normalizeNameKey(trackedName));
+        const rank = normalizeLootRank(state.currentCoreStats?.Rank || generated?.FinalRank || generated?.Rank);
+        const profile = getNpcLootRankProfile(rank, adventureGenre);
+        return {
+            NPC: trackedName,
+            Rank: profile.rank,
+            EquipmentTier: profile.equipmentTier,
+            EquipmentValueRange: profile.equipmentValueRange,
+            MaterialGuidance: profile.materialGuidance,
+            EstablishedGear: showNone(state.gear),
+            EstablishedInventory: showNone(state.inventory),
+            EstablishedCurrency: showNone(state.currency),
+        };
+    }).filter(item => isReal(item.NPC));
+}
+
+function searchedRemainsReferencedByInput(name, state, latestUserText) {
+    const text = String(latestUserText || '').toLowerCase();
+    if (!text) return false;
+    return [name, ...state.aliases, ...state.gear, ...state.inventory, ...state.currency]
+        .map(item => String(item || '').trim().toLowerCase())
+        .filter(item => item.length >= 3)
+        .some(item => new RegExp(`\\b${escapeRegExp(item)}\\b`, 'i').test(text));
+}
+
+function findTrackedNpcName(snapshot = {}, wanted = '') {
+    return findTrackerEntryName(snapshot, wanted);
+}
+
+function findTrackedLootTargetName(snapshot = {}, wanted = '') {
+    const exact = findTrackedNpcName(snapshot, wanted);
+    if (exact) return exact;
+    const wantedKey = normalizeLootTargetReference(wanted);
+    if (!wantedKey) return '';
+    const matches = Object.entries(snapshot || {})
+        .filter(([name, value]) => [name, ...normalizeTrackerEntry(value).aliases]
+            .some(reference => normalizeLootTargetReference(reference) === wantedKey))
+        .map(([name]) => name);
+    return matches.length === 1 ? matches[0] : '';
+}
+
+function normalizeLootTargetReference(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/'s\b/g, ' ')
+        .replace(/\b(?:the|a|an|dead|defeated|fallen|slain|body|corpse|remains|of)\b/g, ' ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function normalizeLootRank(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (text === 'weak') return 'Weak';
+    if (text === 'trained') return 'Trained';
+    if (text === 'elite') return 'Elite';
+    if (text === 'boss') return 'Boss';
+    return 'Average';
+}
+
 export function buildAdventureIntroNameGeneration(context, adventurePrompt = '') {
     const audit = [];
     const prompt = String(adventurePrompt || '').trim();
@@ -774,13 +936,31 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         relationshipTrackerUpdate: injuryTrackerUpdate,
         healthBefore,
     });
-    const healthAfter = applyHiddenHealthEvents(healthBefore, healthEvents, {
+    const healthRefsAfterTurn = {
         user: playerTrackerSnapshot,
         npcs: buildHiddenHealthNpcRefs({
             ...(trackerSnapshot || {}),
             ...(injuryTrackerUpdate || {}),
         }, ledger, context),
+    };
+    const healthAfterUserAction = applyHiddenHealthEvents(
+        healthBefore,
+        healthEvents.filter(event => event?.source === 'user_action'),
+        healthRefsAfterTurn,
+    );
+    const healthAfter = applyHiddenHealthEvents(healthBefore, healthEvents, healthRefsAfterTurn);
+    const lootDiscovery = runDeterministicLootDiscovery({
+        search: resolution.packet?.LootSearch,
+        trackerSnapshot: {
+            ...(trackerSnapshot || {}),
+            ...(injuryTrackerUpdate || {}),
+        },
+        hiddenHealth: healthAfterUserAction,
+        context,
+        adventureGenre: options?.adventureGenre || 'Fantasy',
+        audit,
     });
+    if (lootDiscovery.packet) resolution.packet.LootDiscovery = lootDiscovery.packet;
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter);
     const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), ledger?.trackerUpdateEngine?.userReputation || {});
     const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name, playerTrackerSnapshot);
@@ -814,6 +994,14 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         ...(resolution.generatedNpcStats || []),
         ...(relationships.generatedNpcStats || []),
     ]);
+    const npcEquipmentProfiles = buildNpcEquipmentProfiles({
+        resolutionPacket: narrativeResolutionPacket,
+        trackerBefore: trackerSnapshot,
+        trackerAfter: trackerDeltas.npcs,
+        generatedNpcStats,
+        adventureGenre: options?.adventureGenre || 'Fantasy',
+        context,
+    });
     const finalNarrativeHandoff = {
         generationType: type || 'normal',
         resolutionPacket: narrativeResolutionPacket,
@@ -825,6 +1013,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         powerActorPressure: powerActors.handoff,
         boundCompanion: boundCompanion.handoff,
         generatedNpcStats,
+        npcEquipmentProfiles,
         sceneState: worldState,
         persistencePolicy: buildPersistencePolicy(),
         resultLine: resolution.resultLine,
@@ -2250,6 +2439,22 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
     return packet;
 }
 
+function normalizeLootSearchForHandoff(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const attempted = bool(source.attempted ?? source.Attempted);
+    const target = String(source.target ?? source.Target ?? '').trim();
+    const rawKind = String(source.targetKind ?? source.TargetKind ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const targetKind = ['humanoid', 'monster', 'other'].includes(rawKind) ? rawKind : 'other';
+    const evidence = String(source.evidence ?? source.Evidence ?? '').trim();
+    const validAttempt = attempted && isReal(target);
+    return {
+        Attempted: validAttempt ? 'Y' : 'N',
+        Target: validAttempt ? target : NONE,
+        TargetKind: validAttempt ? targetKind : 'other',
+        Evidence: validAttempt && isReal(evidence) ? evidence : NONE,
+    };
+}
+
 function itemUseRequiresPlayerTrackerItem(source, item, evidence, context) {
     return USER_OWNED_ITEM_SOURCES.includes(source)
         || latestUserInputClaimsItemPossession(item, evidence, context);
@@ -2669,6 +2874,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let rollReason = normalizeRollReason(semantic.rollReason);
     const itemUseAudit = [];
     const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, itemUseAudit, playerTrackerSnapshot);
+    const lootSearch = normalizeLootSearchForHandoff(semantic.lootSearch);
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
     let restraintControl = normalizeBoundaryObject(semantic.restraintControl);
     let boundaryPressure = normalizeBoundaryObject(semantic.boundaryPressure);
@@ -3026,6 +3232,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         GOAL: goal,
         UserAbilityUse: normalizeUserAbilityUseForHandoff(semantic.userAbilityUse),
         ItemUse: itemUse,
+        LootSearch: lootSearch,
         ClaimCheck: normalizeClaimCheckForHandoff(semantic.claimCheck),
         actions,
         actionUnits,
@@ -3076,6 +3283,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     audit.push(`2.7q InflictedNpcInjuryEngine=${compact(inflictedInjuries)}`);
     audit.push(`2.7r UserAbilityUse=${compact(packet.UserAbilityUse)}`);
     audit.push(`2.7s ItemUse=${compact(packet.ItemUse)}`);
+    audit.push(`2.7s.2 LootSearch=${compact(packet.LootSearch)}`);
     audit.push(`2.7t ClaimCheck=${compact(packet.ClaimCheck)}`);
     audit.push(`2.8 HANDOFF=${compact(packet)}`);
     audit.push('---');

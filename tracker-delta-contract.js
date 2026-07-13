@@ -106,14 +106,19 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Pending price payment: if ECONOMY_CONTEXT.pendingPrice exists and the latest user input plus FINAL_NARRATION semantically confirm that {{user}} delivers/authorizes the payment for that pending price, set EconomyState.payPendingPrice=Y, set TrackerUpdateEngine.User.currencyRemove to the pending amount if no more specific paid amount is stated, and set EconomyState.clearPendingPrice=Y. This is semantic payment confirmation, not keyword matching: do not mark it for asking about price, promising future payment, agreeing to a deal without payment delivery, attempted/refused payment, credit/debt, or ambiguous handling of coins.',
     '- Clear pending price without payment only when FINAL_NARRATION clearly abandons, refuses, replaces, completes through credit/debt instead of immediate payment, or leaves the transaction/scene behind. Then set EconomyState.clearPendingPrice=Y and do not remove currency.',
     '- Preserve the exact amount and currency phrase from FINAL_NARRATION or ECONOMY_CONTEXT.pendingPrice when possible, such as "50 sv", "$20", "12 cr", "3 spirit stones", or "two ration chits". Prefer the default/current tracker currency abbreviation when the narration uses the currency name, such as "5 sv" for "5 silver". Do not infer prices, wages, fees, rewards, loot value, balances, conversions, debt, or change unless the final narration or pendingPrice states the amount.',
+    '- NPC POSSESSION DELTA: use NPC inventoryAdd/inventoryRemove and currencyAdd/currencyRemove for possessions explicitly revealed, gained, lost, transferred, spent, destroyed, or removed in FINAL_NARRATION.',
+    '- Add NPC inventory only when FINAL_NARRATION establishes that a specific NPC owns/carries the item or that the item remains on, in, or with that NPC\'s dead body/remains after a loot search. Visible worn/equipped items remain NPC gear, not inventory.',
+    '- Add NPC currency when FINAL_NARRATION reveals a concrete amount still carried by that NPC or remaining with their body/remains. Do not move revealed loot to {{user}} merely because it is visible, found, reachable, or searched.',
+    '- When FINAL_NARRATION confirms a completed transfer from an NPC/body to {{user}}, remove the exact item/currency from that NPC and add it to {{user}} in the same delta. A transfer happens once; never duplicate ownership or regenerate removed loot.',
+    '- Revealed keepsakes, tools, supplies, documents, containers, and other possessions belong in NPC inventory only when the narration clearly associates them with that NPC. Do not invent possessions in the tracker block.',
     '- Use the latest user input only to identify who the acting user/player/persona is and which described body/item/task belongs to them. Do not extract changes from the latest user input unless the same change also appears in the final assistant narration.',
     '- Remove wounds/status only when the prose explicitly says the injury/status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing. Bandaging, splinting, dressing, cleaning, stitching, stabilizing, normal care, or starting treatment does NOT remove injuries unless the prose also says the injury/status is gone, healed, cured, fully recovered, or no longer impairing.',
     '- Natural full recovery should be reflected only when FINAL_NARRATION clearly establishes a completed safe recovery transition: the danger/scene has resolved and time advances through safe lodging, overnight rest, travel downtime, or an explicit recovery time skip. Do not mark full recovery from merely starting to rest, making camp, sleeping in an unsafe area, resting in a dungeon/battlefield/pursuit, or ordinary treatment without completed safe downtime.',
     '- Never rewrite full tracker lists. Return deltas only.',
     '- LIST FORMAT: For every Add/Remove list field, output (none) or separate multiple complete entries with " | ". A comma is part of one entry and MUST NOT separate entries. Example: woundsAdd=deep cut, left forearm | bruised ribs.',
     '- Use condition=unchanged unless the narration explicitly changes overall condition.',
-    '- NPC entries are only for named or currently tracked NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes. NPC inventory is not tracked.',
-    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
+    '- NPC entries are only for named or currently tracked NPCs with explicit condition, wound, status, visible gear, revealed inventory/currency, possession transfer, or stable personalitySummary changes.',
+    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, gearRemove, inventoryAdd, inventoryRemove, currencyAdd, and currencyRemove.',
     '- If uncertain, output (none).',
     '- Inside the fenced tracker block, output exactly the compact tracker lines. No prose. No JSON. No extra labels.',
     '',
@@ -198,6 +203,10 @@ TrackerUpdateEngine.NPC[0].statusAdd=(none)
 TrackerUpdateEngine.NPC[0].statusRemove=(none)
 TrackerUpdateEngine.NPC[0].gearAdd=(none)
 TrackerUpdateEngine.NPC[0].gearRemove=(none)
+TrackerUpdateEngine.NPC[0].inventoryAdd=(none)
+TrackerUpdateEngine.NPC[0].inventoryRemove=(none)
+TrackerUpdateEngine.NPC[0].currencyAdd=(none)
+TrackerUpdateEngine.NPC[0].currencyRemove=(none)
 UserKnowledgeLedger.personal.count=0
 UserKnowledgeLedger.personal[0].knownBy=(none)
 UserKnowledgeLedger.personal[0].scope=private

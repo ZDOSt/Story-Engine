@@ -24,6 +24,30 @@ const VALUE_TIER_BASES = Object.freeze([
     { name: 'elite', range: [5000, null], examples: 'magic items, property, ships, expeditions, major bribes, rare artifacts' },
 ]);
 
+const NPC_LOOT_RANK_PROFILES = Object.freeze({
+    Weak: Object.freeze({ equipmentTier: 'cheap', currencyTier: 'trivial', currencyChance: 40 }),
+    Average: Object.freeze({ equipmentTier: 'standard', currencyTier: 'cheap', currencyChance: 55 }),
+    Trained: Object.freeze({ equipmentTier: 'expensive', currencyTier: 'standard', currencyChance: 70 }),
+    Elite: Object.freeze({ equipmentTier: 'luxury', currencyTier: 'expensive', currencyChance: 85 }),
+    Boss: Object.freeze({ equipmentTier: 'elite', currencyTier: 'luxury', currencyChance: 100 }),
+});
+
+const NPC_EQUIPMENT_MATERIAL_GUIDANCE = Object.freeze({
+    Weak: 'Crude or heavily worn common materials and rough workmanship: damaged wood, bone, patched leather, poor iron, or the setting-equivalent.',
+    Average: 'Serviceable common materials and ordinary workmanship: iron, leather, ordinary steel, or the setting-equivalent.',
+    Trained: 'Quality common materials and professional workmanship: tempered steel, reinforced leather, fitted components, or the setting-equivalent.',
+    Elite: 'Masterwork construction using excellent common materials or a setting-valid rare material appropriate to an exceptional individual.',
+    Boss: 'The finest setting-valid materials and exceptional craftsmanship appropriate to a singular major threat; quality is physical, not a magical property.',
+});
+
+const MAGIC_STONE_PHYSICAL_GUIDANCE = Object.freeze({
+    Weak: 'small and cloudy',
+    Average: 'solid and clear',
+    Trained: 'dense and brightly colored',
+    Elite: 'large, clear, and strongly luminous',
+    Boss: 'massive, exceptionally clear, and intensely luminous',
+});
+
 export function getEconomyProfileForGenre(genre = 'Fantasy') {
     const genreName = Object.prototype.hasOwnProperty.call(ECONOMY_PROFILES, genre) ? genre : 'Fantasy';
     const base = ECONOMY_PROFILES[genreName];
@@ -37,6 +61,52 @@ export function getEconomyProfileForGenre(genre = 'Fantasy') {
             range: formatTierRange(tier.range, base.currencyUnit),
             examples: tier.examples,
         })),
+    };
+}
+
+export function getNpcLootRankProfile(rank = 'Average', genre = 'Fantasy') {
+    const normalizedRank = normalizeLootRank(rank);
+    const profile = NPC_LOOT_RANK_PROFILES[normalizedRank];
+    const economy = getEconomyProfileForGenre(genre);
+    const equipmentTier = getValueTierDefinition(profile.equipmentTier, economy.currencyUnit);
+    const currencyTier = getValueTierDefinition(profile.currencyTier, economy.currencyUnit);
+    return {
+        rank: normalizedRank,
+        equipmentTier: equipmentTier.name,
+        equipmentValueRange: equipmentTier.range,
+        currencyTier: currencyTier.name,
+        currencyValueRange: currencyTier.range,
+        currencyChance: profile.currencyChance,
+        materialGuidance: NPC_EQUIPMENT_MATERIAL_GUIDANCE[normalizedRank],
+    };
+}
+
+export function buildDeterministicLootEnvelope(options = {}) {
+    const genre = options?.genre || options?.adventureGenre || 'Fantasy';
+    const target = cleanLootSeedPart(options?.target) || 'unknown-target';
+    const seed = cleanLootSeedPart(options?.seed) || 'story-engine-loot';
+    const targetKind = normalizeLootTargetKind(options?.targetKind);
+    const profile = getNpcLootRankProfile(options?.rank, genre);
+    const economy = getEconomyProfileForGenre(genre);
+    const currencyPresent = targetKind === 'humanoid'
+        && stableLootPercent(`${seed}|${target}|currency-present`) <= profile.currencyChance;
+    const currencyAmount = currencyPresent
+        ? deterministicCurrencyAmount(profile.currencyTier, economy.currencyUnit, `${seed}|${target}|currency-amount`)
+        : '';
+    const magicStone = targetKind === 'monster'
+        ? {
+            item: 'magic stone',
+            valueTier: profile.equipmentTier,
+            valueRange: profile.equipmentValueRange,
+            physicalGuidance: MAGIC_STONE_PHYSICAL_GUIDANCE[profile.rank],
+        }
+        : null;
+    return {
+        ...profile,
+        targetKind,
+        currencyAmount,
+        magicStone,
+        maxNewMundaneItems: targetKind === 'humanoid' ? 2 : 0,
     };
 }
 
@@ -183,6 +253,56 @@ function formatTierRange(range, unit) {
     const [low, high] = range;
     if (high == null) return `${formatCurrencyValue(low, unit)}+`;
     return `${formatCurrencyValue(low, unit)}-${formatCurrencyValue(high, unit)}`;
+}
+
+function getValueTierDefinition(name, unit) {
+    const tier = VALUE_TIER_BASES.find(item => item.name === name) || VALUE_TIER_BASES[0];
+    return {
+        name: tier.name,
+        range: formatTierRange(tier.range, unit),
+        numericRange: [...tier.range],
+    };
+}
+
+function deterministicCurrencyAmount(tierName, unit, seed) {
+    const tier = VALUE_TIER_BASES.find(item => item.name === tierName) || VALUE_TIER_BASES[0];
+    const low = Math.max(1, Math.floor(Number(tier.range[0]) || 1));
+    const high = tier.range[1] == null
+        ? Math.max(low, low * 2)
+        : Math.max(low, Math.floor(Number(tier.range[1]) || low));
+    const amount = low + (stableLootHash(seed) % (high - low + 1));
+    return formatCurrencyValue(amount, unit);
+}
+
+function normalizeLootRank(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (text === 'weak') return 'Weak';
+    if (text === 'trained') return 'Trained';
+    if (text === 'elite') return 'Elite';
+    if (text === 'boss') return 'Boss';
+    return 'Average';
+}
+
+function normalizeLootTargetKind(value) {
+    const text = String(value || '').trim().toLowerCase();
+    return ['humanoid', 'monster', 'other'].includes(text) ? text : 'other';
+}
+
+function cleanLootSeedPart(value) {
+    return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, 180);
+}
+
+function stableLootPercent(seed) {
+    return (stableLootHash(seed) % 100) + 1;
+}
+
+function stableLootHash(seed) {
+    let hash = 2166136261;
+    for (const char of String(seed || 'story-engine-loot')) {
+        hash ^= char.charCodeAt(0);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
 }
 
 function formatCurrencyValue(value, unit) {
