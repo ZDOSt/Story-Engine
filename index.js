@@ -71,9 +71,12 @@ const LEGACY_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_writing_style';
 const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
+const PROGRESSION_SWIPE_EXTRA_KEY = 'structured_preflight_progression_swipe';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 
 const TRACKER_DISPLAY_VERSION = 1;
+const PROGRESSION_SWIPE_VERSION = 1;
+const TRACKER_ROOT_SNAPSHOT_LIMIT = 120;
 
 const TRACKER_VISIBLE_INACTIVE_LIMIT = 2;
 
@@ -2658,6 +2661,17 @@ function getPlayerRoot(context = getContext()) {
     return root;
 }
 
+
+function pruneRootTrackerSnapshots(root) {
+    if (!root?.snapshots || typeof root.snapshots !== 'object') return;
+    const entries = Object.entries(root.snapshots);
+    if (entries.length <= TRACKER_ROOT_SNAPSHOT_LIMIT) return;
+    entries
+        .sort((left, right) => Number(left[1]?.savedAt || 0) - Number(right[1]?.savedAt || 0))
+        .slice(0, entries.length - TRACKER_ROOT_SNAPSHOT_LIMIT)
+        .forEach(([key]) => delete root.snapshots[key]);
+}
+
 function normalizePlayerCreatorSetupState(creator) {
     const next = creator && typeof creator === 'object' ? creator : { stage: 'offer' };
     const stage = String(next.stage || 'offer');
@@ -4021,6 +4035,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
 
         userCoreStats: pendingRun?.userCoreStats || report?.semanticLedger?.engineContext?.userCoreStats || null,
         user,
+        hiddenHealth: cloneHiddenHealth(pendingRun?.healthAfter || pendingRun?.healthBefore),
         powerActors,
         userKnowledge,
         userReputation,
@@ -4649,7 +4664,7 @@ function applyTrackerListDelta(current, add, remove) {
 
     }
 
-    return filtered.slice(0, 40);
+    return filtered.slice(-40);
 
 }
 
@@ -4932,6 +4947,81 @@ function getMessageTrackerDisplaySnapshot(message) {
 }
 
 
+function buildProgressionSwipeSnapshot(messageKey, context = getContext()) {
+    const root = getProgressionRoot(context);
+    const records = root?.accomplishments
+        ?.filter(item => item?.messageKey === messageKey)
+        .map(normalizeProgressionRecord)
+        .filter(Boolean) || [];
+    const record = records[records.length - 1] || null;
+    return {
+        version: PROGRESSION_SWIPE_VERSION,
+        messageKey,
+        savedAt: Date.now(),
+        record: record ? clone(record) : null,
+    };
+}
+
+
+function setMessageProgressionSwipeSnapshot(message, snapshot) {
+    if (!message || message.is_user || !snapshot) return;
+    const swipeId = getMessageSwipeId(message);
+    message.extra = message.extra || {};
+    message.extra[PROGRESSION_SWIPE_EXTRA_KEY] = message.extra[PROGRESSION_SWIPE_EXTRA_KEY] || {};
+    message.extra[PROGRESSION_SWIPE_EXTRA_KEY][swipeId] = clone(snapshot);
+
+    const swipeInfo = ensureSwipeInfoEntry(message, swipeId);
+    if (swipeInfo) {
+        swipeInfo.extra[PROGRESSION_SWIPE_EXTRA_KEY] = swipeInfo.extra[PROGRESSION_SWIPE_EXTRA_KEY] || {};
+        swipeInfo.extra[PROGRESSION_SWIPE_EXTRA_KEY][swipeId] = clone(snapshot);
+    }
+}
+
+
+function getMessageProgressionSwipeSnapshot(message) {
+    if (!message || message.is_user) return null;
+    const swipeId = getMessageSwipeId(message);
+    return message.extra?.[PROGRESSION_SWIPE_EXTRA_KEY]?.[swipeId]
+        || message.swipe_info?.[swipeId]?.extra?.[PROGRESSION_SWIPE_EXTRA_KEY]?.[swipeId]
+        || null;
+}
+
+
+function restoreProgressionFromMessageSwipe(messageId, context = getContext()) {
+    const message = context?.chat?.[messageId];
+    const snapshot = getMessageProgressionSwipeSnapshot(message);
+    if (!snapshot || snapshot.version !== PROGRESSION_SWIPE_VERSION) return false;
+
+    const messageKey = getMessageKey(messageId, context);
+    if (snapshot.messageKey !== messageKey) return false;
+    const root = getProgressionRoot(context);
+    if (!root) return false;
+
+    const current = root.accomplishments.filter(record => record.messageKey === messageKey);
+    if (current.some(record => progressionRecordXpSpent(record) > 0)) {
+        return false;
+    }
+
+    const removedIds = new Set(current.map(record => record.id));
+    root.accomplishments = root.accomplishments.filter(record => record.messageKey !== messageKey);
+    if (root.pendingAdvancement?.sourceRecordIds?.some(id => removedIds.has(id))) {
+        root.pendingAdvancement = null;
+        root.ui = {};
+    }
+
+    const selectedRecord = normalizeProgressionRecord(snapshot.record);
+    if (selectedRecord) {
+        root.accomplishments.push({ ...selectedRecord, messageKey });
+        root.accomplishments = root.accomplishments
+            .map(normalizeProgressionRecord)
+            .filter(Boolean)
+            .slice(-PROGRESSION_RECORD_HISTORY_LIMIT);
+    }
+    maybeCreateProgressionPendingAdvancement(root);
+    return true;
+}
+
+
 
 function getLatestTrackerDisplaySnapshot(context = getContext()) {
 
@@ -4997,7 +5087,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(snapshot.pendingBoundary || root.pendingBoundary || {});
-    root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
+    root.health = normalizeHiddenHealth(snapshot.hiddenHealth || root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
 }
@@ -5023,7 +5113,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(snapshot.pendingBoundary || root.pendingBoundary || {});
-    root.health = normalizeHiddenHealth(root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
+    root.health = normalizeHiddenHealth(snapshot.hiddenHealth || root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
 }
@@ -8631,8 +8721,20 @@ function maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context 
     if (!pendingRun || !messageKey) return false;
     const root = getProgressionRoot(context);
     if (!root || root.pendingAdvancement) return false;
-    if (progressionXpAwardFromPendingRun(pendingRun) <= 0) return false;
-    if (root.accomplishments.some(record => record.messageKey === messageKey)) return false;
+
+    const existing = root.accomplishments.filter(record => record.messageKey === messageKey);
+    if (existing.some(record => progressionRecordXpSpent(record) > 0)) {
+        return false;
+    }
+
+    const removedIds = new Set(existing.map(record => record.id));
+    root.accomplishments = root.accomplishments.filter(record => record.messageKey !== messageKey);
+    if (root.pendingAdvancement?.sourceRecordIds?.some(id => removedIds.has(id))) {
+        root.pendingAdvancement = null;
+        root.ui = {};
+    }
+
+    if (progressionXpAwardFromPendingRun(pendingRun) <= 0) return existing.length > 0;
 
     const record = buildProgressionAccomplishmentRecord(pendingRun, messageKey);
     root.accomplishments.push(record);
@@ -8686,6 +8788,35 @@ function removeProgressionRecordsForMessage(messageKey, context = getContext()) 
         root.ui = {};
     }
     return root.accomplishments.length !== before;
+}
+
+
+function splitMessageKey(messageKey) {
+    const value = String(messageKey || '');
+    const separator = value.lastIndexOf(':');
+    if (separator < 0) return { chatId: '', messageId: NaN };
+    return {
+        chatId: value.slice(0, separator),
+        messageId: Number(value.slice(separator + 1)),
+    };
+}
+
+
+function removeProgressionRecordsAtOrAfterMessageId(chatId, firstMessageId, context = getContext()) {
+    const root = getProgressionRoot(context);
+    if (!root) return false;
+    const affectedKeys = new Set();
+    for (const record of root.accomplishments) {
+        const parsed = splitMessageKey(record?.messageKey);
+        if (parsed.chatId === chatId && Number.isFinite(parsed.messageId) && parsed.messageId >= firstMessageId) {
+            affectedKeys.add(record.messageKey);
+        }
+    }
+    let changed = false;
+    for (const key of affectedKeys) {
+        changed = removeProgressionRecordsForMessage(key, context) || changed;
+    }
+    return changed;
 }
 
 async function requestProgressionText(prompt, responseLength, overridePayload = {}) {
@@ -8966,7 +9097,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 'Use exactly these markdown section headings, in this order: # BASIC INFO, # APPEARANCE, # STATS, # NATURAL WEAPONS, # ABILITIES, # SPELLS, # INVENTORY, # CURRENCY, # GEAR, # CHARACTER ANCHORS.\n' +
                 'Use bold field labels for BASIC INFO, APPEARANCE, and STATS. Use bullets for NATURAL WEAPONS, INVENTORY, CURRENCY, GEAR, and CHARACTER ANCHORS. Named abilities and spells should have a bold name followed by a clear description, limits, range or requirements when relevant, and what the ability permits without granting automatic success.\n\n' +
                 'Required sections:\n' +
-                '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
+                '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age as one integer, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
                 '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 '# STATS: PHY, MND, CHA copied exactly.\n' +
                 '# NATURAL WEAPONS: concrete offensive body parts only, if any. Write None when the race/body has no clear natural weapon. Examples: horns, claws, fangs, talons, tusks, stinger, crushing tail, biting jaws. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
@@ -9232,6 +9363,7 @@ function sanitizeGeneratedSheet(raw) {
 
 function validatePlayerCreatorSheet(sheetText, creator = {}) {
     const identity = creator.identity || {};
+    const genre = creator.flow === 'new' ? normalizePlayerAdventureGenre(identity.genre || 'Fantasy') : 'Fantasy';
     const expectedRace = creator.flow === 'new'
         ? identity.raceMode === 'specify'
             ? String(identity.specifiedRace || '').trim()
@@ -9242,7 +9374,8 @@ function validatePlayerCreatorSheet(sheetText, creator = {}) {
     return assertValidCharacterSheet(sheetText, {
         stats: normalizeCoreStats(creator.stats || {}),
         expectedRace,
-        genre: creator.flow === 'new' ? normalizePlayerAdventureGenre(identity.genre || 'Fantasy') : 'Fantasy',
+        genre,
+        requireNumericAge: creator.flow === 'new' && genre === 'Isekai',
     });
 }
 
@@ -10846,6 +10979,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 trackerDeltaWarning = error instanceof Error ? error.message : String(error);
 
                 console.warn(`[${EXTENSION_NAME}] post-narration tracker update failed; keeping mechanical tracker snapshot.`, error);
+                notifyInfo('Narration completed, but its tracker delta was incomplete. Mechanical state was preserved; narration-only tracker changes may be missing.', EXTENSION_NAME, { timeOut: 8000 });
 
             }
 
@@ -10854,6 +10988,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             const hiddenHealthAfter = pendingRun.healthAfter
                 ? normalizeHiddenHealth(pendingRun.healthAfter, { user: trackerDisplaySnapshot.user, npcs: trackerDisplaySnapshot.npcs })
                 : null;
+            trackerDisplaySnapshot.hiddenHealth = cloneHiddenHealth(hiddenHealthAfter || root.health);
 
             if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
             await saveTrackerUpdate(context, buildTrackerUpdateForPersistence(trackerDisplaySnapshot, hiddenHealthAfter), { save: false });
@@ -10889,6 +11024,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 savedAt: Date.now(),
 
             };
+            pruneRootTrackerSnapshots(root);
 
             setMessageTrackerDisplaySnapshot(message, trackerDisplaySnapshot);
             finalTrackerDisplaySnapshot = trackerDisplaySnapshot;
@@ -10900,6 +11036,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         }
 
         maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context });
+        setMessageProgressionSwipeSnapshot(message, buildProgressionSwipeSnapshot(messageKey, context));
 
         narrationText = applyDeterministicNarrationFormatting(narrationText, {
             trackerDisplaySnapshot: finalTrackerDisplaySnapshot,
@@ -10970,21 +11107,22 @@ async function handleMessageDeleted(newLength) {
         : Array.isArray(context?.chat) ? context.chat.length : 0;
 
     const chatId = getChatId(context);
+    const firstAffectedMessageId = Math.min(chatLength, firstAffectedIndex);
 
     let restoreCandidate = null;
+
+    removeProgressionRecordsAtOrAfterMessageId(chatId, firstAffectedMessageId, context);
 
 
 
     for (const [key, snapshot] of Object.entries(root.snapshots || {})) {
-        const [snapshotChatId, rawMessageId] = key.split(':');
-        const messageId = Number(rawMessageId);
+        const { chatId: snapshotChatId, messageId } = splitMessageKey(key);
         if (snapshotChatId !== chatId) continue;
-        if (Number.isFinite(messageId) && messageId >= Math.min(chatLength, firstAffectedIndex)) {
+        if (Number.isFinite(messageId) && messageId >= firstAffectedMessageId) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
                 restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
             }
             delete root.snapshots[key];
-            removeProgressionRecordsForMessage(key, context);
         }
     }
 
@@ -11013,7 +11151,7 @@ async function handleMessageDeleted(newLength) {
         root.pendingBoundary = normalizePendingBoundaryState(restoreCandidate.beforePendingBoundary || root.pendingBoundary || {});
         await persistMetadata(context);
         if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
-        console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${Math.min(chatLength, firstAffectedIndex)}`);
+        console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${firstAffectedMessageId}`);
 
     } else if (restoreTrackerFromLatestDisplaySnapshot(context)) {
 
@@ -11045,12 +11183,14 @@ async function handleMessageSwiped(messageId) {
     const operationIdentity = createStoryEngineEpochIdentity(context);
     const resolvedMessageId = Number.isFinite(Number(messageId)) ? Number(messageId) : null;
 
-    if (resolvedMessageId != null && restoreTrackerFromMessageDisplaySnapshot(resolvedMessageId, context)) {
-
-        await persistMetadata(context);
-        if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
-
-    } else if (restoreTrackerFromLatestDisplaySnapshot(context)) {
+    const trackerRestored = resolvedMessageId != null
+        ? restoreTrackerFromMessageDisplaySnapshot(resolvedMessageId, context)
+        : false;
+    const fallbackTrackerRestored = trackerRestored ? false : restoreTrackerFromLatestDisplaySnapshot(context);
+    const progressionRestored = resolvedMessageId != null
+        ? restoreProgressionFromMessageSwipe(resolvedMessageId, context)
+        : false;
+    if (trackerRestored || fallbackTrackerRestored || progressionRestored) {
         await persistMetadata(context);
         if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
     }
@@ -11437,6 +11577,7 @@ async function handleChatCompletionPromptReady(eventData) {
             const isekaiOpeningSeed = pendingGeneration.isekaiOpeningSeed || buildIsekaiOpeningSeed({
                 adventureGenre,
                 prompt: adventurePrompt,
+                characterText: getPersonaText(context) || getPlayerRoot(context)?.sheet?.text,
             });
             pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
             const introOptions = {

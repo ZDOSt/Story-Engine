@@ -113,6 +113,26 @@ const GENERATED_CORE_RANGES = Object.freeze({
     Boss: [11, 14],
     none: [1, 1],
 });
+const CAPABILITY_POOL_RANK_TABLES = Object.freeze({
+    common: Object.freeze([
+        Object.freeze({ max: 15, rank: 'Weak' }),
+        Object.freeze({ max: 95, rank: 'Average' }),
+        Object.freeze({ max: 99, rank: 'Trained' }),
+        Object.freeze({ max: 100, rank: 'Elite' }),
+    ]),
+    trained: Object.freeze([
+        Object.freeze({ max: 20, rank: 'Average' }),
+        Object.freeze({ max: 90, rank: 'Trained' }),
+        Object.freeze({ max: 100, rank: 'Elite' }),
+    ]),
+    elite: Object.freeze([
+        Object.freeze({ max: 20, rank: 'Trained' }),
+        Object.freeze({ max: 100, rank: 'Elite' }),
+    ]),
+    boss: Object.freeze([
+        Object.freeze({ max: 100, rank: 'Boss' }),
+    ]),
+});
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
 const RAPPORT_COOLDOWN_MS = 30 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
@@ -731,7 +751,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const worldState = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
     const boundCompanionBefore = normalizeBoundCompanionState(options?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context));
     const pendingBoundaryBefore = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context));
-    const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger);
+    const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger, context);
     const healthBefore = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
         npcs: healthNpcRefsBefore,
@@ -759,7 +779,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         npcs: buildHiddenHealthNpcRefs({
             ...(trackerSnapshot || {}),
             ...(injuryTrackerUpdate || {}),
-        }, ledger),
+        }, ledger, context),
     });
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter);
     const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), ledger?.trackerUpdateEngine?.userReputation || {});
@@ -790,6 +810,10 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         pendingBoundary: pendingBoundaryBefore,
     };
     const narrativeResolutionPacket = applyHiddenHealthToResolutionPacket(resolution.packet, healthAfter);
+    const generatedNpcStats = mergeGeneratedNpcStats([
+        ...(resolution.generatedNpcStats || []),
+        ...(relationships.generatedNpcStats || []),
+    ]);
     const finalNarrativeHandoff = {
         generationType: type || 'normal',
         resolutionPacket: narrativeResolutionPacket,
@@ -800,6 +824,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         aggressionResults: aggression.results,
         powerActorPressure: powerActors.handoff,
         boundCompanion: boundCompanion.handoff,
+        generatedNpcStats,
         sceneState: worldState,
         persistencePolicy: buildPersistencePolicy(),
         resultLine: resolution.resultLine,
@@ -995,7 +1020,7 @@ function boundCompanionSourceText(resolutionPacket = {}) {
     ].filter(Boolean).join(' ');
 }
 
-function buildHiddenHealthNpcRefs(trackerSnapshot = {}, ledger = {}) {
+function buildHiddenHealthNpcRefs(trackerSnapshot = {}, ledger = {}, context = null) {
     const refs = {};
     for (const [name, entry] of Object.entries(trackerSnapshot || {})) {
         if (!isReal(name)) continue;
@@ -1026,7 +1051,30 @@ function buildHiddenHealthNpcRefs(trackerSnapshot = {}, ledger = {}) {
         for (const name of toRealArray(targets.HarmedObservers)) markAdventuringScale(name);
     }
 
+    applyGeneratedCapabilityHealthRefs(refs, ledger, semantic, targets, context);
+
     return refs;
+}
+
+function applyGeneratedCapabilityHealthRefs(refs, ledger, resolutionEngine, targets, context) {
+    const primaryTarget = firstReal(targets?.OppTargets?.NPC);
+    const applyProfile = (npc, options = {}) => {
+        if (!isReal(npc)) return;
+        const refName = Object.keys(refs).find(name => sameName(name, npc));
+        if (!refName || refs[refName]?.currentCoreStats) return;
+        const profile = resolveGeneratedCoreProfile(ledger, resolutionEngine, npc, { ...options, context });
+        refs[refName] = {
+            ...refs[refName],
+            Rank: profile.finalRank,
+            MainStat: profile.seed.MainStat,
+        };
+    };
+
+    applyProfile(primaryTarget);
+    for (const item of ledger?.relationshipEngine || []) {
+        if (sameName(item?.NPC, primaryTarget)) continue;
+        applyProfile(item?.NPC, { relationshipOnly: true });
+    }
 }
 
 function applyHiddenHealthToResolutionPacket(packet = {}, healthAfter = null) {
@@ -2822,6 +2870,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let resolvedUserStat = null;
     let environmentDifficulty = 0;
     let targetCore = null;
+    const generatedNpcStats = [];
 
     if (rollNeeded === 'N') {
         userImpairment = evaluateUserImpairment(ledger, context, semantic, goal, null, rollNeeded);
@@ -2892,20 +2941,18 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
                 audit.push(`2.7h getCurrentCoreStats(${oppTargetsNpcFirst})=${compact(targetCore)}`);
                 audit.push(`2.7n targetCore=${compact(targetCore)}`);
             } else {
-                const generatedCoreSource = chooseGeneratedCore(ledger, semantic, oppTargetsNpcFirst, dice);
+                const generatedCoreSource = chooseGeneratedCore(ledger, semantic, oppTargetsNpcFirst, dice, { context });
                 targetCore = normalizeCore(generatedCoreSource.core, { PHY: 1, MND: 1, CHA: 1 });
+                generatedNpcStats.push(generatedCoreAuditEntry(oppTargetsNpcFirst, generatedCoreSource));
                 audit.push(`2.7h getCurrentCoreStats(${oppTargetsNpcFirst || NONE})=missing`);
-                audit.push('2.7i missing -> deterministicAssignStats(genStats seed)');
-                if (generatedCoreSource.source !== 'resolutionEngine.genStats') {
-                    audit.push(`2.7i.1 genStats source=${generatedCoreSource.source}`);
-                }
-                audit.push(`2.7j genStats.Rank=${generatedCoreSource.seed?.Rank || generatedCoreSource.core?.Rank || 'none'}`);
+                audit.push('2.7i missing -> deterministicCapabilityPoolRank(genStats seed) -> deterministicAssignStats');
+                audit.push(`2.7i.1 genStats source=${generatedCoreSource.source}`);
+                audit.push(`2.7j genStats.CapabilityPool=${generatedCoreSource.seed?.CapabilityPool || 'common'}`);
+                audit.push(`2.7j.1 genStats.Percentile=${generatedCoreSource.percentile}`);
+                audit.push(`2.7j.2 genStats.FinalRank=${generatedCoreSource.core?.Rank || 'none'}`);
                 audit.push(`2.7k genStats.MainStat=${generatedCoreSource.seed?.MainStat || generatedCoreSource.core?.MainStat || 'none'}`);
                 audit.push(`2.7l genStats=${compact(targetCore)}`);
                 audit.push(`2.7m targetCore=${compact(targetCore)}`);
-                if (generatedCoreSource.defaultFallback) {
-                    audit.push('2.7m.1 genStatsDefaultFallback=not persisted as explicit NPC stats');
-                }
             }
         }
 
@@ -3033,7 +3080,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     audit.push(`2.8 HANDOFF=${compact(packet)}`);
     audit.push('---');
 
-    return { packet, resultLine };
+    return { packet, resultLine, generatedNpcStats };
 }
 
 function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refereeContext, context, rapportClock = normalizeRapportClock(), dice = null) {
@@ -3042,6 +3089,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
     const npcList = unique(toRealArray(resolutionPacket.NPCInScene));
     const handoffs = [];
     const trackerUpdate = {};
+    const generatedNpcStats = [];
     const pendingOfferNpcs = npcList.filter(npc => isRomanceMemoryTag(normalizeTrackerEntry(trackerSnapshot[npc] || {}).proactivityMemory.pendingTag));
     const userReputation = buildUserReputationSnapshot(context);
     const currentWorldState = buildWorldStateSnapshot(context);
@@ -3337,11 +3385,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
 
         const generatedCoreSource = state.currentCoreStats
             ? null
-            : chooseGeneratedCore(ledger, resolutionSemantic, npc, dice, { preferRelationshipSeed: true, relationshipOnly: true });
-        const coreStats = state.currentCoreStats || (generatedCoreSource?.defaultFallback ? null : generatedCoreSource?.core);
-        if (!state.currentCoreStats && !coreStats) {
-            audit.push(`3.7a currentCoreStats not persisted for ${npc}: no semantic Rank/MainStat seed`);
-        } else if (!state.currentCoreStats && generatedCoreSource) {
+            : chooseGeneratedCore(ledger, resolutionSemantic, npc, dice, { preferRelationshipSeed: true, relationshipOnly: true, context });
+        const coreStats = state.currentCoreStats || generatedCoreSource?.core || null;
+        if (!state.currentCoreStats && generatedCoreSource) {
+            generatedNpcStats.push(generatedCoreAuditEntry(npc, generatedCoreSource));
             audit.push(`3.7a currentCoreStats assigned for ${npc} from ${generatedCoreSource.source}: seed=${compact(generatedCoreSource.seed)} core=${compact(coreStats)}`);
         }
         trackerUpdate[npc] = {
@@ -3367,7 +3414,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
     }
 
     audit.push('---');
-    return { handoffs, trackerUpdate };
+    return { handoffs, trackerUpdate, generatedNpcStats };
 }
 
 function buildSlowBondSceneKey(resolutionPacket, npc) {
@@ -7587,40 +7634,48 @@ function chooseGeneratedCore(ledger, resolutionEngine, oppTargetsNpcFirst, dice 
         return { ...cached, source: `${cached.source} (cached)` };
     }
 
-    const resolutionSeed = normalizeGeneratedStatsSeed(resolutionEngine?.genStats);
-    const relationshipSeed = normalizeGeneratedStatsSeed((ledger.relationshipEngine || [])
-        .find(item => sameName(item?.NPC, oppTargetsNpcFirst))
-        ?.genStats);
-    const candidates = options.relationshipOnly
-        ? [
-            { seed: relationshipSeed, source: `relationshipEngine[${oppTargetsNpcFirst}].genStats` },
-        ]
-        : options.preferRelationshipSeed
-        ? [
-            { seed: relationshipSeed, source: `relationshipEngine[${oppTargetsNpcFirst}].genStats` },
-            { seed: resolutionSeed, source: 'resolutionEngine.genStats' },
-        ]
-        : [
-            { seed: resolutionSeed, source: 'resolutionEngine.genStats' },
-            { seed: relationshipSeed, source: `relationshipEngine[${oppTargetsNpcFirst}].genStats` },
-        ];
-    const selected = candidates.find(item => hasGeneratedStatsSeed(item.seed));
-
-    if (!selected) {
-        return {
-            core: { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 },
-            seed: { Rank: 'none', MainStat: 'none' },
-            source: 'engine default core fallback',
-            defaultFallback: true,
-        };
-    }
-
-    const core = assignGeneratedCoreStats(selected.seed, dice);
-    const generated = { core, seed: selected.seed, source: selected.source, defaultFallback: false };
+    const profile = resolveGeneratedCoreProfile(ledger, resolutionEngine, oppTargetsNpcFirst, options);
+    const core = assignGeneratedCoreStats({ Rank: profile.finalRank, MainStat: profile.seed.MainStat }, dice);
+    const generated = { ...profile, core };
     if (npcKey) {
         getGeneratedCoreCache(ledger)[npcKey] = generated;
     }
     return generated;
+}
+
+function resolveGeneratedCoreProfile(ledger, resolutionEngine, npc, options = {}) {
+    const resolutionSeed = normalizeGeneratedStatsSeed(resolutionEngine?.genStats);
+    const relationshipSeed = normalizeGeneratedStatsSeed((ledger.relationshipEngine || [])
+        .find(item => sameName(item?.NPC, npc))
+        ?.genStats);
+    const candidates = options.relationshipOnly
+        ? [
+            { seed: relationshipSeed, source: `relationshipEngine[${npc}].genStats` },
+        ]
+        : options.preferRelationshipSeed
+        ? [
+            { seed: relationshipSeed, source: `relationshipEngine[${npc}].genStats` },
+            { seed: resolutionSeed, source: 'resolutionEngine.genStats' },
+        ]
+        : [
+            { seed: resolutionSeed, source: 'resolutionEngine.genStats' },
+            { seed: relationshipSeed, source: `relationshipEngine[${npc}].genStats` },
+        ];
+    const selected = candidates.find(item => hasGeneratedStatsSeed(item.seed));
+    const specialization = candidates.find(item => item.seed?.MainStat !== 'none')?.seed?.MainStat || 'Balanced';
+    const resolved = selected || {
+        seed: { CapabilityPool: 'common', MainStat: specialization },
+        source: 'deterministic common capability fallback',
+    };
+    const seed = {
+        CapabilityPool: normalizeGeneratedCapabilityPool(resolved.seed?.CapabilityPool, 'common'),
+        MainStat: normalizeGeneratedMainStat(resolved.seed?.MainStat) === 'none'
+            ? specialization
+            : normalizeGeneratedMainStat(resolved.seed?.MainStat),
+    };
+    const percentile = capabilityPercentileForNpc(npc, seed.CapabilityPool, options.context);
+    const finalRank = rankForCapabilityPool(seed.CapabilityPool, percentile);
+    return { seed, percentile, finalRank, source: resolved.source };
 }
 
 function getGeneratedCoreCache(ledger) {
@@ -7631,19 +7686,18 @@ function getGeneratedCoreCache(ledger) {
 
 function normalizeGeneratedStatsSeed(value) {
     return {
-        Rank: normalizeGeneratedRank(value?.Rank),
+        CapabilityPool: normalizeGeneratedCapabilityPool(value?.CapabilityPool),
         MainStat: normalizeGeneratedMainStat(value?.MainStat),
     };
 }
 
 function hasGeneratedStatsSeed(seed) {
-    return seed?.Rank !== 'none' || seed?.MainStat !== 'none';
+    return seed?.CapabilityPool !== 'none';
 }
 
-function normalizeGeneratedRank(value) {
+function normalizeGeneratedCapabilityPool(value, fallback = 'none') {
     const text = String(value ?? '').trim().toLowerCase();
-    const map = { weak: 'Weak', average: 'Average', trained: 'Trained', elite: 'Elite', boss: 'Boss', none: 'none' };
-    return map[text] || 'none';
+    return ['common', 'trained', 'elite', 'boss', 'none'].includes(text) ? text : fallback;
 }
 
 function normalizeGeneratedMainStat(value) {
@@ -7652,9 +7706,58 @@ function normalizeGeneratedMainStat(value) {
     return map[text] || 'none';
 }
 
+export function rankForCapabilityPool(value, percentile) {
+    const pool = normalizeGeneratedCapabilityPool(value, 'common');
+    const table = CAPABILITY_POOL_RANK_TABLES[pool] || CAPABILITY_POOL_RANK_TABLES.common;
+    const roll = clamp(Math.floor(Number(percentile) || 1), 1, 100);
+    return table.find(entry => roll <= entry.max)?.rank || table[table.length - 1].rank;
+}
+
+function capabilityPercentileForNpc(npc, pool, context = null) {
+    const root = context?.chatMetadata?.structuredPreflightTracker || {};
+    const campaignSeed = String(root?.health?.seed || root?.worldState?.reputationLocation || 'story-engine');
+    const npcSeed = normalizeNameKey(npc) || String(npc || 'unknown').trim().toLowerCase() || 'unknown';
+    return stablePercentile(`${campaignSeed}|${npcSeed}|${pool}`);
+}
+
+function stablePercentile(value) {
+    let hash = 2166136261;
+    for (const char of String(value || 'story-engine')) {
+        hash ^= char.charCodeAt(0);
+        hash = Math.imul(hash, 16777619);
+    }
+    return ((hash >>> 0) % 100) + 1;
+}
+
+function generatedCoreAuditEntry(npc, generated = {}) {
+    const core = generated?.core || {};
+    return {
+        NPC: npc || NONE,
+        CapabilityPool: generated?.seed?.CapabilityPool || 'common',
+        Percentile: generated?.percentile ?? 1,
+        FinalRank: core.Rank || generated?.finalRank || 'none',
+        MainStat: core.MainStat || generated?.seed?.MainStat || 'Balanced',
+        PHY: core.PHY ?? 1,
+        MND: core.MND ?? 1,
+        CHA: core.CHA ?? 1,
+        Source: generated?.source || 'deterministic capability pool',
+    };
+}
+
+function mergeGeneratedNpcStats(entries = []) {
+    const merged = new Map();
+    for (const entry of entries) {
+        const key = normalizeNameKey(entry?.NPC);
+        if (!key || merged.has(key)) continue;
+        merged.set(key, entry);
+    }
+    return [...merged.values()];
+}
+
 function assignGeneratedCoreStats(seed, dice = null) {
-    const normalized = normalizeGeneratedStatsSeed(seed);
-    const range = GENERATED_CORE_RANGES[normalized.Rank] || GENERATED_CORE_RANGES.none;
+    const rank = Object.prototype.hasOwnProperty.call(GENERATED_CORE_RANGES, seed?.Rank) ? seed.Rank : 'Average';
+    const mainStat = normalizeGeneratedMainStat(seed?.MainStat) === 'none' ? 'Balanced' : normalizeGeneratedMainStat(seed?.MainStat);
+    const range = GENERATED_CORE_RANGES[rank] || GENERATED_CORE_RANGES.Average;
     const [min, max] = range;
     const stats = {
         PHY: rollGeneratedStat(min, max, dice),
@@ -7662,30 +7765,30 @@ function assignGeneratedCoreStats(seed, dice = null) {
         CHA: rollGeneratedStat(min, max, dice),
     };
 
-    if (normalized.MainStat === 'Balanced') {
+    if (mainStat === 'Balanced') {
         const center = rollGeneratedStat(min, max, dice);
         for (const stat of ['PHY', 'MND', 'CHA']) {
             stats[stat] = clamp(center + rollGeneratedStat(-1, 1, dice), min, max);
         }
-    } else if (['PHY', 'MND', 'CHA'].includes(normalized.MainStat)) {
-        const others = ['PHY', 'MND', 'CHA'].filter(stat => stat !== normalized.MainStat);
+    } else if (['PHY', 'MND', 'CHA'].includes(mainStat)) {
+        const others = ['PHY', 'MND', 'CHA'].filter(stat => stat !== mainStat);
         const otherMax = Math.max(...others.map(stat => stats[stat]));
-        stats[normalized.MainStat] = Math.max(stats[normalized.MainStat], otherMax);
-        if (max > min && stats[normalized.MainStat] <= otherMax) {
-            stats[normalized.MainStat] = Math.min(max, otherMax + 1);
+        stats[mainStat] = Math.max(stats[mainStat], otherMax);
+        if (max > min && stats[mainStat] <= otherMax) {
+            stats[mainStat] = Math.min(max, otherMax + 1);
         }
         if (max > min) {
             for (const stat of others) {
-                if (stats[stat] >= stats[normalized.MainStat]) {
-                    stats[stat] = Math.max(min, stats[normalized.MainStat] - 1);
+                if (stats[stat] >= stats[mainStat]) {
+                    stats[stat] = Math.max(min, stats[mainStat] - 1);
                 }
             }
         }
     }
 
     return normalizeCore({
-        Rank: normalized.Rank,
-        MainStat: normalized.MainStat,
+        Rank: rank,
+        MainStat: mainStat,
         ...stats,
     }, { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 });
 }

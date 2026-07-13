@@ -186,10 +186,15 @@ function ResolutionEngine(input) {
   genStats(target, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: use only if target currentCoreStats missing
-    rule: determine Rank from explicit portrayal only: Weak, Average, Trained, Elite, Boss
-    rule: determine MainStat from explicit portrayal only: PHY, MND, CHA, or Balanced
-    rule: deterministic code assigns numeric stats and saves them
-    return {Rank, MainStat}
+    rule: classify the population/role context that best fits this specific NPC; consider occupation, location, species, established actions, card/lore facts, and reputation together
+    rule: common = ordinary civilian, laborer, resident, incidental person, unknown capability, or no explicit evidence of practiced exceptional capability
+    rule: trained = role or portrayal clearly implies practiced professional, martial, magical, intellectual, investigative, or social capability
+    rule: elite = explicitly exceptional champion, master, veteran, rare predator, renowned expert, or similarly uncommon individual
+    rule: boss = explicitly singular major threat, legendary being, supreme master, or central overwhelming antagonist; never use boss from title, location, hostility, or dramatic importance alone
+    rule: if target currentCoreStats are missing and capability is uncertain, return CapabilityPool=common; return none only when no target needs stats
+    rule: determine MainStat from explicit specialization: PHY, MND, CHA, or Balanced; unclear or broadly capable = Balanced
+    rule: deterministic code rolls final Rank from CapabilityPool percentiles, assigns numeric stats, and saves them
+    return {CapabilityPool, MainStat}
 
   execution:
     finalGoal = identifyGoal(input)
@@ -1558,8 +1563,8 @@ export function buildNarrationGuidance(resolution, handoffs, chaos, proactivity,
 export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
-        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
-        playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'tasks', 'commitments'],
+        npcPersistentRuleMutated: ['currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'slowBondEvidence', 'proactivityMemory', 'currentCoreStats', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear'],
+        playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'currency', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'harmMode', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'restraintControl', 'boundaryPressure', 'boundaryBreak', 'activeHostileThreat', 'CHAOS', 'proactivityResults', 'aggressionResults'],
     };
@@ -2119,9 +2124,8 @@ export function normalizeTrackerStringList(value) {
         if (seen.has(key)) continue;
         seen.add(key);
         result.push(text.slice(0, 140));
-        if (result.length >= 40) break;
     }
-    return result;
+    return result.slice(-40);
 }
 
 export function normalizePersonalitySummary(value) {
@@ -2261,9 +2265,9 @@ export function normalizeCore(value, fallback) {
     return {
         Rank: normalizeRank(value?.Rank ?? fallback.Rank),
         MainStat: normalizeMainStat(value?.MainStat ?? fallback.MainStat),
-        PHY: clamp(Number(value?.PHY ?? fallback.PHY), 1, 10),
-        MND: clamp(Number(value?.MND ?? fallback.MND), 1, 10),
-        CHA: clamp(Number(value?.CHA ?? fallback.CHA), 1, 10),
+        PHY: clamp(Number(value?.PHY ?? fallback.PHY), 1, 14),
+        MND: clamp(Number(value?.MND ?? fallback.MND), 1, 14),
+        CHA: clamp(Number(value?.CHA ?? fallback.CHA), 1, 14),
     };
 }
 

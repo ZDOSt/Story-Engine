@@ -471,9 +471,9 @@ function buildSemanticPreflightSchema() {
     const generatedStatsSeedSchema = {
         type: 'object',
         additionalProperties: false,
-        required: ['Rank', 'MainStat'],
+        required: ['CapabilityPool', 'MainStat'],
         properties: {
-            Rank: { type: 'string', enum: ['none', 'Weak', 'Average', 'Trained', 'Elite', 'Boss'] },
+            CapabilityPool: { type: 'string', enum: ['none', 'common', 'trained', 'elite', 'boss'] },
             MainStat: { type: 'string', enum: ['none', 'PHY', 'MND', 'CHA', 'Balanced'] },
         },
     };
@@ -1336,7 +1336,7 @@ const COMPACT_LEDGER_CONTRACT = [
     '- ResolutionEngine.activeHostileThreat is strict. Return Y only if the current scene contains an immediate hostile danger from an NPC/entity: attacking, charging, preparing to attack, pursuing, ambushing, threatening violence, monster/hostile creature engagement, armed standoff, capture attempt, or imminent physical/supernatural harm. Return N for negotiation, refusal, bargaining, argument, social resistance, authority denial, suspicion, rivalry, nonviolent obstruction, or ordinary OppTargets.NPC without immediate danger.',
     '- ResolutionEngine.intimacyAdvanceExplicit is strict. Return Y only if {{user}} explicitly attempts, requests, accepts, or reciprocates actual intimate escalation with a specific NPC: kissing, making out, sexual touch, undressing toward intimacy, asking to sleep together, asking for sex, moving to bed, or clearly initiating romantic/sexual physical closeness. Return Y for accepting or reciprocating a prior explicit NPC-initiated intimacy invitation or action. Return N for flirting, teasing, compliments, romantic banter, suggestive jokes, vague innuendo, "what did you have in mind", declarations of love, asking for a date, emotional confession, hand-holding, casual proximity, or ordinary affection that does not clearly escalate into kissing or sexual/intimate contact. This is only an intimacy permission/boundary signal and does not create stakes, rolls, landed actions, Bond loss, Fear, or Hostility by itself.',
     '- ResolutionEngine.harmMode is a downstream damage/death gate only. It must NOT decide rollNeeded, challengeType, boundary pressure, or relationship harm. Set lethal when the current action attacks a living body using a weapon, improvised weapon, natural weapon, dangerous tool, projectile, firearm, blade, fang, claw, horn, crushing object, lethal/destructive magic, poison, fire, electricity, or another method that could reasonably kill or maim if it lands decisively. {{user}} does not need to say "kill"; infer from the physical method and context. Set nonlethal when the current action attacks a living body with ordinary unarmed force or explicitly controlled force: punches, kicks, elbows, knees, brawling, tackles meant as attacks, training, sparring, pulled blows, pommel strikes, flat-of-blade strikes, practice weapons, or a clearly stated attempt to avoid serious/fatal harm. Nonlethal can deal HP damage, but HP 0 means unconscious/incapacitated, not dead. Set restraint_control when the current action controls, holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a living body without a separate attack meant to injure. Restraint/control does not deal HP damage; it can cause bruising at most and restraint/control statuses if scene-valid. Set none when there is no bodily attack, harmful effect, or restraint/control. If the turn mixes methods, choose the most dangerous active mode: lethal > nonlethal > restraint_control > none. Ambiguous ordinary bodily force without weapons or inherently dangerous methods is nonlethal by default; mere restraint/control remains restraint_control.',
-    '- All genStats groups must include only Rank and MainStat. Use genStats only when the relevant NPC currentCoreStats are missing in the tracker snapshot. The semantic pass identifies Rank and MainStat from explicit portrayal; deterministic code assigns numeric PHY/MND/CHA values within the Rank range and saves them once.',
+    '- All genStats groups must include only CapabilityPool and MainStat. Use genStats only when the relevant NPC currentCoreStats are missing in the tracker snapshot. CapabilityPool classifies this specific NPC population/role context using occupation, location, species, established actions, card/lore facts, and reputation together: common for ordinary civilians/residents/incidental people, unknown capability, or no practiced-capability evidence; trained when role or portrayal clearly implies practiced professional, martial, magical, intellectual, investigative, or social capability; elite only for explicitly exceptional champions, masters, veterans, rare predators, renowned experts, or similarly uncommon individuals; boss only for an explicitly singular major threat, legendary being, supreme master, or central overwhelming antagonist. Title, location, hostility, or dramatic importance alone never makes boss. If stats are missing and uncertain, use common; use none only when no NPC needs stats. MainStat uses explicit specialization PHY/MND/CHA; unclear or broadly capable is Balanced. Deterministic code rolls final Rank from the pool percentiles, assigns numeric PHY/MND/CHA, and saves the result once.',
     '- InjuryEffectEngine is semantic-only candidate extraction for effects the user action would cause if deterministic mechanics say the action lands. It does not roll and does not decide success. Include physical injuries and impairing magical/status effects regardless of source: burns, poison, paralysis, sickness, blindness, fear/panic, restraint, curses, lightning/electrical effects, exhaustion, mental effects, or other ongoing impairing states. Exclude purely emotional/social harm, mere witnessing, momentary pain, intended/requested future injuries, or effects that would not persist or impair later action.',
     '- InjuryEffectEngine target must be the entity actually receiving the impairing effect. HarmedObservers may appear only if they are directly affected by the injury/status effect, not merely emotionally harmed by seeing or caring about another target. Use persistence=lasting and affectsAction=Y only for effects that should impair later action if applied.',
     '- TrackerUpdateEngine is explicit-only visual state tracking. Output deltas only from the latest user input and immediate visible context. Use condition=unchanged, personalitySummary=unchanged, and (none) lists unless a change is explicitly stated.',
@@ -1422,7 +1422,7 @@ ResolutionEngine.actionUnits[0].action={{user}} takes the latest explicit action
 ResolutionEngine.actionUnits[0].evidence=(none)
 ResolutionEngine.environmentDifficultyTier=none
 ResolutionEngine.activeHostileThreat=N
-ResolutionEngine.genStats.Rank=none
+ResolutionEngine.genStats.CapabilityPool=none
 ResolutionEngine.genStats.MainStat=none
 RelationshipEngine.count=0
 UserKnowledgeApplication.count=0
@@ -1642,8 +1642,8 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Identify ResolutionEngine.identifyTargets.PowerActors during target discovery: include any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Assess semantically, not by keywords or titles. A living NPC can appear in HarmedObservers/BenefitedObservers/ActionTargets/OppTargets.NPC/NPCAwareOfUser for personal B/F/H and also appear in PowerActors for hidden strategic consequences. PowerActors never replace normal target/observer/awareness placement. ' +
         'Create one relationshipEngine entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser. This coverage is mandatory even when that same NPC is also in PowerActors or assessed as a PowerActorEnmity power actor. PowerActors and PowerActorEnmity never replace RelationshipEngine. Do not create entries for bystanders, hostilesInScene-only NPCs, PowerActors-only entities, groups/crowds, or inferred scene participants outside those target/observer/awareness lists. ' +
         'For each living NPC in relationshipEngine, stakeChangeByOutcome must describe that NPC stakes change for each outcome: benefit means their stakes improve, harm means their stakes worsen, none means no meaningful stake change. For explicit boundary violations toward a direct/opposing NPC target, successful or landed outcomes worsen that NPC boundary/autonomy/trust stakes, so use harm and not none. ' +
-        'If a named NPC is a primary target and tracker currentCoreStats are missing, generate that NPC stat seed from explicit portrayal and copy the same Rank/MainStat seed into ResolutionEngine genStats and the matching RelationshipEngine genStats. ' +
-        'Do not leave a named portrayed NPC as Rank none/MainStat none unless the card, scene, and tracker give no explicit portrayal at all. ' +
+        'If a named NPC is a primary target and tracker currentCoreStats are missing, classify that NPC CapabilityPool/MainStat from the full context and copy the same seed into ResolutionEngine genStats and the matching RelationshipEngine genStats. Use common/Balanced when capability or specialization is uncertain. ' +
+        'When a named NPC needs missing stats, do not leave CapabilityPool or MainStat as none; use common/Balanced when evidence is uncertain. ' +
         'Apply stored user knowledge before RelationshipEngine initPreset only when it is authored/personal context, not broad public reputation. Fill UserKnowledgeApplication from the hidden User knowledge snapshot only when a stored personal entry plausibly applies to a present NPC/group or to the current scene. Personal knowledge applies only to the named knownBy NPC/group or a direct institutional/group match. ReputationKnowledge entries are contextOnly unless they are explicit authored pre-existing relationship context for this exact NPC/group; broad public reputation does not set priorUserGoodRep, userBadRep, or userNonHuman because deterministic fame/infamy handles public standing. effect=priorUserGoodRep only for explicit personal/authored favorable relationship knowledge; userBadRep only for explicit personal/authored negative relationship knowledge; userNonHuman only for explicit personal/authored fear-coded relationship knowledge or visible unnormalized nonhuman exposure; contextOnly for knowledge that informs narration but should not initialize B/F/H; none when no current application exists. Do not invent new reputation here; creation happens only in post-narration UserKnowledgeLedger and FameInfamyLedger. ' +
         'Detect user ability/spell attempts before target/risk classification: compare the latest user input against active {{user}}/persona abilities and spells, including the # ABILITIES and # SPELLS character sheet sections, assembled SillyTavern prompt stack, character persona/sheet, scenario, lore/world info, and chat context. Mark ResolutionEngine.userAbilityUse.Attempted=Y when the input explicitly names an ability/spell or implicitly describes attempting one through trigger, delivery method, or desired effect. Private delivery phrasing such as "meant only for X", "only X can hear", "whisper so only X hears", "send the words directly/private to X", or "speak into X alone" should match a persona ability/spell whose effect privately carries speech, sound, thought, or message to a target, even if the ability/spell name is not said. Mark Available=Y only if the attempted ability/spell exists in active {{user}} abilities or spells. Mark Used=Y only when Attempted=Y and Available=Y. Use the exact persona ability/spell name when available; otherwise name the attempted ability/effect concisely. Evidence is the user wording that signals the attempt. NarrativeEffect is the direct in-world effect the narrator must preserve when available, or the attempted effect that must not occur when unavailable. If Attempted=Y and Available=N, set NoEffectReason to why no ability/spell effect occurs. MechanicalScope must always be flavor_only_no_bonus: ability/spell use is fictional permission/method only, never a bonus, never a dice modifier, never a separate roll, and never a bypass for broader stakes or outcomes. If an available ability/spell is used to deliver a threat, persuasion, attack, escape, healing, or other contested goal, classify and roll the broader goal normally while keeping the ability/spell as delivery/flavor. ' +
         'Detect personal gear/inventory item attempts before target/risk classification. Fill ResolutionEngine.itemUse only when {{user}} attempts to use, draw, wield, consume, spend, present, unlock with, attack with, defend with, produce, retrieve, or otherwise rely on an item as {{user}}\'s own personal equipment, gear, or inventory already carried before the latest input. Personal carried-item signals include "my X", "from my belt", "from my pocket", "from my pack", "from my bag", "from my pouch", "from my sheath", "from my holster", "I draw X", "I produce X", "I retrieve X", or equivalent wording that claims {{user}} already has the item on their person or in carried inventory. Mark Available=Y only when that exact attempted personal item is already listed in {{user}} gear or inventory before the latest user input; use Source=gear or Source=inventory. The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability. Mark Available=N and Source=unavailable when the personal item is unsupported, absent, too specific for the listed inventory item, or only asserted by the latest user wording. Mark Attempted=N for ordinary interaction with environmental, scene, or NPC-offered objects, including grabbing, taking, picking up, receiving, finding, searching for, using, breaking, burning, throwing, or moving an object from a table, floor, ground, counter, shelf, corpse, display, container, NPC hand, offered transfer, or any other scene source; those actions remain normal narration/stakes/ENV context, not itemUse. Examples: "I draw my sword" -> Attempted=Y; "I pull my phone from my pocket" -> Attempted=Y; "I grab the sword from the table" -> Attempted=N; "Alice hands me a key and I take it" -> Attempted=N. Do not infer personal item availability from setting likelihood. If Available=N, the personal item effect must not be treated as completed. ' +
@@ -2124,7 +2124,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         'ResolutionEngine.actionUnits.count',
         'ResolutionEngine.environmentDifficultyTier',
         'ResolutionEngine.activeHostileThreat',
-        'ResolutionEngine.genStats.Rank',
+        'ResolutionEngine.genStats.CapabilityPool',
         'ResolutionEngine.genStats.MainStat',
         'RelationshipEngine.count',
         'UserKnowledgeApplication.count',
@@ -2340,7 +2340,7 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.checkThreshold.Transactional`,
             `${prefix}.checkThreshold.Established`,
             `${prefix}.checkThreshold.RomanticBuildup`,
-            `${prefix}.genStats.Rank`,
+            `${prefix}.genStats.CapabilityPool`,
             `${prefix}.genStats.MainStat`,
         ];
         for (const outcomeKey of STAKE_OUTCOME_KEYS) {
@@ -2676,6 +2676,10 @@ function parseNarratorTrackerDeltaText(text) {
         if (key) fields.set(key, value);
     }
 
+    const trackerNpcCount = clampNumber(readNumber(fields, 'TrackerUpdateEngine.NPC.count', 0), 0, 12);
+    const personalCount = clampNumber(readNumber(fields, 'UserKnowledgeLedger.personal.count', 0), 0, 20);
+    const reputationCount = clampNumber(readNumber(fields, 'UserKnowledgeLedger.reputation.count', 0), 0, 20);
+    const fameInfamyCount = clampNumber(readNumber(fields, 'FameInfamyLedger.count', 0), 0, 2);
     const required = [
         'TrackerUpdateEngine.User.condition',
         'TrackerUpdateEngine.User.woundsAdd',
@@ -2688,6 +2692,12 @@ function parseNarratorTrackerDeltaText(text) {
         'TrackerUpdateEngine.User.inventoryRemove',
         'TrackerUpdateEngine.User.currencyAdd',
         'TrackerUpdateEngine.User.currencyRemove',
+        'EconomyState.payPendingPrice',
+        'EconomyState.pendingPriceAmount',
+        'EconomyState.pendingPriceItem',
+        'EconomyState.pendingPricePayee',
+        'EconomyState.pendingPriceEvidence',
+        'EconomyState.clearPendingPrice',
         'TrackerUpdateEngine.User.tasksAdd',
         'TrackerUpdateEngine.User.tasksRemove',
         'TrackerUpdateEngine.User.commitmentsAdd',
@@ -2696,6 +2706,14 @@ function parseNarratorTrackerDeltaText(text) {
         'UserKnowledgeLedger.personal.count',
         'UserKnowledgeLedger.reputation.count',
         'FameInfamyLedger.count',
+        'WorldStateDelta.reputationLocation',
+        'WorldStateDelta.place',
+        'WorldStateDelta.area',
+        'WorldStateDelta.indoors',
+        'WorldStateDelta.timeAdvance',
+        'WorldStateDelta.timeOfDay',
+        'WorldStateDelta.weatherCondition',
+        'WorldStateDelta.weatherTick',
         'BoundCompanionState.status',
         'BoundCompanionState.name',
         'BoundCompanionState.type',
@@ -2709,25 +2727,45 @@ function parseNarratorTrackerDeltaText(text) {
         'PendingBoundaryState.objectOrAccess',
         'PendingBoundaryState.evidence',
     ];
+    for (let index = 0; index < trackerNpcCount; index += 1) {
+        const prefix = `TrackerUpdateEngine.NPC[${index}]`;
+        required.push(...['NPC', 'revealedName', 'personalitySummary', 'condition', 'woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']
+            .map(field => `${prefix}.${field}`));
+    }
+    for (let index = 0; index < personalCount; index += 1) {
+        const prefix = `UserKnowledgeLedger.personal[${index}]`;
+        required.push(...['knownBy', 'scope', 'topic', 'truth', 'confidence', 'line', 'reason']
+            .map(field => `${prefix}.${field}`));
+    }
+    for (let index = 0; index < reputationCount; index += 1) {
+        const prefix = `UserKnowledgeLedger.reputation[${index}]`;
+        required.push(...['scope', 'valence', 'topic', 'truth', 'confidence', 'line', 'origin', 'reason']
+            .map(field => `${prefix}.${field}`));
+    }
+    for (let index = 0; index < fameInfamyCount; index += 1) {
+        const prefix = `FameInfamyLedger[${index}]`;
+        required.push(...['location', 'fameDelta', 'infamyDelta', 'reason', 'evidence']
+            .map(field => `${prefix}.${field}`));
+    }
     const missing = required.filter(key => !fields.has(key));
     if (missing.length) throw new Error(`tracker delta block missing required lines: ${missing.join(', ')}`);
 
     const user = {
         condition: normalizeTrackerDeltaCondition(fields.get('TrackerUpdateEngine.User.condition')),
-        woundsAdd: readList(fields, 'TrackerUpdateEngine.User.woundsAdd'),
-        woundsRemove: readList(fields, 'TrackerUpdateEngine.User.woundsRemove'),
-        statusAdd: readList(fields, 'TrackerUpdateEngine.User.statusAdd'),
-        statusRemove: readList(fields, 'TrackerUpdateEngine.User.statusRemove'),
-        gearAdd: readList(fields, 'TrackerUpdateEngine.User.gearAdd'),
-        gearRemove: readList(fields, 'TrackerUpdateEngine.User.gearRemove'),
-        inventoryAdd: readList(fields, 'TrackerUpdateEngine.User.inventoryAdd'),
-        inventoryRemove: readList(fields, 'TrackerUpdateEngine.User.inventoryRemove'),
-        currencyAdd: readList(fields, 'TrackerUpdateEngine.User.currencyAdd'),
-        currencyRemove: readList(fields, 'TrackerUpdateEngine.User.currencyRemove'),
-        tasksAdd: readList(fields, 'TrackerUpdateEngine.User.tasksAdd'),
-        tasksRemove: readList(fields, 'TrackerUpdateEngine.User.tasksRemove'),
-        commitmentsAdd: readList(fields, 'TrackerUpdateEngine.User.commitmentsAdd'),
-        commitmentsRemove: readList(fields, 'TrackerUpdateEngine.User.commitmentsRemove'),
+        woundsAdd: readTrackerList(fields, 'TrackerUpdateEngine.User.woundsAdd'),
+        woundsRemove: readTrackerList(fields, 'TrackerUpdateEngine.User.woundsRemove'),
+        statusAdd: readTrackerList(fields, 'TrackerUpdateEngine.User.statusAdd'),
+        statusRemove: readTrackerList(fields, 'TrackerUpdateEngine.User.statusRemove'),
+        gearAdd: readTrackerList(fields, 'TrackerUpdateEngine.User.gearAdd'),
+        gearRemove: readTrackerList(fields, 'TrackerUpdateEngine.User.gearRemove'),
+        inventoryAdd: readTrackerList(fields, 'TrackerUpdateEngine.User.inventoryAdd'),
+        inventoryRemove: readTrackerList(fields, 'TrackerUpdateEngine.User.inventoryRemove'),
+        currencyAdd: readTrackerList(fields, 'TrackerUpdateEngine.User.currencyAdd'),
+        currencyRemove: readTrackerList(fields, 'TrackerUpdateEngine.User.currencyRemove'),
+        tasksAdd: readTrackerList(fields, 'TrackerUpdateEngine.User.tasksAdd'),
+        tasksRemove: readTrackerList(fields, 'TrackerUpdateEngine.User.tasksRemove'),
+        commitmentsAdd: readTrackerList(fields, 'TrackerUpdateEngine.User.commitmentsAdd'),
+        commitmentsRemove: readTrackerList(fields, 'TrackerUpdateEngine.User.commitmentsRemove'),
     };
     const economy = normalizeEconomyDelta({
         payPendingPrice: fields.get('EconomyState.payPendingPrice'),
@@ -2741,7 +2779,6 @@ function parseNarratorTrackerDeltaText(text) {
     });
 
     const npcs = [];
-    const trackerNpcCount = clampNumber(readNumber(fields, 'TrackerUpdateEngine.NPC.count', 0), 0, 12);
     for (let index = 0; index < trackerNpcCount; index += 1) {
         const prefix = `TrackerUpdateEngine.NPC[${index}]`;
         const npc = cleanScalar(fields.get(`${prefix}.NPC`));
@@ -2751,17 +2788,16 @@ function parseNarratorTrackerDeltaText(text) {
             revealedName: normalizeRevealedName(fields.get(`${prefix}.revealedName`)),
             personalitySummary: normalizePersonalitySummary(fields.get(`${prefix}.personalitySummary`)),
             condition: normalizeTrackerDeltaCondition(fields.get(`${prefix}.condition`)),
-            woundsAdd: readList(fields, `${prefix}.woundsAdd`),
-            woundsRemove: readList(fields, `${prefix}.woundsRemove`),
-            statusAdd: readList(fields, `${prefix}.statusAdd`),
-            statusRemove: readList(fields, `${prefix}.statusRemove`),
-            gearAdd: readList(fields, `${prefix}.gearAdd`),
-            gearRemove: readList(fields, `${prefix}.gearRemove`),
+            woundsAdd: readTrackerList(fields, `${prefix}.woundsAdd`),
+            woundsRemove: readTrackerList(fields, `${prefix}.woundsRemove`),
+            statusAdd: readTrackerList(fields, `${prefix}.statusAdd`),
+            statusRemove: readTrackerList(fields, `${prefix}.statusRemove`),
+            gearAdd: readTrackerList(fields, `${prefix}.gearAdd`),
+            gearRemove: readTrackerList(fields, `${prefix}.gearRemove`),
         });
     }
 
     const userKnowledge = { personal: [], reputation: [] };
-    const personalCount = clampNumber(readNumber(fields, 'UserKnowledgeLedger.personal.count', 0), 0, 20);
     for (let index = 0; index < personalCount; index += 1) {
         const prefix = `UserKnowledgeLedger.personal[${index}]`;
         const entry = normalizePersonalKnowledgeDeltaEntry({
@@ -2775,7 +2811,6 @@ function parseNarratorTrackerDeltaText(text) {
         });
         if (entry) userKnowledge.personal.push(entry);
     }
-    const reputationCount = clampNumber(readNumber(fields, 'UserKnowledgeLedger.reputation.count', 0), 0, 20);
     for (let index = 0; index < reputationCount; index += 1) {
         const prefix = `UserKnowledgeLedger.reputation[${index}]`;
         const entry = normalizeReputationKnowledgeDeltaEntry({
@@ -2792,7 +2827,6 @@ function parseNarratorTrackerDeltaText(text) {
     }
 
     const userReputation = { events: [] };
-    const fameInfamyCount = clampNumber(readNumber(fields, 'FameInfamyLedger.count', 0), 0, 2);
     for (let index = 0; index < fameInfamyCount; index += 1) {
         const prefix = `FameInfamyLedger[${index}]`;
         const entry = normalizeFameInfamyDeltaEntry({
@@ -3253,11 +3287,10 @@ function createFallbackRelationshipEntry(NPC, genStats) {
 
 function fallbackRelationshipCoreStats(genStats) {
     const stats = normalizeGeneratedStatsSeed(genStats);
-    const hasUsableStats = stats.Rank !== 'none'
-        || stats.MainStat !== 'none';
+    const hasUsableStats = stats.CapabilityPool !== 'none';
     return hasUsableStats
         ? stats
-        : { Rank: 'Average', MainStat: 'Balanced' };
+        : { CapabilityPool: 'common', MainStat: stats.MainStat !== 'none' ? stats.MainStat : 'Balanced' };
 }
 
 function mergeSemanticLedgerRepair(previous, next) {
@@ -3298,7 +3331,7 @@ function readCoreGroup(fields, prefix) {
 
 function readGeneratedStatsSeed(fields, prefix) {
     return {
-        Rank: normalizeRank(fields.get(`${prefix}.Rank`)),
+        CapabilityPool: normalizeCapabilityPool(fields.get(`${prefix}.CapabilityPool`)),
         MainStat: normalizeMainStat(fields.get(`${prefix}.MainStat`)),
     };
 }
@@ -3307,9 +3340,9 @@ function readCoreObject(value) {
     return {
         Rank: normalizeRank(value?.Rank),
         MainStat: normalizeMainStat(value?.MainStat),
-        PHY: clampNumber(Number(value?.PHY ?? 1), 1, 10),
-        MND: clampNumber(Number(value?.MND ?? 1), 1, 10),
-        CHA: clampNumber(Number(value?.CHA ?? 1), 1, 10),
+        PHY: clampNumber(Number(value?.PHY ?? 1), 1, 14),
+        MND: clampNumber(Number(value?.MND ?? 1), 1, 14),
+        CHA: clampNumber(Number(value?.CHA ?? 1), 1, 14),
     };
 }
 
@@ -3329,6 +3362,28 @@ function readList(fields, key, fallback = []) {
         .replace(/^\[/, '')
         .replace(/\]$/, '')
         .split(/[;,]/)
+        .map(cleanScalar)
+        .filter(item => item && !isNoneValue(item));
+}
+
+
+function readTrackerList(fields, key, fallback = []) {
+    const raw = String(fields.get(key) ?? '').trim();
+    if (!raw || isNoneValue(raw)) return fallback;
+    if (raw.startsWith('[') && raw.endsWith(']')) {
+        try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                return parsed.map(cleanScalar).filter(item => item && !isNoneValue(item));
+            }
+        } catch {
+            // Fall through to the compact pipe-delimited format.
+        }
+    }
+    return raw
+        .replace(/^\[/, '')
+        .replace(/\]$/, '')
+        .split(/\s*\|\s*|;/)
         .map(cleanScalar)
         .filter(item => item && !isNoneValue(item));
 }
@@ -3364,6 +3419,11 @@ function normalizeRank(value) {
     const text = cleanScalar(value).toLowerCase();
     const map = { weak: 'Weak', average: 'Average', trained: 'Trained', elite: 'Elite', boss: 'Boss', none: 'none' };
     return map[text] || 'none';
+}
+
+function normalizeCapabilityPool(value) {
+    const text = cleanScalar(value).toLowerCase();
+    return ['common', 'trained', 'elite', 'boss', 'none'].includes(text) ? text : 'none';
 }
 
 function normalizeMainStat(value) {
@@ -3487,7 +3547,7 @@ function environmentDifficultyFromTier(value, challengeType = 'environment') {
 
 function normalizeGeneratedStatsSeed(value) {
     return {
-        Rank: normalizeRank(value?.Rank),
+        CapabilityPool: normalizeCapabilityPool(value?.CapabilityPool),
         MainStat: normalizeMainStat(value?.MainStat),
     };
 }

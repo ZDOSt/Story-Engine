@@ -115,7 +115,7 @@ function buildReadableSemanticDebug(ledger) {
         'environmentDifficultyTier=' + valueOrNone(resolution.environmentDifficultyTier),
         'environmentDifficultyBonus=' + valueOrNone(resolution.environmentDifficulty),
         'activeHostileThreat=' + String(Boolean(resolution.activeHostileThreat)),
-        'genStats=' + coreLine(resolution.genStats),
+        'genStats=' + generatedStatsSeedLine(resolution.genStats),
         '',
         'RelationshipEngine:',
         relationships.length ? '' : 'none',
@@ -124,7 +124,7 @@ function buildReadableSemanticDebug(ledger) {
             `explicitIntimidationOrCoercion=${Boolean(item.explicitIntimidationOrCoercion)}`,
             `stakeChangeByOutcome=${inline(item.stakeChangeByOutcome ?? {})}`,
             `overrideFlags=${inline(item.overrideFlags ?? {})}`,
-            `genStats=${coreLine(item.genStats)}`,
+            `genStats=${generatedStatsSeedLine(item.genStats)}`,
             '',
         ]),
         '',
@@ -184,6 +184,7 @@ function buildReadableDeterministicDebug(handoff) {
         'resolutionPacket.HarmedObservers=' + list(resolution.HarmedObservers),
         'resolutionPacket.NPCAwareOfUser=' + list(resolution.NPCAwareOfUser),
         'resolutionPacket.NPCInScene=' + list(resolution.NPCInScene),
+        'generatedNpcStats=' + (handoff?.generatedNpcStats?.length ? inline(handoff.generatedNpcStats) : 'none'),
         'resultLine=' + valueOrNone(handoff?.resultLine),
         '',
         'npcHandoffs=' + (npcs.length ? '' : 'none'),
@@ -281,6 +282,7 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['injury.inflictedNpc', summary.inflictedNpcInjury],
         ['injury.inflictedUser', summary.inflictedUserInjury],
         ['npc.state', summary.npc],
+        ['npc.generatedStats', handoff?.generatedNpcStats?.length ? inline(handoff.generatedNpcStats) : 'none'],
         ['relationship.result', summary.relationshipResult],
         ['chaos.result', summary.chaos],
         ['proactivity.result', summary.proactive],
@@ -444,7 +446,7 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'medical_death',
         label: 'Medical Death',
-        guidance: 'Use illness, surgery, hospital crisis, sudden collapse, or a final medical moment. Keep the Earth side restrained and move quickly to the crossing.',
+        guidance: 'Use illness, receiving surgery or medical care, a hospital crisis, sudden collapse, or a final medical moment. Treat {{user}} as the patient, never as the medical professional performing the procedure. Keep the Earth side restrained and move quickly to the crossing.',
     },
     {
         key: 'violent_death',
@@ -460,6 +462,20 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
         key: 'overwork_collapse',
         label: 'Overwork / Burnout Collapse',
         guidance: 'Use exhaustion, office collapse, study pressure, marathon gaming, or sleep deprivation as the final Earth-side pressure.',
+        ageVariants: {
+            school_age: {
+                label: 'Study / Exhaustion Collapse',
+                guidance: 'Use schoolwork, exam pressure, late-night studying, marathon gaming, or sleep deprivation as the final Earth-side pressure. Keep {{user}} out of workplaces and adult professional roles.',
+            },
+            adult_context: {
+                label: 'Work / Exhaustion Collapse',
+                guidance: 'Use workplace exhaustion, an office collapse, a punishing shift, adult study pressure, marathon gaming, or sleep deprivation as the final Earth-side pressure. Do not place {{user}} in a high-school classroom or high-school student role.',
+            },
+            unknown: {
+                label: 'Exhaustion / Sleep-Deprivation Collapse',
+                guidance: 'Use exhaustion, marathon gaming, or sleep deprivation without assigning {{user}} a school or workplace role.',
+            },
+        },
     },
     {
         key: 'domestic_accident',
@@ -483,6 +499,18 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
         label: 'Summoning From Earth',
         guidance: 'Use a magic circle, ritual pull, classroom light, office interruption, or unseen summoning force that removes the character from Earth.',
         requiredOpeningTags: ['summon'],
+        ageVariants: {
+            school_age: {
+                label: 'Classroom / School Summoning',
+                guidance: 'Use a magic circle, classroom light, school corridor, club room, school trip, or unseen summoning force that removes {{user}} from an ordinary student context on Earth. Do not place {{user}} at work or in an adult professional role.',
+            },
+            adult_context: {
+                guidance: 'Use a magic circle, ritual pull, workplace interruption, home, street, transit, or unseen summoning force that removes {{user}} from Earth. Do not place {{user}} in a high-school classroom or high-school student role.',
+            },
+            unknown: {
+                guidance: 'Use a magic circle, ritual pull, public place, home, transit, or unseen summoning force that removes {{user}} from Earth without assigning a school or workplace role.',
+            },
+        },
     },
     {
         key: 'portal_rift_incident',
@@ -510,6 +538,20 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
         label: 'Class / Group Transfer',
         guidance: 'Use classmates, coworkers, passengers, a party, a convention crowd, or strangers pulled at the same time. The group can be nearby, separated, or only partly visible.',
         requiredOpeningTags: ['group'],
+        ageVariants: {
+            school_age: {
+                label: 'Class / School Group Transfer',
+                guidance: 'Use classmates, a school club, a school trip, or another student group pulled from Earth at the same time. The group can be nearby, separated, or only partly visible. Do not use coworkers or an adult workplace.',
+            },
+            adult_context: {
+                label: 'Adult Group Transfer',
+                guidance: 'Use coworkers, passengers, a party, a convention crowd, or adult strangers pulled from Earth at the same time. The group can be nearby, separated, or only partly visible. Do not use a high-school class or high-school setting.',
+            },
+            unknown: {
+                label: 'Group Transfer',
+                guidance: 'Use passengers, a public crowd, a party, or strangers pulled from Earth at the same time. Keep their school and workplace roles unspecified. The group can be nearby, separated, or only partly visible.',
+            },
+        },
     },
     {
         key: 'object_triggered_transfer',
@@ -524,7 +566,8 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'scientific_experiment',
         label: 'Scientific Experiment',
-        guidance: 'Use a lab accident, teleport test, particle event, experimental neural tech, or failed research device as the transfer trigger.',
+        guidance: 'Use a lab accident, teleport test, particle event, experimental neural tech, or failed research device as the transfer trigger. Assign {{user}} no scientific profession unless the character sheet explicitly establishes it.',
+        ageGroups: ['adult_context'],
     },
     {
         key: 'apocalypse_crossover',
@@ -562,12 +605,39 @@ const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
         label: 'Pulled With Classmates or Strangers',
         guidance: 'Begin with several Earth people arriving together or in the same aftermath. Preserve {{user}} as the premade character while others may be confused, missing, or nearby.',
         tags: ['group', 'summon'],
+        ageVariants: {
+            school_age: {
+                label: 'Pulled With Classmates',
+                guidance: 'Begin with {{user}} and several classmates or other students arriving together or in the same aftermath. Others may be confused, missing, separated, or nearby.',
+            },
+            adult_context: {
+                label: 'Pulled With Coworkers or Strangers',
+                guidance: 'Begin with {{user}} and several adult coworkers, passengers, or strangers arriving together or in the same aftermath. Others may be confused, missing, separated, or nearby. Do not turn them into a high-school class.',
+            },
+            unknown: {
+                label: 'Pulled With Strangers',
+                guidance: 'Begin with {{user}} and several Earth strangers arriving together or in the same aftermath without assigning school or workplace roles. Others may be confused, missing, separated, or nearby.',
+            },
+        },
     },
     {
         key: 'pulled_with_party_or_team',
         label: 'Pulled With Party or Team',
         guidance: 'Begin with a small group, party, raid team, coworkers, passengers, or companions arriving together or being sorted by the new world.',
         tags: ['group', 'summon'],
+        ageVariants: {
+            school_age: {
+                label: 'Pulled With School Group or Team',
+                guidance: 'Begin with a class group, school club, student team, or game party arriving together or being sorted by the new world. Do not use coworkers or an adult workplace.',
+            },
+            adult_context: {
+                guidance: 'Begin with a small party, raid team, coworkers, passengers, or adult companions arriving together or being sorted by the new world. Do not turn them into a high-school class.',
+            },
+            unknown: {
+                label: 'Pulled With Group or Team',
+                guidance: 'Begin with a small party, team, passengers, or companions arriving together or being sorted by the new world without assigning school or workplace roles.',
+            },
+        },
     },
     {
         key: 'wildland_awakening',
@@ -703,13 +773,55 @@ const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
 export function buildIsekaiOpeningSeed(options = {}) {
     if (!isIsekaiGenre(options?.adventureGenre) && !promptLooksIsekai(options?.prompt)) return null;
     const rng = typeof options?.rng === 'function' ? options.rng : Math.random;
-    const earthTransition = pickSeedEntry(ISEKAI_EARTH_TRANSITIONS, rng);
+    const characterAge = resolveIsekaiCharacterAge(options);
+    const ageGroup = classifyIsekaiCharacterAge(characterAge);
+    const earthPool = compatibleIsekaiEarthTransitionsForAge(ageGroup);
+    const earthTransition = specializeIsekaiSeedEntry(pickSeedEntry(earthPool, rng), ageGroup);
+    const openingPool = compatibleIsekaiOpeningsForEarthSeed(earthTransition);
     return {
         type: 'isekaiOpeningSeed',
-        version: 1,
+        version: 2,
+        characterAge,
+        ageGroup,
         earthTransition,
-        newWorldOpening: pickSeedEntry(compatibleIsekaiOpeningsForEarthSeed(earthTransition), rng),
+        newWorldOpening: specializeIsekaiSeedEntry(pickSeedEntry(openingPool, rng), ageGroup),
     };
+}
+
+function resolveIsekaiCharacterAge(options = {}) {
+    const directAge = normalizeIsekaiCharacterAge(options?.characterAge);
+    if (directAge !== null) return directAge;
+    const source = String(options?.characterText || '');
+    const match = source.match(/^[ \t]*(?:(?:[-+*][ \t]+)?(?:\*\*)?[ \t]*Age[ \t]*(?::[ \t]*\*\*|\*\*[ \t]*:|:|=)|\|[ \t]*(?:\*\*)?Age(?:\*\*)?[ \t]*\|)[ \t]*(?:\*\*)?(\d{1,4})\b/im);
+    return normalizeIsekaiCharacterAge(match?.[1]);
+}
+
+function normalizeIsekaiCharacterAge(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const text = String(value).trim();
+    if (!/^\d{1,4}$/.test(text)) return null;
+    const age = Number(text);
+    return Number.isInteger(age) && age >= 0 ? age : null;
+}
+
+function classifyIsekaiCharacterAge(age) {
+    if (!Number.isInteger(age)) return 'unknown';
+    return age <= 18 ? 'school_age' : 'adult_context';
+}
+
+function compatibleIsekaiEarthTransitionsForAge(ageGroup) {
+    const compatible = ISEKAI_EARTH_TRANSITIONS.filter(transition => {
+        const allowedAgeGroups = normalizeSeedTagList(transition.ageGroups);
+        return !allowedAgeGroups.length || allowedAgeGroups.includes(ageGroup);
+    });
+    return compatible.length ? compatible : ISEKAI_EARTH_TRANSITIONS.filter(transition => !normalizeSeedTagList(transition.ageGroups).length);
+}
+
+function specializeIsekaiSeedEntry(entry = {}, ageGroup = 'unknown') {
+    const { ageGroups, ageVariants, ...base } = entry;
+    const variants = ageVariants && typeof ageVariants === 'object' ? ageVariants : {};
+    const variant = variants[ageGroup] || variants.unknown || {};
+    return { ...base, ...variant };
 }
 
 function pickSeedEntry(entries, rng) {
@@ -744,9 +856,13 @@ function renderIsekaiOpeningSeed(seed = null) {
     if (!transition?.label || !opening?.label) return '';
     const transitionGuidance = String(transition.guidance || '').trim();
     const openingGuidance = String(opening.guidance || '').trim();
+    const ageCompatibility = isekaiAgeCompatibilityInstruction(seed?.ageGroup);
     return [
         'You MUST narrate BOTH required beats below, in order.',
         'Do NOT skip either beat. Do NOT choose a different Earth last moment or Isekai opening.',
+        '',
+        'AGE COMPATIBILITY:',
+        ageCompatibility,
         '',
         'BEAT #1: EARTH LAST MOMENTS',
         `Selected Earth Last Moment: ${transition.label}.`,
@@ -765,6 +881,16 @@ function renderIsekaiOpeningSeed(seed = null) {
         'ADAPTATION RULE:',
         'If explicit character-card or lorebook facts already establish the exact Earth last moment, honor those facts and adapt this seed without contradiction.',
     ].join('\n');
+}
+
+function isekaiAgeCompatibilityInstruction(ageGroup) {
+    if (ageGroup === 'school_age') {
+        return '{{user}} is 18 or younger. The Earth scene MUST remain student-compatible. NEVER place {{user}} in a workplace or adult professional role.';
+    }
+    if (ageGroup === 'adult_context') {
+        return '{{user}} is 19 or older. The Earth scene MUST remain adult-compatible. NEVER place {{user}} in a high-school classroom or high-school student role.';
+    }
+    return '{{user}}\'s age is not explicitly numeric. Keep the Earth scene age-neutral and occupation-neutral; do not assign a school or workplace role.';
 }
 
 function formatNarrativeContract({ summary, handoff, resolution, ledger, options = {} }) {
@@ -843,60 +969,60 @@ function renderFinalWritingStyleReminder(options = {}) {
 function renderControlEngineNarrativeContract() {
     return String.raw`renderControlEngine(input): {
 
-activeHandoff:
-Execute activeHandoff(response, context).
-mandate: YOU MUST END EVERY RESPONSE on one active, concrete beat that {{user}} can immediately respond to.
-HARD LIMIT: Do not prompt {{user}}, end on waiting/silence/filler, or continue past the handoff beat.
-
-characterTurnPacing:
-Execute characterTurnPacing(response, context).
-mandate: EACH CHARACTER/NPC is entitled to NO MORE THAN ONE COHESIVE TURN PER RESPONSE. A turn MAY include INTERCONNECTED dialogue, actions, reaction beats, and gestures.
-HARD LIMIT: Do not give the same NPC a second turn, chain NPC turns/questions, dump exposition, or use filler reaction loops.
-
-hypotacticSceneBeats:
-Execute hypotacticSceneBeats(response, context).
-mandate: Hypotactic Narration: Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
-HARD LIMIT: Do not break one beat into staccato action stacking, micro-reaction loops, or body-cue pileups.
-
-linearChronology:
-Execute linearChronology(response, input, context).
-mandate: You MUST ONLY narrate the EXTERNAL CONSEQUENTIAL RESULTS, RESISTANCE, FAILURE POINTS, REACTIONS, AND RESPONSES TO {{user}}'s actions and dialogue. {{user}}'s input is IN THE PAST. Narrate ONLY what comes after.
-HARD LIMIT: Do not repeat, paraphrase, summarize, re-stage, or narrate any part of {{user}}'s input.
-
-agencySeparation:
-Execute agencySeparation(response, input, context).
-mandate: You control ONLY the world, NPCs, hazards, objects, and consequences. {{user}} is EXCLUSIVELY controlled by the human player. YOUR TASK is to narrate TO {{user}}, not AS {{user}}.
-HARD LIMIT: Do not narrate {{user}}'s thoughts, feelings, choices, decisions, voluntary actions, dialogue, intent, or undeclared behavior.
-
-strictBehaviorism:
-Execute strictBehaviorism(response, context).
-mandate: You MUST render character/NPC state through EXTERNAL BEHAVIOR/ACTION ONLY. Narrate REAL, VISIBLE BEHAVIORAL GESTURES that clearly express the NPC's current state without naming their internal feelings.
-HARD LIMIT: Do not reveal internal states or use invisible eye-language, micro-expressions, skin color changes, autonomic/body-cue shortcuts, or mouth/jaw loops as emotional shorthand.
-
-embodiedPerception:
-Execute embodiedPerception(response, context).
-mandate: ALWAYS narrate the scene using CONCRETE PHYSICAL EVIDENCE from {{user}}'s physical position.
-HARD LIMIT: Do not use ambient smell/taste as scene dressing or let {{user}} perceive, reach, or interact through barriers unless the scene explicitly opens that path.
-
-denotativePhysicality:
-Execute denotativePhysicality(response, context).
-mandate: You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE.
-HARD LIMIT: Do not use metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.
-
-inanimateObjectivity:
-Execute inanimateObjectivity(response, context).
-mandate: ONLY living beings, physical forces, mechanisms, and active processes can take actions. ONLY living beings can have emotions, intentions, or awareness.
-HARD LIMIT: Do not attribute will, awareness, memory, intention, or emotion to objects, weather, architecture, mood, atmosphere, or abstractions.
+diegeticPhysicality:
+Execute diegeticPhysicality(response, context).
+mandate: Abilities MUST be narrated THROUGH OBSERVABLE CONSEQUENCES IN THE SCENE.
+HARD LIMIT: Do not label, announce, name, or explain abilities, spells, powers, traits, activation, casting, or system mechanics unless spoken in dialogue.
 
 strictEpistemology:
 Execute strictEpistemology(response, context).
 mandate: Information remains LOCKED until it is EARNED THROUGH DIRECT sensory evidence, dialogue, readable text, or previously established scene fact.
 HARD LIMIT: Do not reveal unknown names, identities, roles, hidden causes, thoughts, unseen actions, background lore, or {{user}} cognition.
 
-diegeticPhysicality:
-Execute diegeticPhysicality(response, context).
-mandate: Abilities MUST be narrated THROUGH OBSERVABLE CONSEQUENCES IN THE SCENE.
-HARD LIMIT: Do not label, announce, name, or explain abilities, spells, powers, traits, activation, casting, or system mechanics unless spoken in dialogue.
+inanimateObjectivity:
+Execute inanimateObjectivity(response, context).
+mandate: ONLY living beings, physical forces, mechanisms, and active processes can take actions. ONLY living beings can have emotions, intentions, or awareness.
+HARD LIMIT: Do not attribute will, awareness, memory, intention, or emotion to objects, weather, architecture, mood, atmosphere, or abstractions.
+
+denotativePhysicality:
+Execute denotativePhysicality(response, context).
+mandate: You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE.
+HARD LIMIT: Do not use metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.
+
+embodiedPerception:
+Execute embodiedPerception(response, context).
+mandate: ALWAYS narrate the scene using CONCRETE PHYSICAL EVIDENCE from {{user}}'s physical position.
+HARD LIMIT: Do not use ambient smell/taste as scene dressing or let {{user}} perceive, reach, or interact through barriers unless the scene explicitly opens that path.
+
+strictBehaviorism:
+Execute strictBehaviorism(response, context).
+mandate: You MUST render character/NPC state through EXTERNAL BEHAVIOR/ACTION ONLY. Narrate REAL, VISIBLE BEHAVIORAL GESTURES that clearly express the NPC's current state without naming their internal feelings.
+HARD LIMIT: Do not reveal internal states or use invisible eye-language, micro-expressions, skin color changes, autonomic/body-cue shortcuts, or mouth/jaw loops as emotional shorthand.
+
+agencySeparation:
+Execute agencySeparation(response, input, context).
+mandate: You control ONLY the world, NPCs, hazards, objects, and consequences. {{user}} is EXCLUSIVELY controlled by the human player. YOUR TASK is to narrate TO {{user}}, not AS {{user}}.
+HARD LIMIT: Do not narrate {{user}}'s thoughts, feelings, choices, decisions, voluntary actions, dialogue, intent, or undeclared behavior.
+
+linearChronology:
+Execute linearChronology(response, input, context).
+mandate: You MUST ONLY narrate the EXTERNAL CONSEQUENTIAL RESULTS, RESISTANCE, FAILURE POINTS, REACTIONS, AND RESPONSES TO {{user}}'s actions and dialogue. {{user}}'s input is IN THE PAST. Narrate ONLY what comes after.
+HARD LIMIT: Do not repeat, paraphrase, summarize, re-stage, or narrate any part of {{user}}'s input.
+
+hypotacticSceneBeats:
+Execute hypotacticSceneBeats(response, context).
+mandate: Hypotactic Narration: Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
+HARD LIMIT: Do not break one beat into staccato action stacking, micro-reaction loops, or body-cue pileups.
+
+characterTurnPacing:
+Execute characterTurnPacing(response, context).
+mandate: Include ONLY NPCs directly responding to {{user}} or explicitly required by narrativeFacts(input). NO CHARACTER/NPC MAY RECEIVE MORE THAN ONE COHESIVE TURN PER RESPONSE. One turn may include interconnected dialogue, actions, reactions, and gestures.
+HARD LIMIT: Do NOT give every present NPC a turn, give the same NPC a second turn, chain unrelated NPC turns or questions, dump exposition, or use filler reaction loops.
+
+activeHandoff:
+Execute activeHandoff(response, context).
+mandate: YOU MUST END EVERY RESPONSE on dialogue directed at {{user}}, action directed at {{user}}, or a visible scene change that requires {{user}}'s input.
+HARD LIMIT: End immediately on that beat. Do NOT prompt {{user}} with meta questions such as "What do you do?", describe characters waiting for {{user}} to respond, or continue beyond the handoff.
 }`;
 }
 
@@ -2676,14 +2802,11 @@ function valueOrNone(value) {
     return text || '(none)';
 }
 
-function coreLine(core) {
-    if (!core) return '{}';
+function generatedStatsSeedLine(seed) {
+    if (!seed) return '{}';
     return inline({
-        Rank: core.Rank ?? 'none',
-        MainStat: core.MainStat ?? 'none',
-        PHY: core.PHY ?? 1,
-        MND: core.MND ?? 1,
-        CHA: core.CHA ?? 1,
+        CapabilityPool: seed.CapabilityPool ?? 'none',
+        MainStat: seed.MainStat ?? 'none',
     });
 }
 

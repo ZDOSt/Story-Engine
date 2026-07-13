@@ -17,6 +17,7 @@ export function assertValidCharacterSheet(sheetText, options = {}) {
 
     const sections = parseRequiredSections(text);
     validateLockedStats(sections.get('STATS'), options.stats);
+    if (options.requireNumericAge === true) validateNumericAge(sections.get('BASIC INFO'));
 
     const expectedRace = String(options.expectedRace || '').trim();
     if (expectedRace) validateExpectedRace(sections.get('BASIC INFO'), expectedRace);
@@ -92,6 +93,13 @@ function validateExpectedRace(basicInfoSection, expectedRace) {
     const raceValues = extractLabeledValues(basicInfoSection, 'RACE(?:\\s*\\/\\s*(?:SPECIES|ANCESTRY))?');
     if (raceValues.length !== 1 || !raceValueMatches(raceValues[0], expectedRace)) {
         throw new Error(`Character sheet is invalid: # BASIC INFO must use the selected race "${expectedRace}".`);
+    }
+}
+
+function validateNumericAge(basicInfoSection) {
+    const ageValues = extractLabeledValues(basicInfoSection, 'AGE');
+    if (ageValues.length !== 1 || !/^\d{1,4}$/.test(ageValues[0])) {
+        throw new Error('Character sheet is invalid: # BASIC INFO must contain exactly one numeric Age entry.');
     }
 }
 
