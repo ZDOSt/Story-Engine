@@ -34,7 +34,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentGrievances, normalizeRapportClockState, renameLatentGrievanceTargets, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -2738,8 +2738,11 @@ function getTrackerRoot(context = getContext()) {
     root.npcs = root.npcs || {};
     root.user = normalizeTrackerUserState(root.user || {});
     root.powerActors = root.powerActors && typeof root.powerActors === 'object' ? root.powerActors : {};
+    root.snapshots = root.snapshots || {};
     root.latentGrievances = normalizeLatentGrievances(root.latentGrievances || []);
     root.latentGrievanceArchive = mergeLatentGrievanceArchive(root.latentGrievanceArchive, root.latentGrievances);
+    root.latentFavors = normalizeLatentFavors(root.latentFavors || []);
+    root.latentFavorArchive = pruneLatentFavorArchive(root.latentFavorArchive, root.latentFavors, root.snapshots);
     root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
     root.worldState = normalizeWorldState(root.worldState || {});
@@ -2756,8 +2759,6 @@ function getTrackerRoot(context = getContext()) {
 
     root.rapportClock = normalizeRapportClockState(root.rapportClock);
 
-    root.snapshots = root.snapshots || {};
-
     return root;
 
 }
@@ -2767,6 +2768,13 @@ function resolveStoredLatentGrievances(root, storedIds, fallback = []) {
         return resolveLatentGrievanceIds(storedIds, root?.latentGrievanceArchive || {});
     }
     return normalizeLatentGrievances(fallback);
+}
+
+function resolveStoredLatentFavors(root, storedIds, fallback = []) {
+    if (Array.isArray(storedIds)) {
+        return resolveLatentFavorIds(storedIds, root?.latentFavorArchive || {});
+    }
+    return normalizeLatentFavors(fallback);
 }
 
 
@@ -2804,11 +2812,13 @@ function getPlayerRoot(context = getContext()) {
 function pruneRootTrackerSnapshots(root) {
     if (!root?.snapshots || typeof root.snapshots !== 'object') return;
     const entries = Object.entries(root.snapshots);
-    if (entries.length <= TRACKER_ROOT_SNAPSHOT_LIMIT) return;
-    entries
-        .sort((left, right) => Number(left[1]?.savedAt || 0) - Number(right[1]?.savedAt || 0))
-        .slice(0, entries.length - TRACKER_ROOT_SNAPSHOT_LIMIT)
-        .forEach(([key]) => delete root.snapshots[key]);
+    if (entries.length > TRACKER_ROOT_SNAPSHOT_LIMIT) {
+        entries
+            .sort((left, right) => Number(left[1]?.savedAt || 0) - Number(right[1]?.savedAt || 0))
+            .slice(0, entries.length - TRACKER_ROOT_SNAPSHOT_LIMIT)
+            .forEach(([key]) => delete root.snapshots[key]);
+    }
+    root.latentFavorArchive = pruneLatentFavorArchive(root.latentFavorArchive, root.latentFavors, root.snapshots);
 }
 
 function normalizePlayerCreatorSetupState(creator) {
@@ -4153,6 +4163,9 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     let latentGrievances = normalizeLatentGrievances(
         pendingRun?.latentGrievancesAfter ?? pendingRun?.latentGrievancesBefore ?? [],
     );
+    let latentFavors = normalizeLatentFavors(
+        pendingRun?.latentFavorsAfter ?? pendingRun?.latentFavorsBefore ?? [],
+    );
     const userKnowledge = mergeUserKnowledgeLedger(pendingRun?.userKnowledgeBefore || {}, pendingRun?.userKnowledgeAfter || {});
     const userReputation = mergeUserReputationLedger(pendingRun?.userReputationBefore || {}, pendingRun?.userReputationAfter || {});
     const worldState = normalizeWorldState(pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {});
@@ -4165,8 +4178,12 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     });
     syncPendingRunHealthNamePromotions(pendingRun, promotionResult.promotions);
     syncPendingRunLatentGrievanceNamePromotions(pendingRun, promotionResult.promotions);
+    syncPendingRunLatentFavorNamePromotions(pendingRun, promotionResult.promotions);
     latentGrievances = normalizeLatentGrievances(
         pendingRun?.latentGrievancesAfter ?? latentGrievances,
+    );
+    latentFavors = normalizeLatentFavors(
+        pendingRun?.latentFavorsAfter ?? latentFavors,
     );
 
     const snapshot = {
@@ -4184,6 +4201,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         hiddenHealth: cloneHiddenHealth(pendingRun?.healthAfter || pendingRun?.healthBefore),
         powerActors,
         latentGrievanceIds: latentGrievanceIds(latentGrievances),
+        latentFavorIds: latentFavorIds(latentFavors),
         userKnowledge,
         userReputation,
         worldState,
@@ -4208,6 +4226,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const playerTrackerSnapshot = pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context);
     const powerActorSnapshot = pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context);
     const latentGrievanceSnapshot = pendingGeneration?.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context);
+    const latentFavorSnapshot = pendingGeneration?.latentFavorSnapshot || buildLatentFavorSnapshot(context);
     const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
@@ -4248,6 +4267,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             user: {},
             powerActors: {},
             latentGrievances: latentGrievanceSnapshot,
+            latentFavors: latentFavorSnapshot,
             userKnowledge: {},
             userReputation: {},
             worldState: worldStateSnapshot,
@@ -4272,6 +4292,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         powerActorsAfter: {},
         latentGrievancesBefore: latentGrievanceSnapshot,
         latentGrievancesAfter: latentGrievanceSnapshot,
+        latentFavorsBefore: latentFavorSnapshot,
+        latentFavorsAfter: latentFavorSnapshot,
         userKnowledgeBefore: userKnowledgeSnapshot,
         userKnowledgeAfter: {},
         userReputationBefore: userReputationSnapshot,
@@ -4359,6 +4381,14 @@ function syncPendingRunLatentGrievanceNamePromotions(pendingRun, promotions = []
     if (!pendingRun || !Array.isArray(promotions) || !promotions.length) return;
     pendingRun.latentGrievancesAfter = renameLatentGrievanceTargets(
         pendingRun.latentGrievancesAfter ?? pendingRun.latentGrievancesBefore ?? [],
+        promotions,
+    );
+}
+
+function syncPendingRunLatentFavorNamePromotions(pendingRun, promotions = []) {
+    if (!pendingRun || !Array.isArray(promotions) || !promotions.length) return;
+    pendingRun.latentFavorsAfter = renameLatentFavorTargets(
+        pendingRun.latentFavorsAfter ?? pendingRun.latentFavorsBefore ?? [],
         promotions,
     );
 }
@@ -4479,17 +4509,19 @@ function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null, pendin
         const promotions = [{ oldName: placeholder, newName: candidates[0] }];
         syncPendingRunHealthNamePromotions(pendingRun, promotions);
         syncPendingRunLatentGrievanceNamePromotions(pendingRun, promotions);
+        syncPendingRunLatentFavorNamePromotions(pendingRun, promotions);
     }
     return normalized;
 }
 
 
-function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = []) {
+function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = [], latentFavors = []) {
     const update = {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
         user: normalizeTrackerUserState(displaySnapshot?.user || {}),
         powerActors: displaySnapshot?.powerActors || {},
         latentGrievances: normalizeLatentGrievances(latentGrievances),
+        latentFavors: normalizeLatentFavors(latentFavors),
         userKnowledge: mergeUserKnowledgeLedger(displaySnapshot?.userKnowledge || {}, {}),
         userReputation: mergeUserReputationLedger(displaySnapshot?.userReputation || {}, {}),
         worldState: normalizeWorldState(displaySnapshot?.worldState || {}),
@@ -4560,15 +4592,20 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
             const promotions = [{ oldName: name, newName: revealedName }];
             syncPendingRunHealthNamePromotions(options.pendingRun, promotions);
             syncPendingRunLatentGrievanceNamePromotions(options.pendingRun, promotions);
+            syncPendingRunLatentFavorNamePromotions(options.pendingRun, promotions);
         }
     }
     assignMissingDisplayNpcPersonalitySummaries(npcs, 'post-narration', options.context);
     const textPromotions = applyExplicitNamePromotions(npcs, options);
     syncPendingRunHealthNamePromotions(options.pendingRun, textPromotions.promotions);
     syncPendingRunLatentGrievanceNamePromotions(options.pendingRun, textPromotions.promotions);
+    syncPendingRunLatentFavorNamePromotions(options.pendingRun, textPromotions.promotions);
     merged.npcs = reconcileNamedNpcDuplicates(textPromotions.npcs, options.beforeNpcs, delta, options.pendingRun);
     merged.latentGrievanceIds = latentGrievanceIds(
         options.pendingRun?.latentGrievancesAfter ?? options.pendingRun?.latentGrievancesBefore ?? [],
+    );
+    merged.latentFavorIds = latentFavorIds(
+        options.pendingRun?.latentFavorsAfter ?? options.pendingRun?.latentFavorsBefore ?? [],
     );
     assignMissingDisplayNpcPersonalitySummaries(merged.npcs, 'post-narration', options.context);
     const deltaActiveNames = new Set();
@@ -5272,6 +5309,11 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
         snapshot.latentGrievanceIds ?? root.snapshots?.[snapshot.messageKey]?.afterLatentGrievanceIds,
         root.latentGrievances,
     );
+    root.latentFavors = resolveStoredLatentFavors(
+        root,
+        snapshot.latentFavorIds ?? root.snapshots?.[snapshot.messageKey]?.afterLatentFavorIds,
+        root.latentFavors,
+    );
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
@@ -5302,6 +5344,11 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
         root,
         snapshot.latentGrievanceIds ?? root.snapshots?.[snapshot.messageKey]?.afterLatentGrievanceIds,
         root.latentGrievances,
+    );
+    root.latentFavors = resolveStoredLatentFavors(
+        root,
+        snapshot.latentFavorIds ?? root.snapshots?.[snapshot.messageKey]?.afterLatentFavorIds,
+        root.latentFavors,
     );
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
@@ -10034,6 +10081,11 @@ function restoreTrackerForRegeneration(type) {
             root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeLatentGrievanceIds,
             root.latentGrievances,
         );
+        root.latentFavors = resolveStoredLatentFavors(
+            root,
+            root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeLatentFavorIds,
+            root.latentFavors,
+        );
         root.userKnowledge = mergeUserKnowledgeLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserKnowledge || root.userKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserReputation || root.userReputation || {}, {});
         root.worldState = normalizeWorldState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeWorldState || root.worldState || {});
@@ -10935,6 +10987,8 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         boundCompanion: pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {},
         pendingBoundary: pendingRun?.pendingBoundaryAfter || pendingRun?.pendingBoundaryBefore || {},
 
+        powerActorFavor: handoff.powerActorFavor || null,
+
         activeNpcNames,
     };
     const firstContactPersonalitySeeds = (handoff.npcHandoffs || [])
@@ -11309,6 +11363,13 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     postNarrationDelta = parsePostNarrationTrackerResponse(trackerRaw, narrationText);
                 }
 
+                const presentedLatentFavorId = verifyLatentFavorPresentation(
+                    postNarrationDelta,
+                    pendingRun?.report?.finalNarrativeHandoff?.powerActorFavor,
+                    pendingRun?.latentFavorsAfter ?? pendingRun?.latentFavorsBefore ?? [],
+                    narrationText,
+                );
+
                 const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
                 const reconciledTrackerDelta = reconcileLootPossessionTransfers(trackerDisplaySnapshot, clampedTrackerDelta);
                 const mergedTrackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, reconciledTrackerDelta, {
@@ -11333,6 +11394,19 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     throw new Error(`Loot tracker transaction was incomplete: ${lootCompletion.reason}.`);
                 }
                 mergedTrackerDisplaySnapshot.npcs = lootCompletion.npcs;
+                if (presentedLatentFavorId) {
+                    pendingRun.latentFavorsAfter = consumeLatentFavorById(
+                        pendingRun.latentFavorsAfter ?? pendingRun.latentFavorsBefore ?? [],
+                        presentedLatentFavorId,
+                    );
+                    mergedTrackerDisplaySnapshot.latentFavorIds = latentFavorIds(pendingRun.latentFavorsAfter);
+                    if (pendingRun.report?.latentFavors) {
+                        pendingRun.report.latentFavors.after = clone(pendingRun.latentFavorsAfter);
+                    }
+                    if (Array.isArray(pendingRun.report?.audit)) {
+                        pendingRun.report.audit.push(`POST_NARRATION latentFavorConsumed=${presentedLatentFavorId}`);
+                    }
+                }
                 trackerDisplaySnapshot = mergedTrackerDisplaySnapshot;
             } catch (error) {
 
@@ -11355,7 +11429,11 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 trackerDisplaySnapshot,
                 hiddenHealthAfter,
                 pendingRun.latentGrievancesAfter ?? pendingRun.latentGrievancesBefore ?? [],
-            ), { save: false });
+                pendingRun.latentFavorsAfter ?? pendingRun.latentFavorsBefore ?? [],
+            ), {
+                save: false,
+                retainLatentFavorStates: [pendingRun.latentFavorsBefore || [], pendingRun.latentFavorsAfter || []],
+            });
             if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
 
             root.snapshots[messageKey] = {
@@ -11365,6 +11443,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforeHealth: cloneHiddenHealth(pendingRun.healthBefore || root.health),
                 beforePowerActors: clone(pendingRun.powerActorsBefore),
                 beforeLatentGrievanceIds: latentGrievanceIds(pendingRun.latentGrievancesBefore || []),
+                beforeLatentFavorIds: latentFavorIds(pendingRun.latentFavorsBefore || []),
                 beforeUserKnowledge: clone(pendingRun.userKnowledgeBefore || {}),
                 beforeUserReputation: clone(pendingRun.userReputationBefore || {}),
                 beforeWorldState: clone(pendingRun.worldStateBefore || {}),
@@ -11376,6 +11455,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
                 afterPowerActors: clone(trackerDisplaySnapshot.powerActors || {}),
                 afterLatentGrievanceIds: latentGrievanceIds(pendingRun.latentGrievancesAfter || []),
+                afterLatentFavorIds: latentFavorIds(pendingRun.latentFavorsAfter || []),
                 afterUserKnowledge: clone(trackerDisplaySnapshot.userKnowledge || {}),
                 afterUserReputation: clone(trackerDisplaySnapshot.userReputation || {}),
                 afterWorldState: clone(trackerDisplaySnapshot.worldState || {}),
@@ -11486,7 +11566,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= firstAffectedMessageId) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeLatentGrievanceIds: snapshot.beforeLatentGrievanceIds, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeLatentGrievanceIds: snapshot.beforeLatentGrievanceIds, beforeLatentFavorIds: snapshot.beforeLatentFavorIds, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
             }
             delete root.snapshots[key];
         }
@@ -11510,6 +11590,7 @@ async function handleMessageDeleted(newLength) {
         root.health = normalizeHiddenHealth(restoreCandidate.beforeHealth || root.health, { user: root.user, npcs: root.npcs });
         root.powerActors = restoreCandidate.beforePowerActors || {};
         root.latentGrievances = resolveStoredLatentGrievances(root, restoreCandidate.beforeLatentGrievanceIds);
+        root.latentFavors = resolveStoredLatentFavors(root, restoreCandidate.beforeLatentFavorIds);
         root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(restoreCandidate.beforeUserReputation || {}, {});
         root.worldState = normalizeWorldState(restoreCandidate.beforeWorldState || root.worldState || {});
@@ -11863,6 +11944,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
         powerActorSnapshot: buildPowerActorSnapshot(context),
         latentGrievanceSnapshot: buildLatentGrievanceSnapshot(context),
+        latentFavorSnapshot: buildLatentFavorSnapshot(context),
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
@@ -12022,6 +12104,7 @@ async function handleChatCompletionPromptReady(eventData) {
         const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, pendingGeneration.type, {
             playerTrackerSnapshot: pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             latentGrievanceSnapshot: pendingGeneration.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
+            latentFavorSnapshot: pendingGeneration.latentFavorSnapshot || buildLatentFavorSnapshot(context),
             worldStateSnapshot: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
@@ -12056,6 +12139,8 @@ async function handleChatCompletionPromptReady(eventData) {
             powerActorsAfter: report.trackerUpdate?.powerActors || {},
             latentGrievancesBefore: pendingGeneration.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
             latentGrievancesAfter: report.trackerUpdate?.latentGrievances || [],
+            latentFavorsBefore: pendingGeneration.latentFavorSnapshot || buildLatentFavorSnapshot(context),
+            latentFavorsAfter: report.trackerUpdate?.latentFavors || [],
             userKnowledgeBefore: pendingGeneration.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userKnowledgeAfter: report.trackerUpdate?.userKnowledge || {},
             userReputationBefore: pendingGeneration.userReputationSnapshot || buildUserReputationSnapshot(context),
@@ -12148,6 +12233,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             playerTrackerSnapshot: pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             powerActorSnapshot: pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
             latentGrievanceSnapshot: pendingGeneration?.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
+            latentFavorSnapshot: pendingGeneration?.latentFavorSnapshot || buildLatentFavorSnapshot(context),
             userKnowledgeSnapshot: pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userReputationSnapshot: pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
             worldStateSnapshot: pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),

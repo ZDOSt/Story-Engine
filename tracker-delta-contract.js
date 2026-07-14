@@ -167,6 +167,11 @@ export const TRACKER_DELTA_CONTRACT = [
     '- boundaryId is code-owned. For renewal or clear, copy the exact active boundaryId from PREVIOUS_STATE. For a genuinely new boundary, use (none); code assigns its ID. Never invent, alter, or reuse an ID from another boundary.',
     '- Type must be restraint, object_access, space_access, departure, intimacy, or none. TargetNPC is the NPC who set the boundary. ObjectOrAccess is the restrained behavior, item, doorway, route, space, departure, or intimate advance being refused.',
     '- Evidence must cite the visible spoken or behavioral boundary in FINAL_NARRATION. This is hidden bookkeeping only; never add visible tracker text for it.',
+    '',
+    'LATENT_FAVOR_PRESENTATION:',
+    '- MECHANICAL_TRACKER_AUTHORITY.powerActorFavor is the only favor opportunity eligible for confirmation. If it is absent, output (none) for both lines.',
+    '- Copy its exact FavorId only when FINAL_NARRATION visibly presents that authorized favorable approach through the named actor, an ordinary representative, or a message, and visibly connects the approach to the established help. If narration omits or merely foreshadows it, output (none).',
+    '- Evidence must be an exact concise quotation from FINAL_NARRATION proving the approach appeared. Never confirm from the handoff alone.',
 ].join('\n');
 
 export const TRACKER_DELTA_TEMPLATE = `${TRACKER_DELTA_FENCE}
@@ -250,5 +255,7 @@ PendingBoundaryState.targetNPC=(none)
 PendingBoundaryState.type=none
 PendingBoundaryState.objectOrAccess=(none)
 PendingBoundaryState.evidence=(none)
+LatentFavorPresentation.favorId=(none)
+LatentFavorPresentation.evidence=(none)
 ${TRACKER_DELTA_END}
 ${TRACKER_DELTA_FENCE_END}`;

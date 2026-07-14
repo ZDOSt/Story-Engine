@@ -20,8 +20,10 @@ const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'st
 const TRACKER_NARRATOR_NPC_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove']);
 const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
 const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
+const POWER_ACTOR_FAVOR_TYPES = Object.freeze(['none', 'rescue_or_protect', 'valuable_information', 'recover_property', 'prevent_major_loss', 'exceptional_aid']);
 const POWER_ACTOR_SEVERITIES = Object.freeze(['none', 'minor', 'meaningful', 'major']);
 const POWER_ACTOR_ASSESSMENT_SCOPES = Object.freeze(['individual', 'organization', 'institution', 'group', 'unknown']);
+const POWER_ACTOR_FAVOR_FITS = Object.freeze(['use_now', 'defer']);
 const POWER_EVENT_TYPES = Object.freeze(['none', 'minor_obstruction', 'warning', 'ambush', 'frame_user', 'plant_contact', 'agent_mislead', 'agent_report', 'agent_sabotage']);
 const POWER_EVENT_FITS = Object.freeze(['none', 'use_now', 'defer', 'drop']);
 const POWER_EVENT_CONTACT_GENDERS = Object.freeze(['none', 'male', 'female', 'unknown']);
@@ -772,6 +774,43 @@ function buildSemanticPreflightSchema() {
             attributionPath: { type: 'string' },
         },
     };
+    const latentFavorSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['target', 'actionUnitId', 'explicitlyCompleted', 'benefit', 'severity', 'reason', 'evidence', 'uncompensated', 'beyondExpectedDuty', 'attributionPath'],
+        properties: {
+            target: {
+                type: 'string',
+                description: 'Exact current living beneficiary label. This target is presently assessed as ordinary and has no established Power Actor affiliation.',
+            },
+            actionUnitId: {
+                type: 'string',
+                enum: ['A1', 'A2', 'A3'],
+                description: 'Exact ResolutionEngine.actionUnits id that causes this favor.',
+            },
+            explicitlyCompleted: {
+                type: 'boolean',
+                description: 'For no-roll turns only: Y only when current input/context explicitly establishes the aid as already completed. Use N for attempts and all rolled actions.',
+            },
+            benefit: { type: 'string', enum: POWER_ACTOR_FAVOR_TYPES },
+            severity: {
+                type: 'string',
+                enum: ['meaningful', 'major'],
+                description: 'Only substantial help qualifies. Courtesy, small gifts, and ordinary assistance do not.',
+            },
+            reason: { type: 'string' },
+            evidence: { type: 'string' },
+            uncompensated: {
+                type: 'boolean',
+                description: 'Y only when no payment, contracted reward, exchange, or promised compensation already covers the help. N when unclear.',
+            },
+            beyondExpectedDuty: {
+                type: 'boolean',
+                description: 'Y only when the help exceeds the user normal job, contract, role, obligation, or routine professional conduct. N when unclear.',
+            },
+            attributionPath: { type: 'string' },
+        },
+    };
     const powerActorAffiliationLinkSchema = {
         type: 'object',
         additionalProperties: false,
@@ -797,6 +836,50 @@ function buildSemanticPreflightSchema() {
                 description: 'Y only when the Power Actor knows or has a concrete ordinary discovery/reporting path for the stored grievance.',
             },
             knowledgeEvidence: { type: 'string' },
+        },
+    };
+    const powerActorFavorAffiliationLinkSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['favorId', 'target', 'powerActor', 'actorType', 'hasReach', 'affiliationEvidence', 'knownToActor', 'knowledgeEvidence', 'knownToUser', 'userKnowledgeEvidence', 'fit', 'fitEvidence'],
+        properties: {
+            favorId: {
+                type: 'string',
+                description: 'Exact id copied from the hidden latent favor snapshot.',
+            },
+            target: {
+                type: 'string',
+                description: 'Exact target copied from the referenced latent favor.',
+            },
+            powerActor: { type: 'string' },
+            actorType: { type: 'string' },
+            hasReach: { type: 'boolean' },
+            affiliationEvidence: {
+                type: 'string',
+                description: 'Explicit established context linking the favor target to this Power Actor. Never infer or invent an affiliation.',
+            },
+            knownToActor: {
+                type: 'boolean',
+                description: 'Y only when the Power Actor knows or has a concrete ordinary discovery/reporting path for the stored favor.',
+            },
+            knowledgeEvidence: { type: 'string' },
+            knownToUser: {
+                type: 'boolean',
+                description: 'Y only when visible or previously established user-facing context already reveals this beneficiary affiliation and Power Actor identity. Hidden semantic knowledge is insufficient.',
+            },
+            userKnowledgeEvidence: {
+                type: 'string',
+                description: 'Direct user-facing dialogue, readable text, recognition, or established scene fact proving knownToUser=Y; otherwise (none).',
+            },
+            fit: {
+                type: 'string',
+                enum: POWER_ACTOR_FAVOR_FITS,
+                description: 'use_now only when one favorable approach can naturally enter the current scene without interrupting combat, crisis, active intimacy, urgent action, or the current dramatic beat; otherwise defer.',
+            },
+            fitEvidence: {
+                type: 'string',
+                description: 'Concise current-scene reason for use_now or defer.',
+            },
         },
     };
     const powerEventShapeSchema = {
@@ -1278,7 +1361,7 @@ function buildSemanticPreflightSchema() {
             powerActorEnmity: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['assessments', 'effects', 'latentGrievances', 'affiliationLinks'],
+                required: ['assessments', 'effects', 'latentGrievances', 'affiliationLinks', 'latentFavors', 'favorAffiliationLinks'],
                 properties: {
                     assessments: {
                         type: 'array',
@@ -1295,6 +1378,14 @@ function buildSemanticPreflightSchema() {
                     affiliationLinks: {
                         type: 'array',
                         items: powerActorAffiliationLinkSchema,
+                    },
+                    latentFavors: {
+                        type: 'array',
+                        items: latentFavorSchema,
+                    },
+                    favorAffiliationLinks: {
+                        type: 'array',
+                        items: powerActorFavorAffiliationLinkSchema,
                     },
                 },
             },
@@ -1581,6 +1672,8 @@ const SEMANTIC_FIELD_GUIDANCE = [
     '- PowerActorEnmity severity: minor=small obstruction or insult; meaningful=real setback, exposure, loss, asset harm, or operation disruption; major=severe public exposure, major defeat, major theft, death/capture of members, ruined operation, or serious reputation/income damage. If none, output count=0.',
     '- PowerActorEnmity.latentGrievances records only a substantial meaningful/major setback against a specific current living target who is explicitly assessed isPowerActor=N, has no credible reach, and has no established Power Actor affiliation anywhere in active context. Use the same qualifying effect classes as PowerActorEnmity. actionUnitId MUST copy the exact A1/A2/A3 unit causing the grievance. For rolled actions set explicitlyCompleted=N and let deterministic resolution decide whether that unit lands. For no-roll actions set explicitlyCompleted=Y only when the setback is explicitly already completed, never for an attempt. Exclude minor insults, routine disagreement, ordinary relationship friction, consensual interaction, mere restraint, harmless embarrassment, and any target already linked to a known Power Actor. evidence must cite the latest user action; attributionPath states who directly knows, witnessed, can report, or what evidence exists, or (none).',
     '- PowerActorEnmity.affiliationLinks may reference only an exact grievanceId and target from the hidden latent grievance snapshot. Add a link only when active card/scenario/lore/chat context explicitly establishes that target\'s membership, employment, allegiance, ownership, command relationship, or other concrete affiliation with the named Power Actor. Never invent or infer a future organization. The linked Power Actor must also receive an isPowerActor=Y assessment with credible reach. knownToActor=Y only when explicit context or an ordinary concrete reporting/discovery path lets that Power Actor know the stored grievance; otherwise use N and the grievance remains latent. affiliationEvidence and knowledgeEvidence must cite those separate facts.',
+    '- PowerActorEnmity.latentFavors records only substantial meaningful/major completed help to a specific current living target who is explicitly assessed isPowerActor=N and has no established Power Actor affiliation. uncompensated=Y and beyondExpectedDuty=Y are mandatory; when either is unclear, use N and do not record. Exclude paid or promised rewards, contracts, quests, normal jobs, role obligations, routine professional work, ordinary commerce, courtesy, small gifts, and minor assistance. actionUnitId and explicitlyCompleted use the same exact outcome gate as latentGrievances. attributionPath states who knows, witnessed, can report, or what evidence exists.',
+    '- PowerActorEnmity.favorAffiliationLinks may reference only an exact favorId and target from the hidden latent favor snapshot. Require an explicit established affiliation, an independently assessed Power Actor with reach, and separate affiliation/knowledge evidence. Never invent a future organization. knownToActor=Y only for a concrete actor knowledge/discovery path. knownToUser=Y only when user-facing context already reveals the affiliation and Power Actor identity; hidden context is insufficient. fit=use_now only when one favorable approach naturally fits the current scene without interrupting combat, crisis, active intimacy, urgent action, or the current dramatic beat. Otherwise use fit=defer. The favor remains latent unless all gates pass and final narration visibly presents the authorized opportunity.',
     '- PowerEventShape is hidden pending pressure shaping. Use it only when the Power actor snapshot contains a pendingEvent. If no pending event exists, output PowerEventShape.count=0. The pending event type is deterministic and immutable; do not choose, replace, or output an event type. For each pending event, decide if it fits the current scene now. fit=use_now only when it can enter naturally through visible scene logic without forcing {{user}} action or revealing hidden motives. fit=defer when the current scene cannot naturally support it yet. fit=drop only if it is impossible or would contradict visible facts. visibleInstruction must be narrator-safe surface instruction only: describe what visibly happens or what an ordinary NPC/contact does, not why. Never include the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative in visibleInstruction. For plant_contact, use the provided contactName when available and describe only an ordinary plausible introduction, role, offer, request, trade, work, travel, help, rumor, or social contact. For agent_* events, use the activeAgent name as an ordinary established NPC and describe only the visible action/suggestion/setback.',
     '- Companion/ally commands are tactical requests only. They can address the companion as an ActionTarget and can refer to an established hostile by name for later companion crisis targeting, but they must not be treated as {{user}} making the companion act, must not force a companion attack, and must not create a user-resolved success/failure roll for companion obedience. The named hostile must still be established through assistant narration/tracker/card/scenario/lore/initial test setup and belongs in hostilesInScene.NPC unless it directly opposes {{user}}\'s current action. If several hostiles exist and no specific one is named, do not guess a target.',
     '- Do not output primaryOppTarget or primaryOpposition. The only opposing living target list is identifyTargets.OppTargets.NPC; the separate broad hostile pool is identifyTargets.hostilesInScene.NPC.',
@@ -1741,6 +1834,30 @@ PowerActorAffiliationLink[0].hasReach=N
 PowerActorAffiliationLink[0].affiliationEvidence=(none)
 PowerActorAffiliationLink[0].knownToActor=N
 PowerActorAffiliationLink[0].knowledgeEvidence=(none)
+LatentFavor.count=0
+LatentFavor[0].target=(none)
+LatentFavor[0].actionUnitId=A1
+LatentFavor[0].explicitlyCompleted=N
+LatentFavor[0].benefit=none
+LatentFavor[0].severity=none
+LatentFavor[0].reason=(none)
+LatentFavor[0].evidence=(none)
+LatentFavor[0].uncompensated=N
+LatentFavor[0].beyondExpectedDuty=N
+LatentFavor[0].attributionPath=(none)
+PowerActorFavorAffiliationLink.count=0
+PowerActorFavorAffiliationLink[0].favorId=(none)
+PowerActorFavorAffiliationLink[0].target=(none)
+PowerActorFavorAffiliationLink[0].powerActor=(none)
+PowerActorFavorAffiliationLink[0].actorType=(none)
+PowerActorFavorAffiliationLink[0].hasReach=N
+PowerActorFavorAffiliationLink[0].affiliationEvidence=(none)
+PowerActorFavorAffiliationLink[0].knownToActor=N
+PowerActorFavorAffiliationLink[0].knowledgeEvidence=(none)
+PowerActorFavorAffiliationLink[0].knownToUser=N
+PowerActorFavorAffiliationLink[0].userKnowledgeEvidence=(none)
+PowerActorFavorAffiliationLink[0].fit=defer
+PowerActorFavorAffiliationLink[0].fitEvidence=(none)
 PowerEventShape.count=0
 PowerEventShape[0].eventId=(none)
 PowerEventShape[0].actor=(none)
@@ -1864,6 +1981,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         : normalizeInlineProxyInstructions(options?.inlineProxyInstructions);
     const powerActorSnapshot = sanitizePowerActorSnapshotForSemantic(options?.powerActorSnapshot || {});
     const latentGrievanceSnapshot = sanitizeLatentGrievanceSnapshotForSemantic(options?.latentGrievanceSnapshot || []);
+    const latentFavorSnapshot = sanitizeLatentFavorSnapshotForSemantic(options?.latentFavorSnapshot || []);
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const worldStateSnapshot = normalizeWorldState(options?.worldStateSnapshot || {});
     const boundCompanionSnapshot = normalizeBoundCompanionState(options?.boundCompanionSnapshot || {});
@@ -1874,6 +1992,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         `Disposition continuity context (plain-language tracker state for rollNeeded and social buckets; use this to decide whether a current NPC reaction or negative social contest is already settled):\n${dispositionContinuityContext}\n\n` +
         `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
         `Latent grievance snapshot JSON (hidden unresolved grievance memory; use only for exact PowerActorEnmity.affiliationLinks, never visible tracker text or narration):\n${JSON.stringify(latentGrievanceSnapshot)}\n\n` +
+        `Latent favor snapshot JSON (hidden unresolved favor memory; use only for exact PowerActorEnmity.favorAffiliationLinks, never visible tracker text or narration):\n${JSON.stringify(latentFavorSnapshot)}\n\n` +
         `User knowledge snapshot JSON (hidden memory about authored or personal facts people may know about {{user}}; use for UserKnowledgeApplication context only, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         `World state snapshot JSON (hidden current scene continuity; use reputationLocation/place as the default current community for EngineContext.userReputationContext.location when applicable):\n${JSON.stringify(worldStateSnapshot, null, 2)}\n\n` +
         `Bound companion snapshot JSON (hidden user state; current established inner companion, possession/shared vessel, intelligent item/weapon, bound spirit/artifact, or implant if any):\n${JSON.stringify(boundCompanionSnapshot, null, 2)}\n\n` +
@@ -1909,7 +2028,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. Name pools are deterministic runtime data and not part of this semantic pass; do not generate name candidates or output name fields. ' +
         'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity candidate when the latest user input would, if completed, meaningfully thwart, expose, harm assets of, steal from, publicly humiliate, help an enemy of, disrupt an operation of, kill/capture people of, or damage reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Do not decide whether a rolled action succeeds; deterministic code applies the candidate only when the resolved action succeeds or lands. No-roll entries require an explicitly completed effect. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. Mark knownToActor=Y only for that concrete knowledge path. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
-        'Within PowerActorEnmity, fill latentGrievances only for substantial unresolved harm against a currently ordinary target with no established Power Actor link. Fill affiliationLinks only by copying an exact hidden latent grievance id and citing an explicit established affiliation plus a concrete Power Actor knowledge/discovery path. Deterministic code alone records, links, consumes, and converts these entries into enmity. ' +
+        'Within PowerActorEnmity, fill latentGrievances only for substantial unresolved harm against a currently ordinary target with no established Power Actor link. Fill affiliationLinks only by copying an exact hidden latent grievance id and citing an explicit established affiliation plus a concrete Power Actor knowledge/discovery path. Fill latentFavors only for substantial completed uncompensated help beyond expected duty to a currently ordinary target with no established Power Actor link; routine, paid, contracted, promised-reward, or expected work never qualifies. Fill favorAffiliationLinks only from an exact hidden favor id with explicit affiliation and actor-knowledge paths. Also determine whether the affiliation is already user-known and whether one favorable approach fits the present scene. Deterministic code authorizes at most one opportunity; post-narration verification alone consumes a visibly presented favor. ' +
         'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. The pending event type is deterministic and immutable; do not choose, replace, or output an event type. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
         'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. Currency changes are finalized post-narration only, so semantic preflight must keep currencyAdd=(none) and currencyRemove=(none). TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory and currency changes are finalized only by the post-narration tracker after FINAL_NARRATION establishes them. ' +
@@ -2274,6 +2393,8 @@ function validateRawLedgerContract(ledger, raw) {
     if (!Array.isArray(ledger?.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
     if (!Array.isArray(ledger?.powerActorEnmity?.latentGrievances)) missing.push('powerActorEnmity.latentGrievances');
     if (!Array.isArray(ledger?.powerActorEnmity?.affiliationLinks)) missing.push('powerActorEnmity.affiliationLinks');
+    if (!Array.isArray(ledger?.powerActorEnmity?.latentFavors)) missing.push('powerActorEnmity.latentFavors');
+    if (!Array.isArray(ledger?.powerActorEnmity?.favorAffiliationLinks)) missing.push('powerActorEnmity.favorAffiliationLinks');
     if (!ledger?.powerEventShape) missing.push('powerEventShape');
     if (!Array.isArray(ledger?.powerEventShape?.events)) missing.push('powerEventShape.events');
     if (!ledger?.trackerUpdateEngine) missing.push('trackerUpdateEngine');
@@ -2424,6 +2545,8 @@ function parseCompactLedger(text, trackerSnapshot) {
         'PowerActorEnmity.count',
         'LatentGrievance.count',
         'PowerActorAffiliationLink.count',
+        'LatentFavor.count',
+        'PowerActorFavorAffiliationLink.count',
         'PowerEventShape.count',
     ];
     const missing = required.filter(key => !fields.has(key));
@@ -2569,6 +2692,54 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.knowledgeEvidence`,
         ];
         for (const key of affiliationLinkRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const latentFavorCount = clampNumber(readNumber(fields, 'LatentFavor.count', 0), 0, 12);
+    for (let index = 0; index < latentFavorCount; index += 1) {
+        const prefix = `LatentFavor[${index}]`;
+        const latentFavorRequired = [
+            `${prefix}.target`,
+            `${prefix}.actionUnitId`,
+            `${prefix}.explicitlyCompleted`,
+            `${prefix}.benefit`,
+            `${prefix}.severity`,
+            `${prefix}.reason`,
+            `${prefix}.evidence`,
+            `${prefix}.uncompensated`,
+            `${prefix}.beyondExpectedDuty`,
+            `${prefix}.attributionPath`,
+        ];
+        for (const key of latentFavorRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const powerActorFavorAffiliationLinkCount = clampNumber(readNumber(fields, 'PowerActorFavorAffiliationLink.count', 0), 0, 12);
+    for (let index = 0; index < powerActorFavorAffiliationLinkCount; index += 1) {
+        const prefix = `PowerActorFavorAffiliationLink[${index}]`;
+        const favorAffiliationLinkRequired = [
+            `${prefix}.favorId`,
+            `${prefix}.target`,
+            `${prefix}.powerActor`,
+            `${prefix}.actorType`,
+            `${prefix}.hasReach`,
+            `${prefix}.affiliationEvidence`,
+            `${prefix}.knownToActor`,
+            `${prefix}.knowledgeEvidence`,
+            `${prefix}.knownToUser`,
+            `${prefix}.userKnowledgeEvidence`,
+            `${prefix}.fit`,
+            `${prefix}.fitEvidence`,
+        ];
+        for (const key of favorAffiliationLinkRequired) {
             if (!fields.has(key)) missing.push(key);
         }
     }
@@ -2850,7 +3021,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         });
     }
 
-    const powerActorEnmity = { assessments: [], effects: [], latentGrievances: [], affiliationLinks: [] };
+    const powerActorEnmity = { assessments: [], effects: [], latentGrievances: [], affiliationLinks: [], latentFavors: [], favorAffiliationLinks: [] };
     for (let index = 0; index < powerActorAssessmentCount; index += 1) {
         const prefix = `PowerActorAssessment[${index}]`;
         const assessment = normalizePowerActorAssessment({
@@ -2907,6 +3078,40 @@ function parseCompactLedger(text, trackerSnapshot) {
             knowledgeEvidence: fields.get(`${prefix}.knowledgeEvidence`),
         });
         if (link) powerActorEnmity.affiliationLinks.push(link);
+    }
+    for (let index = 0; index < latentFavorCount; index += 1) {
+        const prefix = `LatentFavor[${index}]`;
+        const favor = normalizeLatentFavorCandidate({
+            target: fields.get(`${prefix}.target`),
+            actionUnitId: fields.get(`${prefix}.actionUnitId`),
+            explicitlyCompleted: readBoolean(fields, `${prefix}.explicitlyCompleted`, false),
+            benefit: fields.get(`${prefix}.benefit`),
+            severity: fields.get(`${prefix}.severity`),
+            reason: fields.get(`${prefix}.reason`),
+            evidence: fields.get(`${prefix}.evidence`),
+            uncompensated: readBoolean(fields, `${prefix}.uncompensated`, false),
+            beyondExpectedDuty: readBoolean(fields, `${prefix}.beyondExpectedDuty`, false),
+            attributionPath: fields.get(`${prefix}.attributionPath`),
+        });
+        if (favor) powerActorEnmity.latentFavors.push(favor);
+    }
+    for (let index = 0; index < powerActorFavorAffiliationLinkCount; index += 1) {
+        const prefix = `PowerActorFavorAffiliationLink[${index}]`;
+        const link = normalizePowerActorFavorAffiliationLink({
+            favorId: fields.get(`${prefix}.favorId`),
+            target: fields.get(`${prefix}.target`),
+            powerActor: fields.get(`${prefix}.powerActor`),
+            actorType: fields.get(`${prefix}.actorType`),
+            hasReach: readBoolean(fields, `${prefix}.hasReach`, false),
+            affiliationEvidence: fields.get(`${prefix}.affiliationEvidence`),
+            knownToActor: readBoolean(fields, `${prefix}.knownToActor`, false),
+            knowledgeEvidence: fields.get(`${prefix}.knowledgeEvidence`),
+            knownToUser: readBoolean(fields, `${prefix}.knownToUser`, false),
+            userKnowledgeEvidence: fields.get(`${prefix}.userKnowledgeEvidence`),
+            fit: fields.get(`${prefix}.fit`),
+            fitEvidence: fields.get(`${prefix}.fitEvidence`),
+        });
+        if (link) powerActorEnmity.favorAffiliationLinks.push(link);
     }
 
     const powerEventShape = { events: [] };
@@ -3070,6 +3275,8 @@ function parseNarratorTrackerDeltaText(text) {
         'PendingBoundaryState.type',
         'PendingBoundaryState.objectOrAccess',
         'PendingBoundaryState.evidence',
+        'LatentFavorPresentation.favorId',
+        'LatentFavorPresentation.evidence',
     ];
     for (let index = 0; index < trackerNpcCount; index += 1) {
         const prefix = `TrackerUpdateEngine.NPC[${index}]`;
@@ -3214,7 +3421,12 @@ function parseNarratorTrackerDeltaText(text) {
         evidence: fields.get('PendingBoundaryState.evidence'),
     });
 
-    return { user, npcs, userKnowledge, userReputation, worldState, economy, boundCompanion, pendingBoundary };
+    const latentFavorPresentation = normalizeLatentFavorPresentation({
+        favorId: fields.get('LatentFavorPresentation.favorId'),
+        evidence: fields.get('LatentFavorPresentation.evidence'),
+    });
+
+    return { user, npcs, userKnowledge, userReputation, worldState, economy, boundCompanion, pendingBoundary, latentFavorPresentation };
 }
 
 function sanitizeNarratorTrackerDelta(delta, narration) {
@@ -3233,6 +3445,7 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
         economy: normalizeEconomyDelta(delta?.economy),
         boundCompanion: normalizeBoundCompanionDelta(delta?.boundCompanion),
         pendingBoundary: normalizePendingBoundaryDelta(delta?.pendingBoundary),
+        latentFavorPresentation: normalizeLatentFavorPresentation(delta?.latentFavorPresentation),
     };
     cleanDelta.npcs = cleanDelta.npcs.filter(item =>
         item?.NPC
@@ -3243,6 +3456,16 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
             || normalizePersonalitySummary(item.personalitySummary)
         ));
     return cleanDelta;
+}
+
+function normalizeLatentFavorPresentation(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const favorId = cleanScalar(source.favorId ?? source.FavorId).replace(/\s+/g, ' ').slice(0, 100);
+    const evidence = cleanScalar(source.evidence ?? source.Evidence).replace(/\s+/g, ' ').slice(0, 260);
+    if (!favorId || isNoneValue(favorId) || !evidence || isNoneValue(evidence)) {
+        return { favorId: '(none)', evidence: '(none)' };
+    }
+    return { favorId, evidence };
 }
 
 function sanitizeNarratorTrackerActorDelta(delta, narration, actorName = '') {
@@ -4166,6 +4389,12 @@ function normalizeLedger(ledger) {
     ledger.powerActorEnmity.affiliationLinks = Array.isArray(ledger.powerActorEnmity.affiliationLinks)
         ? ledger.powerActorEnmity.affiliationLinks.map(normalizePowerActorAffiliationLink).filter(Boolean)
         : [];
+    ledger.powerActorEnmity.latentFavors = Array.isArray(ledger.powerActorEnmity.latentFavors)
+        ? ledger.powerActorEnmity.latentFavors.map(normalizeLatentFavorCandidate).filter(Boolean)
+        : [];
+    ledger.powerActorEnmity.favorAffiliationLinks = Array.isArray(ledger.powerActorEnmity.favorAffiliationLinks)
+        ? ledger.powerActorEnmity.favorAffiliationLinks.map(normalizePowerActorFavorAffiliationLink).filter(Boolean)
+        : [];
     ledger.powerEventShape = ledger.powerEventShape || {};
     ledger.powerEventShape.events = Array.isArray(ledger.powerEventShape.events)
         ? ledger.powerEventShape.events.map(normalizePowerEventShape).filter(Boolean)
@@ -4518,6 +4747,32 @@ function normalizeLatentGrievanceCandidate(value) {
     };
 }
 
+function normalizeLatentFavorCandidate(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const target = cleanScalar(source.target ?? source.Target).replace(/\s+/g, ' ').slice(0, 100);
+    const actionUnitId = normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId);
+    const benefit = normalizePowerActorFavorType(source.benefit ?? source.Benefit);
+    const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
+    const reason = cleanScalar(source.reason ?? source.Reason).replace(/\s+/g, ' ').slice(0, 180);
+    const evidence = cleanScalar(source.evidence ?? source.Evidence).replace(/\s+/g, ' ').slice(0, 220);
+    const uncompensated = toBoolean(source.uncompensated ?? source.Uncompensated, false);
+    const beyondExpectedDuty = toBoolean(source.beyondExpectedDuty ?? source.BeyondExpectedDuty, false);
+    if (!target || isNoneValue(target) || !actionUnitId || benefit === 'none' || !['meaningful', 'major'].includes(severity) || !reason || isNoneValue(reason) || !evidence || isNoneValue(evidence) || !uncompensated || !beyondExpectedDuty) return null;
+    const attributionPath = cleanScalar(source.attributionPath ?? source.AttributionPath).replace(/\s+/g, ' ').slice(0, 180);
+    return {
+        target,
+        actionUnitId,
+        explicitlyCompleted: toBoolean(source.explicitlyCompleted ?? source.ExplicitlyCompleted, false),
+        benefit,
+        severity,
+        reason,
+        evidence,
+        uncompensated: true,
+        beyondExpectedDuty: true,
+        attributionPath: attributionPath && !isNoneValue(attributionPath) ? attributionPath : '(none)',
+    };
+}
+
 function normalizePowerActorAffiliationLink(value) {
     const source = value && typeof value === 'object' ? value : {};
     const grievanceId = cleanScalar(source.grievanceId ?? source.GrievanceId).replace(/\s+/g, ' ').slice(0, 100);
@@ -4538,6 +4793,39 @@ function normalizePowerActorAffiliationLink(value) {
         knownToActor: toBoolean(source.knownToActor ?? source.KnownToActor, false),
         knowledgeEvidence: knowledgeEvidence && !isNoneValue(knowledgeEvidence) ? knowledgeEvidence : '(none)',
     };
+}
+
+function normalizePowerActorFavorAffiliationLink(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const favorId = cleanScalar(source.favorId ?? source.FavorId).replace(/\s+/g, ' ').slice(0, 100);
+    const target = cleanScalar(source.target ?? source.Target).replace(/\s+/g, ' ').slice(0, 100);
+    const powerActor = cleanScalar(source.powerActor ?? source.PowerActor).replace(/\s+/g, ' ').slice(0, 100);
+    const actorType = cleanScalar(source.actorType ?? source.ActorType).replace(/\s+/g, ' ').slice(0, 80);
+    const affiliationEvidence = cleanScalar(source.affiliationEvidence ?? source.AffiliationEvidence).replace(/\s+/g, ' ').slice(0, 220);
+    const hasReach = toBoolean(source.hasReach ?? source.HasReach, false);
+    if (!favorId || isNoneValue(favorId) || !target || isNoneValue(target) || !powerActor || isNoneValue(powerActor) || !actorType || isNoneValue(actorType) || !hasReach || !affiliationEvidence || isNoneValue(affiliationEvidence)) return null;
+    const knowledgeEvidence = cleanScalar(source.knowledgeEvidence ?? source.KnowledgeEvidence).replace(/\s+/g, ' ').slice(0, 220);
+    const userKnowledgeEvidence = cleanScalar(source.userKnowledgeEvidence ?? source.UserKnowledgeEvidence).replace(/\s+/g, ' ').slice(0, 220);
+    const fitEvidence = cleanScalar(source.fitEvidence ?? source.FitEvidence).replace(/\s+/g, ' ').slice(0, 220);
+    return {
+        favorId,
+        target,
+        powerActor,
+        actorType,
+        hasReach: true,
+        affiliationEvidence,
+        knownToActor: toBoolean(source.knownToActor ?? source.KnownToActor, false),
+        knowledgeEvidence: knowledgeEvidence && !isNoneValue(knowledgeEvidence) ? knowledgeEvidence : '(none)',
+        knownToUser: toBoolean(source.knownToUser ?? source.KnownToUser, false),
+        userKnowledgeEvidence: userKnowledgeEvidence && !isNoneValue(userKnowledgeEvidence) ? userKnowledgeEvidence : '(none)',
+        fit: normalizePowerActorFavorFit(source.fit ?? source.Fit),
+        fitEvidence: fitEvidence && !isNoneValue(fitEvidence) ? fitEvidence : '(none)',
+    };
+}
+
+function normalizePowerActorFavorFit(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_FAVOR_FITS.includes(text) ? text : 'defer';
 }
 
 function normalizePowerEventShape(value) {
@@ -4587,6 +4875,11 @@ function sanitizePowerEventVisibleInstruction(value) {
 function normalizePowerActorEffectType(value) {
     const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
     return POWER_ACTOR_EFFECT_TYPES.includes(text) ? text : 'none';
+}
+
+function normalizePowerActorFavorType(value) {
+    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_FAVOR_TYPES.includes(text) ? text : 'none';
 }
 
 function normalizePowerActorSeverity(value) {
@@ -4646,6 +4939,29 @@ function sanitizeLatentGrievanceSnapshotForSemantic(value = []) {
             id,
             target,
             effect,
+            severity,
+            reason: cleanScalar(item.reason ?? item.Reason).replace(/\s+/g, ' ').slice(0, 180) || '(none)',
+        };
+    }).filter(Boolean).slice(-24);
+}
+
+function sanitizeLatentFavorSnapshotForSemantic(value = []) {
+    const source = Array.isArray(value)
+        ? value
+        : Array.isArray(value?.entries)
+            ? value.entries
+            : [];
+    return source.map(raw => {
+        const item = raw && typeof raw === 'object' ? raw : {};
+        const id = cleanScalar(item.id ?? item.Id).replace(/\s+/g, ' ').slice(0, 100);
+        const target = cleanScalar(item.target ?? item.Target).replace(/\s+/g, ' ').slice(0, 100);
+        const benefit = normalizePowerActorFavorType(item.benefit ?? item.Benefit);
+        const severity = normalizePowerActorSeverity(item.severity ?? item.Severity);
+        if (!id || !target || benefit === 'none' || !['meaningful', 'major'].includes(severity)) return null;
+        return {
+            id,
+            target,
+            benefit,
             severity,
             reason: cleanScalar(item.reason ?? item.Reason).replace(/\s+/g, ' ').slice(0, 180) || '(none)',
         };
@@ -4845,6 +5161,8 @@ function validateNormalizedLedger(ledger, raw) {
     if (!Array.isArray(ledger.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
     if (!Array.isArray(ledger.powerActorEnmity?.latentGrievances)) missing.push('powerActorEnmity.latentGrievances');
     if (!Array.isArray(ledger.powerActorEnmity?.affiliationLinks)) missing.push('powerActorEnmity.affiliationLinks');
+    if (!Array.isArray(ledger.powerActorEnmity?.latentFavors)) missing.push('powerActorEnmity.latentFavors');
+    if (!Array.isArray(ledger.powerActorEnmity?.favorAffiliationLinks)) missing.push('powerActorEnmity.favorAffiliationLinks');
     if (!ledger.powerEventShape) missing.push('powerEventShape');
     if (!Array.isArray(ledger.powerEventShape?.events)) missing.push('powerEventShape.events');
     if (!ledger.trackerUpdateEngine) missing.push('trackerUpdateEngine');

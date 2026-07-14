@@ -370,6 +370,11 @@ const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 const POWER_ACTOR_ENMITY_VERSION = 1;
 const LATENT_GRIEVANCE_VERSION = 1;
 const LATENT_GRIEVANCE_LIMIT = 24;
+const LATENT_FAVOR_VERSION = 1;
+const LATENT_FAVOR_LIMIT = 24;
+const LATENT_FAVOR_ARCHIVE_LIMIT = 512;
+const POWER_ACTOR_FAVOR_TYPES = Object.freeze(['none', 'rescue_or_protect', 'valuable_information', 'recover_property', 'prevent_major_loss', 'exceptional_aid']);
+const POWER_ACTOR_FAVOR_FITS = Object.freeze(['use_now', 'defer']);
 const POWER_ACTOR_EVENT_FITS = Object.freeze(['none', 'use_now', 'defer', 'drop']);
 const POWER_ACTOR_EVENT_TYPES = Object.freeze(['none', 'minor_obstruction', 'warning', 'ambush', 'frame_user', 'plant_contact', 'agent_mislead', 'agent_report', 'agent_sabotage']);
 const POWER_ACTOR_CONTACT_GENDERS = Object.freeze(['none', 'male', 'female', 'unknown']);
@@ -643,6 +648,10 @@ export function buildLatentGrievanceSnapshot(context) {
     return normalizeLatentGrievances(context?.chatMetadata?.structuredPreflightTracker?.latentGrievances || []);
 }
 
+export function buildLatentFavorSnapshot(context) {
+    return normalizeLatentFavors(context?.chatMetadata?.structuredPreflightTracker?.latentFavors || []);
+}
+
 export function buildUserKnowledgeSnapshot(context) {
     return normalizeUserKnowledgeLedger(context?.chatMetadata?.structuredPreflightTracker?.userKnowledge || {});
 }
@@ -851,6 +860,14 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.powerActors = normalizePowerActors(root.powerActors || {});
     root.latentGrievances = normalizeLatentGrievances(root.latentGrievances || []);
     root.latentGrievanceArchive = mergeLatentGrievanceArchive(root.latentGrievanceArchive, root.latentGrievances);
+    root.latentFavors = normalizeLatentFavors(root.latentFavors || []);
+    root.latentFavorArchive = pruneLatentFavorArchive(
+        root.latentFavorArchive,
+        root.latentFavors,
+        root.snapshots,
+        LATENT_FAVOR_ARCHIVE_LIMIT,
+        options.retainLatentFavorStates,
+    );
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.userReputation = normalizeUserReputation(root.userReputation || {});
     root.worldState = normalizeWorldState(root.worldState || {});
@@ -882,6 +899,10 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
         root.latentGrievances = normalizeLatentGrievances(trackerUpdate.latentGrievances);
         root.latentGrievanceArchive = mergeLatentGrievanceArchive(root.latentGrievanceArchive, root.latentGrievances);
     }
+    if (trackerUpdate.latentFavors !== undefined) {
+        root.latentFavors = normalizeLatentFavors(trackerUpdate.latentFavors);
+        root.latentFavorArchive = mergeLatentFavorArchive(root.latentFavorArchive, root.latentFavors);
+    }
     if (trackerUpdate.userKnowledge) {
         root.userKnowledge = normalizeUserKnowledgeLedger(trackerUpdate.userKnowledge);
     }
@@ -905,6 +926,13 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     } else {
         root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     }
+    root.latentFavorArchive = pruneLatentFavorArchive(
+        root.latentFavorArchive,
+        root.latentFavors,
+        root.snapshots,
+        LATENT_FAVOR_ARCHIVE_LIMIT,
+        options.retainLatentFavorStates,
+    );
 
     context.chatMetadata.structuredPreflightTracker = root;
 
@@ -926,6 +954,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const boundCompanionBefore = normalizeBoundCompanionState(options?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context));
     const pendingBoundaryBefore = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context));
     const latentGrievancesBefore = normalizeLatentGrievances(options?.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context));
+    const latentFavorsBefore = normalizeLatentFavors(options?.latentFavorSnapshot || buildLatentFavorSnapshot(context));
     const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger, context);
     const healthBefore = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
@@ -986,6 +1015,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         playerTrackerSnapshot,
         resolution.packet,
         latentGrievancesBefore,
+        latentFavorsBefore,
         trackerSnapshot,
         healthBefore,
     );
@@ -1014,6 +1044,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         boundCompanion: boundCompanion.state,
         pendingBoundary: pendingBoundaryBefore,
         latentGrievances: powerActors.latentGrievances,
+        latentFavors: powerActors.latentFavors,
     };
     const narrativeResolutionPacket = applyHiddenHealthToResolutionPacket(resolution.packet, healthAfter);
     const generatedNpcStats = mergeGeneratedNpcStats([
@@ -1037,6 +1068,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         proactivityResults: proactivity.results,
         aggressionResults: aggression.results,
         powerActorPressure: powerActors.handoff,
+        powerActorFavor: powerActors.favorOpportunity,
         boundCompanion: boundCompanion.handoff,
         generatedNpcStats,
         npcEquipmentProfiles,
@@ -1063,6 +1095,10 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         latentGrievances: {
             before: latentGrievancesBefore,
             after: powerActors.latentGrievances,
+        },
+        latentFavors: {
+            before: latentFavorsBefore,
+            after: powerActors.latentFavors,
         },
     };
 }
@@ -1350,16 +1386,20 @@ function advanceRapportClock(context, audit) {
     return clock;
 }
 
-function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null, playerTrackerSnapshot = null, resolutionPacket = {}, latentGrievanceSnapshot = [], trackerSnapshot = {}, hiddenHealthSnapshot = null) {
+function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null, playerTrackerSnapshot = null, resolutionPacket = {}, latentGrievanceSnapshot = [], latentFavorSnapshot = [], trackerSnapshot = {}, hiddenHealthSnapshot = null) {
     const before = buildPowerActorSnapshot(context);
     const trackerUpdate = {};
     const handoffEntries = [];
     const semanticEffects = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
     const semanticLatentGrievances = Array.isArray(ledger?.powerActorEnmity?.latentGrievances) ? ledger.powerActorEnmity.latentGrievances : [];
     const semanticAffiliationLinks = Array.isArray(ledger?.powerActorEnmity?.affiliationLinks) ? ledger.powerActorEnmity.affiliationLinks : [];
+    const semanticLatentFavors = Array.isArray(ledger?.powerActorEnmity?.latentFavors) ? ledger.powerActorEnmity.latentFavors : [];
+    const semanticFavorAffiliationLinks = Array.isArray(ledger?.powerActorEnmity?.favorAffiliationLinks) ? ledger.powerActorEnmity.favorAffiliationLinks : [];
     const eventShapes = Array.isArray(ledger?.powerEventShape?.events) ? ledger.powerEventShape.events : [];
     let latentGrievances = normalizeLatentGrievances(latentGrievanceSnapshot);
+    let latentFavors = normalizeLatentFavors(latentFavorSnapshot);
     let shapedEventHandoff = null;
+    let favorOpportunity = null;
     const acceptedDirectEffects = [];
 
     audit.push(`STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER`);
@@ -1369,6 +1409,9 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
     audit.push(`3P.1b latentGrievancesBefore=${latentGrievances.length ? compact(latentGrievances) : 'none'}`);
     audit.push(`3P.1c semanticLatentGrievances=${semanticLatentGrievances.length ? compact(semanticLatentGrievances) : 'none'}`);
     audit.push(`3P.1d semanticAffiliationLinks=${semanticAffiliationLinks.length ? compact(semanticAffiliationLinks) : 'none'}`);
+    audit.push(`3P.1d.1 latentFavorsBefore=${latentFavors.length ? compact(latentFavors) : 'none'}`);
+    audit.push(`3P.1d.2 semanticLatentFavors=${semanticLatentFavors.length ? compact(semanticLatentFavors) : 'none'}`);
+    audit.push(`3P.1d.3 semanticFavorAffiliationLinks=${semanticFavorAffiliationLinks.length ? compact(semanticFavorAffiliationLinks) : 'none'}`);
     const effects = semanticEffects;
     audit.push(`3P.1e semanticPowerEventShapes=${eventShapes.length ? compact(eventShapes) : 'none'}`);
 
@@ -1492,7 +1535,7 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
             continue;
         }
         establishedLinkedTargetKeys.add(normalizeNameKey(grievance.target));
-        if (!link.knownToActor || !link.knowledgeEvidence) {
+        if (!link.knownToActor || !isReal(link.knowledgeEvidence)) {
             audit.push(`3P.4a deferredPowerActorAffiliationLink=${compact({ reason: 'affiliation established but no knowledge or discovery path yet', grievanceId: grievance.id, actor: link.powerActor })}`);
             continue;
         }
@@ -1547,6 +1590,69 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
         latentGrievances = latentGrievances.filter(item => !consumedGrievanceIds.has(item.id));
     }
 
+    const eligibleFavorLinks = [];
+    const eligibleFavorIds = new Set();
+    for (const rawLink of semanticFavorAffiliationLinks) {
+        const link = normalizePowerActorFavorAffiliationLink(rawLink);
+        if (!link) {
+            audit.push(`3P.4c.1 ignoredPowerActorFavorAffiliationLink=${compact({ reason: 'invalid link', rawLink })}`);
+            continue;
+        }
+        const favor = latentFavors.find(item => item.id === link.favorId);
+        if (!favor || !sameName(favor.target, link.target)) {
+            audit.push(`3P.4c.1 ignoredPowerActorFavorAffiliationLink=${compact({ reason: 'no exact latent favor match', favorId: link.favorId, target: link.target })}`);
+            continue;
+        }
+        const assessment = assessments.find(item => sameName(item.actor, link.powerActor));
+        if (!assessment?.isPowerActor || !assessment.hasReach) {
+            audit.push(`3P.4c.1 ignoredPowerActorFavorAffiliationLink=${compact({ reason: 'linked entity was not independently assessed as a power actor with reach', favorId: favor.id, actor: link.powerActor })}`);
+            continue;
+        }
+        establishedLinkedTargetKeys.add(normalizeNameKey(favor.target));
+        if (!link.knownToActor || !link.knowledgeEvidence) {
+            audit.push(`3P.4c.1 deferredPowerActorFavorAffiliationLink=${compact({ reason: 'affiliation established but no knowledge or discovery path yet', favorId: favor.id, actor: link.powerActor })}`);
+            continue;
+        }
+        if (!link.knownToUser || !isReal(link.userKnowledgeEvidence)) {
+            audit.push(`3P.4c.1 deferredPowerActorFavorAffiliationLink=${compact({ reason: 'power-actor affiliation is not yet established to user', favorId: favor.id, actor: link.powerActor })}`);
+            continue;
+        }
+        if (link.fit !== 'use_now' || !isReal(link.fitEvidence)) {
+            audit.push(`3P.4c.1 deferredPowerActorFavorAffiliationLink=${compact({ reason: 'favorable approach does not fit the current scene', favorId: favor.id, actor: link.powerActor, fitEvidence: link.fitEvidence })}`);
+            continue;
+        }
+        const actorName = findExistingPowerActorName(trackerUpdate, link.powerActor)
+            || findExistingPowerActorName(before, link.powerActor)
+            || link.powerActor;
+        const actorState = normalizePowerActorState(trackerUpdate[actorName] || before[actorName] || {});
+        if (actorState.enmity > 0) {
+            audit.push(`3P.4c.1 deferredPowerActorFavorAffiliationLink=${compact({ reason: 'linked power actor currently has active enmity', favorId: favor.id, actor: actorName, enmity: actorState.enmity })}`);
+            continue;
+        }
+        if (eligibleFavorIds.has(favor.id)) {
+            audit.push(`3P.4c.1 ignoredPowerActorFavorAffiliationLink=${compact({ reason: 'latent favor already linked this turn', favorId: favor.id, actor: actorName })}`);
+            continue;
+        }
+        eligibleFavorIds.add(favor.id);
+        eligibleFavorLinks.push({ favor, link: { ...link, powerActor: actorName }, assessment });
+    }
+
+    eligibleFavorLinks.sort((a, b) => {
+        const severityDelta = powerActorFavorPriority(b.favor.severity) - powerActorFavorPriority(a.favor.severity);
+        if (severityDelta) return severityDelta;
+        const ageDelta = (a.favor.createdAt || 0) - (b.favor.createdAt || 0);
+        if (ageDelta) return ageDelta;
+        return String(a.favor.id).localeCompare(String(b.favor.id));
+    });
+    const selectedFavorLink = eligibleFavorLinks[0];
+    if (selectedFavorLink) {
+        favorOpportunity = buildPowerActorFavorOpportunity(selectedFavorLink.favor, selectedFavorLink.link, selectedFavorLink.assessment);
+        audit.push(`3P.4c.2 latentFavorOpportunityAuthorized=${compact({ favorId: selectedFavorLink.favor.id, target: selectedFavorLink.favor.target, actor: selectedFavorLink.link.powerActor, affiliationEvidence: selectedFavorLink.link.affiliationEvidence, knowledgeEvidence: selectedFavorLink.link.knowledgeEvidence, userKnowledgeEvidence: selectedFavorLink.link.userKnowledgeEvidence, fitEvidence: selectedFavorLink.link.fitEvidence, opportunity: favorOpportunity })}`);
+    }
+    for (const deferred of eligibleFavorLinks.slice(1)) {
+        audit.push(`3P.4c.3 deferredPowerActorFavorAffiliationLink=${compact({ reason: 'one favorable opportunity per turn', favorId: deferred.favor.id, actor: deferred.link.powerActor })}`);
+    }
+
     const currentTargets = currentLatentGrievanceTargets(ledger, resolutionPacket, trackerSnapshot, hiddenHealthSnapshot, context);
     for (const rawCandidate of semanticLatentGrievances) {
         const candidate = normalizeLatentGrievanceCandidate(rawCandidate);
@@ -1592,6 +1698,47 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
         audit.push(`3P.4f latentGrievanceRecorded=${compact(entry)}`);
     }
 
+    const currentFavorTargets = currentLatentFavorTargets(ledger, resolutionPacket, trackerSnapshot, hiddenHealthSnapshot, context);
+    for (const rawCandidate of semanticLatentFavors) {
+        const candidate = normalizeLatentFavorCandidate(rawCandidate);
+        if (!candidate) {
+            audit.push(`3P.4g ignoredLatentFavor=${compact({ reason: 'invalid, compensated, expected-duty, non-substantial, or incomplete candidate', rawCandidate })}`);
+            continue;
+        }
+        const candidateOutcomeGate = powerActorEffectOutcomeGate(resolutionPacket, candidate);
+        if (!candidateOutcomeGate.allowed) {
+            audit.push(`3P.4g ignoredLatentFavor=${compact({ reason: 'resolved action did not succeed or complete', target: candidate.target, outcome: candidateOutcomeGate })}`);
+            continue;
+        }
+        if (!currentFavorTargets.some(target => sameName(target, candidate.target))) {
+            audit.push(`3P.4g ignoredLatentFavor=${compact({ reason: 'target is not a current benefited living target', target: candidate.target })}`);
+            continue;
+        }
+        const targetAssessment = assessments.find(item => sameName(item.actor, candidate.target));
+        const knownPowerActor = Boolean(
+            targetAssessment?.isPowerActor
+            || targetAssessment?.hasReach
+            || findExistingPowerActorName(trackerUpdate, candidate.target)
+            || findExistingPowerActorName(before, candidate.target)
+            || toRealArray(resolutionPacket?.PowerActors).some(actor => sameName(actor, candidate.target)),
+        );
+        if (!targetAssessment || knownPowerActor) {
+            audit.push(`3P.4g ignoredLatentFavor=${compact({ reason: targetAssessment ? 'target is already or contradictorily identified as a power actor' : 'target lacks an explicit ordinary-actor assessment', target: candidate.target })}`);
+            continue;
+        }
+        if (establishedLinkedTargetKeys.has(normalizeNameKey(candidate.target))) {
+            audit.push(`3P.4g ignoredLatentFavor=${compact({ reason: 'target received an explicit power-actor affiliation link this turn', target: candidate.target })}`);
+            continue;
+        }
+        const entry = latentFavorFromCandidate(candidate);
+        if (latentFavors.some(existing => existing.id === entry.id || latentFavorFingerprint(existing) === latentFavorFingerprint(entry))) {
+            audit.push(`3P.4h ignoredLatentFavor=${compact({ reason: 'duplicate latent favor', target: entry.target, benefit: entry.benefit })}`);
+            continue;
+        }
+        latentFavors = [...latentFavors, entry].slice(-LATENT_FAVOR_LIMIT);
+        audit.push(`3P.4i latentFavorRecorded=${compact(entry)}`);
+    }
+
     const proactivity = shapedEventHandoff
         ? { handoffEvent: shapedEventHandoff }
         : runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice, rapportClock, nameGeneration, audit });
@@ -1615,7 +1762,9 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
     audit.push(`3P.5 powerActorPressureHandoff=${handoff.entries.length ? compact(handoff.entries) : 'none'}`);
     audit.push(`3P.6 powerEventHandoff=${handoff.event ? compact(handoff.event) : 'none'}`);
     audit.push(`3P.6a latentGrievancesAfter=${latentGrievances.length ? compact(latentGrievances) : 'none'}`);
-    return { trackerUpdate, latentGrievances, handoff };
+    audit.push(`3P.6b latentFavorsAfter=${latentFavors.length ? compact(latentFavors) : 'none'}`);
+    audit.push(`3P.6c powerActorFavorOpportunity=${favorOpportunity ? compact(favorOpportunity) : 'none'}`);
+    return { trackerUpdate, latentGrievances, latentFavors, favorOpportunity, handoff };
 }
 
 function powerActorEffectOutcomeGate(resolutionPacket = {}, effect = {}) {
@@ -1735,6 +1884,31 @@ function normalizeLatentGrievanceCandidate(value = {}) {
     };
 }
 
+function normalizeLatentFavorCandidate(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const target = cleanPowerActorScalar(source.target ?? source.Target, 100);
+    const actionUnitId = normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId);
+    const benefit = normalizePowerActorFavorType(source.benefit ?? source.Benefit);
+    const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
+    const reason = cleanPowerActorScalar(source.reason ?? source.Reason, 180);
+    const evidence = cleanPowerActorScalar(source.evidence ?? source.Evidence, 220);
+    const uncompensated = bool(source.uncompensated ?? source.Uncompensated);
+    const beyondExpectedDuty = bool(source.beyondExpectedDuty ?? source.BeyondExpectedDuty);
+    if (!target || !actionUnitId || benefit === 'none' || !['meaningful', 'major'].includes(severity) || !reason || !evidence || !uncompensated || !beyondExpectedDuty) return null;
+    return {
+        target,
+        actionUnitId,
+        explicitlyCompleted: bool(source.explicitlyCompleted ?? source.ExplicitlyCompleted),
+        benefit,
+        severity,
+        reason,
+        evidence,
+        uncompensated: true,
+        beyondExpectedDuty: true,
+        attributionPath: cleanPowerActorScalar(source.attributionPath ?? source.AttributionPath, 180),
+    };
+}
+
 function normalizePowerActorAffiliationLink(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const grievanceId = cleanPowerActorScalar(source.grievanceId ?? source.GrievanceId, 100);
@@ -1757,12 +1931,54 @@ function normalizePowerActorAffiliationLink(value = {}) {
     };
 }
 
+function normalizePowerActorFavorAffiliationLink(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const favorId = cleanPowerActorScalar(source.favorId ?? source.FavorId, 100);
+    const target = cleanPowerActorScalar(source.target ?? source.Target, 100);
+    const powerActor = cleanPowerActorScalar(source.powerActor ?? source.PowerActor, 100);
+    const actorType = cleanPowerActorScalar(source.actorType ?? source.ActorType, 80);
+    const affiliationEvidence = cleanPowerActorScalar(source.affiliationEvidence ?? source.AffiliationEvidence, 220);
+    const knowledgeEvidence = cleanPowerActorScalar(source.knowledgeEvidence ?? source.KnowledgeEvidence, 220);
+    const userKnowledgeEvidence = cleanPowerActorScalar(source.userKnowledgeEvidence ?? source.UserKnowledgeEvidence, 220);
+    const fitEvidence = cleanPowerActorScalar(source.fitEvidence ?? source.FitEvidence, 220);
+    const hasReach = bool(source.hasReach ?? source.HasReach);
+    if (!favorId || !target || !powerActor || !actorType || !affiliationEvidence || !hasReach) return null;
+    return {
+        favorId,
+        target,
+        powerActor,
+        actorType,
+        hasReach: true,
+        affiliationEvidence,
+        knownToActor: bool(source.knownToActor ?? source.KnownToActor),
+        knowledgeEvidence,
+        knownToUser: bool(source.knownToUser ?? source.KnownToUser),
+        userKnowledgeEvidence,
+        fit: normalizePowerActorFavorFit(source.fit ?? source.Fit),
+        fitEvidence,
+    };
+}
+
 function currentLatentGrievanceTargets(ledger, resolutionPacket = {}, trackerSnapshot = {}, hiddenHealthSnapshot = null, context = {}) {
     const targets = resolutionPacket || {};
     const currentTargets = unique([
         ...toRealArray(targets.ActionTargets),
         ...toRealArray(targets.OppTargets?.NPC),
         ...toRealArray(targets.HarmedObservers),
+        ...toRealArray(targets.NPCAwareOfUser),
+    ]);
+    const livingNpcKeys = new Set((Array.isArray(ledger?.relationshipEngine) ? ledger.relationshipEngine : [])
+        .map(item => normalizeNameKey(item?.NPC))
+        .filter(Boolean));
+    const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, hiddenHealthSnapshot);
+    return currentTargets.filter(target => livingNpcKeys.has(normalizeNameKey(target)) && targetClassifier.isLiving(target));
+}
+
+function currentLatentFavorTargets(ledger, resolutionPacket = {}, trackerSnapshot = {}, hiddenHealthSnapshot = null, context = {}) {
+    const targets = resolutionPacket || {};
+    const currentTargets = unique([
+        ...toRealArray(targets.ActionTargets),
+        ...toRealArray(targets.BenefitedObservers),
         ...toRealArray(targets.NPCAwareOfUser),
     ]);
     const livingNpcKeys = new Set((Array.isArray(ledger?.relationshipEngine) ? ledger.relationshipEngine : [])
@@ -1787,6 +2003,26 @@ function latentGrievanceFingerprint(value = {}) {
     return [
         normalizeNameKey(value.target),
         normalizePowerActorEffectType(value.effect),
+        normalizePowerActorSeverity(value.severity),
+        normalizeNameKey(value.reason),
+    ].join('|');
+}
+
+function latentFavorFromCandidate(candidate) {
+    const normalized = normalizeLatentFavorCandidate(candidate);
+    const fingerprint = latentFavorFingerprint(normalized || {});
+    return normalizeLatentFavor({
+        version: LATENT_FAVOR_VERSION,
+        id: `lf_${powerActorStableHash(fingerprint)}`,
+        ...normalized,
+        createdAt: Date.now(),
+    });
+}
+
+function latentFavorFingerprint(value = {}) {
+    return [
+        normalizeNameKey(value.target),
+        normalizePowerActorFavorType(value.benefit),
         normalizePowerActorSeverity(value.severity),
         normalizeNameKey(value.reason),
     ].join('|');
@@ -1924,6 +2160,121 @@ export function renameLatentGrievanceTargets(value, promotions = []) {
     return grievances;
 }
 
+export function normalizeLatentFavors(value) {
+    const source = Array.isArray(value)
+        ? value
+        : Array.isArray(value?.entries)
+            ? value.entries
+            : [];
+    const result = [];
+    const seenIds = new Set();
+    const seenFingerprints = new Set();
+    for (const raw of source) {
+        const favor = normalizeLatentFavor(raw);
+        if (!favor) continue;
+        const fingerprint = latentFavorFingerprint(favor);
+        if (seenIds.has(favor.id) || seenFingerprints.has(fingerprint)) continue;
+        seenIds.add(favor.id);
+        seenFingerprints.add(fingerprint);
+        result.push(favor);
+    }
+    return result.slice(-LATENT_FAVOR_LIMIT);
+}
+
+export function latentFavorIds(value) {
+    return normalizeLatentFavors(value).map(item => item.id);
+}
+
+export function mergeLatentFavorArchive(value = {}, ...states) {
+    const archive = {};
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    for (const [id, raw] of Object.entries(source)) {
+        const favor = normalizeLatentFavor({ ...(raw || {}), id: raw?.id || id });
+        if (favor) archive[favor.id] = favor;
+    }
+    for (const state of states) {
+        for (const favor of normalizeLatentFavors(state)) {
+            archive[favor.id] = favor;
+        }
+    }
+    return archive;
+}
+
+export function pruneLatentFavorArchive(value = {}, active = [], snapshots = {}, limit = LATENT_FAVOR_ARCHIVE_LIMIT, retainedStates = []) {
+    const archive = mergeLatentFavorArchive(value, active);
+    const maxEntries = Math.max(LATENT_FAVOR_LIMIT, Math.floor(Number(limit) || LATENT_FAVOR_ARCHIVE_LIMIT));
+    const orderedIds = [];
+    const seen = new Set();
+    const addId = rawId => {
+        const id = String(rawId || '').trim();
+        if (!id || seen.has(id) || !archive[id]) return;
+        seen.add(id);
+        orderedIds.push(id);
+    };
+
+    latentFavorIds(active).forEach(addId);
+    for (const state of Array.isArray(retainedStates) ? retainedStates : []) {
+        latentFavorIds(state).forEach(addId);
+    }
+    Object.values(snapshots && typeof snapshots === 'object' ? snapshots : {})
+        .sort((left, right) => Number(right?.savedAt || 0) - Number(left?.savedAt || 0))
+        .forEach(snapshot => {
+            for (const key of ['afterLatentFavorIds', 'beforeLatentFavorIds']) {
+                (Array.isArray(snapshot?.[key]) ? snapshot[key] : []).forEach(addId);
+            }
+            (Array.isArray(snapshot?.display?.latentFavorIds) ? snapshot.display.latentFavorIds : []).forEach(addId);
+        });
+    Object.values(archive)
+        .sort((left, right) => {
+            const age = Number(right?.createdAt || 0) - Number(left?.createdAt || 0);
+            return age || String(left?.id || '').localeCompare(String(right?.id || ''));
+        })
+        .forEach(favor => addId(favor.id));
+
+    return Object.fromEntries(orderedIds.slice(0, maxEntries).map(id => [id, archive[id]]));
+}
+
+export function consumeLatentFavorById(value, favorId) {
+    const id = String(favorId || '').trim();
+    if (!id) return normalizeLatentFavors(value);
+    return normalizeLatentFavors(value).filter(favor => favor.id !== id);
+}
+
+export function verifyLatentFavorPresentation(postNarrationDelta, opportunity, latentFavors, narrationText) {
+    const expectedId = String(opportunity?.FavorId || '').trim();
+    const presentation = postNarrationDelta?.latentFavorPresentation || {};
+    const reportedId = String(presentation?.favorId || '').trim();
+    const evidence = String(presentation?.evidence || '').trim().replace(/^["']|["']$/g, '');
+    if (!expectedId || reportedId !== expectedId || !evidence || /^\(none\)$/i.test(evidence)) return '';
+    if (!normalizeLatentFavors(latentFavors).some(favor => favor.id === expectedId)) return '';
+
+    const normalizeText = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const normalizedEvidence = normalizeText(evidence);
+    if (normalizedEvidence.length < 8 || !normalizeText(narrationText).includes(normalizedEvidence)) return '';
+    return expectedId;
+}
+
+export function resolveLatentFavorIds(ids, archive = {}, fallback = []) {
+    if (!Array.isArray(ids)) return normalizeLatentFavors(fallback);
+    const normalizedArchive = mergeLatentFavorArchive(archive);
+    return normalizeLatentFavors(ids.map(id => normalizedArchive[String(id || '').trim()]).filter(Boolean));
+}
+
+export function renameLatentFavorTargets(value, promotions = []) {
+    let favors = normalizeLatentFavors(value);
+    for (const promotion of Array.isArray(promotions) ? promotions : []) {
+        const oldName = cleanPowerActorScalar(promotion?.oldName, 100);
+        const newName = cleanPowerActorScalar(promotion?.newName, 100);
+        if (!oldName || !newName || sameName(oldName, newName)) continue;
+        favors = normalizeLatentFavors(favors.map(favor => {
+            if (!sameName(favor.target, oldName)) return favor;
+            const { id: _oldId, ...rest } = favor;
+            return normalizeLatentFavor({ ...rest, target: newName });
+        }));
+    }
+    return favors;
+}
+
 function normalizeLatentGrievance(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const target = cleanPowerActorScalar(source.target ?? source.Target, 100);
@@ -1945,6 +2296,36 @@ function normalizeLatentGrievance(value = {}) {
         severity,
         reason,
         evidence,
+        attributionPath: cleanPowerActorScalar(source.attributionPath ?? source.AttributionPath, 180),
+        createdAt: Math.max(0, Math.floor(Number(source.createdAt ?? source.CreatedAt ?? 0) || 0)),
+    };
+}
+
+function normalizeLatentFavor(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const target = cleanPowerActorScalar(source.target ?? source.Target, 100);
+    const actionUnitId = normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId);
+    const benefit = normalizePowerActorFavorType(source.benefit ?? source.Benefit);
+    const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
+    const reason = cleanPowerActorScalar(source.reason ?? source.Reason, 180);
+    const evidence = cleanPowerActorScalar(source.evidence ?? source.Evidence, 220);
+    const rawId = cleanPowerActorScalar(source.id ?? source.Id, 100);
+    const uncompensated = bool(source.uncompensated ?? source.Uncompensated);
+    const beyondExpectedDuty = bool(source.beyondExpectedDuty ?? source.BeyondExpectedDuty);
+    if (!target || !actionUnitId || benefit === 'none' || !['meaningful', 'major'].includes(severity) || !reason || !evidence || !uncompensated || !beyondExpectedDuty) return null;
+    const fingerprint = latentFavorFingerprint({ target, benefit, severity, reason });
+    return {
+        version: LATENT_FAVOR_VERSION,
+        id: rawId || `lf_${powerActorStableHash(fingerprint)}`,
+        target,
+        actionUnitId,
+        explicitlyCompleted: bool(source.explicitlyCompleted ?? source.ExplicitlyCompleted),
+        benefit,
+        severity,
+        reason,
+        evidence,
+        uncompensated: true,
+        beyondExpectedDuty: true,
         attributionPath: cleanPowerActorScalar(source.attributionPath ?? source.AttributionPath, 180),
         createdAt: Math.max(0, Math.floor(Number(source.createdAt ?? source.CreatedAt ?? 0) || 0)),
     };
@@ -2101,6 +2482,45 @@ function powerActorEnmityDelta(severity) {
     if (severity === 'meaningful') return 2;
     if (severity === 'minor') return 1;
     return 0;
+}
+
+function powerActorFavorPriority(severity) {
+    if (severity === 'major') return 2;
+    if (severity === 'meaningful') return 1;
+    return 0;
+}
+
+function buildPowerActorFavorOpportunity(favor, link, assessment) {
+    const responseOptions = powerActorFavorResponseOptions(favor.benefit, favor.severity);
+    return {
+        FavorId: favor.id,
+        Actor: link.powerActor,
+        Type: link.actorType || assessment?.actorType || 'power actor',
+        Beneficiary: favor.target,
+        Benefit: favor.benefit,
+        Severity: favor.severity,
+        Reason: favor.reason,
+        ResponseOptions: responseOptions,
+        VisibleInstruction: `${link.powerActor} makes one scene-compatible favorable approach acknowledging the established help to ${favor.target}. Choose one proportionate response: ${responseOptions.join(', ')}. The approach may be direct or use an ordinary representative or message. Do not grant allegiance, permanent loyalty, or a new relationship in this response; allow any bond to develop through later interaction.`,
+    };
+}
+
+function normalizePowerActorFavorFit(value) {
+    const fit = cleanPowerActorScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_FAVOR_FITS.includes(fit) ? fit : 'defer';
+}
+
+function powerActorFavorResponseOptions(benefit, severity) {
+    const optionsByBenefit = {
+        rescue_or_protect: ['personal thanks', 'limited protection', 'access or an audience', 'an invitation to discuss future work'],
+        valuable_information: ['reciprocal information', 'a private meeting', 'a trusted assignment', 'an introduction'],
+        recover_property: ['a proportionate reward', 'an introduction', 'a future favor', 'preferred access'],
+        prevent_major_loss: ['formal recognition', 'a proportionate reward', 'useful access', 'a valuable opportunity'],
+        exceptional_aid: ['personal thanks', 'an introduction', 'a valuable opportunity', 'limited assistance'],
+    };
+    const options = [...(optionsByBenefit[normalizePowerActorFavorType(benefit)] || optionsByBenefit.exceptional_aid)];
+    if (severity === 'major') options.push('an invitation to discuss sponsorship or recruitment');
+    return unique(options);
 }
 
 function powerActorTier(enmity) {
@@ -2410,6 +2830,11 @@ function normalizePowerActorEffectType(value) {
     const text = cleanPowerActorScalar(value, 80).toLowerCase().replace(/[\s-]+/g, '_');
     const allowed = ['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income'];
     return allowed.includes(text) ? text : 'none';
+}
+
+function normalizePowerActorFavorType(value) {
+    const text = cleanPowerActorScalar(value, 80).toLowerCase().replace(/[\s-]+/g, '_');
+    return POWER_ACTOR_FAVOR_TYPES.includes(text) ? text : 'none';
 }
 
 function normalizePowerActorSeverity(value) {

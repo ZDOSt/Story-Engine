@@ -68,6 +68,8 @@ function buildReadableSemanticDebug(ledger) {
     const powerActors = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
     const latentGrievances = Array.isArray(ledger?.powerActorEnmity?.latentGrievances) ? ledger.powerActorEnmity.latentGrievances : [];
     const affiliationLinks = Array.isArray(ledger?.powerActorEnmity?.affiliationLinks) ? ledger.powerActorEnmity.affiliationLinks : [];
+    const latentFavors = Array.isArray(ledger?.powerActorEnmity?.latentFavors) ? ledger.powerActorEnmity.latentFavors : [];
+    const favorAffiliationLinks = Array.isArray(ledger?.powerActorEnmity?.favorAffiliationLinks) ? ledger.powerActorEnmity.favorAffiliationLinks : [];
     const powerEventShapes = Array.isArray(ledger?.powerEventShape?.events) ? ledger.powerEventShape.events : [];
     const userCore = ledger?.engineContext?.userCoreStats ?? {};
     const trackerNpcs = Array.isArray(ledger?.engineContext?.trackerRelevantNPCs)
@@ -137,6 +139,8 @@ function buildReadableSemanticDebug(ledger) {
         'powerActorEnmity.effects=' + (powerActors.length ? inline(powerActors) : 'none'),
         'powerActorEnmity.latentGrievances=' + (latentGrievances.length ? inline(latentGrievances) : 'none'),
         'powerActorEnmity.affiliationLinks=' + (affiliationLinks.length ? inline(affiliationLinks) : 'none'),
+        'powerActorEnmity.latentFavors=' + (latentFavors.length ? inline(latentFavors) : 'none'),
+        'powerActorEnmity.favorAffiliationLinks=' + (favorAffiliationLinks.length ? inline(favorAffiliationLinks) : 'none'),
         'powerEventShape.events=' + (powerEventShapes.length ? inline(powerEventShapes) : 'none'),
         'nameGeneration=deterministic style-aware pool; final approved pool shown in deterministic nameGeneration',
         'proactivitySemantic=deterministic cap 3',
@@ -225,6 +229,7 @@ function buildReadableDeterministicDebug(handoff) {
         ...formatAggressionDebugLines(aggression),
         'powerActorPressure=' + powerActorPressureSummary(powerActorPressure),
         'powerActorEvent=' + powerActorEventAuditSummary(powerActorPressure?.event),
+        'powerActorFavor=' + powerActorFavorAuditSummary(handoff?.powerActorFavor),
         'nameGeneration=' + nameGenerationSummary(name),
         'trackerUpdate=' + inline(handoff?.sceneTrackerUpdate ?? {}),
     ];
@@ -259,6 +264,10 @@ function formatMechanicsResultList(summary, resolution, handoff = {}, ledger = {
     const affiliationLinks = Array.isArray(ledger?.powerActorEnmity?.affiliationLinks) ? ledger.powerActorEnmity.affiliationLinks : [];
     const latentBefore = Array.isArray(report?.latentGrievances?.before) ? report.latentGrievances.before : [];
     const latentAfter = Array.isArray(report?.latentGrievances?.after) ? report.latentGrievances.after : [];
+    const favorCandidates = Array.isArray(ledger?.powerActorEnmity?.latentFavors) ? ledger.powerActorEnmity.latentFavors : [];
+    const favorAffiliationLinks = Array.isArray(ledger?.powerActorEnmity?.favorAffiliationLinks) ? ledger.powerActorEnmity.favorAffiliationLinks : [];
+    const favorBefore = Array.isArray(report?.latentFavors?.before) ? report.latentFavors.before : [];
+    const favorAfter = Array.isArray(report?.latentFavors?.after) ? report.latentFavors.after : [];
     return [
         ['userAction', summary.userAction],
         ['resolution.GOAL', valueOrNone(resolution.GOAL)],
@@ -310,6 +319,11 @@ function formatMechanicsResultList(summary, resolution, handoff = {}, ledger = {
         ['powerActor.affiliationLinks', affiliationLinks.length ? inline(affiliationLinks) : 'none'],
         ['powerActor.latentStateBefore', latentBefore.length ? inline(latentBefore) : 'none'],
         ['powerActor.latentStateAfter', latentAfter.length ? inline(latentAfter) : 'none'],
+        ['powerActor.favorCandidates', favorCandidates.length ? inline(favorCandidates) : 'none'],
+        ['powerActor.favorAffiliationLinks', favorAffiliationLinks.length ? inline(favorAffiliationLinks) : 'none'],
+        ['powerActor.favorStateBefore', favorBefore.length ? inline(favorBefore) : 'none'],
+        ['powerActor.favorStateAfter', favorAfter.length ? inline(favorAfter) : 'none'],
+        ['powerActor.favorOpportunity', summary.powerActorFavorOpportunity],
         ['powerActor.pressure', summary.powerActorPressure],
         ['powerActor.event', summary.powerActorEventAudit ?? summary.powerActorEvent],
         ['nameGeneration.result', summary.generatedName],
@@ -1770,6 +1784,10 @@ function narrativeWorldEventFact(handoff = {}) {
     if (!isNoneText(event)) {
         parts.push(`Include this visible surface event only: ${event}. Do not explain why it happens, who benefits, unseen causes, or hidden pressure behind it.`);
     }
+    const favor = powerActorFavorNarratorSummary(handoff?.powerActorFavor);
+    if (!isNoneText(favor)) {
+        parts.push(`Include this favorable response opportunity: ${favor}`);
+    }
     return parts.length ? parts.join(' ') : '';
 }
 
@@ -1865,6 +1883,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
     const powerActorPressure = powerActorPressureNarratorSummary(handoff.powerActorPressure);
     const powerActorEvent = powerActorEventNarratorSummary(handoff.powerActorPressure?.event);
     const powerActorEventAudit = powerActorEventAuditSummary(handoff.powerActorPressure?.event);
+    const powerActorFavorOpportunity = powerActorFavorAuditSummary(handoff.powerActorFavor);
     const userKnowledgeApplication = userKnowledgeApplicationSummary(ledger?.userKnowledgeApplication?.applications);
     const userAbilityUse = userAbilityUseSummary(resolution.UserAbilityUse);
     const itemUse = itemUseSummary(resolution.ItemUse);
@@ -1917,6 +1936,7 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         powerActorPressure,
         powerActorEvent,
         powerActorEventAudit,
+        powerActorFavorOpportunity,
     };
 }
 
@@ -2262,6 +2282,24 @@ function powerActorEventNarratorSummary(event) {
         !isNoneText(role) ? `role:${role}` : '',
     ].filter(Boolean).join('; ');
     return `${instruction}${details ? ` (${details})` : ''}`;
+}
+
+function powerActorFavorAuditSummary(opportunity) {
+    if (!opportunity || typeof opportunity !== 'object') return 'none';
+    const favorId = valueOrNone(opportunity.FavorId ?? opportunity.favorId);
+    const actor = valueOrNone(opportunity.Actor ?? opportunity.actor);
+    const beneficiary = valueOrNone(opportunity.Beneficiary ?? opportunity.beneficiary);
+    const benefit = valueOrNone(opportunity.Benefit ?? opportunity.benefit);
+    const severity = valueOrNone(opportunity.Severity ?? opportunity.severity);
+    const reason = valueOrNone(opportunity.Reason ?? opportunity.reason);
+    const options = list(opportunity.ResponseOptions ?? opportunity.responseOptions);
+    return `id:${favorId}/${actor}/${benefit}/${severity}/beneficiary:${beneficiary}/options:${options}/reason:${reason}/state:pending_visible_confirmation`;
+}
+
+function powerActorFavorNarratorSummary(opportunity) {
+    if (!opportunity || typeof opportunity !== 'object') return 'none';
+    const instruction = narratorUserMacroText(opportunity.VisibleInstruction ?? opportunity.visibleInstruction);
+    return isNoneText(instruction) ? 'none' : instruction;
 }
 
 function readableActionDescription(semanticResolution, resolution) {
