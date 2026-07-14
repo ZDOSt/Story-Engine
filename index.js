@@ -34,7 +34,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
+import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentGrievances, normalizeRapportClockState, renameLatentGrievanceTargets, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -2738,6 +2738,8 @@ function getTrackerRoot(context = getContext()) {
     root.npcs = root.npcs || {};
     root.user = normalizeTrackerUserState(root.user || {});
     root.powerActors = root.powerActors && typeof root.powerActors === 'object' ? root.powerActors : {};
+    root.latentGrievances = normalizeLatentGrievances(root.latentGrievances || []);
+    root.latentGrievanceArchive = mergeLatentGrievanceArchive(root.latentGrievanceArchive, root.latentGrievances);
     root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
     root.worldState = normalizeWorldState(root.worldState || {});
@@ -2758,6 +2760,13 @@ function getTrackerRoot(context = getContext()) {
 
     return root;
 
+}
+
+function resolveStoredLatentGrievances(root, storedIds, fallback = []) {
+    if (Array.isArray(storedIds)) {
+        return resolveLatentGrievanceIds(storedIds, root?.latentGrievanceArchive || {});
+    }
+    return normalizeLatentGrievances(fallback);
 }
 
 
@@ -4141,6 +4150,9 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         ...(pendingRun?.powerActorsBefore || {}),
         ...(pendingRun?.powerActorsAfter || {}),
     };
+    let latentGrievances = normalizeLatentGrievances(
+        pendingRun?.latentGrievancesAfter ?? pendingRun?.latentGrievancesBefore ?? [],
+    );
     const userKnowledge = mergeUserKnowledgeLedger(pendingRun?.userKnowledgeBefore || {}, pendingRun?.userKnowledgeAfter || {});
     const userReputation = mergeUserReputationLedger(pendingRun?.userReputationBefore || {}, pendingRun?.userReputationAfter || {});
     const worldState = normalizeWorldState(pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {});
@@ -4152,6 +4164,10 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         assistantText,
     });
     syncPendingRunHealthNamePromotions(pendingRun, promotionResult.promotions);
+    syncPendingRunLatentGrievanceNamePromotions(pendingRun, promotionResult.promotions);
+    latentGrievances = normalizeLatentGrievances(
+        pendingRun?.latentGrievancesAfter ?? latentGrievances,
+    );
 
     const snapshot = {
 
@@ -4167,6 +4183,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         user,
         hiddenHealth: cloneHiddenHealth(pendingRun?.healthAfter || pendingRun?.healthBefore),
         powerActors,
+        latentGrievanceIds: latentGrievanceIds(latentGrievances),
         userKnowledge,
         userReputation,
         worldState,
@@ -4190,6 +4207,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const trackerSnapshot = pendingGeneration?.trackerSnapshot || buildTrackerSnapshot(context);
     const playerTrackerSnapshot = pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context);
     const powerActorSnapshot = pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context);
+    const latentGrievanceSnapshot = pendingGeneration?.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context);
     const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
@@ -4229,6 +4247,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             npcs: {},
             user: {},
             powerActors: {},
+            latentGrievances: latentGrievanceSnapshot,
             userKnowledge: {},
             userReputation: {},
             worldState: worldStateSnapshot,
@@ -4251,6 +4270,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         healthAfter: cloneHiddenHealth(healthSnapshot),
         powerActorsBefore: powerActorSnapshot,
         powerActorsAfter: {},
+        latentGrievancesBefore: latentGrievanceSnapshot,
+        latentGrievancesAfter: latentGrievanceSnapshot,
         userKnowledgeBefore: userKnowledgeSnapshot,
         userKnowledgeAfter: {},
         userReputationBefore: userReputationSnapshot,
@@ -4332,6 +4353,14 @@ function syncPendingRunHealthNamePromotions(pendingRun, promotions = []) {
             pendingRun.healthAfter = renameHiddenHealthNpc(pendingRun.healthAfter, promotion.oldName, promotion.newName);
         }
     }
+}
+
+function syncPendingRunLatentGrievanceNamePromotions(pendingRun, promotions = []) {
+    if (!pendingRun || !Array.isArray(promotions) || !promotions.length) return;
+    pendingRun.latentGrievancesAfter = renameLatentGrievanceTargets(
+        pendingRun.latentGrievancesAfter ?? pendingRun.latentGrievancesBefore ?? [],
+        promotions,
+    );
 }
 
 
@@ -4447,17 +4476,20 @@ function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null, pendin
     if (candidates.length !== 1) return normalized;
 
     if (promoteTrackerEntry(normalized, placeholder, candidates[0])) {
-        syncPendingRunHealthNamePromotions(pendingRun, [{ oldName: placeholder, newName: candidates[0] }]);
+        const promotions = [{ oldName: placeholder, newName: candidates[0] }];
+        syncPendingRunHealthNamePromotions(pendingRun, promotions);
+        syncPendingRunLatentGrievanceNamePromotions(pendingRun, promotions);
     }
     return normalized;
 }
 
 
-function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null) {
+function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = []) {
     const update = {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
         user: normalizeTrackerUserState(displaySnapshot?.user || {}),
         powerActors: displaySnapshot?.powerActors || {},
+        latentGrievances: normalizeLatentGrievances(latentGrievances),
         userKnowledge: mergeUserKnowledgeLedger(displaySnapshot?.userKnowledge || {}, {}),
         userReputation: mergeUserReputationLedger(displaySnapshot?.userReputation || {}, {}),
         worldState: normalizeWorldState(displaySnapshot?.worldState || {}),
@@ -4525,13 +4557,19 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         if (revealedName) {
 
             promoteTrackerEntry(npcs, name, revealedName);
-            syncPendingRunHealthNamePromotions(options.pendingRun, [{ oldName: name, newName: revealedName }]);
+            const promotions = [{ oldName: name, newName: revealedName }];
+            syncPendingRunHealthNamePromotions(options.pendingRun, promotions);
+            syncPendingRunLatentGrievanceNamePromotions(options.pendingRun, promotions);
         }
     }
     assignMissingDisplayNpcPersonalitySummaries(npcs, 'post-narration', options.context);
     const textPromotions = applyExplicitNamePromotions(npcs, options);
     syncPendingRunHealthNamePromotions(options.pendingRun, textPromotions.promotions);
+    syncPendingRunLatentGrievanceNamePromotions(options.pendingRun, textPromotions.promotions);
     merged.npcs = reconcileNamedNpcDuplicates(textPromotions.npcs, options.beforeNpcs, delta, options.pendingRun);
+    merged.latentGrievanceIds = latentGrievanceIds(
+        options.pendingRun?.latentGrievancesAfter ?? options.pendingRun?.latentGrievancesBefore ?? [],
+    );
     assignMissingDisplayNpcPersonalitySummaries(merged.npcs, 'post-narration', options.context);
     const deltaActiveNames = new Set();
 
@@ -5229,6 +5267,11 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
     root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
     root.powerActors = snapshot.powerActors || root.powerActors || {};
+    root.latentGrievances = resolveStoredLatentGrievances(
+        root,
+        snapshot.latentGrievanceIds ?? root.snapshots?.[snapshot.messageKey]?.afterLatentGrievanceIds,
+        root.latentGrievances,
+    );
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
@@ -5255,6 +5298,11 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.npcs = normalizeDisplayTrackerNpcs(snapshot.npcs);
     root.user = normalizeTrackerUserState(snapshot.user || root.user || {});
     root.powerActors = snapshot.powerActors || root.powerActors || {};
+    root.latentGrievances = resolveStoredLatentGrievances(
+        root,
+        snapshot.latentGrievanceIds ?? root.snapshots?.[snapshot.messageKey]?.afterLatentGrievanceIds,
+        root.latentGrievances,
+    );
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
@@ -9981,6 +10029,11 @@ function restoreTrackerForRegeneration(type) {
         root.user = normalizeTrackerUserState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUser || root.user || {});
         root.health = normalizeHiddenHealth(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeHealth || root.health, { user: root.user, npcs: root.npcs });
         root.powerActors = root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforePowerActors || root.powerActors || {};
+        root.latentGrievances = resolveStoredLatentGrievances(
+            root,
+            root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeLatentGrievanceIds,
+            root.latentGrievances,
+        );
         root.userKnowledge = mergeUserKnowledgeLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserKnowledge || root.userKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserReputation || root.userReputation || {}, {});
         root.worldState = normalizeWorldState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeWorldState || root.worldState || {});
@@ -11298,7 +11351,11 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             trackerDisplaySnapshot.hiddenHealth = cloneHiddenHealth(hiddenHealthAfter || root.health);
 
             if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-            await saveTrackerUpdate(context, buildTrackerUpdateForPersistence(trackerDisplaySnapshot, hiddenHealthAfter), { save: false });
+            await saveTrackerUpdate(context, buildTrackerUpdateForPersistence(
+                trackerDisplaySnapshot,
+                hiddenHealthAfter,
+                pendingRun.latentGrievancesAfter ?? pendingRun.latentGrievancesBefore ?? [],
+            ), { save: false });
             if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
 
             root.snapshots[messageKey] = {
@@ -11307,6 +11364,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforeUser: clone(pendingRun.userBefore),
                 beforeHealth: cloneHiddenHealth(pendingRun.healthBefore || root.health),
                 beforePowerActors: clone(pendingRun.powerActorsBefore),
+                beforeLatentGrievanceIds: latentGrievanceIds(pendingRun.latentGrievancesBefore || []),
                 beforeUserKnowledge: clone(pendingRun.userKnowledgeBefore || {}),
                 beforeUserReputation: clone(pendingRun.userReputationBefore || {}),
                 beforeWorldState: clone(pendingRun.worldStateBefore || {}),
@@ -11317,6 +11375,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterUser: clone(trackerDisplaySnapshot.user),
                 afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
                 afterPowerActors: clone(trackerDisplaySnapshot.powerActors || {}),
+                afterLatentGrievanceIds: latentGrievanceIds(pendingRun.latentGrievancesAfter || []),
                 afterUserKnowledge: clone(trackerDisplaySnapshot.userKnowledge || {}),
                 afterUserReputation: clone(trackerDisplaySnapshot.userReputation || {}),
                 afterWorldState: clone(trackerDisplaySnapshot.worldState || {}),
@@ -11427,7 +11486,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= firstAffectedMessageId) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeLatentGrievanceIds: snapshot.beforeLatentGrievanceIds, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
             }
             delete root.snapshots[key];
         }
@@ -11450,6 +11509,7 @@ async function handleMessageDeleted(newLength) {
         root.user = normalizeTrackerUserState(restoreCandidate.beforeUser || root.user || {});
         root.health = normalizeHiddenHealth(restoreCandidate.beforeHealth || root.health, { user: root.user, npcs: root.npcs });
         root.powerActors = restoreCandidate.beforePowerActors || {};
+        root.latentGrievances = resolveStoredLatentGrievances(root, restoreCandidate.beforeLatentGrievanceIds);
         root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(restoreCandidate.beforeUserReputation || {}, {});
         root.worldState = normalizeWorldState(restoreCandidate.beforeWorldState || root.worldState || {});
@@ -11802,6 +11862,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         trackerSnapshot: buildTrackerSnapshot(context),
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
         powerActorSnapshot: buildPowerActorSnapshot(context),
+        latentGrievanceSnapshot: buildLatentGrievanceSnapshot(context),
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
@@ -11960,6 +12021,7 @@ async function handleChatCompletionPromptReady(eventData) {
 
         const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, pendingGeneration.type, {
             playerTrackerSnapshot: pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+            latentGrievanceSnapshot: pendingGeneration.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
             worldStateSnapshot: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
@@ -11992,6 +12054,8 @@ async function handleChatCompletionPromptReady(eventData) {
             healthAfter: report.hiddenHealth?.after || report.trackerUpdate?.health || null,
             powerActorsBefore: pendingGeneration.powerActorSnapshot || buildPowerActorSnapshot(context),
             powerActorsAfter: report.trackerUpdate?.powerActors || {},
+            latentGrievancesBefore: pendingGeneration.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
+            latentGrievancesAfter: report.trackerUpdate?.latentGrievances || [],
             userKnowledgeBefore: pendingGeneration.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userKnowledgeAfter: report.trackerUpdate?.userKnowledge || {},
             userReputationBefore: pendingGeneration.userReputationSnapshot || buildUserReputationSnapshot(context),
@@ -12083,6 +12147,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             assembledPrompt: true,
             playerTrackerSnapshot: pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             powerActorSnapshot: pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
+            latentGrievanceSnapshot: pendingGeneration?.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
             userKnowledgeSnapshot: pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userReputationSnapshot: pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
             worldStateSnapshot: pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),

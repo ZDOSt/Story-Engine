@@ -368,6 +368,8 @@ const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 const POWER_ACTOR_ENMITY_VERSION = 1;
+const LATENT_GRIEVANCE_VERSION = 1;
+const LATENT_GRIEVANCE_LIMIT = 24;
 const POWER_ACTOR_EVENT_FITS = Object.freeze(['none', 'use_now', 'defer', 'drop']);
 const POWER_ACTOR_EVENT_TYPES = Object.freeze(['none', 'minor_obstruction', 'warning', 'ambush', 'frame_user', 'plant_contact', 'agent_mislead', 'agent_report', 'agent_sabotage']);
 const POWER_ACTOR_CONTACT_GENDERS = Object.freeze(['none', 'male', 'female', 'unknown']);
@@ -637,6 +639,10 @@ export function buildPowerActorSnapshot(context) {
     return normalizePowerActors(context?.chatMetadata?.structuredPreflightTracker?.powerActors || {});
 }
 
+export function buildLatentGrievanceSnapshot(context) {
+    return normalizeLatentGrievances(context?.chatMetadata?.structuredPreflightTracker?.latentGrievances || []);
+}
+
 export function buildUserKnowledgeSnapshot(context) {
     return normalizeUserKnowledgeLedger(context?.chatMetadata?.structuredPreflightTracker?.userKnowledge || {});
 }
@@ -843,6 +849,8 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.npcs = root.npcs || {};
     root.user = normalizeTrackerUserState(root.user || {});
     root.powerActors = normalizePowerActors(root.powerActors || {});
+    root.latentGrievances = normalizeLatentGrievances(root.latentGrievances || []);
+    root.latentGrievanceArchive = mergeLatentGrievanceArchive(root.latentGrievanceArchive, root.latentGrievances);
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.userReputation = normalizeUserReputation(root.userReputation || {});
     root.worldState = normalizeWorldState(root.worldState || {});
@@ -869,6 +877,10 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
             ...root.powerActors,
             ...trackerUpdate.powerActors,
         });
+    }
+    if (trackerUpdate.latentGrievances !== undefined) {
+        root.latentGrievances = normalizeLatentGrievances(trackerUpdate.latentGrievances);
+        root.latentGrievanceArchive = mergeLatentGrievanceArchive(root.latentGrievanceArchive, root.latentGrievances);
     }
     if (trackerUpdate.userKnowledge) {
         root.userKnowledge = normalizeUserKnowledgeLedger(trackerUpdate.userKnowledge);
@@ -913,6 +925,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const worldState = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
     const boundCompanionBefore = normalizeBoundCompanionState(options?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context));
     const pendingBoundaryBefore = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context));
+    const latentGrievancesBefore = normalizeLatentGrievances(options?.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context));
     const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger, context);
     const healthBefore = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
@@ -963,7 +976,19 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     if (lootDiscovery.packet) resolution.packet.LootDiscovery = lootDiscovery.packet;
     const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter, playerTrackerSnapshot);
     const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), ledger?.trackerUpdateEngine?.userReputation || {});
-    const powerActors = runPowerActorEnmity(ledger, context, audit, dice, rapportClock, name, playerTrackerSnapshot);
+    const powerActors = runPowerActorEnmity(
+        ledger,
+        context,
+        audit,
+        dice,
+        rapportClock,
+        name,
+        playerTrackerSnapshot,
+        resolution.packet,
+        latentGrievancesBefore,
+        trackerSnapshot,
+        healthBefore,
+    );
     const boundCompanion = runBoundCompanionEngine({
         before: boundCompanionBefore,
         semanticDelta: ledger?.trackerUpdateEngine?.boundCompanion,
@@ -988,6 +1013,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         health: healthAfter,
         boundCompanion: boundCompanion.state,
         pendingBoundary: pendingBoundaryBefore,
+        latentGrievances: powerActors.latentGrievances,
     };
     const narrativeResolutionPacket = applyHiddenHealthToResolutionPacket(resolution.packet, healthAfter);
     const generatedNpcStats = mergeGeneratedNpcStats([
@@ -1033,6 +1059,10 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
             before: healthBefore,
             after: healthAfter,
             events: healthEvents,
+        },
+        latentGrievances: {
+            before: latentGrievancesBefore,
+            after: powerActors.latentGrievances,
         },
     };
 }
@@ -1320,24 +1350,32 @@ function advanceRapportClock(context, audit) {
     return clock;
 }
 
-function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null, playerTrackerSnapshot = null) {
+function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null, playerTrackerSnapshot = null, resolutionPacket = {}, latentGrievanceSnapshot = [], trackerSnapshot = {}, hiddenHealthSnapshot = null) {
     const before = buildPowerActorSnapshot(context);
     const trackerUpdate = {};
     const handoffEntries = [];
     const semanticEffects = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
+    const semanticLatentGrievances = Array.isArray(ledger?.powerActorEnmity?.latentGrievances) ? ledger.powerActorEnmity.latentGrievances : [];
+    const semanticAffiliationLinks = Array.isArray(ledger?.powerActorEnmity?.affiliationLinks) ? ledger.powerActorEnmity.affiliationLinks : [];
     const eventShapes = Array.isArray(ledger?.powerEventShape?.events) ? ledger.powerEventShape.events : [];
+    let latentGrievances = normalizeLatentGrievances(latentGrievanceSnapshot);
     let shapedEventHandoff = null;
+    const acceptedDirectEffects = [];
 
     audit.push(`STEP 3P: EXECUTE PowerActorEnmity USING SEMANTIC_LEDGER`);
     audit.push(`3P.0 currentPowerActors=${powerActorSummary(before)}`);
     audit.push(`3P.1 semanticPowerActorEffects=${semanticEffects.length ? compact(semanticEffects) : 'none'}`);
+    audit.push('3P.1a powerActorEffectOutcomeGate=per actionUnitId');
+    audit.push(`3P.1b latentGrievancesBefore=${latentGrievances.length ? compact(latentGrievances) : 'none'}`);
+    audit.push(`3P.1c semanticLatentGrievances=${semanticLatentGrievances.length ? compact(semanticLatentGrievances) : 'none'}`);
+    audit.push(`3P.1d semanticAffiliationLinks=${semanticAffiliationLinks.length ? compact(semanticAffiliationLinks) : 'none'}`);
     const effects = semanticEffects;
-    audit.push(`3P.1a semanticPowerEventShapes=${eventShapes.length ? compact(eventShapes) : 'none'}`);
+    audit.push(`3P.1e semanticPowerEventShapes=${eventShapes.length ? compact(eventShapes) : 'none'}`);
 
     for (const rawShape of eventShapes) {
         const shape = normalizePowerEventShape(rawShape);
         if (!shape) {
-            audit.push(`3P.1b ignoredPowerEventShape=${compact({ reason: 'invalid shape', rawShape })}`);
+            audit.push(`3P.1f ignoredPowerEventShape=${compact({ reason: 'invalid shape', rawShape })}`);
             continue;
         }
         const actorName = findExistingPowerActorName(trackerUpdate, shape.actor)
@@ -1345,11 +1383,11 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
             || shape.actor;
         const previous = normalizePowerActorState(trackerUpdate[actorName] || before[actorName] || {});
         if (!previous.name || previous.enmity <= 0 || !previous.pendingEvent.id) {
-            audit.push(`3P.1c ignoredPowerEventShape=${compact({ actor: shape.actor, reason: 'no matching pending power event' })}`);
+            audit.push(`3P.1g ignoredPowerEventShape=${compact({ actor: shape.actor, reason: 'no matching pending power event' })}`);
             continue;
         }
         if (previous.pendingEvent.id !== shape.eventId) {
-            audit.push(`3P.1d ignoredPowerEventShape=${compact({ actor: actorName, reason: 'event id mismatch', expected: previous.pendingEvent.id, received: shape.eventId })}`);
+            audit.push(`3P.1h ignoredPowerEventShape=${compact({ actor: actorName, reason: 'event id mismatch', expected: previous.pendingEvent.id, received: shape.eventId })}`);
             continue;
         }
 
@@ -1357,13 +1395,24 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
         trackerUpdate[actorName] = applied.state;
         if (applied.handoffEntry) handoffEntries.push(applied.handoffEntry);
         if (applied.surfaceEvent && !shapedEventHandoff) shapedEventHandoff = applied.surfaceEvent;
-        audit.push(`3P.1e powerEventShapeApplied=${compact(applied.audit)}`);
+        audit.push(`3P.1i powerEventShapeApplied=${compact(applied.audit)}`);
     }
 
     for (const rawEffect of effects) {
         let effect = normalizePowerActorEffect(rawEffect);
         if (!effect) {
             audit.push(`3P.2 ignoredPowerActorEffect=${compact({ reason: 'invalid/no reach/no known actor/no enmity effect', rawEffect })}`);
+            continue;
+        }
+        const effectOutcomeGate = powerActorEffectOutcomeGate(resolutionPacket, effect);
+        if (!effectOutcomeGate.allowed) {
+            audit.push(`3P.2a ignoredPowerActorEffect=${compact({
+                actor: effect.actor,
+                effect: effect.effect,
+                severity: effect.severity,
+                reason: 'resolved action did not succeed or land',
+                outcome: effectOutcomeGate,
+            })}`);
             continue;
         }
 
@@ -1377,6 +1426,7 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
             audit.push(`3P.3 ignoredPowerActorEffect=${compact({ actor: effect.actor, reason: 'zero delta', severity: effect.severity })}`);
             continue;
         }
+        acceptedDirectEffects.push(effect);
         if (isDuplicatePowerActorEffect(effect, previous)) {
             audit.push(`3P.3a ignoredPowerActorEffect=${compact({
                 actor: previousName,
@@ -1405,6 +1455,8 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
                 effect: effect.effect,
                 severity: effect.severity,
                 reason: effect.reason,
+                sourceTarget: effect.sourceTarget,
+                actionUnitId: effect.actionUnitId,
                 delta,
                 at: Date.now(),
             },
@@ -1412,6 +1464,132 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
         trackerUpdate[previousName] = next;
         handoffEntries.push(powerActorHandoffEntry(next));
         audit.push(`3P.4 powerActorEnmityUpdate=${compact({ actor: previousName, delta, enmity: `${previous.enmity}->${next.enmity}`, tier: `${previous.tier}->${next.tier}`, effect: effect.effect, reason: effect.reason })}`);
+    }
+
+    const consumedGrievanceIds = new Set();
+    const establishedLinkedTargetKeys = new Set();
+    const assessments = (Array.isArray(ledger?.powerActorEnmity?.assessments) ? ledger.powerActorEnmity.assessments : [])
+        .map(normalizePowerActorAssessmentForRunner)
+        .filter(item => item.actor);
+    for (const rawLink of semanticAffiliationLinks) {
+        const link = normalizePowerActorAffiliationLink(rawLink);
+        if (!link) {
+            audit.push(`3P.4a ignoredPowerActorAffiliationLink=${compact({ reason: 'invalid link', rawLink })}`);
+            continue;
+        }
+        const grievance = latentGrievances.find(item => item.id === link.grievanceId);
+        if (!grievance || !sameName(grievance.target, link.target)) {
+            audit.push(`3P.4a ignoredPowerActorAffiliationLink=${compact({ reason: 'no exact latent grievance match', grievanceId: link.grievanceId, target: link.target })}`);
+            continue;
+        }
+        if (consumedGrievanceIds.has(grievance.id)) {
+            audit.push(`3P.4a ignoredPowerActorAffiliationLink=${compact({ reason: 'latent grievance was already consumed this turn', grievanceId: grievance.id, actor: link.powerActor })}`);
+            continue;
+        }
+        const assessment = assessments.find(item => sameName(item.actor, link.powerActor));
+        if (!assessment?.isPowerActor || !assessment.hasReach) {
+            audit.push(`3P.4a ignoredPowerActorAffiliationLink=${compact({ reason: 'linked entity was not independently assessed as a power actor with reach', grievanceId: grievance.id, actor: link.powerActor })}`);
+            continue;
+        }
+        establishedLinkedTargetKeys.add(normalizeNameKey(grievance.target));
+        if (!link.knownToActor || !link.knowledgeEvidence) {
+            audit.push(`3P.4a deferredPowerActorAffiliationLink=${compact({ reason: 'affiliation established but no knowledge or discovery path yet', grievanceId: grievance.id, actor: link.powerActor })}`);
+            continue;
+        }
+
+        const actorName = findExistingPowerActorName(trackerUpdate, link.powerActor)
+            || findExistingPowerActorName(before, link.powerActor)
+            || link.powerActor;
+        const previous = normalizePowerActorState(trackerUpdate[actorName] || before[actorName] || {});
+        const linkedEffect = {
+            actor: actorName,
+            actorType: link.actorType || assessment.actorType,
+            hasReach: true,
+            effect: grievance.effect,
+            severity: grievance.severity,
+            reason: grievance.reason,
+            sourceTarget: grievance.target,
+            actionUnitId: grievance.actionUnitId,
+            explicitlyCompleted: true,
+            knownToActor: true,
+        };
+        if (isDuplicatePowerActorEffect(linkedEffect, previous)) {
+            consumedGrievanceIds.add(grievance.id);
+            audit.push(`3P.4b latentGrievanceConsumedAsDuplicate=${compact({ grievanceId: grievance.id, actor: actorName, reason: grievance.reason })}`);
+            continue;
+        }
+
+        const delta = powerActorEnmityDelta(grievance.severity);
+        const next = normalizePowerActorState({
+            ...previous,
+            version: POWER_ACTOR_ENMITY_VERSION,
+            name: actorName,
+            type: link.actorType || assessment.actorType || previous.type,
+            enmity: clamp(previous.enmity + delta, 0, 20),
+            reasons: unique([...previous.reasons, grievance.reason]).slice(-8),
+            responseHistory: previous.responseHistory,
+            lastEffect: {
+                effect: grievance.effect,
+                severity: grievance.severity,
+                reason: grievance.reason,
+                sourceTarget: grievance.target,
+                actionUnitId: grievance.actionUnitId,
+                delta,
+                at: Date.now(),
+            },
+        });
+        trackerUpdate[actorName] = next;
+        handoffEntries.push(powerActorHandoffEntry(next));
+        consumedGrievanceIds.add(grievance.id);
+        audit.push(`3P.4c latentGrievanceLinked=${compact({ grievanceId: grievance.id, target: grievance.target, actor: actorName, affiliationEvidence: link.affiliationEvidence, knowledgeEvidence: link.knowledgeEvidence, delta, enmity: `${previous.enmity}->${next.enmity}` })}`);
+    }
+    if (consumedGrievanceIds.size) {
+        latentGrievances = latentGrievances.filter(item => !consumedGrievanceIds.has(item.id));
+    }
+
+    const currentTargets = currentLatentGrievanceTargets(ledger, resolutionPacket, trackerSnapshot, hiddenHealthSnapshot, context);
+    for (const rawCandidate of semanticLatentGrievances) {
+        const candidate = normalizeLatentGrievanceCandidate(rawCandidate);
+        if (!candidate) {
+            audit.push(`3P.4d ignoredLatentGrievance=${compact({ reason: 'invalid, non-substantial, or incomplete candidate', rawCandidate })}`);
+            continue;
+        }
+        const candidateOutcomeGate = powerActorEffectOutcomeGate(resolutionPacket, candidate);
+        if (!candidateOutcomeGate.allowed) {
+            audit.push(`3P.4d ignoredLatentGrievance=${compact({ reason: 'resolved action did not succeed or land', target: candidate.target, outcome: candidateOutcomeGate })}`);
+            continue;
+        }
+        if (!currentTargets.some(target => sameName(target, candidate.target))) {
+            audit.push(`3P.4d ignoredLatentGrievance=${compact({ reason: 'target is not a current affected living target', target: candidate.target })}`);
+            continue;
+        }
+        const targetAssessment = assessments.find(item => sameName(item.actor, candidate.target));
+        const knownPowerActor = Boolean(
+            targetAssessment?.isPowerActor
+            || targetAssessment?.hasReach
+            || findExistingPowerActorName(trackerUpdate, candidate.target)
+            || findExistingPowerActorName(before, candidate.target)
+            || toRealArray(resolutionPacket?.PowerActors).some(actor => sameName(actor, candidate.target)),
+        );
+        if (!targetAssessment || knownPowerActor) {
+            audit.push(`3P.4d ignoredLatentGrievance=${compact({ reason: targetAssessment ? 'target is already or contradictorily identified as a power actor' : 'target lacks an explicit ordinary-actor assessment', target: candidate.target })}`);
+            continue;
+        }
+        if (establishedLinkedTargetKeys.has(normalizeNameKey(candidate.target))) {
+            audit.push(`3P.4d ignoredLatentGrievance=${compact({ reason: 'target received an explicit power-actor affiliation link this turn', target: candidate.target })}`);
+            continue;
+        }
+        if (acceptedDirectEffects.some(effect => powerActorEffectMatchesLatentCandidate(effect, candidate))) {
+            audit.push(`3P.4d ignoredLatentGrievance=${compact({ reason: 'same action and affected target already produced a direct power-actor effect', target: candidate.target, actionUnitId: candidate.actionUnitId, effect: candidate.effect })}`);
+            continue;
+        }
+        const entry = latentGrievanceFromCandidate(candidate);
+        if (latentGrievances.some(existing => existing.id === entry.id || latentGrievanceFingerprint(existing) === latentGrievanceFingerprint(entry))) {
+            audit.push(`3P.4e ignoredLatentGrievance=${compact({ reason: 'duplicate latent grievance', target: entry.target, effect: entry.effect })}`);
+            continue;
+        }
+        latentGrievances = [...latentGrievances, entry].slice(-LATENT_GRIEVANCE_LIMIT);
+        audit.push(`3P.4f latentGrievanceRecorded=${compact(entry)}`);
     }
 
     const proactivity = shapedEventHandoff
@@ -1436,7 +1614,35 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
     };
     audit.push(`3P.5 powerActorPressureHandoff=${handoff.entries.length ? compact(handoff.entries) : 'none'}`);
     audit.push(`3P.6 powerEventHandoff=${handoff.event ? compact(handoff.event) : 'none'}`);
-    return { trackerUpdate, handoff };
+    audit.push(`3P.6a latentGrievancesAfter=${latentGrievances.length ? compact(latentGrievances) : 'none'}`);
+    return { trackerUpdate, latentGrievances, handoff };
+}
+
+function powerActorEffectOutcomeGate(resolutionPacket = {}, effect = {}) {
+    const rollNeeded = resolutionPacket?.RollNeeded === 'Y';
+    const actionUnitId = normalizePowerActorActionUnitId(effect?.actionUnitId ?? effect?.ActionUnitId);
+    const actionUnits = Array.isArray(resolutionPacket?.actionUnits) ? resolutionPacket.actionUnits : [];
+    const actionIndex = actionUnits.findIndex(unit => normalizePowerActorActionUnitId(unit?.id) === actionUnitId);
+    const landedCount = Math.max(0, Math.floor(Number(resolutionPacket?.LandedActions) || 0));
+    const actionUnitResolved = actionIndex >= 0;
+    const explicitlyCompleted = bool(effect?.explicitlyCompleted ?? effect?.ExplicitlyCompleted);
+    const allowed = actionUnitResolved && (rollNeeded ? actionIndex < landedCount : explicitlyCompleted);
+    return {
+        allowed,
+        actionUnitId: actionUnitId || '(none)',
+        actionIndex,
+        explicitlyCompleted: explicitlyCompleted ? 'Y' : 'N',
+        RollNeeded: rollNeeded ? 'Y' : 'N',
+        LandedActions: resolutionPacket?.LandedActions ?? '(none)',
+        OutcomeTier: resolutionPacket?.OutcomeTier || 'NONE',
+        Outcome: resolutionPacket?.Outcome || 'no_roll',
+    };
+}
+
+function powerActorEffectMatchesLatentCandidate(effect = {}, candidate = {}) {
+    return normalizePowerActorActionUnitId(effect.actionUnitId) === normalizePowerActorActionUnitId(candidate.actionUnitId)
+        && normalizePowerActorEffectType(effect.effect) === normalizePowerActorEffectType(candidate.effect)
+        && sameName(effect.sourceTarget, candidate.target);
 }
 
 function isDuplicatePowerActorEffect(effect, previousState) {
@@ -1501,11 +1707,98 @@ function normalizePowerActorAssessmentForRunner(value) {
     return {
         actor,
         isPowerActor: bool(source.isPowerActor ?? source.IsPowerActor),
-        hasReach: reach.length > 0 || bool(source.isPowerActor ?? source.IsPowerActor),
+        hasReach: reach.length > 0,
         actorType: cleanPowerActorScalar(source.actorType ?? source.ActorType, 80) || 'power actor',
         evidence: cleanPowerActorScalar(source.evidence ?? source.Evidence, 180),
         assessmentReason: cleanPowerActorScalar(source.assessmentReason ?? source.AssessmentReason ?? source.reason ?? source.Reason, 180),
     };
+}
+
+function normalizeLatentGrievanceCandidate(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const target = cleanPowerActorScalar(source.target ?? source.Target, 100);
+    const actionUnitId = normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId);
+    const effect = normalizePowerActorEffectType(source.effect ?? source.Effect);
+    const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
+    const reason = cleanPowerActorScalar(source.reason ?? source.Reason, 180);
+    const evidence = cleanPowerActorScalar(source.evidence ?? source.Evidence, 220);
+    if (!target || !actionUnitId || effect === 'none' || !['meaningful', 'major'].includes(severity) || !reason || !evidence) return null;
+    return {
+        target,
+        actionUnitId,
+        explicitlyCompleted: bool(source.explicitlyCompleted ?? source.ExplicitlyCompleted),
+        effect,
+        severity,
+        reason,
+        evidence,
+        attributionPath: cleanPowerActorScalar(source.attributionPath ?? source.AttributionPath, 180),
+    };
+}
+
+function normalizePowerActorAffiliationLink(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const grievanceId = cleanPowerActorScalar(source.grievanceId ?? source.GrievanceId, 100);
+    const target = cleanPowerActorScalar(source.target ?? source.Target, 100);
+    const powerActor = cleanPowerActorScalar(source.powerActor ?? source.PowerActor, 100);
+    const actorType = cleanPowerActorScalar(source.actorType ?? source.ActorType, 80);
+    const affiliationEvidence = cleanPowerActorScalar(source.affiliationEvidence ?? source.AffiliationEvidence, 220);
+    const knowledgeEvidence = cleanPowerActorScalar(source.knowledgeEvidence ?? source.KnowledgeEvidence, 220);
+    const hasReach = bool(source.hasReach ?? source.HasReach);
+    if (!grievanceId || !target || !powerActor || !actorType || !affiliationEvidence || !hasReach) return null;
+    return {
+        grievanceId,
+        target,
+        powerActor,
+        actorType,
+        hasReach: true,
+        affiliationEvidence,
+        knownToActor: bool(source.knownToActor ?? source.KnownToActor),
+        knowledgeEvidence,
+    };
+}
+
+function currentLatentGrievanceTargets(ledger, resolutionPacket = {}, trackerSnapshot = {}, hiddenHealthSnapshot = null, context = {}) {
+    const targets = resolutionPacket || {};
+    const currentTargets = unique([
+        ...toRealArray(targets.ActionTargets),
+        ...toRealArray(targets.OppTargets?.NPC),
+        ...toRealArray(targets.HarmedObservers),
+        ...toRealArray(targets.NPCAwareOfUser),
+    ]);
+    const livingNpcKeys = new Set((Array.isArray(ledger?.relationshipEngine) ? ledger.relationshipEngine : [])
+        .map(item => normalizeNameKey(item?.NPC))
+        .filter(Boolean));
+    const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, hiddenHealthSnapshot);
+    return currentTargets.filter(target => livingNpcKeys.has(normalizeNameKey(target)) && targetClassifier.isLiving(target));
+}
+
+function latentGrievanceFromCandidate(candidate) {
+    const normalized = normalizeLatentGrievanceCandidate(candidate);
+    const fingerprint = latentGrievanceFingerprint(normalized || {});
+    return normalizeLatentGrievance({
+        version: LATENT_GRIEVANCE_VERSION,
+        id: `lg_${powerActorStableHash(fingerprint)}`,
+        ...normalized,
+        createdAt: Date.now(),
+    });
+}
+
+function latentGrievanceFingerprint(value = {}) {
+    return [
+        normalizeNameKey(value.target),
+        normalizePowerActorEffectType(value.effect),
+        normalizePowerActorSeverity(value.severity),
+        normalizeNameKey(value.reason),
+    ].join('|');
+}
+
+function powerActorStableHash(value) {
+    let hash = 2166136261;
+    for (const char of String(value || '')) {
+        hash ^= char.charCodeAt(0);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
 }
 
 function powerActorLatestActionSource(ledger, context, effect = null, playerTrackerSnapshot = null) {
@@ -1538,14 +1831,19 @@ function normalizePowerActorEffect(value) {
     const source = value && typeof value === 'object' ? value : {};
     const actor = cleanPowerActorScalar(source.actor ?? source.Actor, 100);
     if (!actor) return null;
+    const sourceTarget = cleanPowerActorScalar(source.sourceTarget ?? source.SourceTarget, 100);
+    const actionUnitId = normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId);
     const hasReach = bool(source.hasReach ?? source.HasReach);
     const knownToActor = bool(source.knownToActor ?? source.KnownToActor);
     const effect = normalizePowerActorEffectType(source.effect ?? source.Effect);
     const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
-    if (!hasReach || !knownToActor || effect === 'none' || severity === 'none') return null;
+    if (!sourceTarget || !actionUnitId || !hasReach || !knownToActor || effect === 'none' || severity === 'none') return null;
     return {
         actor,
         actorType: cleanPowerActorScalar(source.actorType ?? source.ActorType, 80) || 'power actor',
+        sourceTarget,
+        actionUnitId,
+        explicitlyCompleted: bool(source.explicitlyCompleted ?? source.ExplicitlyCompleted),
         hasReach: true,
         effect,
         severity,
@@ -1563,6 +1861,93 @@ function normalizePowerActors(value) {
         result[normalized.name] = normalized;
     }
     return result;
+}
+
+export function normalizeLatentGrievances(value) {
+    const source = Array.isArray(value)
+        ? value
+        : Array.isArray(value?.entries)
+            ? value.entries
+            : [];
+    const result = [];
+    const seenIds = new Set();
+    const seenFingerprints = new Set();
+    for (const raw of source) {
+        const grievance = normalizeLatentGrievance(raw);
+        if (!grievance) continue;
+        const fingerprint = latentGrievanceFingerprint(grievance);
+        if (seenIds.has(grievance.id) || seenFingerprints.has(fingerprint)) continue;
+        seenIds.add(grievance.id);
+        seenFingerprints.add(fingerprint);
+        result.push(grievance);
+    }
+    return result.slice(-LATENT_GRIEVANCE_LIMIT);
+}
+
+export function latentGrievanceIds(value) {
+    return normalizeLatentGrievances(value).map(item => item.id);
+}
+
+export function mergeLatentGrievanceArchive(value = {}, ...states) {
+    const archive = {};
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    for (const [id, raw] of Object.entries(source)) {
+        const grievance = normalizeLatentGrievance({ ...(raw || {}), id: raw?.id || id });
+        if (grievance) archive[grievance.id] = grievance;
+    }
+    for (const state of states) {
+        for (const grievance of normalizeLatentGrievances(state)) {
+            archive[grievance.id] = grievance;
+        }
+    }
+    return archive;
+}
+
+export function resolveLatentGrievanceIds(ids, archive = {}, fallback = []) {
+    if (!Array.isArray(ids)) return normalizeLatentGrievances(fallback);
+    const normalizedArchive = mergeLatentGrievanceArchive(archive);
+    return normalizeLatentGrievances(ids.map(id => normalizedArchive[String(id || '').trim()]).filter(Boolean));
+}
+
+export function renameLatentGrievanceTargets(value, promotions = []) {
+    let grievances = normalizeLatentGrievances(value);
+    for (const promotion of Array.isArray(promotions) ? promotions : []) {
+        const oldName = cleanPowerActorScalar(promotion?.oldName, 100);
+        const newName = cleanPowerActorScalar(promotion?.newName, 100);
+        if (!oldName || !newName || sameName(oldName, newName)) continue;
+        grievances = normalizeLatentGrievances(grievances.map(grievance => {
+            if (!sameName(grievance.target, oldName)) return grievance;
+            const { id: _oldId, ...rest } = grievance;
+            return normalizeLatentGrievance({ ...rest, target: newName });
+        }));
+    }
+    return grievances;
+}
+
+function normalizeLatentGrievance(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const target = cleanPowerActorScalar(source.target ?? source.Target, 100);
+    const actionUnitId = normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId);
+    const effect = normalizePowerActorEffectType(source.effect ?? source.Effect);
+    const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
+    const reason = cleanPowerActorScalar(source.reason ?? source.Reason, 180);
+    const evidence = cleanPowerActorScalar(source.evidence ?? source.Evidence, 220);
+    const rawId = cleanPowerActorScalar(source.id ?? source.Id, 100);
+    if (!target || !actionUnitId || effect === 'none' || !['meaningful', 'major'].includes(severity) || !reason || !evidence) return null;
+    const fingerprint = latentGrievanceFingerprint({ target, effect, severity, reason });
+    return {
+        version: LATENT_GRIEVANCE_VERSION,
+        id: rawId || `lg_${powerActorStableHash(fingerprint)}`,
+        target,
+        actionUnitId,
+        explicitlyCompleted: bool(source.explicitlyCompleted ?? source.ExplicitlyCompleted),
+        effect,
+        severity,
+        reason,
+        evidence,
+        attributionPath: cleanPowerActorScalar(source.attributionPath ?? source.AttributionPath, 180),
+        createdAt: Math.max(0, Math.floor(Number(source.createdAt ?? source.CreatedAt ?? 0) || 0)),
+    };
 }
 
 function normalizePowerActorState(value = {}) {
@@ -1655,6 +2040,8 @@ function normalizePowerActorLastEffect(value = {}) {
         effect: normalizePowerActorEffectType(source.effect ?? source.Effect),
         severity: normalizePowerActorSeverity(source.severity ?? source.Severity),
         reason: cleanPowerActorScalar(source.reason ?? source.Reason, 180),
+        sourceTarget: cleanPowerActorScalar(source.sourceTarget ?? source.SourceTarget, 100),
+        actionUnitId: normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId),
         delta: clamp(Math.floor(Number(source.delta ?? source.Delta ?? 0) || 0), 0, 5),
         at: Math.max(0, Math.floor(Number(source.at ?? source.At ?? 0) || 0)),
     };
@@ -1665,12 +2052,10 @@ function normalizePowerEventShape(value = {}) {
     const eventId = cleanPowerActorScalar(source.eventId ?? source.EventId, 80);
     const actor = cleanPowerActorScalar(source.actor ?? source.Actor, 100);
     const fit = normalizePowerActorEventFit(source.fit ?? source.Fit);
-    const eventType = normalizePowerActorEventType(source.eventType ?? source.EventType);
     if (!eventId || !actor || fit === 'none') return null;
     return {
         eventId,
         actor,
-        eventType,
         fit,
         visibleInstruction: cleanPowerActorScalar(source.visibleInstruction ?? source.VisibleInstruction, 360),
         contactName: cleanPowerActorScalar(source.contactName ?? source.ContactName, 80),
@@ -1753,8 +2138,7 @@ function runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice,
         return { handoffEvent: null };
     }
 
-    const agentActor = actors.find(state => state.activeAgent.name);
-    const candidatePool = agentActor ? [agentActor] : actors.filter(state => activeMs >= state.cooldownUntilActiveMs);
+    const candidatePool = actors.filter(state => activeMs >= state.cooldownUntilActiveMs);
     if (!candidatePool.length) {
         audit.push('3P.8 powerActorProactivityBlocked=cooldown_or_no_actor');
         return { handoffEvent: null };
@@ -1794,7 +2178,7 @@ function runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice,
 function applyPowerEventShape(previous, shape, rapportClock, audit) {
     const activeMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
     const pending = previous.pendingEvent;
-    const eventType = normalizePowerActorEventType(shape.eventType && shape.eventType !== 'none' ? shape.eventType : pending.eventType);
+    const eventType = pending.eventType;
     let nextPending = emptyPowerActorPendingEvent();
     let actorHandoffEntry = null;
     let surfaceEvent = null;
@@ -2031,6 +2415,11 @@ function normalizePowerActorEffectType(value) {
 function normalizePowerActorSeverity(value) {
     const text = cleanPowerActorScalar(value, 40).toLowerCase().replace(/[\s-]+/g, '_');
     return ['none', 'minor', 'meaningful', 'major'].includes(text) ? text : 'none';
+}
+
+function normalizePowerActorActionUnitId(value) {
+    const match = cleanPowerActorScalar(value, 8).toUpperCase().match(/^A([1-3])$/);
+    return match ? `A${match[1]}` : '';
 }
 
 function normalizePowerActorStringList(value) {

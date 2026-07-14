@@ -66,6 +66,8 @@ function buildReadableSemanticDebug(ledger) {
     const userKnowledgeApplications = Array.isArray(ledger?.userKnowledgeApplication?.applications) ? ledger.userKnowledgeApplication.applications : [];
     const powerActorAssessments = Array.isArray(ledger?.powerActorEnmity?.assessments) ? ledger.powerActorEnmity.assessments : [];
     const powerActors = Array.isArray(ledger?.powerActorEnmity?.effects) ? ledger.powerActorEnmity.effects : [];
+    const latentGrievances = Array.isArray(ledger?.powerActorEnmity?.latentGrievances) ? ledger.powerActorEnmity.latentGrievances : [];
+    const affiliationLinks = Array.isArray(ledger?.powerActorEnmity?.affiliationLinks) ? ledger.powerActorEnmity.affiliationLinks : [];
     const powerEventShapes = Array.isArray(ledger?.powerEventShape?.events) ? ledger.powerEventShape.events : [];
     const userCore = ledger?.engineContext?.userCoreStats ?? {};
     const trackerNpcs = Array.isArray(ledger?.engineContext?.trackerRelevantNPCs)
@@ -133,6 +135,8 @@ function buildReadableSemanticDebug(ledger) {
         'trackerUpdateEngine=' + inline(tracker),
         'powerActorEnmity.assessments=' + (powerActorAssessments.length ? inline(powerActorAssessments) : 'none'),
         'powerActorEnmity.effects=' + (powerActors.length ? inline(powerActors) : 'none'),
+        'powerActorEnmity.latentGrievances=' + (latentGrievances.length ? inline(latentGrievances) : 'none'),
+        'powerActorEnmity.affiliationLinks=' + (affiliationLinks.length ? inline(affiliationLinks) : 'none'),
         'powerEventShape.events=' + (powerEventShapes.length ? inline(powerEventShapes) : 'none'),
         'nameGeneration=deterministic style-aware pool; final approved pool shown in deterministic nameGeneration',
         'proactivitySemantic=deterministic cap 3',
@@ -238,7 +242,7 @@ export function formatNarratorPromptContext(report, options = {}) {
         'This displayed handoff is for audit only. The narrator model receives narrativeContract(input), not this mechanics audit.',
         '',
         '==MECHANICS_RESULTS==',
-        ...formatMechanicsResultList(summary, resolution, handoff),
+        ...formatMechanicsResultList(summary, resolution, handoff, ledger, report),
         '',
         '==NARRATOR_MODEL_HANDOFF==',
         'This is the exact narrator-facing handoff delivered to the narrator model as a native depth-0 prompt for this response.',
@@ -249,8 +253,12 @@ export function formatNarratorPromptContext(report, options = {}) {
     return lines.join('\n');
 }
 
-function formatMechanicsResultList(summary, resolution, handoff = {}) {
+function formatMechanicsResultList(summary, resolution, handoff = {}, ledger = {}, report = {}) {
     const aggressionEntries = formatAggressionMechanicsEntries(handoff?.aggressionResults ?? {});
+    const latentCandidates = Array.isArray(ledger?.powerActorEnmity?.latentGrievances) ? ledger.powerActorEnmity.latentGrievances : [];
+    const affiliationLinks = Array.isArray(ledger?.powerActorEnmity?.affiliationLinks) ? ledger.powerActorEnmity.affiliationLinks : [];
+    const latentBefore = Array.isArray(report?.latentGrievances?.before) ? report.latentGrievances.before : [];
+    const latentAfter = Array.isArray(report?.latentGrievances?.after) ? report.latentGrievances.after : [];
     return [
         ['userAction', summary.userAction],
         ['resolution.GOAL', valueOrNone(resolution.GOAL)],
@@ -298,6 +306,10 @@ function formatMechanicsResultList(summary, resolution, handoff = {}) {
         ['aggression.result', summary.aggression],
         ['powerActor.assessment', summary.powerActorAssessment],
         ['powerActor.enmityEffect', summary.powerActorEnmityEffect],
+        ['powerActor.latentCandidates', latentCandidates.length ? inline(latentCandidates) : 'none'],
+        ['powerActor.affiliationLinks', affiliationLinks.length ? inline(affiliationLinks) : 'none'],
+        ['powerActor.latentStateBefore', latentBefore.length ? inline(latentBefore) : 'none'],
+        ['powerActor.latentStateAfter', latentAfter.length ? inline(latentAfter) : 'none'],
         ['powerActor.pressure', summary.powerActorPressure],
         ['powerActor.event', summary.powerActorEventAudit ?? summary.powerActorEvent],
         ['nameGeneration.result', summary.generatedName],

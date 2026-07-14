@@ -696,10 +696,23 @@ function buildSemanticPreflightSchema() {
     const powerActorEffectSchema = {
         type: 'object',
         additionalProperties: false,
-        required: ['actor', 'actorType', 'hasReach', 'effect', 'severity', 'reason', 'knownToActor'],
+        required: ['actor', 'actorType', 'sourceTarget', 'actionUnitId', 'explicitlyCompleted', 'hasReach', 'effect', 'severity', 'reason', 'knownToActor'],
         properties: {
             actor: { type: 'string' },
             actorType: { type: 'string' },
+            sourceTarget: {
+                type: 'string',
+                description: 'Exact person, organization, or other current target whose setback creates this effect. Use the Power Actor itself when directly affected.',
+            },
+            actionUnitId: {
+                type: 'string',
+                enum: ['A1', 'A2', 'A3'],
+                description: 'Exact ResolutionEngine.actionUnits id that causes this effect.',
+            },
+            explicitlyCompleted: {
+                type: 'boolean',
+                description: 'For no-roll turns only: Y only when current input/context explicitly establishes the effect as already completed. Use N for attempts and all rolled actions.',
+            },
             hasReach: {
                 type: 'boolean',
                 description: 'Y only for organizations or unusually influential individuals with resources, agents, authority, territory, money, magic, reputation, or information access.',
@@ -730,14 +743,69 @@ function buildSemanticPreflightSchema() {
             assessmentReason: { type: 'string' },
         },
     };
+    const latentGrievanceSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['target', 'actionUnitId', 'explicitlyCompleted', 'effect', 'severity', 'reason', 'evidence', 'attributionPath'],
+        properties: {
+            target: {
+                type: 'string',
+                description: 'Exact current living target label. This target is presently assessed as ordinary and has no established Power Actor affiliation.',
+            },
+            actionUnitId: {
+                type: 'string',
+                enum: ['A1', 'A2', 'A3'],
+                description: 'Exact ResolutionEngine.actionUnits id that causes this grievance.',
+            },
+            explicitlyCompleted: {
+                type: 'boolean',
+                description: 'For no-roll turns only: Y only when current input/context explicitly establishes the setback as already completed. Use N for attempts and all rolled actions.',
+            },
+            effect: { type: 'string', enum: POWER_ACTOR_EFFECT_TYPES },
+            severity: {
+                type: 'string',
+                enum: ['meaningful', 'major'],
+                description: 'Only substantial durable setbacks qualify. Ordinary friction and minor insults do not.',
+            },
+            reason: { type: 'string' },
+            evidence: { type: 'string' },
+            attributionPath: { type: 'string' },
+        },
+    };
+    const powerActorAffiliationLinkSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['grievanceId', 'target', 'powerActor', 'actorType', 'hasReach', 'affiliationEvidence', 'knownToActor', 'knowledgeEvidence'],
+        properties: {
+            grievanceId: {
+                type: 'string',
+                description: 'Exact id copied from the hidden latent grievance snapshot.',
+            },
+            target: {
+                type: 'string',
+                description: 'Exact target copied from the referenced latent grievance.',
+            },
+            powerActor: { type: 'string' },
+            actorType: { type: 'string' },
+            hasReach: { type: 'boolean' },
+            affiliationEvidence: {
+                type: 'string',
+                description: 'Explicit established context linking the grievance target to this Power Actor. Never infer or invent an affiliation.',
+            },
+            knownToActor: {
+                type: 'boolean',
+                description: 'Y only when the Power Actor knows or has a concrete ordinary discovery/reporting path for the stored grievance.',
+            },
+            knowledgeEvidence: { type: 'string' },
+        },
+    };
     const powerEventShapeSchema = {
         type: 'object',
         additionalProperties: false,
-        required: ['eventId', 'actor', 'eventType', 'fit', 'visibleInstruction', 'contactName', 'contactGender', 'surfaceRole', 'deferReason'],
+        required: ['eventId', 'actor', 'fit', 'visibleInstruction', 'contactName', 'contactGender', 'surfaceRole', 'deferReason'],
         properties: {
             eventId: { type: 'string' },
             actor: { type: 'string' },
-            eventType: { type: 'string', enum: POWER_EVENT_TYPES },
             fit: { type: 'string', enum: POWER_EVENT_FITS },
             visibleInstruction: {
                 type: 'string',
@@ -1210,7 +1278,7 @@ function buildSemanticPreflightSchema() {
             powerActorEnmity: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['assessments', 'effects'],
+                required: ['assessments', 'effects', 'latentGrievances', 'affiliationLinks'],
                 properties: {
                     assessments: {
                         type: 'array',
@@ -1219,6 +1287,14 @@ function buildSemanticPreflightSchema() {
                     effects: {
                         type: 'array',
                         items: powerActorEffectSchema,
+                    },
+                    latentGrievances: {
+                        type: 'array',
+                        items: latentGrievanceSchema,
+                    },
+                    affiliationLinks: {
+                        type: 'array',
+                        items: powerActorAffiliationLinkSchema,
                     },
                 },
             },
@@ -1501,9 +1577,11 @@ const SEMANTIC_FIELD_GUIDANCE = [
     '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory and currency are post-narration-owned and do not appear in this semantic ledger. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
     '- PowerActorEnmity is hidden power-actor memory. First assess power candidates semantically, not by keyword/title. A power actor is any entity with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. Ordinary people with only personal reaction are not power actors even if they have a job title.',
     '- PowerActorEnmity.assessments is audit-only diagnosis. Include one assessment for each meaningful ResolutionEngine.identifyTargets.PowerActors entry and for every current-scene or active-card candidate whose possible reach should be auditable: the active character/card actor, named scene NPCs, target/observer NPCs, and any affected organization/group when context gives credible reach beyond personal action. Do this even when PowerActorEnmity.effects count is 0. Assessment never creates enmity by itself and never replaces RelationshipEngine. If a living NPC appears in a normal target/observer list, still create the required RelationshipEngine entry even when isPowerActor=Y.',
-    '- PowerActorEnmity effects are only for the latest user input and immediate visible context. Add an entry only if the user meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. If the affected party lacks reach, hasReach=N and severity=none. If the actor cannot plausibly know or discover it, knownToActor=N and deterministic code will not increase enmity.',
+    '- PowerActorEnmity effects are candidate strategic consequences of the latest user input and immediate visible context. Add an entry when the attempted action would, if completed, meaningfully thwart, expose, harm assets of, steal from, publicly humiliate, help an enemy of, disrupt an operation of, kill/capture people of, or damage reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. actionUnitId MUST copy the exact A1/A2/A3 unit causing the effect. sourceTarget names the directly affected current target; use actor when the Power Actor itself is directly affected. For rolled actions set explicitlyCompleted=N and do not decide success; deterministic code applies only effects whose action unit lands. For no-roll actions set explicitlyCompleted=Y only when the effect is explicitly already completed, never for an attempt. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. If the affected party lacks reach, hasReach=N and severity=none. If the actor cannot plausibly know or discover it, knownToActor=N and deterministic code will not increase enmity.',
     '- PowerActorEnmity severity: minor=small obstruction or insult; meaningful=real setback, exposure, loss, asset harm, or operation disruption; major=severe public exposure, major defeat, major theft, death/capture of members, ruined operation, or serious reputation/income damage. If none, output count=0.',
-    '- PowerEventShape is hidden pending pressure shaping. Use it only when the Power actor snapshot contains a pendingEvent. If no pending event exists, output PowerEventShape.count=0. For each pending event, decide if it fits the current scene now. fit=use_now only when it can enter naturally through visible scene logic without forcing {{user}} action or revealing hidden motives. fit=defer when the current scene cannot naturally support it yet. fit=drop only if it is impossible or would contradict visible facts. visibleInstruction must be narrator-safe surface instruction only: describe what visibly happens or what an ordinary NPC/contact does, not why. Never include the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative in visibleInstruction. For plant_contact, use the provided contactName when available and describe only an ordinary plausible introduction, role, offer, request, trade, work, travel, help, rumor, or social contact. For agent_* events, use the activeAgent name as an ordinary established NPC and describe only the visible action/suggestion/setback.',
+    '- PowerActorEnmity.latentGrievances records only a substantial meaningful/major setback against a specific current living target who is explicitly assessed isPowerActor=N, has no credible reach, and has no established Power Actor affiliation anywhere in active context. Use the same qualifying effect classes as PowerActorEnmity. actionUnitId MUST copy the exact A1/A2/A3 unit causing the grievance. For rolled actions set explicitlyCompleted=N and let deterministic resolution decide whether that unit lands. For no-roll actions set explicitlyCompleted=Y only when the setback is explicitly already completed, never for an attempt. Exclude minor insults, routine disagreement, ordinary relationship friction, consensual interaction, mere restraint, harmless embarrassment, and any target already linked to a known Power Actor. evidence must cite the latest user action; attributionPath states who directly knows, witnessed, can report, or what evidence exists, or (none).',
+    '- PowerActorEnmity.affiliationLinks may reference only an exact grievanceId and target from the hidden latent grievance snapshot. Add a link only when active card/scenario/lore/chat context explicitly establishes that target\'s membership, employment, allegiance, ownership, command relationship, or other concrete affiliation with the named Power Actor. Never invent or infer a future organization. The linked Power Actor must also receive an isPowerActor=Y assessment with credible reach. knownToActor=Y only when explicit context or an ordinary concrete reporting/discovery path lets that Power Actor know the stored grievance; otherwise use N and the grievance remains latent. affiliationEvidence and knowledgeEvidence must cite those separate facts.',
+    '- PowerEventShape is hidden pending pressure shaping. Use it only when the Power actor snapshot contains a pendingEvent. If no pending event exists, output PowerEventShape.count=0. The pending event type is deterministic and immutable; do not choose, replace, or output an event type. For each pending event, decide if it fits the current scene now. fit=use_now only when it can enter naturally through visible scene logic without forcing {{user}} action or revealing hidden motives. fit=defer when the current scene cannot naturally support it yet. fit=drop only if it is impossible or would contradict visible facts. visibleInstruction must be narrator-safe surface instruction only: describe what visibly happens or what an ordinary NPC/contact does, not why. Never include the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative in visibleInstruction. For plant_contact, use the provided contactName when available and describe only an ordinary plausible introduction, role, offer, request, trade, work, travel, help, rumor, or social contact. For agent_* events, use the activeAgent name as an ordinary established NPC and describe only the visible action/suggestion/setback.',
     '- Companion/ally commands are tactical requests only. They can address the companion as an ActionTarget and can refer to an established hostile by name for later companion crisis targeting, but they must not be treated as {{user}} making the companion act, must not force a companion attack, and must not create a user-resolved success/failure roll for companion obedience. The named hostile must still be established through assistant narration/tracker/card/scenario/lore/initial test setup and belongs in hostilesInScene.NPC unless it directly opposes {{user}}\'s current action. If several hostiles exist and no specific one is named, do not guess a target.',
     '- Do not output primaryOppTarget or primaryOpposition. The only opposing living target list is identifyTargets.OppTargets.NPC; the separate broad hostile pool is identifyTargets.hostilesInScene.NPC.',
     '- If you cannot find explicit evidence, use the engine default for that line; never invent missing facts.',
@@ -1637,15 +1715,35 @@ PowerActorAssessment[0].assessmentReason=(none)
 PowerActorEnmity.count=0
 PowerActorEnmity[0].actor=(none)
 PowerActorEnmity[0].actorType=(none)
+PowerActorEnmity[0].sourceTarget=(none)
+PowerActorEnmity[0].actionUnitId=A1
+PowerActorEnmity[0].explicitlyCompleted=N
 PowerActorEnmity[0].hasReach=N
 PowerActorEnmity[0].effect=none
 PowerActorEnmity[0].severity=none
 PowerActorEnmity[0].reason=(none)
 PowerActorEnmity[0].knownToActor=N
+LatentGrievance.count=0
+LatentGrievance[0].target=(none)
+LatentGrievance[0].actionUnitId=A1
+LatentGrievance[0].explicitlyCompleted=N
+LatentGrievance[0].effect=none
+LatentGrievance[0].severity=none
+LatentGrievance[0].reason=(none)
+LatentGrievance[0].evidence=(none)
+LatentGrievance[0].attributionPath=(none)
+PowerActorAffiliationLink.count=0
+PowerActorAffiliationLink[0].grievanceId=(none)
+PowerActorAffiliationLink[0].target=(none)
+PowerActorAffiliationLink[0].powerActor=(none)
+PowerActorAffiliationLink[0].actorType=(none)
+PowerActorAffiliationLink[0].hasReach=N
+PowerActorAffiliationLink[0].affiliationEvidence=(none)
+PowerActorAffiliationLink[0].knownToActor=N
+PowerActorAffiliationLink[0].knowledgeEvidence=(none)
 PowerEventShape.count=0
 PowerEventShape[0].eventId=(none)
 PowerEventShape[0].actor=(none)
-PowerEventShape[0].eventType=none
 PowerEventShape[0].fit=none
 PowerEventShape[0].visibleInstruction=(none)
 PowerEventShape[0].contactName=(none)
@@ -1765,6 +1863,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         ? []
         : normalizeInlineProxyInstructions(options?.inlineProxyInstructions);
     const powerActorSnapshot = sanitizePowerActorSnapshotForSemantic(options?.powerActorSnapshot || {});
+    const latentGrievanceSnapshot = sanitizeLatentGrievanceSnapshotForSemantic(options?.latentGrievanceSnapshot || []);
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const worldStateSnapshot = normalizeWorldState(options?.worldStateSnapshot || {});
     const boundCompanionSnapshot = normalizeBoundCompanionState(options?.boundCompanionSnapshot || {});
@@ -1774,6 +1873,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     return `Active names: user=${userName}, character=${charName}\nGeneration type=${type || 'normal'}\nNPC tracker snapshot JSON:\n${JSON.stringify(trackerSnapshot, null, 2)}\nPlayer tracker snapshot JSON:\n${JSON.stringify(semanticPlayerTrackerSnapshot, null, 2)}\n\n` +
         `Disposition continuity context (plain-language tracker state for rollNeeded and social buckets; use this to decide whether a current NPC reaction or negative social contest is already settled):\n${dispositionContinuityContext}\n\n` +
         `Power actor snapshot JSON (hidden strategic memory; use only for PowerEventShape and PowerActorEnmity, never visible tracker text):\n${JSON.stringify(powerActorSnapshot, null, 2)}\n\n` +
+        `Latent grievance snapshot JSON (hidden unresolved grievance memory; use only for exact PowerActorEnmity.affiliationLinks, never visible tracker text or narration):\n${JSON.stringify(latentGrievanceSnapshot)}\n\n` +
         `User knowledge snapshot JSON (hidden memory about authored or personal facts people may know about {{user}}; use for UserKnowledgeApplication context only, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         `World state snapshot JSON (hidden current scene continuity; use reputationLocation/place as the default current community for EngineContext.userReputationContext.location when applicable):\n${JSON.stringify(worldStateSnapshot, null, 2)}\n\n` +
         `Bound companion snapshot JSON (hidden user state; current established inner companion, possession/shared vessel, intelligent item/weapon, bound spirit/artifact, or implant if any):\n${JSON.stringify(boundCompanionSnapshot, null, 2)}\n\n` +
@@ -1808,8 +1908,9 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer/awareness living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, accepts, agrees to, arranges, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. This includes the NPC accepting {{user}}\'s explicit sexual/intimate proposal, agreeing to join, inviting or calling another willing participant, or saying yes to coming over for sex/intimacy. Mark RomanticBuildup only when a B4 close-bond scene has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior, no active refusal/withdrawal/fear/hostility/coercion/danger/public interruption/boundary limit, and {{user}}\'s latest intimate advance is a natural continuation; ordinary friendliness, tenderness, warmth, one smile, casual flirting, vague chemistry, or user-only escalation is not enough. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. Name pools are deterministic runtime data and not part of this semantic pass; do not generate name candidates or output name fields. ' +
-        'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity entry only when the latest user input meaningfully thwarts, exposes, harms assets of, steals from, publicly humiliates, helps an enemy of, disrupts an operation of, kills/captures people of, or damages reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. Mark knownToActor=Y only for that concrete knowledge path. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
-        'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
+        'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity candidate when the latest user input would, if completed, meaningfully thwart, expose, harm assets of, steal from, publicly humiliate, help an enemy of, disrupt an operation of, kill/capture people of, or damage reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Do not decide whether a rolled action succeeds; deterministic code applies the candidate only when the resolved action succeeds or lands. No-roll entries require an explicitly completed effect. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. Mark knownToActor=Y only for that concrete knowledge path. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
+        'Within PowerActorEnmity, fill latentGrievances only for substantial unresolved harm against a currently ordinary target with no established Power Actor link. Fill affiliationLinks only by copying an exact hidden latent grievance id and citing an explicit established affiliation plus a concrete Power Actor knowledge/discovery path. Deterministic code alone records, links, consumes, and converts these entries into enmity. ' +
+        'Execute PowerEventShape after PowerActorEnmity. Read the Power actor snapshot JSON for hidden pendingEvent and activeAgent state. If no pendingEvent exists, output PowerEventShape.count=0. The pending event type is deterministic and immutable; do not choose, replace, or output an event type. If a pendingEvent exists, shape only that pending event into a compact visible scene instruction or defer/drop it. fit=use_now only when the event can enter the current scene naturally through visible circumstances, ordinary NPC behavior, available routes, messages, trouble, obstruction, or local consequences. fit=defer when scene fit is poor. fit=drop when it contradicts established visible facts. visibleInstruction is for the final narrator but must contain only surface facts. Do not include hidden explanation, sponsor/allegiance, motive labels, secret plan labels, or the words spy, agent, infiltrator, sponsor, handler, hidden motive, hidden allegiance, secret orders, betrayal, plant, or covert operative. For plant_contact, use the provided contactName when available and make the person look like an ordinary plausible scene contact; do not say why they are there. For agent_* events, refer to activeAgent by name as an ordinary established NPC and describe only the visible suggestion, report opportunity, delay, misdirection, or practical setback. ' +
         'Execute TrackerUpdateEngine as explicit-only persistent tracker deltas after RelationshipEngine. TrackerUpdateEngine is for display/state memory only, not outcome resolution. ' +
         'TrackerUpdateEngine.User records only explicit changes to the player condition, wounds, status effects, gear, inventory, tasks, and commitments. Currency changes are finalized post-narration only, so semantic preflight must keep currencyAdd=(none) and currencyRemove=(none). TrackerUpdateEngine.NPC records only explicit changes to tracked or directly affected NPC condition, wounds, status effects, visible gear, and concise stable personality summaries. NPC inventory and currency changes are finalized only by the post-narration tracker after FINAL_NARRATION establishes them. ' +
         'TrackerUpdateEngine.BoundCompanionState reads the full assembled context, not only persona: active prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when explicit established context says an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant is already active/completed/accepted and can communicate with {{user}} internally or through a carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Use status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also use status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, proposals, unclear voices, dreams, hallucination ambiguity, metaphor, rumor, or no explicit change. Do not invent a companion. TrackerUpdateEngine.PendingBoundaryState is post-narration-owned; in semantic preflight output status=unchanged with placeholder fields. ' +
@@ -2171,6 +2272,8 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.powerActorEnmity) missing.push('powerActorEnmity');
     if (!Array.isArray(ledger?.powerActorEnmity?.assessments)) missing.push('powerActorEnmity.assessments');
     if (!Array.isArray(ledger?.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
+    if (!Array.isArray(ledger?.powerActorEnmity?.latentGrievances)) missing.push('powerActorEnmity.latentGrievances');
+    if (!Array.isArray(ledger?.powerActorEnmity?.affiliationLinks)) missing.push('powerActorEnmity.affiliationLinks');
     if (!ledger?.powerEventShape) missing.push('powerEventShape');
     if (!Array.isArray(ledger?.powerEventShape?.events)) missing.push('powerEventShape.events');
     if (!ledger?.trackerUpdateEngine) missing.push('trackerUpdateEngine');
@@ -2319,6 +2422,8 @@ function parseCompactLedger(text, trackerSnapshot) {
         'TrackerUpdateEngine.PendingBoundaryState.evidence',
         'PowerActorAssessment.count',
         'PowerActorEnmity.count',
+        'LatentGrievance.count',
+        'PowerActorAffiliationLink.count',
         'PowerEventShape.count',
     ];
     const missing = required.filter(key => !fields.has(key));
@@ -2412,6 +2517,9 @@ function parseCompactLedger(text, trackerSnapshot) {
         const powerActorRequired = [
             `${prefix}.actor`,
             `${prefix}.actorType`,
+            `${prefix}.sourceTarget`,
+            `${prefix}.actionUnitId`,
+            `${prefix}.explicitlyCompleted`,
             `${prefix}.hasReach`,
             `${prefix}.effect`,
             `${prefix}.severity`,
@@ -2426,13 +2534,54 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
+    const latentGrievanceCount = clampNumber(readNumber(fields, 'LatentGrievance.count', 0), 0, 12);
+    for (let index = 0; index < latentGrievanceCount; index += 1) {
+        const prefix = `LatentGrievance[${index}]`;
+        const latentGrievanceRequired = [
+            `${prefix}.target`,
+            `${prefix}.actionUnitId`,
+            `${prefix}.explicitlyCompleted`,
+            `${prefix}.effect`,
+            `${prefix}.severity`,
+            `${prefix}.reason`,
+            `${prefix}.evidence`,
+            `${prefix}.attributionPath`,
+        ];
+        for (const key of latentGrievanceRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const powerActorAffiliationLinkCount = clampNumber(readNumber(fields, 'PowerActorAffiliationLink.count', 0), 0, 12);
+    for (let index = 0; index < powerActorAffiliationLinkCount; index += 1) {
+        const prefix = `PowerActorAffiliationLink[${index}]`;
+        const affiliationLinkRequired = [
+            `${prefix}.grievanceId`,
+            `${prefix}.target`,
+            `${prefix}.powerActor`,
+            `${prefix}.actorType`,
+            `${prefix}.hasReach`,
+            `${prefix}.affiliationEvidence`,
+            `${prefix}.knownToActor`,
+            `${prefix}.knowledgeEvidence`,
+        ];
+        for (const key of affiliationLinkRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+    }
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
     const powerEventShapeCount = clampNumber(readNumber(fields, 'PowerEventShape.count', 0), 0, 4);
     for (let index = 0; index < powerEventShapeCount; index += 1) {
         const prefix = `PowerEventShape[${index}]`;
         const powerEventRequired = [
             `${prefix}.eventId`,
             `${prefix}.actor`,
-            `${prefix}.eventType`,
             `${prefix}.fit`,
             `${prefix}.visibleInstruction`,
             `${prefix}.contactName`,
@@ -2701,7 +2850,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         });
     }
 
-    const powerActorEnmity = { assessments: [], effects: [] };
+    const powerActorEnmity = { assessments: [], effects: [], latentGrievances: [], affiliationLinks: [] };
     for (let index = 0; index < powerActorAssessmentCount; index += 1) {
         const prefix = `PowerActorAssessment[${index}]`;
         const assessment = normalizePowerActorAssessment({
@@ -2720,6 +2869,9 @@ function parseCompactLedger(text, trackerSnapshot) {
         const effect = normalizePowerActorEffect({
             actor: fields.get(`${prefix}.actor`),
             actorType: fields.get(`${prefix}.actorType`),
+            sourceTarget: fields.get(`${prefix}.sourceTarget`),
+            actionUnitId: fields.get(`${prefix}.actionUnitId`),
+            explicitlyCompleted: readBoolean(fields, `${prefix}.explicitlyCompleted`, false),
             hasReach: readBoolean(fields, `${prefix}.hasReach`, false),
             effect: fields.get(`${prefix}.effect`),
             severity: fields.get(`${prefix}.severity`),
@@ -2728,6 +2880,34 @@ function parseCompactLedger(text, trackerSnapshot) {
         });
         if (effect) powerActorEnmity.effects.push(effect);
     }
+    for (let index = 0; index < latentGrievanceCount; index += 1) {
+        const prefix = `LatentGrievance[${index}]`;
+        const grievance = normalizeLatentGrievanceCandidate({
+            target: fields.get(`${prefix}.target`),
+            actionUnitId: fields.get(`${prefix}.actionUnitId`),
+            explicitlyCompleted: readBoolean(fields, `${prefix}.explicitlyCompleted`, false),
+            effect: fields.get(`${prefix}.effect`),
+            severity: fields.get(`${prefix}.severity`),
+            reason: fields.get(`${prefix}.reason`),
+            evidence: fields.get(`${prefix}.evidence`),
+            attributionPath: fields.get(`${prefix}.attributionPath`),
+        });
+        if (grievance) powerActorEnmity.latentGrievances.push(grievance);
+    }
+    for (let index = 0; index < powerActorAffiliationLinkCount; index += 1) {
+        const prefix = `PowerActorAffiliationLink[${index}]`;
+        const link = normalizePowerActorAffiliationLink({
+            grievanceId: fields.get(`${prefix}.grievanceId`),
+            target: fields.get(`${prefix}.target`),
+            powerActor: fields.get(`${prefix}.powerActor`),
+            actorType: fields.get(`${prefix}.actorType`),
+            hasReach: readBoolean(fields, `${prefix}.hasReach`, false),
+            affiliationEvidence: fields.get(`${prefix}.affiliationEvidence`),
+            knownToActor: readBoolean(fields, `${prefix}.knownToActor`, false),
+            knowledgeEvidence: fields.get(`${prefix}.knowledgeEvidence`),
+        });
+        if (link) powerActorEnmity.affiliationLinks.push(link);
+    }
 
     const powerEventShape = { events: [] };
     for (let index = 0; index < powerEventShapeCount; index += 1) {
@@ -2735,7 +2915,6 @@ function parseCompactLedger(text, trackerSnapshot) {
         const event = normalizePowerEventShape({
             eventId: fields.get(`${prefix}.eventId`),
             actor: fields.get(`${prefix}.actor`),
-            eventType: fields.get(`${prefix}.eventType`),
             fit: fields.get(`${prefix}.fit`),
             visibleInstruction: fields.get(`${prefix}.visibleInstruction`),
             contactName: fields.get(`${prefix}.contactName`),
@@ -3981,6 +4160,12 @@ function normalizeLedger(ledger) {
     ledger.powerActorEnmity.effects = Array.isArray(ledger.powerActorEnmity.effects)
         ? ledger.powerActorEnmity.effects.map(normalizePowerActorEffect).filter(Boolean)
         : [];
+    ledger.powerActorEnmity.latentGrievances = Array.isArray(ledger.powerActorEnmity.latentGrievances)
+        ? ledger.powerActorEnmity.latentGrievances.map(normalizeLatentGrievanceCandidate).filter(Boolean)
+        : [];
+    ledger.powerActorEnmity.affiliationLinks = Array.isArray(ledger.powerActorEnmity.affiliationLinks)
+        ? ledger.powerActorEnmity.affiliationLinks.map(normalizePowerActorAffiliationLink).filter(Boolean)
+        : [];
     ledger.powerEventShape = ledger.powerEventShape || {};
     ledger.powerEventShape.events = Array.isArray(ledger.powerEventShape.events)
         ? ledger.powerEventShape.events.map(normalizePowerEventShape).filter(Boolean)
@@ -4278,10 +4463,18 @@ function normalizePowerActorAssessmentScope(value) {
     return POWER_ACTOR_ASSESSMENT_SCOPES.includes(text) ? text : 'unknown';
 }
 
+function normalizePowerActorActionUnitId(value) {
+    const match = cleanScalar(value).trim().toUpperCase().match(/^A([1-3])$/);
+    return match ? `A${match[1]}` : '';
+}
+
 function normalizePowerActorEffect(value) {
     const source = value && typeof value === 'object' ? value : {};
     const actor = cleanScalar(source.actor ?? source.Actor).replace(/\s+/g, ' ').slice(0, 100);
     if (!actor || isNoneValue(actor)) return null;
+    const sourceTarget = cleanScalar(source.sourceTarget ?? source.SourceTarget).replace(/\s+/g, ' ').slice(0, 100);
+    const actionUnitId = normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId);
+    if (!sourceTarget || isNoneValue(sourceTarget) || !actionUnitId) return null;
     const effect = normalizePowerActorEffectType(source.effect ?? source.Effect);
     const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
     const hasReach = toBoolean(source.hasReach ?? source.HasReach, false);
@@ -4292,11 +4485,58 @@ function normalizePowerActorEffect(value) {
     return {
         actor,
         actorType,
+        sourceTarget,
+        actionUnitId,
+        explicitlyCompleted: toBoolean(source.explicitlyCompleted ?? source.ExplicitlyCompleted, false),
         hasReach,
         effect,
         severity,
         reason,
         knownToActor,
+    };
+}
+
+function normalizeLatentGrievanceCandidate(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const target = cleanScalar(source.target ?? source.Target).replace(/\s+/g, ' ').slice(0, 100);
+    const actionUnitId = normalizePowerActorActionUnitId(source.actionUnitId ?? source.ActionUnitId);
+    const effect = normalizePowerActorEffectType(source.effect ?? source.Effect);
+    const severity = normalizePowerActorSeverity(source.severity ?? source.Severity);
+    const reason = cleanScalar(source.reason ?? source.Reason).replace(/\s+/g, ' ').slice(0, 180);
+    const evidence = cleanScalar(source.evidence ?? source.Evidence).replace(/\s+/g, ' ').slice(0, 220);
+    if (!target || isNoneValue(target) || !actionUnitId || effect === 'none' || !['meaningful', 'major'].includes(severity) || !reason || isNoneValue(reason) || !evidence || isNoneValue(evidence)) return null;
+    const attributionPath = cleanScalar(source.attributionPath ?? source.AttributionPath).replace(/\s+/g, ' ').slice(0, 180);
+    return {
+        target,
+        actionUnitId,
+        explicitlyCompleted: toBoolean(source.explicitlyCompleted ?? source.ExplicitlyCompleted, false),
+        effect,
+        severity,
+        reason,
+        evidence,
+        attributionPath: attributionPath && !isNoneValue(attributionPath) ? attributionPath : '(none)',
+    };
+}
+
+function normalizePowerActorAffiliationLink(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const grievanceId = cleanScalar(source.grievanceId ?? source.GrievanceId).replace(/\s+/g, ' ').slice(0, 100);
+    const target = cleanScalar(source.target ?? source.Target).replace(/\s+/g, ' ').slice(0, 100);
+    const powerActor = cleanScalar(source.powerActor ?? source.PowerActor).replace(/\s+/g, ' ').slice(0, 100);
+    const actorType = cleanScalar(source.actorType ?? source.ActorType).replace(/\s+/g, ' ').slice(0, 80);
+    const affiliationEvidence = cleanScalar(source.affiliationEvidence ?? source.AffiliationEvidence).replace(/\s+/g, ' ').slice(0, 220);
+    const hasReach = toBoolean(source.hasReach ?? source.HasReach, false);
+    if (!grievanceId || isNoneValue(grievanceId) || !target || isNoneValue(target) || !powerActor || isNoneValue(powerActor) || !actorType || isNoneValue(actorType) || !hasReach || !affiliationEvidence || isNoneValue(affiliationEvidence)) return null;
+    const knowledgeEvidence = cleanScalar(source.knowledgeEvidence ?? source.KnowledgeEvidence).replace(/\s+/g, ' ').slice(0, 220);
+    return {
+        grievanceId,
+        target,
+        powerActor,
+        actorType,
+        hasReach: true,
+        affiliationEvidence,
+        knownToActor: toBoolean(source.knownToActor ?? source.KnownToActor, false),
+        knowledgeEvidence: knowledgeEvidence && !isNoneValue(knowledgeEvidence) ? knowledgeEvidence : '(none)',
     };
 }
 
@@ -4306,13 +4546,11 @@ function normalizePowerEventShape(value) {
     const actor = cleanScalar(source.actor ?? source.Actor).replace(/\s+/g, ' ').slice(0, 100);
     if (!eventId || isNoneValue(eventId) || !actor || isNoneValue(actor)) return null;
     const fit = normalizePowerEventFit(source.fit ?? source.Fit);
-    const eventType = normalizePowerEventType(source.eventType ?? source.EventType);
     if (fit === 'none') return null;
     const visibleInstruction = sanitizePowerEventVisibleInstruction(source.visibleInstruction ?? source.VisibleInstruction);
     return {
         eventId,
         actor,
-        eventType,
         fit,
         visibleInstruction: fit === 'use_now' ? visibleInstruction : '(none)',
         contactName: cleanScalar(source.contactName ?? source.ContactName).replace(/\s+/g, ' ').slice(0, 80) || '(none)',
@@ -4389,6 +4627,29 @@ function sanitizePowerActorSnapshotForSemantic(value = {}) {
         };
     }
     return result;
+}
+
+function sanitizeLatentGrievanceSnapshotForSemantic(value = []) {
+    const source = Array.isArray(value)
+        ? value
+        : Array.isArray(value?.entries)
+            ? value.entries
+            : [];
+    return source.map(raw => {
+        const item = raw && typeof raw === 'object' ? raw : {};
+        const id = cleanScalar(item.id ?? item.Id).replace(/\s+/g, ' ').slice(0, 100);
+        const target = cleanScalar(item.target ?? item.Target).replace(/\s+/g, ' ').slice(0, 100);
+        const effect = normalizePowerActorEffectType(item.effect ?? item.Effect);
+        const severity = normalizePowerActorSeverity(item.severity ?? item.Severity);
+        if (!id || !target || effect === 'none' || !['meaningful', 'major'].includes(severity)) return null;
+        return {
+            id,
+            target,
+            effect,
+            severity,
+            reason: cleanScalar(item.reason ?? item.Reason).replace(/\s+/g, ' ').slice(0, 180) || '(none)',
+        };
+    }).filter(Boolean).slice(-24);
 }
 
 function sanitizeUserKnowledgeSnapshotForSemantic(value = {}) {
@@ -4582,6 +4843,8 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.powerActorEnmity) missing.push('powerActorEnmity');
     if (!Array.isArray(ledger.powerActorEnmity?.assessments)) missing.push('powerActorEnmity.assessments');
     if (!Array.isArray(ledger.powerActorEnmity?.effects)) missing.push('powerActorEnmity.effects');
+    if (!Array.isArray(ledger.powerActorEnmity?.latentGrievances)) missing.push('powerActorEnmity.latentGrievances');
+    if (!Array.isArray(ledger.powerActorEnmity?.affiliationLinks)) missing.push('powerActorEnmity.affiliationLinks');
     if (!ledger.powerEventShape) missing.push('powerEventShape');
     if (!Array.isArray(ledger.powerEventShape?.events)) missing.push('powerEventShape.events');
     if (!ledger.trackerUpdateEngine) missing.push('trackerUpdateEngine');
