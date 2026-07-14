@@ -3,10 +3,12 @@ import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, applyPendingBoundaryDelta
 import {
     addEphemeralStoppingString,
     applyConnectionProfileName,
+    canGenerate,
     canSubscribeToEvent,
     clearNotification,
     extension_settings,
     flushEphemeralStoppingStrings,
+    generate as generateSillyTavern,
     generateRawData,
     getActiveConnectionProfileName,
     getActiveUserAvatar,
@@ -31,7 +33,7 @@ import {
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
-import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendSemanticProfileTextRequest } from './semantic-extractor.js';
+import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -49,6 +51,7 @@ import {
 } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
+import { applyProseGuardEdits, parseProseGuardEditPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
 import { applyCurrencyDelta, applyEconomyDelta, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, renderEconomyTrackerContext } from './economy.js';
 
@@ -95,8 +98,9 @@ const PROSE_GUARD_HIDDEN_MESSAGE_CLASS = 'structured-preflight-proseguard-hidden
 const PROSE_GUARD_HIDDEN_TEXT_CLASS = 'structured-preflight-proseguard-hidden-text';
 const PROSE_GUARD_DEFER_MS = 0;
 const PROSE_GUARD_TIMEOUT_MS = 90000;
-const COMBINED_POST_PASS_NARRATION_START = 'BEGIN_CORRECTED_NARRATION';
-const COMBINED_POST_PASS_NARRATION_END = 'END_CORRECTED_NARRATION';
+const PROSE_GUARD_TOOL_NAME = 'submit_prose_guard_edits';
+const POST_NARRATION_TOOL_NAME = 'submit_post_narration_pass';
+const TRACKER_DELTA_TOOL_NAME = 'submit_tracker_delta';
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
 const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
@@ -620,7 +624,8 @@ const state = {
     subscribed: false,
 
     pendingGeneration: null,
-    narratorDepthReplay: null,
+    preflightDryRun: null,
+    narratorGeneration: null,
     internalGenerationStopPending: false,
     internalGenerationStopTimer: null,
 
@@ -2081,13 +2086,13 @@ function hasNarratorDepthPrompt(context = getContext()) {
 }
 
 function isActiveNarratorDepthPromptContent(content) {
-    const replayText = String(state.narratorDepthReplay?.narratorModelContext || '').trim();
-    if (!replayText) return false;
+    const narratorText = String(state.narratorGeneration?.narratorModelContext || '').trim();
+    if (!narratorText) return false;
     const text = String(content || '').trim();
-    if (text === replayText || text.includes(replayText)) return true;
-    const macroTolerantReplayText = escapeRegExp(replayText)
+    if (text === narratorText || text.includes(narratorText)) return true;
+    const macroTolerantNarratorText = escapeRegExp(narratorText)
         .replace(/\\\{\\\{(?:user|char)\\\}\\\}/gi, '[\\s\\S]{1,160}');
-    return new RegExp(macroTolerantReplayText).test(text);
+    return new RegExp(macroTolerantNarratorText).test(text);
 }
 
 function chatHasNarratorDepthPrompt(chat) {
@@ -2102,23 +2107,23 @@ function chatHasNarratorDepthPrompt(chat) {
     });
 }
 
-function clearNarratorDepthReplayTimer() {
-    if (state.narratorDepthReplay?.restartTimer) {
-        clearTimeout(state.narratorDepthReplay.restartTimer);
-        state.narratorDepthReplay.restartTimer = null;
+function clearNarratorGenerationTimer() {
+    if (state.narratorGeneration?.restartTimer) {
+        clearTimeout(state.narratorGeneration.restartTimer);
+        state.narratorGeneration.restartTimer = null;
     }
 }
 
-function armNarratorDepthReplay({ context, pendingGeneration, pendingRun, narratorContext, narratorModelContext, generationMode, spacingLabel }) {
+function armNarratorGeneration({ context, pendingGeneration, pendingRun, narratorContext, narratorModelContext, generationMode, spacingLabel }) {
     const nativePrompt = setNarratorDepthPrompt(context, narratorModelContext);
-    clearNarratorDepthReplayTimer();
+    clearNarratorGenerationTimer();
 
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const runEpoch = Number(pendingGeneration?.runEpoch ?? state.runEpoch);
     const chatId = String(pendingGeneration?.chatId ?? getChatId(context));
     const personaId = String(pendingGeneration?.personaId ?? getActiveUserAvatar() ?? '');
 
-    const replay = {
+    const generation = {
         id,
         runEpoch,
         chatId,
@@ -2141,15 +2146,15 @@ function armNarratorDepthReplay({ context, pendingGeneration, pendingRun, narrat
         restartTimer: null,
     };
 
-    state.narratorDepthReplay = replay;
+    state.narratorGeneration = generation;
     state.pendingRun = pendingRun;
     state.lastNarratorHandoff = narratorContext;
-    return replay;
+    return generation;
 }
 
-function clearNarratorDepthReplayState() {
-    clearNarratorDepthReplayTimer();
-    state.narratorDepthReplay = null;
+function clearNarratorGenerationState() {
+    clearNarratorGenerationTimer();
+    state.narratorGeneration = null;
 }
 
 function clearInternalGenerationStopState() {
@@ -2216,8 +2221,123 @@ function getStoryEngineRunOwnerId(runIdentity = {}) {
         .join(':');
 }
 
-function failNarratorDepthReplay(replay, error) {
-    if (state.narratorDepthReplay !== replay || !isCurrentStoryEngineEpoch(replay)) return;
+function createPreflightDryRunMarker() {
+    const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+    return `[SPE_DRY:${nonce}]`;
+}
+
+function chatHasPreflightDryRunMarker(chat, marker) {
+    const expected = String(marker || '');
+    if (!expected || !Array.isArray(chat)) return false;
+    return chat.some(message => {
+        if (typeof message?.content === 'string') return message.content.includes(expected);
+        if (!Array.isArray(message?.content)) return false;
+        return message.content.some(part => typeof part?.text === 'string' && part.text.includes(expected));
+    });
+}
+
+function stripPreflightDryRunMarkerFromChat(chat, marker) {
+    const expected = String(marker || '');
+    if (!expected || !Array.isArray(chat)) return false;
+    let found = false;
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        const message = chat[index];
+        if (typeof message?.content === 'string' && message.content.includes(expected)) {
+            found = true;
+            message.content = message.content.split(expected).join('');
+            if (!message.content.trim()) chat.splice(index, 1);
+            continue;
+        }
+        if (!Array.isArray(message?.content)) continue;
+        let markerFoundInMessage = false;
+        const cleanedParts = [];
+        for (const part of message.content) {
+            if (typeof part?.text !== 'string' || !part.text.includes(expected)) {
+                cleanedParts.push(part);
+                continue;
+            }
+            found = true;
+            markerFoundInMessage = true;
+            const text = part.text.split(expected).join('');
+            const hasNonTextPayload = Object.keys(part).some(key => !['type', 'text'].includes(key));
+            if (text.trim() || hasNonTextPayload) cleanedParts.push({ ...part, text });
+        }
+        if (!markerFoundInMessage) continue;
+        message.content = cleanedParts;
+        if (!message.content.length) chat.splice(index, 1);
+    }
+    return found;
+}
+
+function isOwnedPreflightDryRun(eventData, pendingGeneration = state.pendingGeneration, context = getContext()) {
+    const dryRun = state.preflightDryRun;
+    return Boolean(
+        eventData?.dryRun === true
+        && Array.isArray(eventData?.chat)
+        && dryRun?.phase === 'assembling'
+        && chatHasPreflightDryRunMarker(eventData.chat, dryRun.marker)
+        && pendingGeneration?.runId
+        && pendingGeneration.runId === dryRun.runId
+        && isCurrentStoryEngineRun(dryRun, context)
+    );
+}
+
+function failPreflightDryRun(dryRun, error) {
+    if (state.preflightDryRun !== dryRun || !isCurrentStoryEngineEpoch(dryRun)) return false;
+    state.preflightDryRun = null;
+    state.generationActive = false;
+    state.runningSemanticPass = false;
+    state.pendingGeneration = null;
+    state.pendingRun = null;
+    state.activeRunId = null;
+    state.lastNarratorHandoff = '';
+    state.startAdventureReasoningCleanupPending = false;
+    clearRuntimePrompts();
+    releaseProseGuardDisplayIntercept({ restore: true });
+    clearAllProgress();
+    showBlockingError(error);
+    return true;
+}
+
+async function runPreflightDryRun(context, pendingGeneration) {
+    const dryRun = {
+        runId: pendingGeneration.runId,
+        runEpoch: pendingGeneration.runEpoch,
+        chatId: pendingGeneration.chatId,
+        personaId: pendingGeneration.personaId,
+        phase: 'assembling',
+        error: null,
+        marker: createPreflightDryRunMarker(),
+    };
+    state.preflightDryRun = dryRun;
+
+    try {
+        console.info(`[${EXTENSION_NAME}] assembling semantic preflight through local SillyTavern dry run`);
+        await generateSillyTavern(pendingGeneration.type || 'normal', {
+            automatic_trigger: true,
+            quiet_prompt: dryRun.marker,
+        }, true, context);
+
+        if (state.preflightDryRun !== dryRun || !isCurrentStoryEngineEpoch(dryRun, context)) return false;
+        if (dryRun.phase === 'failed') {
+            throw dryRun.error || new Error('Story Engine semantic preflight dry run failed.');
+        }
+        if (dryRun.phase !== 'complete' || !isNarratorGenerationArmed()) {
+            throw new Error('Story Engine dry run completed without producing a native narrator handoff.');
+        }
+
+        state.preflightDryRun = null;
+        console.info(`[${EXTENSION_NAME}] semantic preflight dry run complete; scheduling one narrator generation`);
+        scheduleNarratorGeneration();
+        return true;
+    } catch (error) {
+        failPreflightDryRun(dryRun, error);
+        return false;
+    }
+}
+
+function failNarratorGeneration(generation, error) {
+    if (state.narratorGeneration !== generation || !isCurrentStoryEngineEpoch(generation)) return;
     clearPendingRunCleanupTimer();
     setChatInputLocked(false);
     clearRuntimePrompts();
@@ -2231,93 +2351,78 @@ function failNarratorDepthReplay(replay, error) {
     showBlockingError(error);
 }
 
-function scheduleNarratorDepthReplay() {
-    const replay = state.narratorDepthReplay;
-    if (!replay) return;
+function scheduleNarratorGeneration() {
+    const generation = state.narratorGeneration;
+    if (!generation) return;
 
-    clearNarratorDepthReplayTimer();
-    replay.restartTimer = setTimeout(() => {
-        replay.restartTimer = null;
-        if (state.narratorDepthReplay !== replay) return;
+    clearNarratorGenerationTimer();
+    generation.restartTimer = setTimeout(() => {
+        generation.restartTimer = null;
+        if (state.narratorGeneration !== generation) return;
 
-        const replayContext = getContext();
-        if (!isCurrentStoryEngineEpoch(replay, replayContext)) return;
+        const narratorContext = getContext();
+        if (!isCurrentStoryEngineEpoch(generation, narratorContext)) return;
         try {
             if (!isStoryEngineEnabled()) {
                 clearRuntimePrompts();
                 return;
             }
-            if (!hasNarratorDepthPrompt(replayContext)) {
-                throw new Error('Story Engine native narrator handoff was cleared before replay; generation aborted before narration.');
-            }
-            if (typeof replayContext?.generate !== 'function') {
-                throw new Error('SillyTavern generate API is unavailable; generation aborted before narration.');
+            if (!hasNarratorDepthPrompt(narratorContext)) {
+                throw new Error('Story Engine native narrator handoff was cleared before generation; generation aborted before narration.');
             }
 
-            replay.phase = 'replaying';
+            generation.phase = 'starting';
             showProgress('Starting narration with native handoff...');
             const generateOptions = { automatic_trigger: true };
-            const adventureReplayPrompt = String(replay.pendingGeneration?.adventureStartPrompt || '').trim();
-            if (adventureReplayPrompt) {
-                generateOptions.quiet_prompt = adventureReplayPrompt;
+            const adventurePrompt = String(generation.pendingGeneration?.adventureStartPrompt || '').trim();
+            if (adventurePrompt) {
+                generateOptions.quiet_prompt = adventurePrompt;
                 generateOptions.quietToLoud = true;
             }
-            Promise.resolve(replayContext.generate(replay.type || 'normal', generateOptions))
-                .catch(error => failNarratorDepthReplay(replay, error));
+            Promise.resolve(generateSillyTavern(generation.type || 'normal', generateOptions, false, narratorContext))
+                .catch(error => failNarratorGeneration(generation, error));
         } catch (error) {
-            failNarratorDepthReplay(replay, error);
+            failNarratorGeneration(generation, error);
         }
     }, 350);
 }
 
-function isNarratorDepthReplayArmed() {
-    return state.narratorDepthReplay?.phase === 'armed';
+function isNarratorGenerationArmed() {
+    return state.narratorGeneration?.phase === 'armed';
 }
 
-function isNarratorDepthReplayPromptPass() {
-    return ['replaying', 'active'].includes(String(state.narratorDepthReplay?.phase || ''));
+function isNarratorGenerationPromptPass() {
+    return ['starting', 'active'].includes(String(state.narratorGeneration?.phase || ''));
 }
 
-function activateNarratorDepthReplayPass(context, contextSize, type) {
-    const replay = state.narratorDepthReplay;
-    if (!replay) return false;
+function activateNarratorGenerationPass(context, contextSize, type) {
+    const generation = state.narratorGeneration;
+    if (!generation) return false;
 
-    if (!isCurrentStoryEngineEpoch(replay, context)) {
-        throw new Error('Story Engine narrator replay belongs to a different chat or expired run.');
+    if (!isCurrentStoryEngineEpoch(generation, context)) {
+        throw new Error('Story Engine narrator generation belongs to a different chat or expired run.');
     }
 
     if (!hasNarratorDepthPrompt(context)) {
-        throw new Error('Story Engine native narrator handoff is missing during replay; generation aborted before narration.');
+        throw new Error('Story Engine native narrator handoff is missing during generation; generation aborted before narration.');
     }
 
-    replay.phase = 'active';
-    replay.type = type || replay.type || 'normal';
-    replay.pendingGeneration = {
-        ...clone(replay.pendingGeneration || {}),
-        runId: replay.id,
-        runEpoch: replay.runEpoch,
-        chatId: replay.chatId,
-        personaId: replay.personaId,
-        type: type || replay.type || 'normal',
+    generation.phase = 'active';
+    generation.type = type || generation.type || 'normal';
+    generation.pendingGeneration = {
+        ...clone(generation.pendingGeneration || {}),
+        runId: generation.id,
+        runEpoch: generation.runEpoch,
+        chatId: generation.chatId,
+        personaId: generation.personaId,
+        type: type || generation.type || 'normal',
         contextSize,
     };
-    state.pendingGeneration = replay.pendingGeneration;
-    state.pendingRun = replay.pendingRun;
-    state.lastNarratorHandoff = replay.narratorContext || '';
-    state.activeRunId = replay.id;
+    state.pendingGeneration = generation.pendingGeneration;
+    state.pendingRun = generation.pendingRun;
+    state.lastNarratorHandoff = generation.narratorContext || '';
+    state.activeRunId = generation.id;
     return true;
-}
-
-function replacePromptWithReplayNotice(chat) {
-    if (!Array.isArray(chat)) return;
-    chat.splice(0, chat.length, {
-        role: 'system',
-        content: [
-            '[STORY_ENGINE_NATIVE_DEPTH_REPLAY]',
-            'The first prompt assembly pass has completed. Do not narrate from this pass.',
-            'Return exactly: Story Engine is preparing the native narrator handoff.',
-        ].join('\n'),
-    });
 }
 
 
@@ -2423,9 +2528,9 @@ function setChatInputLocked(locked, reason = '') {
 function clearRuntimePrompts({ preserveNarratorDepthPrompt = false } = {}) {
     const context = getContext();
     if (!preserveNarratorDepthPrompt) {
-        clearNarratorDepthReplayState();
+        clearNarratorGenerationState();
     } else {
-        clearNarratorDepthReplayTimer();
+        clearNarratorGenerationTimer();
     }
     if (!context?.extensionPrompts) return;
 
@@ -2436,6 +2541,7 @@ function clearRuntimePrompts({ preserveNarratorDepthPrompt = false } = {}) {
 
 function invalidateStoryEnginePipeline() {
     state.runEpoch += 1;
+    state.preflightDryRun = null;
     void semanticStopController.invalidate();
     promptReadyBypassGate.clear();
     clearInternalGenerationStopState();
@@ -2463,7 +2569,7 @@ function disableStoryEngineRuntime() {
     const generationActive = state.generationActive;
     const context = getContext();
     invalidateStoryEnginePipeline();
-    if (generationActive) abortGenerationAfterPromptReady(context);
+    if (generationActive) abortActiveGeneration(context);
     clearPromptOptionPrompts();
     if (state.proseGuardChatObserver) {
         state.proseGuardChatObserver.disconnect();
@@ -8296,7 +8402,7 @@ function syncIdentityInputs(creator) {
 
 function submitPlayerAdventureStartPrompt(prompt, context = getContext(), actionIdentity = null) {
     const text = String(prompt || '').trim();
-    if (!text || typeof context?.generate !== 'function') {
+    if (!text || !canGenerate(context)) {
         notifyError('Could not find SillyTavern generation API to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
         return false;
     }
@@ -8305,11 +8411,11 @@ function submitPlayerAdventureStartPrompt(prompt, context = getContext(), action
         void (async () => {
             if (!isStoryEngineEnabled() || !isCurrentStoryEngineEpoch(requestIdentity, context)) return;
             try {
-                await context.generate('normal', {
+                await generateSillyTavern('normal', {
                     automatic_trigger: true,
                     quiet_prompt: text,
                     quietToLoud: true,
-                });
+                }, false, context);
             } catch (error) {
                 if (!isCurrentStoryEngineEpoch(requestIdentity, context)) return;
                 console.error(`[${EXTENSION_NAME}] adventure start failed`, error);
@@ -9749,7 +9855,7 @@ function sanitizeFinalPromptHistory(chat) {
 
 
         if (typeof message.content === 'string') {
-            if (isNarratorDepthReplayPromptPass() && isActiveNarratorDepthPromptContent(message.content)) {
+            if (isNarratorGenerationPromptPass() && isActiveNarratorDepthPromptContent(message.content)) {
                 continue;
             }
 
@@ -9768,7 +9874,7 @@ function sanitizeFinalPromptHistory(chat) {
                 .map(part => {
 
                     if (part && typeof part === 'object' && typeof part.text === 'string') {
-                        if (isNarratorDepthReplayPromptPass() && isActiveNarratorDepthPromptContent(part.text)) {
+                        if (isNarratorGenerationPromptPass() && isActiveNarratorDepthPromptContent(part.text)) {
                             return part;
                         }
 
@@ -9885,11 +9991,14 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'You are PROSE_GUARD, a strict prose compliance editor.',
         '',
         'TASK:',
-        'Edit TEXT_TO_CHECK only to repair clear prose-rule violations. Preserve the scene exactly.',
+        'Identify only clear prose-rule violations in TEXT_TO_CHECK and return exact replacement edits for those violations. Preserve the scene exactly.',
         'You are not a style improver, summarizer, censor, or second narrator.',
-        'If no violations exist, return TEXT_TO_CHECK unchanged.',
+        'If no violations exist, return an empty proseEdits array.',
         'If you are uncertain whether text violates a rule, leave it unchanged.',
-        'Prefer narrow rewrites over deletion. Delete only invalid after-beat tailing, duplicated user-input restatement, or text that cannot be repaired without changing facts.',
+        'NEVER delete narration. Every edit MUST replace a non-empty exact source span with non-empty corrected prose.',
+        'Placeholders, punctuation-only replacements, and replacements that materially contract the source are invalid.',
+        'Everything outside an accepted edit MUST remain byte-for-byte unchanged.',
+        'Use the smallest complete sentence or contiguous span that can be repaired without changing scene facts.',
         'Repair only clear violations of the Prose Guard rules below.',
         '',
         'PROSE_GUARD_RULES:',
@@ -9960,17 +10069,18 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '5. denotativePhysicality(response): repair specific literal prose/style violations only.',
         '6. inanimateObjectivity(response): repair false agency assigned to objects, weather, architecture, rooms, atmosphere, silence, tension, darkness, or abstractions only.',
         '7. strictEpistemology(response): repair obvious private thoughts, hidden motives, unknown identities, unseen actions, or unrevealed lore only.',
-        '8. linearChronology(response, RECENT_USER_INPUT): start right after the latest user input and remove user-input restatement only.',
-        '9. activeHandoff(response): cut invalid after-beat tailing only.',
+        '8. linearChronology(response, RECENT_USER_INPUT): start right after the latest user input and rewrite user-input restatement as its immediate external consequence only.',
+        '9. activeHandoff(response): repair invalid after-beat tailing without omitting existing scene information.',
         '10. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
         '',
         'PROTECTED FACTS / INTEGRITY LOCK:',
         '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
-        '- Do not add new actions, remove valid pre-boundary actions, add reactions, add dialogue, reveal information, soften refusals, intensify intimacy, or reinterpret what happened.',
-        '- Exception: if explicit after-beat tailing is present, remove only the final trailing sentence or tail fragment after the response beat unless it is required by an explicit resolved mechanic.',
+        '- Do not add or remove actions, reactions, dialogue, information, refusals, intimacy, mechanics, or any other scene content.',
+        '- If explicit after-beat tailing is present, replace the smallest contiguous span containing the handoff and its trailing material so the same information appears before the handoff and the handoff ends the response.',
+        '- A multi-sentence replacement may only reorder or conjoin the existing sentence content. Preserve each original sentence\'s concrete word sequence, dialogue, names, numbers, actions, and facts.',
         '- Preserve valid explicit, sensual, romantic, violent, tense, atmospheric, environmental, and intimate detail. Do not sanitize, soften, summarize, reduce, or desexualize valid content.',
         '- Do not shorten a valid message just because it is rich, vivid, intimate, descriptive, or atmospheric.',
-        '- Do not delete body detail. Replace invalid shorthand with valid concrete prose when needed.',
+        '- Do not delete body detail or any other narration. Replace invalid shorthand with valid concrete prose when needed.',
         '',
         'PASS 1: embodiedPerception(response)',
         'Goal: preserve the same scene content while repairing only clear smell/taste gate violations and obvious spatial-continuity impossibilities.',
@@ -9978,7 +10088,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs, smells, tastes, eats, or drinks, or TEXT_TO_CHECK ties the sensation to a specific close-range physical source that is overpowering and unavoidable at the user position.',
         'Valid smell/taste sources must be concrete and immediate, such as smoke filling the room, blood on a hand, rot beside a body, food or drink in the mouth, chemicals in contact, or fire filling the space.',
         'Repair smell/taste only when it is clearly used for "the air," "the room," "the place," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
-        'If smell/taste is valid, keep at most one mention per beat or major location shift and attach it to the concrete source. Do not add a new smell or taste to replace a removed one.',
+        'If smell/taste is valid, keep at most one mention per beat or major location shift and attach it to the concrete source. Do not add a new smell or taste while repairing another violation.',
         'Keep established position, distance, facing, barriers, cover, doors, walls, line of sight, and reach consistent.',
         'Repair only obvious impossibilities, such as touching a person across the room without movement, seeing through a closed door or wall, hearing precise quiet speech from an implausible distance, or using a new position before movement to that position is narrated.',
         'If the intended scene fact is clear, add the minimum necessary movement, obstruction, uncertainty, or line-of-sight wording. If uncertain, leave unchanged.',
@@ -10049,7 +10159,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT.',
         'If RECENT_USER_INPUT says the user sits, enters, walks, watches, scans, speaks, takes, opens, moves, leans, observes, or looks around, do not write the user doing that same thing again.',
         'Valid continuation may describe what changes because of the declared action: who reacts, what becomes visible from the new position, what sound interrupts, what blocks access, what object is within reach, what NPC says, or what happens next.',
-        'If the first sentence merely repeats the user action, remove that sentence or rewrite it as consequence without adding new user action.',
+        'If the first sentence merely repeats the user action, rewrite it as consequence without adding a new user action or omitting existing scene information.',
         '',
         'PASS 9: activeHandoff(response)',
         'Goal: end at the natural user-centered response beat.',
@@ -10058,27 +10168,31 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'If an NPC speaks or acts toward the user, end on that speech or action once it creates a natural point for the user to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act.',
         'If no NPC is driving the beat, end on the relevant consequence of the user\'s action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.',
         'Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat just to create an endpoint. Never end by prompting the user to act.',
-        'HARD STOP: if explicit after-beat tailing is present, trim only the final trailing sentence or tail fragment after the response beat unless it is required by an explicit resolved mechanic.',
+        'HARD STOP: if explicit after-beat tailing is present, return one replacement for the smallest contiguous span containing the handoff and tail. Preserve the same information, place supporting detail before the handoff, and end on the handoff.',
         'Ban explicit waiting, "she waits," "awaits your response," "what do you do," "the choice is yours," all-eyes-on-user framing, mood-only silence, unrelated ambience, outro paragraphs, scene-break tails, and extra narration after the response beat.',
-        'Do not replace after-beat tailing with different after-beat tailing. Trim only the final tail fragment.',
+        'Do not replace after-beat tailing with different after-beat tailing. Do not omit the existing scene information.',
         '',
         'PASS 10: integrityCheck(original, corrected)',
-        'Goal: return only a corrected narration that preserves the resolved scene.',
-        'Before answering, verify that the corrected text did not change protected facts, did not add a new scene beat, did not delete a valid pre-boundary scene beat, did not reduce valid intimacy/detail/intensity, and did not reinterpret mechanics or character decisions.',
-        'If a proposed correction would change protected facts, keep the original valid content and only remove the prose violation.',
-        'If a sentence is both a valid resolved scene beat and contains a prose violation, rewrite the sentence narrowly instead of deleting it.',
-        'Deletion is a last resort except for endpoint tailing or repeated user-action restatement.',
+        'Goal: return only exact replacement edits that preserve the resolved scene.',
+        'Before answering, verify that every replacement preserves protected facts, adds no scene beat, omits no scene beat, preserves valid intimacy/detail/intensity, and does not reinterpret mechanics or character decisions.',
+        'If a proposed correction would change protected facts, return no edit for that text.',
+        'If a sentence is both a valid resolved scene beat and contains a prose violation, rewrite the sentence narrowly while preserving the entire beat.',
+        'Deletion is forbidden, including endpoint tailing and repeated user-action restatement. Repair through non-empty replacement only.',
         '',
         'GOOD REPLACEMENT PATTERN:',
         'Invalid: "Her jaw tightened. The word landed flat and hard, dropped like a stone between them."',
         'Valid: "She set her hand against his wrist and pushed it away. She said the word once, low and clear, then stepped back to keep distance between them."',
         'Invalid after-beat tail: "She says, \"Come with me.\" A cart rattles past behind her, and two guards continue down the street."',
-        'Valid after-beat cut: "She says, \"Come with me.\"',
+        'Valid information-preserving reorder: "A cart rattles past behind her while two guards continue down the street. She says, \"Come with me.\""',
         'Invalid chronology restatement: User said "I take a seat and scan the room." Narration says "You take the empty desk and let your gaze drift across the room."',
         'Valid chronology continuation: "The nearest students stop whispering. A girl in the second row catches the look and turns back to her slate."',
         '',
         'OUTPUT CONTRACT:',
-        'Return only the corrected narration text. No labels, bullets, commentary, markdown fences, XML, JSON, analysis, or preamble.',
+        `Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
+        'The JSON shape is {"proseEdits":[{"originalText":"exact source substring","replacementText":"non-empty corrected substring","occurrence":1}]}.',
+        'originalText MUST be copied exactly from TEXT_TO_CHECK. occurrence is the one-based occurrence of originalText in TEXT_TO_CHECK.',
+        'replacementText MUST contain substantive corrected narration and preserve all valid source information. Punctuation-only, placeholder, destructive, or materially contracted replacements are invalid. Return {"proseEdits":[]} when no repair is certain.',
+        'Do not return corrected narration, commentary, markdown fences, analysis, or any other fields.',
         '',
         '==RECENT_USER_INPUT==',
         latestUserText || '(empty)',
@@ -10086,14 +10200,17 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '==TEXT_TO_CHECK==',
         narrationText || '(empty)',
         '',
-        '==CORRECTED_TEXT==',
+        '==PROSE_GUARD_EDITS==',
     ].join('\n');
 }
 
 function sanitizeProseGuardResponse(raw, fallbackText) {
-    const extracted = extractGeneratedText(raw);
-    const cleaned = sanitizeAssistantNarration(stripStructuredArtifacts(stripNarratorMetaPrefix(extracted))).trim();
-    return cleaned || fallbackText;
+    const structuredPayload = raw && typeof raw === 'object' && !Array.isArray(raw) && Array.isArray(raw.proseEdits)
+        ? raw
+        : null;
+    const extracted = structuredPayload ? structuredPayload : extractGeneratedText(raw) || String(raw || '');
+    const editPayload = parseProseGuardEditPayload(extracted);
+    return applyProseGuardEdits(fallbackText, editPayload).narrationText;
 }
 
 function parseProseGuardBannedPhraseList(value) {
@@ -10152,6 +10269,19 @@ function findSentenceBoundsForIndex(text, matchStart, matchEnd) {
     return { start, end };
 }
 
+function findTextOccurrenceAtIndex(source, search, targetIndex) {
+    let occurrence = 0;
+    let fromIndex = 0;
+    while (fromIndex <= targetIndex) {
+        const found = source.indexOf(search, fromIndex);
+        if (found < 0 || found > targetIndex) break;
+        occurrence += 1;
+        if (found === targetIndex) return occurrence;
+        fromIndex = found + Math.max(1, search.length);
+    }
+    return Math.max(1, occurrence);
+}
+
 function collectTargetedProseBanFindings(narrationText, settings = getSettings()) {
     const source = String(narrationText ?? '');
     if (!source.trim()) return [];
@@ -10171,6 +10301,8 @@ function collectTargetedProseBanFindings(narrationText, settings = getSettings()
                 const bounds = findSentenceBoundsForIndex(source, index, matchEnd);
                 const sentence = source.slice(bounds.start, bounds.end).trim();
                 if (!sentence) continue;
+                const sentenceStart = source.indexOf(sentence, bounds.start);
+                const occurrence = findTextOccurrenceAtIndex(source, sentence, sentenceStart);
 
                 const key = `${rule.ruleName}\u0000${phrase.toLowerCase()}\u0000${bounds.start}\u0000${bounds.end}`;
                 if (seen.has(key)) continue;
@@ -10180,6 +10312,7 @@ function collectTargetedProseBanFindings(narrationText, settings = getSettings()
                     phrase,
                     matchedPhrase,
                     sentence,
+                    occurrence,
                     start: bounds.start,
                     end: bounds.end,
                     repairInstruction: rule.repairInstruction,
@@ -10197,6 +10330,7 @@ function formatTargetedProseBanFindings(findings) {
         `   banned phrase: ${finding.phrase}`,
         `   matched text: ${finding.matchedPhrase}`,
         `   full sentence to rewrite: ${finding.sentence}`,
+        `   one-based occurrence of that exact sentence: ${finding.occurrence}`,
         `   required repair: ${finding.repairInstruction}`,
     ].join('\n')).join('\n\n');
 }
@@ -10209,9 +10343,10 @@ function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserTe
         '',
         'TASK:',
         'The deterministic scanner has already confirmed banned phrase violations in TEXT_TO_CHECK.',
-        'Rewrite the ENTIRE sentence containing each detected violation. Do not replace only the phrase.',
+        'Return one exact replacement edit for the ENTIRE sentence containing each detected violation. Do not replace only the phrase.',
         'If one sentence has multiple violations, rewrite that sentence once so it obeys every cited rule.',
-        'Leave all other compliant sentences unchanged.',
+        'Everything outside an accepted edit MUST remain byte-for-byte unchanged.',
+        'NEVER delete narration. Every replacementText MUST contain substantive corrected prose; punctuation-only, placeholder, destructive, or materially contracted replacements are invalid.',
         '',
         'GOVERNING RULES:',
         '- strictBehaviorism: character/NPC state and emotion must be rendered through external behavior/action only. No involuntary physiology, body-cue shorthand, emotional shorthand, internal labels, eye-language, micro-expressions, autonomic tells, or mouth/jaw opening-closing loops.',
@@ -10219,13 +10354,15 @@ function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserTe
         '- inanimateObjectivity: inanimate things may have physical properties/effects only. No agency, awareness, will, emotion, watching, waiting, breathing, swallowing, whispering, judgment, threat, or intent assigned to objects, places, weather, darkness, silence, tension, atmosphere, or abstractions.',
         '',
         'REPAIR REQUIREMENTS:',
-        '- Rewrite the full sentence containing each listed banned phrase.',
-        '- Remove the banned phrase and its workaround pattern completely.',
+        '- Replace the full sentence containing each listed banned phrase with a compliant, non-empty sentence.',
+        '- The replacement must contain none of the banned phrase or its workaround pattern.',
         '- Preserve the same speaker, dialogue meaning, scene facts, action order, intensity, consent/refusal, mechanics, and final handoff.',
         '- Do not add new actions, dialogue, events, thoughts, emotions, motives, lore, mechanics, or outcomes.',
         '- Do not replace one banned phrase with another body cue, metaphor, atmospheric shorthand, or personification.',
         '- Use concrete physical prose: chosen action, speech content, posture that changes action, movement, spacing, contact, object use, sound, material state, obstruction, lighting, weather behavior, visible consequence.',
-        '- Return the corrected narration only.',
+        `- Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
+        '- Use {"proseEdits":[{"originalText":"exact full sentence","replacementText":"non-empty corrected sentence","occurrence":1}]}.',
+        '- Copy originalText exactly from TEXT_TO_CHECK. Return no corrected narration outside the edit payload.',
         '',
         'DETERMINISTIC_FINDINGS:',
         formatTargetedProseBanFindings(findings),
@@ -10236,7 +10373,7 @@ function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserTe
         '==TEXT_TO_CHECK==',
         narrationText || '(empty)',
         '',
-        '==CORRECTED_TEXT==',
+        '==PROSE_GUARD_EDITS==',
     ].join('\n');
 }
 
@@ -10246,15 +10383,19 @@ async function requestTargetedProseBanRepair(narrationText, findings, latestUser
     }
     const prompt = buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserText);
     const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 600));
+    const toolDefinition = buildPostNarrationToolDefinition(PROSE_GUARD_TOOL_NAME, { includeProseEdits: true });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
-            if (settings?.semanticProfileId) {
-                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
-                    temperature: 0,
-                });
-            }
-            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' });
+            return await requestPostNarrationUtility({
+                settings,
+                prompt,
+                responseLength,
+                toolDefinition,
+                purpose: 'targeted Prose Guard repair',
+                validateStructured: raw => sanitizeProseGuardResponse(raw, narrationText),
+                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' }),
+            });
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -10298,7 +10439,7 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, latestUserText
         }
         return {
             narrationText: repairedText,
-            changed: String(repairedText ?? '').trim() !== String(narrationText ?? '').trim(),
+            changed: String(repairedText ?? '') !== String(narrationText ?? ''),
             findings,
             remainingFindings,
         };
@@ -10323,11 +10464,11 @@ function buildTrackerReferencePrompt({ pendingRun, messageKey, trackerDisplaySna
     return buildPostNarrationTrackerPrompt({
         pendingRun,
         messageKey,
-        narrationText: 'CORRECTED_NARRATION_FROM_FIRST_SECTION',
+        narrationText: 'TEXT_TO_CHECK_AFTER_APPLYING_PROSE_GUARD_EDITS',
         trackerDisplaySnapshot,
     })
         .replace('You update tracker state only. Do not narrate, roleplay, explain, or add prose.', 'For the tracker section, update tracker state only. Do not roleplay, explain, or add prose there.')
-        .replace('Return exactly one story_engine_tracker_delta fenced block and nothing else.', 'For this combined pass, place exactly one story_engine_tracker_delta fenced block after the corrected narration section.');
+        .replace('Return exactly one story_engine_tracker_delta fenced block and nothing else.', 'For this combined pass, place exactly one story_engine_tracker_delta fenced block after the Prose Guard edit block.');
 }
 
 function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
@@ -10335,12 +10476,13 @@ function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationTex
         'STORY_ENGINE_COMBINED_POST_NARRATION_PASS',
         '',
         'You are a private Story Engine finalization pass. Complete exactly two tasks in order:',
-        '1. Correct TEXT_TO_CHECK using the Prose Guard rules.',
-        '2. Extract tracker delta from CORRECTED_NARRATION using the Tracker Update rules.',
+        '1. Return exact replacement edits for clear violations in TEXT_TO_CHECK using the Prose Guard rules.',
+        '2. Extract tracker delta from TEXT_TO_CHECK after mentally applying those exact edits, using the Tracker Update rules.',
         '',
         'Do not narrate, roleplay, explain, summarize, add commentary, or output anything outside the required sections.',
-        'The tracker delta must be based on CORRECTED_NARRATION, not on rejected or removed draft text.',
-        'If no prose corrections are needed, CORRECTED_NARRATION must equal TEXT_TO_CHECK.',
+        'The tracker delta MUST describe the narration produced by applying proseEdits, not rejected draft wording.',
+        'If no prose corrections are needed, return an empty proseEdits array and derive the tracker delta from TEXT_TO_CHECK unchanged.',
+        'NEVER return replacement narration and NEVER delete narration. Only return exact, non-empty replacement edits.',
         '',
         '==PROSE_GUARD_CONTRACT==',
         'Use this as correction rules only; its standalone output contract is superseded by STRICT_OUTPUT_CONTRACT below.',
@@ -10351,10 +10493,10 @@ function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationTex
         buildTrackerReferencePrompt({ pendingRun, messageKey, trackerDisplaySnapshot }),
         '',
         '==STRICT_OUTPUT_CONTRACT==',
-        `Return exactly these two sections, in this order:`,
-        COMBINED_POST_PASS_NARRATION_START,
-        '<corrected narration only>',
-        COMBINED_POST_PASS_NARRATION_END,
+        'Return exactly these two sections, in this order:',
+        PROSE_GUARD_EDITS_START,
+        '{"proseEdits":[{"originalText":"exact source substring","replacementText":"non-empty corrected substring","occurrence":1}]}',
+        PROSE_GUARD_EDITS_END,
         '',
         '```story_engine_tracker_delta',
         'BEGIN_TRACKER_DELTA',
@@ -10362,7 +10504,7 @@ function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationTex
         'END_TRACKER_DELTA',
         '```',
         '',
-        'No labels other than the required delimiters. No analysis. No prose outside corrected narration. No tracker text inside corrected narration.',
+        'Use {"proseEdits":[]} when no prose repair is certain. No labels other than the required delimiters. No analysis or corrected narration.',
         '',
         '==TEXT_TO_CHECK==',
         narrationText || '(empty)',
@@ -10374,29 +10516,112 @@ function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationTex
     ].join('\n');
 }
 
-function extractCombinedCorrectedNarration(raw, fallbackText) {
-    const extracted = extractGeneratedText(raw);
-    const source = String(extracted || raw || '');
-    const pattern = new RegExp(`${escapeRegExp(COMBINED_POST_PASS_NARRATION_START)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(COMBINED_POST_PASS_NARRATION_END)}`, 'i');
-    const match = source.match(pattern);
-    if (!match) {
-        throw new Error('Combined post-pass response missing corrected narration section.');
-    }
-    const cleaned = sanitizeAssistantNarration(stripStructuredArtifacts(stripNarratorMetaPrefix(match[1]))).trim();
-    if (!cleaned) {
-        throw new Error('Combined post-pass corrected narration was empty.');
-    }
-    return cleaned || fallbackText;
-}
-
 function parseCombinedPostNarrationResponse(raw, fallbackText) {
-    const correctedNarration = extractCombinedCorrectedNarration(raw, fallbackText);
-    const trackerDeltaText = extractTrackerDeltaText(raw);
+    const correctedNarration = sanitizeProseGuardResponse(raw, fallbackText);
+    const structuredTrackerDelta = raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? String(raw.trackerDelta || '')
+        : '';
+    const rawText = structuredTrackerDelta || extractGeneratedText(raw) || String(raw || '');
+    const trackerDeltaText = extractTrackerDeltaText(rawText);
     if (!trackerDeltaText) {
         throw new Error('Combined post-pass response missing tracker delta block.');
     }
     const trackerDelta = parseNarratorTrackerDelta(trackerDeltaText, correctedNarration);
     return { correctedNarration, trackerDelta };
+}
+
+function parsePostNarrationTrackerResponse(raw, narrationText) {
+    const structuredTrackerDelta = raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? String(raw.trackerDelta || '')
+        : '';
+    const rawText = structuredTrackerDelta || extractGeneratedText(raw) || String(raw || '');
+    const trackerDeltaText = extractTrackerDeltaText(rawText) || rawText;
+    return parseNarratorTrackerDelta(trackerDeltaText, narrationText);
+}
+
+function buildPostNarrationToolDefinition(name, { includeProseEdits = false, includeTrackerDelta = false } = {}) {
+    const properties = {};
+    const required = [];
+    if (includeProseEdits) {
+        required.push('proseEdits');
+        properties.proseEdits = {
+            type: 'array',
+            description: 'Exact, information-preserving replacement edits for clear Prose Guard violations. Empty when no repair is certain.',
+            items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['originalText', 'replacementText', 'occurrence'],
+                properties: {
+                    originalText: { type: 'string', description: 'Exact non-empty contiguous substring copied byte-for-byte from TEXT_TO_CHECK.' },
+                    replacementText: { type: 'string', description: 'Substantive corrected narration that replaces only originalText without deleting or materially contracting its valid information.' },
+                    occurrence: { type: 'integer', description: 'Positive one-based occurrence of originalText in TEXT_TO_CHECK.' },
+                },
+            },
+        };
+    }
+    if (includeTrackerDelta) {
+        required.push('trackerDelta');
+        properties.trackerDelta = {
+            type: 'string',
+            description: 'The complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger derived from narration after applying proseEdits.',
+        };
+    }
+    return {
+        name,
+        description: includeProseEdits && includeTrackerDelta
+            ? 'Submit exact Prose Guard replacement edits and the tracker delta derived from the corrected narration.'
+            : includeProseEdits
+                ? 'Submit exact non-deleting replacement edits for clear Prose Guard violations.'
+                : 'Submit the validated post-narration tracker delta.',
+        parameters: {
+            type: 'object',
+            additionalProperties: false,
+            required,
+            properties,
+        },
+    };
+}
+
+function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
+    const fields = Object.keys(toolDefinition?.parameters?.properties || {});
+    const fieldInstructions = [];
+    if (fields.includes('proseEdits')) {
+        fieldInstructions.push('Put only exact, substantive, information-preserving replacement edits in proseEdits. Use [] when no violation is certain. Never delete, materially contract, or return full rewritten narration.');
+    }
+    if (fields.includes('trackerDelta')) {
+        fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on TEXT_TO_CHECK after applying proseEdits when proseEdits is present.');
+    }
+    return [
+        { role: 'user', content: String(prompt || '') },
+        {
+            role: 'user',
+            content: [
+                `NATIVE DEEPSEEK TOOL OUTPUT OVERRIDE: Call ${toolDefinition.name} exactly once.`,
+                'Do not emit visible text, JSON, markdown, narration, analysis, or a text ledger outside the tool call.',
+                ...fieldInstructions,
+                'The preceding task rules remain authoritative; only its text-output formatting is superseded by this tool contract.',
+            ].join('\n'),
+        },
+    ];
+}
+
+async function requestPostNarrationUtility({ settings, prompt, responseLength, toolDefinition, purpose, validateStructured, generateFallback }) {
+    if (settings?.semanticProfileId) {
+        if (isOfficialDeepSeekProfile(settings)) {
+            try {
+                const toolPrompt = buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition);
+                const structured = await sendDeepSeekProfileStructuredRequest(toolPrompt, responseLength, settings, toolDefinition);
+                validateStructured?.(structured);
+                return structured;
+            } catch (error) {
+                console.warn(`[${EXTENSION_NAME}] official DeepSeek ${purpose} tool call failed; falling back to validated text output.`, error);
+            }
+        }
+        return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
+            temperature: 0,
+        });
+    }
+    return await generateFallback();
 }
 
 async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }, requestOptions = {}) {
@@ -10407,15 +10632,22 @@ async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrat
     const proseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
     const trackerLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
     const responseLength = Math.min(9000, proseLength + trackerLength + 700);
+    const toolDefinition = buildPostNarrationToolDefinition(POST_NARRATION_TOOL_NAME, {
+        includeProseEdits: true,
+        includeTrackerDelta: true,
+    });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
-            if (settings?.semanticProfileId) {
-                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
-                    temperature: 0,
-                });
-            }
-            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'combined post-narration pass' });
+            return await requestPostNarrationUtility({
+                settings,
+                prompt,
+                responseLength,
+                toolDefinition,
+                purpose: 'combined post-narration pass',
+                validateStructured: raw => parseCombinedPostNarrationResponse(raw, narrationText),
+                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'combined post-narration pass' }),
+            });
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -10450,15 +10682,19 @@ async function requestProseGuardCorrection(narrationText, latestUserText = '', r
     }
     const prompt = buildProseGuardPrompt(narrationText, latestUserText);
     const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
+    const toolDefinition = buildPostNarrationToolDefinition(PROSE_GUARD_TOOL_NAME, { includeProseEdits: true });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
-            if (settings?.semanticProfileId) {
-                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
-                    temperature: 0,
-                });
-            }
-            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'Prose Guard' });
+            return await requestPostNarrationUtility({
+                settings,
+                prompt,
+                responseLength,
+                toolDefinition,
+                purpose: 'Prose Guard',
+                validateStructured: raw => sanitizeProseGuardResponse(raw, narrationText),
+                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'Prose Guard' }),
+            });
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -10730,17 +10966,19 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
     }
     const prompt = buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot });
     const responseLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
+    const toolDefinition = buildPostNarrationToolDefinition(TRACKER_DELTA_TOOL_NAME, { includeTrackerDelta: true });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withTrackerGenerationSettings(async settings => {
-            if (settings?.semanticProfileId) {
-                return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
-                    temperature: 0,
-                });
-
-            }
-
-            return await generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' });
+            return await requestPostNarrationUtility({
+                settings,
+                prompt,
+                responseLength,
+                toolDefinition,
+                purpose: 'post-narration tracker update',
+                validateStructured: raw => parsePostNarrationTrackerResponse(raw, narrationText),
+                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' }),
+            });
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -10986,8 +11224,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
                     }, requestOptions);
                     if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                    const trackerDeltaText = extractTrackerDeltaText(trackerRaw) || String(trackerRaw || '');
-                    postNarrationDelta = parseNarratorTrackerDelta(trackerDeltaText, narrationText);
+                    postNarrationDelta = parsePostNarrationTrackerResponse(trackerRaw, narrationText);
                 }
 
                 const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
@@ -11257,7 +11494,7 @@ function handleChatChanged() {
     const generationActive = state.generationActive;
     invalidateStoryEnginePipeline();
     const context = getContext();
-    if (generationActive) abortGenerationAfterPromptReady(context);
+    if (generationActive) abortActiveGeneration(context);
     injectPromptOptionPrompts();
     getPlayerRoot(context);
     restoreTrackerFromLatestDisplaySnapshot(context);
@@ -11281,7 +11518,7 @@ function handlePersonaChanged() {
     const generationActive = state.generationActive;
     invalidateStoryEnginePipeline();
     const context = getContext();
-    if (generationActive) abortGenerationAfterPromptReady(context);
+    if (generationActive) abortActiveGeneration(context);
     injectPromptOptionPrompts();
     getPlayerRoot(context);
     const renderIdentity = createStoryEngineEpochIdentity(context);
@@ -11294,8 +11531,9 @@ function handlePersonaChanged() {
 
 
 function handleGenerationLifecycleStart(type, params, dryRun) {
-    state.generationActive = isStoryEngineEnabled() && dryRun !== true;
     ensureProseGuardDisplayInterceptor(type, params, dryRun);
+    if (dryRun === true) return;
+    state.generationActive = isStoryEngineEnabled();
 }
 
 
@@ -11309,9 +11547,9 @@ function handleGenerationLifecycleEnd() {
     clearAllProgress();
     state.pendingGeneration = null;
     state.startAdventureReasoningCleanupPending = false;
-    if (isNarratorDepthReplayArmed()) {
+    if (isNarratorGenerationArmed()) {
         clearRuntimePrompts({ preserveNarratorDepthPrompt: true });
-        scheduleNarratorDepthReplay();
+        scheduleNarratorGeneration();
         return;
     }
     clearRuntimePrompts();
@@ -11439,10 +11677,10 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
     const interceptorIdentity = createStoryEngineEpochIdentity(context);
 
-    if (isNarratorDepthReplayPromptPass()) {
+    if (isNarratorGenerationPromptPass()) {
         try {
             injectPromptOptionPrompts();
-            activateNarratorDepthReplayPass(context, contextSize, type);
+            activateNarratorGenerationPass(context, contextSize, type);
             showProgress('Preparing native narrator handoff...');
             return false;
         } catch (error) {
@@ -11551,7 +11789,24 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
     releaseProseGuardDisplayIntercept({ restore: true });
     showProgress('Computing structured pre-flight...');
 
-    return false;
+    const pendingGeneration = state.pendingGeneration;
+    if (isBeginningAdventureIntroGeneration(pendingGeneration, context)) {
+        return false;
+    }
+
+    if (typeof abort !== 'function') {
+        const error = new Error('SillyTavern generation interceptor abort API is unavailable; generation stopped before unsafe narration.');
+        state.generationActive = false;
+        state.pendingGeneration = null;
+        state.activeRunId = null;
+        clearAllProgress();
+        showBlockingError(error);
+        return true;
+    }
+
+    abort(true);
+    await runPreflightDryRun(context, pendingGeneration);
+    return true;
 };
 
 
@@ -11561,7 +11816,7 @@ async function handleChatCompletionPromptReady(eventData) {
         return;
     }
     if (promptReadyBypassGate.isActive() || state.runningSemanticPass) return;
-    if (!eventData || eventData.dryRun || !Array.isArray(eventData.chat)) return;
+    if (!eventData || !Array.isArray(eventData.chat)) return;
 
     if (!state.pendingGeneration) return;
 
@@ -11572,6 +11827,8 @@ async function handleChatCompletionPromptReady(eventData) {
     if (!context) return;
 
     const pendingGeneration = state.pendingGeneration;
+    const ownedPreflightDryRun = isOwnedPreflightDryRun(eventData, pendingGeneration, context);
+    if (eventData.dryRun === true && !ownedPreflightDryRun) return;
     const runIdentity = {
         runId: pendingGeneration.runId || state.activeRunId,
         runEpoch: Number(pendingGeneration.runEpoch ?? state.runEpoch),
@@ -11598,13 +11855,13 @@ async function handleChatCompletionPromptReady(eventData) {
             return;
         }
 
-        if (isNarratorDepthReplayPromptPass()) {
+        if (isNarratorGenerationPromptPass()) {
             if (!hasNarratorDepthPrompt(context) || !chatHasNarratorDepthPrompt(eventData.chat)) {
                 throw new Error('Story Engine native narrator handoff was not injected at depth 0; generation aborted before narration.');
             }
             beginProseGuardDisplayIntercept(pendingGeneration.type || 'normal');
             sanitizeFinalPromptHistory(eventData.chat);
-            await waitForStoryEngineModelCallSpacing(state.narratorDepthReplay?.spacingLabel || 'narrator model call');
+            await waitForStoryEngineModelCallSpacing(state.narratorGeneration?.spacingLabel || 'narrator model call');
             if (!isCurrentStoryEngineRun(runIdentity)) return;
             clearAllProgress();
             return;
@@ -11641,6 +11898,14 @@ async function handleChatCompletionPromptReady(eventData) {
             return;
         }
 
+        if (!ownedPreflightDryRun) {
+            throw new Error('Story Engine semantic preflight reached a real narrator request instead of its owned local dry run.');
+        }
+        const dryRun = state.preflightDryRun;
+        if (!dryRun || !stripPreflightDryRunMarkerFromChat(eventData.chat, dryRun.marker)) {
+            throw new Error('Story Engine could not claim its local preflight dry run; generation aborted before narration.');
+        }
+        dryRun.phase = 'processing';
         state.runningSemanticPass = true;
         const trackerSnapshot = pendingGeneration.trackerSnapshot || buildTrackerSnapshot(context);
         const semanticLedger = await runSemanticPassWithPromptReadyBypass(
@@ -11723,7 +11988,7 @@ async function handleChatCompletionPromptReady(eventData) {
         };
         state.lastNarratorHandoff = narratorContext;
 
-        armNarratorDepthReplay({
+        armNarratorGeneration({
             context,
             pendingGeneration,
             pendingRun: state.pendingRun,
@@ -11732,12 +11997,18 @@ async function handleChatCompletionPromptReady(eventData) {
             generationMode,
             spacingLabel: 'narrator model call',
         });
-        sanitizeFinalPromptHistory(eventData.chat);
-        replacePromptWithReplayNotice(eventData.chat);
-        abortGenerationAfterPromptReady(context);
-        scheduleNarratorDepthReplay();
+        if (state.preflightDryRun === dryRun) dryRun.phase = 'complete';
     } catch (error) {
         if (!isCurrentStoryEngineRun(runIdentity)) return;
+        if (ownedPreflightDryRun) {
+            const dryRun = state.preflightDryRun;
+            if (dryRun) {
+                dryRun.phase = 'failed';
+                dryRun.error = error;
+                failPreflightDryRun(dryRun, error);
+            }
+            return;
+        }
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
         state.startAdventureReasoningCleanupPending = false;
@@ -11746,7 +12017,7 @@ async function handleChatCompletionPromptReady(eventData) {
         clearRuntimePrompts();
         showBlockingError(error);
 
-        abortGenerationAfterPromptReady(context);
+        abortActiveGeneration(context);
 
         replacePromptWithAbortNotice(eventData.chat, error);
 
@@ -11834,7 +12105,7 @@ function replacePromptWithAbortNotice(chat, error) {
 
 
 
-function abortGenerationAfterPromptReady(context) {
+function abortActiveGeneration(context) {
 
     try {
         markInternalGenerationStop();

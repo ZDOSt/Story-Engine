@@ -208,6 +208,18 @@ export async function generateRawData(request = {}, context = getContext(), opti
     throw new Error(`SillyTavern generateRawData API is unavailable${purpose ? ` for ${purpose}` : ''}.`);
 }
 
+export function canGenerate(context = getContext()) {
+    return typeof context?.generate === 'function';
+}
+
+export async function generate(type = 'normal', options = {}, dryRun = false, context = getContext()) {
+    const fn = context?.generate;
+    if (typeof fn !== 'function') {
+        throw new Error('SillyTavern generate API is unavailable.');
+    }
+    return await fn.call(context, type, options, dryRun);
+}
+
 export function canSubscribeToEvent(eventType, context = getContext()) {
     return Boolean(resolveEventName(eventType, context) && typeof context?.eventSource?.on === 'function');
 }
@@ -541,13 +553,25 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
 }
 
 export function getChatCompletionSourceForProfile(profileId, profileName = '') {
+    return getChatCompletionProfileRoute(profileId, profileName).source;
+}
+
+export function getChatCompletionProfileRoute(profileId, profileName = '') {
     const context = getContext();
     const profile = getConnectionProfile(profileId);
     const chatCompletionSource = context?.CONNECT_API_MAP?.[profile?.api]?.source;
     if (!chatCompletionSource) {
         throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support chat-completion requests.`, { stage: 'profile' });
     }
-    return chatCompletionSource;
+    const hasRoutingValue = value => {
+        const normalized = String(value || '').trim().toLowerCase();
+        return Boolean(normalized && normalized !== '<none>' && normalized !== '<empty>');
+    };
+    return {
+        source: String(chatCompletionSource),
+        usesCustomUrl: hasRoutingValue(profile?.['api-url']),
+        usesReverseProxy: hasRoutingValue(profile?.proxy),
+    };
 }
 
 export async function sendChatCompletionProfileRequest(request = {}) {

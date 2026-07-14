@@ -1,6 +1,6 @@
 import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
-import { canGenerateRawData, generateRawData, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
+import { canGenerateRawData, generateRawData, getChatCompletionProfileRoute, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta } from './world-state.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
 
@@ -352,6 +352,74 @@ export async function sendSemanticProfileTextRequest(prompt, responseLength, opt
         preparePayload: applyStoryEngineThinkingDisabledPayload,
     });
     return extractGeneratedText(result);
+}
+
+export function isOfficialDeepSeekProfile(options = {}) {
+    if (!options?.semanticProfileId) return false;
+    const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
+    return String(route.source || '').toLowerCase() === DEEPSEEK_CHAT_COMPLETION_SOURCE
+        && route.usesCustomUrl !== true
+        && route.usesReverseProxy !== true;
+}
+
+export async function sendDeepSeekProfileStructuredRequest(prompt, responseLength, options = {}, toolDefinition = {}) {
+    if (!isOfficialDeepSeekProfile(options)) {
+        throw new Error(`Connection profile "${options.semanticProfileName || options.semanticProfileId || '(none)'}" is not an official DeepSeek profile.`);
+    }
+
+    const toolName = String(toolDefinition.name || '').trim();
+    if (!toolName || !toolDefinition.parameters || typeof toolDefinition.parameters !== 'object') {
+        throw new Error('DeepSeek structured request is missing a valid tool definition.');
+    }
+
+    const messages = Array.isArray(prompt)
+        ? prompt
+        : [{ role: 'user', content: String(prompt || '') }];
+    const tool = {
+        type: 'function',
+        function: {
+            name: toolName,
+            description: String(toolDefinition.description || 'Submit the required structured Story Engine utility result.'),
+            strict: true,
+            parameters: toolDefinition.parameters,
+        },
+    };
+    const result = await sendChatCompletionProfileRequest({
+        profileId: options.semanticProfileId,
+        profileName: options.semanticProfileName,
+        prompt: messages,
+        responseLength,
+        overridePayload: {
+            temperature: 0,
+            stream: false,
+            messages,
+            tools: [tool],
+            tool_choice: undefined,
+            enable_web_search: false,
+            request_images: undefined,
+            request_image_resolution: undefined,
+            request_image_aspect_ratio: undefined,
+            json_schema: undefined,
+            stop: undefined,
+            ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
+        },
+        extractData: false,
+        preparePayload: applySemanticThinkingPayload,
+    });
+    if (result?.error) {
+        throw new Error(`DeepSeek structured request returned an error: ${previewRaw(result)}`);
+    }
+
+    const calls = collectToolCalls(result);
+    const matching = calls.find(call => getToolCallName(call) === toolName);
+    if (!matching) {
+        throw new Error(`DeepSeek structured response did not call ${toolName}. RawPreview=${previewRaw(result)}`);
+    }
+    const payload = parseToolArguments(getToolCallArguments(matching));
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error(`DeepSeek structured response for ${toolName} was not an object. RawPreview=${previewRaw(result)}`);
+    }
+    return payload;
 }
 
 export function extractGeneratedText(raw) {
