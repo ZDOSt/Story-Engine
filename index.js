@@ -33,7 +33,7 @@ import {
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
-import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
+import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeRapportClockState, runDeterministicEngines, saveTrackerUpdate } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -516,6 +516,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
+    semanticReasoningEffort: 'medium',
     modelCallDelayEnabled: false,
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
@@ -681,6 +682,9 @@ function getSettings() {
             extension_settings[SETTINGS_KEY][key] = value;
         }
     }
+    extension_settings[SETTINGS_KEY].semanticReasoningEffort = normalizeSemanticReasoningEffort(
+        extension_settings[SETTINGS_KEY].semanticReasoningEffort,
+    );
     return extension_settings[SETTINGS_KEY];
 }
 
@@ -825,6 +829,7 @@ async function withSemanticGenerationSettings(callback) {
     return await callback({
         semanticProfileId: profile.id,
         semanticProfileName: profile.name,
+        semanticReasoningEffort: normalizeSemanticReasoningEffort(settings.semanticReasoningEffort),
     });
 }
 
@@ -1176,6 +1181,7 @@ function refreshSettingsControls() {
     const enabled = Boolean(settings.useSeparateSemanticSettings);
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
+    const reasoningEffortSelect = document.getElementById('structured_preflight_semantic_reasoning_effort');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardEnabledCheckbox = document.getElementById('structured_preflight_prose_guard_enabled');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
@@ -1244,6 +1250,10 @@ function refreshSettingsControls() {
     );
 
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
+    if (reasoningEffortSelect) {
+        reasoningEffortSelect.value = normalizeSemanticReasoningEffort(settings.semanticReasoningEffort);
+        reasoningEffortSelect.disabled = !engineEnabled || !enabled;
+    }
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
     for (const { element } of proseGuardBanFields) {
         if (element) element.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
@@ -1506,6 +1516,15 @@ function renderSettingsPanel() {
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                             </div>
                             <div class="spe-settings-row">
+                                <label for="structured_preflight_semantic_reasoning_effort">Reasoning effort</label>
+                                <select id="structured_preflight_semantic_reasoning_effort" class="text_pole flex1">
+                                    <option value="low">Low</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                            </div>
+                            <small class="spe-settings-note">Official direct DeepSeek only. Low disables thinking; Medium uses DeepSeek high effort; High uses DeepSeek max effort.</small>
+                            <div class="spe-settings-row">
                                 <small class="spe-settings-note flex1">Used for semantic preflight and post-narration Story Engine utility calls. Narration, adventure openings, character creation, and character progression use the current SillyTavern profile.</small>
                                 <button id="structured_preflight_refresh_semantic_settings" class="menu_button">Refresh</button>
                             </div>
@@ -1706,6 +1725,11 @@ function renderSettingsPanel() {
 
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
         settings.semanticConnectionProfile = String(event.target?.value || '');
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_semantic_reasoning_effort')?.addEventListener('change', event => {
+        settings.semanticReasoningEffort = normalizeSemanticReasoningEffort(event.target?.value);
+        refreshSettingsControls();
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_model_call_delay_enabled')?.addEventListener('change', event => {
@@ -12062,6 +12086,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             pendingBoundarySnapshot: pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
+            semanticReasoningEffort: settings?.semanticReasoningEffort,
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',
             proxyUserAction: pendingGeneration?.mode === 'proxy' ? pendingGeneration?.latestUserText : '',

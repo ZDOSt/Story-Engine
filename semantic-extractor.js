@@ -13,7 +13,8 @@ const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const DEEPSEEK_CHAT_COMPLETION_SOURCE = 'deepseek';
-const DEEPSEEK_SEMANTIC_REASONING_EFFORT = 'high';
+const SEMANTIC_REASONING_EFFORTS = Object.freeze(['low', 'medium', 'high']);
+const DEFAULT_SEMANTIC_REASONING_EFFORT = 'medium';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_NARRATOR_NPC_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove']);
@@ -278,7 +279,7 @@ async function generateSemanticToolCall(context, prompt, responseLength, options
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
             buildTool: buildSemanticPreflightTool,
             buildToolChoice: buildSemanticToolChoice,
-            preparePayload: applySemanticThinkingPayload,
+            preparePayload: payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort),
         });
         if (raw?.error) {
             throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
@@ -303,6 +304,9 @@ async function generateSemanticToolCallWithProfile(context, prompt, responseLeng
 
     const toolPrompt = buildSemanticToolPrompt(prompt);
     const semanticTool = buildSemanticPreflightTool(chatCompletionSource);
+    const preparePayload = isOfficialDeepSeekProfile(options)
+        ? payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort)
+        : applyStoryEngineThinkingDisabledPayload;
     const overridePayload = {
         temperature: 0,
         stream: false,
@@ -327,7 +331,7 @@ async function generateSemanticToolCallWithProfile(context, prompt, responseLeng
             responseLength,
             overridePayload,
             extractData: false,
-            preparePayload: applySemanticThinkingPayload,
+            preparePayload,
         });
     } catch (error) {
         throw new SemanticToolTransportError(`Direct semantic profile tool-call request failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -404,7 +408,7 @@ export async function sendDeepSeekProfileStructuredRequest(prompt, responseLengt
             ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
         },
         extractData: false,
-        preparePayload: applySemanticThinkingPayload,
+        preparePayload: payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort),
     });
     if (result?.error) {
         throw new Error(`DeepSeek structured request returned an error: ${previewRaw(result)}`);
@@ -427,15 +431,29 @@ export function extractGeneratedText(raw) {
     return candidates[0] || '';
 }
 
-export function applySemanticThinkingPayload(payload) {
+export function normalizeSemanticReasoningEffort(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return SEMANTIC_REASONING_EFFORTS.includes(normalized)
+        ? normalized
+        : DEFAULT_SEMANTIC_REASONING_EFFORT;
+}
+
+export function applySemanticThinkingPayload(payload, reasoningEffort = DEFAULT_SEMANTIC_REASONING_EFFORT) {
     if (!payload || typeof payload !== 'object') {
         return payload;
     }
 
     removeCustomThinkingOverride(payload);
     if (String(payload.chat_completion_source || '').toLowerCase() === DEEPSEEK_CHAT_COMPLETION_SOURCE) {
+        const normalizedEffort = normalizeSemanticReasoningEffort(reasoningEffort);
+        if (normalizedEffort === 'low') {
+            payload.include_reasoning = false;
+            delete payload.reasoning_effort;
+            return payload;
+        }
+
         payload.include_reasoning = true;
-        payload.reasoning_effort = DEEPSEEK_SEMANTIC_REASONING_EFFORT;
+        payload.reasoning_effort = normalizedEffort === 'high' ? 'max' : 'high';
         const currentMaxTokens = Number(payload.max_tokens);
         payload.max_tokens = Number.isFinite(currentMaxTokens)
             ? Math.max(currentMaxTokens, SEMANTIC_RESPONSE_LENGTH_MAX)
