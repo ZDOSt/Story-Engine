@@ -10022,7 +10022,9 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'NEVER delete narration. Every edit MUST replace a non-empty exact source span with non-empty corrected prose.',
         'Placeholders, punctuation-only replacements, and replacements that materially contract the source are invalid.',
         'Everything outside an accepted edit MUST remain byte-for-byte unchanged.',
-        'Use the smallest complete sentence or contiguous span that can be repaired without changing scene facts.',
+        'Each ordinary edit MUST target the smallest exact violating span and MUST remain within one sentence.',
+        'The ONLY permitted multi-sentence edit is an activeHandoff repair that reorders or conjoins the exact existing handoff and trailing sentences without dropping, paraphrasing, or inventing content.',
+        'If a repair cannot satisfy this scope, return no edit for that text.',
         'Repair only clear violations of the Prose Guard rules below.',
         '',
         'PROSE_GUARD_RULES:',
@@ -10101,7 +10103,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
         '- Do not add or remove actions, reactions, dialogue, information, refusals, intimacy, mechanics, or any other scene content.',
         '- If explicit after-beat tailing is present, replace the smallest contiguous span containing the handoff and its trailing material so the same information appears before the handoff and the handoff ends the response.',
-        '- A multi-sentence replacement may only reorder or conjoin the existing sentence content. Preserve each original sentence\'s concrete word sequence, dialogue, names, numbers, actions, and facts.',
+        '- Multi-sentence replacement is forbidden except for explicit activeHandoff tailing. That sole exception may only reorder or conjoin the existing sentence content while preserving each original sentence\'s concrete word sequence, dialogue, names, numbers, actions, and facts.',
         '- Preserve valid explicit, sensual, romantic, violent, tense, atmospheric, environmental, and intimate detail. Do not sanitize, soften, summarize, reduce, or desexualize valid content.',
         '- Do not shorten a valid message just because it is rich, vivid, intimate, descriptive, or atmospheric.',
         '- Do not delete body detail or any other narration. Replace invalid shorthand with valid concrete prose when needed.',
@@ -10192,7 +10194,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'If an NPC speaks or acts toward the user, end on that speech or action once it creates a natural point for the user to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act.',
         'If no NPC is driving the beat, end on the relevant consequence of the user\'s action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.',
         'Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat just to create an endpoint. Never end by prompting the user to act.',
-        'HARD STOP: if explicit after-beat tailing is present, return one replacement for the smallest contiguous span containing the handoff and tail. Preserve the same information, place supporting detail before the handoff, and end on the handoff.',
+        'HARD STOP: if explicit after-beat tailing is present, return one replacement for the smallest contiguous span containing the handoff and tail. This is the ONLY permitted multi-sentence edit. Preserve every existing sentence\'s content, place supporting detail before the handoff, and end on the handoff.',
         'Ban explicit waiting, "she waits," "awaits your response," "what do you do," "the choice is yours," all-eyes-on-user framing, mood-only silence, unrelated ambience, outro paragraphs, scene-break tails, and extra narration after the response beat.',
         'Do not replace after-beat tailing with different after-beat tailing. Do not omit the existing scene information.',
         '',
@@ -10215,6 +10217,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         `Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
         'The JSON shape is {"proseEdits":[{"originalText":"exact source substring","replacementText":"non-empty corrected substring","occurrence":1}]}.',
         'originalText MUST be copied exactly from TEXT_TO_CHECK. occurrence is the one-based occurrence of originalText in TEXT_TO_CHECK.',
+        'Each edit MUST remain within one sentence unless it is the strictly information-preserving activeHandoff exception defined above.',
         'replacementText MUST contain substantive corrected narration and preserve all valid source information. Punctuation-only, placeholder, destructive, or materially contracted replacements are invalid. Return {"proseEdits":[]} when no repair is certain.',
         'Do not include an edit when replacementText would equal originalText. Omit that edit instead.',
         'Do not return corrected narration, commentary, markdown fences, analysis, or any other fields.',
@@ -10508,6 +10511,7 @@ function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationTex
         'The tracker delta MUST describe the narration produced by applying proseEdits, not rejected draft wording.',
         'If no prose corrections are needed, return an empty proseEdits array and derive the tracker delta from TEXT_TO_CHECK unchanged.',
         'NEVER return replacement narration and NEVER delete narration. Only return exact, non-empty replacement edits.',
+        'Every ordinary prose edit MUST remain within one sentence. The ONLY multi-sentence exception is an activeHandoff repair that reorders or conjoins the exact existing handoff and trailing sentences without dropping, paraphrasing, or inventing content. If uncertain, return no edit.',
         '',
         '==PROSE_GUARD_CONTRACT==',
         'Use this as correction rules only; its standalone output contract is superseded by STRICT_OUTPUT_CONTRACT below.',
@@ -10571,14 +10575,14 @@ function buildPostNarrationToolDefinition(name, { includeProseEdits = false, inc
         required.push('proseEdits');
         properties.proseEdits = {
             type: 'array',
-            description: 'Exact, information-preserving replacement edits for clear Prose Guard violations. Empty when no repair is certain.',
+            description: 'Exact, information-preserving replacement edits for clear Prose Guard violations. Each ordinary edit stays within one sentence; only a strictly information-preserving activeHandoff reorder may span sentences. Empty when no repair is certain.',
             items: {
                 type: 'object',
                 additionalProperties: false,
                 required: ['originalText', 'replacementText', 'occurrence'],
                 properties: {
-                    originalText: { type: 'string', description: 'Exact non-empty contiguous substring copied byte-for-byte from TEXT_TO_CHECK.' },
-                    replacementText: { type: 'string', description: 'Substantive corrected narration that differs from originalText and replaces it without deleting or materially contracting valid information.' },
+                    originalText: { type: 'string', description: 'Smallest exact non-empty violating substring copied byte-for-byte from TEXT_TO_CHECK and contained within one sentence, except for the activeHandoff-only multi-sentence exception.' },
+                    replacementText: { type: 'string', description: 'Substantive corrected narration within the same scope that differs from originalText and replaces it without deleting, paraphrasing, inventing, or materially contracting valid information.' },
                     occurrence: { type: 'integer', description: 'Positive one-based occurrence of originalText in TEXT_TO_CHECK.' },
                 },
             },
@@ -10611,7 +10615,7 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     const fields = Object.keys(toolDefinition?.parameters?.properties || {});
     const fieldInstructions = [];
     if (fields.includes('proseEdits')) {
-        fieldInstructions.push('Put only exact, substantive, information-preserving replacement edits in proseEdits. Omit no-op edits where replacementText equals originalText. Use [] when no violation is certain. Never delete, materially contract, or return full rewritten narration.');
+        fieldInstructions.push('Put only exact, substantive, information-preserving replacement edits in proseEdits. Every ordinary edit MUST stay within one sentence. The ONLY multi-sentence exception is a strictly information-preserving activeHandoff reorder of the exact existing handoff and trailing sentences. Otherwise use []. Omit no-op edits. Never delete, paraphrase, invent, materially contract, or return full rewritten narration.');
     }
     if (fields.includes('trackerDelta')) {
         fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on TEXT_TO_CHECK after applying proseEdits when proseEdits is present.');
