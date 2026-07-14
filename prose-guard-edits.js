@@ -178,9 +178,17 @@ function normalizeEditPayload(value) {
         throw new Error(`Prose Guard returned more than ${MAX_PROSE_GUARD_EDITS} edits.`);
     }
 
-    return {
-        proseEdits: rawEdits.map((edit, index) => normalizeEdit(edit, index)),
-    };
+    const proseEdits = [];
+    const seen = new Set();
+    rawEdits.forEach((edit, index) => {
+        const normalized = normalizeEdit(edit, index);
+        if (!normalized) return;
+        const key = JSON.stringify([normalized.originalText, normalized.replacementText, normalized.occurrence]);
+        if (seen.has(key)) return;
+        seen.add(key);
+        proseEdits.push(normalized);
+    });
+    return { proseEdits };
 }
 
 function normalizeEdit(edit, index) {
@@ -198,7 +206,7 @@ function normalizeEdit(edit, index) {
         throw new Error(`Prose Guard edit ${index + 1} attempted to delete narration.`);
     }
     if (originalText === replacementText) {
-        throw new Error(`Prose Guard edit ${index + 1} does not change its source text.`);
+        return null;
     }
     if (!Number.isInteger(occurrence) || occurrence < 1) {
         throw new Error(`Prose Guard edit ${index + 1} has an invalid occurrence.`);

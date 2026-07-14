@@ -10192,6 +10192,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'The JSON shape is {"proseEdits":[{"originalText":"exact source substring","replacementText":"non-empty corrected substring","occurrence":1}]}.',
         'originalText MUST be copied exactly from TEXT_TO_CHECK. occurrence is the one-based occurrence of originalText in TEXT_TO_CHECK.',
         'replacementText MUST contain substantive corrected narration and preserve all valid source information. Punctuation-only, placeholder, destructive, or materially contracted replacements are invalid. Return {"proseEdits":[]} when no repair is certain.',
+        'Do not include an edit when replacementText would equal originalText. Omit that edit instead.',
         'Do not return corrected narration, commentary, markdown fences, analysis, or any other fields.',
         '',
         '==RECENT_USER_INPUT==',
@@ -10362,7 +10363,7 @@ function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserTe
         '- Use concrete physical prose: chosen action, speech content, posture that changes action, movement, spacing, contact, object use, sound, material state, obstruction, lighting, weather behavior, visible consequence.',
         `- Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
         '- Use {"proseEdits":[{"originalText":"exact full sentence","replacementText":"non-empty corrected sentence","occurrence":1}]}.',
-        '- Copy originalText exactly from TEXT_TO_CHECK. Return no corrected narration outside the edit payload.',
+        '- Copy originalText exactly from TEXT_TO_CHECK. Omit no-op edits where replacementText equals originalText. Return no corrected narration outside the edit payload.',
         '',
         'DETERMINISTIC_FINDINGS:',
         formatTargetedProseBanFindings(findings),
@@ -10553,7 +10554,7 @@ function buildPostNarrationToolDefinition(name, { includeProseEdits = false, inc
                 required: ['originalText', 'replacementText', 'occurrence'],
                 properties: {
                     originalText: { type: 'string', description: 'Exact non-empty contiguous substring copied byte-for-byte from TEXT_TO_CHECK.' },
-                    replacementText: { type: 'string', description: 'Substantive corrected narration that replaces only originalText without deleting or materially contracting its valid information.' },
+                    replacementText: { type: 'string', description: 'Substantive corrected narration that differs from originalText and replaces it without deleting or materially contracting valid information.' },
                     occurrence: { type: 'integer', description: 'Positive one-based occurrence of originalText in TEXT_TO_CHECK.' },
                 },
             },
@@ -10586,7 +10587,7 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     const fields = Object.keys(toolDefinition?.parameters?.properties || {});
     const fieldInstructions = [];
     if (fields.includes('proseEdits')) {
-        fieldInstructions.push('Put only exact, substantive, information-preserving replacement edits in proseEdits. Use [] when no violation is certain. Never delete, materially contract, or return full rewritten narration.');
+        fieldInstructions.push('Put only exact, substantive, information-preserving replacement edits in proseEdits. Omit no-op edits where replacementText equals originalText. Use [] when no violation is certain. Never delete, materially contract, or return full rewritten narration.');
     }
     if (fields.includes('trackerDelta')) {
         fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on TEXT_TO_CHECK after applying proseEdits when proseEdits is present.');
