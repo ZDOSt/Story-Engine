@@ -1068,13 +1068,20 @@ function cohesiveSceneBeats(response, context): {
 
 function npcRambleGuard(response, context): {
   MANDATE:
-    Each participating character or NPC may contribute NO MORE THAN ONE COHESIVE NARRATIVE BEAT PER RESPONSE, centered around a single purpose. A beat MAY include:
+    Each participating character or NPC may contribute NO MORE THAN ONE COHESIVE PARAGRAPH directly responding to {{user}}'s input OR another PRESENT character/NPC.
 
-    - A character's dialogue, actions, gestures, or reactions in response to {{user}}'s input OR another PRESENT character/NPC.
+    That paragraph MAY contain:
+    - ONE immediate reaction or action sequence.
+    - ONE uninterrupted dialogue turn containing NO MORE THAN ONE question.
+    - ONE gesture that directly supports the same response.
+
+    These are MAXIMUMS, not a checklist. Omit anything unnecessary.
 
   FORBIDDEN:
-    Do NOT give narrative beats to uninvolved or merely present characters/NPCs.
-    Do NOT give ANY participating character multiple narrative beats, separate dialogue turns, more than one question, a second action sequence, or multiple emotional beats in one response.
+    - DO NOT give a paragraph to uninvolved or merely present characters/NPCs.
+    - DO NOT compress multiple narrative beats, dialogue turns, action sequences, topics, gestures, or emotional shifts into one paragraph.
+    - DO NOT continue any character beyond their single paragraph.
+    - Narrative flow NEVER overrides these limits. DO NOT allow characters/NPCs to ramble.
 }
 
 function activeHandoff(response, context): {
