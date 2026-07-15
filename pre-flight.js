@@ -127,6 +127,8 @@ function buildReadableSemanticDebug(ledger) {
         ...relationships.flatMap((item, index) => [
             `NPC[${index}]=${valueOrNone(item.NPC)}`,
             `explicitIntimidationOrCoercion=${Boolean(item.explicitIntimidationOrCoercion)}`,
+            `standingInfluence=${valueOrNone(item.standingInfluence)}`,
+            `standingBasis=${valueOrNone(item.standingBasis)}`,
             `stakeChangeByOutcome=${inline(item.stakeChangeByOutcome ?? {})}`,
             `overrideFlags=${inline(item.overrideFlags ?? {})}`,
             `genStats=${generatedStatsSeedLine(item.genStats)}`,
@@ -210,6 +212,8 @@ function buildReadableDeterministicDebug(handoff) {
             `npcHandoffs[${index}].PersonalitySummary=${valueOrNone(npc.PersonalitySummary)}`,
             `npcHandoffs[${index}].Target=${valueOrNone(npc.Target)}`,
             `npcHandoffs[${index}].NPC_STAKES=${valueOrNone(npc.NPC_STAKES)}`,
+            `npcHandoffs[${index}].StandingInfluence=${valueOrNone(npc.StandingInfluence)}`,
+            `npcHandoffs[${index}].StandingBasis=${valueOrNone(npc.StandingBasis)}`,
             `npcHandoffs[${index}].IntimacyBoundary=${valueOrNone(npc.IntimacyBoundary)}`,
             `npcHandoffs[${index}].IntimacyBoundarySource=${valueOrNone(npc.IntimacyBoundarySource)}`,
             `npcHandoffs[${index}].IntimacyRefusalStyle=${valueOrNone(npc.IntimacyRefusalStyle)}`,
@@ -309,6 +313,8 @@ function formatMechanicsResultList(summary, resolution, handoff = {}, ledger = {
         ['npc.state', summary.npc],
         ['npc.generatedStats', handoff?.generatedNpcStats?.length ? inline(handoff.generatedNpcStats) : 'none'],
         ['npc.equipmentProfiles', handoff?.npcEquipmentProfiles?.length ? inline(handoff.npcEquipmentProfiles) : 'none'],
+        ['relationship.semanticStanding', semanticStandingAuditSummary(ledger)],
+        ['relationship.resolvedStanding', resolvedStandingAuditSummary(handoff)],
         ['relationship.result', summary.relationshipResult],
         ['chaos.result', summary.chaos],
         ['proactivity.result', summary.proactive],
@@ -1263,10 +1269,31 @@ function npcPersonalityNarrativeGuide(npc = {}) {
 function npcDispositionBehaviorGuide(npc = {}) {
     const state = relationshipDispositionNarrativeGuide(npc);
     const behavior = behaviorNarrationGuide(npc?.Behavior);
+    const standing = npcStandingNarrativeGuide(npc);
     const boundary = npc?.BoundaryPressure === 'Y'
         ? ' Active boundary pressure is present; show it through physical space, refusal, guarded movement, or physical protection.'
         : '';
-    return `${state} ${behavior}${boundary}`.replace(/\s+/g, ' ').trim();
+    return `${state} ${behavior}${standing}${boundary}`.replace(/\s+/g, ' ').trim();
+}
+
+function npcStandingNarrativeGuide(npc = {}) {
+    const influence = String(npc?.StandingInfluence || '').trim().toLowerCase();
+    if (!['aware', 'constrained'].includes(influence)) return '';
+
+    const state = parseRelationshipState(npc?.FinalState);
+    const basis = valueOrNone(npc?.StandingBasis);
+    const effect = influence === 'constrained'
+        ? ' The standing this NPC recognizes in {{user}} limits reckless action and how openly they express themselves while preserving their actual attitude. Warmth may be restrained or formal, hostility concealed, and neutral conduct protocol-conscious.'
+        : ' The standing this NPC recognizes in {{user}} should affect etiquette, caution, risk, or openness while preserving their actual attitude.';
+    const taper = state?.B >= 4
+        ? ' Deep familiarity prevents routine stiffness; keep duty, authority, or public protocol only where it materially matters.'
+        : state?.B === 3
+            ? ' Familiarity softens protocol; use stronger formality mainly in public, official, or consequential moments.'
+            : '';
+    const context = isNoneText(basis)
+        ? ''
+        : ` Behavior context: ${basis}. Use this only to shape conduct; do not state, explain, or reveal this basis unless it is already visible or spoken in the scene.`;
+    return `${effect}${taper}${context}`;
 }
 
 function relationshipDispositionNarrativeGuide(npc = {}) {
@@ -2003,9 +2030,30 @@ function relationshipResultSummary(handoff, resolution) {
     return npcs.map(npc => [
         npc.NPC || '(unknown)',
         `target:${npc.Target ?? 'No Change'}`,
+        `standing:${npc.StandingInfluence ?? 'none'}/${npc.StandingBasis ?? '(none)'}`,
         `intimacy:${npc.IntimacyBoundary ?? 'SKIP'}/${npc.IntimacyBoundarySource ?? 'NONE'}`,
         `boundary:${npc.BoundaryPressure ?? 'N'}`,
         `pressure:${npc.HostilePressure ?? 0}/${npc.HostileLandedPressure ?? 0}`,
+    ].join('/')).join('; ');
+}
+
+function semanticStandingAuditSummary(ledger = {}) {
+    const relationships = Array.isArray(ledger?.relationshipEngine) ? ledger.relationshipEngine : [];
+    if (!relationships.length) return 'none';
+    return relationships.map(npc => [
+        valueOrNone(npc?.NPC),
+        `standingInfluence=${valueOrNone(npc?.standingInfluence)}`,
+        `standingBasis=${valueOrNone(npc?.standingBasis)}`,
+    ].join('/')).join('; ');
+}
+
+function resolvedStandingAuditSummary(handoff = {}) {
+    const relationships = Array.isArray(handoff?.npcHandoffs) ? handoff.npcHandoffs : [];
+    if (!relationships.length) return 'none';
+    return relationships.map(npc => [
+        valueOrNone(npc?.NPC),
+        `StandingInfluence=${valueOrNone(npc?.StandingInfluence)}`,
+        `StandingBasis=${valueOrNone(npc?.StandingBasis)}`,
     ].join('/')).join('; ');
 }
 

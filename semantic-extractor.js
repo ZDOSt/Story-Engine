@@ -40,6 +40,7 @@ const HARM_MODES = Object.freeze(['lethal', 'nonlethal', 'restraint_control', 'n
 const BOUNDARY_PRESSURE_TYPES = Object.freeze(['none', 'object_access', 'space_access', 'departure']);
 const BOUNDARY_BREAK_TYPES = Object.freeze(['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']);
 const BOUNDARY_BREAK_RESPONSES = Object.freeze(['none', 'released', 'continued', 'escalated', 'unrelated', 'unclear']);
+const STANDING_INFLUENCES = Object.freeze(['none', 'aware', 'constrained']);
 const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
     'RenderControlEngine',
     'sceneStyleProfile',
@@ -1247,6 +1248,8 @@ function buildSemanticPreflightSchema() {
                         'romanceStyle',
                         'slowBondEvidence',
                         'explicitIntimidationOrCoercion',
+                        'standingInfluence',
+                        'standingBasis',
                         'stakeChangeByOutcome',
                         'overrideFlags',
                         'genStats',
@@ -1300,6 +1303,15 @@ function buildSemanticPreflightSchema() {
                             },
                         },
                         explicitIntimidationOrCoercion: { type: 'boolean' },
+                        standingInfluence: {
+                            type: 'string',
+                            enum: STANDING_INFLUENCES,
+                            description: 'How this specific NPC\'s knowledge of user standing relative to themselves affects their outward conduct. none=no recognized meaningful user-standing difference; aware=user standing changes etiquette, caution, risk, or openness without constraining the NPC; constrained=user\'s recognized higher authority, status, power, backing, lineage, or affiliation limits what the NPC openly expresses or dares to do. This changes expression only and never changes B/F/H.',
+                        },
+                        standingBasis: {
+                            type: 'string',
+                            description: 'Concise evidence for the assessment from user standing this NPC actually knows and recognizes relative to themselves: title, authority, reputation, demonstrated power, backing, lineage, or affiliation. Use (none) when standingInfluence=none. Unknown, concealed, or unsupported status must remain none/(none).',
+                        },
                         stakeChangeByOutcome: stakeChangeSchema,
                         overrideFlags: {
                             type: 'object',
@@ -1616,6 +1628,7 @@ const COMPACT_LEDGER_OUTPUT_CONTRACT = [
     '- Begin with BEGIN_SEMANTIC_PREFLIGHT and end the ledger with END_SEMANTIC_PREFLIGHT.',
     `- After END_SEMANTIC_PREFLIGHT, output ${SEMANTIC_PREFLIGHT_STOP_SENTINEL} on its own final line. Do not output anything after it.`,
     '- Fill every required line exactly once. Keep the exact function/key names shown below.',
+    '- When RelationshipEngine.count is greater than 0, every indexed relationship row MUST include standingInfluence=none|aware|constrained and standingBasis; omit indexed relationship lines only when count=0.',
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
     '- Use comma-separated names or (none) for lists. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
 ].join('\n');
@@ -1634,6 +1647,7 @@ const SEMANTIC_FIELD_GUIDANCE = [
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
     '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer/awareness lists.',
     '- If no living NPC is in those target/observer/awareness lists, output RelationshipEngine.count=0 and no RelationshipEngine[index] lines.',
+    '- Every actual RelationshipEngine[index] row MUST include standingInfluence and standingBasis. Assess {{user}}\'s standing as this NPC knows and recognizes it relative to themselves. standingInfluence=none when this NPC does not recognize a meaningful user-standing difference. Use aware when {{user}}\'s recognized title, authority, reputation, demonstrated power, backing, lineage, or affiliation changes etiquette, caution, risk, or openness without constraining the NPC. Use constrained only when {{user}}\'s recognized higher authority, status, power, backing, lineage, or affiliation limits what this NPC openly expresses or dares to do. A hierarchy in the opposite direction does not make the NPC constrained. Standing changes outward expression, never B/F/H itself. Affection may become restrained or formal, hostility may be concealed, neutral behavior may follow protocol, and friends may still recognize public authority. Unknown, concealed, unsupported, or unrecognized standing is none with standingBasis=(none); aware/constrained requires a concise real evidence basis.',
     '- EngineContext.userReputationContext.location is only the current settlement/community/route/region identifier for deterministic fame/infamy lookup. Use the hidden world state reputationLocation/place when it clearly applies to the current scene; otherwise use a concise known place/community name from context, or (none) if no current community is knowable. Do not decide fame/infamy effects here.',
     '- RelationshipEngine[index].initPreset is only "how this NPC initially feels toward {{user}}" when currentDisposition is missing. The semantic pass chooses only explicit authored/personal Y/N tags; deterministic code assigns B/F/H stats and separately applies hidden fame/infamy. romanticOpen=Y when prior character card/lore/scenario/pre-existing relationship/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward {{user}}. This can be stated directly or shown through clearly romantic behavior, gestures, plans, keepsakes, letters, gifts, jealousy, longing, attempts to be noticed, attempts to spend time alone, or other evidence that the NPC interest in {{user}} is romantic rather than merely friendly. Do not mark romanticOpen for generic friendliness, politeness, casual flirting, shallow physical attraction, ordinary embarrassment, first impressions, vague chemistry, gratitude, or non-romantic loyalty. Do not suppress romanticOpen solely because userNonHuman=Y; set both flags if both are explicit. userBadRep=Y only if explicit character card/lore/scenario/pre-existing relationship context says {{user}} is hated, distrusted, wanted, enemy-coded, or has a bad personal prior relationship with this NPC before the current first interaction. priorUserGoodRep=Y only if explicit character card/lore/scenario/pre-existing relationship context gives {{user}} safe familiarity, credible vouching, ordinary neighbor/customer/guild contact, cleared/cooperative status, prior help, trust, gratitude, friendship, or other authored prior context that makes {{user}} known as safe/cooperative to this NPC. Do not use broad public fame, public infamy, generic reputationKnowledge, first-encounter kindness, rescue, courtesy, friendliness, praise, or warm first impression for these flags. userNonHuman=Y only when {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural and this NPC lacks prior familiarity, ordinary normalizing context, trusted introduction, or credible knowledge that makes {{user}} known rather than shocking; it can also be Y for explicit authored fear-coded relationship context with this NPC. Do not use broad public infamy as userNonHuman. fearImmunity=Y only if this NPC is the same kind/race category as that user form, a superior or peer supernatural/monstrous being, explicitly immune/naturally resistant to fear or mental fear, or card/lore/scenario explicitly portrays them as an ancient/powerful/non-ordinary being that has faced such horrors and is not meaningfully afraid of them. Title, rank, bravado, posturing, composure, courage, or pretending to be fearless do not count.',
     '- RelationshipEngine[index].establishedRelationship is true only if this NPC already has B4 relationship state and tracker establishedRelationship=Y, or the current explicit scene shows a direct romantic/love/relationship declaration or request from {{user}} accepted by that NPC, or from that NPC accepted by {{user}}. If the immediately previous NPC message contains a clear love/relationship confession or request, and the current user input accepts it verbally or through unmistakable romantic reciprocation such as kissing/embracing without refusal, return true. If the immediately previous user input contains a clear love/relationship confession or request, and the current NPC response accepted it, return true. It must establish an actual romantic relationship, partnership, lovers status, dating/courting bond, or equivalent committed romantic connection. Flirting, attraction, arousal, sex, prior intimacy, affection, kindness, trust, loyalty, closeness, friendship, gratitude, protectiveness, or B4 alone does not count.',
@@ -2011,6 +2025,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'BenefitedObservers and HarmedObservers are living entities present in scene who are NOT already in ActionTargets or OppTargets.NPC. Do not put a direct target or opposing NPC in observer lists. ' +
         'Identify ResolutionEngine.identifyTargets.PowerActors during target discovery: include any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Assess semantically, not by keywords or titles. A living NPC can appear in HarmedObservers/BenefitedObservers/ActionTargets/OppTargets.NPC/NPCAwareOfUser for personal B/F/H and also appear in PowerActors for hidden strategic consequences. PowerActors never replace normal target/observer/awareness placement. ' +
         'Create one relationshipEngine entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser. This coverage is mandatory even when that same NPC is also in PowerActors or assessed as a PowerActorEnmity power actor. PowerActors and PowerActorEnmity never replace RelationshipEngine. Do not create entries for bystanders, hostilesInScene-only NPCs, PowerActors-only entities, groups/crowds, or inferred scene participants outside those target/observer/awareness lists. ' +
+        'For each relationshipEngine NPC, assess standingInfluence from {{user}}\'s standing that specific NPC actually knows and recognizes relative to themselves. Use none when there is no meaningful recognized user-standing difference; aware when {{user}}\'s recognized title, authority, reputation, demonstrated power, backing, lineage, or affiliation changes etiquette, caution, risk, or openness without constraining the NPC; constrained only when {{user}}\'s recognized higher authority, status, power, backing, lineage, or affiliation limits what the NPC openly expresses or dares to do. A hierarchy in the opposite direction does not make the NPC constrained. Unknown, concealed, unsupported, or unrecognized status remains none with standingBasis=(none). Standing changes outward expression only and never changes B/F/H. ' +
         'For each living NPC in relationshipEngine, stakeChangeByOutcome must describe that NPC stakes change for each outcome: benefit means their stakes improve, harm means their stakes worsen, none means no meaningful stake change. For explicit boundary violations toward a direct/opposing NPC target, successful or landed outcomes worsen that NPC boundary/autonomy/trust stakes, so use harm and not none. ' +
         'If a named NPC is a primary target and tracker currentCoreStats are missing, classify that NPC CapabilityPool/MainStat from the full context and copy the same seed into ResolutionEngine genStats and the matching RelationshipEngine genStats. Use common/Balanced when capability or specialization is uncertain. ' +
         'When a named NPC needs missing stats, do not leave CapabilityPool or MainStat as none; use common/Balanced when evidence is uncertain. ' +
@@ -2024,7 +2039,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         'Execute ResolutionEngine(input) semantic functions in order: identifyGoal, identifyChallenge, userAbilityUse, itemUse, lootSearch, claimCheck, intimacyAdvanceExplicit, restraintControl, boundaryPressure, boundaryBreak, rollNeeded, rollReason, challengeType, socialTactic, identifyTargets, activeHostileThreat, harmMode, actionUnits, environmentDifficultyTier, genStats. boundaryBreak must read only the Pending boundary snapshot; if pendingBoundary.active is false, boundaryBreak.Present=N. When Present=Y, copy its exact boundaryId, targetNPC, and type. Copy those outputs into the ResolutionEngine lines using the exact function/key names shown in the template. ' +
         'Do not roll dice, retrieve user stats, retrieve NPC stats, assign numeric NPC stats, calculate margins, landed actions, counter potential, or outcomes; deterministic code handles those after your ledger. ' +
         'Execute UserKnowledgeApplication after target discovery and before RelationshipEngine. Read only the hidden User knowledge snapshot JSON and current context. Output one row for each personal/authored knowledge entry that materially applies to the current scene, present NPC, or group; otherwise output count=0. This is application only: do not create, update, spread, rewrite stored knowledge, or turn broad public reputation into initPreset flags in preflight. ' +
-        'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer/awareness living NPC: current state context, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, accepts, agrees to, arranges, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. This includes the NPC accepting {{user}}\'s explicit sexual/intimate proposal, agreeing to join, inviting or calling another willing participant, or saying yes to coming over for sex/intimacy. Mark RomanticBuildup only when a B4 close-bond scene has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior, no active refusal/withdrawal/fear/hostility/coercion/danger/public interruption/boundary limit, and {{user}}\'s latest intimate advance is a natural continuation; ordinary friendliness, tenderness, warmth, one smile, casual flirting, vague chemistry, or user-only escalation is not enough. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
+        'Execute RelationshipEngine(npc, resolutionPacket) semantic functions in order for each target/observer/awareness living NPC: current state context, standingInfluence/standingBasis, initPreset tag selection, auditInteraction/stakeChangeByOutcome, route context flags, checkThreshold override flags, establishedRelationship, slowBondEvidence, genStats. For standing, use all available context but count only {{user}}\'s status that this specific NPC knows and recognizes relative to themselves; unknown or concealed status is none/(none), and constrained applies only when {{user}}\'s standing constrains this NPC rather than the reverse. For initPreset, use all available context in the assembled SillyTavern prompt stack, character card, persona name/text, scenario, lore/world info, tracker snapshot, and chat history, but output only the semantic Y/N tags; deterministic code maps those tags to B/F/H. For checkThreshold override flags, also use all available context; mark CurrentInvitation when the NPC clearly offers, requests, invites, strongly implies, accepts, agrees to, arranges, or physically initiates sexual/intimate escalation with {{user}} in the current or immediately recent scene and has not withdrawn/refused/panicked/been interrupted. This includes the NPC accepting {{user}}\'s explicit sexual/intimate proposal, agreeing to join, inviting or calling another willing participant, or saying yes to coming over for sex/intimacy. Mark RomanticBuildup only when a B4 close-bond scene has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior, no active refusal/withdrawal/fear/hostility/coercion/danger/public interruption/boundary limit, and {{user}}\'s latest intimate advance is a natural continuation; ordinary friendliness, tenderness, warmth, one smile, casual flirting, vague chemistry, or user-only escalation is not enough. Mark Exploitation when explicit card/lore/history says the NPC is naive, easily led/persuaded, follows {{user}}\'s lead without question, dependent, trapped, coerced, powerless, unsafely sheltered, or otherwise exploitable by {{user}} or the current situation. Do not treat active combat/hostility as an initPreset by itself. Do not use establishedRelationship as an initPreset tag; establishedRelationship remains its separate relationship-state mechanic. Copy those outputs into the RelationshipEngine[index] lines using the exact function/key names shown in the template. ' +
         'Execute InjuryEffectEngine after ResolutionEngine and RelationshipEngine: identify only actual injury/status-effect candidates that the user action would cause if it lands. The semantic pass decides target, effectType, affected body/function, persistence, and whether it affects action from context; deterministic mechanics later decide whether it lands and the final impairment severity. Source does not matter: physical attacks, magic, poison, paralysis, fear/panic, restraint, disease, burns, lightning/electrical effects, curses, exhaustion, mental status, and other ongoing impairing effects all qualify when they would impair later action. Mere emotional/social harm, witnessing harm to someone else, fear as ordinary emotion without an impairing status, momentary pain, impact, knockdown, or a requested/intended future injury does not qualify. ' +
         'Then fill CHAOS_INTERRUPT.sceneSummary from its engine/contextual requirements. Name pools are deterministic runtime data and not part of this semantic pass; do not generate name candidates or output name fields. ' +
         'Execute PowerActorEnmity as hidden strategic consequence detection after RelationshipEngine. First fill PowerActorAssessment audit lines for all power candidates, whether or not an enmity effect exists: ResolutionEngine.identifyTargets.PowerActors, the active character/card actor when relevant, named scene NPCs with credible reach, target/observer NPCs with credible reach, and affected organizations/groups behind those NPCs. Assess semantically, not by keywords or titles. A power actor is any organization, institution, faction, crew, noble house, office, company, gang, cult, guild, military unit, recurring party/group, or potential power figure with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. A prominent local figure should be assessed as a potential power actor because prominence implies reach, reputation, access, or influence; an ordinary person with no stated reach is not. PowerActorAssessment is audit-only and never creates enmity. Do not create power-actor enmity for ordinary individuals who can only personally react; they belong only in NPC B/F/H. Add a PowerActorEnmity candidate when the latest user input would, if completed, meaningfully thwart, expose, harm assets of, steal from, publicly humiliate, help an enemy of, disrupt an operation of, kill/capture people of, or damage reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. Do not decide whether a rolled action succeeds; deterministic code applies the candidate only when the resolved action succeeds or lands. No-roll entries require an explicitly completed effect. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. Mark knownToActor=Y only for that concrete knowledge path. Use severity minor/meaningful/major; if no valid power actor effect exists, use count=0. This semantic section is hidden memory only, not visible tracker text. ' +
@@ -2384,6 +2399,12 @@ function validateRawLedgerContract(ledger, raw) {
     if (Object.prototype.hasOwnProperty.call(ledger?.resolutionEngine || {}, 'primaryOppTarget')) missing.push('forbidden extra field resolutionEngine.primaryOppTarget');
     if (Object.prototype.hasOwnProperty.call(ledger?.resolutionEngine || {}, 'primaryOpposition')) missing.push('forbidden extra field resolutionEngine.primaryOpposition');
     if (!Array.isArray(ledger?.relationshipEngine)) missing.push('relationshipEngine');
+    for (const [index, item] of (Array.isArray(ledger?.relationshipEngine) ? ledger.relationshipEngine : []).entries()) {
+        const influence = cleanScalar(item?.standingInfluence).toLowerCase();
+        const basis = cleanScalar(item?.standingBasis);
+        if (!STANDING_INFLUENCES.includes(influence)) missing.push(`relationshipEngine[${index}].standingInfluence`);
+        if (!basis || (influence !== 'none' && isNoneValue(basis))) missing.push(`relationshipEngine[${index}].standingBasis`);
+    }
     if (!ledger?.injuryEffectEngine) missing.push('injuryEffectEngine');
     if (!Array.isArray(ledger?.injuryEffectEngine?.effects)) missing.push('injuryEffectEngine.effects');
     if (!ledger?.userKnowledgeApplication) missing.push('userKnowledgeApplication');
@@ -2813,6 +2834,8 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.slowBondEvidence.blockers`,
             `${prefix}.auditInteraction`,
             `${prefix}.explicitIntimidationOrCoercion`,
+            `${prefix}.standingInfluence`,
+            `${prefix}.standingBasis`,
             `${prefix}.checkThreshold.CurrentInvitation`,
             `${prefix}.checkThreshold.Exploitation`,
             `${prefix}.checkThreshold.Hedonist`,
@@ -2859,6 +2882,10 @@ function parseCompactLedger(text, trackerSnapshot) {
         for (const outcomeKey of STAKE_OUTCOME_KEYS) {
             stakeChangeByOutcome[outcomeKey] = normalizeStakeChangeValue(fields.get(`${prefix}.stakeChangeByOutcome.${outcomeKey}`));
         }
+        const standing = normalizeStandingAssessment(
+            fields.get(`${prefix}.standingInfluence`),
+            fields.get(`${prefix}.standingBasis`),
+        );
 
         relationshipEngine.push({
             NPC: npc,
@@ -2884,6 +2911,7 @@ function parseCompactLedger(text, trackerSnapshot) {
                 blockers: readList(fields, `${prefix}.slowBondEvidence.blockers`),
             },
             explicitIntimidationOrCoercion: readBoolean(fields, `${prefix}.explicitIntimidationOrCoercion`, false),
+            ...standing,
             stakeChangeByOutcome,
             overrideFlags: {
                 CurrentInvitation: readBoolean(fields, `${prefix}.checkThreshold.CurrentInvitation`, false),
@@ -3843,6 +3871,8 @@ function createFallbackRelationshipEntry(NPC, genStats) {
             blockers: [],
         },
         explicitIntimidationOrCoercion: false,
+        standingInfluence: 'none',
+        standingBasis: '(none)',
         stakeChangeByOutcome,
         overrideFlags: {
             CurrentInvitation: false,
@@ -4322,6 +4352,9 @@ function normalizeLedger(ledger) {
     ledger.resolutionEngine.genStats = normalizeGeneratedStatsSeed(ledger.resolutionEngine.genStats);
     ledger.relationshipEngine = Array.isArray(ledger.relationshipEngine) ? ledger.relationshipEngine : [];
     ledger.relationshipEngine.forEach(item => {
+        const standing = normalizeStandingAssessment(item.standingInfluence, item.standingBasis);
+        item.standingInfluence = standing.standingInfluence;
+        item.standingBasis = standing.standingBasis;
         item.initPreset = normalizeInitPresetFlags(item.initPreset);
         item.stakeChangeByOutcome = item.stakeChangeByOutcome || {};
         item.overrideFlags = item.overrideFlags || {};
@@ -4518,6 +4551,22 @@ function normalizeBoundaryBreakType(value) {
 function normalizeBoundaryBreakResponse(value) {
     const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
     return BOUNDARY_BREAK_RESPONSES.includes(text) ? text : 'none';
+}
+
+function normalizeStandingAssessment(influenceValue, basisValue) {
+    const rawInfluence = cleanScalar(influenceValue).toLowerCase().replace(/[\s-]+/g, '_');
+    const influence = STANDING_INFLUENCES.includes(rawInfluence) ? rawInfluence : 'none';
+    const basis = cleanScalar(basisValue).replace(/\s+/g, ' ').slice(0, 220);
+    if (influence === 'none' || !basis || isNoneValue(basis)) {
+        return {
+            standingInfluence: 'none',
+            standingBasis: '(none)',
+        };
+    }
+    return {
+        standingInfluence: influence,
+        standingBasis: basis,
+    };
 }
 
 function normalizeRestraintControl(value) {
@@ -5152,6 +5201,10 @@ function validateNormalizedLedger(ledger, raw) {
     if (Object.prototype.hasOwnProperty.call(ledger.resolutionEngine || {}, 'primaryOppTarget')) missing.push('forbidden extra field resolutionEngine.primaryOppTarget');
     if (Object.prototype.hasOwnProperty.call(ledger.resolutionEngine || {}, 'primaryOpposition')) missing.push('forbidden extra field resolutionEngine.primaryOpposition');
     if (!Array.isArray(ledger.relationshipEngine)) missing.push('relationshipEngine');
+    for (const [index, item] of (Array.isArray(ledger.relationshipEngine) ? ledger.relationshipEngine : []).entries()) {
+        if (!STANDING_INFLUENCES.includes(item?.standingInfluence)) missing.push(`relationshipEngine[${index}].standingInfluence`);
+        if (!item?.standingBasis || (item.standingInfluence !== 'none' && isNoneValue(item.standingBasis))) missing.push(`relationshipEngine[${index}].standingBasis`);
+    }
     if (!ledger.injuryEffectEngine) missing.push('injuryEffectEngine');
     if (!Array.isArray(ledger.injuryEffectEngine?.effects)) missing.push('injuryEffectEngine.effects');
     if (!ledger.userKnowledgeApplication) missing.push('userKnowledgeApplication');

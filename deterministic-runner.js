@@ -29,6 +29,7 @@ import {
     classifyProactivityTier,
     thresholdFromTier,
     selectIntent,
+    standingConstrainedAttackGuard,
     isImmediateAttackIntent,
     isImmediateAttackIntentForType,
     buildNarrationGuidance,
@@ -4113,6 +4114,15 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     return { packet, resultLine, generatedNpcStats };
 }
 
+function standingHandoffFromSemantic(semantic = {}) {
+    const influence = String(semantic?.standingInfluence || '').trim().toLowerCase();
+    const basis = String(semantic?.standingBasis || '').trim().replace(/\s+/g, ' ').slice(0, 220);
+    if (!['aware', 'constrained'].includes(influence) || !isReal(basis)) {
+        return { StandingInfluence: 'none', StandingBasis: NONE };
+    }
+    return { StandingInfluence: influence, StandingBasis: basis };
+}
+
 function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refereeContext, context, rapportClock = normalizeRapportClock(), dice = null) {
     const resolutionSemantic = ledger.resolutionEngine || {};
     const semanticMap = new Map((ledger.relationshipEngine || []).filter(x => x?.NPC).map(x => [x.NPC, x]));
@@ -4132,6 +4142,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
 
     for (const npc of npcList) {
         const sem = semanticMap.get(npc) || { NPC: npc, stakeChangeByOutcome: {}, overrideFlags: {} };
+        const standing = standingHandoffFromSemantic(sem);
         const relevant = toRealArray(resolutionPacket.NPCInScene).some(name => sameName(name, npc)) ? 'Y' : 'N';
         audit.push(`3.2 ${npc}.relevant=${relevant}`);
 
@@ -4143,6 +4154,8 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
                 Behavior: 'None',
                 Target: 'No Change',
                 NPC_STAKES: 'N',
+                StandingInfluence: 'none',
+                StandingBasis: NONE,
                 Override: 'NONE',
                 EstablishedRelationship: 'N',
                 IntimacyBoundary: 'SKIP',
@@ -4206,6 +4219,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         }
 
         audit.push(`3.3k currentRapport=${currentRapport}`);
+        audit.push(`3.3l standing=${compact(standing)}`);
 
         const outcomeKey = String(resolutionPacket.Outcome || 'no_roll');
         const relationshipContext = {
@@ -4388,6 +4402,8 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             Behavior: classified.behavior,
             Target: target,
             NPC_STAKES: npcStakes,
+            StandingInfluence: standing.StandingInfluence,
+            StandingBasis: standing.StandingBasis,
             Override: threshold.Override,
             EstablishedRelationship: establishedRelationship,
             IntimacyBoundary: intimacyBoundary.boundary,
@@ -7593,8 +7609,14 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
             const intent = selectIntent(impulse, kind, fin, handoff.Override, handoff.PressureMode);
             const proactivityTarget = proactivityGuard ? NONE : deriveProactivityTarget(handoff, resolutionPacket, intent);
             const targetsUser = isUserProactivityTarget({ ProactivityTarget: proactivityTarget }, refereeContext) ? 'Y' : 'N';
-            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die: 20, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: 'AUTO', passes: 'Y' }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText, rapportClock }));
-            audit.push('6.4i FORCED candidate');
+            const candidate = applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die: 20, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: 'AUTO', passes: 'Y' }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText, rapportClock });
+            const standingGuard = standingConstrainedAttackGuard(handoff, resolutionPacket, candidate);
+            if (standingGuard) {
+                audit.push(`6.4i standingAttackGuard=${standingGuard}; Proactive=N`);
+            } else {
+                candidates.push(candidate);
+                audit.push('6.4i FORCED candidate');
+            }
             continue;
         }
 
@@ -7619,9 +7641,15 @@ function runProactivity(ledger, handoffs, resolutionPacket, chaosHandoff, dice, 
             const intent = selectIntent(impulse, kind, fin, handoff.Override, handoff.PressureMode);
             const proactivityTarget = proactivityGuard ? NONE : deriveProactivityTarget(handoff, resolutionPacket, intent);
             const targetsUser = isUserProactivityTarget({ ProactivityTarget: proactivityTarget }, refereeContext) ? 'Y' : 'N';
-            candidates.push(applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: threshold, passes }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText, rapportClock }));
+            const candidate = applyInitiativeOverridesIfEligible({ NPC: handoff.NPC, die, tier, intent, impulse, ProactivityTarget: proactivityTarget, TargetsUser: targetsUser, Threshold: threshold, passes }, handoff, fin, dice, audit, { kind, resolutionPacket, chaosBand, counterPotential, handoffs, latestUserText, rapportClock });
+            const standingGuard = standingConstrainedAttackGuard(handoff, resolutionPacket, candidate);
             audit.push(`6.5c selectIntent=${intent}`);
-            audit.push(`6.5e ProactivityTarget=${proactivityTarget}; TargetsUser=${targetsUser}`);
+            audit.push(`6.5e ProactivityTarget=${candidate.ProactivityTarget}; TargetsUser=${candidate.TargetsUser}`);
+            if (standingGuard) {
+                audit.push(`6.5f standingAttackGuard=${standingGuard}; Proactive=N`);
+            } else {
+                candidates.push(candidate);
+            }
         } else {
             audit.push('6.5c Proactive=N -> Intent=NONE, Impulse=NONE, ProactivityTarget=(none), TargetsUser=N');
         }

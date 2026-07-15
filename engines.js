@@ -271,6 +271,18 @@ function RelationshipEngine(npc, resolutionPacket) {
     rule: pressureMode = valid none/cornered/dominated ? exact value : none
     return {currentDisposition, currentRapport, establishedRelationship, slowBondEvidence, hostilePressure, hostileLandedPressure, dominantLock, pressureMode}
 
+  standingInfluence(npc, context):
+    policy: EO, FYW
+    rule: assess only {{user}} standing that this specific NPC knows and recognizes relative to themselves from title, authority, reputation, demonstrated power, backing, lineage, or affiliation
+    rule: unknown, concealed, unsupported, or unrecognized standing -> {standingInfluence:none,standingBasis:(none)}
+    rule: standing changes outward expression only; it NEVER changes B/F/H, locks, relationship direction, rapport, or stakes
+    if {{user}}'s recognized higher authority, status, power, backing, lineage, or affiliation limits what the NPC openly expresses or dares to do -> {standingInfluence:constrained,standingBasis:concise evidence}
+    if {{user}}'s recognized standing changes etiquette, caution, risk, or openness without constraining the NPC -> {standingInfluence:aware,standingBasis:concise evidence}
+    else -> {standingInfluence:none,standingBasis:(none)}
+    rule: affection/love may be restrained or formal, hostility may be concealed, neutral conduct may follow protocol, and friends may still recognize public authority
+    rule: B3 familiarity softens protocol; stronger formality belongs mainly in public, official, or consequential situations
+    rule: B4 deep familiarity prevents routine stiffness; standing remains relevant only for duty, authority, public protocol, and meaningful consequences
+
   initPreset():
     policy: EO, FYW
     rule: use only if currentDisposition is missing
@@ -529,9 +541,9 @@ function RelationshipEngine(npc, resolutionPacket) {
     update disposition and apply rapport reset if present
     if hostilePressureResult.dominatedFearBreak=Y and currentDisposition.F>=4 and currentDisposition.H>=3 -> lower currentDisposition.H by 1
     save currentRapport, lastRapportGainActiveMs, hostilePressure, hostileLandedPressure, dominantLock, and pressureMode to sceneTracker
-    classify disposition, update slowBondEvidence, check slowBondEligible, resolve threshold/override, and check establishedRelationship
+    classify disposition, assess standingInfluence/standingBasis, update slowBondEvidence, check slowBondEligible, resolve threshold/override, and check establishedRelationship
     RelationToUserAction = {isDirect, isOpp, isBenefited, isHarmed}
-    return NPC handoff including HostilePressure, HostileLandedPressure, DominantLock, PressureMode, and RelationToUserAction
+    return NPC handoff including StandingInfluence, StandingBasis, HostilePressure, HostileLandedPressure, DominantLock, PressureMode, and RelationToUserAction
 }
 -----------------
 function CHAOS_INTERRUPT(resolutionPacket, npcHandoffList, sceneSummary, diceList) {
@@ -782,6 +794,15 @@ function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, di
     if ProactivityTarget={{user}} -> Y
     else -> N
 
+  standingConstrainedAttackGuard(handoff, resolutionPacket, candidate):
+    policy: LOCKED, DETERMINISTIC
+    rule: apply only when handoff.StandingInfluence=constrained, candidate.Intent=ESCALATE_VIOLENCE, and candidate.ProactivityTarget={{user}}
+    rule: suppress only an unsolicited proactive attack; never alter B/F/H or another intent
+    rule: do NOT suppress self-defense, retaliation after a harmful user attack, a valid counter, restraint/boundary response, or established combat involving this NPC
+    rule: do NOT suppress an NPC-versus-NPC attack
+    if all apply and no exemption applies -> SUPPRESS candidate; keep provisional Proactive=N result
+    else -> none
+
   execution:
     kind = classifyAction(resolutionPacket)
     chaosBand = chaosHandoff.CHAOS.band
@@ -803,7 +824,9 @@ function NPCProactivityEngine(npcHandoffList, resolutionPacket, chaosHandoff, di
       if passes=Y:
         intent = selectIntent(impulse, kind, fin, handoff.Override, handoff.PressureMode)
         target = proactivityTarget(handoff, resolutionPacket, intent)
-        store candidate
+        apply initiative overrides, then standingConstrainedAttackGuard
+        if guard suppresses -> keep Proactive=N result and do not store candidate
+        else -> store candidate
       if passes=N -> keep Proactive:N, Intent:NONE, Impulse:NONE, ProactivityTarget:(none), TargetsUser:N
     sort candidates by die descending
     promote up to 3 candidates to proactive results
@@ -1551,6 +1574,46 @@ export function selectIntent(impulse, kind, fin, override, pressureMode = 'none'
     if (override !== 'NONE' && fin.B >= 3) return 'INTIMACY_OR_FLIRT';
     if (['Skill', 'Social'].includes(kind)) return 'SUPPORT_ACT';
     return 'PLAN_OR_BANTER';
+}
+
+export function standingConstrainedAttackGuard(handoff = {}, packet = {}, candidate = {}) {
+    if (String(handoff?.StandingInfluence || '').trim().toLowerCase() !== 'constrained') return null;
+    if (candidate?.intent !== 'ESCALATE_VIOLENCE') return null;
+
+    const target = candidate?.ProactivityTarget;
+    const targetsUser = candidate?.TargetsUser === 'Y' || sameName(target, '{{user}}');
+    if (!targetsUser) return null;
+
+    const npc = handoff?.NPC;
+    const relation = handoff?.RelationToUserAction || {};
+    const directlyInvolved = Boolean(
+        relation.isDirect
+        || relation.isOpp
+        || relation.isHarmed
+        || includesName(packet?.ActionTargets, npc)
+        || includesName(packet?.OppTargets?.NPC, npc)
+        || includesName(packet?.HarmedObservers, npc)
+    );
+    const validCounter = ['light', 'medium', 'severe'].includes(String(packet?.CounterPotential || '').toLowerCase())
+        && (relation.isDirect || relation.isOpp || includesName(packet?.OppTargets?.NPC, npc));
+    const harmfulUserAttack = packetHarmfulAttackActive(packet) && directlyInvolved;
+    const boundaryTarget = [
+        packet?.restraintControl?.TargetNPC ?? packet?.restraintControl?.targetNPC,
+        packet?.boundaryPressure?.TargetNPC ?? packet?.boundaryPressure?.targetNPC,
+        packet?.boundaryBreak?.TargetNPC ?? packet?.boundaryBreak?.targetNPC,
+    ].some(name => isReal(name) && sameName(name, npc));
+    const boundaryResponse = (
+        packetRestraintActive(packet)
+        || packetBoundaryPressureActive(packet)
+        || packetBoundaryBreakActive(packet)
+    ) && (boundaryTarget || directlyInvolved);
+    const establishedCombat = packet?.classifyCombatActionSequence === 'Y'
+        && (directlyInvolved || includesName(packet?.hostilesInScene?.NPC, npc));
+    const activeHostileCombat = packet?.activeHostileThreat === 'Y'
+        && includesName(packet?.hostilesInScene?.NPC, npc);
+
+    if (validCounter || harmfulUserAttack || boundaryResponse || establishedCombat || activeHostileCombat) return null;
+    return 'standing_constrained_unsolicited_user_attack';
 }
 
 export function targetsUserFromIntent(intent) {
