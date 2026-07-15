@@ -346,51 +346,39 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 YOUR FINAL RESPONSE MUST FOLLOW THE CONSTRAINTS BELOW, WHICH GOVERN PROSE, USER AGENCY, CHRONOLOGY, PERCEPTION AND NARRATION BOUNDARIES.
 
 function activeHandoff(response, context): {
-  policy: ACTIVE-HANDOFF
-  mandate:
-    YOU MUST END EVERY RESPONSE on one active, concrete beat that {{user}} can immediately respond to.
-  Valid endings:
-    - Dialogue directed at {{user}}.
-    - Action directed at {{user}}.
+  MANDATE:
+    You MUST end every response on ONE ACTIVE, CONCRETE BEAT that {{user}} can respond to.
+
+  VALID ENDINGS:
+    - Dialogue, action, or a concrete gesture directed at {{user}}.
     - A visible scene change that requires {{user}}'s input.
-  Hard limits:
-    - Do not prompt {{user}} with meta questions such as "What do you do?"
-    - Do not end on a character waiting, staring, falling silent, or expecting a response.
-    - Do not end on filler environmental detail unrelated to the current scene.
+
+  FORBIDDEN:
+    - DO NOT end by prompting {{user}} with a meta question (e.g., "What do you do?") or by describing a character waiting for or expecting {{user}}'s response.
+    - DO NOT end on filler or distant environmental detail unrelated to the current scene.
 }
 
-function characterTurnPacing(response, context): {
-  policy: DIALOGUE-TURN-LIMITS
+function npcRambleGuard(response, context): {
+  MANDATE:
+    Each participating character or NPC may contribute NO MORE THAN ONE COHESIVE NARRATIVE BEAT PER RESPONSE, centered around a single purpose. A beat MAY include:
 
-  mandate:
-    EACH CHARACTER/NPC is entitled to NO MORE THAN ONE COHESIVE TURN PER RESPONSE. A turn MAY include INTERCONNECTED dialogue, actions, reaction beats, and gestures.
+    - A character's dialogue, actions, gestures, or reactions in response to {{user}}'s input OR another PRESENT character/NPC.
 
-  VALID CONTENT:
-    - Character/NPC interconnected actions and dialogue directed at {{user}} OR another present character.
-    - Character/NPC responses/reactions to {{user}}'s input.
-    - Character/NPC gestures that directly support their actions and dialogue.
-    - When NPCs interact with each other, you may ONLY narrate a single NPC A -> NPC B -> NPC A exchange, then END your response on the resulting user-facing beat.
-    - NPCs must address the actionable substance of {{user}}'s input.
-
-  Hard Limits:
-    - Once an NPC's turn ends, they MAY NOT ACT OR SPEAK AGAIN IN THAT RESPONSE, except for the allowed NPC A -> NPC B -> NPC A exchange above.
-    - DO NOT dump exposition or narrate beyond that NPC's immediate actions and dialogue for this scene.
-    - DO NOT chain multiple NPC reactions or questions together.
-    - DO NOT use repeated body language, filler micro-actions, or canned reaction loops.
+  FORBIDDEN:
+    Do NOT give narrative beats to uninvolved or merely present characters/NPCs.
+    Do NOT give ANY participating character multiple narrative beats, separate dialogue turns, more than one question, a second action sequence, or multiple emotional beats in one response.
 }
 
-function hypotacticSceneBeats(response, context): {
-  policy: COHESIVE-ACTION-RESULT
+function cohesiveSceneBeats(response, context): {
+  MANDATE:
+    Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
 
-  mandate:
-    Hypotactic Narration: Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
+  GOOD EXAMPLE:
+    The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
 
-  Hard Limits:
-    - DO NOT USE PARATACTIC NARRATION: Do not break a beat into staccato, short sentences.
+  FORBIDDEN:
+    - DO NOT split a single scene beat into a sequence of short, staccato sentences.
     - DO NOT use micro-reaction loops, twitch narration, or body-cue pileups.
-
-  GOOD EXAMPLE: The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
-  BAD EXAMPLE: The guard grabs your wrist. He blocks the door. He lowers his voice. He looks serious. "Not that way."
 }
 
 function linearChronology(response, input, context): {

@@ -1054,20 +1054,41 @@ Execute linearChronology(response, input, context).
 mandate: You MUST ONLY narrate the EXTERNAL CONSEQUENTIAL RESULTS, RESISTANCE, FAILURE POINTS, REACTIONS, AND RESPONSES TO {{user}}'s actions and dialogue. {{user}}'s input is IN THE PAST. Narrate ONLY what comes after.
 HARD LIMIT: Do not repeat, paraphrase, summarize, re-stage, or narrate any part of {{user}}'s input.
 
-hypotacticSceneBeats:
-Execute hypotacticSceneBeats(response, context).
-mandate: Hypotactic Narration: Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
-HARD LIMIT: Do not break one beat into staccato action stacking, micro-reaction loops, or body-cue pileups.
+function cohesiveSceneBeats(response, context): {
+  MANDATE:
+    Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
 
-characterTurnPacing:
-Execute characterTurnPacing(response, context).
-mandate: Include ONLY NPCs directly responding to {{user}} or explicitly required by narrativeFacts(input). NO CHARACTER/NPC MAY RECEIVE MORE THAN ONE COHESIVE TURN PER RESPONSE. One turn may include interconnected dialogue, actions, reactions, and gestures.
-HARD LIMIT: Do NOT give every present NPC a turn, give the same NPC a second turn, chain unrelated NPC turns or questions, dump exposition, or use filler reaction loops.
+  GOOD EXAMPLE:
+    The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
 
-activeHandoff:
-Execute activeHandoff(response, context).
-mandate: YOU MUST END EVERY RESPONSE on dialogue directed at {{user}}, action directed at {{user}}, or a visible scene change that requires {{user}}'s input.
-HARD LIMIT: End immediately on that beat. Do NOT prompt {{user}} with meta questions such as "What do you do?", describe characters waiting for {{user}} to respond, or continue beyond the handoff.
+  FORBIDDEN:
+    - DO NOT split a single scene beat into a sequence of short, staccato sentences.
+    - DO NOT use micro-reaction loops, twitch narration, or body-cue pileups.
+}
+
+function npcRambleGuard(response, context): {
+  MANDATE:
+    Each participating character or NPC may contribute NO MORE THAN ONE COHESIVE NARRATIVE BEAT PER RESPONSE, centered around a single purpose. A beat MAY include:
+
+    - A character's dialogue, actions, gestures, or reactions in response to {{user}}'s input OR another PRESENT character/NPC.
+
+  FORBIDDEN:
+    Do NOT give narrative beats to uninvolved or merely present characters/NPCs.
+    Do NOT give ANY participating character multiple narrative beats, separate dialogue turns, more than one question, a second action sequence, or multiple emotional beats in one response.
+}
+
+function activeHandoff(response, context): {
+  MANDATE:
+    You MUST end every response on ONE ACTIVE, CONCRETE BEAT that {{user}} can respond to.
+
+  VALID ENDINGS:
+    - Dialogue, action, or a concrete gesture directed at {{user}}.
+    - A visible scene change that requires {{user}}'s input.
+
+  FORBIDDEN:
+    - DO NOT end by prompting {{user}} with a meta question (e.g., "What do you do?") or by describing a character waiting for or expecting {{user}}'s response.
+    - DO NOT end on filler or distant environmental detail unrelated to the current scene.
+}
 }`;
 }
 
