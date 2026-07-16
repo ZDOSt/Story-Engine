@@ -360,20 +360,19 @@ function activeHandoff(response, context): {
 
 function npcRambleGuard(response, context): {
   MANDATE:
-    Each participating character or NPC may contribute NO MORE THAN ONE COHESIVE PARAGRAPH directly responding to {{user}}'s input OR another PRESENT character/NPC.
+    Each participating character or NPC may contribute no more than ONE COHESIVE PARAGRAPH centered on ONE IMMEDIATE RESPONSE.
 
-    That paragraph MAY contain:
-    - ONE immediate reaction or action sequence.
-    - ONE uninterrupted dialogue turn containing NO MORE THAN ONE question.
-    - ONE gesture that directly supports the same response.
-
-    These are MAXIMUMS, not a checklist. Omit anything unnecessary.
+    That paragraph may contain:
+    - ONE immediate reaction to {{user}} or another present character/NPC.
+    - ONE directly related action sequence.
+    - ONE uninterrupted dialogue turn containing no more than ONE question.
+    - Only gestures that directly support that immediate response.
 
   FORBIDDEN:
-    - DO NOT give a paragraph to uninvolved or merely present characters/NPCs.
-    - DO NOT compress multiple narrative beats, dialogue turns, action sequences, topics, gestures, or emotional shifts into one paragraph.
-    - DO NOT continue any character beyond their single paragraph.
-    - Narrative flow NEVER overrides these limits. DO NOT allow characters/NPCs to ramble.
+    - DO NOT add a second reaction, action sequence, dialogue turn, question, or topic.
+    - DO NOT disguise multiple narrative beats as one paragraph.
+    - A question MUST end that character's dialogue turn.
+    - Narrative flow NEVER overrides these limits. Characters/NPCs MUST NOT take over the scene or ramble.
 }
 
 function cohesiveSceneBeats(response, context): {
