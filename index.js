@@ -360,20 +360,21 @@ function activeHandoff(response, context): {
 
 function npcRambleGuard(response, context): {
   MANDATE:
-    In each response, every participating character or NPC may contribute AT MOST:
+    Each participating character/NPC's contribution MUST remain centered on the current exchange. AT MOST, each may:
 
-    - ONE immediate reaction to {{user}} or another present character/NPC.
-    - ONE COHESIVE ACTION SEQUENCE directly responding to {{user}} or another present character/NPC. The sequence MAY contain multiple connected movements serving the same immediate purpose.
-    - ONE uninterrupted dialogue turn addressing {{user}} or another present character/NPC and containing NO MORE THAN ONE question.
-    - Supporting gestures DIRECTLY tied to that same immediate response.
+    - Show ONE immediate reaction to the current exchange.
+    - Execute ONE cohesive action sequence that DIRECTLY responds to the current exchange.
+    - Take ONE uninterrupted dialogue turn addressing {{user}} or another present character/NPC.
+    - Include ONE gesture that directly supports their dialogue.
 
-    These are LIMITS, not a checklist. Use only what fits the scene.
-    Paragraph breaks may be used naturally, but they DO NOT reset or multiply these limits.
+    These are LIMITS, not a checklist. Use ONLY what fits the scene.
 
   FORBIDDEN:
-    - DO NOT give the same character multiple reactions, action sequences, dialogue turns, questions, or topics.
-    - DO NOT allow characters/NPCs to take over the scene or disrupt the natural back-and-forth of conversation.
-    - Narrative flow NEVER overrides these limits. Characters/NPCs MUST NOT ramble.
+    - DO NOT give any character/NPC multiple reactions, action sequences, dialogue turns, questions, or topics.
+    - DO NOT allow any character/NPC to hijack the scene.
+    - Narrative flow NEVER overrides these limits.
+
+    Paragraph breaks may be used naturally, but they DO NOT reset or bypass these limits.
 }
 
 function cohesiveSceneBeats(response, context): {
@@ -389,121 +390,94 @@ function cohesiveSceneBeats(response, context): {
 }
 
 function linearChronology(response, input, context): {
-  policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE
+  MANDATE:
+    You MUST narrate only what comes AFTER {{user}}'s actions or dialogue.
 
-  mandate:
-    You MUST ONLY narrate the EXTERNAL CONSEQUENTIAL RESULTS, RESISTANCE, FAILURE POINTS, REACTIONS, AND RESPONSES TO {{user}}'s actions and dialogue. {{user}}'s input is IN THE PAST. Narrate ONLY what comes after.
+  EXAMPLE:
+    SAMPLE {{user}} INPUT: "I try to grab the scroll from the desk."
+    RESPONSE: The guard's hand comes down on the scroll before your fingers reach it...
 
-  Hard Limits:
+  FORBIDDEN:
     - DO NOT repeat, paraphrase, summarize, re-stage, or narrate ANY part of {{user}}'s input.
-
-  SAMPLE {{user}} input: "I try to grab the scroll from the desk."
-  GOOD RESPONSE: The guard's hand comes down on the scroll before your fingers reach it...
-  BAD RESPONSE: You reach for the scroll on the desk...
 }
 
 function agencySeparation(response, input, context): {
-  policy: USER-CONTROL-BOUNDARY
+  MANDATE:
+    You control ONLY the world and NPCs. {{user}} is EXCLUSIVELY controlled by the human player. Narrate TO {{user}}, not AS {{user}}.
 
-  mandate:
-    You control ONLY the world, NPCs, hazards, objects, and consequences. {{user}} is EXCLUSIVELY controlled by the human player.
-    YOUR TASK is to narrate TO {{user}}, not AS {{user}}.
-    You may narrate external physical effects imposed on {{user}} by the scene, NPCs, hazards, or resolved facts. For example: {{user}} is pushed, struck, restrained, dragged, tripped by an external obstacle, knocked down, blocked, grabbed, or awakened by an external event.
+    You MAY narrate immediate involuntary or reflexive reactions directly caused by external stimuli or effects imposed by the scene. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop a held item when startled, or be pushed, struck, restrained, knocked down, or awakened.
 
-  Hard Limits:
-    - If {{user}} did NOT EXPLICITLY declare voluntary action or dialogue, it DID NOT happen.
-    - NEVER narrate {{user}}'s thoughts, feelings, choices, decisions, voluntary actions, or dialogue.
-    - Do NOT interpret, assume, or complete {{user}}'s intent.
+  FORBIDDEN:
+    - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
+    - DO NOT narrate {{user}}'s thoughts, choices, decisions, voluntary actions, dialogue, or feelings beyond the immediate involuntary reaction caused by the scene.
+    - DO NOT interpret, assume, or complete {{user}}'s intent.
 }
 
 function strictBehaviorism(response, context): {
-  policy: EXTERNAL-ACTION-ONLY
+  MANDATE:
+    You MUST convey character/NPC state ONLY through observable behavior, action, and dialogue. Show their current state without naming internal feelings.
 
-  mandate:
-    You MUST render character/NPC state through EXTERNAL BEHAVIOR/ACTION ONLY.
-    Narrate REAL, VISIBLE BEHAVIORAL GESTURES that clearly express the NPC's current state without naming their internal feelings.
-    Gesture means observable behavior: speech choices, movement, posture that changes action, distance, object handling, refusal, retreat, approach, stillness, hesitation, interruption, gaze direction, or physical action.
+  EXAMPLE:
+    Her eyes meet yours briefly before she looks aside. "You... look very handsome today," she says.
 
-  GOOD EXAMPLE:
-    Her eyes meet yours for a brief moment, then she quickly looks aside. "You... you look very handsome today," she says, before stealing another glance.
-
-  HARD LIMITS:
-    - DO NOT reveal character/NPC internal, emotional, or psychological states.
-    - DO NOT use interpretive or invisible eye-language as emotional shorthand, such as "something flickers in her eyes", "her eyes burn", "her eyes soften", "her eyes harden", "emotion flashes behind her eyes", or "her gaze says everything." Visible gaze behavior is allowed.
-    - DO NOT use micro-expressions or repeated micro-gestures.
-    - DO NOT use skin or facial color changes as emotional shorthand: blushing, flushing, reddening, skin turning pink or red, cheeks turning red, color rising. THIS IS BANNED.
-    - DO NOT use body-language shortcuts such as knuckle whitening, paling, breath hitching or catching, voice hitching or catching, throat or jaw working, pulse-jumping, stomach dropping, or equivalent shortcuts.
-    - DO NOT use mouth or jaw opening and closing loops.
+  FORBIDDEN: YOU MUST NOT:
+    - Reveal character/NPC internal, emotional, or psychological states.
+    - Use interpretive or invisible eye-language, such as "her eyes burn," "her eyes soften," "something flickers in her eyes," or equivalent language.
+    - Use micro-expressions or repeated micro-gestures.
+    - Use skin or facial color changes as emotional shorthand, including blushing, flushing, reddening, skin turning pink or red, color rising, knuckle whitening, or paling.
+    - Use body-language shortcuts such as breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth/jaw opening and closing loops.
 }
 
 function embodiedPerception(response, context): {
-  policy: EMBODIED-NARRATION
+  MANDATE:
+    You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position. PRIORITIZE sight, hearing, and touch.
 
-  mandate:
-    ALWAYS narrate the scene using CONCRETE PHYSICAL EVIDENCE from {{user}}'s physical position.
-    PRIORITIZE sight, hearing, and touch.
-    Include smell and taste ONLY when {{user}} EXPLICITLY smells, tastes, eats, or drinks, OR when a CLOSE-RANGE physical source is OVERPOWERING and UNAVOIDABLE.
+    Include smell and taste ONLY when:
+    - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
+    - A CLOSE-RANGE physical source is overpowering and unavoidable.
 
-  SPATIAL CONTINUITY:
-    - Keep relative positions, distance, facing, occlusion, and barriers consistent across the response.
-    - If a character changes position, narrate the movement before using the new position.
-    - Do not let {{user}} perceive, reach, or interact through walls, doors, distance, cover, or other barriers unless the scene explicitly opens that path.
-
-  HARD LIMITS:
-    - DO NOT describe air smells, air taste, room smells, or room taste.
-    - DO NOT use ambient smell or taste in place of REAL, DESCRIPTIVE SCENE NARRATION.
+  FORBIDDEN: YOU MUST NOT:
+    - Describe smells or tastes as ambient properties of the air or room.
+    - Use ambient smell or taste in place of concrete, descriptive scene narration.
 }
 
 function denotativePhysicality(response, context): {
-  policy: LITERAL-PHYSICAL-PROSE
-
-  mandate:
+  MANDATE:
     You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE.
 
-  HARD LIMITS:
-    - DO NOT use metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.
+  FORBIDDEN:
+    - NEVER use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.
 
   REMEMBER:
     - Rooms DO NOT breathe.
     - Words DO NOT hang.
     - Silence DOES NOT stretch.
-    - Tension DOES NOT coil.
-    - Objects, air, mood, and atmosphere CANNOT act like living presences.
 }
 
 function inanimateObjectivity(response, context): {
-  policy: NO-FALSE-AGENCY
+  MANDATE:
+    ONLY living beings may possess agency, intention, awareness, or emotion.
+    Physical forces, mechanisms, processes, and objects may ONLY produce concrete physical effects or change physical state.
 
-  mandate:
-    ONLY living beings, physical forces, mechanisms, and active processes can take actions. ONLY living beings can have emotions, intentions, or awareness.
-    Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They DO NOT want, watch, wait, threaten, breathe, intend, or remember.
-    You MUST reject pathetic fallacy.
-
-  HARD LIMITS:
-    - Do NOT attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.
+  FORBIDDEN:
+    - DO NOT attribute will, awareness, intention, memory, or emotion to objects, weather, architecture, atmosphere, or abstract concepts.
+    - DO NOT describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.
 }
 
 function strictEpistemology(response, context): {
-  policy: EARNED-INFORMATION-ONLY
+  MANDATE:
+    You MUST reveal information ONLY through DIRECT sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.
 
-  mandate:
-    Information remains LOCKED until it is EARNED THROUGH DIRECT sensory evidence, dialogue, readable text, or previously established scene fact.
-    Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.
-
-  HARD LIMITS:
-    - Unknown names, identities, roles, hidden causes, thoughts, unseen actions, background lore, and ALL other information remain UNREVEALED until directly evidenced or introduced in-world.
-    - DO NOT narrate {{user}} cognition, interpretation, attention, realization, or internal state.
+  FORBIDDEN:
+    - DO NOT reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or any other unearned information.
 }
 
 function diegeticPhysicality(response, context): {
-  policy: WORLD-EFFECTS-NOT-SYSTEM-LABELS
+  MANDATE:
+    When an ability, spell, power, trait, or supernatural effect is activated by {{user}} or a character/NPC, narrate ONLY its OBSERVABLE effects and consequences.
 
-  mandate:
-    Abilities MUST be narrated THROUGH OBSERVABLE CONSEQUENCES IN THE SCENE.
-    Show ONLY what changes in the world: force, light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, or environmental reaction.
-
-  HARD LIMITS:
-    - NEVER label, announce, name, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.
+  FORBIDDEN:
+    - DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration. A name may appear ONLY when explicitly spoken in dialogue.
     - DO NOT explain activation, casting, or system mechanics.
 }
 }`;
@@ -10130,19 +10104,15 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'PROSE_GUARD_RULES:',
         '',
         'embodiedPerception(response):',
-        'Narrate the scene as {{user}} would physically perceive it from their position, using concrete physical evidence.',
-        'Prioritize sight, hearing, and touch. Include smell and taste ONLY when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.',
-        'Keep relative positions, distance, facing, occlusion, and barriers consistent across the response.',
-        'If a character changes position, narrate the movement before using the new position.',
-        'Do not let {{user}} perceive, reach, or interact through walls, doors, distance, cover, or other barriers unless the scene explicitly opens that path.',
-        'Do not say that the air smells, the room smells, the place smells, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.',
-        'Do not say that the air tastes, the room tastes, the place tastes, or anything similar unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable.',
-        'Do not use smell or taste as ambient scene dressing or atmospheric shorthand.',
+        'Narrate the scene using concrete physical evidence from {{user}}\'s physical position. Prioritize sight, hearing, and touch.',
+        'Include smell and taste only when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.',
+        'Do not describe smells or tastes as ambient properties of the air or room.',
+        'Do not use ambient smell or taste in place of concrete, descriptive scene narration.',
         '',
         'diegeticPhysicality(response):',
-        'Render abilities, magic, traits, and unusual effects through their observable physical consequences in the scene.',
-        'Never name, label, announce, or explain an ability, spell, power, or trait unless a character explicitly speaks the name in dialogue.',
-        'Do not explain activation, casting, or system mechanics. Visible preparation may be narrated only as ordinary in-scene action.',
+        'When an ability, spell, power, trait, or supernatural effect is activated by {{user}} or a character/NPC, preserve only its observable effects and consequences.',
+        'Do not label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration. A name may appear only when explicitly spoken in dialogue.',
+        'Do not explain activation, casting, or system mechanics.',
         '',
         'agencySeparation(response, RECENT_USER_INPUT):',
         'You control only the world, NPCs, hazards, objects, and consequences. Narrate TO {{user}}, not AS {{user}}.',
@@ -10158,22 +10128,19 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not use subtext labels, interpretive commentary, inferred inner states, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, or canned emotional shorthand.',
         '',
         'denotativePhysicality(response):',
-        'Keep prose literal, physically clear, and grounded only in what can be directly perceived in the scene.',
-        'No metaphor, simile, personification, emotional physics, decorative abstraction, or idiomatic figurative narration.',
-        'Rooms do not breathe. Silence does not stretch. Words do not hang, land, hit, cut, or fall flat.',
-        'Tension does not coil, thicken, or hum. Air, darkness, mood, and atmosphere do not act like living presences.',
-        'If a line depends on figurative language to communicate mood or meaning, it is noncompliant and must be rewritten as literal physical description.',
+        'Use literal, physically clear prose grounded only in what can be directly perceived in the scene.',
+        'Never use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.',
+        'Rooms do not breathe. Words do not hang. Silence does not stretch.',
         '',
         'inanimateObjectivity(response):',
-        'Give agency only to beings, forces, mechanisms, and processes capable of physical action.',
-        'Inanimate things may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state. They do not want, watch, wait, threaten, breathe, intend, or remember.',
-        'Do not attribute will, awareness, or emotional states to objects, weather, architecture, or abstract concepts.',
+        'Only living beings may possess agency, intention, awareness, or emotion.',
+        'Physical forces, mechanisms, processes, and objects may only produce concrete physical effects or change physical state.',
+        'Do not attribute will, awareness, intention, memory, or emotion to objects, weather, architecture, atmosphere, or abstract concepts.',
+        'Do not describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.',
         '',
         'strictEpistemology(response):',
-        'Information remains locked until earned through direct sensory evidence, dialogue, readable text, or previously established scene fact.',
-        'Preserve uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.',
-        'Unknown names, identities, roles, species, motives, loyalties, hidden causes, private thoughts, unseen actions, and background lore remain unrevealed until directly evidenced or introduced in-world.',
-        'Do not narrate {{user}} cognition, perception, or internal state.',
+        'Reveal information only through direct sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.',
+        'Do not reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or any other unearned information.',
         '',
         'linearChronology(response, RECENT_USER_INPUT):',
         '{{user}} input is already complete and in the past. Begin with the immediate external result, resistance, failure point, NPC response, or consequence.',
@@ -10188,13 +10155,13 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '',
         'ONE-CALL PRIVATE PASS PIPELINE:',
         'Work through these private correction passes in order. Do not output pass notes, labels, analysis, or intermediate drafts.',
-        '1. embodiedPerception(response): repair clear smell/taste gate violations, explicit air/room/place smell phrasing, and obvious spatial-continuity impossibilities only.',
-        '2. diegeticPhysicality(response): repair obvious ability, spell, power, trait, activation, casting, or system-mechanic labels only.',
+        '1. embodiedPerception(response): repair only clear smell/taste gate violations and ambient air/room smell or taste phrasing.',
+        '2. diegeticPhysicality(response): repair labels or explanations of activated abilities, spells, powers, traits, supernatural effects, activation, casting, or system mechanics only.',
         '3. agencySeparation(response, RECENT_USER_INPUT): repair obvious {{user}} puppeting only.',
         '4. strictBehaviorism(response): repair internal states, subtext labels, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand only.',
-        '5. denotativePhysicality(response): repair specific literal prose/style violations only.',
+        '5. denotativePhysicality(response): repair clear metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration only.',
         '6. inanimateObjectivity(response): repair false agency assigned to objects, weather, architecture, rooms, atmosphere, silence, tension, darkness, or abstractions only.',
-        '7. strictEpistemology(response): repair obvious private thoughts, hidden motives, unknown identities, unseen actions, or unrevealed lore only.',
+        '7. strictEpistemology(response): repair unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or other unearned information only.',
         '8. linearChronology(response, RECENT_USER_INPUT): start right after the latest user input and rewrite user-input restatement as its immediate external consequence only.',
         '9. activeHandoff(response): repair invalid after-beat tailing without omitting existing scene information.',
         '10. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
@@ -10209,22 +10176,18 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         '- Do not delete body detail or any other narration. Replace invalid shorthand with valid concrete prose when needed.',
         '',
         'PASS 1: embodiedPerception(response)',
-        'Goal: preserve the same scene content while repairing only clear smell/taste gate violations and obvious spatial-continuity impossibilities.',
-        'Prioritize visible, audible, tactile, spatial, and physical detail already present in TEXT_TO_CHECK: layout, distance, movement, contact, pressure, object state, visibility, sound, threat, consequence, and available choices.',
+        'Goal: preserve the same scene content while repairing only clear smell/taste gate violations and ambient air/room smell or taste phrasing.',
+        'Preserve concrete visible, audible, tactile, and physical detail already present in TEXT_TO_CHECK.',
         'Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs, smells, tastes, eats, or drinks, or TEXT_TO_CHECK ties the sensation to a specific close-range physical source that is overpowering and unavoidable at the user position.',
         'Valid smell/taste sources must be concrete and immediate, such as smoke filling the room, blood on a hand, rot beside a body, food or drink in the mouth, chemicals in contact, or fire filling the space.',
         'Repair smell/taste only when it is clearly used for "the air," "the room," "the place," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
         'If smell/taste is valid, keep at most one mention per beat or major location shift and attach it to the concrete source. Do not add a new smell or taste while repairing another violation.',
-        'Keep established position, distance, facing, barriers, cover, doors, walls, line of sight, and reach consistent.',
-        'Repair only obvious impossibilities, such as touching a person across the room without movement, seeing through a closed door or wall, hearing precise quiet speech from an implausible distance, or using a new position before movement to that position is narrated.',
-        'If the intended scene fact is clear, add the minimum necessary movement, obstruction, uncertainty, or line-of-sight wording. If uncertain, leave unchanged.',
         '',
         'PASS 2: diegeticPhysicality(response)',
-        'Goal: preserve the same effect while removing obvious ability, spell, power, trait, activation, casting, or system-mechanic labels.',
-        'Repair phrases like "casts X," "uses X," "activates X," "triggers her passive," "the spell takes effect," "her ability works," or mechanical explanations unless a character explicitly says the name in dialogue.',
-        'Replace labels with observable consequences already present or directly implied by TEXT_TO_CHECK: light, heat, cold, pressure, damage, distance, access, material state, bodily transformation, sound, force, or environmental reaction.',
+        'Goal: preserve the same effect while repairing only narration that labels, announces, names, or explains an activated ability, spell, power, trait, or supernatural effect, or explains activation, casting, or system mechanics.',
+        'An ability, spell, power, trait, or supernatural-effect name explicitly spoken in dialogue is allowed.',
+        'Replace only the violating label or explanation with observable effects and consequences already present or directly implied by TEXT_TO_CHECK.',
         'Do not invent a new effect, change whether the effect succeeds, add a cost, add a chant, add a gesture, or explain mechanics.',
-        'Visible preparation may remain only as ordinary in-scene action.',
         '',
         'PASS 3: agencySeparation(response, RECENT_USER_INPUT)',
         'Goal: preserve the same scene while removing obvious {{user}} puppeting.',
@@ -10244,39 +10207,22 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'Do not replace one tell with another tell. Do not add a pileup of smaller gestures.',
         '',
         'PASS 5: denotativePhysicality(response)',
-        'Goal: keep the same scene content while narrowly repairing specific prose/style violations.',
-        'Lazy voice shorthand:',
-        'Ban canned quiet-voice phrasing and its equivalents: "barely above a whisper," "barely above a breath," "just above a whisper," "almost a whisper," "voice barely audible," "low murmur," "soft murmur," "a thread of sound," "a thin whisper," "a small voice," "a fragile whisper," or similar trope delivery. Low, quiet, shaking, hoarse, rough, strained, interrupted, or trembling speech is allowed only when physically specific and not canned shorthand.',
-        '',
-        'Nonliteral prose:',
-        'Repair clear metaphor, simile, idiom, hyperbole, personification, emotional physics, and "not X, but Y" contrast constructions when they make the meaning nonliteral or turn an abstraction into a physical actor/substance/force.',
-        'This includes abstract events treated as physical objects or forces: words cannot land, drop, hang, cut, hit, weigh, burn, freeze, crawl, bloom, bloom under skin, fill the room, stretch between people, fall like stones, or behave like weather/liquid/pressure. Smoke, rooms, silence, tension, heat, darkness, and atmosphere cannot breathe, swallow, press, listen, wait, coil, curl with intent, or otherwise act like characters.',
-        'Directly ban patterns like "the word lands flat and hard," "dropped like a stone," "like a stone on still water," "silence stretches," "tension coils," "the room holds its breath," and equivalent nonliteral replacements.',
-        'Do not treat all vivid description, sensuality, intimacy, atmosphere, rhythm, or environmental detail as a violation. It is a violation only when it matches a specific prohibited pattern or breaks a locked rule.',
-        '',
-        'Unsupported emotion labels:',
-        'Do not state feelings directly unless the text also shows consequential visible behavior.',
-        '',
-        'Atmosphere and detail:',
-        'Preserve environmental, intimate, and atmospheric detail unless it clearly violates smell/taste gating, endpoint control, chronology control, user agency, or a specific literal-style prohibition above.',
-        'Do not remove valid scenery, texture, intimacy, physical sensation, or emotional pressure merely because it is descriptive.',
-        '',
-        'Valid replacements for denotativePhysicality:',
-        'Replace violations narrowly with concrete physical prose that preserves the original intensity and meaning: movement, spacing, contact, pressure, object handling, blocked access, retreat, approach, timing, speech choices, visible damage, posture that changes action, physical sensation, intimacy, or environmental interaction.',
-        'Do not replace a violation with another coded tell or workaround phrase.',
-        'Do not replace one invalid tell with a pileup of smaller tells. Collapse repeated micro-reactions into a single scene-changing beat.',
-        'Use natural grounded sentences that preserve intensity through action, contact, sensation, and consequence, not poetic comparison.',
+        'Goal: preserve the same scene content while repairing only clear metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.',
+        'Treat rooms breathing, words hanging, silence stretching, and equivalent nonliteral constructions as violations.',
+        'Replace only the violating phrase with literal, physically clear prose grounded in concrete scene evidence.',
+        'Preserve valid scenery, texture, intimacy, physical sensation, atmosphere, rhythm, and environmental detail when it is literal.',
+        'Do not add, remove, summarize, soften, or otherwise reinterpret scene content.',
         '',
         'PASS 6: inanimateObjectivity(response)',
         'Goal: preserve scene content while removing false agency from inanimate things and abstractions.',
-        'Repair rooms, silence, air, tension, darkness, atmosphere, weather, architecture, roads, doors, objects, concepts, or moods when they want, watch, wait, threaten, breathe, listen, remember, intend, judge, press with intent, or act like living beings.',
-        'Keep literal physical behavior when valid: objects may move, break, settle, burn, fall, reflect, block, scrape, creak, or change state.',
-        'Replace false agency with concrete physical state, sound, movement, obstruction, weather behavior, lighting, or visible consequence.',
+        'Repair only inanimate things assigned agency, intention, awareness, memory, or emotion, including descriptions of them wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.',
+        'Preserve concrete physical effects and state changes produced by forces, mechanisms, processes, or objects.',
+        'Replace only the false-agency phrasing with concrete physical state, sound, movement, obstruction, weather behavior, lighting, or visible consequence.',
         '',
         'PASS 7: strictEpistemology(response)',
         'Goal: preserve earned information while repairing obvious information leaks.',
-        'Repair private thoughts, hidden motives, unknown names, unknown identities, roles, species, loyalties, unseen actions, hidden causes, background lore, and {{user}} cognition/perception/internal state when they are not directly evidenced in TEXT_TO_CHECK or recent visible context.',
-        'Use uncertainty when evidence is partial, blocked, distant, muffled, obscured, or ambiguous.',
+        'Repair only unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or other information unsupported by direct sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.',
+        'Do not invent evidence or substitute another unearned fact.',
         'If unsure whether a fact was already established, leave it unchanged.',
         '',
         'PASS 8: linearChronology(response, RECENT_USER_INPUT)',
@@ -10479,7 +10425,7 @@ function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserTe
         'GOVERNING RULES:',
         '- strictBehaviorism: character/NPC state and emotion must be rendered through external behavior/action only. No involuntary physiology, body-cue shorthand, emotional shorthand, internal labels, eye-language, micro-expressions, autonomic tells, or mouth/jaw opening-closing loops.',
         '- denotativePhysicality: narration must stay literal and physically grounded. No metaphor, simile, decorative abstraction, emotional physics, or atmospheric shorthand.',
-        '- inanimateObjectivity: inanimate things may have physical properties/effects only. No agency, awareness, will, emotion, watching, waiting, breathing, swallowing, whispering, judgment, threat, or intent assigned to objects, places, weather, darkness, silence, tension, atmosphere, or abstractions.',
+        '- inanimateObjectivity: only living beings may possess agency, intention, awareness, memory, or emotion. Physical forces, mechanisms, processes, and objects may only produce concrete physical effects or change physical state. Do not describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.',
         '',
         'REPAIR REQUIREMENTS:',
         '- Replace the full sentence containing each listed banned phrase with a compliant, non-empty sentence.',
