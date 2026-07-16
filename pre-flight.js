@@ -1907,22 +1907,22 @@ function narrativeNameRevealFact(nameGeneration = {}) {
     const maleNames = (pool.male || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     return [
-        'Name reveal is LOCKED and GATED.',
+        'MANDATE:',
+        'Reveal a NEW person, entity, or location name ONLY when it is revealed in the current scene through dialogue, self-introduction, readable text, or clear recognition supported by established context.',
         '',
-        'DO NOT output any new person, entity, or location name unless that name is explicitly revealed in the current scene through dialogue, self-introduction, direct address, readable text, signage, documents, or clear recognition supported by context.',
-        '',
-        'If a new name IS revealed, you MUST choose exactly one unused name from the appropriate pool below.',
-        '',
-        'DO NOT invent, modify, translate, combine, suffix, derive, surname, ignore, or replace these names. Any new name outside this list makes the response invalid.',
+        'IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:',
         '',
         `FEMALE: ${nameList(femaleNames)}.`,
         `MALE: ${nameList(maleNames)}.`,
         `LOCATION: ${nameList(locationNames)}.`,
         '',
-        'If no name is revealed in-scene, leave the person, entity, or location unnamed.',
-        'Do NOT name background, incidental, unseen, or merely described figures.',
-        'Do NOT create a name reveal just because someone or somewhere appears.',
-        'Already revealed names continue unchanged.',
+        'Previously revealed names MUST remain unchanged.',
+        'Using the provided names for EVERY NEW name is MANDATORY and NON-NEGOTIABLE.',
+        'Any unauthorized NEW name renders the response INVALID.',
+        '',
+        'FORBIDDEN:',
+        '- DO NOT invent, modify, combine, translate, or derive names.',
+        '- DO NOT use ANY NEW name outside the appropriate pool.',
     ].join('\n');
 }
 
