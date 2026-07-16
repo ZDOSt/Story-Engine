@@ -1,0 +1,4 @@
+#!/bin/sh
+
+root="$(git rev-parse --show-toplevel)" || exit 1
+exec node "$root/scripts/bump-extension-version.mjs"
