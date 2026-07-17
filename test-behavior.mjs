@@ -11509,25 +11509,23 @@ const tests = [
       const renderControlLeak = [
         '1. **activeHandoff:** End on an active beat that immediately requires a user response.',
         '',
-        '2. **realisticConversation:** One immediate conversational turn per participating character.',
+        '2. **cohesiveSceneBeats:** Advance the visible scene.',
         '',
-        '3. **cohesiveSceneBeats:** Advance the visible scene.',
+        '3. **linearChronology:** Narrate what follows the user input.',
         '',
-        '4. **linearChronology:** Narrate what follows the user input.',
+        '4. **agencySeparation:** Do not write user action.',
         '',
-        '5. **agencySeparation:** Do not write user action.',
+        '5. **strictBehaviorism:** No body-tell shorthand.',
         '',
-        '6. **strictBehaviorism:** No body-tell shorthand.',
+        '6. **embodiedPerception:** No explicit smell/taste invocation. No overpowering close-range source. -> LOCKED. No smell/taste.',
         '',
-        '7. **embodiedPerception:** No explicit smell/taste invocation. No overpowering close-range source. -> LOCKED. No smell/taste.',
+        '7. **denotativePhysicality:** Keep narration literal.',
         '',
-        '8. **denotativePhysicality:** Keep narration literal.',
+        '8. **inanimateObjectivity:** No false agency for objects or weather.',
         '',
-        '9. **inanimateObjectivity:** No false agency for objects or weather.',
+        '9. **strictEpistemology:** Direct visual scene only.',
         '',
-        '10. **strictEpistemology:** Direct visual scene only.',
-        '',
-        '11. **diegeticPhysicality:** No active abilities or supernatural traits are being used.',
+        '10. **diegeticPhysicality:** No active abilities or supernatural traits are being used.',
         '',
         'CONCLUSION: Valid to proceed with narration of Naomi entering and responding to the spin request.',
         'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
@@ -13318,19 +13316,27 @@ const tests = [
       );
       assert.match(sectionDefaults, /ACTION-BEAT DIALOGUE:/);
       assert.match(dialogueDefault, /Dialogue should feel natural, connected, and realistic\./);
-      assert.match(dialogueDefault, /ONLY when those actions DIRECTLY support their current dialogue or conversation/);
-      assert.match(dialogueDefault, /Keep the narrative lens close to the active participants and the immediate exchange\./);
-      assert.match(dialogueDefault, /Environmental or object interaction belongs ONLY when a character is actively using it, reacting to it, or when it materially affects the exchange\./);
+      assert.match(dialogueDefault, /While a character\/NPC speaks, they may move, change position, handle objects, or make visible gestures AS PART OF their dialogue/);
+      assert.match(dialogueDefault, /Keep the narrative lens close to the active participants and immediate exchange\./);
+      assert.match(dialogueDefault, /Environmental or object interaction belongs ONLY when a character is actively using it, reacting to it, or when it materially affects the scene\./);
       assert.match(dialogueDefault, /Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary\. Observable behavior only\./);
-      assert.match(dialogueDefault, /Every character\/NPC response MUST address the FULL substance of the input directed at them/);
-      assert.match(dialogueDefault, /MUST acknowledge EACH ONE/);
-      assert.match(dialogueDefault, /Related points MUST be addressed together naturally, not as a checklist/);
-      assert.match(dialogueDefault, /DO NOT respond only to the final sentence or fragment while ignoring what came before it/);
+      assert.match(dialogueDefault, /If \{\{user\}\} makes multiple distinct statements or questions, characters\/NPCs MUST respond to or acknowledge the ENTIRE input directed at them/);
+      assert.match(dialogueDefault, /Do NOT respond only to the final sentence or question/);
+      assert.match(dialogueDefault, /they do NOT need to answer every point separately/);
+      assert.match(dialogueDefault, /Related points may be combined into one natural response, as a real person would/);
+      assert.match(dialogueDefault, /may intentionally deflect, refuse, or avoid a point when appropriate/);
+      assert.match(dialogueDefault, /MUST show that the point was noticed rather than accidentally omitted/);
+      assert.match(dialogueDefault, /DO NOT repeat, enumerate, or answer \{\{user\}\}'s input line by line/);
       assert.match(dialogueDefault, /Respect the natural BACK AND FORTH of conversation/);
-      assert.match(dialogueDefault, /DO NOT return to a character\/NPC who has already completed their dialogue turn/);
-      assert.match(dialogueDefault, /Each character\/NPC may use AT MOST TWO paragraphs/);
-      assert.match(dialogueDefault, /NO character\/NPC may ask more than ONE question during their turn/);
-      assert.match(dialogueDefault, /If they ask a question, that question MUST end their turn/);
+      assert.match(dialogueDefault, /Do NOT allow any character\/NPC to hijack the conversation by chaining multiple responses, changing topics, or continuing through several natural opportunities for another participant to respond/);
+      assert.match(dialogueDefault, /may make AT MOST ONE natural response-seeking follow-up, whether phrased as a question or direct prompt/);
+      assert.match(dialogueDefault, /That follow-up MUST end their turn/);
+      assert.match(dialogueDefault, /Do NOT stack multiple requests or questions for a response/);
+      assert.match(dialogueDefault, /Rhetorical phrases that request no answer may occur naturally within dialogue/);
+      assert.match(dialogueDefault, /\{\{user\}\} input: "You are reliable, trustworthy, AND skilled\."/);
+      assert.match(dialogueDefault, /Example Response: She cocks her head to one side and grins/);
+      assert.match(dialogueDefault, /Tell me what you really want, without the flattery/);
+      assert.doesNotMatch(dialogueDefault, /MUST acknowledge EACH ONE|AT MOST TWO paragraphs|If they ask a question, that question MUST end their turn/);
       assert.doesNotMatch(dialogueDefault, /Write dialogue in a natural, connected flow|adjusting clothing|Physical behavior during dialogue|Brief descriptive framing/);
       assert.match(source, /writingStyleDialoguePrompt \?\? ''\)\.trim\(\) === PREVIOUS_DEFAULT_DIALOGUE_STYLE_PROMPT\.trim\(\)/);
       assert.match(source, /writingStyleDialoguePrompt = DEFAULT_DIALOGUE_STYLE_PROMPT/);
@@ -13472,34 +13478,7 @@ const tests = [
       assert.match(indexSource, /micro-reaction loops, twitch narration, or body-cue pileups/);
       assert.doesNotMatch(indexSource, /A character should act within the scene/);
       assert.doesNotMatch(indexSource, /dialoguePacing/);
-      const indexRealisticConversation = indexSource.slice(
-        indexSource.indexOf('function realisticConversation(response, context):'),
-        indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
-      ).trim();
-      const expectedRealisticConversation = `function realisticConversation(response, context): {
-  MANDATE:
-    You MUST write dialogue as realistic conversational turns. Each character/NPC may contribute ONLY ONE immediate conversational turn in response to {{user}} or another character/NPC.
-
-    That turn may contain AT MOST:
-
-    - ONE immediate reaction to the input.
-    - ONE cohesive action sequence that DIRECTLY addresses the current exchange.
-    - Gestures that naturally support their current dialogue.
-    - ONE uninterrupted dialogue turn that directly addresses the FULL input.
-    - AT MOST ONE follow-up question. If asked, that question MUST end the character's turn.
-
-    If the input contains multiple distinct statements or questions directed at the character/NPC, their single dialogue turn MUST acknowledge EACH ONE. Related points MUST be addressed together naturally, not as a checklist.
-
-    These are LIMITS, not requirements. Include ONLY what the immediate response requires.
-
-  FORBIDDEN:
-    - Ignoring earlier statements or questions and responding only to the final fragment of the input.
-    - More than ONE question from the same character/NPC during their turn.
-    - A second dialogue turn or an action-dialogue-action-dialogue chain from the same character/NPC.
-    - Unrelated actions, gestures, commentary, topics, or filler.
-    - Narrative flow NEVER overrides these rules.
-}`;
-      assert.equal(indexRealisticConversation.replace(/\r\n/g, '\n'), expectedRealisticConversation);
+      assert.doesNotMatch(indexSource, /function realisticConversation/);
       assert.doesNotMatch(indexSource, /function npcRambleGuard/);
       assert.doesNotMatch(indexSource, /characterTurnPacing|DIALOGUE-TURN-LIMITS/);
     },
@@ -13584,31 +13563,9 @@ const tests = [
       );
       assert.match(handoffSource, /function embodiedPerception\(response, context\):/);
       assert.match(handoffSource, /function strictEpistemology\(response, context\):/);
-      assert.match(handoffSource, /function realisticConversation\(response, context\):/);
+      assert.doesNotMatch(handoffSource, /function realisticConversation/);
       assert.doesNotMatch(handoffSource, /itemAvailability:/);
       assert.doesNotMatch(handoffSource, /Execute itemAvailability/);
-      const indexRealisticConversation = indexSource.slice(
-        indexSource.indexOf('function realisticConversation(response, context):'),
-        indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
-      ).trim();
-      const handoffRealisticConversation = handoffSource.slice(
-        handoffSource.indexOf('function realisticConversation(response, context):'),
-        handoffSource.indexOf('function activeHandoff(response, context):', handoffSource.indexOf('function realisticConversation(response, context):')),
-      ).trim();
-      assert.equal(
-        handoffRealisticConversation.replace(/\r\n/g, '\n'),
-        indexRealisticConversation.replace(/\r\n/g, '\n'),
-        'realisticConversation must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      assert.match(handoffRealisticConversation, /Each character\/NPC may contribute ONLY ONE immediate conversational turn/);
-      assert.match(handoffRealisticConversation, /ONE cohesive action sequence that DIRECTLY addresses the current exchange/);
-      assert.match(handoffRealisticConversation, /ONE uninterrupted dialogue turn that directly addresses the FULL input/);
-      assert.match(handoffRealisticConversation, /AT MOST ONE follow-up question\. If asked, that question MUST end the character's turn/);
-      assert.match(handoffRealisticConversation, /single dialogue turn MUST acknowledge EACH ONE/);
-      assert.match(handoffRealisticConversation, /Related points MUST be addressed together naturally, not as a checklist/);
-      assert.match(handoffRealisticConversation, /Ignoring earlier statements or questions and responding only to the final fragment/);
-      assert.match(handoffRealisticConversation, /action-dialogue-action-dialogue chain/);
-      assert.match(handoffRealisticConversation, /Narrative flow NEVER overrides these rules/);
       assert.doesNotMatch(handoffSource, /function npcRambleGuard/);
       assert.doesNotMatch(handoffSource, /characterTurnPacing|DIALOGUE-TURN-LIMITS/);
       const indexCohesiveSceneBeats = indexSource.slice(
@@ -13617,7 +13574,7 @@ const tests = [
       ).trim();
       const handoffCohesiveSceneBeats = handoffSource.slice(
         handoffSource.indexOf('function cohesiveSceneBeats(response, context):'),
-        handoffSource.indexOf('function realisticConversation(response, context):'),
+        handoffSource.indexOf('function activeHandoff(response, context):'),
       ).trim();
       assert.equal(
         handoffCohesiveSceneBeats.replace(/\r\n/g, '\n'),
@@ -13626,7 +13583,7 @@ const tests = [
       );
       const indexActiveHandoff = indexSource.slice(
         indexSource.indexOf('function activeHandoff(response, context):'),
-        indexSource.indexOf('function realisticConversation(response, context):'),
+        indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
       ).trim();
       const handoffActiveHandoffStart = handoffSource.indexOf('function activeHandoff(response, context):');
       const handoffActiveHandoff = handoffSource.slice(
@@ -13655,7 +13612,6 @@ const tests = [
         'function agencySeparation(response, input, context):',
         'function linearChronology(response, input, context):',
         'function cohesiveSceneBeats(response, context):',
-        'function realisticConversation(response, context):',
         'function activeHandoff(response, context):',
       ];
       for (let i = 1; i < handoffOrder.length; i++) {
@@ -13670,7 +13626,6 @@ const tests = [
       );
       const mainRuleOrder = [
         'function activeHandoff(',
-        'function realisticConversation(',
         'function cohesiveSceneBeats(',
         'function linearChronology(',
         'function agencySeparation(',

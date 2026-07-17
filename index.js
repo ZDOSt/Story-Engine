@@ -266,20 +266,6 @@ Notice the details that matter: clothing, tools, weapons, posture, trade signs, 
 Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`;
 
 const PREVIOUS_DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`ACTION-BEAT DIALOGUE:
-Write dialogue in a natural, connected flow. Characters may speak while moving, handling objects, adjusting clothing, changing position, using the environment, or making ordinary visible gestures.
-
-Keep the narrative lens close to the active participants and the immediate exchange.
-
-Physical behavior during dialogue should feel natural to the moment and directly belong to the ongoing turn, rather than reading like decorative filler or a stacked sequence of tells.
-
-Brief descriptive framing is allowed only when it supports the dialogue or action already happening.
-
-Environmental or object interaction belongs only when a character is actively using it, reacting to it, or when it materially affects the exchange.
-
-Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary. Observable behavior only.
-`;
-
-const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`ACTION-BEAT DIALOGUE:
 
 Dialogue should feel natural, connected, and realistic. Characters may speak while moving, changing position, handling objects, or making visible gestures ONLY when those actions DIRECTLY support their current dialogue or conversation.
 
@@ -294,6 +280,34 @@ Every character/NPC response MUST address the FULL substance of the input direct
 Respect the natural BACK AND FORTH of conversation: one participant speaks and the other may respond. Within the same response, DO NOT return to a character/NPC who has already completed their dialogue turn.
 
 DO NOT allow any single character/NPC to hijack the scene. Each character/NPC may use AT MOST TWO paragraphs, and paragraph breaks DO NOT permit another dialogue turn. NO character/NPC may ask more than ONE question during their turn. If they ask a question, that question MUST end their turn.`;
+
+const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`ACTION-BEAT DIALOGUE:
+
+Dialogue should feel natural, connected, and realistic. While a character/NPC speaks, they may move, change position, handle objects, or make visible gestures AS PART OF their dialogue.
+
+Keep the narrative lens close to the active participants and immediate exchange.
+
+Environmental or object interaction belongs ONLY when a character is actively using it, reacting to it, or when it materially affects the scene.
+
+Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary. Observable behavior only.
+
+If {{user}} makes multiple distinct statements or questions, characters/NPCs MUST respond to or acknowledge the ENTIRE input directed at them. Do NOT respond only to the final sentence or question.
+
+However, they do NOT need to answer every point separately. Related points may be combined into one natural response, as a real person would.
+
+A character/NPC may intentionally deflect, refuse, or avoid a point when appropriate, but their dialogue or observable behavior MUST show that the point was noticed rather than accidentally omitted.
+
+DO NOT repeat, enumerate, or answer {{user}}'s input line by line.
+
+Respect the natural BACK AND FORTH of conversation: one participant speaks, then the other responds. Do NOT allow any character/NPC to hijack the conversation by chaining multiple responses, changing topics, or continuing through several natural opportunities for another participant to respond.
+
+A character/NPC may make AT MOST ONE natural response-seeking follow-up, whether phrased as a question or direct prompt. That follow-up MUST end their turn. Do NOT stack multiple requests or questions for a response. Rhetorical phrases that request no answer may occur naturally within dialogue.
+
+Example Dialogue:
+
+{{user}} input: "You are reliable, trustworthy, AND skilled."
+
+Example Response: She cocks her head to one side and grins. "You sure are laying it on thick, huh?" She leans closer until her lips are barely an inch from your ear and whispers, "Tell me what you really want, without the flattery."`;
 
 const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
 
@@ -372,30 +386,6 @@ function activeHandoff(response, context): {
   FORBIDDEN:
     - DO NOT end by prompting {{user}} with a meta question (e.g., "What do you do?") or by describing a character waiting for or expecting {{user}}'s response.
     - DO NOT end on filler or distant environmental detail unrelated to the current scene.
-}
-
-function realisticConversation(response, context): {
-  MANDATE:
-    You MUST write dialogue as realistic conversational turns. Each character/NPC may contribute ONLY ONE immediate conversational turn in response to {{user}} or another character/NPC.
-
-    That turn may contain AT MOST:
-
-    - ONE immediate reaction to the input.
-    - ONE cohesive action sequence that DIRECTLY addresses the current exchange.
-    - Gestures that naturally support their current dialogue.
-    - ONE uninterrupted dialogue turn that directly addresses the FULL input.
-    - AT MOST ONE follow-up question. If asked, that question MUST end the character's turn.
-
-    If the input contains multiple distinct statements or questions directed at the character/NPC, their single dialogue turn MUST acknowledge EACH ONE. Related points MUST be addressed together naturally, not as a checklist.
-
-    These are LIMITS, not requirements. Include ONLY what the immediate response requires.
-
-  FORBIDDEN:
-    - Ignoring earlier statements or questions and responding only to the final fragment of the input.
-    - More than ONE question from the same character/NPC during their turn.
-    - A second dialogue turn or an action-dialogue-action-dialogue chain from the same character/NPC.
-    - Unrelated actions, gestures, commentary, topics, or filler.
-    - Narrative flow NEVER overrides these rules.
 }
 
 function cohesiveSceneBeats(response, context): {

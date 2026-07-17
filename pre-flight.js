@@ -1118,30 +1118,6 @@ function cohesiveSceneBeats(response, context): {
     - DO NOT use micro-reaction loops, twitch narration, or body-cue pileups.
 }
 
-function realisticConversation(response, context): {
-  MANDATE:
-    You MUST write dialogue as realistic conversational turns. Each character/NPC may contribute ONLY ONE immediate conversational turn in response to {{user}} or another character/NPC.
-
-    That turn may contain AT MOST:
-
-    - ONE immediate reaction to the input.
-    - ONE cohesive action sequence that DIRECTLY addresses the current exchange.
-    - Gestures that naturally support their current dialogue.
-    - ONE uninterrupted dialogue turn that directly addresses the FULL input.
-    - AT MOST ONE follow-up question. If asked, that question MUST end the character's turn.
-
-    If the input contains multiple distinct statements or questions directed at the character/NPC, their single dialogue turn MUST acknowledge EACH ONE. Related points MUST be addressed together naturally, not as a checklist.
-
-    These are LIMITS, not requirements. Include ONLY what the immediate response requires.
-
-  FORBIDDEN:
-    - Ignoring earlier statements or questions and responding only to the final fragment of the input.
-    - More than ONE question from the same character/NPC during their turn.
-    - A second dialogue turn or an action-dialogue-action-dialogue chain from the same character/NPC.
-    - Unrelated actions, gestures, commentary, topics, or filler.
-    - Narrative flow NEVER overrides these rules.
-}
-
 function activeHandoff(response, context): {
   MANDATE:
     You MUST end every response on ONE ACTIVE, CONCRETE BEAT that {{user}} can respond to.
