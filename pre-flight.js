@@ -951,8 +951,6 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '',
         ...renderGenreLensSection(options),
         ...renderEconomyLensSection(options),
-        renderFinalWritingStyleReminder(options),
-        '',
         '#2 - RESOLVED FACTS',
         'narrativeFacts(input) below is the AUTHORITATIVE SCENE RESOLUTION FOR THIS RESPONSE.',
         'The facts below are immutable and unbreakable. They override style, drama, pacing, genre expectations, and narrative convenience.',
@@ -1001,14 +999,6 @@ function isIsekaiGenre(value) {
 
 function promptLooksIsekai(prompt = '') {
     return /\bselected genre:\s*isekai\b/i.test(String(prompt || ''));
-}
-
-const DEFAULT_FINAL_WRITING_STYLE_REMINDER = String.raw`FINAL WRITING STYLE REMINDER:
-Write clear, grounded narration while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with concrete environmental detail; dialogue should stay close to the active participants and immediate exchange, using observable behavior only and object or environmental interaction only when a character is actively using it, reacting to it, or when it materially affects the exchange; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, agency for {{user}}, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
-
-
-function renderFinalWritingStyleReminder(options = {}) {
-    return String(options?.writingStyleReminderPrompt || DEFAULT_FINAL_WRITING_STYLE_REMINDER).trim();
 }
 
 function renderControlEngineNarrativeContract() {
@@ -1116,6 +1106,30 @@ function cohesiveSceneBeats(response, context): {
   FORBIDDEN:
     - DO NOT split a single scene beat into a sequence of short, staccato sentences.
     - DO NOT use micro-reaction loops, twitch narration, or body-cue pileups.
+}
+
+function dialogueTurn(response, context): {
+  MANDATE:
+    During dialogue, each character/NPC may take AT MOST ONE dialogue turn PER RESPONSE.
+
+    A dialogue turn MAY contain AT MOST ONE of each component:
+
+    - Reaction Beat: ONE brief, cohesive, and observable reaction to {{user}} or another character/NPC.
+    - Utterance: ONE cohesive spoken response that addresses or acknowledges the input from {{user}} or another character/NPC.
+    - Action Beat: ONE cohesive action sequence OR gesture that DIRECTLY supports the current exchange.
+    - Follow-Up: AT MOST ONE response-seeking statement, question, or gesture that naturally ENDS that character/NPC's turn.
+
+    These components are LIMITS, not a checklist. Combine or reorder them naturally, but NEVER exceed the stated limit.
+
+    A character/NPC MUST account for the full input directed at them. Intentional refusal, deflection, or avoidance is allowed, but it MUST be observable rather than an accidental omission.
+
+  FORBIDDEN - NEVER:
+    - Give any character/NPC more than ONE dialogue turn per response.
+    - Stack or disguise multiple reactions, utterances, action beats, or follow-ups as one component.
+    - Chain action-dialogue-action-dialogue sequences.
+    - Continue a character/NPC's dialogue turn after their follow-up.
+    - Reset or grant another dialogue turn because of an interruption, scene event, or another character's participation.
+    - Add unrelated actions, gestures, dialogue, topics, commentary, or filler.
 }
 
 function activeHandoff(response, context): {

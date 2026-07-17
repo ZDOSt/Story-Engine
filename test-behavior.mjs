@@ -13288,7 +13288,7 @@ const tests = [
     },
   },
   {
-    name: '45 sectioned writing style profile and reminder wiring are correct',
+    name: '45 writing style remains narrator-only without dialogue or a handoff reminder',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
@@ -13300,81 +13300,45 @@ const tests = [
       assert.doesNotMatch(source, /writingStyleDepth:\s*0/);
       assert.doesNotMatch(source, /writingStylePrompt ===/);
       assert.match(source, /writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT/);
-      assert.match(source, /writingStyleDialoguePrompt: DEFAULT_DIALOGUE_STYLE_PROMPT/);
       assert.match(source, /writingStyleActionPrompt: DEFAULT_ACTION_STYLE_PROMPT/);
       assert.match(source, /writingStyleIntimacyPrompt: DEFAULT_INTIMACY_STYLE_PROMPT/);
-      assert.match(source, /writingStyleReminderPrompt: DEFAULT_WRITING_STYLE_REMINDER_PROMPT/);
+      assert.doesNotMatch(source, /writingStyleDialoguePrompt:\s*DEFAULT_DIALOGUE_STYLE_PROMPT/);
+      assert.doesNotMatch(source, /writingStyleReminderPrompt:\s*DEFAULT_WRITING_STYLE_REMINDER_PROMPT/);
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStylePrompt/);
+      assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleDialoguePrompt/);
+      assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleReminderPrompt/);
       assert.match(source, /Notice the details that matter/);
       const sectionDefaults = source.slice(
         source.indexOf('const DEFAULT_EXPLORATION_STYLE_PROMPT'),
         source.indexOf('const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES'),
       );
-      const dialogueDefault = source.slice(
-        source.indexOf('const DEFAULT_DIALOGUE_STYLE_PROMPT'),
-        source.indexOf('const DEFAULT_ACTION_STYLE_PROMPT'),
-      );
-      assert.match(sectionDefaults, /ACTION-BEAT DIALOGUE:/);
-      assert.match(dialogueDefault, /Dialogue should feel natural, connected, and realistic\./);
-      assert.match(dialogueDefault, /While a character\/NPC speaks, they may move, change position, handle objects, or make visible gestures AS PART OF their dialogue/);
-      assert.match(dialogueDefault, /Keep the narrative lens close to the active participants and immediate exchange\./);
-      assert.match(dialogueDefault, /Environmental or object interaction belongs ONLY when a character is actively using it, reacting to it, or when it materially affects the scene\./);
-      assert.match(dialogueDefault, /Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary\. Observable behavior only\./);
-      assert.match(dialogueDefault, /If \{\{user\}\} makes multiple distinct statements or questions, characters\/NPCs MUST respond to or acknowledge the ENTIRE input directed at them/);
-      assert.match(dialogueDefault, /Do NOT respond only to the final sentence or question/);
-      assert.match(dialogueDefault, /they do NOT need to answer every point separately/);
-      assert.match(dialogueDefault, /Related points may be combined into one natural response, as a real person would/);
-      assert.match(dialogueDefault, /may intentionally deflect, refuse, or avoid a point when appropriate/);
-      assert.match(dialogueDefault, /MUST show that the point was noticed rather than accidentally omitted/);
-      assert.match(dialogueDefault, /DO NOT repeat, enumerate, or answer \{\{user\}\}'s input line by line/);
-      assert.match(dialogueDefault, /Respect the natural BACK AND FORTH of conversation/);
-      assert.match(dialogueDefault, /Do NOT allow any character\/NPC to hijack the conversation by chaining multiple responses, changing topics, or continuing through several natural opportunities for another participant to respond/);
-      assert.match(dialogueDefault, /may make AT MOST ONE natural response-seeking follow-up, whether phrased as a question or direct prompt/);
-      assert.match(dialogueDefault, /That follow-up MUST end their turn/);
-      assert.match(dialogueDefault, /Do NOT stack multiple requests or questions for a response/);
-      assert.match(dialogueDefault, /Rhetorical phrases that request no answer may occur naturally within dialogue/);
-      assert.match(dialogueDefault, /\{\{user\}\} input: "You are reliable, trustworthy, AND skilled\."/);
-      assert.match(dialogueDefault, /Example Response: She cocks her head to one side and grins/);
-      assert.match(dialogueDefault, /Tell me what you really want, without the flattery/);
-      assert.doesNotMatch(dialogueDefault, /MUST acknowledge EACH ONE|AT MOST TWO paragraphs|If they ask a question, that question MUST end their turn/);
-      assert.doesNotMatch(dialogueDefault, /Write dialogue in a natural, connected flow|adjusting clothing|Physical behavior during dialogue|Brief descriptive framing/);
-      assert.match(source, /writingStyleDialoguePrompt \?\? ''\)\.trim\(\) === PREVIOUS_DEFAULT_DIALOGUE_STYLE_PROMPT\.trim\(\)/);
-      assert.match(source, /writingStyleDialoguePrompt = DEFAULT_DIALOGUE_STYLE_PROMPT/);
-      assert.doesNotMatch(sectionDefaults, /Let behavior carry subtext through what the characters actually do in the exchange, not through accumulated tells/);
-      assert.doesNotMatch(sectionDefaults, /what is left unsaid/);
-      assert.doesNotMatch(sectionDefaults, /<example>/);
-      assert.doesNotMatch(sectionDefaults, /Her lower lip trembles once/);
-      assert.doesNotMatch(sectionDefaults, /Mara pushed the log deeper into the hearth/);
-      assert.doesNotMatch(sectionDefaults, /These examples show the target shape; they are not required patterns/);
-      assert.doesNotMatch(sectionDefaults, /Elias kept both hands around his cup/);
-      assert.doesNotMatch(sectionDefaults, /During dialogue, prioritize the current interaction and active participants/);
-      assert.doesNotMatch(sectionDefaults, /Surrounding scene detail is as-needed only/);
-      assert.doesNotMatch(source, /Include it when setting the scene/);
+      assert.doesNotMatch(sectionDefaults, /ACTION-BEAT DIALOGUE:|FINAL WRITING STYLE REMINDER:/);
+      assert.doesNotMatch(source, /const (?:PREVIOUS_)?DEFAULT_DIALOGUE_STYLE_PROMPT/);
+      assert.doesNotMatch(source, /const DEFAULT_WRITING_STYLE_REMINDER_PROMPT/);
       const profileBuilder = source.slice(
         source.indexOf('function buildSceneStyleProfilePrompt'),
-        source.indexOf('function getWritingStyleReminderPrompt'),
+        source.indexOf('function injectWritingStylePrompt'),
       );
       assert.match(profileBuilder, /function sceneStyleProfile\(response, context\) \{/);
       assert.match(profileBuilder, /Shape narration by scene type while obeying every renderControlEngine rule above/);
       assert.match(profileBuilder, /explorationStyle:/);
-      assert.match(profileBuilder, /dialogueStyle:/);
       assert.match(profileBuilder, /actionStyle:/);
       assert.match(profileBuilder, /intimacyStyle:/);
+      assert.doesNotMatch(profileBuilder, /dialogueStyle:|writingStyleDialoguePrompt|writingStyleReminderPrompt/);
       assert.match(source, /injectMovablePrompt\(\s*WRITING_STYLE_PROMPT_KEY,\s*promptText,\s*'in_prompt',\s*0,\s*EXTENSION_PROMPT_ROLES\.SYSTEM,\s*\)/);
       assert.match(source, /injectMovablePrompt\(\s*PROSE_RULES_PROMPT_KEY,\s*DEFAULT_PROSE_RULES_PROMPT,\s*'in_prompt',\s*0,\s*EXTENSION_PROMPT_ROLES\.SYSTEM,\s*\)/);
       assert.doesNotMatch(source, /injectMovablePrompt\(\s*(?:WRITING_STYLE_PROMPT_KEY|PROSE_RULES_PROMPT_KEY),[\s\S]{0,120}'before_prompt'/);
       const promptInjection = source.slice(
         source.indexOf('function injectPromptOptionPrompts'),
-        source.indexOf('function clearFinalReminderPrompt'),
+        source.indexOf('function clearLegacyFinalReminderPrompt'),
       );
       assert.ok(
         promptInjection.indexOf('injectProseRulesPrompt();') < promptInjection.indexOf('injectWritingStylePrompt();'),
         'Prose Rules should be injected before sceneStyleProfile.',
       );
-      assert.match(handoffSource, /DEFAULT_FINAL_WRITING_STYLE_REMINDER/);
-      assert.match(handoffSource, /renderFinalWritingStyleReminder\(options\)/);
-      assert.match(handoffSource, /options\?\.writingStyleReminderPrompt \|\| DEFAULT_FINAL_WRITING_STYLE_REMINDER/);
-      assert.match(source, /Write clear, grounded narration while preserving narrativeFacts\(input\) and obeying every renderControlEngine gate\./);
+      assert.doesNotMatch(handoffSource, /DEFAULT_FINAL_WRITING_STYLE_REMINDER|renderFinalWritingStyleReminder|writingStyleReminderPrompt|FINAL WRITING STYLE REMINDER/);
+      assert.match(source, /const LEGACY_FINAL_REMINDER_PROMPT_KEY = 'structured_preflight_30_final_reminder'/);
+      assert.match(source, /delete context\.extensionPrompts\[LEGACY_FINAL_REMINDER_PROMPT_KEY\]/);
       assert.doesNotMatch(source, /density and clarity of a skilled novelist/);
       assert.match(source, /context\.setExtensionPrompt\(\s*key,\s*text,\s*position,\s*normalizePromptDepth\(depth\),\s*false,\s*normalizePromptRole\(role\),\s*\)/);
     },
@@ -13547,15 +13511,19 @@ const tests = [
       assert.doesNotMatch(handoffSource, /==MODEL_INSTRUCTION==/);
       const narrativeContractSource = handoffSource.slice(
         handoffSource.indexOf('function formatNarrativeContract'),
-        handoffSource.indexOf('const DEFAULT_FINAL_WRITING_STYLE_REMINDER'),
+        handoffSource.indexOf('function renderGenreLensSection'),
       );
       assert.ok(
-        narrativeContractSource.indexOf('renderControlEngineNarrativeContract()') < narrativeContractSource.indexOf('renderFinalWritingStyleReminder(options)'),
-        'renderControlEngine reminder should appear before the writing style reminder.',
+        narrativeContractSource.indexOf('renderControlEngineNarrativeContract()') < narrativeContractSource.indexOf('renderGenreLensSection(options)'),
+        'renderControlEngine reminder should appear before the genre lens.',
       );
       assert.ok(
-        narrativeContractSource.indexOf('renderFinalWritingStyleReminder(options)') < narrativeContractSource.indexOf('formatNarrativeFacts({ summary, handoff, resolution, ledger, options })'),
-        'writing style reminder should appear before narrativeFacts in formatNarrativeContract.',
+        narrativeContractSource.indexOf('renderGenreLensSection(options)') < narrativeContractSource.indexOf('renderEconomyLensSection(options)'),
+        'genre lens should appear before the economy lens.',
+      );
+      assert.ok(
+        narrativeContractSource.indexOf('renderEconomyLensSection(options)') < narrativeContractSource.indexOf('formatNarrativeFacts({ summary, handoff, resolution, ledger, options })'),
+        'economy lens should appear immediately before narrativeFacts in formatNarrativeContract.',
       );
       assert.ok(
         narrativeContractSource.indexOf('formatNarrativeFacts({ summary, handoff, resolution, ledger, options })') < narrativeContractSource.indexOf("'#3 - OUTPUT'"),
@@ -13563,6 +13531,7 @@ const tests = [
       );
       assert.match(handoffSource, /function embodiedPerception\(response, context\):/);
       assert.match(handoffSource, /function strictEpistemology\(response, context\):/);
+      assert.match(handoffSource, /function dialogueTurn\(response, context\):/);
       assert.doesNotMatch(handoffSource, /function realisticConversation/);
       assert.doesNotMatch(handoffSource, /itemAvailability:/);
       assert.doesNotMatch(handoffSource, /Execute itemAvailability/);
@@ -13574,7 +13543,7 @@ const tests = [
       ).trim();
       const handoffCohesiveSceneBeats = handoffSource.slice(
         handoffSource.indexOf('function cohesiveSceneBeats(response, context):'),
-        handoffSource.indexOf('function activeHandoff(response, context):'),
+        handoffSource.indexOf('function dialogueTurn(response, context):'),
       ).trim();
       assert.equal(
         handoffCohesiveSceneBeats.replace(/\r\n/g, '\n'),
@@ -13583,7 +13552,7 @@ const tests = [
       );
       const indexActiveHandoff = indexSource.slice(
         indexSource.indexOf('function activeHandoff(response, context):'),
-        indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
+        indexSource.indexOf('function dialogueTurn(response, context):'),
       ).trim();
       const handoffActiveHandoffStart = handoffSource.indexOf('function activeHandoff(response, context):');
       const handoffActiveHandoff = handoffSource.slice(
@@ -13595,13 +13564,31 @@ const tests = [
         indexActiveHandoff.replace(/\r\n/g, '\n'),
         'activeHandoff must be mirrored verbatim in the full prose rules and narrator handoff.',
       );
+      const indexDialogueTurn = indexSource.slice(
+        indexSource.indexOf('function dialogueTurn(response, context):'),
+        indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
+      ).trim();
+      const handoffDialogueTurn = handoffSource.slice(
+        handoffSource.indexOf('function dialogueTurn(response, context):'),
+        handoffSource.indexOf('function activeHandoff(response, context):'),
+      ).trim();
+      assert.equal(
+        handoffDialogueTurn.replace(/\r\n/g, '\n'),
+        indexDialogueTurn.replace(/\r\n/g, '\n'),
+        'dialogueTurn must be mirrored verbatim in the full prose rules and narrator handoff.',
+      );
+      assert.match(indexDialogueTurn, /During dialogue, each character\/NPC may take AT MOST ONE dialogue turn PER RESPONSE\./);
+      assert.match(indexDialogueTurn, /A dialogue turn MAY contain AT MOST ONE of each component:/);
+      assert.match(indexDialogueTurn, /These components are LIMITS, not a checklist\./);
+      assert.match(indexDialogueTurn, /Intentional refusal, deflection, or avoidance is allowed, but it MUST be observable rather than an accidental omission\./);
+      assert.match(indexDialogueTurn, /Reset or grant another dialogue turn because of an interruption, scene event, or another character's participation\./);
       assert.doesNotMatch(indexSource, /hypotacticSceneBeats|COHESIVE-ACTION-RESULT/);
       assert.doesNotMatch(handoffSource, /hypotacticSceneBeats|COHESIVE-ACTION-RESULT/);
       assert.match(handoffSource, /function linearChronology\(response, input, context\):/);
       assert.match(handoffSource, /function agencySeparation\(response, input, context\):/);
       assert.match(handoffSource, /function activeHandoff\(response, context\):/);
       assert.doesNotMatch(handoffSource, /applicationContract:/);
-      assert.doesNotMatch(handoffSource, /ABSOLUTELY-FORBIDDEN|PROHIBITED:|NON-NEGOTIABLE PROHIBITION|NEVER:/);
+      assert.doesNotMatch(handoffSource, /ABSOLUTELY-FORBIDDEN|PROHIBITED:|NON-NEGOTIABLE PROHIBITION/);
       const handoffOrder = [
         'function diegeticPhysicality(response, context):',
         'function strictEpistemology(response, context):',
@@ -13612,6 +13599,7 @@ const tests = [
         'function agencySeparation(response, input, context):',
         'function linearChronology(response, input, context):',
         'function cohesiveSceneBeats(response, context):',
+        'function dialogueTurn(response, context):',
         'function activeHandoff(response, context):',
       ];
       for (let i = 1; i < handoffOrder.length; i++) {
@@ -13626,6 +13614,7 @@ const tests = [
       );
       const mainRuleOrder = [
         'function activeHandoff(',
+        'function dialogueTurn(',
         'function cohesiveSceneBeats(',
         'function linearChronology(',
         'function agencySeparation(',
@@ -13805,17 +13794,14 @@ const tests = [
         'Isekai lens should appear after Prose Rules.',
       );
       assert.ok(
-        isekaiPrompt.indexOf('#1.5 - GENRE LENS') < isekaiPrompt.indexOf('FINAL WRITING STYLE REMINDER'),
-        'Isekai lens should appear before the writing style reminder.',
+        isekaiPrompt.indexOf('#1.5 - GENRE LENS') < isekaiPrompt.indexOf('#1.6 - ECONOMY AND VALUE'),
+        'Isekai lens should appear before the economy lens.',
       );
       assert.ok(
-        isekaiPrompt.indexOf('#1.6 - ECONOMY AND VALUE') < isekaiPrompt.indexOf('FINAL WRITING STYLE REMINDER'),
-        'Economy lens should appear before the writing style reminder.',
+        isekaiPrompt.indexOf('#1.6 - ECONOMY AND VALUE') < isekaiPrompt.indexOf('#2 - RESOLVED FACTS'),
+        'Economy lens should appear before narrativeFacts.',
       );
-      assert.ok(
-        isekaiPrompt.indexOf('FINAL WRITING STYLE REMINDER') < isekaiPrompt.indexOf('#2 - RESOLVED FACTS'),
-        'Writing style reminder should stay before narrativeFacts.',
-      );
+      assert.doesNotMatch(isekaiPrompt, /FINAL WRITING STYLE REMINDER/);
 
       const openingSeedRolls = [0, 0.53];
       const openingSeed = buildIsekaiOpeningSeed({
@@ -14786,7 +14772,7 @@ const tests = [
       assert.match(source, /return Boolean\(getActiveAdventureIntroPrompt\(pendingGeneration, context\)\)/);
       assert.match(source, /adventureGenre: getActiveAdventureGenre\(context\)/);
       assert.match(source, /adventureStartPrompt: getBeginningAdventureStartPrompt\(context, type\)/);
-      assert.match(source, /writingStyleReminderPrompt: getWritingStyleReminderPrompt\(\)/);
+      assert.doesNotMatch(source, /writingStyleReminderPrompt: getWritingStyleReminderPrompt\(\)/);
       const promptReadySource = source.slice(
         source.indexOf('async function handleChatCompletionPromptReady'),
         source.indexOf('async function runSemanticPassWithPromptReadyBypass'),
@@ -14955,10 +14941,8 @@ const tests = [
         'structured_preflight_writing_style_enabled',
         'structured_preflight_writing_style_drawer',
         'structured_preflight_writing_style_exploration_prompt',
-        'structured_preflight_writing_style_dialogue_prompt',
         'structured_preflight_writing_style_action_prompt',
         'structured_preflight_writing_style_intimacy_prompt',
-        'structured_preflight_writing_style_reminder_prompt',
         'structured_preflight_player_setup_status',
         'structured_preflight_show_player_setup',
         'structured_preflight_force_player_setup',
@@ -14979,10 +14963,10 @@ const tests = [
       assert.doesNotMatch(renderSource, /structured_preflight_writing_style_prompt/);
       assert.match(renderSource, /data-structured-preflight-reset-writing-style="all"/);
       assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleExplorationPrompt"/);
-      assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleDialoguePrompt"/);
       assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleActionPrompt"/);
       assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleIntimacyPrompt"/);
-      assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleReminderPrompt"/);
+      assert.doesNotMatch(renderSource, /structured_preflight_writing_style_(?:dialogue|reminder)_prompt/);
+      assert.doesNotMatch(renderSource, /data-structured-preflight-reset-writing-style="writingStyle(?:Dialogue|Reminder)Prompt"/);
       assert.match(renderSource, /Injected after Prose Rules as sceneStyleProfile/);
       assert.match(renderSource, /Use private Story Engine connection profile/);
       assert.match(renderSource, /Story Engine profile/);

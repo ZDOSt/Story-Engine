@@ -65,7 +65,7 @@ const WRITING_STYLE_PROMPT_KEY = 'structured_preflight_30_scene_style';
 
 const PROSE_RULES_PROMPT_KEY = 'structured_preflight_20_prose_rules';
 
-const FINAL_REMINDER_PROMPT_KEY = 'structured_preflight_30_final_reminder';
+const LEGACY_FINAL_REMINDER_PROMPT_KEY = 'structured_preflight_30_final_reminder';
 
 const LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY = 'structured_preflight_10_writing_style';
 
@@ -265,50 +265,6 @@ Notice the details that matter: clothing, tools, weapons, posture, trade signs, 
 
 Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`;
 
-const PREVIOUS_DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`ACTION-BEAT DIALOGUE:
-
-Dialogue should feel natural, connected, and realistic. Characters may speak while moving, changing position, handling objects, or making visible gestures ONLY when those actions DIRECTLY support their current dialogue or conversation.
-
-Keep the narrative lens close to the active participants and the immediate exchange.
-
-Environmental or object interaction belongs ONLY when a character is actively using it, reacting to it, or when it materially affects the exchange.
-
-Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary. Observable behavior only.
-
-Every character/NPC response MUST address the FULL substance of the input directed at them. If that input contains multiple distinct statements or questions, the character/NPC MUST acknowledge EACH ONE. Related points MUST be addressed together naturally, not as a checklist. DO NOT respond only to the final sentence or fragment while ignoring what came before it.
-
-Respect the natural BACK AND FORTH of conversation: one participant speaks and the other may respond. Within the same response, DO NOT return to a character/NPC who has already completed their dialogue turn.
-
-DO NOT allow any single character/NPC to hijack the scene. Each character/NPC may use AT MOST TWO paragraphs, and paragraph breaks DO NOT permit another dialogue turn. NO character/NPC may ask more than ONE question during their turn. If they ask a question, that question MUST end their turn.`;
-
-const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`ACTION-BEAT DIALOGUE:
-
-Dialogue should feel natural, connected, and realistic. While a character/NPC speaks, they may move, change position, handle objects, or make visible gestures AS PART OF their dialogue.
-
-Keep the narrative lens close to the active participants and immediate exchange.
-
-Environmental or object interaction belongs ONLY when a character is actively using it, reacting to it, or when it materially affects the scene.
-
-Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary. Observable behavior only.
-
-If {{user}} makes multiple distinct statements or questions, characters/NPCs MUST respond to or acknowledge the ENTIRE input directed at them. Do NOT respond only to the final sentence or question.
-
-However, they do NOT need to answer every point separately. Related points may be combined into one natural response, as a real person would.
-
-A character/NPC may intentionally deflect, refuse, or avoid a point when appropriate, but their dialogue or observable behavior MUST show that the point was noticed rather than accidentally omitted.
-
-DO NOT repeat, enumerate, or answer {{user}}'s input line by line.
-
-Respect the natural BACK AND FORTH of conversation: one participant speaks, then the other responds. Do NOT allow any character/NPC to hijack the conversation by chaining multiple responses, changing topics, or continuing through several natural opportunities for another participant to respond.
-
-A character/NPC may make AT MOST ONE natural response-seeking follow-up, whether phrased as a question or direct prompt. That follow-up MUST end their turn. Do NOT stack multiple requests or questions for a response. Rhetorical phrases that request no answer may occur naturally within dialogue.
-
-Example Dialogue:
-
-{{user}} input: "You are reliable, trustworthy, AND skilled."
-
-Example Response: She cocks her head to one side and grins. "You sure are laying it on thick, huh?" She leans closer until her lips are barely an inch from your ear and whispers, "Tell me what you really want, without the flattery."`;
-
 const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
 
 Action prose should be vivid but efficient. Every sentence should clarify what happens, where bodies move, what changes, and what can happen next. Let movement change the shape of the room and the next possible action.
@@ -320,9 +276,6 @@ const DEFAULT_INTIMACY_STYLE_PROMPT = String.raw`When intimacy, arousal, exposur
 Let intimate scenes linger when the scene supports it. Capture shifting positions, breath against skin, hands, tension, release, texture, sound, slickness, and the changing pressure between bodies. Keep the prose direct, specific, and scene-aware.
 
 Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, exposure, or physical intimacy when the scene supports sustained detail.`;
-
-const DEFAULT_WRITING_STYLE_REMINDER_PROMPT = String.raw`FINAL WRITING STYLE REMINDER:
-Write clear, grounded narration while preserving narrativeFacts(input) and obeying every renderControlEngine gate. Match prose density to the scene: exploration can breathe with concrete environmental detail; dialogue should stay close to the active participants and immediate exchange, using observable behavior only and object or environmental interaction only when a character is actively using it, reacting to it, or when it materially affects the exchange; action should be punchy, spatial, and consequence-focused; intimacy should be detailed, sensual, embodied, and physically specific when supported by the scene. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, or resolved mechanics.`;
 
 const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES = String.raw`cheeks flush
 cheeks flushed
@@ -386,6 +339,30 @@ function activeHandoff(response, context): {
   FORBIDDEN:
     - DO NOT end by prompting {{user}} with a meta question (e.g., "What do you do?") or by describing a character waiting for or expecting {{user}}'s response.
     - DO NOT end on filler or distant environmental detail unrelated to the current scene.
+}
+
+function dialogueTurn(response, context): {
+  MANDATE:
+    During dialogue, each character/NPC may take AT MOST ONE dialogue turn PER RESPONSE.
+
+    A dialogue turn MAY contain AT MOST ONE of each component:
+
+    - Reaction Beat: ONE brief, cohesive, and observable reaction to {{user}} or another character/NPC.
+    - Utterance: ONE cohesive spoken response that addresses or acknowledges the input from {{user}} or another character/NPC.
+    - Action Beat: ONE cohesive action sequence OR gesture that DIRECTLY supports the current exchange.
+    - Follow-Up: AT MOST ONE response-seeking statement, question, or gesture that naturally ENDS that character/NPC's turn.
+
+    These components are LIMITS, not a checklist. Combine or reorder them naturally, but NEVER exceed the stated limit.
+
+    A character/NPC MUST account for the full input directed at them. Intentional refusal, deflection, or avoidance is allowed, but it MUST be observable rather than an accidental omission.
+
+  FORBIDDEN - NEVER:
+    - Give any character/NPC more than ONE dialogue turn per response.
+    - Stack or disguise multiple reactions, utterances, action beats, or follow-ups as one component.
+    - Chain action-dialogue-action-dialogue sequences.
+    - Continue a character/NPC's dialogue turn after their follow-up.
+    - Reset or grant another dialogue turn because of an interruption, scene event, or another character's participation.
+    - Add unrelated actions, gestures, dialogue, topics, commentary, or filler.
 }
 
 function cohesiveSceneBeats(response, context): {
@@ -507,10 +484,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     characterProgressionEnabled: true,
     writingStyleEnabled: true,
     writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT,
-    writingStyleDialoguePrompt: DEFAULT_DIALOGUE_STYLE_PROMPT,
     writingStyleActionPrompt: DEFAULT_ACTION_STYLE_PROMPT,
     writingStyleIntimacyPrompt: DEFAULT_INTIMACY_STYLE_PROMPT,
-    writingStyleReminderPrompt: DEFAULT_WRITING_STYLE_REMINDER_PROMPT,
 
     nameStyle: 'Balanced Fantasy',
 
@@ -650,11 +625,10 @@ function getContext() {
 
 function getSettings() {
     extension_settings[SETTINGS_KEY] = extension_settings[SETTINGS_KEY] || {};
-    if (String(extension_settings[SETTINGS_KEY].writingStyleDialoguePrompt ?? '').trim() === PREVIOUS_DEFAULT_DIALOGUE_STYLE_PROMPT.trim()) {
-        extension_settings[SETTINGS_KEY].writingStyleDialoguePrompt = DEFAULT_DIALOGUE_STYLE_PROMPT;
-    }
     delete extension_settings[SETTINGS_KEY].disableSemanticThinking;
     delete extension_settings[SETTINGS_KEY].writingStylePrompt;
+    delete extension_settings[SETTINGS_KEY].writingStyleDialoguePrompt;
+    delete extension_settings[SETTINGS_KEY].writingStyleReminderPrompt;
     delete extension_settings[SETTINGS_KEY].writingStylePlacement;
     delete extension_settings[SETTINGS_KEY].writingStyleDepth;
     delete extension_settings[SETTINGS_KEY].writingStyleRole;
@@ -1100,15 +1074,15 @@ function injectPromptOptionPrompts() {
         clearPromptOptionPrompts();
         return;
     }
-    clearFinalReminderPrompt();
+    clearLegacyFinalReminderPrompt();
     injectProseRulesPrompt();
     injectWritingStylePrompt();
 }
 
 
-function clearFinalReminderPrompt(context = getContext()) {
+function clearLegacyFinalReminderPrompt(context = getContext()) {
 
-    if (context?.extensionPrompts) delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
+    if (context?.extensionPrompts) delete context.extensionPrompts[LEGACY_FINAL_REMINDER_PROMPT_KEY];
 
 }
 
@@ -1120,11 +1094,6 @@ const WRITING_STYLE_SECTION_FIELDS = Object.freeze([
         defaultValue: DEFAULT_EXPLORATION_STYLE_PROMPT,
     },
     {
-        id: 'structured_preflight_writing_style_dialogue_prompt',
-        key: 'writingStyleDialoguePrompt',
-        defaultValue: DEFAULT_DIALOGUE_STYLE_PROMPT,
-    },
-    {
         id: 'structured_preflight_writing_style_action_prompt',
         key: 'writingStyleActionPrompt',
         defaultValue: DEFAULT_ACTION_STYLE_PROMPT,
@@ -1133,11 +1102,6 @@ const WRITING_STYLE_SECTION_FIELDS = Object.freeze([
         id: 'structured_preflight_writing_style_intimacy_prompt',
         key: 'writingStyleIntimacyPrompt',
         defaultValue: DEFAULT_INTIMACY_STYLE_PROMPT,
-    },
-    {
-        id: 'structured_preflight_writing_style_reminder_prompt',
-        key: 'writingStyleReminderPrompt',
-        defaultValue: DEFAULT_WRITING_STYLE_REMINDER_PROMPT,
     },
 ]);
 
@@ -1561,13 +1525,6 @@ function renderSettingsPanel() {
                                     </div>
                                     <div class="spe-settings-style-block">
                                         <div class="spe-settings-style-header">
-                                            <label for="structured_preflight_writing_style_dialogue_prompt">Dialogue</label>
-                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleDialoguePrompt">Reset</button>
-                                        </div>
-                                        <textarea id="structured_preflight_writing_style_dialogue_prompt" class="text_pole textarea_compact" rows="12" spellcheck="false"></textarea>
-                                    </div>
-                                    <div class="spe-settings-style-block">
-                                        <div class="spe-settings-style-header">
                                             <label for="structured_preflight_writing_style_action_prompt">Action</label>
                                             <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleActionPrompt">Reset</button>
                                         </div>
@@ -1579,13 +1536,6 @@ function renderSettingsPanel() {
                                             <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleIntimacyPrompt">Reset</button>
                                         </div>
                                         <textarea id="structured_preflight_writing_style_intimacy_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
-                                    </div>
-                                    <div class="spe-settings-style-block">
-                                        <div class="spe-settings-style-header">
-                                            <label for="structured_preflight_writing_style_reminder_prompt">Final Reminder</label>
-                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleReminderPrompt">Reset</button>
-                                        </div>
-                                        <textarea id="structured_preflight_writing_style_reminder_prompt" class="text_pole textarea_compact" rows="5" spellcheck="false"></textarea>
                                     </div>
                                 </div>
                             </details>
@@ -1963,9 +1913,6 @@ function buildSceneStyleProfilePrompt(settings = getSettings()) {
         '  explorationStyle:',
         indentStyleBlock(settings.writingStyleExplorationPrompt ?? DEFAULT_EXPLORATION_STYLE_PROMPT),
         '',
-        '  dialogueStyle:',
-        indentStyleBlock(settings.writingStyleDialoguePrompt ?? DEFAULT_DIALOGUE_STYLE_PROMPT),
-        '',
         '  actionStyle:',
         indentStyleBlock(settings.writingStyleActionPrompt ?? DEFAULT_ACTION_STYLE_PROMPT),
         '',
@@ -1973,11 +1920,6 @@ function buildSceneStyleProfilePrompt(settings = getSettings()) {
         indentStyleBlock(settings.writingStyleIntimacyPrompt ?? DEFAULT_INTIMACY_STYLE_PROMPT),
         '}',
     ].join('\n');
-}
-
-
-function getWritingStyleReminderPrompt(settings = getSettings()) {
-    return String(settings.writingStyleReminderPrompt ?? DEFAULT_WRITING_STYLE_REMINDER_PROMPT).trim();
 }
 
 
@@ -2023,7 +1965,7 @@ function injectProseRulesPrompt() {
     }
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
     if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
-    clearFinalReminderPrompt(context);
+    clearLegacyFinalReminderPrompt(context);
     if (!isStoryEngineEnabled()) {
         if (context.extensionPrompts) delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
         return;
@@ -9825,7 +9767,7 @@ function clearPromptOptionPrompts(context = getContext()) {
 
     delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
 
-    delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
+    delete context.extensionPrompts[LEGACY_FINAL_REMINDER_PROMPT_KEY];
 
     delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
     delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
@@ -11908,7 +11850,6 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         pendingBoundarySnapshot: buildPendingBoundarySnapshot(context),
         adventureGenre: getActiveAdventureGenre(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
-        writingStyleReminderPrompt: getWritingStyleReminderPrompt(),
         contextSize,
         createdAt: Date.now(),
     };
@@ -12270,7 +12211,7 @@ export function onDisable() {
 
         delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
 
-        delete context.extensionPrompts[FINAL_REMINDER_PROMPT_KEY];
+        delete context.extensionPrompts[LEGACY_FINAL_REMINDER_PROMPT_KEY];
 
         delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
         delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
