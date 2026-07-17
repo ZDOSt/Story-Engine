@@ -11509,7 +11509,7 @@ const tests = [
       const renderControlLeak = [
         '1. **activeHandoff:** End on an active beat that immediately requires a user response.',
         '',
-        '2. **npcRambleGuard:** One cohesive paragraph per participating character.',
+        '2. **realisticConversation:** One immediate conversational turn per participating character.',
         '',
         '3. **cohesiveSceneBeats:** Advance the visible scene.',
         '',
@@ -13312,13 +13312,29 @@ const tests = [
         source.indexOf('const DEFAULT_EXPLORATION_STYLE_PROMPT'),
         source.indexOf('const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES'),
       );
+      const dialogueDefault = source.slice(
+        source.indexOf('const DEFAULT_DIALOGUE_STYLE_PROMPT'),
+        source.indexOf('const DEFAULT_ACTION_STYLE_PROMPT'),
+      );
       assert.match(sectionDefaults, /ACTION-BEAT DIALOGUE:/);
-      assert.match(sectionDefaults, /Write dialogue in a natural, connected flow\./);
-      assert.match(sectionDefaults, /Keep the narrative lens close to the active participants and the immediate exchange\./);
+      assert.match(dialogueDefault, /Dialogue should feel natural, connected, and realistic\./);
+      assert.match(dialogueDefault, /ONLY when those actions DIRECTLY support their current dialogue or conversation/);
+      assert.match(dialogueDefault, /Keep the narrative lens close to the active participants and the immediate exchange\./);
+      assert.match(dialogueDefault, /Environmental or object interaction belongs ONLY when a character is actively using it, reacting to it, or when it materially affects the exchange\./);
+      assert.match(dialogueDefault, /Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary\. Observable behavior only\./);
+      assert.match(dialogueDefault, /Every character\/NPC response MUST address the FULL substance of the input directed at them/);
+      assert.match(dialogueDefault, /MUST acknowledge EACH ONE/);
+      assert.match(dialogueDefault, /Related points MUST be addressed together naturally, not as a checklist/);
+      assert.match(dialogueDefault, /DO NOT respond only to the final sentence or fragment while ignoring what came before it/);
+      assert.match(dialogueDefault, /Respect the natural BACK AND FORTH of conversation/);
+      assert.match(dialogueDefault, /DO NOT return to a character\/NPC who has already completed their dialogue turn/);
+      assert.match(dialogueDefault, /Each character\/NPC may use AT MOST TWO paragraphs/);
+      assert.match(dialogueDefault, /NO character\/NPC may ask more than ONE question during their turn/);
+      assert.match(dialogueDefault, /If they ask a question, that question MUST end their turn/);
+      assert.doesNotMatch(dialogueDefault, /Write dialogue in a natural, connected flow|adjusting clothing|Physical behavior during dialogue|Brief descriptive framing/);
+      assert.match(source, /writingStyleDialoguePrompt \?\? ''\)\.trim\(\) === PREVIOUS_DEFAULT_DIALOGUE_STYLE_PROMPT\.trim\(\)/);
+      assert.match(source, /writingStyleDialoguePrompt = DEFAULT_DIALOGUE_STYLE_PROMPT/);
       assert.doesNotMatch(sectionDefaults, /Let behavior carry subtext through what the characters actually do in the exchange, not through accumulated tells/);
-      assert.match(sectionDefaults, /Brief descriptive framing is allowed only when it supports the dialogue or action already happening\./);
-      assert.match(sectionDefaults, /Environmental or object interaction belongs only when a character is actively using it, reacting to it, or when it materially affects the exchange\./);
-      assert.match(sectionDefaults, /Do not infer emotional or internal states, provide subtext labels, or add interpretive commentary\. Observable behavior only\./);
       assert.doesNotMatch(sectionDefaults, /what is left unsaid/);
       assert.doesNotMatch(sectionDefaults, /<example>/);
       assert.doesNotMatch(sectionDefaults, /Her lower lip trembles once/);
@@ -13456,29 +13472,35 @@ const tests = [
       assert.match(indexSource, /micro-reaction loops, twitch narration, or body-cue pileups/);
       assert.doesNotMatch(indexSource, /A character should act within the scene/);
       assert.doesNotMatch(indexSource, /dialoguePacing/);
-      const indexNpcRambleGuard = indexSource.slice(
-        indexSource.indexOf('function npcRambleGuard(response, context):'),
+      const indexRealisticConversation = indexSource.slice(
+        indexSource.indexOf('function realisticConversation(response, context):'),
         indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
       ).trim();
-      const expectedNpcRambleGuard = `function npcRambleGuard(response, context): {
+      const expectedRealisticConversation = `function realisticConversation(response, context): {
   MANDATE:
-    Each participating character/NPC's contribution MUST remain centered on the current exchange. AT MOST, each may:
+    You MUST write dialogue as realistic conversational turns. Each character/NPC may contribute ONLY ONE immediate conversational turn in response to {{user}} or another character/NPC.
 
-    - Show ONE immediate reaction to the current exchange.
-    - Execute ONE cohesive action sequence that DIRECTLY responds to the current exchange.
-    - Take ONE uninterrupted dialogue turn addressing {{user}} or another present character/NPC.
-    - Include ONE gesture that directly supports their dialogue.
+    That turn may contain AT MOST:
 
-    These are LIMITS, not a checklist. Use ONLY what fits the scene.
+    - ONE immediate reaction to the input.
+    - ONE cohesive action sequence that DIRECTLY addresses the current exchange.
+    - Gestures that naturally support their current dialogue.
+    - ONE uninterrupted dialogue turn that directly addresses the FULL input.
+    - AT MOST ONE follow-up question. If asked, that question MUST end the character's turn.
+
+    If the input contains multiple distinct statements or questions directed at the character/NPC, their single dialogue turn MUST acknowledge EACH ONE. Related points MUST be addressed together naturally, not as a checklist.
+
+    These are LIMITS, not requirements. Include ONLY what the immediate response requires.
 
   FORBIDDEN:
-    - DO NOT give any character/NPC multiple reactions, action sequences, dialogue turns, questions, or topics.
-    - DO NOT allow any character/NPC to hijack the scene.
-    - Narrative flow NEVER overrides these limits.
-
-    Paragraph breaks may be used naturally, but they DO NOT reset or bypass these limits.
+    - Ignoring earlier statements or questions and responding only to the final fragment of the input.
+    - More than ONE question from the same character/NPC during their turn.
+    - A second dialogue turn or an action-dialogue-action-dialogue chain from the same character/NPC.
+    - Unrelated actions, gestures, commentary, topics, or filler.
+    - Narrative flow NEVER overrides these rules.
 }`;
-      assert.equal(indexNpcRambleGuard.replace(/\r\n/g, '\n'), expectedNpcRambleGuard);
+      assert.equal(indexRealisticConversation.replace(/\r\n/g, '\n'), expectedRealisticConversation);
+      assert.doesNotMatch(indexSource, /function npcRambleGuard/);
       assert.doesNotMatch(indexSource, /characterTurnPacing|DIALOGUE-TURN-LIMITS/);
     },
   },
@@ -13562,32 +13584,32 @@ const tests = [
       );
       assert.match(handoffSource, /function embodiedPerception\(response, context\):/);
       assert.match(handoffSource, /function strictEpistemology\(response, context\):/);
-      assert.match(handoffSource, /function npcRambleGuard\(response, context\):/);
+      assert.match(handoffSource, /function realisticConversation\(response, context\):/);
       assert.doesNotMatch(handoffSource, /itemAvailability:/);
       assert.doesNotMatch(handoffSource, /Execute itemAvailability/);
-      const indexNpcRambleGuard = indexSource.slice(
-        indexSource.indexOf('function npcRambleGuard(response, context):'),
+      const indexRealisticConversation = indexSource.slice(
+        indexSource.indexOf('function realisticConversation(response, context):'),
         indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
       ).trim();
-      const handoffNpcRambleGuard = handoffSource.slice(
-        handoffSource.indexOf('function npcRambleGuard(response, context):'),
-        handoffSource.indexOf('function activeHandoff(response, context):', handoffSource.indexOf('function npcRambleGuard(response, context):')),
+      const handoffRealisticConversation = handoffSource.slice(
+        handoffSource.indexOf('function realisticConversation(response, context):'),
+        handoffSource.indexOf('function activeHandoff(response, context):', handoffSource.indexOf('function realisticConversation(response, context):')),
       ).trim();
       assert.equal(
-        handoffNpcRambleGuard.replace(/\r\n/g, '\n'),
-        indexNpcRambleGuard.replace(/\r\n/g, '\n'),
-        'npcRambleGuard must be mirrored verbatim in the full prose rules and narrator handoff.',
+        handoffRealisticConversation.replace(/\r\n/g, '\n'),
+        indexRealisticConversation.replace(/\r\n/g, '\n'),
+        'realisticConversation must be mirrored verbatim in the full prose rules and narrator handoff.',
       );
-      assert.match(handoffNpcRambleGuard, /Each participating character\/NPC's contribution MUST remain centered on the current exchange\. AT MOST, each may/);
-      assert.match(handoffNpcRambleGuard, /Show ONE immediate reaction to the current exchange/);
-      assert.match(handoffNpcRambleGuard, /Execute ONE cohesive action sequence that DIRECTLY responds to the current exchange/);
-      assert.match(handoffNpcRambleGuard, /Take ONE uninterrupted dialogue turn addressing \{\{user\}\} or another present character\/NPC/);
-      assert.match(handoffNpcRambleGuard, /Include ONE gesture that directly supports their dialogue/);
-      assert.match(handoffNpcRambleGuard, /These are LIMITS, not a checklist\. Use ONLY what fits the scene/);
-      assert.match(handoffNpcRambleGuard, /Paragraph breaks may be used naturally, but they DO NOT reset or bypass these limits/);
-      assert.match(handoffNpcRambleGuard, /DO NOT give any character\/NPC multiple reactions, action sequences, dialogue turns, questions, or topics/);
-      assert.match(handoffNpcRambleGuard, /DO NOT allow any character\/NPC to hijack the scene/);
-      assert.match(handoffNpcRambleGuard, /Narrative flow NEVER overrides these limits/);
+      assert.match(handoffRealisticConversation, /Each character\/NPC may contribute ONLY ONE immediate conversational turn/);
+      assert.match(handoffRealisticConversation, /ONE cohesive action sequence that DIRECTLY addresses the current exchange/);
+      assert.match(handoffRealisticConversation, /ONE uninterrupted dialogue turn that directly addresses the FULL input/);
+      assert.match(handoffRealisticConversation, /AT MOST ONE follow-up question\. If asked, that question MUST end the character's turn/);
+      assert.match(handoffRealisticConversation, /single dialogue turn MUST acknowledge EACH ONE/);
+      assert.match(handoffRealisticConversation, /Related points MUST be addressed together naturally, not as a checklist/);
+      assert.match(handoffRealisticConversation, /Ignoring earlier statements or questions and responding only to the final fragment/);
+      assert.match(handoffRealisticConversation, /action-dialogue-action-dialogue chain/);
+      assert.match(handoffRealisticConversation, /Narrative flow NEVER overrides these rules/);
+      assert.doesNotMatch(handoffSource, /function npcRambleGuard/);
       assert.doesNotMatch(handoffSource, /characterTurnPacing|DIALOGUE-TURN-LIMITS/);
       const indexCohesiveSceneBeats = indexSource.slice(
         indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
@@ -13595,7 +13617,7 @@ const tests = [
       ).trim();
       const handoffCohesiveSceneBeats = handoffSource.slice(
         handoffSource.indexOf('function cohesiveSceneBeats(response, context):'),
-        handoffSource.indexOf('function npcRambleGuard(response, context):'),
+        handoffSource.indexOf('function realisticConversation(response, context):'),
       ).trim();
       assert.equal(
         handoffCohesiveSceneBeats.replace(/\r\n/g, '\n'),
@@ -13604,7 +13626,7 @@ const tests = [
       );
       const indexActiveHandoff = indexSource.slice(
         indexSource.indexOf('function activeHandoff(response, context):'),
-        indexSource.indexOf('function npcRambleGuard(response, context):'),
+        indexSource.indexOf('function realisticConversation(response, context):'),
       ).trim();
       const handoffActiveHandoffStart = handoffSource.indexOf('function activeHandoff(response, context):');
       const handoffActiveHandoff = handoffSource.slice(
@@ -13633,7 +13655,7 @@ const tests = [
         'function agencySeparation(response, input, context):',
         'function linearChronology(response, input, context):',
         'function cohesiveSceneBeats(response, context):',
-        'function npcRambleGuard(response, context):',
+        'function realisticConversation(response, context):',
         'function activeHandoff(response, context):',
       ];
       for (let i = 1; i < handoffOrder.length; i++) {
@@ -13648,7 +13670,7 @@ const tests = [
       );
       const mainRuleOrder = [
         'function activeHandoff(',
-        'function npcRambleGuard(',
+        'function realisticConversation(',
         'function cohesiveSceneBeats(',
         'function linearChronology(',
         'function agencySeparation(',
@@ -14185,7 +14207,7 @@ const tests = [
       assert.match(source, /Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT/);
       assert.match(source, /start at the point right after the latest user input/);
       assert.match(source, /Invalid chronology restatement/);
-      assert.doesNotMatch(proseGuardPromptSource, /npcRambleGuard/);
+      assert.doesNotMatch(proseGuardPromptSource, /npcRambleGuard|realisticConversation/);
       assert.doesNotMatch(proseGuardPromptSource, /cohesiveSceneBeats/);
       assert.doesNotMatch(proseGuardPromptSource, /applicationContract/);
       assert.doesNotMatch(proseGuardPromptSource, /itemAvailability/);
