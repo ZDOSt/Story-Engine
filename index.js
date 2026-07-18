@@ -10052,6 +10052,7 @@ function buildProseGuardPrompt(narrationText, latestUserText = '') {
         'NEVER delete narration. Every edit MUST replace a non-empty exact source span with non-empty corrected prose.',
         'Placeholders, punctuation-only replacements, and replacements that materially contract the source are invalid.',
         'Everything outside an accepted edit MUST remain byte-for-byte unchanged.',
+        'A replacement MUST NOT repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK. If no compliant replacement avoids duplication, return no edit.',
         'Each ordinary edit MUST target the smallest exact violating span and MUST remain within one sentence.',
         'The ONLY permitted multi-sentence edit is an activeHandoff repair that reorders or conjoins the exact existing handoff and trailing sentences without dropping, paraphrasing, or inventing content.',
         'If a repair cannot satisfy this scope, return no edit for that text.',
@@ -10387,6 +10388,7 @@ function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserTe
         '- Replace the full sentence containing each listed banned phrase with a compliant, non-empty sentence.',
         '- The replacement must contain none of the banned phrase or its workaround pattern.',
         '- Preserve the same speaker, dialogue meaning, scene facts, action order, intensity, consent/refusal, mechanics, and final handoff.',
+        '- Do not repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK. If no compliant replacement avoids duplication, return no edit.',
         '- Do not add new actions, dialogue, events, thoughts, emotions, motives, lore, mechanics, or outcomes.',
         '- Do not replace one banned phrase with another body cue, metaphor, atmospheric shorthand, or personification.',
         '- Use concrete physical prose: chosen action, speech content, posture that changes action, movement, spacing, contact, object use, sound, material state, obstruction, lighting, weather behavior, visible consequence.',
@@ -10513,6 +10515,7 @@ function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationTex
         'The tracker delta MUST describe the narration produced by applying proseEdits, not rejected draft wording.',
         'If no prose corrections are needed, return an empty proseEdits array and derive the tracker delta from TEXT_TO_CHECK unchanged.',
         'NEVER return replacement narration and NEVER delete narration. Only return exact, non-empty replacement edits.',
+        'A replacement MUST NOT repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK. If no compliant replacement avoids duplication, return no edit.',
         'Every ordinary prose edit MUST remain within one sentence. The ONLY multi-sentence exception is an activeHandoff repair that reorders or conjoins the exact existing handoff and trailing sentences without dropping, paraphrasing, or inventing content. If uncertain, return no edit.',
         '',
         '==PROSE_GUARD_CONTRACT==',
@@ -10617,7 +10620,7 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     const fields = Object.keys(toolDefinition?.parameters?.properties || {});
     const fieldInstructions = [];
     if (fields.includes('proseEdits')) {
-        fieldInstructions.push('Put only exact, substantive, information-preserving replacement edits in proseEdits. Every ordinary edit MUST stay within one sentence. The ONLY multi-sentence exception is a strictly information-preserving activeHandoff reorder of the exact existing handoff and trailing sentences. Otherwise use []. Omit no-op edits. Never delete, paraphrase, invent, materially contract, or return full rewritten narration.');
+        fieldInstructions.push('Put only exact, substantive, information-preserving replacement edits in proseEdits. Never repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK; if avoiding duplication is impossible, use []. Every ordinary edit MUST stay within one sentence. The ONLY multi-sentence exception is a strictly information-preserving activeHandoff reorder of the exact existing handoff and trailing sentences. Otherwise use []. Omit no-op edits. Never delete, paraphrase, invent, materially contract, or return full rewritten narration.');
     }
     if (fields.includes('trackerDelta')) {
         fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on TEXT_TO_CHECK after applying proseEdits when proseEdits is present.');

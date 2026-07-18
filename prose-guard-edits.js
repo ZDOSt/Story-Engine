@@ -5,6 +5,9 @@ const MAX_PROSE_GUARD_EDITS = 32;
 const MAX_LONG_NARRATION_EDIT_COVERAGE = 0.75;
 const LONG_NARRATION_EDIT_COVERAGE_THRESHOLD = 600;
 const MIN_REPLACEMENT_WORD_RATIO = 0.5;
+const MIN_EXACT_DUPLICATE_TOKEN_COUNT = 2;
+const MIN_NEAR_DUPLICATE_TOKEN_RUN = 4;
+const MIN_NEAR_DUPLICATE_COVERAGE = 0.75;
 const STRUCTURED_ARTIFACT_PATTERN = /(?:BEGIN|END)_(?:PROSE_GUARD_EDITS|TRACKER_DELTA|CORRECTED_NARRATION)|```story_engine_tracker_delta|STORY_ENGINE_(?:TRACKER_DELTA|PROSE_GUARD)/i;
 const REORDER_CONNECTOR_WORDS = new Set(['a', 'an', 'the', 'and', 'as', 'but', 'or', 'nor', 'yet', 'so', 'while', 'whereas', 'then']);
 
@@ -47,6 +50,7 @@ export function applyProseGuardEdits(narrationText, rawEdits) {
         }
         return {
             ...edit,
+            editIndex: index,
             start,
             end: start + edit.originalText.length,
         };
@@ -59,6 +63,7 @@ export function applyProseGuardEdits(narrationText, rawEdits) {
     }
 
     rejectExcessiveEditCoverage(source, ranges);
+    rejectRepeatedNarration(source, ranges);
 
     let corrected = source;
     for (const edit of [...ranges].reverse()) {
@@ -68,7 +73,7 @@ export function applyProseGuardEdits(narrationText, rawEdits) {
     return {
         narrationText: corrected,
         changed: corrected !== source,
-        edits: ranges,
+        edits: ranges.map(({ editIndex, ...edit }) => edit),
     };
 }
 
@@ -112,6 +117,108 @@ function splitProseSegments(value) {
         .flatMap(line => line.match(/.*?[.!?](?:["')\]]+)?(?=\s|$)|.+$/g) || [])
         .map(segment => significantReorderWords(segment))
         .filter(words => words.length > 0);
+}
+
+function splitProseSentenceSpans(value) {
+    const source = String(value || '');
+    const spans = [];
+    const lines = source.split(/\r?\n/);
+    let lineOffset = 0;
+
+    for (const line of lines) {
+        const pattern = /.*?[.!?](?:["')\]]+)?(?=\s|$)|.+$/g;
+        for (const match of line.matchAll(pattern)) {
+            const raw = String(match[0] || '');
+            const text = raw.trim();
+            if (!text) continue;
+            const leadingWhitespace = raw.search(/\S/);
+            const start = lineOffset + Number(match.index || 0) + Math.max(0, leadingWhitespace);
+            spans.push({ start, end: start + text.length, text });
+        }
+
+        lineOffset += line.length;
+        if (source.startsWith('\r\n', lineOffset)) lineOffset += 2;
+        else if (source[lineOffset] === '\n') lineOffset += 1;
+    }
+
+    return spans;
+}
+
+function longestCommonTokenRun(left, right) {
+    let previous = new Array(right.length + 1).fill(0);
+    let longest = 0;
+
+    for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+        const current = new Array(right.length + 1).fill(0);
+        for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+            if (left[leftIndex] !== right[rightIndex]) continue;
+            current[rightIndex + 1] = previous[rightIndex] + 1;
+            longest = Math.max(longest, current[rightIndex + 1]);
+        }
+        previous = current;
+    }
+
+    return longest;
+}
+
+function isNearDuplicateNarration(left, right) {
+    const leftTokens = tokenizeProseWords(left);
+    const rightTokens = tokenizeProseWords(right);
+    if (leftTokens.length < MIN_EXACT_DUPLICATE_TOKEN_COUNT || rightTokens.length < MIN_EXACT_DUPLICATE_TOKEN_COUNT) return false;
+
+    if (leftTokens.length === rightTokens.length
+        && leftTokens.join(' ') === rightTokens.join(' ')) {
+        return true;
+    }
+
+    const shorterLength = Math.min(leftTokens.length, rightTokens.length);
+    const commonRun = longestCommonTokenRun(leftTokens, rightTokens);
+    return commonRun >= MIN_NEAR_DUPLICATE_TOKEN_RUN
+        && (commonRun / shorterLength) >= MIN_NEAR_DUPLICATE_COVERAGE;
+}
+
+function rejectRepeatedNarration(source, ranges) {
+    if (!source || !ranges.length) return;
+
+    const sourceSpans = splitProseSentenceSpans(source);
+    const replacementEntries = [];
+
+    for (const edit of ranges) {
+        const replacementTexts = splitProseSentenceSpans(edit.replacementText).map(replacement => replacement.text);
+        for (const replacementText of replacementTexts) {
+            replacementEntries.push({ edit, text: replacementText });
+
+            for (const sourceSpan of sourceSpans) {
+                if (sourceSpan.end <= edit.start || sourceSpan.start >= edit.end) {
+                    if (isNearDuplicateNarration(replacementText, sourceSpan.text)) {
+                        throw new Error(`Prose Guard edit ${edit.editIndex + 1} repeated or closely duplicated existing narration.`);
+                    }
+                    continue;
+                }
+
+                const residual = `${source.slice(sourceSpan.start, edit.start)} ${source.slice(edit.end, sourceSpan.end)}`.trim();
+                if (isNearDuplicateNarration(replacementText, residual)) {
+                    throw new Error(`Prose Guard edit ${edit.editIndex + 1} repeated or closely duplicated narration within its source sentence.`);
+                }
+            }
+        }
+    }
+
+    for (let leftIndex = 0; leftIndex < replacementEntries.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < replacementEntries.length; rightIndex += 1) {
+            const left = replacementEntries[leftIndex];
+            const right = replacementEntries[rightIndex];
+            if (left.edit === right.edit) {
+                if (isNearDuplicateNarration(left.text, right.text)) {
+                    throw new Error(`Prose Guard edit ${left.edit.editIndex + 1} repeated narration inside its replacement.`);
+                }
+                continue;
+            }
+            if (isNearDuplicateNarration(left.text, right.text)) {
+                throw new Error(`Prose Guard edits ${left.edit.editIndex + 1} and ${right.edit.editIndex + 1} repeated the same narration.`);
+            }
+        }
+    }
 }
 
 function containsWordSequence(words, sequence) {

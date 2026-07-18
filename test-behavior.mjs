@@ -14107,6 +14107,7 @@ const tests = [
       assert.doesNotMatch(proseGuardPromptSource, /Delete only invalid|Deletion is a last resort|remove only the final trailing sentence|trim only the final trailing sentence/);
       assert.match(source, /NEVER delete narration\. Every edit MUST replace a non-empty exact source span with non-empty corrected prose/);
       assert.match(source, /Everything outside an accepted edit MUST remain byte-for-byte unchanged/);
+      assert.match(source, /A replacement MUST NOT repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK/);
       assert.match(source, /Preserve valid explicit, sensual, romantic, violent, tense, atmospheric, environmental, and intimate detail/);
       assert.match(source, /You are not a style improver, summarizer, censor, or second narrator/);
       assert.match(source, /success or failure, landed contact, injuries, death, condition, intimacy permission/);
@@ -14225,6 +14226,27 @@ const tests = [
       });
       assert.equal(mixedNoOpAndRepair.narrationText, repaired.narrationText);
       assert.equal(mixedNoOpAndRepair.edits.length, 1);
+
+      assert.throws(
+        () => applyProseGuardEdits('Phoebe tucks a strand of cyan hair behind her ear and straightens up against the wall, pulling the blanket tighter around her knees. Her eyes soften.', {
+          proseEdits: [{
+            originalText: 'Her eyes soften.',
+            replacementText: 'She tucks a strand of cyan hair behind her ear and straightens up against the wall, pulling the blanket tighter around her knees.',
+            occurrence: 1,
+          }],
+        }),
+        /repeated or closely duplicated existing narration/,
+      );
+      assert.throws(
+        () => applyProseGuardEdits('Her eyes soften.', {
+          proseEdits: [{
+            originalText: 'Her eyes soften.',
+            replacementText: 'She tucks a strand of hair behind her ear. She tucks a strand of hair behind her ear.',
+            occurrence: 1,
+          }],
+        }),
+        /repeated narration inside its replacement/,
+      );
 
       assert.throws(
         () => applyProseGuardEdits(source, {
