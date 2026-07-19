@@ -7,6 +7,7 @@ import {
     normalizeEconomyState,
     normalizeEquipmentTierAssignments,
 } from './economy.js';
+import { stripPersonalityMannerismFields } from './tracker-delta-contract.js';
 
 export const ENGINE_PROMPT_TEXT = String.raw`[STRUCTURED_PREFLIGHT_ENGINE_EXTENSION v0.1 - SOURCE: EXTENSION ONLY]
 
@@ -2438,11 +2439,11 @@ export function normalizeTrackerStringList(value) {
 }
 
 export function normalizePersonalitySummary(value) {
-    const text = String(value ?? '')
+    const text = stripPersonalityMannerismFields(String(value ?? '')
         .trim()
         .replace(/\s+/g, ' ')
         .replace(/^["']|["']$/g, '')
-        .trim();
+        .trim());
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
     return text.slice(0, 320);
 }

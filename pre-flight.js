@@ -1,5 +1,6 @@
 import { normalizeWorldState, summarizeWorldStateForNarration } from './world-state.js';
 import { renderEconomyAndValueLens } from './economy.js';
+import { stripPersonalityMannerismFields } from './tracker-delta-contract.js';
 
 export function formatPreFlightPending() {
     return String.raw`<pre_flight>
@@ -209,7 +210,7 @@ function buildReadableDeterministicDebug(handoff) {
             `npcHandoffs[${index}].InitPreset=${valueOrNone(npc.InitPreset)}`,
             `npcHandoffs[${index}].Lock=${valueOrNone(npc.Lock)}`,
             `npcHandoffs[${index}].Behavior=${valueOrNone(npc.Behavior)}`,
-            `npcHandoffs[${index}].PersonalitySummary=${valueOrNone(npc.PersonalitySummary)}`,
+            `npcHandoffs[${index}].PersonalitySummary=${valueOrNone(stripPersonalityMannerismFields(npc.PersonalitySummary))}`,
             `npcHandoffs[${index}].Target=${valueOrNone(npc.Target)}`,
             `npcHandoffs[${index}].NPC_STAKES=${valueOrNone(npc.NPC_STAKES)}`,
             `npcHandoffs[${index}].StandingInfluence=${valueOrNone(npc.StandingInfluence)}`,
@@ -1101,11 +1102,17 @@ function RenderControlEngine(response, input, context) {
 
       Each character/NPC may make only ONE conversational contribution per response, directly addressing the current input from {{user}} or another character/NPC.
 
-      Once the character/NPC has answered, acknowledged, refused, or observably deflected that input, their turn ENDS.
+      That contribution MUST account for the FULL input directed at them, NOT merely the final sentence or question. Related points may be addressed together in one natural response.
+
+      Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly expressed through dialogue or observable behavior rather than accidental omission.
+
+      The contribution MUST leave the current exchange active. The direct response itself may do this, or the character/NPC may add ONE brief continuation tied to the SAME exchange: a statement, disclosure, question, or gesture that naturally invites a response.
+
+      Once that single contribution is complete, their turn ENDS.
 
     FORBIDDEN:
-      - DO NOT give a character/NPC multiple conversational turns or let them continue after their direct response is complete.
-      - DO NOT introduce another topic, disguise a monologue as one turn, or include more than ONE response-seeking question, statement, or gesture.
+      - DO NOT answer point by point, ignore earlier input, give a character/NPC multiple conversational turns, or continue after the single contribution is complete.
+      - DO NOT introduce another topic, disguise a monologue as one turn, or include more than ONE response-seeking continuation.
   }
 
   function activeHandoff(response, context): {
@@ -1311,8 +1318,9 @@ function narrativeNpcDispositionAndStyleEntry(npc = {}) {
 }
 
 function npcPersonalityNarrativeGuide(npc = {}) {
-    if (npc?.PersonalitySummary && !isNoneText(npc.PersonalitySummary)) {
-        return `${npc.PersonalitySummary}. Use this only for speech style, demeanor, interaction flavor, and occasional visible physical habits. A mannerism is a specific observable physical tell or habit, not a generic attitude, courtesy, decision, or social behavior. Do not force mannerisms, props, locations, or repeated beats. It never overrides narrativeFacts.`;
+    const personalitySummary = stripPersonalityMannerismFields(npc?.PersonalitySummary);
+    if (personalitySummary && !isNoneText(personalitySummary)) {
+        return `${personalitySummary}. Use this only for speech style, demeanor, and interaction flavor. It never overrides narrativeFacts.`;
     }
     return 'No fixed personality profile is listed; infer only from established visible behavior, role, and current scene. Do not invent a new defining trait.';
 }
@@ -1928,7 +1936,9 @@ function buildNarratorSummary(handoff, resolution, ledger = {}, options = {}) {
         `intimacy:${h.IntimacyBoundary ?? 'SKIP'}/${h.IntimacyBoundarySource ?? 'NONE'}/${h.IntimacyRefusalStyle ?? 'NONE'}`,
         `boundary:${h.BoundaryPressure ?? 'N'}`,
         `pressure:${h.HostilePressure ?? 0}/${h.HostileLandedPressure ?? 0}/${h.DominantLock ?? 'None'}/${h.PressureMode ?? 'none'}`,
-        h.PersonalitySummary && !isNoneText(h.PersonalitySummary) ? `personality:${h.PersonalitySummary}` : '',
+        stripPersonalityMannerismFields(h.PersonalitySummary) && !isNoneText(stripPersonalityMannerismFields(h.PersonalitySummary))
+            ? `personality:${stripPersonalityMannerismFields(h.PersonalitySummary)}`
+            : '',
     ].filter(Boolean).join('/')).join(';') || 'none';
 
     const chaos = handoff.chaosHandoff?.CHAOS ?? {};

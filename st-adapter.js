@@ -583,6 +583,7 @@ export async function sendChatCompletionProfileRequest(request = {}) {
         overridePayload = {},
         extractData = true,
         preparePayload = null,
+        signal = null,
     } = request;
     if (!profileId) {
         throw adapterTransportError('Semantic connection profile id is missing.', { stage: 'profile' });
@@ -595,7 +596,9 @@ export async function sendChatCompletionProfileRequest(request = {}) {
         throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support direct chat-completion requests.`, { stage: 'profile' });
     }
 
+    signal?.throwIfAborted?.();
     const proxies = await getProxyPresets();
+    signal?.throwIfAborted?.();
     const proxyPreset = proxies.find(proxy => proxy.name === profile.proxy);
     const messages = Array.isArray(prompt)
         ? prompt
@@ -623,6 +626,7 @@ export async function sendChatCompletionProfileRequest(request = {}) {
         requestPayload,
         {},
         extractData,
+        signal,
     );
 }
 

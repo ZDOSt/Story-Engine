@@ -42,7 +42,7 @@ import {
     renameHiddenHealthNpc,
 } from './health-state.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
-import { deterministicPersonalitySummaryForName, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
+import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import {
     STREAMING_ARTIFACT_REGEX_SCRIPT_ID,
     STREAMING_ARTIFACT_REGEX_SCRIPT_NAME,
@@ -347,12 +347,20 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
       Each character/NPC may make only ONE conversational contribution per response, directly addressing the current input from {{user}} or another character/NPC.
 
-      Once the character/NPC has answered, acknowledged, refused, or observably deflected that input, their turn ENDS.
+      That contribution MUST account for the FULL input directed at them, NOT merely the final sentence or question. Related points may be addressed together in one natural response.
+
+      Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly expressed through dialogue or observable behavior rather than accidental omission.
+
+      The contribution MUST leave the current exchange active. The direct response itself may do this, or the character/NPC may add ONE brief continuation tied to the SAME exchange: a statement, disclosure, question, or gesture that naturally invites a response.
+
+      Once that single contribution is complete, their turn ENDS.
 
     FORBIDDEN:
-      - DO NOT allow a character/NPC to continue through multiple conversational turns.
-      - DO NOT allow a character/NPC to introduce another topic or continue speaking after their direct response is complete.
-      - DO NOT give a character/NPC more than ONE response-seeking question, statement, or gesture.
+      - DO NOT answer or acknowledge {{user}}'s input point by point or as a list.
+      - DO NOT ignore earlier parts of the input merely to answer its final sentence or question.
+      - DO NOT allow a character/NPC multiple conversational turns.
+      - DO NOT introduce another topic or continue after the single contribution is complete.
+      - DO NOT include more than ONE response-seeking continuation.
       - DO NOT disguise a monologue as one turn by chaining multiple replies, arguments, explanations, anecdotes, or follow-ups.
   }
 
@@ -4808,7 +4816,7 @@ function cleanTrackerDeltaText(value) {
 
 
 function cleanPersonalitySummary(value) {
-    const text = String(value ?? '').trim().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '').trim();
+    const text = stripPersonalityMannerismFields(String(value ?? '').trim().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '').trim());
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
     return text.slice(0, 320);
 }
@@ -10074,6 +10082,8 @@ function buildTargetedProseBanRepairPrompt(findings, rules) {
         '',
         'REPAIR LIMITS:',
         '- Return at most one replacement sentence for each supplied FINDING_ID.',
+        '- Change ONLY the exact matched phrase text. Copy every character outside the matched phrase spans exactly as supplied.',
+        '- The deterministic validator rejects changes anywhere outside the confirmed phrase spans.',
         '- Preserve all facts, names, dialogue, quoted wording, actions, consequences, order, tone, intensity, and meaning.',
         '- Do not add, remove, summarize, soften, or reinterpret scene content.',
         '- Do not invent gestures, actions, emotions, motives, information, object handling, or consequences.',
@@ -10122,7 +10132,7 @@ async function requestTargetedProseBanRepair(findings, rules, requestOptions = {
                 purpose: 'targeted Prose Guard repair',
                 validateStructured: raw => parseTargetedProseGuardResponse(raw),
                 generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' }),
-            });
+            }, requestOptions);
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -10238,7 +10248,7 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     const fields = Object.keys(toolDefinition?.parameters?.properties || {});
     const fieldInstructions = [];
     if (fields.includes('sentenceRepairs')) {
-        fieldInstructions.push('Put only repairs for the supplied FINDING_ID values in sentenceRepairs. Return one replacementSentence per finding at most. Preserve all facts, order, tone, and quoted dialogue. Never return full rewritten narration, delete a sentence, invent content, or repair a finding the deterministic scanner did not supply. Use [] when no safe repair is possible.');
+        fieldInstructions.push('Put only repairs for the supplied FINDING_ID values in sentenceRepairs. Change only the exact matched phrase text and copy every character outside its spans unchanged. Return one replacementSentence per finding at most. Preserve all facts, order, tone, and quoted dialogue. Never return full rewritten narration, delete a sentence, invent content, or repair a finding the deterministic scanner did not supply. Use [] when no safe repair is possible.');
     }
     if (fields.includes('trackerDelta')) {
         fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on the supplied final narration exactly as provided.');
@@ -10257,22 +10267,30 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     ];
 }
 
-async function requestPostNarrationUtility({ settings, prompt, responseLength, toolDefinition, purpose, validateStructured, generateFallback }) {
+async function requestPostNarrationUtility({ settings, prompt, responseLength, toolDefinition, purpose, validateStructured, generateFallback }, requestOptions = {}) {
+    assertStoryEngineModelRequestCurrent(requestOptions);
+    const profileSettings = {
+        ...settings,
+        signal: requestOptions.signal,
+    };
     if (settings?.semanticProfileId) {
-        if (isOfficialDeepSeekProfile(settings)) {
+        if (isOfficialDeepSeekProfile(profileSettings)) {
             try {
                 const toolPrompt = buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition);
-                const structured = await sendDeepSeekProfileStructuredRequest(toolPrompt, responseLength, settings, toolDefinition);
+                const structured = await sendDeepSeekProfileStructuredRequest(toolPrompt, responseLength, profileSettings, toolDefinition);
                 validateStructured?.(structured);
                 return structured;
             } catch (error) {
+                assertStoryEngineModelRequestCurrent(requestOptions);
                 console.warn(`[${EXTENSION_NAME}] official DeepSeek ${purpose} tool call failed; falling back to validated text output.`, error);
             }
         }
-        return await sendSemanticProfileTextRequest(prompt, responseLength, settings, {
+        assertStoryEngineModelRequestCurrent(requestOptions);
+        return await sendSemanticProfileTextRequest(prompt, responseLength, profileSettings, {
             temperature: 0,
         });
     }
+    assertStoryEngineModelRequestCurrent(requestOptions);
     return await generateFallback();
 }
 
@@ -10283,6 +10301,7 @@ function deferForProseGuardFinalization() {
 function createTimedInternalRequestControl(requestOptions = {}) {
     let cancelled = false;
     const cancellationHandlers = new Set();
+    const abortController = typeof AbortController === 'function' ? new AbortController() : null;
     const bypassToken = promptReadyBypassGate.acquire();
     const release = () => promptReadyBypassGate.release(bypassToken);
     const parentIsCurrent = typeof requestOptions?.isCurrent === 'function'
@@ -10292,6 +10311,7 @@ function createTimedInternalRequestControl(requestOptions = {}) {
         options: {
             ...requestOptions,
             bypassToken,
+            signal: abortController?.signal || requestOptions.signal || null,
             isCurrent: () => !cancelled && parentIsCurrent(),
             registerCancellation(handler) {
                 if (typeof handler !== 'function') return () => {};
@@ -10306,6 +10326,7 @@ function createTimedInternalRequestControl(requestOptions = {}) {
         cancel() {
             if (cancelled) return;
             cancelled = true;
+            abortController?.abort();
             for (const handler of cancellationHandlers) handler();
             cancellationHandlers.clear();
             release();
@@ -10533,7 +10554,7 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
                 purpose: 'post-narration tracker update',
                 validateStructured: raw => parsePostNarrationTrackerResponse(raw, narrationText),
                 generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' }),
-            });
+            }, requestOptions);
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);

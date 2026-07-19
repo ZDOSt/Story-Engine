@@ -76,7 +76,7 @@ import {
     compact,
     stableStringify,
 } from './engines.js';
-import { deterministicPersonalitySummaryForName, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
+import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import {
     applyHiddenHealthEvents,
     applyHiddenHealthToTrackerState,
@@ -7526,7 +7526,7 @@ function cleanTrackerText(value) {
 }
 
 function cleanPersonalitySummary(value) {
-    const text = String(value ?? '').trim().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '').trim();
+    const text = stripPersonalityMannerismFields(String(value ?? '').trim().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '').trim());
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
     return text.slice(0, 320);
 }

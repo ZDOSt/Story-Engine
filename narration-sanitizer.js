@@ -1,6 +1,20 @@
 const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
 const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
-const RENDER_CONTROL_STAGE = '(?:activeHandoff|cleanHandoff|linearChronology|strictChronology|npcRambleGuard|embodiedPerception|directPerception|strictEpistemology|diegeticPhysicality|agencySeparation|strictBehaviorism|denotativePhysicality|inanimateObjectivity|cohesiveSceneBeats|itemAvailability|applicationContract|SensoryNarrationDirective|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|chronologyControl|userAgencyControl|turnStructureControl|responseEndpointControl|turnBoundaryControl)';
+export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
+    'RenderControlEngine',
+    'activeHandoff',
+    'dialogueTurn',
+    'inputChronology',
+    'agencySeparation',
+    'strictBehaviorism',
+    'strictEpistemology',
+    'diegeticPhysicality',
+    'embodiedPerception',
+    'denotativePhysicality',
+    'cohesiveSceneBeats',
+]);
+export const RENDER_CONTROL_STAGE_PATTERN = `(?:${RENDER_CONTROL_STAGE_NAMES.join('|')})`;
+const RENDER_CONTROL_STAGE = RENDER_CONTROL_STAGE_PATTERN;
 
 export function stripComputedDebugPrefix(text) {
     return stripNarratorMetaPrefix(stripStructuredArtifacts(text)).trimStart();
@@ -132,7 +146,8 @@ export function stripNarratorMetaPrefix(text) {
     }
 
     const prefix = source.slice(0, 2500);
-    if (!/\b(preflight|pre-flight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|renderControlEngine|narrativeFacts|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules|The user action|draft narration|scratchpad)\b/i.test(prefix)) {
+    const narratorMetaSignal = new RegExp(`\\b(?:preflight|pre-flight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|narrativeFacts|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules|The user action|draft narration|scratchpad|${RENDER_CONTROL_STAGE})\\b`, 'i');
+    if (!narratorMetaSignal.test(prefix)) {
         return source;
     }
 
@@ -143,7 +158,7 @@ export function stripNarratorMetaPrefix(text) {
         if (
             !line
             || /^[-*]\s+/.test(line)
-            || new RegExp(`^\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\b`, 'i').test(line)
+            || new RegExp(`^(?:\\d+[.)]?\\s*)?(?:[*_~]{1,3})?\\s*(?:function\\s+)?${RENDER_CONTROL_STAGE}\\b`, 'i').test(line)
             || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|renderControlEngine|narrativeFacts|MANDATE|STRICT RULES|PART 1|PART 2|PRIVATE_MECHANICS_AUDIT|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary)\b/i.test(line)
             || /\b(preflight|pre-flight|mechanics|formatting rules|Length target|Hard maximum|PRIVATE HANDOFF|should be|Let me|scratchpad|stage order|RenderControlEngine)\b/i.test(line)
         ) {

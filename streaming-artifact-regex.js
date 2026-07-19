@@ -1,3 +1,5 @@
+import { RENDER_CONTROL_STAGE_PATTERN } from './narration-sanitizer.js';
+
 export const STREAMING_ARTIFACT_REGEX_SCRIPT_NAME = 'Story Engine - Hide Narrator Artifacts (Streaming Display)';
 export const STREAMING_ARTIFACT_REGEX_SCRIPT_ID = 'story-engine-hide-narrator-artifacts-v1';
 
@@ -7,7 +9,7 @@ export const STREAMING_ARTIFACT_REGEX_SOURCE = [
     '^\\s*STORY_ENGINE_NARRATOR_DIRECTIVE[\\s\\S]*?(?=BEGIN_FINAL_NARRATION|$)',
     '^\\s*narrativeContract\\(input\\)[\\s\\S]*?(?=BEGIN_FINAL_NARRATION|$)',
     '^\\s*PRE-FLIGHT CHECK\\s*:[\\s\\S]*?(?:Draft narration\\s*:\\s*|(?=BEGIN_FINAL_NARRATION)|$)',
-    '^\\s*(?:\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*(?:SensoryNarrationDirective|applicationContract|smellGate|olfactoryGate|abilityAndItemRender|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|chronologyControl|userAgencyControl|turnStructureControl|responseEndpointControl|turnBoundaryControl)\\b[\\s\\S]*?)(?=\\n\\s*(?!\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*(?:SensoryNarrationDirective|applicationContract|smellGate|olfactoryGate|abilityAndItemRender|abilityIntegration|epistemicRender|behavioralRender|literalStyleFilter|sceneBeatComposition|chronologyControl|userAgencyControl|turnStructureControl|responseEndpointControl|turnBoundaryControl)\\b)(?!(?:[*_~]{1,3})?\\s*(?:CONCLUSION|VALIDATION CONCLUSION|FINAL CHECK|RENDER CHECK)\\s*:)|BEGIN_FINAL_NARRATION|$)',
+    `^\\s*(?:(?:\\d+[.)]?\\s*)?(?:[*_~]{1,3})?\\s*(?:function\\s+)?${RENDER_CONTROL_STAGE_PATTERN}\\b[\\s\\S]*?)(?=\\n\\s*(?!(?:\\d+[.)]?\\s*)?(?:[*_~]{1,3})?\\s*(?:function\\s+)?${RENDER_CONTROL_STAGE_PATTERN}\\b)(?!(?:[*_~]{1,3})?\\s*(?:CONCLUSION|VALIDATION CONCLUSION|FINAL CHECK|RENDER CHECK)\\s*:)|BEGIN_FINAL_NARRATION|$)`,
     '^\\s*(?:(?:[*_~]{1,3})?\\s*(?:CONCLUSION|VALIDATION CONCLUSION|FINAL CHECK|RENDER CHECK)\\s*:[\\s\\S]*?)(?=\\n\\s*(?:[\"\\x27]|[*_]*[A-Z0-9])|BEGIN_FINAL_NARRATION|$)',
     '```story_engine_tracker_delta\\s*[\\s\\S]*?(?:```\\s*|(?=BEGIN_FINAL_NARRATION)|$)',
     '\\s*(?:<!--\\s*)?STORY_ENGINE_TRACKER_DELTA[\\s\\S]*?(?:STORY_ENGINE_TRACKER_DELTA_END\\s*-->|(?=BEGIN_FINAL_NARRATION)|$)',

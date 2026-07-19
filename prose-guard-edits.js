@@ -6,10 +6,15 @@ const LONG_NARRATION_EDIT_COVERAGE_THRESHOLD = 600;
 const MAX_LONG_NARRATION_EDIT_COVERAGE = 0.75;
 const MIN_REPLACEMENT_WORD_RATIO = 0.5;
 const MIN_RETAINED_TOKEN_COVERAGE = 0.5;
+const MAX_TARGETED_REPLACEMENT_WORD_RATIO = 1.5;
+const MAX_TARGETED_REPLACEMENT_EXTRA_WORDS = 2;
 const MIN_EXACT_DUPLICATE_TOKEN_COUNT = 2;
 const MIN_NEAR_DUPLICATE_TOKEN_RUN = 4;
 const MIN_NEAR_DUPLICATE_COVERAGE = 0.75;
 const STRUCTURED_ARTIFACT_PATTERN = /(?:BEGIN|END)_(?:FINAL_NARRATION|PROSE_GUARD_EDITS|TRACKER_DELTA|CORRECTED_NARRATION)|```(?:json|story_engine_tracker_delta)|STORY_ENGINE_(?:TARGETED_PROSE_BAN_REPAIR|POST_NARRATION_TRACKER_UPDATE|TRACKER_DELTA|PROSE_GUARD)/i;
+const TARGETED_REPAIR_ACTOR_TOKENS = new Set(['i', 'me', 'my', 'mine', 'myself', 'you', 'your', 'yours', 'yourself', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'they', 'them', 'their', 'theirs', 'themself', 'themselves', 'we', 'us', 'our', 'ours', 'ourselves']);
+const TARGETED_REPAIR_ANCHOR_STOPWORDS = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'but', 'by', 'for', 'from', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'the', 'to', 'was', 'were', 'with']);
+const TARGETED_REPAIR_CLAUSE_EXPANSION_PATTERN = /[;:\u2014]|\b(?:after|before|because|then|until|when|while)\b/giu;
 const SENTENCE_SEGMENTER = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
     ? new Intl.Segmenter(undefined, { granularity: 'sentence' })
     : null;
@@ -140,7 +145,7 @@ export function applyProseGuardSentenceRepairs(narrationText, findings, rawPaylo
         if (repair.replacementSentence === finding.sentence) continue;
 
         try {
-            validateReplacementSentence(finding.sentence, repair.replacementSentence, rules);
+            validateReplacementSentence(finding, repair.replacementSentence, rules);
             candidates.push({
                 findingId: finding.id,
                 start: finding.start,
@@ -223,7 +228,7 @@ function splitProseSentenceSpans(source) {
         return mergeQuotedContinuationSpans(source, spans);
     }
 
-    const pattern = /[^.!?\r\n]+(?:[.!?]+(?=(?:["'\u201d\u00bb)\]]+)?(?:\s|$))|$)/g;
+    const pattern = /[^.!?\r\n]+(?:[.!?]+(?=(?:["'\u2019\u201d\u00bb)\]]+)?(?:\s|$))|$)/g;
     for (const match of source.matchAll(pattern)) {
         const start = Number(match.index || 0);
         appendTrimmedSpan(spans, source, start, start + String(match[0] || '').length);
@@ -290,14 +295,23 @@ function collectDialogueQuoteRanges(source) {
     for (let index = 0; index < source.length; index += 1) {
         const char = source[index];
         if (!opener) {
-            if (char === '"' || char === '\u201c' || char === '\u00ab') {
+            if (char === '"' || char === '\u201c' || char === '\u00ab' || char === '\u2018'
+                || (char === "'" && isStraightSingleQuoteOpener(source, index))) {
                 opener = char;
                 start = index;
             }
             continue;
         }
-        const closer = opener === '\u201c' ? '\u201d' : opener === '\u00ab' ? '\u00bb' : '"';
-        if (char === closer && (opener !== '"' || !isEscaped(source, index))) {
+        const closer = opener === '\u201c'
+            ? '\u201d'
+            : opener === '\u00ab'
+                ? '\u00bb'
+                : opener === '\u2018'
+                    ? '\u2019'
+                    : opener;
+        const escaped = (opener === '"' || opener === "'") && isEscaped(source, index);
+        const validSingleCloser = (opener !== "'" && opener !== '\u2018') || isSingleQuoteCloser(source, index);
+        if (char === closer && !escaped && validSingleCloser) {
             ranges.push({ start, end: index + 1 });
             opener = null;
             start = -1;
@@ -305,6 +319,24 @@ function collectDialogueQuoteRanges(source) {
     }
     if (opener && start >= 0) ranges.push({ start, end: source.length });
     return ranges;
+}
+
+function isStraightSingleQuoteOpener(source, index) {
+    const previous = index > 0 ? source[index - 1] : '';
+    const next = index + 1 < source.length ? source[index + 1] : '';
+    return Boolean(next && !/\s/.test(next) && !isWordCharacter(previous));
+}
+
+function isSingleQuoteCloser(source, index) {
+    const previous = index > 0 ? source[index - 1] : '';
+    const next = index + 1 < source.length ? source[index + 1] : '';
+    return Boolean(previous
+        && !/\s/.test(previous)
+        && !(isWordCharacter(previous) && isWordCharacter(next)));
+}
+
+function isWordCharacter(value) {
+    return Boolean(value && /[\p{L}\p{N}]/u.test(value));
 }
 
 function isEscaped(source, index) {
@@ -317,7 +349,8 @@ function rangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
     return leftStart < rightEnd && leftEnd > rightStart;
 }
 
-function validateReplacementSentence(originalText, replacementText, rules) {
+function validateReplacementSentence(finding, replacementText, rules) {
+    const originalText = String(finding?.sentence || '');
     if (!String(replacementText || '').trim()) throw new Error('replacement was empty');
     if (/[\r\n\u2028\u2029]/.test(replacementText)) throw new Error('replacement crossed a line boundary');
     if (STRUCTURED_ARTIFACT_PATTERN.test(replacementText)) throw new Error('replacement contained a structured-output artifact');
@@ -329,10 +362,113 @@ function validateReplacementSentence(originalText, replacementText, rules) {
         throw new Error('replacement changed quoted dialogue');
     }
 
+    assertOnlyTargetedPhraseTextChanged(finding, replacementText);
     assertNonDestructiveReplacement(originalText, replacementText);
     if (collectProseGuardSentenceFindings(replacementText, rules, 1).length) {
         throw new Error('replacement still contains a targeted phrase violation');
     }
+}
+
+function assertOnlyTargetedPhraseTextChanged(finding, replacementText) {
+    const originalText = String(finding?.sentence || '');
+    const sentenceStart = Number(finding?.start);
+    if (!originalText || !Number.isFinite(sentenceStart)) {
+        throw new Error('finding was missing its source sentence bounds');
+    }
+
+    const ranges = (finding?.matches || [])
+        .map(match => ({
+            start: Math.max(0, Number(match?.start) - sentenceStart),
+            end: Math.min(originalText.length, Number(match?.end) - sentenceStart),
+        }))
+        .filter(range => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start)
+        .sort((left, right) => left.start - right.start || left.end - right.end)
+        .reduce((merged, range) => {
+            const previous = merged[merged.length - 1];
+            if (previous && range.start <= previous.end) {
+                previous.end = Math.max(previous.end, range.end);
+            } else {
+                merged.push({ ...range });
+            }
+            return merged;
+        }, []);
+    if (!ranges.length) throw new Error('finding had no authorized phrase span');
+
+    let cursor = 0;
+    let pattern = '^';
+    for (const range of ranges) {
+        pattern += escapeRegExp(originalText.slice(cursor, range.start));
+        pattern += '([\\s\\S]+?)';
+        cursor = range.end;
+    }
+    pattern += `${escapeRegExp(originalText.slice(cursor))}$`;
+
+    const matched = new RegExp(pattern, 'u').exec(replacementText);
+    if (!matched) {
+        throw new Error('replacement changed text outside the targeted phrase span');
+    }
+
+    ranges.forEach((range, index) => {
+        const originalWords = tokenizeProseWords(originalText.slice(range.start, range.end));
+        const replacementWords = tokenizeProseWords(matched[index + 1]);
+        if (!replacementWords.length) {
+            throw new Error('replacement deleted a targeted phrase instead of rewriting it');
+        }
+        const maximumWords = Math.max(
+            originalWords.length * MAX_TARGETED_REPLACEMENT_WORD_RATIO,
+            originalWords.length + MAX_TARGETED_REPLACEMENT_EXTRA_WORDS,
+        );
+        if (replacementWords.length > maximumWords) {
+            throw new Error('replacement added excessive content inside a targeted phrase span');
+        }
+        assertTargetedFragmentSafety(
+            originalText.slice(range.start, range.end),
+            matched[index + 1],
+        );
+    });
+}
+
+function assertTargetedFragmentSafety(originalFragment, replacementFragment) {
+    const originalWords = tokenizeProseWords(originalFragment);
+    const replacementWords = tokenizeProseWords(replacementFragment);
+    const originalActorCounts = tokenCounts(originalWords.filter(token => TARGETED_REPAIR_ACTOR_TOKENS.has(token)));
+    const replacementActorCounts = tokenCounts(replacementWords.filter(token => TARGETED_REPAIR_ACTOR_TOKENS.has(token)));
+    for (const [token, count] of replacementActorCounts) {
+        if (count > (originalActorCounts.get(token) || 0)) {
+            throw new Error('replacement introduced a new actor reference inside a targeted phrase span');
+        }
+    }
+
+    const originalClauseSignals = String(originalFragment || '').match(TARGETED_REPAIR_CLAUSE_EXPANSION_PATTERN) || [];
+    const replacementClauseSignals = String(replacementFragment || '').match(TARGETED_REPAIR_CLAUSE_EXPANSION_PATTERN) || [];
+    if (replacementClauseSignals.length > originalClauseSignals.length) {
+        throw new Error('replacement expanded a targeted phrase into another action or clause');
+    }
+
+    const sourceAnchors = new Set(originalWords
+        .filter(token => token.length >= 3 && !TARGETED_REPAIR_ANCHOR_STOPWORDS.has(token))
+        .map(targetedRepairTokenRoot));
+    if (sourceAnchors.size) {
+        const retainsAnchor = replacementWords.some(token => sourceAnchors.has(targetedRepairTokenRoot(token)));
+        if (!retainsAnchor) {
+            throw new Error('replacement lacked a lexical anchor from the targeted phrase');
+        }
+    }
+}
+
+function targetedRepairTokenRoot(token) {
+    let value = String(token || '').toLowerCase().replace(/['\u2019]s$/u, '');
+    if (value.length > 5 && value.endsWith('ing')) value = value.slice(0, -3);
+    else if (value.length > 4 && value.endsWith('ed')) value = value.slice(0, -2);
+    else if (value.length > 4 && value.endsWith('es')) value = value.slice(0, -2);
+    else if (value.length > 3 && value.endsWith('s')) value = value.slice(0, -1);
+    return value;
+}
+
+function tokenCounts(tokens) {
+    const counts = new Map();
+    for (const token of tokens || []) counts.set(token, (counts.get(token) || 0) + 1);
+    return counts;
 }
 
 function rejectOverlappingEdits(edits) {

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import { ENGINE_PROMPT_TEXT, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, hasMagicStoneEntry, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
-import { deterministicPersonalitySummaryForName, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
+import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
@@ -8062,8 +8062,7 @@ const tests = [
       assert.equal(report.trackerUpdate.npcs.Seraphina.personalitySummary, 'Gentle, observant, and cautious with new trust.');
       assert.match(prompt(report), /npcDispositionAndStyle:/);
       assert.match(prompt(report), /Personality: Gentle, observant, and cautious with new trust\./);
-      assert.match(prompt(report), /Use this only for speech style, demeanor, interaction flavor, and occasional visible physical habits/);
-      assert.match(prompt(report), /A mannerism is a specific observable physical tell or habit/);
+      assert.match(prompt(report), /Use this only for speech style, demeanor, and interaction flavor/);
       assert.match(prompt(report), /Gentle, observant, and cautious with new trust/);
     },
   },
@@ -8120,27 +8119,70 @@ const tests = [
       assert.match(expected, /^temperament: /);
       assert.match(expected, /speech: /);
       assert.match(expected, /interaction: /);
-      assert.match(expected, /mannerism: /);
-      assert.doesNotMatch(expected, /mannerisms: /);
-      assert.doesNotMatch(expected, /mannerism: (?:keeps exchanges brief|asks for names|names concrete comforts|answers tension|offers alternatives|frames favors|turns tension|moves conversations|corrects imprecision|names terms|pauses before judgment|points back|notices hazards|points out details|names past costs|offers quiet options|redirects conversations|volunteers first|answers sensitive questions|checks needs)/);
+      assert.match(expected, /intensity:medium$/);
+      assert.doesNotMatch(expected, /mannerisms?: /);
       assert.doesNotMatch(expected, /tsundere|kuudere|deredere|yandere|dandere/i);
       assert.match(prompt(report), /npcDispositionAndStyle:/);
       assert.match(prompt(report), /Personality: temperament: /);
-      assert.match(prompt(report), /Use this only for speech style, demeanor, interaction flavor, and occasional visible physical habits/i);
-      assert.match(prompt(report), /A mannerism is a specific observable physical tell or habit/i);
-      assert.match(prompt(report), /Do not force mannerisms, props, locations, or repeated beats/i);
+      assert.match(prompt(report), /Use this only for speech style, demeanor, and interaction flavor/i);
+    },
+  },
+  {
+    name: '29e legacy personality mannerisms are stripped before tracker and narration use',
+    run() {
+      const legacySummary = 'temperament: gentle, reserved; speech: careful and direct; interaction: acknowledges concerns before replying; mannerism: tucks a strand of hair behind her ear; intensity:medium';
+      const expected = 'temperament: gentle, reserved; speech: careful and direct; interaction: acknowledges concerns before replying; intensity:medium';
+      assert.equal(stripPersonalityMannerismFields(legacySummary), expected);
+      assert.equal(
+        stripPersonalityMannerismFields('Gentle, observant, and cautious with new trust.'),
+        'Gentle, observant, and cautious with new trust.',
+      );
+
+      const report = runCase({
+        userText: 'I greet Seraphina at the campfire.',
+        tracker: {
+          Seraphina: trackerEntry({
+            personalitySummary: legacySummary,
+            currentDisposition: { B: 3, F: 1, H: 1 },
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'greet Seraphina at the campfire',
+            explicitMeans: 'greet Seraphina',
+            identifyTargets: { ActionTargets: ['Seraphina'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Seraphina')],
+        }),
+      });
+      assert.equal(report.trackerUpdate.npcs.Seraphina.personalitySummary, expected);
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].PersonalitySummary, expected);
+
+      report.finalNarrativeHandoff.npcHandoffs[0].PersonalitySummary = legacySummary;
+      assert.ok(prompt(report).includes(expected));
+      assert.doesNotMatch(prompt(report), /tucks a strand of hair behind her ear/i);
+      assert.doesNotMatch(auditPrompt(report), /tucks a strand of hair behind her ear/i);
+
+      const parsed = parseNarratorTrackerDelta(TRACKER_DELTA_TEMPLATE
+        .replace('TrackerUpdateEngine.NPC.count=0', 'TrackerUpdateEngine.NPC.count=1')
+        .replace('TrackerUpdateEngine.NPC[0].NPC=(none)', 'TrackerUpdateEngine.NPC[0].NPC=Seraphina')
+        .replace('TrackerUpdateEngine.NPC[0].personalitySummary=unchanged', `TrackerUpdateEngine.NPC[0].personalitySummary=${legacySummary}`));
+      assert.equal(parsed.npcs[0].personalitySummary, expected);
     },
   },
   {
     name: '29c personality contract keeps internal archetype labels out of visible summaries',
     run() {
       assert.match(TRACKER_DELTA_CONTRACT, /Do not output raw internal labels/i);
-      assert.match(TRACKER_DELTA_CONTRACT, /Preferred format: "temperament: \.\.\.; speech: \.\.\.; interaction: \.\.\.; mannerism: \.\.\.; intensity:low\|medium\|high"/);
+      assert.match(TRACKER_DELTA_CONTRACT, /Preferred format: "temperament: \.\.\.; speech: \.\.\.; interaction: \.\.\.; intensity:low\|medium\|high"/);
       assert.match(TRACKER_DELTA_CONTRACT, /Speech and interaction should carry most uniqueness/);
-      assert.match(TRACKER_DELTA_CONTRACT, /A mannerism is a specific observable physical tell or habit/);
-      assert.match(TRACKER_DELTA_CONTRACT, /fidgeting with a sleeve, angling toward exits, tapping a finger while thinking, or touching a charm before speaking/);
-      assert.match(TRACKER_DELTA_CONTRACT, /It is not attitude, etiquette, strategy, kindness, politeness, holding a door, asking questions, offering help, making decisions, or any other generic social behavior/);
-      assert.match(TRACKER_DELTA_CONTRACT, /Mannerism is optional, flexible, scene-valid, and never a mandatory repeated beat/);
+      assert.doesNotMatch(TRACKER_DELTA_CONTRACT, /mannerisms?|visible physical habits?/i);
+      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      const preflightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      assert.doesNotMatch(semanticSource, /A mannerism is|visible physical tell or habit|mannerism is flexible/i);
+      assert.doesNotMatch(preflightSource, /occasional visible physical habits|A mannerism is|Do not force mannerisms/i);
       assert.doesNotMatch(TRACKER_DELTA_CONTRACT, /e\.g\. "tsundere/);
     },
   },
@@ -11464,6 +11506,12 @@ const tests = [
       assert.equal(applyStreamingArtifactDisplayRegex('```story_engine_tracker_delta\nBEGIN_TRACKER_DELTA\nTrackerUpdateEngine.user.condition=unchanged').trim(), '');
       assert.equal(applyStreamingArtifactDisplayRegex('Val steps back.\nBEGIN_TRACKER_DELTA\nTrackerUpdateEngine.user.condition=unchanged').trim(), 'Val steps back.');
       assert.equal(applyStreamingArtifactDisplayRegex('Val says, "This is not a tracker delta."'), 'Val says, "This is not a tracker delta."');
+      for (const stage of ['activeHandoff', 'dialogueTurn', 'inputChronology', 'agencySeparation', 'strictBehaviorism', 'strictEpistemology', 'diegeticPhysicality', 'embodiedPerception', 'denotativePhysicality', 'cohesiveSceneBeats']) {
+        const narration = 'Val steps back.';
+        assert.equal(applyStreamingArtifactDisplayRegex(`${stage}: complete\n${narration}`).trim(), narration);
+        assert.equal(applyStreamingArtifactDisplayRegex(`function ${stage}(response, context): complete\n${narration}`).trim(), narration);
+        assert.equal(sanitizeAssistantNarration(`${stage}: complete\n${narration}`), narration);
+      }
     },
   },
   {
@@ -13427,7 +13475,13 @@ const tests = [
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
       assert.match(mainRulesSource, /Dialogue MUST follow a natural back-and-forth exchange/);
       assert.match(mainRulesSource, /Each character\/NPC may make only ONE conversational contribution per response/);
-      assert.match(mainRulesSource, /Once the character\/NPC has answered, acknowledged, refused, or observably deflected that input, their turn ENDS/);
+      assert.match(mainRulesSource, /That contribution MUST account for the FULL input directed at them, NOT merely the final sentence or question/);
+      assert.match(mainRulesSource, /Related points may be addressed together in one natural response/);
+      assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
+      assert.match(mainRulesSource, /The contribution MUST leave the current exchange active/);
+      assert.match(mainRulesSource, /ONE brief continuation tied to the SAME exchange/);
+      assert.match(mainRulesSource, /Once that single contribution is complete, their turn ENDS/);
+      assert.match(mainRulesSource, /DO NOT ignore earlier parts of the input merely to answer its final sentence or question/);
       assert.match(mainRulesSource, /DO NOT disguise a monologue as one turn/);
       assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
 
@@ -13902,7 +13956,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.7');
+      assert.equal(manifest.version, '0.9.10');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
       assert.match(source, /proseGuardEmbodiedPerceptionBannedPhrases:\s*DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES/);
@@ -13946,6 +14000,23 @@ const tests = [
         collectProseGuardSentenceFindings('Maria says, "Her breath catches."', rules),
         [],
       );
+      assert.deepEqual(
+        collectProseGuardSentenceFindings("Maria says, 'Her breath catches.'", rules),
+        [],
+      );
+      assert.deepEqual(
+        collectProseGuardSentenceFindings('Maria says, \u2018Her breath catches.\u2019', rules),
+        [],
+      );
+      assert.deepEqual(
+        collectProseGuardSentenceFindings('Maria says, \u2018I don\u2019t think her breath catches.\u2019', rules),
+        [],
+      );
+      assert.deepEqual(
+        collectProseGuardSentenceFindings("Maria says, 'I don't think her breath catches.'", rules),
+        [],
+      );
+      assert.equal(collectProseGuardSentenceFindings("Maria's breath catches.", rules).length, 1);
 
       const quotedContinuation = collectProseGuardSentenceFindings(
         'Maria asks, "Are you sure?" while her breath catches.',
@@ -13963,7 +14034,7 @@ const tests = [
   {
     name: '47b sentence repairs are code-owned, non-deleting, and quote-preserving',
     run() {
-      const rules = [{ ruleName: 'strictBehaviorism', phrases: ['breath catches'] }];
+      const rules = [{ ruleName: 'strictBehaviorism', phrases: ['breath catches', 'breath hitches'] }];
       const source = 'Maria says, "Stay here," while her breath catches.';
       const findings = collectProseGuardSentenceFindings(source, rules);
       assert.equal(findings.length, 1);
@@ -13974,19 +14045,19 @@ const tests = [
         JSON.stringify({
           sentenceRepairs: [{
             findingId,
-            replacementSentence: 'Maria says, "Stay here," while she steps back.',
+            replacementSentence: 'Maria says, "Stay here," while her breathing remains steady.',
           }],
         }),
         PROSE_GUARD_EDITS_END,
       ].join('\n'));
       const repaired = applyProseGuardSentenceRepairs(source, findings, validPayload, { rules });
-      assert.equal(repaired.narrationText, 'Maria says, "Stay here," while she steps back.');
+      assert.equal(repaired.narrationText, 'Maria says, "Stay here," while her breathing remains steady.');
       assert.equal(repaired.appliedRepairs.length, 1);
 
       const unknownFinding = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId: 'PG_SENTENCE_999',
-          replacementSentence: 'Maria says, "Stay here," while she steps back.',
+          replacementSentence: 'Maria says, "Stay here," while her breathing remains steady.',
         }],
       }, { rules });
       assert.equal(unknownFinding.narrationText, source);
@@ -13995,7 +14066,7 @@ const tests = [
       const unsafeReplacement = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId,
-          replacementSentence: 'Maria says, "Leave now," while she steps back.',
+          replacementSentence: 'Maria says, "Leave now," while her breathing remains steady.',
         }],
       }, { rules });
       assert.equal(unsafeReplacement.narrationText, source);
@@ -14004,7 +14075,7 @@ const tests = [
       const replacementWithViolation = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId,
-          replacementSentence: 'Maria says, "Stay here," while breath catches.',
+          replacementSentence: 'Maria says, "Stay here," while her breath hitches.',
         }],
       }, { rules });
       assert.equal(replacementWithViolation.narrationText, source);
@@ -14025,7 +14096,22 @@ const tests = [
         { rules },
       );
       assert.equal(destructiveReplacement.narrationText, 'Maria lifts the cup by the window while her breath catches.');
-      assert.match(destructiveReplacement.rejectedRepairs[0].reason, /removed too much source content/);
+      assert.match(destructiveReplacement.rejectedRepairs[0].reason, /outside the targeted phrase span/);
+
+      for (const [factSource, factReplacement] of [
+        ['Maria lifts the cup while her breath catches.', 'Maria drops the cup while her breathing remains steady.'],
+        ["The guard grips Maria's wrist while his breath catches.", "The guard releases Maria's wrist while his breathing remains steady."],
+        ['Maria lifts the cup while her breath catches.', 'Maria lifts the cup while her breathing remains steady and then leaves the room.'],
+        ['Maria lifts the cup while her breath catches.', 'Maria lifts the cup while her breathing remains steady and she leaves.'],
+        ['Maria lifts the cup while her breath catches.', 'Maria lifts the cup while her steps move away.'],
+      ]) {
+        const factFindings = collectProseGuardSentenceFindings(factSource, rules);
+        const factMutation = applyProseGuardSentenceRepairs(factSource, factFindings, {
+          sentenceRepairs: [{ findingId: factFindings[0].id, replacementSentence: factReplacement }],
+        }, { rules });
+        assert.equal(factMutation.narrationText, factSource);
+        assert.match(factMutation.rejectedRepairs[0].reason, /outside the targeted phrase span|excessive content inside a targeted phrase span|new actor reference|another action or clause|lacked a lexical anchor/);
+      }
 
       assert.throws(
         () => parseProseGuardRepairPayload({
@@ -14035,28 +14121,28 @@ const tests = [
         /unauthorized field/,
       );
 
-      const duplicateSource = 'Phoebe tucks a strand of cyan hair behind her ear and straightens against the wall. Her eyes soften.';
+      const duplicateSource = 'Her eyes narrow. Her eyes soften.';
       const duplicateFindings = collectProseGuardSentenceFindings(duplicateSource, [
         { ruleName: 'strictBehaviorism', phrases: ['eyes soften'] },
       ]);
       const duplicateRepair = applyProseGuardSentenceRepairs(duplicateSource, duplicateFindings, {
         sentenceRepairs: [{
           findingId: duplicateFindings[0].id,
-          replacementSentence: 'Phoebe tucks a strand of cyan hair behind her ear and straightens against the wall.',
+          replacementSentence: 'Her eyes narrow.',
         }],
       }, { rules: [{ ruleName: 'strictBehaviorism', phrases: ['eyes soften'] }] });
       assert.equal(duplicateRepair.narrationText, duplicateSource);
       assert.match(duplicateRepair.rejectedRepairs[0].reason, /duplicated existing narration/);
 
-      const repeatedRepairSource = 'The silence stretches. The tension coils.';
+      const repeatedRepairSource = 'The silence stretches. The silence stretches.';
       const repeatedRepairRules = [
-        { ruleName: 'denotativePhysicality', phrases: ['silence stretches', 'tension coils'] },
+        { ruleName: 'denotativePhysicality', phrases: ['silence stretches'] },
       ];
       const repeatedRepairFindings = collectProseGuardSentenceFindings(repeatedRepairSource, repeatedRepairRules);
       const repeatedRepair = applyProseGuardSentenceRepairs(repeatedRepairSource, repeatedRepairFindings, {
         sentenceRepairs: repeatedRepairFindings.map(finding => ({
           findingId: finding.id,
-          replacementSentence: 'She steps back.',
+          replacementSentence: 'The silence continues.',
         })),
       }, { rules: repeatedRepairRules });
       assert.equal(repeatedRepair.appliedRepairs.length, 1);
@@ -14088,6 +14174,8 @@ const tests = [
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
+      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
 
       const targetedIndex = source.indexOf('const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions);');
       const trackerRequestIndex = source.indexOf('const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout({', targetedIndex);
@@ -14102,11 +14190,16 @@ const tests = [
       assert.match(source, /const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout\(\{/);
       assert.match(source, /narrationText,\s*\n\s*trackerDisplaySnapshot/);
       assert.match(source, /function requestPostNarrationUtility/);
+      assert.match(source, /requestPostNarrationUtility\([\s\S]*?requestOptions = \{\}/);
+      assert.match(source, /catch \(error\) \{\s*assertStoryEngineModelRequestCurrent\(requestOptions\);/);
+      assert.match(source, /abortController\?\.abort\(\)/);
       assert.match(source, /sendDeepSeekProfileStructuredRequest/);
       assert.match(source, /official DeepSeek \$\{purpose\} tool call failed; falling back to validated text output/);
       assert.match(source, /function applyTargetedProseBanRepairIfNeeded[\s\S]*if \(!findings\.length\)/);
       assert.doesNotMatch(source, /buildProseGuardPrompt|requestProseGuardCorrection|requestCombinedPostNarrationPass|parseCombinedPostNarrationResponse|combinedTrackerDelta|broadProseGuardAlreadyApplied|STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
       assert.doesNotMatch(source, /includeProseEdits|proseEdits/);
+      assert.match(semanticSource, /signal: options\.signal/);
+      assert.match(adapterSource, /processRequest\(\s*requestPayload,\s*\{\},\s*extractData,\s*signal,/);
     },
   },
   {
