@@ -51,7 +51,7 @@ import {
 } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
-import { applyProseGuardEdits, parseProseGuardEditPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
+import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
 import { applyCurrencyDelta, applyEconomyDelta, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, renderEconomyTrackerContext } from './economy.js';
 
@@ -99,7 +99,6 @@ const PROSE_GUARD_HIDDEN_TEXT_CLASS = 'structured-preflight-proseguard-hidden-te
 const PROSE_GUARD_DEFER_MS = 0;
 const PROSE_GUARD_TIMEOUT_MS = 90000;
 const PROSE_GUARD_TOOL_NAME = 'submit_prose_guard_edits';
-const POST_NARRATION_TOOL_NAME = 'submit_post_narration_pass';
 const TRACKER_DELTA_TOOL_NAME = 'submit_tracker_delta';
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
@@ -297,13 +296,7 @@ mouth opens, then closes
 jaw opens, closes
 jaw opens, then closes`;
 
-const DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES = String.raw`air smells
-air tastes
-room smells
-room tastes
-place smells
-place tastes
-barely above a whisper
+const DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES = String.raw`barely above a whisper
 barely above a breath
 silence stretches
 words hang in the air
@@ -312,9 +305,8 @@ tension coils
 the word lands
 words land
 dropped like a stone
-like a stone on still water`;
-
-const DEFAULT_PROSE_GUARD_INANIMATE_OBJECTIVITY_BANNED_PHRASES = String.raw`room holds its breath
+like a stone on still water
+room holds its breath
 rooms hold their breath
 darkness swallows
 shadows dance
@@ -325,149 +317,139 @@ tension hums
 atmosphere presses
 air waits`;
 
+const DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES = String.raw`air smells
+air tastes
+room smells
+room tastes
+place smells
+place tastes`;
+
 const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
-YOUR FINAL RESPONSE MUST FOLLOW THE CONSTRAINTS BELOW, WHICH GOVERN PROSE, USER AGENCY, CHRONOLOGY, PERCEPTION AND NARRATION BOUNDARIES.
-
-function activeHandoff(response, context): {
   MANDATE:
-    You MUST end every response on ONE ACTIVE, CONCRETE BEAT that {{user}} can respond to.
+    Your final response MUST STRICTLY follow the constraints below. Failure will render your response INVALID.
 
-  VALID ENDINGS:
-    - Dialogue, action, or a concrete gesture directed at {{user}}.
-    - A visible scene change that requires {{user}}'s input.
+  function activeHandoff(response, context): {
+    MANDATE:
+      You MUST end every response on ONE of the following:
+      - Dialogue directed at {{user}}.
+      - An action or concrete gesture directed at {{user}}.
+      - A visible scene change that requires {{user}}'s input.
 
-  FORBIDDEN:
-    - DO NOT end by prompting {{user}} with a meta question (e.g., "What do you do?") or by describing a character waiting for or expecting {{user}}'s response.
-    - DO NOT end on filler or distant environmental detail unrelated to the current scene.
-}
+    FORBIDDEN:
+      - DO NOT ask {{user}} meta questions (e.g., "What do you do?").
+      - DO NOT describe a character waiting for or expecting {{user}}'s response.
+      - DO NOT end your response on filler or distant environmental detail unrelated to the current scene.
+  }
 
-function dialogueTurn(response, context): {
-  MANDATE:
-    During dialogue, each character/NPC may take AT MOST ONE dialogue turn PER RESPONSE.
+  function dialogueTurn(response, context): {
+    MANDATE:
+      Dialogue MUST follow a natural back-and-forth exchange.
 
-    A dialogue turn MAY contain AT MOST ONE of each component:
+      Each character/NPC may make only ONE conversational contribution per response, directly addressing the current input from {{user}} or another character/NPC.
 
-    - Reaction Beat: ONE brief, cohesive, and observable reaction to {{user}} or another character/NPC.
-    - Utterance: ONE cohesive spoken response that addresses or acknowledges the input from {{user}} or another character/NPC.
-    - Action Beat: ONE cohesive action sequence OR gesture that DIRECTLY supports the current exchange.
-    - Follow-Up: AT MOST ONE response-seeking statement, question, or gesture that naturally ENDS that character/NPC's turn.
+      Once the character/NPC has answered, acknowledged, refused, or observably deflected that input, their turn ENDS.
 
-    These components are LIMITS, not a checklist. Combine or reorder them naturally, but NEVER exceed the stated limit.
+    FORBIDDEN:
+      - DO NOT allow a character/NPC to continue through multiple conversational turns.
+      - DO NOT allow a character/NPC to introduce another topic or continue speaking after their direct response is complete.
+      - DO NOT give a character/NPC more than ONE response-seeking question, statement, or gesture.
+      - DO NOT disguise a monologue as one turn by chaining multiple replies, arguments, explanations, anecdotes, or follow-ups.
+  }
 
-    A character/NPC MUST account for the full input directed at them. Intentional refusal, deflection, or avoidance is allowed, but it MUST be observable rather than an accidental omission.
+  function inputChronology(response, input, context): {
+    MANDATE:
+      {{user}}'s input is IN THE PAST. You MUST begin narration with the immediate response, consequence, obstruction, or result that follows {{user}}'s actions or dialogue.
 
-  FORBIDDEN - NEVER:
-    - Give any character/NPC more than ONE dialogue turn per response.
-    - Stack or disguise multiple reactions, utterances, action beats, or follow-ups as one component.
-    - Chain action-dialogue-action-dialogue sequences.
-    - Continue a character/NPC's dialogue turn after their follow-up.
-    - Reset or grant another dialogue turn because of an interruption, scene event, or another character's participation.
-    - Add unrelated actions, gestures, dialogue, topics, commentary, or filler.
-}
+      Previously narrated actions and dialogue have already occurred. Continue from the scene state they established.
 
-function cohesiveSceneBeats(response, context): {
-  MANDATE:
-    Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
+    FORBIDDEN:
+      - DO NOT repeat, paraphrase, echo, summarize, re-stage, or narrate ANY part of {{user}}'s input.
+      - DO NOT repeat, paraphrase, or re-stage previously narrated actions or dialogue.
+  }
 
-  GOOD EXAMPLE:
-    The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
+  function agencySeparation(response, input, context): {
+    MANDATE:
+      You control ONLY the world and NPCs. The human player EXCLUSIVELY controls {{user}}. Narrate TO {{user}}, NEVER AS {{user}}.
 
-  FORBIDDEN:
-    - DO NOT split a single scene beat into a sequence of short, staccato sentences.
-    - DO NOT use micro-reaction loops, twitch narration, or body-cue pileups.
-}
+      You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop a held item when startled, cover their eyes against a sudden blinding glare, or be awakened by an external sound, touch, or impact.
 
-function linearChronology(response, input, context): {
-  MANDATE:
-    You MUST narrate only what comes AFTER {{user}}'s actions or dialogue.
+      Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
 
-  EXAMPLE:
-    SAMPLE {{user}} INPUT: "I try to grab the scroll from the desk."
-    RESPONSE: The guard's hand comes down on the scroll before your fingers reach it...
+    FORBIDDEN:
+      - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
+      - DO NOT narrate {{user}}'s thoughts, feelings, choices, decisions, voluntary actions, or dialogue.
+      - DO NOT interpret, assume, or complete {{user}}'s intent.
+  }
 
-  FORBIDDEN:
-    - DO NOT repeat, paraphrase, summarize, re-stage, or narrate ANY part of {{user}}'s input.
-}
+  function strictBehaviorism(response, context): {
+    MANDATE:
+      When character/NPC state or emotion is conveyed, you MUST convey it ONLY through directly observable behavior, action, or dialogue.
 
-function agencySeparation(response, input, context): {
-  MANDATE:
-    You control ONLY the world and NPCs. {{user}} is EXCLUSIVELY controlled by the human player. Narrate TO {{user}}, not AS {{user}}.
+      Dialogue does NOT require an accompanying gesture, action, or physical cue.
 
-    You MAY narrate immediate involuntary or reflexive reactions directly caused by external stimuli or effects imposed by the scene. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop a held item when startled, or be pushed, struck, restrained, knocked down, or awakened.
+    FORBIDDEN:
+      - DO NOT name, explain, or interpret a character/NPC's internal, emotional, or psychological state in narration.
+      - DO NOT add behavior, actions, or gestures merely to signal emotion.
+      - ABSOLUTELY NO flushing, reddening, skin turning pink or red, color rising, knuckle whitening, or paling.
+      - ABSOLUTELY NO breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth, jaw, or lips opening and closing in loops.
+      - ABSOLUTELY NO interpretive, figurative, or invisible eye-language such as "her eyes burn," "something flickers in her eyes," "her eyes soften," or equivalent language.
+  }
 
-  FORBIDDEN:
-    - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
-    - DO NOT narrate {{user}}'s thoughts, choices, decisions, voluntary actions, dialogue, or feelings beyond the immediate involuntary reaction caused by the scene.
-    - DO NOT interpret, assume, or complete {{user}}'s intent.
-}
+  function strictEpistemology(response, context): {
+    MANDATE:
+      You MUST reveal information ONLY through DIRECT sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.
 
-function strictBehaviorism(response, context): {
-  MANDATE:
-    You MUST convey character/NPC state ONLY through observable behavior, action, and dialogue. Show their current state without naming internal feelings.
+    FORBIDDEN:
+      - DO NOT reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or any other unearned information.
+  }
 
-  EXAMPLE:
-    Her eyes meet yours briefly before she looks aside. "You... look very handsome today," she says.
+  function diegeticPhysicality(response, context): {
+    MANDATE:
+      When an ability, spell, power, trait, or supernatural effect is activated by {{user}} or a character/NPC, narrate ONLY its OBSERVABLE effects and consequences.
 
-  FORBIDDEN: YOU MUST NOT:
-    - Reveal character/NPC internal, emotional, or psychological states.
-    - Use interpretive or invisible eye-language, such as "her eyes burn," "her eyes soften," "something flickers in her eyes," or equivalent language.
-    - Use micro-expressions or repeated micro-gestures.
-    - Use skin or facial color changes as emotional shorthand, including blushing, flushing, reddening, skin turning pink or red, color rising, knuckle whitening, or paling.
-    - Use body-language shortcuts such as breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth/jaw opening and closing loops.
-}
+    FORBIDDEN:
+      - DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration. A name may appear ONLY when explicitly spoken in dialogue.
+      - DO NOT explain activation, casting, or system mechanics.
+  }
 
-function embodiedPerception(response, context): {
-  MANDATE:
-    You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position. PRIORITIZE sight, hearing, and touch.
+  function embodiedPerception(response, context): {
+    MANDATE:
+      You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position. PRIORITIZE sight, hearing, and touch.
 
-    Include smell and taste ONLY when:
-    - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
-    - A CLOSE-RANGE physical source is overpowering and unavoidable.
+      Include smell and taste ONLY when:
+      - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
+      - A CLOSE-RANGE physical source is overpowering and unavoidable.
 
-  FORBIDDEN: YOU MUST NOT:
-    - Describe smells or tastes as ambient properties of the air or room.
-    - Use ambient smell or taste in place of concrete, descriptive scene narration.
-}
+    FORBIDDEN:
+      - DO NOT describe smells or tastes as ambient properties of the air or room.
+      - DO NOT use ambient smell or taste in place of concrete, descriptive scene narration.
+  }
 
-function denotativePhysicality(response, context): {
-  MANDATE:
-    You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE.
+  function denotativePhysicality(response, context): {
+    MANDATE:
+      You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived in the scene.
 
-  FORBIDDEN:
-    - NEVER use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.
+      Objects, weather, architecture, atmosphere, and abstract concepts may ONLY be described through their physical state, movement, or concrete effects.
 
-  REMEMBER:
-    - Rooms DO NOT breathe.
-    - Words DO NOT hang.
-    - Silence DOES NOT stretch.
-}
+    FORBIDDEN:
+      - NEVER use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.
+      - NEVER attribute agency, intention, awareness, memory, or emotion to inanimate things or abstract concepts.
+      - NEVER describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.
 
-function inanimateObjectivity(response, context): {
-  MANDATE:
-    ONLY living beings may possess agency, intention, awareness, or emotion.
-    Physical forces, mechanisms, processes, and objects may ONLY produce concrete physical effects or change physical state.
+    REMEMBER:
+      - Rooms DO NOT breathe.
+      - Words DO NOT hang.
+      - Silence DOES NOT stretch.
+  }
 
-  FORBIDDEN:
-    - DO NOT attribute will, awareness, intention, memory, or emotion to objects, weather, architecture, atmosphere, or abstract concepts.
-    - DO NOT describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.
-}
+  function cohesiveSceneBeats(response, context): {
+    MANDATE:
+      When the scene already contains closely related physical events, narrate them as one clear, connected sequence.
 
-function strictEpistemology(response, context): {
-  MANDATE:
-    You MUST reveal information ONLY through DIRECT sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.
-
-  FORBIDDEN:
-    - DO NOT reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or any other unearned information.
-}
-
-function diegeticPhysicality(response, context): {
-  MANDATE:
-    When an ability, spell, power, trait, or supernatural effect is activated by {{user}} or a character/NPC, narrate ONLY its OBSERVABLE effects and consequences.
-
-  FORBIDDEN:
-    - DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration. A name may appear ONLY when explicitly spoken in dialogue.
-    - DO NOT explain activation, casting, or system mechanics.
-}
+    FORBIDDEN:
+      - DO NOT invent movement, gestures, object handling, or reactions merely to make prose feel active.
+      - DO NOT split one physical event into staccato sentences, micro-reaction loops, or body-cue pileups.
+  }
 }`;
 const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
@@ -480,7 +462,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     postNarrationProseGuardEnabled: true,
     proseGuardStrictBehaviorismBannedPhrases: DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES,
     proseGuardDenotativePhysicalityBannedPhrases: DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES,
-    proseGuardInanimateObjectivityBannedPhrases: DEFAULT_PROSE_GUARD_INANIMATE_OBJECTIVITY_BANNED_PHRASES,
+    proseGuardEmbodiedPerceptionBannedPhrases: DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES,
     characterProgressionEnabled: true,
     writingStyleEnabled: true,
     writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT,
@@ -505,29 +487,24 @@ const PROSE_GUARD_TARGETED_BAN_FIELDS = Object.freeze([
         label: 'strictBehaviorism',
         description: 'Emotional/body-cue shorthand.',
         defaultValue: DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES,
-        repairInstruction: 'Render character state and emotion through external behavior/action only. Remove involuntary physiology, body-cue shorthand, emotional shorthand, internal labels, eye-language, micro-expressions, autonomic tells, and mouth/jaw opening-closing loops. Do not replace one tell with another tell.',
     },
     {
         id: 'structured_preflight_prose_guard_bans_denotative_physicality',
         key: 'proseGuardDenotativePhysicalityBannedPhrases',
         ruleName: 'denotativePhysicality',
         label: 'denotativePhysicality',
-        description: 'Atmospheric shorthand, figurative language, and metaphor violations.',
+        description: 'Figurative language, atmospheric shorthand, and inanimate personification.',
         defaultValue: DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES,
-        repairInstruction: 'Use literal physical description only. Remove metaphor, simile, decorative abstraction, emotional physics, and atmospheric shorthand. Replace the sentence with concrete physical facts, action, spacing, sound, contact, object state, or visible consequence already present or directly implied by the scene.',
     },
     {
-        id: 'structured_preflight_prose_guard_bans_inanimate_objectivity',
-        key: 'proseGuardInanimateObjectivityBannedPhrases',
-        ruleName: 'inanimateObjectivity',
-        label: 'inanimateObjectivity',
-        description: 'False agency/personification assigned to objects, places, weather, or abstractions.',
-        defaultValue: DEFAULT_PROSE_GUARD_INANIMATE_OBJECTIVITY_BANNED_PHRASES,
-        repairInstruction: 'Inanimate things may have physical properties, sounds, movement, obstruction, lighting, weather behavior, or material effects only. Remove agency, awareness, intent, will, emotion, watching, waiting, breathing, swallowing, whispering, judgment, or threat assigned to objects, rooms, air, weather, darkness, silence, tension, atmosphere, or abstractions.',
+        id: 'structured_preflight_prose_guard_bans_embodied_perception',
+        key: 'proseGuardEmbodiedPerceptionBannedPhrases',
+        ruleName: 'embodiedPerception',
+        label: 'embodiedPerception',
+        description: 'Ambient smell and taste phrasing.',
+        defaultValue: DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES,
     },
 ]);
-
-const TARGETED_PROSE_BAN_FINDING_LIMIT = 24;
 
 const EXTENSION_PROMPT_TYPES = Object.freeze({
     NONE: -1,
@@ -10038,212 +10015,14 @@ async function persistMetadata(context = getContext()) {
     return await persistAdapterMetadata(context);
 }
 
-function buildProseGuardPrompt(narrationText, latestUserText = '') {
-    return [
-        'STORY_ENGINE_PROSE_GUARD',
-        '',
-        'You are PROSE_GUARD, a strict prose compliance editor.',
-        '',
-        'TASK:',
-        'Identify only clear prose-rule violations in TEXT_TO_CHECK and return exact replacement edits for those violations. Preserve the scene exactly.',
-        'You are not a style improver, summarizer, censor, or second narrator.',
-        'If no violations exist, return an empty proseEdits array.',
-        'If you are uncertain whether text violates a rule, leave it unchanged.',
-        'NEVER delete narration. Every edit MUST replace a non-empty exact source span with non-empty corrected prose.',
-        'Placeholders, punctuation-only replacements, and replacements that materially contract the source are invalid.',
-        'Everything outside an accepted edit MUST remain byte-for-byte unchanged.',
-        'A replacement MUST NOT repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK. If no compliant replacement avoids duplication, return no edit.',
-        'Each ordinary edit MUST target the smallest exact violating span and MUST remain within one sentence.',
-        'The ONLY permitted multi-sentence edit is an activeHandoff repair that reorders or conjoins the exact existing handoff and trailing sentences without dropping, paraphrasing, or inventing content.',
-        'If a repair cannot satisfy this scope, return no edit for that text.',
-        'Repair only clear violations of the Prose Guard rules below.',
-        '',
-        'PROSE_GUARD_RULES:',
-        '',
-        'embodiedPerception(response):',
-        'Narrate the scene using concrete physical evidence from {{user}}\'s physical position. Prioritize sight, hearing, and touch.',
-        'Include smell and taste only when {{user}} explicitly smells, tastes, eats, or drinks, or when a close-range physical source is overpowering and unavoidable.',
-        'Do not describe smells or tastes as ambient properties of the air or room.',
-        'Do not use ambient smell or taste in place of concrete, descriptive scene narration.',
-        '',
-        'diegeticPhysicality(response):',
-        'When an ability, spell, power, trait, or supernatural effect is activated by {{user}} or a character/NPC, preserve only its observable effects and consequences.',
-        'Do not label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration. A name may appear only when explicitly spoken in dialogue.',
-        'Do not explain activation, casting, or system mechanics.',
-        '',
-        'agencySeparation(response, RECENT_USER_INPUT):',
-        'You control only the world, NPCs, hazards, objects, and consequences. Narrate TO {{user}}, not AS {{user}}.',
-        'Never write {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, or voluntary movement.',
-        'If the player did not explicitly declare a voluntary action, that voluntary action did not happen.',
-        'External physical effects on {{user}} are allowed only when imposed by the scene, NPCs, hazards, or resolved facts.',
-        'Do not interpret, assume, or complete {{user}} intent.',
-        '',
-        'strictBehaviorism(response):',
-        'Render character state only through observable behavior and physical displacement that can be directly witnessed by someone physically present in the scene.',
-        'Narrate only tangible, external action.',
-        'Do not name internal, emotional, or psychological states.',
-        'Do not use subtext labels, interpretive commentary, inferred inner states, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, or canned emotional shorthand.',
-        '',
-        'denotativePhysicality(response):',
-        'Use literal, physically clear prose grounded only in what can be directly perceived in the scene.',
-        'Never use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.',
-        'Rooms do not breathe. Words do not hang. Silence does not stretch.',
-        '',
-        'inanimateObjectivity(response):',
-        'Only living beings may possess agency, intention, awareness, or emotion.',
-        'Physical forces, mechanisms, processes, and objects may only produce concrete physical effects or change physical state.',
-        'Do not attribute will, awareness, intention, memory, or emotion to objects, weather, architecture, atmosphere, or abstract concepts.',
-        'Do not describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.',
-        '',
-        'strictEpistemology(response):',
-        'Reveal information only through direct sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.',
-        'Do not reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or any other unearned information.',
-        '',
-        'linearChronology(response, RECENT_USER_INPUT):',
-        '{{user}} input is already complete and in the past. Begin with the immediate external result, resistance, failure point, NPC response, or consequence.',
-        'Do not echo, summarize, restage, paraphrase, or repeat any part of {{user}} actions or dialogue.',
-        'Do not jump ahead, rewind, or insert undeclared intermediate actions.',
-        '',
-        'activeHandoff(response):',
-        'The response MUST END on an active, concrete beat that {{user}} can respond to: dialogue directed at {{user}}, action directed at {{user}}, or a visible change in the scene that forces a clear decision and immediately requires a response.',
-        'Do not continue past the handoff beat.',
-        'Do not prompt {{user}} to respond or ask meta questions.',
-        'Do not end on explicit waiting, staring, mood-only silence, all-eyes-on-user framing, or irrelevant filler background/ambient detail.',
-        '',
-        'ONE-CALL PRIVATE PASS PIPELINE:',
-        'Work through these private correction passes in order. Do not output pass notes, labels, analysis, or intermediate drafts.',
-        '1. embodiedPerception(response): repair only clear smell/taste gate violations and ambient air/room smell or taste phrasing.',
-        '2. diegeticPhysicality(response): repair labels or explanations of activated abilities, spells, powers, traits, supernatural effects, activation, casting, or system mechanics only.',
-        '3. agencySeparation(response, RECENT_USER_INPUT): repair obvious {{user}} puppeting only.',
-        '4. strictBehaviorism(response): repair internal states, subtext labels, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand only.',
-        '5. denotativePhysicality(response): repair clear metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration only.',
-        '6. inanimateObjectivity(response): repair false agency assigned to objects, weather, architecture, rooms, atmosphere, silence, tension, darkness, or abstractions only.',
-        '7. strictEpistemology(response): repair unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or other unearned information only.',
-        '8. linearChronology(response, RECENT_USER_INPUT): start right after the latest user input and rewrite user-input restatement as its immediate external consequence only.',
-        '9. activeHandoff(response): repair invalid after-beat tailing without omitting existing scene information.',
-        '10. integrityCheck(original, corrected): ensure the corrected text still renders the same resolved scene.',
-        '',
-        'PROTECTED FACTS / INTEGRITY LOCK:',
-        '- Events, action order, success or failure, landed contact, injuries, death, condition, intimacy permission, refusal, consent boundary, names, dialogue meaning, user agency, NPC agency, tracked state, or mechanics.',
-        '- Do not add or remove actions, reactions, dialogue, information, refusals, intimacy, mechanics, or any other scene content.',
-        '- If explicit after-beat tailing is present, replace the smallest contiguous span containing the handoff and its trailing material so the same information appears before the handoff and the handoff ends the response.',
-        '- Multi-sentence replacement is forbidden except for explicit activeHandoff tailing. That sole exception may only reorder or conjoin the existing sentence content while preserving each original sentence\'s concrete word sequence, dialogue, names, numbers, actions, and facts.',
-        '- Preserve valid explicit, sensual, romantic, violent, tense, atmospheric, environmental, and intimate detail. Do not sanitize, soften, summarize, reduce, or desexualize valid content.',
-        '- Do not shorten a valid message just because it is rich, vivid, intimate, descriptive, or atmospheric.',
-        '- Do not delete body detail or any other narration. Replace invalid shorthand with valid concrete prose when needed.',
-        '',
-        'PASS 1: embodiedPerception(response)',
-        'Goal: preserve the same scene content while repairing only clear smell/taste gate violations and ambient air/room smell or taste phrasing.',
-        'Preserve concrete visible, audible, tactile, and physical detail already present in TEXT_TO_CHECK.',
-        'Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs, smells, tastes, eats, or drinks, or TEXT_TO_CHECK ties the sensation to a specific close-range physical source that is overpowering and unavoidable at the user position.',
-        'Valid smell/taste sources must be concrete and immediate, such as smoke filling the room, blood on a hand, rot beside a body, food or drink in the mouth, chemicals in contact, or fire filling the space.',
-        'Repair smell/taste only when it is clearly used for "the air," "the room," "the place," atmosphere, mood, romance, attraction, tension, weather, a tavern, a forest, a city, distance, memory, vibe, a person in general, or filler without a concrete immediate source.',
-        'If smell/taste is valid, keep at most one mention per beat or major location shift and attach it to the concrete source. Do not add a new smell or taste while repairing another violation.',
-        '',
-        'PASS 2: diegeticPhysicality(response)',
-        'Goal: preserve the same effect while repairing only narration that labels, announces, names, or explains an activated ability, spell, power, trait, or supernatural effect, or explains activation, casting, or system mechanics.',
-        'An ability, spell, power, trait, or supernatural-effect name explicitly spoken in dialogue is allowed.',
-        'Replace only the violating label or explanation with observable effects and consequences already present or directly implied by TEXT_TO_CHECK.',
-        'Do not invent a new effect, change whether the effect succeeds, add a cost, add a chant, add a gesture, or explain mechanics.',
-        '',
-        'PASS 3: agencySeparation(response, RECENT_USER_INPUT)',
-        'Goal: preserve the same scene while removing obvious {{user}} puppeting.',
-        'Repair narration that writes {{user}} speech, thoughts, feelings, choices, decisions, attention, compliance, silence, reactions, voluntary movement, or completed intent not explicitly declared in RECENT_USER_INPUT.',
-        'Examples of puppeting include "you realize," "you decide," "you feel," "you want," "you hesitate," "you stay silent," "you nod," "your eyes move to," "you let her," or "you understand" when not explicitly declared.',
-        'Do not remove external forces affecting {{user}} when physically concrete and already part of the resolved scene, such as being shoved, blocked, struck, restrained, pulled, or exposed to environmental pressure.',
-        'Rewrite puppeting as external scene state, NPC action, visible consequence, or available information without deciding {{user}} response.',
-        '',
-        'PASS 4: strictBehaviorism(response)',
-        'Goal: preserve character meaning while repairing internal state labels, interpretive commentary, eye-language, micro-expressions, autonomic tells, repeated micro-gestures, and canned emotional/body shorthand.',
-        'Do not name internal, emotional, sexual, psychological, or subtext states as exposition: no "she is nervous," "desire shows," "curiosity flickers," "something bolder beneath the surface," or equivalent interpretation.',
-        'Do not use eyes, gaze, expression shifts, micro-expressions, breath, pulse, throat, stomach, heat, blush, flush, skin color, trembling, twitching, jaw, lips, knuckles, or similar body cues as canned emotional shorthand.',
-        'Do not use repeated mouth/jaw opening-closing loops as emotional shorthand, including "mouth opens, then closes, then opens again," "mouth opens and closes," or equivalent open-close-open loops.',
-        'Ban indirect skin-color/emotion workarounds: color rising, spreading, crossing, touching, filling, staining, warming, darkening, draining, blooming, or appearing across cheeks, face, ears, throat, chest, or skin.',
-        'Ban indirect eye/subtext workarounds: something flickers in the eyes, eyes darken, eyes soften, gaze sharpens with meaning, expression says, a look betrays, or equivalent hidden-state cues.',
-        'Replace violations with consequential visible behavior: movement, spacing, contact, timing, posture that affects action, object handling, blocked access, retreat, approach, refusal, interruption, dialogue content, or visible consequence.',
-        'Do not replace one tell with another tell. Do not add a pileup of smaller gestures.',
-        '',
-        'PASS 5: denotativePhysicality(response)',
-        'Goal: preserve the same scene content while repairing only clear metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.',
-        'Treat rooms breathing, words hanging, silence stretching, and equivalent nonliteral constructions as violations.',
-        'Replace only the violating phrase with literal, physically clear prose grounded in concrete scene evidence.',
-        'Preserve valid scenery, texture, intimacy, physical sensation, atmosphere, rhythm, and environmental detail when it is literal.',
-        'Do not add, remove, summarize, soften, or otherwise reinterpret scene content.',
-        '',
-        'PASS 6: inanimateObjectivity(response)',
-        'Goal: preserve scene content while removing false agency from inanimate things and abstractions.',
-        'Repair only inanimate things assigned agency, intention, awareness, memory, or emotion, including descriptions of them wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.',
-        'Preserve concrete physical effects and state changes produced by forces, mechanisms, processes, or objects.',
-        'Replace only the false-agency phrasing with concrete physical state, sound, movement, obstruction, weather behavior, lighting, or visible consequence.',
-        '',
-        'PASS 7: strictEpistemology(response)',
-        'Goal: preserve earned information while repairing obvious information leaks.',
-        'Repair only unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or other information unsupported by direct sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.',
-        'Do not invent evidence or substitute another unearned fact.',
-        'If unsure whether a fact was already established, leave it unchanged.',
-        '',
-        'PASS 8: linearChronology(response, RECENT_USER_INPUT)',
-        'Goal: make the narration start at the point right after the latest user input.',
-        'The user input is already complete. The narration must begin after it, with consequence, revealed information, NPC response, environmental change, obstruction, resistance, absence, failure point, or new stimulus.',
-        'Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT.',
-        'If RECENT_USER_INPUT says the user sits, enters, walks, watches, scans, speaks, takes, opens, moves, leans, observes, or looks around, do not write the user doing that same thing again.',
-        'Valid continuation may describe what changes because of the declared action: who reacts, what becomes visible from the new position, what sound interrupts, what blocks access, what object is within reach, what NPC says, or what happens next.',
-        'If the first sentence merely repeats the user action, rewrite it as consequence without adding a new user action or omitting existing scene information.',
-        '',
-        'PASS 9: activeHandoff(response)',
-        'Goal: end at the natural user-centered response beat.',
-        'End on an active, concrete beat that {{user}} can respond to, not where narration prompts or pressures the user to act.',
-        'Acceptable beats are dialogue directed at {{user}}, action directed at {{user}}, or a visible scene change that forces a clear decision and immediately requires a response.',
-        'If an NPC speaks or acts toward the user, end on that speech or action once it creates a natural point for the user to answer, refuse, inspect, interrupt, defend against, follow, ignore, or act.',
-        'If no NPC is driving the beat, end on the relevant consequence of the user\'s action, a visible scene change, an available object or path, a new obstruction, a hazard, or a concrete environmental stimulus.',
-        'Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat just to create an endpoint. Never end by prompting the user to act.',
-        'HARD STOP: if explicit after-beat tailing is present, return one replacement for the smallest contiguous span containing the handoff and tail. This is the ONLY permitted multi-sentence edit. Preserve every existing sentence\'s content, place supporting detail before the handoff, and end on the handoff.',
-        'Ban explicit waiting, "she waits," "awaits your response," "what do you do," "the choice is yours," all-eyes-on-user framing, mood-only silence, unrelated ambience, outro paragraphs, scene-break tails, and extra narration after the response beat.',
-        'Do not replace after-beat tailing with different after-beat tailing. Do not omit the existing scene information.',
-        '',
-        'PASS 10: integrityCheck(original, corrected)',
-        'Goal: return only exact replacement edits that preserve the resolved scene.',
-        'Before answering, verify that every replacement preserves protected facts, adds no scene beat, omits no scene beat, preserves valid intimacy/detail/intensity, and does not reinterpret mechanics or character decisions.',
-        'If a proposed correction would change protected facts, return no edit for that text.',
-        'If a sentence is both a valid resolved scene beat and contains a prose violation, rewrite the sentence narrowly while preserving the entire beat.',
-        'Deletion is forbidden, including endpoint tailing and repeated user-action restatement. Repair through non-empty replacement only.',
-        '',
-        'GOOD REPLACEMENT PATTERN:',
-        'Invalid: "Her jaw tightened. The word landed flat and hard, dropped like a stone between them."',
-        'Valid: "She set her hand against his wrist and pushed it away. She said the word once, low and clear, then stepped back to keep distance between them."',
-        'Invalid after-beat tail: "She says, \"Come with me.\" A cart rattles past behind her, and two guards continue down the street."',
-        'Valid information-preserving reorder: "A cart rattles past behind her while two guards continue down the street. She says, \"Come with me.\""',
-        'Invalid chronology restatement: User said "I take a seat and scan the room." Narration says "You take the empty desk and let your gaze drift across the room."',
-        'Valid chronology continuation: "The nearest students stop whispering. A girl in the second row catches the look and turns back to her slate."',
-        '',
-        'OUTPUT CONTRACT:',
-        `Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
-        'The JSON shape is {"proseEdits":[{"originalText":"exact source substring","replacementText":"non-empty corrected substring","occurrence":1}]}.',
-        'originalText MUST be copied exactly from TEXT_TO_CHECK. occurrence is the one-based occurrence of originalText in TEXT_TO_CHECK.',
-        'Each edit MUST remain within one sentence unless it is the strictly information-preserving activeHandoff exception defined above.',
-        'replacementText MUST contain substantive corrected narration and preserve all valid source information. Punctuation-only, placeholder, destructive, or materially contracted replacements are invalid. Return {"proseEdits":[]} when no repair is certain.',
-        'Do not include an edit when replacementText would equal originalText. Omit that edit instead.',
-        'Do not return corrected narration, commentary, markdown fences, analysis, or any other fields.',
-        '',
-        '==RECENT_USER_INPUT==',
-        latestUserText || '(empty)',
-        '',
-        '==TEXT_TO_CHECK==',
-        narrationText || '(empty)',
-        '',
-        '==PROSE_GUARD_EDITS==',
-    ].join('\n');
+function getProseRuleBlock(ruleName) {
+    const marker = `  function ${String(ruleName || '').trim()}(`;
+    const start = DEFAULT_PROSE_RULES_PROMPT.indexOf(marker);
+    if (start < 0) throw new Error(`Prose Rule "${ruleName}" was not found.`);
+    const next = DEFAULT_PROSE_RULES_PROMPT.indexOf('\n  function ', start + marker.length);
+    const end = next >= 0 ? next : DEFAULT_PROSE_RULES_PROMPT.lastIndexOf('\n}');
+    return DEFAULT_PROSE_RULES_PROMPT.slice(start, end).trim();
 }
-
-function sanitizeProseGuardResponse(raw, fallbackText) {
-    const structuredPayload = raw && typeof raw === 'object' && !Array.isArray(raw) && Array.isArray(raw.proseEdits)
-        ? raw
-        : null;
-    const extracted = structuredPayload ? structuredPayload : extractGeneratedText(raw) || String(raw || '');
-    const editPayload = parseProseGuardEditPayload(extracted);
-    return applyProseGuardEdits(fallbackText, editPayload).narrationText;
-}
-
 function parseProseGuardBannedPhraseList(value) {
     return uniqueStrings(String(value ?? '')
         .split(/\r?\n/)
@@ -10255,167 +10034,83 @@ function getTargetedProseBanRules(settings = getSettings()) {
     return PROSE_GUARD_TARGETED_BAN_FIELDS
         .map(field => ({
             ...field,
+            rulePrompt: getProseRuleBlock(field.ruleName),
             phrases: parseProseGuardBannedPhraseList(settings[field.key] ?? field.defaultValue),
         }))
         .filter(rule => rule.phrases.length > 0);
 }
 
-function buildTargetedProseBanPhraseRegex(phrase) {
-    const tokens = String(phrase ?? '').match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)?/gu) || [];
-    if (!tokens.length) return null;
-    const body = tokens.map(escapeRegExp).join('[\\s\\p{P}\\p{S}]+');
-    return new RegExp(`(^|[^\\p{L}\\p{N}])(${body})(?=$|[^\\p{L}\\p{N}])`, 'giu');
-}
 
-function findSentenceBoundsForIndex(text, matchStart, matchEnd) {
-    const source = String(text ?? '');
-    let start = 0;
-    for (let index = Math.max(0, matchStart - 1); index >= 0; index--) {
-        const char = source[index];
-        if (char === '\n') {
-            start = index + 1;
-            break;
-        }
-        if ('.!?'.includes(char)) {
-            start = index + 1;
-            while (start < source.length && /[\s"'”’)\]]/.test(source[start])) start += 1;
-            break;
-        }
-    }
-
-    let end = source.length;
-    for (let index = Math.max(matchEnd, 0); index < source.length; index++) {
-        const char = source[index];
-        if (char === '\n') {
-            end = index;
-            break;
-        }
-        if ('.!?'.includes(char)) {
-            end = index + 1;
-            while (end < source.length && /["'”’)\]]/.test(source[end])) end += 1;
-            break;
-        }
-    }
-
-    return { start, end };
-}
-
-function findTextOccurrenceAtIndex(source, search, targetIndex) {
-    let occurrence = 0;
-    let fromIndex = 0;
-    while (fromIndex <= targetIndex) {
-        const found = source.indexOf(search, fromIndex);
-        if (found < 0 || found > targetIndex) break;
-        occurrence += 1;
-        if (found === targetIndex) return occurrence;
-        fromIndex = found + Math.max(1, search.length);
-    }
-    return Math.max(1, occurrence);
-}
-
-function collectTargetedProseBanFindings(narrationText, settings = getSettings()) {
-    const source = String(narrationText ?? '');
-    if (!source.trim()) return [];
-
-    const findings = [];
-    const seen = new Set();
-    for (const rule of getTargetedProseBanRules(settings)) {
-        for (const phrase of rule.phrases) {
-            const pattern = buildTargetedProseBanPhraseRegex(phrase);
-            if (!pattern) continue;
-
-            for (const match of source.matchAll(pattern)) {
-                const prefix = match[1] || '';
-                const matchedPhrase = match[2] || phrase;
-                const index = match.index + prefix.length;
-                const matchEnd = index + matchedPhrase.length;
-                const bounds = findSentenceBoundsForIndex(source, index, matchEnd);
-                const sentence = source.slice(bounds.start, bounds.end).trim();
-                if (!sentence) continue;
-                const sentenceStart = source.indexOf(sentence, bounds.start);
-                const occurrence = findTextOccurrenceAtIndex(source, sentence, sentenceStart);
-
-                const key = `${rule.ruleName}\u0000${phrase.toLowerCase()}\u0000${bounds.start}\u0000${bounds.end}`;
-                if (seen.has(key)) continue;
-                seen.add(key);
-                findings.push({
-                    ruleName: rule.ruleName,
-                    phrase,
-                    matchedPhrase,
-                    sentence,
-                    occurrence,
-                    start: bounds.start,
-                    end: bounds.end,
-                    repairInstruction: rule.repairInstruction,
-                });
-                if (findings.length >= TARGETED_PROSE_BAN_FINDING_LIMIT) return findings;
-            }
-        }
-    }
-    return findings;
-}
 
 function formatTargetedProseBanFindings(findings) {
-    return findings.map((finding, index) => [
-        `${index + 1}. rule: ${finding.ruleName}`,
-        `   banned phrase: ${finding.phrase}`,
-        `   matched text: ${finding.matchedPhrase}`,
-        `   full sentence to rewrite: ${finding.sentence}`,
-        `   one-based occurrence of that exact sentence: ${finding.occurrence}`,
-        `   required repair: ${finding.repairInstruction}`,
+    return (findings || []).map(finding => [
+        `FINDING_ID: ${finding.id}`,
+        `MATCHED_PHRASES: ${finding.matches.map(match => `${match.ruleName}=${JSON.stringify(match.matchedPhrase)}`).join('; ')}`,
+        'SENTENCE_TO_REPAIR:',
+        finding.sentence,
+        '',
+        `APPLICABLE_RULES: ${finding.ruleNames.join(', ')}`,
     ].join('\n')).join('\n\n');
 }
 
-function buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserText = '') {
+function formatTargetedProseBanRuleBlocks(findings, rules) {
+    const names = [...new Set((findings || []).flatMap(finding => finding.ruleNames || []))];
+    return names
+        .map(name => rules.find(rule => rule.ruleName === name)?.rulePrompt || '')
+        .filter(Boolean)
+        .join('\n\n');
+}
+
+function buildTargetedProseBanRepairPrompt(findings, rules) {
     return [
         'STORY_ENGINE_TARGETED_PROSE_BAN_REPAIR',
         '',
-        'You are PROSE_GUARD_TARGETED_REPAIR, a strict sentence-level prose compliance editor.',
+        'You are PROSE_GUARD_TARGETED_REPAIR, a strict sentence-level prose repair tool.',
         '',
         'TASK:',
-        'The deterministic scanner has already confirmed banned phrase violations in TEXT_TO_CHECK.',
-        'Return one exact replacement edit for the ENTIRE sentence containing each detected violation. Do not replace only the phrase.',
-        'If one sentence has multiple violations, rewrite that sentence once so it obeys every cited rule.',
-        'Everything outside an accepted edit MUST remain byte-for-byte unchanged.',
-        'NEVER delete narration. Every replacementText MUST contain substantive corrected prose; punctuation-only, placeholder, destructive, or materially contracted replacements are invalid.',
+        'The deterministic scanner has already confirmed the listed phrase matches outside dialogue.',
+        'Rewrite ONLY the supplied sentence for its confirmed violation. Do not audit, improve, or rewrite anything else.',
+        'If no compliant repair can preserve the sentence without invention or deletion, omit that finding.',
         '',
-        'GOVERNING RULES:',
-        '- strictBehaviorism: character/NPC state and emotion must be rendered through external behavior/action only. No involuntary physiology, body-cue shorthand, emotional shorthand, internal labels, eye-language, micro-expressions, autonomic tells, or mouth/jaw opening-closing loops.',
-        '- denotativePhysicality: narration must stay literal and physically grounded. No metaphor, simile, decorative abstraction, emotional physics, or atmospheric shorthand.',
-        '- inanimateObjectivity: only living beings may possess agency, intention, awareness, memory, or emotion. Physical forces, mechanisms, processes, and objects may only produce concrete physical effects or change physical state. Do not describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.',
+        'REPAIR LIMITS:',
+        '- Return at most one replacement sentence for each supplied FINDING_ID.',
+        '- Preserve all facts, names, dialogue, quoted wording, actions, consequences, order, tone, intensity, and meaning.',
+        '- Do not add, remove, summarize, soften, or reinterpret scene content.',
+        '- Do not invent gestures, actions, emotions, motives, information, object handling, or consequences.',
+        '- Quoted dialogue is immutable. Copy every quoted span exactly.',
+        '- Do not replace a banned phrase with another banned phrase or an equivalent workaround.',
+        '- Return no commentary, analysis, corrected narration, or labels outside the required edit block.',
         '',
-        'REPAIR REQUIREMENTS:',
-        '- Replace the full sentence containing each listed banned phrase with a compliant, non-empty sentence.',
-        '- The replacement must contain none of the banned phrase or its workaround pattern.',
-        '- Preserve the same speaker, dialogue meaning, scene facts, action order, intensity, consent/refusal, mechanics, and final handoff.',
-        '- Do not repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK. If no compliant replacement avoids duplication, return no edit.',
-        '- Do not add new actions, dialogue, events, thoughts, emotions, motives, lore, mechanics, or outcomes.',
-        '- Do not replace one banned phrase with another body cue, metaphor, atmospheric shorthand, or personification.',
-        '- Use concrete physical prose: chosen action, speech content, posture that changes action, movement, spacing, contact, object use, sound, material state, obstruction, lighting, weather behavior, visible consequence.',
-        `- Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
-        '- Use {"proseEdits":[{"originalText":"exact full sentence","replacementText":"non-empty corrected sentence","occurrence":1}]}.',
-        '- Copy originalText exactly from TEXT_TO_CHECK. Omit no-op edits where replacementText equals originalText. Return no corrected narration outside the edit payload.',
+        'APPLICABLE PROSE RULES:',
+        formatTargetedProseBanRuleBlocks(findings, rules),
         '',
-        'DETERMINISTIC_FINDINGS:',
+        'DETERMINISTIC FINDINGS:',
         formatTargetedProseBanFindings(findings),
         '',
-        '==RECENT_USER_INPUT==',
-        latestUserText || '(empty)',
+        'OUTPUT CONTRACT:',
+        `Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
+        '{"sentenceRepairs":[{"findingId":"PG_SENTENCE_1","replacementSentence":"one corrected sentence"}]}',
+        'Use {"sentenceRepairs":[]} when no safe repair is possible.',
         '',
-        '==TEXT_TO_CHECK==',
-        narrationText || '(empty)',
-        '',
-        '==PROSE_GUARD_EDITS==',
+        'The only authorized source text is the supplied SENTENCE_TO_REPAIR for each FINDING_ID.',
     ].join('\n');
 }
 
-async function requestTargetedProseBanRepair(narrationText, findings, latestUserText = '', requestOptions = {}) {
+function parseTargetedProseGuardResponse(raw) {
+    const structuredPayload = raw && typeof raw === 'object' && !Array.isArray(raw) && Array.isArray(raw.sentenceRepairs)
+        ? raw
+        : extractGeneratedText(raw) || String(raw || '');
+    return parseProseGuardRepairPayload(structuredPayload);
+}
+
+async function requestTargetedProseBanRepair(findings, rules, requestOptions = {}) {
     if (!isStoryEngineEnabled()) {
         throw new Error('Story Engine is disabled.');
     }
-    const prompt = buildTargetedProseBanRepairPrompt(narrationText, findings, latestUserText);
-    const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 600));
-    const toolDefinition = buildPostNarrationToolDefinition(PROSE_GUARD_TOOL_NAME, { includeProseEdits: true });
+    const prompt = buildTargetedProseBanRepairPrompt(findings, rules);
+    const sentenceCharacters = (findings || []).reduce((total, finding) => total + finding.sentence.length, 0);
+    const responseLength = Math.max(800, Math.min(5000, Math.ceil(sentenceCharacters / 2) + (findings.length * 180) + 500));
+    const toolDefinition = buildPostNarrationToolDefinition(PROSE_GUARD_TOOL_NAME, { includeSentenceRepairs: true });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
@@ -10425,7 +10120,7 @@ async function requestTargetedProseBanRepair(narrationText, findings, latestUser
                 responseLength,
                 toolDefinition,
                 purpose: 'targeted Prose Guard repair',
-                validateStructured: raw => sanitizeProseGuardResponse(raw, narrationText),
+                validateStructured: raw => parseTargetedProseGuardResponse(raw),
                 generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' }),
             });
         }), requestOptions);
@@ -10434,12 +10129,12 @@ async function requestTargetedProseBanRepair(narrationText, findings, latestUser
     }
 }
 
-async function requestTargetedProseBanRepairWithTimeout(narrationText, findings, latestUserText = '', requestOptions = {}) {
+async function requestTargetedProseBanRepairWithTimeout(findings, rules, requestOptions = {}) {
     let timeoutId = null;
     const requestControl = createTimedInternalRequestControl(requestOptions);
     try {
         return await Promise.race([
-            requestTargetedProseBanRepair(narrationText, findings, latestUserText, requestControl.options),
+            requestTargetedProseBanRepair(findings, rules, requestControl.options),
             new Promise((_, reject) => {
                 timeoutId = setTimeout(
                     () => {
@@ -10456,113 +10151,37 @@ async function requestTargetedProseBanRepairWithTimeout(narrationText, findings,
     }
 }
 
-async function applyTargetedProseBanRepairIfNeeded(narrationText, latestUserText = '', requestOptions = {}) {
-    const findings = collectTargetedProseBanFindings(narrationText);
+async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions = {}) {
+    const rules = getTargetedProseBanRules();
+    const findings = collectProseGuardSentenceFindings(narrationText, rules);
     if (!findings.length) {
-        return { narrationText, changed: false, findings, remainingFindings: [] };
+        return { narrationText, changed: false, findings, remainingFindings: [], rejectedRepairs: [] };
     }
 
     try {
-        const repairRaw = await requestTargetedProseBanRepairWithTimeout(narrationText, findings, latestUserText, requestOptions);
-        const repairedText = sanitizeProseGuardResponse(repairRaw, narrationText);
-        const remainingFindings = collectTargetedProseBanFindings(repairedText);
+        const repairRaw = await requestTargetedProseBanRepairWithTimeout(findings, rules, requestOptions);
+        const repairPayload = parseTargetedProseGuardResponse(repairRaw);
+        const repaired = applyProseGuardSentenceRepairs(narrationText, findings, repairPayload, { rules });
+        const remainingFindings = collectProseGuardSentenceFindings(repaired.narrationText, rules);
+        if (repaired.rejectedRepairs.length) {
+            console.warn(`[${EXTENSION_NAME}] targeted Prose Guard rejected sentence repairs.`, repaired.rejectedRepairs);
+        }
         if (remainingFindings.length) {
-            console.warn(`[${EXTENSION_NAME}] targeted Prose Guard repair left banned phrase findings in the final narration.`, remainingFindings);
+            console.warn(`[${EXTENSION_NAME}] targeted Prose Guard findings remain after validated repairs.`, remainingFindings);
         }
         return {
-            narrationText: repairedText,
-            changed: String(repairedText ?? '') !== String(narrationText ?? ''),
+            narrationText: repaired.narrationText,
+            changed: repaired.changed,
             findings,
             remainingFindings,
+            rejectedRepairs: repaired.rejectedRepairs,
         };
     } catch (error) {
         console.warn(`[${EXTENSION_NAME}] targeted Prose Guard repair failed; keeping current narration text.`, error);
-        return { narrationText, changed: false, findings, remainingFindings: findings };
+        return { narrationText, changed: false, findings, remainingFindings: findings, rejectedRepairs: [] };
     }
 }
 
-function canUseCombinedPostNarrationPass(settings = getSettings()) {
-    if (settings.postNarrationProseGuardEnabled === false) return false;
-    return true;
-}
-
-function buildProseGuardReferencePrompt(narrationText, latestUserText = '') {
-    const prompt = buildProseGuardPrompt(narrationText, latestUserText);
-    const outputIndex = prompt.indexOf('\nOUTPUT CONTRACT:');
-    return outputIndex > 0 ? prompt.slice(0, outputIndex).trim() : prompt;
-}
-
-function buildTrackerReferencePrompt({ pendingRun, messageKey, trackerDisplaySnapshot }) {
-    return buildPostNarrationTrackerPrompt({
-        pendingRun,
-        messageKey,
-        narrationText: 'TEXT_TO_CHECK_AFTER_APPLYING_PROSE_GUARD_EDITS',
-        trackerDisplaySnapshot,
-    })
-        .replace('You update tracker state only. Do not narrate, roleplay, explain, or add prose.', 'For the tracker section, update tracker state only. Do not roleplay, explain, or add prose there.')
-        .replace('Return exactly one story_engine_tracker_delta fenced block and nothing else.', 'For this combined pass, place exactly one story_engine_tracker_delta fenced block after the Prose Guard edit block.');
-}
-
-function buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }) {
-    return [
-        'STORY_ENGINE_COMBINED_POST_NARRATION_PASS',
-        '',
-        'You are a private Story Engine finalization pass. Complete exactly two tasks in order:',
-        '1. Return exact replacement edits for clear violations in TEXT_TO_CHECK using the Prose Guard rules.',
-        '2. Extract tracker delta from TEXT_TO_CHECK after mentally applying those exact edits, using the Tracker Update rules.',
-        '',
-        'Do not narrate, roleplay, explain, summarize, add commentary, or output anything outside the required sections.',
-        'The tracker delta MUST describe the narration produced by applying proseEdits, not rejected draft wording.',
-        'If no prose corrections are needed, return an empty proseEdits array and derive the tracker delta from TEXT_TO_CHECK unchanged.',
-        'NEVER return replacement narration and NEVER delete narration. Only return exact, non-empty replacement edits.',
-        'A replacement MUST NOT repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK. If no compliant replacement avoids duplication, return no edit.',
-        'Every ordinary prose edit MUST remain within one sentence. The ONLY multi-sentence exception is an activeHandoff repair that reorders or conjoins the exact existing handoff and trailing sentences without dropping, paraphrasing, or inventing content. If uncertain, return no edit.',
-        '',
-        '==PROSE_GUARD_CONTRACT==',
-        'Use this as correction rules only; its standalone output contract is superseded by STRICT_OUTPUT_CONTRACT below.',
-        buildProseGuardReferencePrompt(narrationText, pendingRun?.latestUserText || ''),
-        '',
-        '==TRACKER_UPDATE_CONTRACT==',
-        'Use this as tracker extraction rules and authority only; its standalone output contract is superseded by STRICT_OUTPUT_CONTRACT below.',
-        buildTrackerReferencePrompt({ pendingRun, messageKey, trackerDisplaySnapshot }),
-        '',
-        '==STRICT_OUTPUT_CONTRACT==',
-        'Return exactly these two sections, in this order:',
-        PROSE_GUARD_EDITS_START,
-        '{"proseEdits":[{"originalText":"exact source substring","replacementText":"non-empty corrected substring","occurrence":1}]}',
-        PROSE_GUARD_EDITS_END,
-        '',
-        '```story_engine_tracker_delta',
-        'BEGIN_TRACKER_DELTA',
-        '...',
-        'END_TRACKER_DELTA',
-        '```',
-        '',
-        'Use {"proseEdits":[]} when no prose repair is certain. No labels other than the required delimiters. No analysis or corrected narration.',
-        '',
-        '==TEXT_TO_CHECK==',
-        narrationText || '(empty)',
-        '',
-        '==RECENT_USER_INPUT==',
-        pendingRun?.latestUserText || '(empty)',
-        '',
-        '==OUTPUT==',
-    ].join('\n');
-}
-
-function parseCombinedPostNarrationResponse(raw, fallbackText) {
-    const correctedNarration = sanitizeProseGuardResponse(raw, fallbackText);
-    const structuredTrackerDelta = raw && typeof raw === 'object' && !Array.isArray(raw)
-        ? String(raw.trackerDelta || '')
-        : '';
-    const rawText = structuredTrackerDelta || extractGeneratedText(raw) || String(raw || '');
-    const trackerDeltaText = extractTrackerDeltaText(rawText);
-    if (!trackerDeltaText) {
-        throw new Error('Combined post-pass response missing tracker delta block.');
-    }
-    const trackerDelta = parseNarratorTrackerDelta(trackerDeltaText, correctedNarration);
-    return { correctedNarration, trackerDelta };
-}
 
 function parsePostNarrationTrackerResponse(raw, narrationText) {
     const structuredTrackerDelta = raw && typeof raw === 'object' && !Array.isArray(raw)
@@ -10573,22 +10192,21 @@ function parsePostNarrationTrackerResponse(raw, narrationText) {
     return parseNarratorTrackerDelta(trackerDeltaText, narrationText);
 }
 
-function buildPostNarrationToolDefinition(name, { includeProseEdits = false, includeTrackerDelta = false } = {}) {
+function buildPostNarrationToolDefinition(name, { includeSentenceRepairs = false, includeTrackerDelta = false } = {}) {
     const properties = {};
     const required = [];
-    if (includeProseEdits) {
-        required.push('proseEdits');
-        properties.proseEdits = {
+    if (includeSentenceRepairs) {
+        required.push('sentenceRepairs');
+        properties.sentenceRepairs = {
             type: 'array',
-            description: 'Exact, information-preserving replacement edits for clear Prose Guard violations. Each ordinary edit stays within one sentence; only a strictly information-preserving activeHandoff reorder may span sentences. Empty when no repair is certain.',
+            description: 'Code-authorized, sentence-level replacement repairs for confirmed targeted phrase violations. Empty when no safe repair is certain.',
             items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['originalText', 'replacementText', 'occurrence'],
+                required: ['findingId', 'replacementSentence'],
                 properties: {
-                    originalText: { type: 'string', description: 'Smallest exact non-empty violating substring copied byte-for-byte from TEXT_TO_CHECK and contained within one sentence, except for the activeHandoff-only multi-sentence exception.' },
-                    replacementText: { type: 'string', description: 'Substantive corrected narration within the same scope that differs from originalText and replaces it without deleting, paraphrasing, inventing, or materially contracting valid information.' },
-                    occurrence: { type: 'integer', description: 'Positive one-based occurrence of originalText in TEXT_TO_CHECK.' },
+                    findingId: { type: 'string', description: 'Exact FINDING_ID supplied by the deterministic scanner.' },
+                    replacementSentence: { type: 'string', description: 'One corrected sentence replacing the supplied sentence, preserving its facts and quoted dialogue.' },
                 },
             },
         };
@@ -10597,15 +10215,15 @@ function buildPostNarrationToolDefinition(name, { includeProseEdits = false, inc
         required.push('trackerDelta');
         properties.trackerDelta = {
             type: 'string',
-            description: 'The complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger derived from narration after applying proseEdits.',
+            description: 'The complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger derived from the supplied final narration.',
         };
     }
     return {
         name,
-        description: includeProseEdits && includeTrackerDelta
-            ? 'Submit exact Prose Guard replacement edits and the tracker delta derived from the corrected narration.'
-            : includeProseEdits
-                ? 'Submit exact non-deleting replacement edits for clear Prose Guard violations.'
+        description: includeSentenceRepairs && includeTrackerDelta
+            ? 'Submit sentence-level Prose Guard repairs and the tracker delta derived from the corrected narration.'
+            : includeSentenceRepairs
+                ? 'Submit code-authorized sentence-level repairs for confirmed targeted prose violations.'
                 : 'Submit the validated post-narration tracker delta.',
         parameters: {
             type: 'object',
@@ -10619,11 +10237,11 @@ function buildPostNarrationToolDefinition(name, { includeProseEdits = false, inc
 function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     const fields = Object.keys(toolDefinition?.parameters?.properties || {});
     const fieldInstructions = [];
-    if (fields.includes('proseEdits')) {
-        fieldInstructions.push('Put only exact, substantive, information-preserving replacement edits in proseEdits. Never repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK; if avoiding duplication is impossible, use []. Every ordinary edit MUST stay within one sentence. The ONLY multi-sentence exception is a strictly information-preserving activeHandoff reorder of the exact existing handoff and trailing sentences. Otherwise use []. Omit no-op edits. Never delete, paraphrase, invent, materially contract, or return full rewritten narration.');
+    if (fields.includes('sentenceRepairs')) {
+        fieldInstructions.push('Put only repairs for the supplied FINDING_ID values in sentenceRepairs. Return one replacementSentence per finding at most. Preserve all facts, order, tone, and quoted dialogue. Never return full rewritten narration, delete a sentence, invent content, or repair a finding the deterministic scanner did not supply. Use [] when no safe repair is possible.');
     }
     if (fields.includes('trackerDelta')) {
-        fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on TEXT_TO_CHECK after applying proseEdits when proseEdits is present.');
+        fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on the supplied final narration exactly as provided.');
     }
     return [
         { role: 'user', content: String(prompt || '') },
@@ -10658,107 +10276,8 @@ async function requestPostNarrationUtility({ settings, prompt, responseLength, t
     return await generateFallback();
 }
 
-async function requestCombinedPostNarrationPass({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot }, requestOptions = {}) {
-    if (!isStoryEngineEnabled()) {
-        throw new Error('Story Engine is disabled.');
-    }
-    const prompt = buildCombinedPostNarrationPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot });
-    const proseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
-    const trackerLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
-    const responseLength = Math.min(9000, proseLength + trackerLength + 700);
-    const toolDefinition = buildPostNarrationToolDefinition(POST_NARRATION_TOOL_NAME, {
-        includeProseEdits: true,
-        includeTrackerDelta: true,
-    });
-    const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
-    try {
-        return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
-            return await requestPostNarrationUtility({
-                settings,
-                prompt,
-                responseLength,
-                toolDefinition,
-                purpose: 'combined post-narration pass',
-                validateStructured: raw => parseCombinedPostNarrationResponse(raw, narrationText),
-                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'combined post-narration pass' }),
-            });
-        }), requestOptions);
-    } finally {
-        promptReadyBypassGate.release(bypassToken);
-    }
-}
-
-async function requestCombinedPostNarrationPassWithTimeout(args, requestOptions = {}) {
-    let timeoutId = null;
-    const requestControl = createTimedInternalRequestControl(requestOptions);
-    try {
-        return await Promise.race([
-            requestCombinedPostNarrationPass(args, requestControl.options),
-            new Promise((_, reject) => {
-                timeoutId = setTimeout(
-                    () => {
-                        requestControl.cancel();
-                        reject(new Error(`Combined post-narration pass timed out after ${Math.round(PROSE_GUARD_TIMEOUT_MS / 1000)} seconds.`));
-                    },
-                    PROSE_GUARD_TIMEOUT_MS,
-                );
-            }),
-        ]);
-    } finally {
-        if (timeoutId != null) clearTimeout(timeoutId);
-        requestControl.release();
-    }
-}
-
-async function requestProseGuardCorrection(narrationText, latestUserText = '', requestOptions = {}) {
-    if (!isStoryEngineEnabled()) {
-        throw new Error('Story Engine is disabled.');
-    }
-    const prompt = buildProseGuardPrompt(narrationText, latestUserText);
-    const responseLength = Math.max(800, Math.min(3000, Math.ceil(String(narrationText || '').length / 3) + 500));
-    const toolDefinition = buildPostNarrationToolDefinition(PROSE_GUARD_TOOL_NAME, { includeProseEdits: true });
-    const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
-    try {
-        return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
-            return await requestPostNarrationUtility({
-                settings,
-                prompt,
-                responseLength,
-                toolDefinition,
-                purpose: 'Prose Guard',
-                validateStructured: raw => sanitizeProseGuardResponse(raw, narrationText),
-                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'Prose Guard' }),
-            });
-        }), requestOptions);
-    } finally {
-        promptReadyBypassGate.release(bypassToken);
-    }
-}
-
 function deferForProseGuardFinalization() {
     return new Promise(resolve => setTimeout(resolve, PROSE_GUARD_DEFER_MS));
-}
-
-async function requestProseGuardCorrectionWithTimeout(narrationText, latestUserText = '', requestOptions = {}) {
-    let timeoutId = null;
-    const requestControl = createTimedInternalRequestControl(requestOptions);
-    try {
-        return await Promise.race([
-            requestProseGuardCorrection(narrationText, latestUserText, requestControl.options),
-            new Promise((_, reject) => {
-                timeoutId = setTimeout(
-                    () => {
-                        requestControl.cancel();
-                        reject(new Error(`Prose Guard timed out after ${Math.round(PROSE_GUARD_TIMEOUT_MS / 1000)} seconds.`));
-                    },
-                    PROSE_GUARD_TIMEOUT_MS,
-                );
-            }),
-        ]);
-    } finally {
-        if (timeoutId != null) clearTimeout(timeoutId);
-        requestControl.release();
-    }
 }
 
 function createTimedInternalRequestControl(requestOptions = {}) {
@@ -11154,27 +10673,21 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         const settings = getSettings();
         const proseGuardEnabled = settings.postNarrationProseGuardEnabled !== false;
         const root = getTrackerRoot(context);
-        const combinedPostPassEnabled = Boolean(narrationText && root && pendingRun && canUseCombinedPostNarrationPass(settings));
-        let combinedTrackerDelta = null;
-        let broadProseGuardAlreadyApplied = false;
         let finalTrackerDisplaySnapshot = null;
 
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
             return;
         }
 
-        if (!(root && pendingRun) && proseGuardEnabled && narrationText) {
+        if (proseGuardEnabled && narrationText) {
             try {
                 await deferForProseGuardFinalization();
                 if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '', requestOptions);
-                if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
-                const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '', requestOptions);
+                const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions);
                 if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                 narrationText = targetedRepair.narrationText;
             } catch (error) {
-                console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
+                console.warn(`[${EXTENSION_NAME}] targeted Prose Guard failed; keeping sanitized narrator text.`, error);
             }
         }
 
@@ -11190,78 +10703,21 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
             });
 
-            if (combinedPostPassEnabled) {
-                try {
-                    await deferForProseGuardFinalization();
-                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                    const combinedRaw = await requestCombinedPostNarrationPassWithTimeout({
-                        pendingRun,
-                        messageKey,
-                        narrationText,
-                        trackerDisplaySnapshot,
-                    }, requestOptions);
-                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                    const combinedResult = parseCombinedPostNarrationResponse(combinedRaw, narrationText);
-                    narrationText = combinedResult.correctedNarration;
-                    combinedTrackerDelta = combinedResult.trackerDelta;
-                    broadProseGuardAlreadyApplied = true;
-                    const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '', requestOptions);
-                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                    narrationText = targetedRepair.narrationText;
-                    if (targetedRepair.changed) {
-                        combinedTrackerDelta = null;
-                    }
-                    trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
-                        messageKey,
-                        pendingRun,
-                        report: pendingRun.report,
-                        assistantText: narrationText,
-                    });
-                } catch (error) {
-                    console.warn(`[${EXTENSION_NAME}] combined post-narration pass failed; falling back to separate post passes.`, error);
-                    combinedTrackerDelta = null;
-                }
-            }
-
-            if (!combinedTrackerDelta && proseGuardEnabled && narrationText && !broadProseGuardAlreadyApplied) {
-                try {
-                    await deferForProseGuardFinalization();
-                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                    const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || '', requestOptions);
-                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                    narrationText = sanitizeProseGuardResponse(proseGuardRaw, narrationText);
-                    const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || '', requestOptions);
-                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                    narrationText = targetedRepair.narrationText;
-                    trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
-                        messageKey,
-                        pendingRun,
-                        report: pendingRun.report,
-                        assistantText: narrationText,
-                    });
-                } catch (error) {
-                    console.warn(`[${EXTENSION_NAME}] Prose Guard failed; keeping sanitized narrator text.`, error);
-                }
-            }
-
             try {
 
-                let postNarrationDelta = combinedTrackerDelta;
-                if (!postNarrationDelta) {
-                    const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout({
+                const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout({
 
-                        pendingRun,
+                    pendingRun,
 
-                        messageKey,
+                    messageKey,
 
-                        narrationText,
+                    narrationText,
 
-                        trackerDisplaySnapshot,
+                    trackerDisplaySnapshot,
 
-                    }, requestOptions);
-                    if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
-                    postNarrationDelta = parsePostNarrationTrackerResponse(trackerRaw, narrationText);
-                }
+                }, requestOptions);
+                if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
+                const postNarrationDelta = parsePostNarrationTrackerResponse(trackerRaw, narrationText);
 
                 const presentedLatentFavorId = verifyLatentFavorPresentation(
                     postNarrationDelta,

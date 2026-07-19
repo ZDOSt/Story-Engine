@@ -1,20 +1,194 @@
 export const PROSE_GUARD_EDITS_START = 'BEGIN_PROSE_GUARD_EDITS';
 export const PROSE_GUARD_EDITS_END = 'END_PROSE_GUARD_EDITS';
 
-const MAX_PROSE_GUARD_EDITS = 32;
-const MAX_LONG_NARRATION_EDIT_COVERAGE = 0.75;
+const MAX_PROSE_GUARD_REPAIRS = 24;
 const LONG_NARRATION_EDIT_COVERAGE_THRESHOLD = 600;
+const MAX_LONG_NARRATION_EDIT_COVERAGE = 0.75;
 const MIN_REPLACEMENT_WORD_RATIO = 0.5;
+const MIN_RETAINED_TOKEN_COVERAGE = 0.5;
 const MIN_EXACT_DUPLICATE_TOKEN_COUNT = 2;
 const MIN_NEAR_DUPLICATE_TOKEN_RUN = 4;
 const MIN_NEAR_DUPLICATE_COVERAGE = 0.75;
-const STRUCTURED_ARTIFACT_PATTERN = /(?:BEGIN|END)_(?:PROSE_GUARD_EDITS|TRACKER_DELTA|CORRECTED_NARRATION)|```story_engine_tracker_delta|STORY_ENGINE_(?:TRACKER_DELTA|PROSE_GUARD)/i;
-const REORDER_CONNECTOR_WORDS = new Set(['a', 'an', 'the', 'and', 'as', 'but', 'or', 'nor', 'yet', 'so', 'while', 'whereas', 'then']);
+const STRUCTURED_ARTIFACT_PATTERN = /(?:BEGIN|END)_(?:FINAL_NARRATION|PROSE_GUARD_EDITS|TRACKER_DELTA|CORRECTED_NARRATION)|```(?:json|story_engine_tracker_delta)|STORY_ENGINE_(?:TARGETED_PROSE_BAN_REPAIR|POST_NARRATION_TRACKER_UPDATE|TRACKER_DELTA|PROSE_GUARD)/i;
+const SENTENCE_SEGMENTER = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter(undefined, { granularity: 'sentence' })
+    : null;
 
-export function parseProseGuardEditPayload(raw) {
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-        return normalizeEditPayload(raw);
+export function parseProseGuardRepairPayload(raw) {
+    const value = parseRepairValue(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('Prose Guard repair payload must be an object.');
     }
+    rejectUnknownKeys(value, ['sentenceRepairs'], 'Prose Guard repair payload');
+    const rawRepairs = Array.isArray(value?.sentenceRepairs) ? value.sentenceRepairs : null;
+    if (!rawRepairs) {
+        throw new Error('Prose Guard repair payload must contain a sentenceRepairs array.');
+    }
+    if (rawRepairs.length > MAX_PROSE_GUARD_REPAIRS) {
+        throw new Error(`Prose Guard returned more than ${MAX_PROSE_GUARD_REPAIRS} sentence repairs.`);
+    }
+
+    const sentenceRepairs = [];
+    const seenIds = new Set();
+    rawRepairs.forEach((repair, index) => {
+        if (!repair || typeof repair !== 'object' || Array.isArray(repair)) {
+            throw new Error(`Prose Guard repair ${index + 1} must be an object.`);
+        }
+        rejectUnknownKeys(repair, ['findingId', 'replacementSentence'], `Prose Guard repair ${index + 1}`);
+        const findingId = String(repair.findingId ?? '').trim();
+        const replacementSentence = typeof repair.replacementSentence === 'string'
+            ? repair.replacementSentence
+            : '';
+        if (!findingId) {
+            throw new Error(`Prose Guard repair ${index + 1} has no findingId.`);
+        }
+        if (seenIds.has(findingId)) {
+            throw new Error(`Prose Guard returned duplicate findingId "${findingId}".`);
+        }
+        if (!replacementSentence.trim()) {
+            throw new Error(`Prose Guard repair ${index + 1} attempted to delete narration.`);
+        }
+        if (/[\r\n\u2028\u2029]/.test(replacementSentence)) {
+            throw new Error(`Prose Guard repair ${index + 1} crossed a line boundary.`);
+        }
+        if (STRUCTURED_ARTIFACT_PATTERN.test(replacementSentence)) {
+            throw new Error(`Prose Guard repair ${index + 1} contains a structured-output artifact.`);
+        }
+        seenIds.add(findingId);
+        sentenceRepairs.push({ findingId, replacementSentence });
+    });
+    return { sentenceRepairs };
+}
+
+export function collectProseGuardSentenceFindings(narrationText, rules, limit = MAX_PROSE_GUARD_REPAIRS) {
+    const source = String(narrationText ?? '');
+    if (!source.trim()) return [];
+
+    const sentenceSpans = splitProseSentenceSpans(source);
+    const dialogueRanges = collectDialogueQuoteRanges(source);
+    const grouped = new Map();
+
+    for (const rule of rules || []) {
+        for (const phrase of rule?.phrases || []) {
+            const pattern = buildTargetedPhraseRegex(phrase);
+            if (!pattern) continue;
+
+            for (const match of source.matchAll(pattern)) {
+                const prefix = match[1] || '';
+                const matchedPhrase = match[2] || phrase;
+                const matchStart = Number(match.index || 0) + prefix.length;
+                const matchEnd = matchStart + matchedPhrase.length;
+                if (dialogueRanges.some(range => rangesOverlap(matchStart, matchEnd, range.start, range.end))) continue;
+
+                const sentenceSpan = sentenceSpans.find(span => matchStart >= span.start && matchEnd <= span.end);
+                if (!sentenceSpan) continue;
+                const key = `${sentenceSpan.start}:${sentenceSpan.end}`;
+                let finding = grouped.get(key);
+                if (!finding) {
+                    finding = {
+                        start: sentenceSpan.start,
+                        end: sentenceSpan.end,
+                        sentence: sentenceSpan.text,
+                        matches: [],
+                        ruleNames: [],
+                    };
+                    grouped.set(key, finding);
+                }
+
+                const matchKey = `${rule.ruleName}\u0000${String(phrase).toLowerCase()}\u0000${matchStart}`;
+                if (finding.matches.some(item => item.key === matchKey)) continue;
+                finding.matches.push({
+                    key: matchKey,
+                    ruleName: rule.ruleName,
+                    phrase: String(phrase),
+                    matchedPhrase,
+                    start: matchStart,
+                    end: matchEnd,
+                });
+                if (!finding.ruleNames.includes(rule.ruleName)) finding.ruleNames.push(rule.ruleName);
+            }
+        }
+    }
+
+    return [...grouped.values()]
+        .sort((left, right) => left.start - right.start)
+        .slice(0, Math.max(0, Number(limit) || MAX_PROSE_GUARD_REPAIRS))
+        .map((finding, index) => ({
+            ...finding,
+            id: `PG_SENTENCE_${index + 1}`,
+            matches: finding.matches.map(({ key, ...match }) => match),
+        }));
+}
+
+export function applyProseGuardSentenceRepairs(narrationText, findings, rawPayload, { rules = [] } = {}) {
+    const source = String(narrationText ?? '');
+    const payload = parseProseGuardRepairPayload(rawPayload);
+    const findingById = new Map((findings || []).map(finding => [finding.id, finding]));
+    const candidates = [];
+    const rejectedRepairs = [];
+
+    for (const repair of payload.sentenceRepairs) {
+        const finding = findingById.get(repair.findingId);
+        if (!finding) {
+            rejectedRepairs.push({ findingId: repair.findingId, reason: 'unknown findingId' });
+            continue;
+        }
+        if (source.slice(finding.start, finding.end) !== finding.sentence) {
+            rejectedRepairs.push({ findingId: repair.findingId, reason: 'source sentence changed' });
+            continue;
+        }
+        if (repair.replacementSentence === finding.sentence) continue;
+
+        try {
+            validateReplacementSentence(finding.sentence, repair.replacementSentence, rules);
+            candidates.push({
+                findingId: finding.id,
+                start: finding.start,
+                end: finding.end,
+                originalText: finding.sentence,
+                replacementText: repair.replacementSentence,
+            });
+        } catch (error) {
+            rejectedRepairs.push({
+                findingId: repair.findingId,
+                reason: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    const accepted = [];
+    for (const candidate of candidates.sort((left, right) => left.start - right.start)) {
+        try {
+            const proposed = [...accepted, candidate];
+            rejectOverlappingEdits(proposed);
+            rejectExcessiveEditCoverage(source, proposed);
+            rejectRepeatedNarration(source, proposed);
+            accepted.push(candidate);
+        } catch (error) {
+            rejectedRepairs.push({
+                findingId: candidate.findingId,
+                reason: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    let corrected = source;
+    for (const candidate of [...accepted].sort((left, right) => right.start - left.start)) {
+        corrected = corrected.slice(0, candidate.start)
+            + candidate.replacementText
+            + corrected.slice(candidate.end);
+    }
+
+    return {
+        narrationText: corrected,
+        changed: corrected !== source,
+        appliedRepairs: accepted,
+        rejectedRepairs,
+    };
+}
+
+function parseRepairValue(raw) {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
 
     const source = String(raw ?? '');
     const start = source.indexOf(PROSE_GUARD_EDITS_START);
@@ -25,129 +199,164 @@ export function parseProseGuardEditPayload(raw) {
 
     let jsonText = source.slice(start + PROSE_GUARD_EDITS_START.length, end).trim();
     jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    if (!jsonText) {
-        throw new Error('Prose Guard edit block was empty.');
-    }
-
-    let parsed;
+    if (!jsonText) throw new Error('Prose Guard edit block was empty.');
     try {
-        parsed = JSON.parse(jsonText);
+        return JSON.parse(jsonText);
     } catch (error) {
         throw new Error(`Prose Guard edit block was not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
-    return normalizeEditPayload(parsed);
 }
 
-export function applyProseGuardEdits(narrationText, rawEdits) {
-    const source = String(narrationText ?? '');
-    const payload = Array.isArray(rawEdits)
-        ? normalizeEditPayload({ proseEdits: rawEdits })
-        : normalizeEditPayload(rawEdits);
-    const ranges = payload.proseEdits.map((edit, index) => {
-        const start = findOccurrence(source, edit.originalText, edit.occurrence);
-        if (start < 0) {
-            throw new Error(`Prose Guard edit ${index + 1} did not match the requested occurrence in the original narration.`);
-        }
-        return {
-            ...edit,
-            editIndex: index,
-            start,
-            end: start + edit.originalText.length,
-        };
-    }).sort((left, right) => left.start - right.start || left.end - right.end);
-
-    for (let index = 1; index < ranges.length; index += 1) {
-        if (ranges[index].start < ranges[index - 1].end) {
-            throw new Error('Prose Guard returned overlapping edits.');
-        }
-    }
-
-    rejectExcessiveEditCoverage(source, ranges);
-    rejectRepeatedNarration(source, ranges);
-
-    let corrected = source;
-    for (const edit of [...ranges].reverse()) {
-        corrected = corrected.slice(0, edit.start) + edit.replacementText + corrected.slice(edit.end);
-    }
-
-    return {
-        narrationText: corrected,
-        changed: corrected !== source,
-        edits: ranges.map(({ editIndex, ...edit }) => edit),
-    };
+function buildTargetedPhraseRegex(phrase) {
+    const tokens = String(phrase ?? '').match(/[\p{L}\p{N}]+(?:['\u2019][\p{L}\p{N}]+)?/gu) || [];
+    if (!tokens.length) return null;
+    const body = tokens.map(escapeRegExp).join('[^\\p{L}\\p{N}\\r\\n.!?]+');
+    return new RegExp(`(^|[^\\p{L}\\p{N}])(${body})(?=$|[^\\p{L}\\p{N}])`, 'giu');
 }
 
-function rejectExcessiveEditCoverage(source, ranges) {
-    if (!ranges.length || !source) return;
-
-    for (const edit of ranges) {
-        if (countProseBoundaries(edit.originalText) <= 1) continue;
-        if (isInformationPreservingMultiSentenceEdit(edit.originalText, edit.replacementText)) continue;
-
-        const fullSourceReplacement = ranges.length === 1
-            && edit.start === 0
-            && edit.end === source.length;
-        throw new Error(fullSourceReplacement
-            ? 'Prose Guard attempted to rewrite the entire multi-sentence narration without preserving its content.'
-            : 'Prose Guard attempted to rewrite a multi-sentence span without preserving its content.');
+function splitProseSentenceSpans(source) {
+    const spans = [];
+    if (SENTENCE_SEGMENTER) {
+        for (const segment of SENTENCE_SEGMENTER.segment(source)) {
+            appendTrimmedLineSpans(spans, source, Number(segment.index), Number(segment.index) + String(segment.segment).length);
+        }
+        return mergeQuotedContinuationSpans(source, spans);
     }
 
-    if (source.length < LONG_NARRATION_EDIT_COVERAGE_THRESHOLD) return;
-    const coveredLength = ranges.reduce((total, edit) => total + (edit.end - edit.start), 0);
+    const pattern = /[^.!?\r\n]+(?:[.!?]+(?=(?:["'\u201d\u00bb)\]]+)?(?:\s|$))|$)/g;
+    for (const match of source.matchAll(pattern)) {
+        const start = Number(match.index || 0);
+        appendTrimmedSpan(spans, source, start, start + String(match[0] || '').length);
+    }
+    return mergeQuotedContinuationSpans(source, spans);
+}
+
+function mergeQuotedContinuationSpans(source, spans) {
+    if (spans.length < 2) return spans;
+    const quoteRanges = collectDialogueQuoteRanges(source);
+    const merged = [];
+
+    for (const span of spans) {
+        const previous = merged[merged.length - 1];
+        const gap = previous ? source.slice(previous.end, span.start) : '';
+        if (previous
+            && !/\r?\n\s*\r?\n/.test(gap)
+            && isQuotedContinuationBoundary(source, previous.end, quoteRanges)
+            && isLikelySentenceContinuation(span.text)) {
+            previous.end = span.end;
+            previous.text = source.slice(previous.start, previous.end).trim();
+            continue;
+        }
+        merged.push({ ...span });
+    }
+
+    return merged;
+}
+
+function isQuotedContinuationBoundary(source, end, quoteRanges) {
+    let cursor = end;
+    while (cursor > 0 && /[.!?\s]/.test(source[cursor - 1])) cursor -= 1;
+    return quoteRanges.some(range => range.end === cursor);
+}
+
+function isLikelySentenceContinuation(text) {
+    const candidate = String(text ?? '').trimStart().replace(/^[\u2014\u2013-]+\s*/, '');
+    const firstWord = candidate.match(/^\p{L}+/u)?.[0] || '';
+    if (!firstWord) return false;
+    const firstLetter = [...firstWord][0];
+    const startsLowercase = firstLetter === firstLetter.toLowerCase() && firstLetter !== firstLetter.toUpperCase();
+    return startsLowercase;
+}
+
+function appendTrimmedLineSpans(spans, source, start, end) {
+    let lineStart = start;
+    for (let index = start; index <= end; index += 1) {
+        if (index !== end && source[index] !== '\n') continue;
+        appendTrimmedSpan(spans, source, lineStart, index);
+        lineStart = index + 1;
+    }
+}
+
+function appendTrimmedSpan(spans, source, start, end) {
+    while (start < end && /\s/.test(source[start])) start += 1;
+    while (end > start && /\s/.test(source[end - 1])) end -= 1;
+    if (end > start) spans.push({ start, end, text: source.slice(start, end) });
+}
+
+function collectDialogueQuoteRanges(source) {
+    const ranges = [];
+    let opener = null;
+    let start = -1;
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        if (!opener) {
+            if (char === '"' || char === '\u201c' || char === '\u00ab') {
+                opener = char;
+                start = index;
+            }
+            continue;
+        }
+        const closer = opener === '\u201c' ? '\u201d' : opener === '\u00ab' ? '\u00bb' : '"';
+        if (char === closer && (opener !== '"' || !isEscaped(source, index))) {
+            ranges.push({ start, end: index + 1 });
+            opener = null;
+            start = -1;
+        }
+    }
+    if (opener && start >= 0) ranges.push({ start, end: source.length });
+    return ranges;
+}
+
+function isEscaped(source, index) {
+    let backslashes = 0;
+    for (let cursor = index - 1; cursor >= 0 && source[cursor] === '\\'; cursor -= 1) backslashes += 1;
+    return backslashes % 2 === 1;
+}
+
+function rangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
+    return leftStart < rightEnd && leftEnd > rightStart;
+}
+
+function validateReplacementSentence(originalText, replacementText, rules) {
+    if (!String(replacementText || '').trim()) throw new Error('replacement was empty');
+    if (/[\r\n\u2028\u2029]/.test(replacementText)) throw new Error('replacement crossed a line boundary');
+    if (STRUCTURED_ARTIFACT_PATTERN.test(replacementText)) throw new Error('replacement contained a structured-output artifact');
+    if (splitProseSentenceSpans(replacementText).length !== 1) throw new Error('replacement was not one sentence');
+
+    const originalQuotes = collectDialogueQuoteRanges(originalText).map(range => originalText.slice(range.start, range.end));
+    const replacementQuotes = collectDialogueQuoteRanges(replacementText).map(range => replacementText.slice(range.start, range.end));
+    if (JSON.stringify(originalQuotes) !== JSON.stringify(replacementQuotes)) {
+        throw new Error('replacement changed quoted dialogue');
+    }
+
+    assertNonDestructiveReplacement(originalText, replacementText);
+    if (collectProseGuardSentenceFindings(replacementText, rules, 1).length) {
+        throw new Error('replacement still contains a targeted phrase violation');
+    }
+}
+
+function rejectOverlappingEdits(edits) {
+    const sorted = [...edits].sort((left, right) => left.start - right.start || left.end - right.end);
+    for (let index = 1; index < sorted.length; index += 1) {
+        if (sorted[index].start < sorted[index - 1].end) throw new Error('Prose Guard repairs overlapped.');
+    }
+}
+
+function rejectExcessiveEditCoverage(source, edits) {
+    if (!source || !edits.length || source.length < LONG_NARRATION_EDIT_COVERAGE_THRESHOLD) return;
+    const coveredLength = edits.reduce((total, edit) => total + (edit.end - edit.start), 0);
     if ((coveredLength / source.length) > MAX_LONG_NARRATION_EDIT_COVERAGE) {
-        throw new Error('Prose Guard edits covered too much of the original narration.');
+        throw new Error('Prose Guard repairs covered too much of the narration.');
     }
-}
-
-function countProseBoundaries(source) {
-    return (String(source).match(/[.!?](?:["')\]]+)?(?=\s|$)|\r?\n+/g) || []).length;
 }
 
 function tokenizeProseWords(value) {
     return String(value || '').toLowerCase().match(/[\p{L}\p{N}]+(?:['\u2019][\p{L}\p{N}]+)*/gu) || [];
 }
 
-function significantReorderWords(value) {
-    return tokenizeProseWords(value).filter(word => !REORDER_CONNECTOR_WORDS.has(word));
-}
-
-function splitProseSegments(value) {
-    return String(value || '')
-        .split(/\r?\n+/)
-        .flatMap(line => line.match(/.*?[.!?](?:["')\]]+)?(?=\s|$)|.+$/g) || [])
-        .map(segment => significantReorderWords(segment))
-        .filter(words => words.length > 0);
-}
-
-function splitProseSentenceSpans(value) {
-    const source = String(value || '');
-    const spans = [];
-    const lines = source.split(/\r?\n/);
-    let lineOffset = 0;
-
-    for (const line of lines) {
-        const pattern = /.*?[.!?](?:["')\]]+)?(?=\s|$)|.+$/g;
-        for (const match of line.matchAll(pattern)) {
-            const raw = String(match[0] || '');
-            const text = raw.trim();
-            if (!text) continue;
-            const leadingWhitespace = raw.search(/\S/);
-            const start = lineOffset + Number(match.index || 0) + Math.max(0, leadingWhitespace);
-            spans.push({ start, end: start + text.length, text });
-        }
-
-        lineOffset += line.length;
-        if (source.startsWith('\r\n', lineOffset)) lineOffset += 2;
-        else if (source[lineOffset] === '\n') lineOffset += 1;
-    }
-
-    return spans;
-}
-
 function longestCommonTokenRun(left, right) {
     let previous = new Array(right.length + 1).fill(0);
     let longest = 0;
-
     for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
         const current = new Array(right.length + 1).fill(0);
         for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
@@ -157,7 +366,6 @@ function longestCommonTokenRun(left, right) {
         }
         previous = current;
     }
-
     return longest;
 }
 
@@ -165,40 +373,22 @@ function isNearDuplicateNarration(left, right) {
     const leftTokens = tokenizeProseWords(left);
     const rightTokens = tokenizeProseWords(right);
     if (leftTokens.length < MIN_EXACT_DUPLICATE_TOKEN_COUNT || rightTokens.length < MIN_EXACT_DUPLICATE_TOKEN_COUNT) return false;
-
-    if (leftTokens.length === rightTokens.length
-        && leftTokens.join(' ') === rightTokens.join(' ')) {
-        return true;
-    }
-
+    if (leftTokens.length === rightTokens.length && leftTokens.join(' ') === rightTokens.join(' ')) return true;
     const shorterLength = Math.min(leftTokens.length, rightTokens.length);
     const commonRun = longestCommonTokenRun(leftTokens, rightTokens);
-    return commonRun >= MIN_NEAR_DUPLICATE_TOKEN_RUN
-        && (commonRun / shorterLength) >= MIN_NEAR_DUPLICATE_COVERAGE;
+    return commonRun >= MIN_NEAR_DUPLICATE_TOKEN_RUN && (commonRun / shorterLength) >= MIN_NEAR_DUPLICATE_COVERAGE;
 }
 
-function rejectRepeatedNarration(source, ranges) {
-    if (!source || !ranges.length) return;
-
+function rejectRepeatedNarration(source, edits) {
+    if (!source || !edits.length) return;
     const sourceSpans = splitProseSentenceSpans(source);
-    const replacementEntries = [];
+    const replacementEntries = edits.map(edit => ({ edit, text: edit.replacementText }));
 
-    for (const edit of ranges) {
-        const replacementTexts = splitProseSentenceSpans(edit.replacementText).map(replacement => replacement.text);
-        for (const replacementText of replacementTexts) {
-            replacementEntries.push({ edit, text: replacementText });
-
-            for (const sourceSpan of sourceSpans) {
-                if (sourceSpan.end <= edit.start || sourceSpan.start >= edit.end) {
-                    if (isNearDuplicateNarration(replacementText, sourceSpan.text)) {
-                        throw new Error(`Prose Guard edit ${edit.editIndex + 1} repeated or closely duplicated existing narration.`);
-                    }
-                    continue;
-                }
-
-                const residual = `${source.slice(sourceSpan.start, edit.start)} ${source.slice(edit.end, sourceSpan.end)}`.trim();
-                if (isNearDuplicateNarration(replacementText, residual)) {
-                    throw new Error(`Prose Guard edit ${edit.editIndex + 1} repeated or closely duplicated narration within its source sentence.`);
+    for (const edit of edits) {
+        for (const sourceSpan of sourceSpans) {
+            if (sourceSpan.end <= edit.start || sourceSpan.start >= edit.end) {
+                if (isNearDuplicateNarration(edit.replacementText, sourceSpan.text)) {
+                    throw new Error(`replacement for ${edit.findingId} repeated or closely duplicated existing narration`);
                 }
             }
         }
@@ -208,131 +398,46 @@ function rejectRepeatedNarration(source, ranges) {
         for (let rightIndex = leftIndex + 1; rightIndex < replacementEntries.length; rightIndex += 1) {
             const left = replacementEntries[leftIndex];
             const right = replacementEntries[rightIndex];
-            if (left.edit === right.edit) {
-                if (isNearDuplicateNarration(left.text, right.text)) {
-                    throw new Error(`Prose Guard edit ${left.edit.editIndex + 1} repeated narration inside its replacement.`);
-                }
-                continue;
-            }
             if (isNearDuplicateNarration(left.text, right.text)) {
-                throw new Error(`Prose Guard edits ${left.edit.editIndex + 1} and ${right.edit.editIndex + 1} repeated the same narration.`);
+                throw new Error(`repairs ${left.edit.findingId} and ${right.edit.findingId} repeated the same narration`);
             }
         }
     }
 }
 
-function containsWordSequence(words, sequence) {
-    if (!sequence.length || sequence.length > words.length) return false;
-    outer: for (let start = 0; start <= words.length - sequence.length; start += 1) {
-        for (let offset = 0; offset < sequence.length; offset += 1) {
-            if (words[start + offset] !== sequence[offset]) continue outer;
-        }
-        return true;
-    }
-    return false;
-}
-
-function countWords(words) {
-    const counts = new Map();
-    for (const word of words) counts.set(word, (counts.get(word) || 0) + 1);
-    return counts;
-}
-
-function extractQuotedSpans(value) {
-    return String(value || '').match(/"[^"\r\n]*"|\u201c[^\u201d\r\n]*\u201d/g) || [];
-}
-
-function isInformationPreservingMultiSentenceEdit(originalText, replacementText) {
-    const originalWords = significantReorderWords(originalText);
-    const replacementWords = significantReorderWords(replacementText);
-    if (!originalWords.length || !replacementWords.length) return false;
-
-    const replacementCounts = countWords(replacementWords);
-    for (const [word, required] of countWords(originalWords)) {
-        if ((replacementCounts.get(word) || 0) < required) return false;
-    }
-
-    if (replacementWords.length !== originalWords.length) return false;
-    if (!extractQuotedSpans(originalText).every(quote => replacementText.includes(quote))) return false;
-
-    return splitProseSegments(originalText)
-        .every(sequence => containsWordSequence(replacementWords, sequence));
-}
-
-function assertNonDestructiveReplacement(originalText, replacementText, index) {
+function assertNonDestructiveReplacement(originalText, replacementText) {
     const originalWords = tokenizeProseWords(originalText);
     const replacementWords = tokenizeProseWords(replacementText);
-    if (!replacementWords.length) {
-        throw new Error(`Prose Guard edit ${index + 1} attempted to delete narration.`);
+    if (!replacementWords.length) throw new Error('replacement attempted to delete narration');
+    if (originalWords.length >= 4 && replacementWords.length < Math.ceil(originalWords.length * MIN_REPLACEMENT_WORD_RATIO)) {
+        throw new Error('replacement removed substantial narration');
     }
-
-    if (originalWords.length >= 4
-        && replacementWords.length < Math.ceil(originalWords.length * MIN_REPLACEMENT_WORD_RATIO)) {
-        throw new Error(`Prose Guard edit ${index + 1} attempted to remove substantial narration.`);
+    if (originalWords.length >= 6) {
+        const retainedTokens = countOrderedCommonTokens(originalWords, replacementWords);
+        if ((retainedTokens / originalWords.length) < MIN_RETAINED_TOKEN_COVERAGE) {
+            throw new Error('replacement removed too much source content');
+        }
     }
 }
 
-function normalizeEditPayload(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new Error('Prose Guard edit payload must be an object.');
+function countOrderedCommonTokens(sourceTokens, replacementTokens) {
+    let replacementIndex = 0;
+    let retained = 0;
+    for (const token of sourceTokens) {
+        const foundIndex = replacementTokens.indexOf(token, replacementIndex);
+        if (foundIndex < 0) continue;
+        retained += 1;
+        replacementIndex = foundIndex + 1;
     }
-
-    const rawEdits = Array.isArray(value.proseEdits) ? value.proseEdits : null;
-    if (!rawEdits) {
-        throw new Error('Prose Guard edit payload must contain a proseEdits array.');
-    }
-    if (rawEdits.length > MAX_PROSE_GUARD_EDITS) {
-        throw new Error(`Prose Guard returned more than ${MAX_PROSE_GUARD_EDITS} edits.`);
-    }
-
-    const proseEdits = [];
-    const seen = new Set();
-    rawEdits.forEach((edit, index) => {
-        const normalized = normalizeEdit(edit, index);
-        if (!normalized) return;
-        const key = JSON.stringify([normalized.originalText, normalized.replacementText, normalized.occurrence]);
-        if (seen.has(key)) return;
-        seen.add(key);
-        proseEdits.push(normalized);
-    });
-    return { proseEdits };
+    return retained;
 }
 
-function normalizeEdit(edit, index) {
-    if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
-        throw new Error(`Prose Guard edit ${index + 1} must be an object.`);
-    }
-
-    const originalText = typeof edit.originalText === 'string' ? edit.originalText : '';
-    const replacementText = typeof edit.replacementText === 'string' ? edit.replacementText : '';
-    const occurrence = Number(edit.occurrence);
-    if (!originalText) {
-        throw new Error(`Prose Guard edit ${index + 1} has an empty originalText.`);
-    }
-    if (!replacementText.trim()) {
-        throw new Error(`Prose Guard edit ${index + 1} attempted to delete narration.`);
-    }
-    if (originalText === replacementText) {
-        return null;
-    }
-    if (!Number.isInteger(occurrence) || occurrence < 1) {
-        throw new Error(`Prose Guard edit ${index + 1} has an invalid occurrence.`);
-    }
-    if (STRUCTURED_ARTIFACT_PATTERN.test(replacementText)) {
-        throw new Error(`Prose Guard edit ${index + 1} contains a structured-output artifact.`);
-    }
-    assertNonDestructiveReplacement(originalText, replacementText, index);
-
-    return { originalText, replacementText, occurrence };
+function rejectUnknownKeys(value, allowedKeys, label) {
+    const allowed = new Set(allowedKeys);
+    const unknown = Object.keys(value).filter(key => !allowed.has(key));
+    if (unknown.length) throw new Error(`${label} contained unauthorized field(s): ${unknown.join(', ')}`);
 }
 
-function findOccurrence(source, search, occurrence) {
-    let fromIndex = 0;
-    let found = -1;
-    for (let count = 0; count < occurrence; count += 1) {
-        found = source.indexOf(search, fromIndex);
-        if (found < 0) return -1;
-        fromIndex = found + Math.max(1, search.length);
-    }
-    return found;
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

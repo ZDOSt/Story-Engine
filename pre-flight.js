@@ -1002,148 +1002,123 @@ function promptLooksIsekai(prompt = '') {
 }
 
 function renderControlEngineNarrativeContract() {
-    return String.raw`renderControlEngine(input): {
+    return String.raw`EXECUTE RenderControlEngine(response, input, context) PRIVATELY BEFORE PRODUCING THE FINAL RESPONSE.
 
-function diegeticPhysicality(response, context): {
+function RenderControlEngine(response, input, context) {
   MANDATE:
-    When an ability, spell, power, trait, or supernatural effect is activated by {{user}} or a character/NPC, narrate ONLY its OBSERVABLE effects and consequences.
+    Your final response MUST STRICTLY follow every constraint below. Failure will render your response INVALID.
 
   FORBIDDEN:
-    - DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration. A name may appear ONLY when explicitly spoken in dialogue.
-    - DO NOT explain activation, casting, or system mechanics.
-}
+    - DO NOT output function names, validation notes, rule summaries, analysis, or intermediate drafts.
 
-function strictEpistemology(response, context): {
-  MANDATE:
-    You MUST reveal information ONLY through DIRECT sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.
+  function cohesiveSceneBeats(response, context): {
+    MANDATE:
+      When the scene already contains closely related physical events, narrate them as one clear, connected sequence.
 
-  FORBIDDEN:
-    - DO NOT reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, or any other unearned information.
-}
+    FORBIDDEN:
+      - DO NOT invent movement, gestures, object handling, or reactions merely to make prose active.
+      - DO NOT fragment one physical event into staccato sentences, micro-reaction loops, or body-cue pileups.
+  }
 
-function inanimateObjectivity(response, context): {
-  MANDATE:
-    ONLY living beings may possess agency, intention, awareness, or emotion.
-    Physical forces, mechanisms, processes, and objects may ONLY produce concrete physical effects or change physical state.
+  function denotativePhysicality(response, context): {
+    MANDATE:
+      You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived in the scene.
 
-  FORBIDDEN:
-    - DO NOT attribute will, awareness, intention, memory, or emotion to objects, weather, architecture, atmosphere, or abstract concepts.
-    - DO NOT describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.
-}
+      Objects, weather, architecture, atmosphere, and abstract concepts may ONLY be described through their physical state, movement, or concrete effects.
 
-function denotativePhysicality(response, context): {
-  MANDATE:
-    You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE.
+    FORBIDDEN:
+      - NEVER use figurative narration, decorative abstraction, emotional physics, or personification.
+      - NEVER attribute agency, intention, awareness, memory, or emotion to inanimate things or abstract concepts.
+  }
 
-  FORBIDDEN:
-    - NEVER use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.
+  function embodiedPerception(response, context): {
+    MANDATE:
+      You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position. PRIORITIZE sight, hearing, and touch.
 
-  REMEMBER:
-    - Rooms DO NOT breathe.
-    - Words DO NOT hang.
-    - Silence DOES NOT stretch.
-}
+      Include smell and taste ONLY when:
+      - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
+      - A CLOSE-RANGE physical source is overpowering and unavoidable.
 
-function embodiedPerception(response, context): {
-  MANDATE:
-    You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position. PRIORITIZE sight, hearing, and touch.
+    FORBIDDEN:
+      - DO NOT use ambient smell or taste as a property of the air or room, or as a substitute for concrete scene narration.
+  }
 
-    Include smell and taste ONLY when:
-    - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
-    - A CLOSE-RANGE physical source is overpowering and unavoidable.
+  function diegeticPhysicality(response, context): {
+    MANDATE:
+      When an ability, spell, power, trait, or supernatural effect is activated by {{user}} or a character/NPC, narrate ONLY its OBSERVABLE effects and consequences.
 
-  FORBIDDEN: YOU MUST NOT:
-    - Describe smells or tastes as ambient properties of the air or room.
-    - Use ambient smell or taste in place of concrete, descriptive scene narration.
-}
+    FORBIDDEN:
+      - DO NOT label, announce, name, or explain abilities or supernatural effects outside explicitly spoken dialogue.
+      - DO NOT explain activation, casting, or system mechanics.
+  }
 
-function strictBehaviorism(response, context): {
-  MANDATE:
-    You MUST convey character/NPC state ONLY through observable behavior, action, and dialogue. Show their current state without naming internal feelings.
+  function strictEpistemology(response, context): {
+    MANDATE:
+      You MUST reveal information ONLY through DIRECT sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.
 
-  EXAMPLE:
-    Her eyes meet yours briefly before she looks aside. "You... look very handsome today," she says.
+    FORBIDDEN:
+      - DO NOT reveal unknown identities, roles, causes, thoughts, unseen actions, background lore, or other unearned information.
+  }
 
-  FORBIDDEN: YOU MUST NOT:
-    - Reveal character/NPC internal, emotional, or psychological states.
-    - Use interpretive or invisible eye-language, such as "her eyes burn," "her eyes soften," "something flickers in her eyes," or equivalent language.
-    - Use micro-expressions or repeated micro-gestures.
-    - Use skin or facial color changes as emotional shorthand, including blushing, flushing, reddening, skin turning pink or red, color rising, knuckle whitening, or paling.
-    - Use body-language shortcuts such as breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth/jaw opening and closing loops.
-}
+  function strictBehaviorism(response, context): {
+    MANDATE:
+      When character/NPC state or emotion is conveyed, you MUST convey it ONLY through directly observable behavior, action, or dialogue.
 
-function agencySeparation(response, input, context): {
-  MANDATE:
-    You control ONLY the world and NPCs. {{user}} is EXCLUSIVELY controlled by the human player. Narrate TO {{user}}, not AS {{user}}.
+      Dialogue does NOT require an accompanying gesture, action, or physical cue.
 
-    You MAY narrate immediate involuntary or reflexive reactions directly caused by external stimuli or effects imposed by the scene. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop a held item when startled, or be pushed, struck, restrained, knocked down, or awakened.
+    FORBIDDEN:
+      - DO NOT name or interpret internal, emotional, or psychological states in narration.
+      - DO NOT manufacture behavior, actions, or gestures merely to signal emotion.
+      - DO NOT use prohibited skin-color, autonomic, body-cue, or invisible eye-language shorthand.
+  }
 
-  FORBIDDEN:
-    - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
-    - DO NOT narrate {{user}}'s thoughts, choices, decisions, voluntary actions, dialogue, or feelings beyond the immediate involuntary reaction caused by the scene.
-    - DO NOT interpret, assume, or complete {{user}}'s intent.
-}
+  function agencySeparation(response, input, context): {
+    MANDATE:
+      You control ONLY the world and NPCs. The human player EXCLUSIVELY controls {{user}}. Narrate TO {{user}}, NEVER AS {{user}}.
 
-function linearChronology(response, input, context): {
-  MANDATE:
-    You MUST narrate only what comes AFTER {{user}}'s actions or dialogue.
+      You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop a held item when startled, cover their eyes against a sudden blinding glare, or be awakened by an external sound, touch, or impact.
 
-  EXAMPLE:
-    SAMPLE {{user}} INPUT: "I try to grab the scroll from the desk."
-    RESPONSE: The guard's hand comes down on the scroll before your fingers reach it...
+      Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
 
-  FORBIDDEN:
-    - DO NOT repeat, paraphrase, summarize, re-stage, or narrate ANY part of {{user}}'s input.
-}
+    FORBIDDEN:
+      - DO NOT invent undeclared {{user}} thoughts, feelings, choices, decisions, voluntary actions, dialogue, or intent.
+  }
 
-function cohesiveSceneBeats(response, context): {
-  MANDATE:
-    Write COHESIVE SCENE BEATS. Combine closely related movement, action, object handling, and consequences into connected prose.
+  function inputChronology(response, input, context): {
+    MANDATE:
+      {{user}}'s input is IN THE PAST. You MUST begin narration with the immediate response, consequence, obstruction, or result that follows {{user}}'s actions or dialogue.
 
-  GOOD EXAMPLE:
-    The guard catches your wrist before your hand reaches the latch. He turns his shoulder into the doorway, blocking the exit, and lowers his voice enough that the crowd behind him cannot hear. "Not that way."
+      Previously narrated actions and dialogue have already occurred. Continue from the scene state they established.
 
-  FORBIDDEN:
-    - DO NOT split a single scene beat into a sequence of short, staccato sentences.
-    - DO NOT use micro-reaction loops, twitch narration, or body-cue pileups.
-}
+    FORBIDDEN:
+      - DO NOT repeat, paraphrase, echo, summarize, or re-stage {{user}}'s input.
+      - DO NOT repeat, paraphrase, or re-stage previously narrated actions or dialogue.
+  }
 
-function dialogueTurn(response, context): {
-  MANDATE:
-    During dialogue, each character/NPC may take AT MOST ONE dialogue turn PER RESPONSE.
+  function dialogueTurn(response, context): {
+    MANDATE:
+      Dialogue MUST follow a natural back-and-forth exchange.
 
-    A dialogue turn MAY contain AT MOST ONE of each component:
+      Each character/NPC may make only ONE conversational contribution per response, directly addressing the current input from {{user}} or another character/NPC.
 
-    - Reaction Beat: ONE brief, cohesive, and observable reaction to {{user}} or another character/NPC.
-    - Utterance: ONE cohesive spoken response that addresses or acknowledges the input from {{user}} or another character/NPC.
-    - Action Beat: ONE cohesive action sequence OR gesture that DIRECTLY supports the current exchange.
-    - Follow-Up: AT MOST ONE response-seeking statement, question, or gesture that naturally ENDS that character/NPC's turn.
+      Once the character/NPC has answered, acknowledged, refused, or observably deflected that input, their turn ENDS.
 
-    These components are LIMITS, not a checklist. Combine or reorder them naturally, but NEVER exceed the stated limit.
+    FORBIDDEN:
+      - DO NOT give a character/NPC multiple conversational turns or let them continue after their direct response is complete.
+      - DO NOT introduce another topic, disguise a monologue as one turn, or include more than ONE response-seeking question, statement, or gesture.
+  }
 
-    A character/NPC MUST account for the full input directed at them. Intentional refusal, deflection, or avoidance is allowed, but it MUST be observable rather than an accidental omission.
+  function activeHandoff(response, context): {
+    MANDATE:
+      You MUST end every response on ONE of the following:
+      - Dialogue directed at {{user}}.
+      - An action or concrete gesture directed at {{user}}.
+      - A visible scene change that requires {{user}}'s input.
 
-  FORBIDDEN - NEVER:
-    - Give any character/NPC more than ONE dialogue turn per response.
-    - Stack or disguise multiple reactions, utterances, action beats, or follow-ups as one component.
-    - Chain action-dialogue-action-dialogue sequences.
-    - Continue a character/NPC's dialogue turn after their follow-up.
-    - Reset or grant another dialogue turn because of an interruption, scene event, or another character's participation.
-    - Add unrelated actions, gestures, dialogue, topics, commentary, or filler.
-}
-
-function activeHandoff(response, context): {
-  MANDATE:
-    You MUST end every response on ONE ACTIVE, CONCRETE BEAT that {{user}} can respond to.
-
-  VALID ENDINGS:
-    - Dialogue, action, or a concrete gesture directed at {{user}}.
-    - A visible scene change that requires {{user}}'s input.
-
-  FORBIDDEN:
-    - DO NOT end by prompting {{user}} with a meta question (e.g., "What do you do?") or by describing a character waiting for or expecting {{user}}'s response.
-    - DO NOT end on filler or distant environmental detail unrelated to the current scene.
-}
+    FORBIDDEN:
+      - DO NOT ask {{user}} meta questions or describe a character waiting for or expecting {{user}}'s response.
+      - DO NOT end on filler or distant environmental detail unrelated to the current scene.
+  }
 }`;
 }
 

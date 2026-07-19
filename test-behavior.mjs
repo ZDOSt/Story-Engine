@@ -14,7 +14,7 @@ import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, 
 import { applyHiddenHealthEvents } from './health-state.js';
 import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character-sheet-validation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
-import { applyProseGuardEdits, parseProseGuardEditPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
+import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 
 const stakeKeys = [
   'no_roll',
@@ -8667,7 +8667,7 @@ const tests = [
       assert.match(indexSource, /user: sanitizeTrackerUserStateForModel\(pendingRun\?\.userBefore \|\| \{\}\)/);
       assert.match(indexSource, /user: sanitizeTrackerUserStateForModel\(pendingRun\?\.userAfter \|\| \{\}\)/);
       assert.match(indexSource, /aggressionResults: sanitizeAggressionResultsForTrackerModel\(handoff\.aggressionResults\)/);
-      assert.match(indexSource, /function buildTrackerReferencePrompt[\s\S]*return buildPostNarrationTrackerPrompt/);
+      assert.match(indexSource, /function buildPostNarrationTrackerPrompt\(\{ pendingRun, messageKey, narrationText, trackerDisplaySnapshot \}\)/);
       assert.match(indexSource, /beforeUser: clone\(pendingRun\.userBefore\)/);
       assert.match(indexSource, /afterUser: clone\(trackerDisplaySnapshot\.user\)/);
       assert.match(indexSource, /root\.user = normalizeTrackerUserState\(restoreCandidate\.beforeUser \|\| root\.user \|\| \{\}\)/);
@@ -11509,23 +11509,23 @@ const tests = [
       const renderControlLeak = [
         '1. **activeHandoff:** End on an active beat that immediately requires a user response.',
         '',
-        '2. **cohesiveSceneBeats:** Advance the visible scene.',
+        '2. **dialogueTurn:** Keep dialogue to one conversational contribution per character.',
         '',
-        '3. **linearChronology:** Narrate what follows the user input.',
+        '3. **inputChronology:** Narrate what follows the user input.',
         '',
         '4. **agencySeparation:** Do not write user action.',
         '',
         '5. **strictBehaviorism:** No body-tell shorthand.',
         '',
-        '6. **embodiedPerception:** No explicit smell/taste invocation. No overpowering close-range source. -> LOCKED. No smell/taste.',
+        '6. **strictEpistemology:** Direct visual scene only.',
         '',
-        '7. **denotativePhysicality:** Keep narration literal.',
+        '7. **diegeticPhysicality:** No active abilities or supernatural traits are being used.',
         '',
-        '8. **inanimateObjectivity:** No false agency for objects or weather.',
+        '8. **embodiedPerception:** No explicit smell/taste invocation. No overpowering close-range source. -> LOCKED. No smell/taste.',
         '',
-        '9. **strictEpistemology:** Direct visual scene only.',
+        '9. **denotativePhysicality:** Keep narration literal and objects physically objective.',
         '',
-        '10. **diegeticPhysicality:** No active abilities or supernatural traits are being used.',
+        '10. **cohesiveSceneBeats:** Connect only closely related physical events already in the scene.',
         '',
         'CONCLUSION: Valid to proceed with narration of Naomi entering and responding to the spin request.',
         'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
@@ -11555,6 +11555,18 @@ const tests = [
       assert.equal(
         sanitizeAssistantNarration(partialTagLeak),
         'Naomi steps into the entryway and turns once, skirt flaring around her knees.',
+      );
+
+      const proseGuardLeak = [
+        'Naomi steps into the entryway and turns once.',
+        'STORY_ENGINE_TARGETED_PROSE_BAN_REPAIR',
+        'BEGIN_PROSE_GUARD_EDITS',
+        '{"sentenceRepairs":[]}',
+        'END_PROSE_GUARD_EDITS',
+      ].join('\n');
+      assert.equal(
+        sanitizeAssistantNarration(proseGuardLeak),
+        'Naomi steps into the entryway and turns once.',
       );
     },
   },
@@ -11657,7 +11669,7 @@ const tests = [
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
       assert.match(preflightSource, /When an ability, spell, power, trait, or supernatural effect is activated by \{\{user\}\} or a character\/NPC, narrate ONLY its OBSERVABLE effects and consequences\./i);
-      assert.match(preflightSource, /DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration\. A name may appear ONLY when explicitly spoken in dialogue\./i);
+      assert.match(preflightSource, /DO NOT label, announce, name, or explain abilities or supernatural effects outside explicitly spoken dialogue\./i);
       assert.match(preflightSource, /DO NOT explain activation, casting, or system mechanics\./i);
 
       const report = runCase({
@@ -13396,359 +13408,202 @@ const tests = [
     },
   },
   {
-    name: '46 prose rules block body and vocal shorthand equivalents',
+    name: '46 prose rules enforce the revised render-control boundaries',
     run() {
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
-      const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
-      assert.doesNotMatch(indexSource, /policy: EXTERNAL-ACTION-ONLY/);
-      assert.match(indexSource, /You MUST convey character\/NPC state ONLY through observable behavior, action, and dialogue/);
-      assert.match(indexSource, /Show their current state without naming internal feelings/);
-      assert.match(indexSource, /Her eyes meet yours briefly before she looks aside/);
-      assert.match(indexSource, /FORBIDDEN: YOU MUST NOT:/);
-      assert.match(indexSource, /Reveal character\/NPC internal, emotional, or psychological states/);
-      assert.match(indexSource, /Use interpretive or invisible eye-language, such as "her eyes burn," "her eyes soften," "something flickers in her eyes," or equivalent language/);
-      assert.match(indexSource, /Use micro-expressions or repeated micro-gestures/);
-      assert.match(indexSource, /Use skin or facial color changes as emotional shorthand, including blushing, flushing, reddening, skin turning pink or red, color rising, knuckle whitening, or paling/);
-      assert.match(indexSource, /Use body-language shortcuts such as breath or voice hitching\/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth\/jaw opening and closing loops/);
-      assert.match(indexSource, /You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE/);
-      assert.match(indexSource, /NEVER use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration/);
-      assert.match(indexSource, /Rooms DO NOT breathe/);
-      assert.match(indexSource, /Silence DOES NOT stretch/);
-      assert.match(indexSource, /Words DO NOT hang/);
-      assert.match(indexSource, /function cohesiveSceneBeats\(response, context\):/);
-      assert.match(indexSource, /Write COHESIVE SCENE BEATS\. Combine closely related movement, action, object handling, and consequences into connected prose\./);
-      assert.match(indexSource, /DO NOT split a single scene beat into a sequence of short, staccato sentences\./);
-      assert.doesNotMatch(indexSource, /hypotacticSceneBeats|COHESIVE-ACTION-RESULT|Hypotactic Narration|PARATACTIC NARRATION/);
-      assert.doesNotMatch(indexSource, /Grounded Vocalization: describe dialogue delivery only when it is physically grounded/);
-      assert.doesNotMatch(indexSource, /Sentence Function: each sentence must advance/);
+      const mainRulesSource = indexSource.slice(
+        indexSource.indexOf('const DEFAULT_PROSE_RULES_PROMPT'),
+        indexSource.indexOf('const DEFAULT_SETTINGS'),
+      );
+
+      assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
+      assert.match(mainRulesSource, /function activeHandoff\(response, context\):/);
+      assert.match(mainRulesSource, /You MUST end every response on ONE of the following:/);
+      assert.match(mainRulesSource, /Dialogue directed at \{\{user\}\}/);
+      assert.match(mainRulesSource, /visible scene change that requires \{\{user\}\}'s input/i);
+      assert.match(mainRulesSource, /DO NOT ask \{\{user\}\} meta questions/);
+      assert.match(mainRulesSource, /DO NOT describe a character waiting for or expecting \{\{user\}\}'s response/);
+
+      assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
+      assert.match(mainRulesSource, /Dialogue MUST follow a natural back-and-forth exchange/);
+      assert.match(mainRulesSource, /Each character\/NPC may make only ONE conversational contribution per response/);
+      assert.match(mainRulesSource, /Once the character\/NPC has answered, acknowledged, refused, or observably deflected that input, their turn ENDS/);
+      assert.match(mainRulesSource, /DO NOT disguise a monologue as one turn/);
+      assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
+
+      assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
+      assert.match(mainRulesSource, /\{\{user\}\}'s input is IN THE PAST/);
+      assert.match(mainRulesSource, /Previously narrated actions and dialogue have already occurred\. Continue from the scene state they established/);
+      assert.match(mainRulesSource, /DO NOT repeat, paraphrase, echo, summarize, re-stage, or narrate ANY part of \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /DO NOT repeat, paraphrase, or re-stage previously narrated actions or dialogue/);
+
+      assert.match(mainRulesSource, /function agencySeparation\(response, input, context\):/);
+      assert.match(mainRulesSource, /The human player EXCLUSIVELY controls \{\{user\}\}/);
+      assert.match(mainRulesSource, /You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects/);
+      assert.match(mainRulesSource, /Any action that can be voluntarily chosen is EXCLUSIVELY controlled by \{\{user\}\}/);
+      assert.match(mainRulesSource, /DO NOT narrate \{\{user\}\}'s thoughts, feelings, choices, decisions, voluntary actions, or dialogue/);
+
+      assert.match(mainRulesSource, /function strictBehaviorism\(response, context\):/);
+      assert.match(mainRulesSource, /When character\/NPC state or emotion is conveyed, you MUST convey it ONLY through directly observable behavior, action, or dialogue/);
+      assert.match(mainRulesSource, /Dialogue does NOT require an accompanying gesture, action, or physical cue/);
+      assert.match(mainRulesSource, /DO NOT add behavior, actions, or gestures merely to signal emotion/);
+      assert.match(mainRulesSource, /ABSOLUTELY NO flushing, reddening/);
+      assert.match(mainRulesSource, /ABSOLUTELY NO breath or voice hitching\/catching/);
+      assert.match(mainRulesSource, /ABSOLUTELY NO interpretive, figurative, or invisible eye-language/);
+
+      assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
+      assert.match(mainRulesSource, /You MUST reveal information ONLY through DIRECT sensory evidence available in the scene/);
+      assert.match(mainRulesSource, /DO NOT reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore/);
+
+      assert.match(mainRulesSource, /function diegeticPhysicality\(response, context\):/);
+      assert.match(mainRulesSource, /narrate ONLY its OBSERVABLE effects and consequences/);
+      assert.match(mainRulesSource, /A name may appear ONLY when explicitly spoken in dialogue/);
+
+      assert.match(mainRulesSource, /function embodiedPerception\(response, context\):/);
+      assert.match(mainRulesSource, /PRIORITIZE sight, hearing, and touch/);
+      assert.match(mainRulesSource, /A CLOSE-RANGE physical source is overpowering and unavoidable/);
+      assert.doesNotMatch(mainRulesSource, /SPATIAL CONTINUITY|relative positions|perceive, reach, or interact through/);
+
+      assert.match(mainRulesSource, /function denotativePhysicality\(response, context\):/);
+      assert.match(mainRulesSource, /You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived in the scene/);
+      assert.match(mainRulesSource, /Objects, weather, architecture, atmosphere, and abstract concepts may ONLY be described through their physical state, movement, or concrete effects/);
+      assert.match(mainRulesSource, /NEVER attribute agency, intention, awareness, memory, or emotion to inanimate things or abstract concepts/);
+      assert.match(mainRulesSource, /Rooms DO NOT breathe/);
+      assert.match(mainRulesSource, /Words DO NOT hang/);
+      assert.match(mainRulesSource, /Silence DOES NOT stretch/);
+
+      assert.match(mainRulesSource, /function cohesiveSceneBeats\(response, context\):/);
+      assert.match(mainRulesSource, /When the scene already contains closely related physical events, narrate them as one clear, connected sequence/);
+      assert.match(mainRulesSource, /DO NOT invent movement, gestures, object handling, or reactions merely to make prose feel active/);
+      assert.match(mainRulesSource, /DO NOT split one physical event into staccato sentences, micro-reaction loops, or body-cue pileups/);
+
+      assert.doesNotMatch(mainRulesSource, /function linearChronology\(/);
+      assert.doesNotMatch(mainRulesSource, /function inanimateObjectivity\(/);
+      assert.doesNotMatch(mainRulesSource, /function realisticConversation|function npcRambleGuard|dialoguePacing|characterTurnPacing|DIALOGUE-TURN-LIMITS/);
+      assert.doesNotMatch(mainRulesSource, /hypotacticSceneBeats|COHESIVE-ACTION-RESULT|PARATACTIC NARRATION/);
       assert.match(indexSource, /barely above a whisper/);
       assert.match(indexSource, /barely above a breath/);
       assert.match(indexSource, /knuckle whitening/);
-      assert.doesNotMatch(indexSource, /changes audibility, privacy, speech control, injury, fatigue, fear, anger, restraint, intimacy, or scene pressure/);
-      assert.match(indexSource, /micro-reaction loops, twitch narration, or body-cue pileups/);
-      assert.doesNotMatch(indexSource, /narration\/speech\/narration\/speech chains/);
-      assert.doesNotMatch(indexSource, /physiologyGate/);
-      assert.doesNotMatch(indexSource, /Skin color changes are allowed only when they have a direct tissue-color cause/);
-      assert.match(indexSource, /body-cue pileups/);
-      assert.match(handoffSource, /You MUST convey character\/NPC state ONLY through observable behavior, action, and dialogue/);
-      assert.match(handoffSource, /FORBIDDEN: YOU MUST NOT:/);
-      assert.match(handoffSource, /Use body-language shortcuts such as breath or voice hitching\/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth\/jaw opening and closing loops/);
-      assert.match(handoffSource, /DO NOT split a single scene beat into a sequence of short, staccato sentences\./);
-      assert.match(handoffSource, /You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE\./);
-      assert.match(handoffSource, /NEVER use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration\./);
-      assert.doesNotMatch(handoffSource, /breath\/throat\/pulse\/stomach cues/);
-      assert.match(handoffSource, /body-cue pileups/);
-      assert.doesNotMatch(handoffSource, /trembling voice, breathy line, hiss, growl/);
-      assert.match(indexSource, /micro-reaction loops, twitch narration, or body-cue pileups/);
-      assert.doesNotMatch(indexSource, /A character should act within the scene/);
-      assert.doesNotMatch(indexSource, /dialoguePacing/);
-      assert.doesNotMatch(indexSource, /function realisticConversation/);
-      assert.doesNotMatch(indexSource, /function npcRambleGuard/);
-      assert.doesNotMatch(indexSource, /characterTurnPacing|DIALOGUE-TURN-LIMITS/);
     },
   },
   {
-    name: '46a turn boundary blocks after-beat tailing',
+    name: '46a narrator reminder mirrors mandates in reverse execution order',
     run() {
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
-      assert.match(indexSource, /function activeHandoff\(response, context\):/);
-      assert.match(indexSource, /You MUST end every response on ONE ACTIVE, CONCRETE BEAT that \{\{user\}\} can respond to\./);
-      assert.match(indexSource, /VALID ENDINGS:/);
-      assert.match(indexSource, /Dialogue, action, or a concrete gesture directed at \{\{user\}\}\./);
-      assert.match(indexSource, /DO NOT end by prompting \{\{user\}\} with a meta question \(e\.g\., "What do you do\?"\) or by describing a character waiting for or expecting \{\{user\}\}'s response\./);
-      assert.match(indexSource, /DO NOT end on filler or distant environmental detail unrelated to the current scene\./);
-      assert.doesNotMatch(indexSource, /policy: ACTIVE-HANDOFF/);
-      assert.doesNotMatch(indexSource, /policy: ZERO-ECHO, IMMEDIATE-CONSEQUENCE/);
-      assert.match(indexSource, /You MUST narrate only what comes AFTER \{\{user\}\}'s actions or dialogue\./);
-      assert.match(indexSource, /SAMPLE \{\{user\}\} INPUT: "I try to grab the scroll from the desk\."/);
-      assert.match(indexSource, /RESPONSE: The guard's hand comes down on the scroll before your fingers reach it\.\.\./);
-      assert.match(indexSource, /DO NOT repeat, paraphrase, summarize, re-stage, or narrate ANY part of \{\{user\}\}'s input/);
-      assert.doesNotMatch(indexSource, /policy: USER-CONTROL-BOUNDARY/);
-      assert.match(indexSource, /You control ONLY the world and NPCs\. \{\{user\}\} is EXCLUSIVELY controlled by the human player\. Narrate TO \{\{user\}\}, not AS \{\{user\}\}\./);
-      assert.match(indexSource, /You MAY narrate immediate involuntary or reflexive reactions directly caused by external stimuli or effects imposed by the scene/);
-      assert.match(indexSource, /\{\{user\}\} may lurch or catch themselves when tripped, flinch or drop a held item when startled/);
-      assert.match(indexSource, /If \{\{user\}\} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen/);
-      assert.match(indexSource, /DO NOT narrate \{\{user\}\}'s thoughts, choices, decisions, voluntary actions, dialogue, or feelings beyond the immediate involuntary reaction caused by the scene/);
-      assert.match(indexSource, /DO NOT interpret, assume, or complete \{\{user\}\}'s intent/);
-      assert.doesNotMatch(indexSource, /Render \{\{user\}\}'s voluntary actions only when the latest input explicitly declares them/);
+      const mainRulesSource = indexSource.slice(
+        indexSource.indexOf('const DEFAULT_PROSE_RULES_PROMPT'),
+        indexSource.indexOf('const DEFAULT_SETTINGS'),
+      );
+      const handoffRulesSource = handoffSource.slice(
+        handoffSource.indexOf('function renderControlEngineNarrativeContract()'),
+        handoffSource.indexOf('function formatNarrativeFacts'),
+      );
+      const mainRuleOrder = [
+        'activeHandoff',
+        'dialogueTurn',
+        'inputChronology',
+        'agencySeparation',
+        'strictBehaviorism',
+        'strictEpistemology',
+        'diegeticPhysicality',
+        'embodiedPerception',
+        'denotativePhysicality',
+        'cohesiveSceneBeats',
+      ];
+      const handoffRuleOrder = [...mainRuleOrder].reverse();
+      const assertRuleOrder = (source, order, label) => {
+        for (let i = 1; i < order.length; i++) {
+          const previous = 'function ' + order[i - 1] + '(';
+          const current = 'function ' + order[i] + '(';
+          assert.ok(
+            source.indexOf(previous) < source.indexOf(current),
+            previous + ' should appear before ' + current + ' in ' + label + '.',
+          );
+        }
+      };
+      const extractRuleBlock = (source, name) => {
+        const start = source.indexOf('function ' + name + '(');
+        assert.ok(start >= 0, name + ' should exist.');
+        const end = source.indexOf('\n  }', start);
+        assert.ok(end > start, name + ' should have a closing block.');
+        return source.slice(start, end + 4);
+      };
+      const extractMandate = (source, name) => {
+        const block = extractRuleBlock(source, name);
+        const start = block.indexOf('MANDATE:');
+        const end = block.indexOf('FORBIDDEN:', start);
+        assert.ok(start >= 0 && end > start, name + ' should contain MANDATE before FORBIDDEN.');
+        return block
+          .slice(start + 'MANDATE:'.length, end)
+          .replace(/\r/g, '')
+          .split('\n')
+          .map(line => line.trim())
+          .join('\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      };
+
+      assertRuleOrder(mainRulesSource, mainRuleOrder, 'the full prose rules');
+      assertRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator reminder');
+
+      for (const name of mainRuleOrder) {
+        assert.equal(
+          (mainRulesSource.match(new RegExp('function ' + name + '\\(', 'g')) || []).length,
+          1,
+          name + ' should appear exactly once in the full prose rules.',
+        );
+        assert.equal(
+          (handoffRulesSource.match(new RegExp('function ' + name + '\\(', 'g')) || []).length,
+          1,
+          name + ' should appear exactly once in the narrator reminder.',
+        );
+        assert.equal(
+          extractMandate(handoffRulesSource, name),
+          extractMandate(mainRulesSource, name),
+          name + ' MANDATE must mirror the full rule exactly.',
+        );
+      }
+
+      assert.match(handoffRulesSource, /EXECUTE RenderControlEngine\(response, input, context\) PRIVATELY BEFORE PRODUCING THE FINAL RESPONSE/);
+      assert.match(handoffRulesSource, /DO NOT output function names, validation notes, rule summaries, analysis, or intermediate drafts/);
+      assert.doesNotMatch(handoffRulesSource, /function linearChronology\(/);
+      assert.doesNotMatch(handoffRulesSource, /function inanimateObjectivity\(/);
+      assert.doesNotMatch(handoffRulesSource, /function realisticConversation|function npcRambleGuard|characterTurnPacing|DIALOGUE-TURN-LIMITS/);
+      assert.doesNotMatch(handoffRulesSource, /itemAvailability:|applicationContract:/);
+
       assert.match(handoffSource, /narrativeContract\(input\): \{/);
-      assert.match(handoffSource, /renderControlEngine\(input\)/);
-      assert.match(handoffSource, /narrativeFacts\(input\)/);
-      assert.match(handoffSource, /MANDATE: The following instructions are BINDING and NON-NEGOTIABLE\./);
+      assert.match(handoffSource, /MANDATE: The following instructions are BINDING and NON-NEGOTIABLE/);
       assert.match(handoffSource, /#1 - PROSE RULES/);
-      assert.match(handoffSource, /Execute renderControlEngine\(input\) as a hard constraint on the response\./);
-      assert.match(handoffSource, /You MUST narrate the scene using CONCRETE physical evidence from \{\{user\}\}'s physical position\. PRIORITIZE sight, hearing, and touch\./);
-      assert.match(handoffSource, /Include smell and taste ONLY when:/);
-      assert.match(handoffSource, /A CLOSE-RANGE physical source is overpowering and unavoidable\./);
-      assert.match(handoffSource, /Describe smells or tastes as ambient properties of the air or room\./);
-      assert.match(handoffSource, /You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY PERCEIVED IN THE SCENE\./);
-      assert.match(handoffSource, /Write COHESIVE SCENE BEATS\. Combine closely related movement, action, object handling, and consequences into connected prose\./);
-      assert.match(handoffSource, /DO NOT split a single scene beat into a sequence of short, staccato sentences\./);
+      assert.match(handoffSource, /Execute renderControlEngine\(input\) as a hard constraint on the response/);
       assert.match(handoffSource, /#2 - RESOLVED FACTS/);
-      assert.match(handoffSource, /narrativeFacts\(input\) below is the AUTHORITATIVE SCENE RESOLUTION FOR THIS RESPONSE\./);
-      assert.match(handoffSource, /The facts below are immutable and unbreakable\. They override style, drama, pacing, genre expectations, and narrative convenience\./);
-      assert.match(handoffSource, /Do not contradict, override, soften, intensify, reinterpret, or add outcomes beyond the established facts below\./);
-      assert.match(handoffSource, /This is the only source of truth for scene outcomes\. A response that violates these facts is invalid\./);
-      assert.match(handoffSource, /Authoritative resolved scene facts for this response\./);
-      assert.match(handoffSource, /Continue from the last visible scene state\./);
-      assert.match(handoffSource, /Do NOT repeat, paraphrase, replay, or re-resolve any part of previous NPC or \{\{user\}\} actions or dialogue/);
-      assert.match(handoffSource, /Do NOT contradict attemptedActionResults, npcAggressionResult, injuryOrDeath, relationshipState, or any other narrativeFacts entry below\./);
-      assert.match(handoffSource, /Continuity provides context only; it does not create new outcomes, undo resolved facts, or override the current response facts\./);
+      assert.match(handoffSource, /narrativeFacts\(input\) below is the AUTHORITATIVE SCENE RESOLUTION FOR THIS RESPONSE/);
       assert.match(handoffSource, /#3 - OUTPUT/);
-      assert.match(handoffSource, /narrativeFacts\(input\) is authoritative\. You MUST follow these facts strictly\./);
-      assert.match(handoffSource, /Your response MUST begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION\./);
-      assert.match(handoffSource, /Output only final in-character narration between those tags\./);
-      assert.doesNotMatch(handoffSource, /Vary sentence openings and rhythm/);
-      assert.doesNotMatch(handoffSource, /VIVID DIRECT PERCEPTION/);
-      assert.doesNotMatch(handoffSource, /NATURAL GROUNDED PROSE/);
-      assert.doesNotMatch(handoffSource, /Required internal calls/);
-      assert.doesNotMatch(handoffSource, /==NARRATOR_AUTHORITY==/);
-      assert.doesNotMatch(handoffSource, /==RENDER_CONTRACT==/);
-      assert.doesNotMatch(handoffSource, /==NARRATION_CRAFT_DIRECTIVE==/);
-      assert.doesNotMatch(handoffSource, /==RESOLVED_SCENE_FACTS==/);
-      assert.doesNotMatch(handoffSource, /==NARRATOR_HANDOFF==/);
-      assert.doesNotMatch(handoffSource, /==MODEL_INSTRUCTION==/);
+      assert.match(handoffSource, /Your response MUST begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION/);
+      assert.match(handoffSource, /Output only final in-character narration between those tags/);
+
       const narrativeContractSource = handoffSource.slice(
         handoffSource.indexOf('function formatNarrativeContract'),
         handoffSource.indexOf('function renderGenreLensSection'),
       );
       assert.ok(
         narrativeContractSource.indexOf('renderControlEngineNarrativeContract()') < narrativeContractSource.indexOf('renderGenreLensSection(options)'),
-        'renderControlEngine reminder should appear before the genre lens.',
+        'RenderControlEngine reminder should appear before the genre lens.',
       );
       assert.ok(
         narrativeContractSource.indexOf('renderGenreLensSection(options)') < narrativeContractSource.indexOf('renderEconomyLensSection(options)'),
-        'genre lens should appear before the economy lens.',
+        'Genre lens should appear before the economy lens.',
       );
       assert.ok(
         narrativeContractSource.indexOf('renderEconomyLensSection(options)') < narrativeContractSource.indexOf('formatNarrativeFacts({ summary, handoff, resolution, ledger, options })'),
-        'economy lens should appear immediately before narrativeFacts in formatNarrativeContract.',
+        'Economy lens should appear immediately before narrativeFacts.',
       );
       assert.ok(
         narrativeContractSource.indexOf('formatNarrativeFacts({ summary, handoff, resolution, ledger, options })') < narrativeContractSource.indexOf("'#3 - OUTPUT'"),
         'narrativeFacts should appear directly before the output contract.',
       );
-      assert.match(handoffSource, /function embodiedPerception\(response, context\):/);
-      assert.match(handoffSource, /function strictEpistemology\(response, context\):/);
-      assert.match(handoffSource, /function dialogueTurn\(response, context\):/);
-      assert.doesNotMatch(handoffSource, /function realisticConversation/);
-      assert.doesNotMatch(handoffSource, /itemAvailability:/);
-      assert.doesNotMatch(handoffSource, /Execute itemAvailability/);
-      assert.doesNotMatch(handoffSource, /function npcRambleGuard/);
-      assert.doesNotMatch(handoffSource, /characterTurnPacing|DIALOGUE-TURN-LIMITS/);
-      const indexCohesiveSceneBeats = indexSource.slice(
-        indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
-        indexSource.indexOf('function linearChronology(response, input, context):'),
-      ).trim();
-      const handoffCohesiveSceneBeats = handoffSource.slice(
-        handoffSource.indexOf('function cohesiveSceneBeats(response, context):'),
-        handoffSource.indexOf('function dialogueTurn(response, context):'),
-      ).trim();
-      assert.equal(
-        handoffCohesiveSceneBeats.replace(/\r\n/g, '\n'),
-        indexCohesiveSceneBeats.replace(/\r\n/g, '\n'),
-        'cohesiveSceneBeats must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      const indexActiveHandoff = indexSource.slice(
-        indexSource.indexOf('function activeHandoff(response, context):'),
-        indexSource.indexOf('function dialogueTurn(response, context):'),
-      ).trim();
-      const handoffActiveHandoffStart = handoffSource.indexOf('function activeHandoff(response, context):');
-      const handoffActiveHandoff = handoffSource.slice(
-        handoffActiveHandoffStart,
-        handoffSource.indexOf('\n}`;', handoffActiveHandoffStart),
-      ).trim();
-      assert.equal(
-        handoffActiveHandoff.replace(/\r\n/g, '\n'),
-        indexActiveHandoff.replace(/\r\n/g, '\n'),
-        'activeHandoff must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      const indexDialogueTurn = indexSource.slice(
-        indexSource.indexOf('function dialogueTurn(response, context):'),
-        indexSource.indexOf('function cohesiveSceneBeats(response, context):'),
-      ).trim();
-      const handoffDialogueTurn = handoffSource.slice(
-        handoffSource.indexOf('function dialogueTurn(response, context):'),
-        handoffSource.indexOf('function activeHandoff(response, context):'),
-      ).trim();
-      assert.equal(
-        handoffDialogueTurn.replace(/\r\n/g, '\n'),
-        indexDialogueTurn.replace(/\r\n/g, '\n'),
-        'dialogueTurn must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      assert.match(indexDialogueTurn, /During dialogue, each character\/NPC may take AT MOST ONE dialogue turn PER RESPONSE\./);
-      assert.match(indexDialogueTurn, /A dialogue turn MAY contain AT MOST ONE of each component:/);
-      assert.match(indexDialogueTurn, /These components are LIMITS, not a checklist\./);
-      assert.match(indexDialogueTurn, /Intentional refusal, deflection, or avoidance is allowed, but it MUST be observable rather than an accidental omission\./);
-      assert.match(indexDialogueTurn, /Reset or grant another dialogue turn because of an interruption, scene event, or another character's participation\./);
-      assert.doesNotMatch(indexSource, /hypotacticSceneBeats|COHESIVE-ACTION-RESULT/);
-      assert.doesNotMatch(handoffSource, /hypotacticSceneBeats|COHESIVE-ACTION-RESULT/);
-      assert.match(handoffSource, /function linearChronology\(response, input, context\):/);
-      assert.match(handoffSource, /function agencySeparation\(response, input, context\):/);
-      assert.match(handoffSource, /function activeHandoff\(response, context\):/);
-      assert.doesNotMatch(handoffSource, /applicationContract:/);
-      assert.doesNotMatch(handoffSource, /ABSOLUTELY-FORBIDDEN|PROHIBITED:|NON-NEGOTIABLE PROHIBITION/);
-      const handoffOrder = [
-        'function diegeticPhysicality(response, context):',
-        'function strictEpistemology(response, context):',
-        'function inanimateObjectivity(response, context):',
-        'function denotativePhysicality(response, context):',
-        'function embodiedPerception(response, context):',
-        'function strictBehaviorism(response, context):',
-        'function agencySeparation(response, input, context):',
-        'function linearChronology(response, input, context):',
-        'function cohesiveSceneBeats(response, context):',
-        'function dialogueTurn(response, context):',
-        'function activeHandoff(response, context):',
-      ];
-      for (let i = 1; i < handoffOrder.length; i++) {
-        assert.ok(
-          handoffSource.indexOf(handoffOrder[i - 1]) < handoffSource.indexOf(handoffOrder[i]),
-          `${handoffOrder[i - 1]} should appear before ${handoffOrder[i]}.`,
-        );
-      }
-      const mainRulesSource = indexSource.slice(
-        indexSource.indexOf('const DEFAULT_PROSE_RULES_PROMPT'),
-        indexSource.indexOf('const DEFAULT_SETTINGS'),
-      );
-      const mainRuleOrder = [
-        'function activeHandoff(',
-        'function dialogueTurn(',
-        'function cohesiveSceneBeats(',
-        'function linearChronology(',
-        'function agencySeparation(',
-        'function strictBehaviorism(',
-        'function embodiedPerception(',
-        'function denotativePhysicality(',
-        'function inanimateObjectivity(',
-        'function strictEpistemology(',
-        'function diegeticPhysicality(',
-      ];
-      for (let i = 1; i < mainRuleOrder.length; i++) {
-        assert.ok(
-          mainRulesSource.indexOf(mainRuleOrder[i - 1]) < mainRulesSource.indexOf(mainRuleOrder[i]),
-          `${mainRuleOrder[i - 1]} should remain before ${mainRuleOrder[i]} in the full prose rules.`,
-        );
-      }
-      const indexLinearChronology = indexSource.slice(
-        indexSource.indexOf('function linearChronology(response, input, context):'),
-        indexSource.indexOf('function agencySeparation(response, input, context):'),
-      ).trim();
-      const handoffLinearChronology = handoffSource.slice(
-        handoffSource.indexOf('function linearChronology(response, input, context):'),
-        handoffSource.indexOf('function cohesiveSceneBeats(response, context):'),
-      ).trim();
-      assert.equal(
-        handoffLinearChronology.replace(/\r\n/g, '\n'),
-        indexLinearChronology.replace(/\r\n/g, '\n'),
-        'linearChronology must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      assert.match(handoffSource, /You MUST narrate only what comes AFTER \{\{user\}\}'s actions or dialogue\./);
-      assert.match(handoffSource, /DO NOT repeat, paraphrase, summarize, re-stage, or narrate ANY part of \{\{user\}\}'s input\./);
-      const indexAgencySeparation = indexSource.slice(
-        indexSource.indexOf('function agencySeparation(response, input, context):'),
-        indexSource.indexOf('function strictBehaviorism(response, context):'),
-      ).trim();
-      const handoffAgencySeparation = handoffSource.slice(
-        handoffSource.indexOf('function agencySeparation(response, input, context):'),
-        handoffSource.indexOf('function linearChronology(response, input, context):'),
-      ).trim();
-      assert.equal(
-        handoffAgencySeparation.replace(/\r\n/g, '\n'),
-        indexAgencySeparation.replace(/\r\n/g, '\n'),
-        'agencySeparation must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      assert.match(handoffSource, /You MAY narrate immediate involuntary or reflexive reactions directly caused by external stimuli or effects imposed by the scene/);
-      assert.match(handoffSource, /DO NOT narrate \{\{user\}\}'s thoughts, choices, decisions, voluntary actions, dialogue, or feelings beyond the immediate involuntary reaction caused by the scene\./);
-      const indexStrictBehaviorism = indexSource.slice(
-        indexSource.indexOf('function strictBehaviorism(response, context):'),
-        indexSource.indexOf('function embodiedPerception(response, context):'),
-      ).trim();
-      const handoffStrictBehaviorism = handoffSource.slice(
-        handoffSource.indexOf('function strictBehaviorism(response, context):'),
-        handoffSource.indexOf('function agencySeparation(response, input, context):'),
-      ).trim();
-      assert.equal(
-        handoffStrictBehaviorism.replace(/\r\n/g, '\n'),
-        indexStrictBehaviorism.replace(/\r\n/g, '\n'),
-        'strictBehaviorism must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      const indexEmbodiedPerception = indexSource.slice(
-        indexSource.indexOf('function embodiedPerception(response, context):'),
-        indexSource.indexOf('function denotativePhysicality(response, context):'),
-      ).trim();
-      const handoffEmbodiedPerception = handoffSource.slice(
-        handoffSource.indexOf('function embodiedPerception(response, context):'),
-        handoffSource.indexOf('function strictBehaviorism(response, context):'),
-      ).trim();
-      assert.equal(
-        handoffEmbodiedPerception.replace(/\r\n/g, '\n'),
-        indexEmbodiedPerception.replace(/\r\n/g, '\n'),
-        'embodiedPerception must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      assert.doesNotMatch(indexEmbodiedPerception, /SPATIAL CONTINUITY|relative positions|perceive, reach, or interact through/);
-      const indexDenotativePhysicality = indexSource.slice(
-        indexSource.indexOf('function denotativePhysicality(response, context):'),
-        indexSource.indexOf('function inanimateObjectivity(response, context):'),
-      ).trim();
-      const handoffDenotativePhysicality = handoffSource.slice(
-        handoffSource.indexOf('function denotativePhysicality(response, context):'),
-        handoffSource.indexOf('function embodiedPerception(response, context):'),
-      ).trim();
-      assert.equal(
-        handoffDenotativePhysicality.replace(/\r\n/g, '\n'),
-        indexDenotativePhysicality.replace(/\r\n/g, '\n'),
-        'denotativePhysicality must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      const indexInanimateObjectivity = indexSource.slice(
-        indexSource.indexOf('function inanimateObjectivity(response, context):'),
-        indexSource.indexOf('function strictEpistemology(response, context):'),
-      ).trim();
-      const handoffInanimateObjectivity = handoffSource.slice(
-        handoffSource.indexOf('function inanimateObjectivity(response, context):'),
-        handoffSource.indexOf('function denotativePhysicality(response, context):'),
-      ).trim();
-      assert.equal(
-        handoffInanimateObjectivity.replace(/\r\n/g, '\n'),
-        indexInanimateObjectivity.replace(/\r\n/g, '\n'),
-        'inanimateObjectivity must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      assert.match(indexInanimateObjectivity, /ONLY living beings may possess agency, intention, awareness, or emotion/);
-      assert.match(indexInanimateObjectivity, /Physical forces, mechanisms, processes, and objects may ONLY produce concrete physical effects or change physical state/);
-      assert.doesNotMatch(indexInanimateObjectivity, /pathetic fallacy|can take actions/);
-      const indexStrictEpistemology = indexSource.slice(
-        indexSource.indexOf('function strictEpistemology(response, context):'),
-        indexSource.indexOf('function diegeticPhysicality(response, context):'),
-      ).trim();
-      const handoffStrictEpistemology = handoffSource.slice(
-        handoffSource.indexOf('function strictEpistemology(response, context):'),
-        handoffSource.indexOf('function inanimateObjectivity(response, context):'),
-      ).trim();
-      assert.equal(
-        handoffStrictEpistemology.replace(/\r\n/g, '\n'),
-        indexStrictEpistemology.replace(/\r\n/g, '\n'),
-        'strictEpistemology must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      assert.match(indexStrictEpistemology, /You MUST reveal information ONLY through DIRECT sensory evidence available in the scene/);
-      assert.doesNotMatch(indexStrictEpistemology, /\{\{user\}\} cognition|interpretation, attention|Preserve uncertainty/);
-      const indexDiegeticPhysicalityStart = indexSource.indexOf('function diegeticPhysicality(response, context):');
-      const indexDiegeticPhysicality = indexSource.slice(
-        indexDiegeticPhysicalityStart,
-        indexSource.indexOf('\n}`;', indexDiegeticPhysicalityStart),
-      ).trim();
-      const handoffDiegeticPhysicality = handoffSource.slice(
-        handoffSource.indexOf('function diegeticPhysicality(response, context):'),
-        handoffSource.indexOf('function strictEpistemology(response, context):'),
-      ).trim();
-      assert.equal(
-        handoffDiegeticPhysicality.replace(/\r\n/g, '\n'),
-        indexDiegeticPhysicality.replace(/\r\n/g, '\n'),
-        'diegeticPhysicality must be mirrored verbatim in the full prose rules and narrator handoff.',
-      );
-      assert.doesNotMatch(indexDiegeticPhysicality, /policy: WORLD-EFFECTS-NOT-SYSTEM-LABELS|Abilities MUST be narrated THROUGH/);
-      assert.match(handoffSource, /You MUST end every response on ONE ACTIVE, CONCRETE BEAT that \{\{user\}\} can respond to\./);
-      assert.match(handoffSource, /DO NOT end by prompting \{\{user\}\} with a meta question \(e\.g\., "What do you do\?"\) or by describing a character waiting for or expecting \{\{user\}\}'s response\./);
+      assert.doesNotMatch(handoffSource, /DEFAULT_FINAL_WRITING_STYLE_REMINDER|renderFinalWritingStyleReminder|FINAL WRITING STYLE REMINDER/);
+      assert.doesNotMatch(handoffSource, /==NARRATOR_AUTHORITY==|==RENDER_CONTRACT==|==NARRATION_CRAFT_DIRECTIVE==|==RESOLVED_SCENE_FACTS==|==NARRATOR_HANDOFF==|==MODEL_INSTRUCTION==/);
     },
   },
   {
@@ -14041,383 +13896,217 @@ const tests = [
     },
   },
   {
-    name: '47 Prose Guard settings and prompt preserve mechanics while targeting prose violations',
+    name: '47 Prose Guard uses only three targeted phrase fields and exact rule blocks',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
-      const proseGuardPromptSource = source.slice(
-        source.indexOf('function buildProseGuardPrompt'),
-        source.indexOf('function sanitizeProseGuardResponse'),
-      );
-      const denotativePassSource = proseGuardPromptSource.slice(
-        proseGuardPromptSource.indexOf("'PASS 5: denotativePhysicality(response)'"),
-        proseGuardPromptSource.indexOf("'PASS 6: inanimateObjectivity(response)'"),
-      );
-      const diegeticPassSource = proseGuardPromptSource.slice(
-        proseGuardPromptSource.indexOf("'PASS 2: diegeticPhysicality(response)'"),
-        proseGuardPromptSource.indexOf("'PASS 3: agencySeparation(response, RECENT_USER_INPUT)'"),
-      );
-      const inanimatePassSource = proseGuardPromptSource.slice(
-        proseGuardPromptSource.indexOf("'PASS 6: inanimateObjectivity(response)'"),
-        proseGuardPromptSource.indexOf("'PASS 7: strictEpistemology(response)'"),
-      );
-      const epistemologyPassSource = proseGuardPromptSource.slice(
-        proseGuardPromptSource.indexOf("'PASS 7: strictEpistemology(response)'"),
-        proseGuardPromptSource.indexOf("'PASS 8: linearChronology(response, RECENT_USER_INPUT)'"),
-      );
-      assert.match(source, /postNarrationProseGuardEnabled:\s*true/);
-      assert.doesNotMatch(source, /proseGuardConnectionProfile/);
-      assert.doesNotMatch(source, /proseGuardFormattingEnabled:\s*true/);
-      assert.doesNotMatch(source, /proseGuardFormattingPrompt:\s*DEFAULT_PROSE_GUARD_FORMATTING_PROMPT/);
+      const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
+
+      assert.equal(manifest.version, '0.9.7');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
-      assert.match(source, /proseGuardInanimateObjectivityBannedPhrases:\s*DEFAULT_PROSE_GUARD_INANIMATE_OBJECTIVITY_BANNED_PHRASES/);
-      assert.match(source, /id="structured_preflight_prose_guard_enabled"/);
-      assert.doesNotMatch(source, /id="structured_preflight_prose_guard_profile"/);
-      assert.doesNotMatch(source, /id="structured_preflight_prose_guard_formatting_enabled"/);
-      assert.doesNotMatch(source, /id="structured_preflight_prose_guard_formatting_prompt"/);
-      assert.doesNotMatch(source, /id="structured_preflight_reset_prose_guard_formatting"/);
-      assert.match(source, /structured_preflight_prose_guard_bans_drawer/);
-      assert.match(source, /structured_preflight_prose_guard_bans_strict_behaviorism/);
-      assert.match(source, /structured_preflight_prose_guard_bans_denotative_physicality/);
-      assert.match(source, /structured_preflight_prose_guard_bans_inanimate_objectivity/);
+      assert.match(source, /proseGuardEmbodiedPerceptionBannedPhrases:\s*DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES/);
+      assert.doesNotMatch(source, /proseGuardInanimateObjectivityBannedPhrases/);
+      assert.doesNotMatch(source, /ruleName:\s*'inanimateObjectivity'/);
+      assert.match(source, /rulePrompt:\s*getProseRuleBlock\(field\.ruleName\)/);
+      assert.match(source, /function getProseRuleBlock\(ruleName\)/);
+      assert.match(source, /function strictBehaviorism\(response, context\)/);
+      assert.match(source, /function denotativePhysicality\(response, context\)/);
+      assert.match(source, /function embodiedPerception\(response, context\)/);
+      assert.match(source, /if \(extension_settings\[SETTINGS_KEY\]\[key\] === undefined\)/);
       assert.match(source, /data-structured-preflight-reset-prose-guard-bans/);
-      assert.match(source, /if \(extension_settings\[SETTINGS_KEY\]\[key\] === undefined\) \{\s*extension_settings\[SETTINGS_KEY\]\[key\] = value;/);
-      assert.match(source, /for \(const \{ id, key \} of PROSE_GUARD_TARGETED_BAN_FIELDS\) \{\s*document\.getElementById\(id\)\?\.addEventListener\('input',[\s\S]*settings\[key\] = String\(event\.target\?\.value \?\? ''\);\s*saveExtensionSettings\(\);/);
-      assert.match(source, /function buildProseGuardPrompt\(narrationText, latestUserText = ''\)/);
-      assert.match(source, /ONE-CALL PRIVATE PASS PIPELINE/);
-      assert.match(source, /embodiedPerception\(response\)/);
-      assert.match(source, /denotativePhysicality\(response\)/);
-      assert.match(source, /linearChronology\(response, RECENT_USER_INPUT\)/);
-      assert.match(source, /activeHandoff\(response\)/);
-      assert.doesNotMatch(source, /formattingControl\(response\)/);
-      assert.match(source, /integrityCheck\(original, corrected\)/);
-      assert.doesNotMatch(source, /DEFAULT_PROSE_GUARD_FORMATTING_PROMPT/);
-      assert.doesNotMatch(source, /Underline all character names, placeholder names, location names, unnamed scene roles, scene placeholders, and role references/);
-      assert.doesNotMatch(source, /__the shopkeeper__/);
-      assert.doesNotMatch(source, /All spoken dialogue must be inside quotation marks/);
-      assert.doesNotMatch(source, /Add quotation marks only around dialogue that is already present/);
-      assert.doesNotMatch(source, /One speaker equals one cohesive block/);
-      assert.doesNotMatch(source, /Use \*\*\* only for environmental narration to character block/);
-      assert.match(source, /PROTECTED FACTS \/ INTEGRITY LOCK/);
-      assert.doesNotMatch(source, /Required formatting is protected unless it violates endpoint control/);
-      assert.doesNotMatch(source, /valid __underlined names\/roles\/locations__ and valid dialogue quotation marks/);
-      assert.match(source, /Do not add or remove actions, reactions, dialogue, information, refusals, intimacy, mechanics, or any other scene content/);
-      assert.match(source, /If explicit after-beat tailing is present, replace the smallest contiguous span containing the handoff and its trailing material/);
-      assert.doesNotMatch(proseGuardPromptSource, /Delete only invalid|Deletion is a last resort|remove only the final trailing sentence|trim only the final trailing sentence/);
-      assert.match(source, /NEVER delete narration\. Every edit MUST replace a non-empty exact source span with non-empty corrected prose/);
-      assert.match(source, /Everything outside an accepted edit MUST remain byte-for-byte unchanged/);
-      assert.match(source, /A replacement MUST NOT repeat or closely paraphrase a complete sentence or concrete action already present elsewhere in TEXT_TO_CHECK/);
-      assert.match(source, /Preserve valid explicit, sensual, romantic, violent, tense, atmospheric, environmental, and intimate detail/);
-      assert.match(source, /You are not a style improver, summarizer, censor, or second narrator/);
-      assert.match(source, /success or failure, landed contact, injuries, death, condition, intimacy permission/);
-      assert.match(source, /PROSE_GUARD_RULES/);
-      assert.match(source, /diegeticPhysicality\(response\)/);
-      assert.match(source, /agencySeparation\(response, RECENT_USER_INPUT\)/);
-      assert.match(source, /strictBehaviorism\(response\)/);
-      assert.match(source, /inanimateObjectivity\(response\)/);
-      assert.match(source, /strictEpistemology\(response\)/);
-      assert.match(source, /repair only clear smell\/taste gate violations and ambient air\/room smell or taste phrasing/);
-      assert.doesNotMatch(proseGuardPromptSource, /spatial-continuity|relative positions, distance|movement before using the new position|perceive, reach, or interact through|Keep established position|Repair only obvious impossibilities|minimum necessary movement/);
-      assert.match(source, /repair labels or explanations of activated abilities, spells, powers, traits, supernatural effects, activation, casting, or system mechanics only/);
-      assert.match(diegeticPassSource, /An ability, spell, power, trait, or supernatural-effect name explicitly spoken in dialogue is allowed/);
-      assert.match(diegeticPassSource, /Replace only the violating label or explanation with observable effects and consequences already present or directly implied by TEXT_TO_CHECK/);
-      assert.doesNotMatch(diegeticPassSource, /triggers her passive|Visible preparation|casts X|uses X|activates X/);
-      assert.match(source, /Repair narration that writes \{\{user\}\} speech, thoughts, feelings, choices/);
-      assert.match(source, /Ban indirect skin-color\/emotion workarounds/);
-      assert.match(source, /something flickers in the eyes/);
-      assert.match(source, /Repair only inanimate things assigned agency, intention, awareness, memory, or emotion/);
-      assert.match(inanimatePassSource, /Preserve concrete physical effects and state changes produced by forces, mechanisms, processes, or objects/);
-      assert.doesNotMatch(inanimatePassSource, /act like living beings|press with intent|judge/);
-      assert.match(source, /Repair only unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore/);
-      assert.match(epistemologyPassSource, /Do not invent evidence or substitute another unearned fact/);
-      assert.doesNotMatch(epistemologyPassSource, /\{\{user\}\} cognition|\{\{user\}\} perception|Use uncertainty|hidden motives|species, loyalties/);
-      assert.match(source, /repair clear metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration only/);
-      assert.match(source, /Treat rooms breathing, words hanging, silence stretching, and equivalent nonliteral constructions as violations/);
-      assert.match(source, /Replace only the violating phrase with literal, physically clear prose grounded in concrete scene evidence/);
-      assert.doesNotMatch(denotativePassSource, /Lazy voice shorthand|Unsupported emotion labels|barely above a whisper|"not X, but Y"|dropped like a stone|the word lands flat and hard/);
-      assert.match(source, /RECENT_USER_INPUT/);
-      assert.match(source, /PASS 1: embodiedPerception\(response\)/);
-      assert.match(source, /Smell and taste are locked unless RECENT_USER_INPUT explicitly sniffs/);
-      assert.match(source, /Do not describe smells or tastes as ambient properties of the air or room/);
-      assert.match(source, /Do not use ambient smell or taste in place of concrete, descriptive scene narration/);
-      assert.match(source, /Repair smell\/taste only when it is clearly used for "the air," "the room," "the place," atmosphere, mood, romance/);
-      assert.match(source, /Do not add a new smell or taste while repairing another violation/);
-      assert.match(source, /PASS 8: linearChronology\(response, RECENT_USER_INPUT\)/);
-      assert.match(source, /PASS 9: activeHandoff\(response\)/);
-      assert.match(source, /PASS 10: integrityCheck\(original, corrected\)/);
-      assert.match(source, /Do not echo, restate, paraphrase, summarize, restage, re-perform, or narrate back RECENT_USER_INPUT/);
-      assert.match(source, /start at the point right after the latest user input/);
-      assert.match(source, /Invalid chronology restatement/);
-      assert.doesNotMatch(proseGuardPromptSource, /npcRambleGuard|realisticConversation/);
-      assert.doesNotMatch(proseGuardPromptSource, /cohesiveSceneBeats/);
-      assert.doesNotMatch(proseGuardPromptSource, /applicationContract/);
-      assert.doesNotMatch(proseGuardPromptSource, /itemAvailability/);
-      assert.match(source, /End on an active, concrete beat that \{\{user\}\} can respond to/);
-      assert.match(source, /forces a clear decision and immediately requires a response/);
-      assert.match(source, /If an NPC speaks or acts toward the user/);
-      assert.match(source, /If no NPC is driving the beat/);
-      assert.match(source, /Do not invent a question, threat, gesture, stare, pause, silence, or waiting beat/);
-      assert.match(source, /Never end by prompting the user to act/);
-      assert.match(source, /HARD STOP: if explicit after-beat tailing is present, return one replacement for the smallest contiguous span containing the handoff and tail/);
-      assert.match(source, /mood-only silence/);
-      assert.match(source, /Do not replace after-beat tailing with different after-beat tailing\. Do not omit the existing scene information\./);
-      assert.match(source, /Invalid after-beat tail/);
-      assert.match(source, /GOOD REPLACEMENT PATTERN/);
-      assert.match(source, /If a proposed correction would change protected facts, return no edit for that text/);
-      assert.match(source, /Each ordinary edit MUST target the smallest exact violating span and MUST remain within one sentence/);
-      assert.match(source, /The ONLY permitted multi-sentence edit is an activeHandoff repair/);
-      assert.match(source, /If a repair cannot satisfy this scope, return no edit for that text/);
-      assert.match(source, /Multi-sentence replacement is forbidden except for explicit activeHandoff tailing/);
-      assert.match(source, /function collectTargetedProseBanFindings\(narrationText, settings = getSettings\(\)\)/);
-      assert.match(source, /function buildTargetedProseBanRepairPrompt\(narrationText, findings, latestUserText = ''\)/);
-      assert.match(source, /Return one exact replacement edit for the ENTIRE sentence containing each detected violation/);
-      assert.match(source, /Everything outside an accepted edit MUST remain byte-for-byte unchanged/);
-      assert.match(editSource, /BEGIN_PROSE_GUARD_EDITS/);
-      assert.match(source, /replacementText MUST contain substantive corrected narration/);
-      assert.match(source, /function sanitizeProseGuardResponse[\s\S]*parseProseGuardEditPayload[\s\S]*applyProseGuardEdits/);
-      assert.match(source, /strictBehaviorism: character\/NPC state and emotion must be rendered through external behavior\/action only/);
-      assert.match(source, /denotativePhysicality: narration must stay literal and physically grounded/);
-      assert.match(source, /inanimateObjectivity: only living beings may possess agency, intention, awareness, memory, or emotion/);
-      assert.match(source, /buildTargetedProseBanPhraseRegex/);
-      assert.match(source, /findSentenceBoundsForIndex/);
-      assert.match(source, /requestTargetedProseBanRepairWithTimeout/);
-      assert.match(source, /applyTargetedProseBanRepairIfNeeded/);
-      assert.match(source, /function collectNarrationUnderlinePhrases\(\{ trackerDisplaySnapshot = null, pendingRun = null, context = null \} = \{\}\)/);
-      assert.match(source, /pendingRun\?\.nameGeneration\?\.namePool/);
-      assert.match(source, /for \(const key of \['male', 'female', 'location'\]\)/);
-      assert.ok(source.includes('add(`the ${spaced}`);'));
-      assert.match(source, /function underlineNarrationPhrases/);
-      assert.match(source, /function applyDeterministicNarrationFormatting/);
-      assert.doesNotMatch(source, /if \(!getSettings\(\)\.proseGuardFormattingEnabled\) return narrationText/);
-      assert.match(source, /narrationText = applyDeterministicNarrationFormatting\(narrationText/);
+
+      assert.match(editSource, /export function collectProseGuardSentenceFindings/);
+      assert.match(editSource, /export function applyProseGuardSentenceRepairs/);
+      assert.match(editSource, /export function parseProseGuardRepairPayload/);
+      assert.match(source, /includeSentenceRepairs/);
+      assert.doesNotMatch(source, /includeProseEdits|proseEdits/);
+      assert.doesNotMatch(source, /buildProseGuardPrompt|requestProseGuardCorrection|requestCombinedPostNarrationPass|STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
     },
   },
   {
-    name: '47a Prose Guard edits preserve untouched narration and reject deletion',
+    name: '47a deterministic phrase findings ignore dialogue and group one sentence',
     run() {
-      const source = 'Keep this exactly.\nHer jaw tightened.\nKeep this too.\nHer jaw tightened.';
-      const parsed = parseProseGuardEditPayload([
+      const rules = [
+        { ruleName: 'strictBehaviorism', phrases: ['breath catches'] },
+        { ruleName: 'denotativePhysicality', phrases: ['silence stretches'] },
+        { ruleName: 'embodiedPerception', phrases: ['room smells'] },
+      ];
+      const source = 'Maria says, "Her breath catches." Outside, her breath catches while silence stretches and the room smells of smoke.';
+      const findings = collectProseGuardSentenceFindings(source, rules);
+
+      assert.equal(findings.length, 1);
+      assert.equal(findings[0].id, 'PG_SENTENCE_1');
+      assert.equal(findings[0].sentence, 'Outside, her breath catches while silence stretches and the room smells of smoke.');
+      assert.deepEqual(findings[0].ruleNames, ['strictBehaviorism', 'denotativePhysicality', 'embodiedPerception']);
+      assert.equal(findings[0].matches.length, 3);
+      assert.equal(findings[0].matches.filter(match => match.ruleName === 'strictBehaviorism').length, 1);
+
+      assert.deepEqual(
+        collectProseGuardSentenceFindings('Maria says, "Her breath catches."', rules),
+        [],
+      );
+
+      const quotedContinuation = collectProseGuardSentenceFindings(
+        'Maria asks, "Are you sure?" while her breath catches.',
+        rules,
+      );
+      assert.equal(quotedContinuation[0].sentence, 'Maria asks, "Are you sure?" while her breath catches.');
+
+      const separateSentence = collectProseGuardSentenceFindings(
+        'Maria asks, "Are you sure?" Her breath catches.',
+        rules,
+      );
+      assert.equal(separateSentence[0].sentence, 'Her breath catches.');
+    },
+  },
+  {
+    name: '47b sentence repairs are code-owned, non-deleting, and quote-preserving',
+    run() {
+      const rules = [{ ruleName: 'strictBehaviorism', phrases: ['breath catches'] }];
+      const source = 'Maria says, "Stay here," while her breath catches.';
+      const findings = collectProseGuardSentenceFindings(source, rules);
+      assert.equal(findings.length, 1);
+      const findingId = findings[0].id;
+
+      const validPayload = parseProseGuardRepairPayload([
         PROSE_GUARD_EDITS_START,
-        '{"proseEdits":[{"originalText":"Her jaw tightened.","replacementText":"She pushed the chair back.","occurrence":2}]}',
+        JSON.stringify({
+          sentenceRepairs: [{
+            findingId,
+            replacementSentence: 'Maria says, "Stay here," while she steps back.',
+          }],
+        }),
         PROSE_GUARD_EDITS_END,
       ].join('\n'));
-      const repaired = applyProseGuardEdits(source, parsed);
-      assert.equal(repaired.narrationText, 'Keep this exactly.\nHer jaw tightened.\nKeep this too.\nShe pushed the chair back.');
-      assert.equal(repaired.changed, true);
+      const repaired = applyProseGuardSentenceRepairs(source, findings, validPayload, { rules });
+      assert.equal(repaired.narrationText, 'Maria says, "Stay here," while she steps back.');
+      assert.equal(repaired.appliedRepairs.length, 1);
 
-      const unchanged = applyProseGuardEdits(source, { proseEdits: [] });
-      assert.equal(unchanged.narrationText, source);
-      assert.equal(unchanged.changed, false);
-
-      const ignoredNoOp = applyProseGuardEdits(source, {
-        proseEdits: [{ originalText: 'Her jaw tightened.', replacementText: 'Her jaw tightened.', occurrence: 1 }],
-      });
-      assert.equal(ignoredNoOp.narrationText, source);
-      assert.equal(ignoredNoOp.changed, false);
-      assert.deepEqual(ignoredNoOp.edits, []);
-
-      const mixedNoOpAndRepair = applyProseGuardEdits(source, {
-        proseEdits: [
-          { originalText: 'Keep this exactly.', replacementText: 'Keep this exactly.', occurrence: 1 },
-          { originalText: 'Her jaw tightened.', replacementText: 'She pushed the chair back.', occurrence: 2 },
-          { originalText: 'Her jaw tightened.', replacementText: 'She pushed the chair back.', occurrence: 2 },
-        ],
-      });
-      assert.equal(mixedNoOpAndRepair.narrationText, repaired.narrationText);
-      assert.equal(mixedNoOpAndRepair.edits.length, 1);
-
-      assert.throws(
-        () => applyProseGuardEdits('Phoebe tucks a strand of cyan hair behind her ear and straightens up against the wall, pulling the blanket tighter around her knees. Her eyes soften.', {
-          proseEdits: [{
-            originalText: 'Her eyes soften.',
-            replacementText: 'She tucks a strand of cyan hair behind her ear and straightens up against the wall, pulling the blanket tighter around her knees.',
-            occurrence: 1,
-          }],
-        }),
-        /repeated or closely duplicated existing narration/,
-      );
-      assert.throws(
-        () => applyProseGuardEdits('Her eyes soften.', {
-          proseEdits: [{
-            originalText: 'Her eyes soften.',
-            replacementText: 'She tucks a strand of hair behind her ear. She tucks a strand of hair behind her ear.',
-            occurrence: 1,
-          }],
-        }),
-        /repeated narration inside its replacement/,
-      );
-
-      assert.throws(
-        () => applyProseGuardEdits(source, {
-          proseEdits: [{ originalText: 'Her jaw tightened.', replacementText: '', occurrence: 1 }],
-        }),
-        /attempted to delete narration/,
-      );
-      assert.throws(
-        () => applyProseGuardEdits('Alice draws her sword, blocks the doorway, and says, "You will not pass."', {
-          proseEdits: [{
-            originalText: 'Alice draws her sword, blocks the doorway, and says, "You will not pass."',
-            replacementText: '.',
-            occurrence: 1,
-          }],
-        }),
-        /attempted to delete narration/,
-      );
-      assert.throws(
-        () => applyProseGuardEdits('Alice draws her sword, blocks the doorway, and says, "You will not pass."', {
-          proseEdits: [{
-            originalText: 'Alice draws her sword, blocks the doorway, and says, "You will not pass."',
-            replacementText: 'Alice leaves.',
-            occurrence: 1,
-          }],
-        }),
-        /attempted to remove substantial narration/,
-      );
-      assert.throws(
-        () => applyProseGuardEdits('abcdef', {
-          proseEdits: [
-            { originalText: 'abc', replacementText: 'ABC', occurrence: 1 },
-            { originalText: 'bcd', replacementText: 'BCD', occurrence: 1 },
-          ],
-        }),
-        /overlapping edits/,
-      );
-      assert.throws(
-        () => applyProseGuardEdits(source, {
-          proseEdits: [{
-            originalText: 'A sentence that is not present.',
-            replacementText: 'A corrected sentence that remains fully present.',
-            occurrence: 1,
-          }],
-        }),
-        /did not match the requested occurrence/,
-      );
-      assert.throws(
-        () => applyProseGuardEdits('First sentence. Second sentence.', {
-          proseEdits: [{ originalText: 'First sentence. Second sentence.', replacementText: 'A complete rewrite.', occurrence: 1 }],
-        }),
-        /entire multi-sentence narration/,
-      );
-      const handoffSource = 'A cart rattles past behind Phoebe. She says, "Come with me."';
-      const handoffRepair = applyProseGuardEdits(handoffSource, {
-        proseEdits: [{
-          originalText: handoffSource,
-          replacementText: 'A cart rattles past behind Phoebe while she says, "Come with me."',
-          occurrence: 1,
+      const unknownFinding = applyProseGuardSentenceRepairs(source, findings, {
+        sentenceRepairs: [{
+          findingId: 'PG_SENTENCE_999',
+          replacementSentence: 'Maria says, "Stay here," while she steps back.',
         }],
-      });
-      assert.equal(handoffRepair.narrationText, 'A cart rattles past behind Phoebe while she says, "Come with me."');
-      assert.match(handoffRepair.narrationText, /Phoebe/);
-      assert.match(handoffRepair.narrationText, /"Come with me\."/);
-      const longSource = 'a'.repeat(800);
+      }, { rules });
+      assert.equal(unknownFinding.narrationText, source);
+      assert.match(unknownFinding.rejectedRepairs[0].reason, /unknown findingId/);
+
+      const unsafeReplacement = applyProseGuardSentenceRepairs(source, findings, {
+        sentenceRepairs: [{
+          findingId,
+          replacementSentence: 'Maria says, "Leave now," while she steps back.',
+        }],
+      }, { rules });
+      assert.equal(unsafeReplacement.narrationText, source);
+      assert.match(unsafeReplacement.rejectedRepairs[0].reason, /changed quoted dialogue/);
+
+      const replacementWithViolation = applyProseGuardSentenceRepairs(source, findings, {
+        sentenceRepairs: [{
+          findingId,
+          replacementSentence: 'Maria says, "Stay here," while breath catches.',
+        }],
+      }, { rules });
+      assert.equal(replacementWithViolation.narrationText, source);
+      assert.match(replacementWithViolation.rejectedRepairs[0].reason, /targeted phrase violation/);
+
+      const destructiveReplacement = applyProseGuardSentenceRepairs(
+        'Maria lifts the cup by the window while her breath catches.',
+        collectProseGuardSentenceFindings(
+          'Maria lifts the cup by the window while her breath catches.',
+          rules,
+        ),
+        {
+          sentenceRepairs: [{
+            findingId: 'PG_SENTENCE_1',
+            replacementSentence: 'Maria steps away from the window.',
+          }],
+        },
+        { rules },
+      );
+      assert.equal(destructiveReplacement.narrationText, 'Maria lifts the cup by the window while her breath catches.');
+      assert.match(destructiveReplacement.rejectedRepairs[0].reason, /removed too much source content/);
+
       assert.throws(
-        () => applyProseGuardEdits(longSource, {
-          proseEdits: [{ originalText: 'a'.repeat(700), replacementText: 'A narrower rewrite.', occurrence: 1 }],
+        () => parseProseGuardRepairPayload({
+          sentenceRepairs: [],
+          commentary: 'rewrite complete',
         }),
-        /covered too much/,
+        /unauthorized field/,
+      );
+
+      const duplicateSource = 'Phoebe tucks a strand of cyan hair behind her ear and straightens against the wall. Her eyes soften.';
+      const duplicateFindings = collectProseGuardSentenceFindings(duplicateSource, [
+        { ruleName: 'strictBehaviorism', phrases: ['eyes soften'] },
+      ]);
+      const duplicateRepair = applyProseGuardSentenceRepairs(duplicateSource, duplicateFindings, {
+        sentenceRepairs: [{
+          findingId: duplicateFindings[0].id,
+          replacementSentence: 'Phoebe tucks a strand of cyan hair behind her ear and straightens against the wall.',
+        }],
+      }, { rules: [{ ruleName: 'strictBehaviorism', phrases: ['eyes soften'] }] });
+      assert.equal(duplicateRepair.narrationText, duplicateSource);
+      assert.match(duplicateRepair.rejectedRepairs[0].reason, /duplicated existing narration/);
+
+      const repeatedRepairSource = 'The silence stretches. The tension coils.';
+      const repeatedRepairRules = [
+        { ruleName: 'denotativePhysicality', phrases: ['silence stretches', 'tension coils'] },
+      ];
+      const repeatedRepairFindings = collectProseGuardSentenceFindings(repeatedRepairSource, repeatedRepairRules);
+      const repeatedRepair = applyProseGuardSentenceRepairs(repeatedRepairSource, repeatedRepairFindings, {
+        sentenceRepairs: repeatedRepairFindings.map(finding => ({
+          findingId: finding.id,
+          replacementSentence: 'She steps back.',
+        })),
+      }, { rules: repeatedRepairRules });
+      assert.equal(repeatedRepair.appliedRepairs.length, 1);
+      assert.equal(repeatedRepair.rejectedRepairs.length, 1);
+      assert.match(repeatedRepair.rejectedRepairs[0].reason, /repeated the same narration/);
+
+      assert.throws(
+        () => parseProseGuardRepairPayload({
+          sentenceRepairs: [{ findingId, replacementSentence: '' }],
+        }),
+        /attempted to delete narration/,
+      );
+      assert.throws(
+        () => parseProseGuardRepairPayload({
+          sentenceRepairs: [{ findingId, replacementSentence: 'First sentence.\nSecond sentence.' }],
+        }),
+        /crossed a line boundary/,
+      );
+      assert.throws(
+        () => parseProseGuardRepairPayload({
+          sentenceRepairs: [{ findingId, replacementSentence: 'BEGIN_FINAL_NARRATION Maria steps back.' }],
+        }),
+        /structured-output artifact/,
       );
     },
   },
   {
-    name: '48 Prose Guard runs before tracker and tracker receives corrected narration',
+    name: '48 targeted Prose Guard runs before one separate tracker call',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
-      const guardIndex = source.indexOf('const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(');
-      const guardCallWithUserInputIndex = source.indexOf("const proseGuardRaw = await requestProseGuardCorrectionWithTimeout(narrationText, pendingRun?.latestUserText || ''");
-      const combinedIndex = source.indexOf('const combinedRaw = await requestCombinedPostNarrationPassWithTimeout({');
-      const combinedParseIndex = source.indexOf('const combinedResult = parseCombinedPostNarrationResponse(combinedRaw, narrationText);');
-      const combinedTrackerIndex = source.indexOf('combinedTrackerDelta = combinedResult.trackerDelta;');
-      const broadGuardAppliedIndex = source.indexOf('broadProseGuardAlreadyApplied = true;', combinedTrackerIndex);
-      const targetedRepairIndex = source.indexOf('const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, pendingRun?.latestUserText || \'\'', combinedTrackerIndex);
-      const targetedCombinedInvalidationIndex = source.indexOf('if (targetedRepair.changed) {', targetedRepairIndex);
-      const trackerIndex = source.indexOf('const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout({');
-      const displayIndex = source.indexOf('message.extra.display_text = narrationText');
-      assert.ok(guardIndex > 0 || guardCallWithUserInputIndex > 0, 'Prose Guard request call missing.');
-      assert.ok(guardCallWithUserInputIndex > 0, 'Prose Guard must receive latest user input for chronology checks.');
-      assert.ok(combinedIndex > 0, 'Combined Prose Guard + Tracker pass should exist.');
-      assert.ok(combinedParseIndex > combinedIndex, 'Combined response must be parsed after combined request.');
-      assert.ok(combinedTrackerIndex > combinedParseIndex, 'Combined tracker delta must be extracted after corrected narration parse.');
-      assert.ok(broadGuardAppliedIndex > combinedTrackerIndex, 'Combined broad Prose Guard pass should be marked before targeted repair can invalidate tracker delta.');
-      assert.ok(targetedRepairIndex > combinedTrackerIndex, 'Targeted Prose Guard repair must run after broad Prose Guard correction.');
-      assert.ok(targetedCombinedInvalidationIndex > targetedRepairIndex, 'Combined tracker delta must be invalidated when targeted repair changes narration.');
-      assert.match(source, /if \(!combinedTrackerDelta && proseGuardEnabled && narrationText && !broadProseGuardAlreadyApplied\)/);
-      assert.ok(trackerIndex > guardCallWithUserInputIndex, 'Separate Tracker update fallback must run after Prose Guard fallback.');
-      assert.ok(displayIndex > trackerIndex, 'Final displayed narration should use the post-guard narration text.');
-      assert.match(source, /function canUseCombinedPostNarrationPass/);
-      assert.doesNotMatch(source, /trackerProfile === proseGuardProfile/);
-      assert.match(source, /function canUseCombinedPostNarrationPass[\s\S]*if \(settings\.postNarrationProseGuardEnabled === false\) return false;[\s\S]*return true;/);
-      assert.match(source, /STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
-      assert.match(source, /The tracker delta MUST describe the narration produced by applying proseEdits/);
-      assert.match(editSource, /BEGIN_PROSE_GUARD_EDITS/);
-      assert.match(source, /NEVER return replacement narration and NEVER delete narration/);
-      assert.match(source, /Every ordinary prose edit MUST remain within one sentence/);
-      assert.match(source, /Each ordinary edit stays within one sentence; only a strictly information-preserving activeHandoff reorder may span sentences/);
-      assert.match(source, /Every ordinary edit MUST stay within one sentence/);
-      assert.match(source, /parseCombinedPostNarrationResponse/);
+
+      const targetedIndex = source.indexOf('const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions);');
+      const trackerRequestIndex = source.indexOf('const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout({', targetedIndex);
+      const trackerParseIndex = source.indexOf('const postNarrationDelta = parsePostNarrationTrackerResponse(trackerRaw, narrationText);', trackerRequestIndex);
+      const displayIndex = source.indexOf('message.extra.display_text = narrationText', trackerParseIndex);
+
+      assert.ok(targetedIndex > 0, 'Targeted Prose Guard call is missing.');
+      assert.ok(trackerRequestIndex > targetedIndex, 'Tracker call must follow targeted Prose Guard.');
+      assert.ok(trackerParseIndex > trackerRequestIndex, 'Tracker response must be parsed after its request.');
+      assert.ok(displayIndex > trackerParseIndex, 'Final display must follow the tracker call.');
+      assert.match(source, /if \(proseGuardEnabled && narrationText\)/);
+      assert.match(source, /const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout\(\{/);
+      assert.match(source, /narrationText,\s*\n\s*trackerDisplaySnapshot/);
       assert.match(source, /function requestPostNarrationUtility/);
       assert.match(source, /sendDeepSeekProfileStructuredRequest/);
-      assert.match(source, /validateStructured\?\.\(structured\)/);
-      assert.match(source, /validateStructured: raw => parseCombinedPostNarrationResponse\(raw, narrationText\)/);
-      assert.match(source, /validateStructured: raw => parsePostNarrationTrackerResponse\(raw, narrationText\)/);
       assert.match(source, /official DeepSeek \$\{purpose\} tool call failed; falling back to validated text output/);
-      assert.match(source, /submit_post_narration_pass/);
-      assert.match(source, /submit_prose_guard_edits/);
-      assert.match(source, /submit_tracker_delta/);
-      assert.match(source, /combined post-narration pass failed; falling back to separate post passes/);
-      assert.match(source, /function requestCombinedPostNarrationPassWithTimeout[\s\S]*requestControl\.cancel\(\)[\s\S]*requestControl\.release\(\)/);
-      assert.match(source, /function requestPostNarrationTrackerDeltaWithTimeout[\s\S]*requestControl\.cancel\(\)[\s\S]*requestControl\.release\(\)/);
-      assert.match(source, /const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout\(\{/);
-      assert.match(source, /let postNarrationDelta = combinedTrackerDelta/);
-      assert.match(source, /setChatInputLocked\(true, 'Finalizing narration\.\.\.'\)/);
-      assert.match(source, /Prose Guard failed; keeping sanitized narrator text/);
-      assert.match(source, /function armNarratorGeneration[\s\S]*setNarratorDepthPrompt\(context, narratorModelContext\)/);
-      assert.match(source, /if \(isNarratorGenerationPromptPass\(\)\) \{[\s\S]*beginProseGuardDisplayIntercept\(pendingGeneration\.type \|\| 'normal'\)/);
-      assert.match(source, /function createPreflightDryRunMarker\(\)[\s\S]*return `\[SPE_DRY:\$\{nonce\}\]`/);
-      assert.match(source, /function isOwnedPreflightDryRun[\s\S]*chatHasPreflightDryRunMarker\(eventData\.chat, dryRun\.marker\)/);
-      assert.match(source, /async function runPreflightDryRun[\s\S]*marker: createPreflightDryRunMarker\(\)[\s\S]*generateSillyTavern\(pendingGeneration\.type \|\| 'normal', \{[\s\S]*automatic_trigger: true,[\s\S]*quiet_prompt: dryRun\.marker,[\s\S]*\}, true, context\)/);
-      assert.match(source, /abort\(true\);\s*await runPreflightDryRun\(context, pendingGeneration\);\s*return true;/);
-      assert.match(source, /if \(eventData\.dryRun === true && !ownedPreflightDryRun\) return;/);
-      assert.match(source, /if \(!ownedPreflightDryRun\) \{\s*throw new Error\('Story Engine semantic preflight reached a real narrator request instead of its owned local dry run\.'\);/);
-      assert.match(source, /stripPreflightDryRunMarkerFromChat\(eventData\.chat, dryRun\.marker\)[\s\S]*dryRun\.phase = 'processing';/);
-      assert.match(source, /if \(state\.preflightDryRun === dryRun\) dryRun\.phase = 'complete';/);
-      assert.doesNotMatch(source, /replacePromptWithReplayNotice|STORY_ENGINE_NATIVE_DEPTH_REPLAY/);
-      assert.match(source, /function appendNarratorContextToPrompt\(chat, narratorContext\)/);
-      assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: true \}\);\s*showProgress\('Computing structured pre-flight\.\.\.'\)/);
-      assert.match(source, /function canHideExpectedProseGuardMessage\(messageId\)/);
-      assert.match(source, /if \(!Number\.isFinite\(normalizedId\) \|\| normalizedId < 0\) return false;/);
-      assert.match(source, /if \(state\.pendingRun\?\.adventureIntro\) return true;/);
-      assert.match(source, /if \(!Number\.isFinite\(expectedMessageId\)\) return false;/);
-      assert.match(source, /function ensureProseGuardDisplayInterceptor\(\)/);
-      assert.match(source, /function beginProseGuardDisplayIntercept\(type, dryRun = false\) \{\s*ensureProseGuardDisplayInterceptor\(\);/);
-      assert.match(source, /function handleGenerationLifecycleStart[\s\S]*ensureProseGuardDisplayInterceptor\(type, params, dryRun\)/);
-      assert.match(source, /\['GENERATION_STARTED', handleGenerationLifecycleStart\]/);
-      assert.match(source, /\['CHAT_COMPLETION_SETTINGS_READY', handleChatCompletionSettingsReady\]/);
-      assert.match(source, /onEvent\(eventType, handler, context, \{ warn: false \}\)/);
-      assert.doesNotMatch(source, /TEXT_COMPLETION_SETTINGS_READY/);
-      assert.doesNotMatch(source, /handleTextCompletionSettingsReady/);
-      assert.match(source, /applyStoryEngineThinkingDisabledPayload\(generateData\)/);
-      assert.match(source, /startAdventureReasoningCleanupPending/);
-      assert.match(source, /function markNextStartAdventureRequestReasoningCleanup\(\)/);
-      assert.match(source, /storyEngineModelRequestGate\.isActive\(\) \|\| state\.startAdventureReasoningCleanupPending/);
-      assert.match(source, /consumeStartAdventureReasoningCleanupIfNeeded\(\)/);
-      assert.doesNotMatch(source, /narratorThinkingDisablePending/);
-      assert.match(source, /withStoryEngineModelRequest/);
-      assert.match(source, /new MutationObserver\(mutations =>/);
-      assert.match(source, /PROSE_GUARD_HIDDEN_MESSAGE_CLASS/);
-      assert.match(source, /function hideProseGuardMessageElement/);
-      assert.match(source, /function requestProseGuardCorrectionWithTimeout/);
-      assert.match(source, /Prose Guard timed out after/);
-      assert.match(source, /setTimeout\(finalize, PROSE_GUARD_DEFER_MS\)/);
-      assert.match(source, /releaseProseGuardDisplayIntercept\(\{ restore: !finalNarrationRendered, messageId \}\)/);
-      assert.match(source, /Story Engine is finalizing narration/);
-      const interceptSource = source.slice(source.indexOf('function attachProseGuardStreamIntercept'), source.indexOf('function beginProseGuardDisplayIntercept'));
-      assert.doesNotMatch(interceptSource, /\.innerHTML\s*=\s*''/);
-      assert.doesNotMatch(interceptSource, /innerHTML\s*=\s*state\.proseGuardStreamOriginalHtml/);
-      assert.doesNotMatch(interceptSource, /new MutationObserver/);
-      assert.doesNotMatch(interceptSource, /characterData:\s*true/);
-      assert.match(source, /PROSE_GUARD_HIDDEN_TEXT_CLASS/);
+      assert.match(source, /function applyTargetedProseBanRepairIfNeeded[\s\S]*if \(!findings\.length\)/);
+      assert.doesNotMatch(source, /buildProseGuardPrompt|requestProseGuardCorrection|requestCombinedPostNarrationPass|parseCombinedPostNarrationResponse|combinedTrackerDelta|broadProseGuardAlreadyApplied|STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
+      assert.doesNotMatch(source, /includeProseEdits|proseEdits/);
     },
   },
   {
@@ -15076,7 +14765,7 @@ const tests = [
       assert.match(source, /function renderProgressionCard\(context = getContext\(\)\)[\s\S]*if \(!isStoryEngineEnabled\(\) \|\| getSettings\(\)\.characterProgressionEnabled === false/);
       assert.match(source, /function maybeRecordProgressionAccomplishment[\s\S]*if \(!isStoryEngineEnabled\(\)\) return false;/);
       assert.match(source, /async function finalizePostNarrationMessage[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*clearRuntimePrompts\(\);\s*releaseProseGuardDisplayIntercept\(\{ restore: true, messageId \}\);\s*return;/);
-      assert.match(source, /async function requestProseGuardCorrection[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
+      assert.match(source, /async function requestTargetedProseBanRepair[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
       assert.match(source, /async function requestPostNarrationTrackerDelta[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
       assert.match(source, /async function requestPlayerSetupText[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
       assert.match(source, /async function requestProgressionText[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
@@ -15129,8 +14818,7 @@ const tests = [
       assert.match(indexSource, /generate as generateSillyTavern,/);
       assert.match(indexSource, /generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{ purpose: 'player setup' \}\)/);
       assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{ purpose: 'targeted Prose Guard repair' \}\)/);
-      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{ purpose: 'combined post-narration pass' \}\)/);
-      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{ purpose: 'Prose Guard' \}\)/);
+      assert.doesNotMatch(indexSource, /purpose: 'Prose Guard'/);
       assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{ purpose: 'post-narration tracker update' \}\)/);
       assert.match(semanticSource, /generateRawData\(options, context, \{ purpose: 'semantic preflight' \}\)/);
       assert.doesNotMatch(indexSource, /context(?:\?\.|\.)generateRawData\s*\(/);
@@ -15721,7 +15409,6 @@ const tests = [
       assert.doesNotMatch(source, /storyEngineModelRequestDepth/);
       assert.match(source, /function createTimedInternalRequestControl[\s\S]*isCurrent: \(\) => !cancelled && parentIsCurrent\(\)[\s\S]*cancel\(\) \{[\s\S]*release\(\)/);
       assert.match(source, /function createTimedInternalRequestControl[\s\S]*registerCancellation\(handler\)[\s\S]*for \(const handler of cancellationHandlers\) handler\(\)/);
-      assert.match(source, /function requestProseGuardCorrectionWithTimeout[\s\S]*requestControl\.cancel\(\)[\s\S]*requestControl\.release\(\)/);
       assert.match(source, /function requestTargetedProseBanRepairWithTimeout[\s\S]*requestControl\.cancel\(\)[\s\S]*requestControl\.release\(\)/);
       assert.match(source, /function withStoryEngineModelRequest[\s\S]*options\?\.registerCancellation[\s\S]*unregisterCancellation\?\.\(\)[\s\S]*releaseRequestToken\(\)/);
       assert.match(source, /submitPlayerAdventureStartPrompt\(prompt, context, actionIdentity\)/);
