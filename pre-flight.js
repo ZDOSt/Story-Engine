@@ -1106,25 +1106,32 @@ function RenderControlEngine(response, input, context) {
 
       Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly expressed through dialogue or observable behavior rather than accidental omission.
 
-      The contribution MUST leave the current exchange active. The direct response itself may do this, or the character/NPC may add ONE brief continuation tied to the SAME exchange: a statement, disclosure, question, or gesture that naturally invites a response.
-
       Once that single contribution is complete, their turn ENDS.
 
     FORBIDDEN:
       - DO NOT answer point by point, ignore earlier input, give a character/NPC multiple conversational turns, or continue after the single contribution is complete.
-      - DO NOT introduce another topic, disguise a monologue as one turn, or include more than ONE response-seeking continuation.
+      - DO NOT introduce another topic or disguise a monologue as one turn.
   }
 
   function activeHandoff(response, context): {
     MANDATE:
-      You MUST end every response on ONE of the following:
-      - Dialogue directed at {{user}}.
-      - An action or concrete gesture directed at {{user}}.
-      - A visible scene change that requires {{user}}'s input.
+      When a character/NPC actively participates in the current exchange, you MUST end your response on ONE of the following:
+
+      - ENVIRONMENTAL:
+        A visible environmental or scene change that requires {{user}}'s input.
+
+      - CONVERSATIONAL:
+        A statement or question to which {{user}} can naturally respond. It does not need to be phrased as a question.
+
+      - ACTION/GESTURE:
+        A concrete action or gesture directed at {{user}} or materially affecting the immediate exchange.
+
+      These are alternative ending types, not a checklist. Use only the ending that naturally results from the scene.
 
     FORBIDDEN:
-      - DO NOT ask {{user}} meta questions or describe a character waiting for or expecting {{user}}'s response.
-      - DO NOT end on filler or distant environmental detail unrelated to the current scene.
+      - DO NOT use meta questions, waiting/expecting language, filler, or unrelated environmental detail.
+      - DO NOT manufacture a handoff solely to satisfy this rule.
+      - DO NOT apply these rules when {{user}} is alone.
   }
 }`;
 }

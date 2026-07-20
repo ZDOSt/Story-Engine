@@ -8031,7 +8031,7 @@ const tests = [
       assert.match(text, /information, evidence, a sign, or an overheard detail/);
       assert.match(text, /Choose the concrete implementation freely/);
       assert.match(text, /do not override the main result, consent limits, attacks, injuries, or relationship facts/);
-      assert.doesNotMatch(text, /Chaos Guide|BENEFICIAL|MODERATE|CLUE|ENVIRONMENT/);
+      assert.doesNotMatch(text, /Chaos Guide|\bBENEFICIAL\b|\bMODERATE\b|\bCLUE\b|\bENVIRONMENT\b/);
     },
   },
   {
@@ -13491,11 +13491,17 @@ const tests = [
 
       assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
       assert.match(mainRulesSource, /function activeHandoff\(response, context\):/);
-      assert.match(mainRulesSource, /You MUST end every response on ONE of the following:/);
-      assert.match(mainRulesSource, /Dialogue directed at \{\{user\}\}/);
-      assert.match(mainRulesSource, /visible scene change that requires \{\{user\}\}'s input/i);
+      assert.match(mainRulesSource, /When a character\/NPC actively participates in the current exchange, you MUST end your response on ONE of the following/);
+      assert.match(mainRulesSource, /ENVIRONMENTAL:[\s\S]*A visible environmental or scene change that requires \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /CONVERSATIONAL:[\s\S]*A statement or question to which \{\{user\}\} can naturally respond/);
+      assert.match(mainRulesSource, /It does not need to be phrased as a question/);
+      assert.match(mainRulesSource, /ACTION\/GESTURE:[\s\S]*A concrete action or gesture directed at \{\{user\}\} or materially affecting the immediate exchange/);
+      assert.match(mainRulesSource, /These are alternative ending types, not a checklist/);
       assert.match(mainRulesSource, /DO NOT ask \{\{user\}\} meta questions/);
       assert.match(mainRulesSource, /DO NOT describe a character waiting for or expecting \{\{user\}\}'s response/);
+      assert.match(mainRulesSource, /DO NOT manufacture a question, statement, gesture, interruption, or scene change solely to create a handoff/);
+      assert.match(mainRulesSource, /DO NOT apply these rules when \{\{user\}\} is alone/);
+      assert.doesNotMatch(mainRulesSource, /You MUST end every response on ONE of the following|Dialogue directed at \{\{user\}\}/);
 
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
       assert.match(mainRulesSource, /Dialogue MUST follow a natural back-and-forth exchange/);
@@ -13503,11 +13509,10 @@ const tests = [
       assert.match(mainRulesSource, /That contribution MUST account for the FULL input directed at them, NOT merely the final sentence or question/);
       assert.match(mainRulesSource, /Related points may be addressed together in one natural response/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
-      assert.match(mainRulesSource, /The contribution MUST leave the current exchange active/);
-      assert.match(mainRulesSource, /ONE brief continuation tied to the SAME exchange/);
       assert.match(mainRulesSource, /Once that single contribution is complete, their turn ENDS/);
       assert.match(mainRulesSource, /DO NOT ignore earlier parts of the input merely to answer its final sentence or question/);
       assert.match(mainRulesSource, /DO NOT disguise a monologue as one turn/);
+      assert.doesNotMatch(mainRulesSource, /The contribution MUST leave the current exchange active|ONE brief continuation tied to the SAME exchange|response-seeking continuation/);
       assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
@@ -13981,7 +13986,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.16');
+      assert.equal(manifest.version, '0.9.18');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
       assert.match(source, /proseGuardEmbodiedPerceptionBannedPhrases:\s*DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES/);
