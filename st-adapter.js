@@ -482,13 +482,14 @@ function assertPersonaWriteCurrent(expectedAvatarId, options = {}) {
 
 export async function sendDefaultChatCompletionToolRequest(messages, responseLength, options = {}) {
     let generateData;
+    const purpose = String(options?.purpose || 'semantic tool call').trim() || 'semantic tool call';
     const chatCompletionSettings = getChatCompletionSettings();
     try {
         const model = await getChatCompletionModel(chatCompletionSettings);
         const params = await createGenerationParameters(chatCompletionSettings, model, 'quiet', messages);
         generateData = params.generate_data;
     } catch (error) {
-        throw adapterTransportError('Could not build SillyTavern chat-completion backend request for semantic tool call.', { cause: error, stage: 'build' });
+        throw adapterTransportError(`Could not build SillyTavern chat-completion backend request for ${purpose}.`, { cause: error, stage: 'build' });
     }
 
     const chatCompletionSource = generateData.chat_completion_source || chatCompletionSettings?.chat_completion_source;
@@ -521,7 +522,10 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     options?.preparePayload?.(generateData);
 
     if (Object.prototype.hasOwnProperty.call(generateData, 'temperature')) {
-        generateData.temperature = 0;
+        const requestedTemperature = Number(options?.temperature);
+        generateData.temperature = Number.isFinite(requestedTemperature)
+            ? Math.max(0, Math.min(2, requestedTemperature))
+            : 0;
     }
 
     let response;
@@ -532,7 +536,7 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
             body: JSON.stringify(generateData),
         });
     } catch (error) {
-        throw adapterTransportError('SillyTavern backend semantic tool-call request failed before provider response.', { cause: error, stage: 'fetch' });
+        throw adapterTransportError(`SillyTavern backend ${purpose} request failed before provider response.`, { cause: error, stage: 'fetch' });
     }
 
     if (!response.ok) {
@@ -542,7 +546,7 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
         } catch {
             body = '';
         }
-        throw adapterTransportError(`SillyTavern backend rejected semantic tool-call request: ${response.status} ${response.statusText}${body ? ` ${body.slice(0, 600)}` : ''}`, {
+        throw adapterTransportError(`SillyTavern backend rejected ${purpose}: ${response.status} ${response.statusText}${body ? ` ${body.slice(0, 600)}` : ''}`, {
             status: response.status,
             body,
             stage: 'response',

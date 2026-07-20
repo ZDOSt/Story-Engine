@@ -27,11 +27,13 @@ import {
     saveChat,
     saveMetadataDebounced,
     saveSettingsDebounced,
+    sendDefaultChatCompletionToolRequest,
     stopGeneration,
     writePersonaDescription,
 } from './st-adapter.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
+import { appendCharacterSheetOutputInstruction, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, describeCharacterSheetRaw, extractCharacterSheetToolPayload, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
@@ -9234,6 +9236,14 @@ function parsePersonaAnalysis(raw) {
 async function generateNewPlayerCharacterSheet(creator, context = getContext()) {
     const stats = normalizeCoreStats(creator.stats || {});
     const identity = creator.identity || {};
+    const genre = normalizePlayerAdventureGenre(identity.genre || 'Fantasy');
+    const generationOptions = {
+        mode: 'new',
+        stats,
+        fixedRace: getLockedPlayerCreatorRace(identity),
+        fixedUserNonHuman: getLockedPlayerCreatorUserNonHuman(identity),
+        genre,
+    };
     const retryNotes = Array.isArray(creator.retryNotes) ? creator.retryNotes : [];
     const statInstruction = buildNewCharacterStatInstruction(stats);
     const genreInstruction = buildNewCharacterGenreInstruction(identity);
@@ -9254,30 +9264,26 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
         {
             role: 'user',
             content:
-                'Return only the finished character sheet in markdown. No preface and no questions.\n\n' +
+                'Produce the complete character-sheet data through the required structured output. Do not write Markdown, a preface, or questions. Supply plain field values only; deterministic code owns the final headings, order, labels, name, and locked stats.\n\n' +
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
                 `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
-                'Use exactly these markdown section headings, in this order: # BASIC INFO, # APPEARANCE, # STATS, # NATURAL WEAPONS, # ABILITIES, # SPELLS, # INVENTORY, # CURRENCY, # GEAR, # CHARACTER ANCHORS.\n' +
-                'Use bold field labels for BASIC INFO, APPEARANCE, and STATS. Use bullets for NATURAL WEAPONS, INVENTORY, CURRENCY, GEAR, and CHARACTER ANCHORS. Named abilities and spells should have a bold name followed by one or two plain sentences stating what the character can do and the direct effect. Do not include rules, mechanics, permission language, or outcome adjudication.\n\n' +
-                'Required sections:\n' +
-                '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age as one integer, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies.\n' +
-                '# APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
-                '# STATS: PHY, MND, CHA copied exactly.\n' +
-                '# NATURAL WEAPONS: concrete offensive body parts only, if any. Write None when the race/body has no clear natural weapon. Examples: horns, claws, fangs, talons, tusks, stinger, crushing tail, biting jaws. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
-                `# ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. It must be a protagonist-grade, genuinely useful capability that ordinary PHY/MND/CHA mechanics do not already cover. It must be deliberately activated, have one clear observable effect, and fit the character's race, body, origin, genre, stats, and concept. Choose a varied result from that context rather than copying a stock template or example. Do not make it a passive trait, ordinary skill, cosmetic or lore-only detail, passive perception, detection-only effect, disguised stat bonus, or spell. Describe what it does in one or two plain sentences. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
-                `# SPELLS: exactly ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell when MND is 7 or higher; otherwise write None. Every genre is eligible. The spell must be a genre-native activated spell or equivalent with one clear observable effect and exactly one primary purpose: offensive, healing, or utilitarian. Do not combine purposes or generate barriers. Adapt the expression and underlying logic to the selected genre, character, and concept rather than importing incompatible conventions. Choose a varied result from that context rather than copying a stock template or example. Describe what it does in one or two plain sentences. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language, and do not create passive traits, broad schools, vague categories, or guaranteed outcomes.\n` +
-                '# INVENTORY: carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy here.\n' +
-                '# CURRENCY: money only, using the genre currency when possible. For fantasy and isekai use silver (sv), for modern use dollars ($), for cyberpunk use credits (cr), and otherwise choose a simple fitting currency. Write exact starting money such as 12 sv, $40, or 30 cr. If none, write None. Do not put currency in INVENTORY or GEAR.\n' +
-                '# GEAR: worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, carried supplies, pack contents, natural weapons, or body anatomy here. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
-                '# CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail.',
+                'Required structured fields:\n' +
+                'BASIC INFO: Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age as one integer, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies. Use an empty string only for an inapplicable optional text field.\n' +
+                'APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Return each fact as a plain label/detail pair. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
+                'NATURAL WEAPONS: concrete offensive body parts only, if any. Use an empty array when the race/body has no clear natural weapon. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
+                `ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. It must be a protagonist-grade, genuinely useful capability that ordinary PHY/MND/CHA mechanics do not already cover. It must be deliberately activated, have one clear observable effect, and fit the character's race, body, origin, genre, stats, and concept. Choose a varied result from that context rather than copying a stock template or example. Do not make it a passive trait, ordinary skill, cosmetic or lore-only detail, passive perception, detection-only effect, disguised stat bonus, or spell. Describe what it does in one or two plain sentences. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
+                `SPELLS: exactly ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell when MND is 7 or higher; otherwise return an empty array. Every genre is eligible. The spell must be a genre-native activated spell or equivalent with one clear observable effect and exactly one primary purpose: offensive, healing, or utilitarian. Do not combine purposes or generate barriers. Adapt the expression and underlying logic to the selected genre, character, and concept rather than importing incompatible conventions. Choose a varied result from that context rather than copying a stock template or example. Describe what it does in one or two plain sentences. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language, and do not create passive traits, broad schools, vague categories, or guaranteed outcomes.\n` +
+                'INVENTORY: carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy here.\n' +
+                'CURRENCY: money only, using the genre currency when possible. For fantasy and isekai use silver (sv), for modern use dollars ($), for cyberpunk use credits (cr), and otherwise choose a simple fitting currency. Write exact starting money such as 12 sv, $40, or 30 cr. Use an empty array if none. Do not put currency in INVENTORY or GEAR.\n' +
+                'GEAR: worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, carried supplies, pack contents, natural weapons, or body anatomy here. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
+                'CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail. For Isekai, deterministic rendering supplies the required death-and-reincarnation premise; do not restate that generic premise.',
         },
     ];
-    const sheetText = sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
-
+    const payload = await requestPlayerSetupStructured(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, generationOptions, {
         temperature: 0.7,
-
-    }));
+    }, context);
+    const sheetText = renderCharacterSheet(payload, generationOptions);
     validatePlayerCreatorSheet(sheetText, creator);
     return sheetText;
 
@@ -9288,7 +9294,7 @@ function getPlayerSetupPersonaName() {
 }
 
 function buildNewCharacterNameInstruction() {
-    return `Use {{user}} exactly as the character name. {{user}} resolves to the current SillyTavern persona name. Do not generate, rename, translate, or embellish the character name.`;
+    return `Deterministic rendering uses {{user}} exactly as the character name. {{user}} resolves to the current SillyTavern persona name. Do not generate, rename, translate, or embellish the character name.`;
 }
 
 function buildNewCharacterSexInstruction(identity = {}) {
@@ -9425,6 +9431,13 @@ function buildNewCharacterRaceInstruction(identity = {}) {
 async function generateExistingPersonaCharacterSheet(creator, context = getContext()) {
 
     const stats = normalizeCoreStats(creator.stats || {});
+    const generationOptions = {
+        mode: 'existing',
+        stats,
+        fixedRace: '',
+        fixedUserNonHuman: '',
+        genre: 'Fantasy',
+    };
 
     const persona = getPersonaText(context);
     const retryNotes = Array.isArray(creator.retryNotes) ? creator.retryNotes : [];
@@ -9461,7 +9474,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
             content:
 
-                'Return only the finished character sheet in markdown. No preface and no questions.\n\n' +
+                'Produce the complete character-sheet data through the required structured output. Do not write Markdown, a preface, or questions. Supply plain field values only; deterministic code owns the final headings, order, labels, name, and locked stats.\n\n' +
 
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
 
@@ -9473,22 +9486,20 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
                 `USER NON-HUMAN IF KNOWN: ${analysis.UserNonHuman || 'unknown'}\n\n` +
 
-                'Use exactly these markdown section headings, in this order: # BASIC INFO, # APPEARANCE, # STATS, # NATURAL WEAPONS, # ABILITIES, # SPELLS, # INVENTORY, # CURRENCY, # GEAR, # CHARACTER ANCHORS.\n' +
-                'Use bold field labels for BASIC INFO, APPEARANCE, and STATS when the source supports them. Use bullets for NATURAL WEAPONS, INVENTORY, CURRENCY, GEAR, and CHARACTER ANCHORS. Preserve explicit facts exactly in meaning while sorting possessions into the matching tracker-aligned sections.\n\n' +
+                'Preserve explicit facts exactly in meaning while sorting possessions into the matching tracker-aligned structured fields. Use empty arrays for list fields with no explicit source facts.\n\n' +
 
                 'Template requirements:\n' +
 
-                '# BASIC INFO: Name, Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and origin/mind notes. Use explicit persona facts only; otherwise write Not specified.\n' +
+                'BASIC INFO: Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and origin/mind notes. Use explicit persona facts only; otherwise write Not specified for required text fields or an empty string for inapplicable optional fields.\n' +
 
-                '# APPEARANCE: preserve explicit appearance facts only, including explicit visible natural weapons/body armaments; otherwise write Not specified.\n' +
-                '# STATS: PHY, MND, CHA copied exactly.\n' +
-                '# NATURAL WEAPONS: preserve explicit offensive body parts only: claws, fangs, horns, talons, tusks, stinger, crushing tail, biting jaws, or similar built-in offensive anatomy. Do not invent missing natural weapons. Do not preserve passive racial traits, anatomy, senses, body texture, vulnerabilities, vague toughness, resistance, immunity, skill boosts, better-at wording, or mechanical advantages here. If none are explicit, write None.\n' +
-                '# ABILITIES: preserve explicit activated non-spell abilities only. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. Do not preserve mundane expertise, combat techniques, hidden bonuses, passive traits, or broad skill competence as abilities. If none are explicit, write Not specified.\n' +
-                '# SPELLS: preserve explicit spells only, maximum 5. If none are explicit, write None. Preserve healing spells, but do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
-                '# INVENTORY: preserve explicit carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, or body armaments here. If none are explicit, write Not specified.\n' +
-                '# CURRENCY: preserve explicit money only. Normalize obvious fantasy money to sv when possible, such as 12 silver coins -> 12 sv. Do not invent money. If none is explicit, write None.\n' +
-                '# GEAR: preserve explicit worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, pack contents, carried supplies, natural weapons, or body anatomy here. If none are explicit, write Not specified.\n' +
-                '# CHARACTER ANCHORS: preserve all important persona notes, origin facts, limits, fighting style, known possessions, and secrecy rules.\n\n' +
+                'APPEARANCE: preserve explicit appearance facts only as plain label/detail pairs, including explicit visible natural weapons/body armaments.\n' +
+                'NATURAL WEAPONS: preserve explicit offensive body parts only: claws, fangs, horns, talons, tusks, stinger, crushing tail, biting jaws, or similar built-in offensive anatomy. Do not invent missing natural weapons. Do not preserve passive racial traits, anatomy, senses, body texture, vulnerabilities, vague toughness, resistance, immunity, skill boosts, better-at wording, or mechanical advantages here.\n' +
+                'ABILITIES: preserve all explicit activated non-spell abilities. If an explicit natural weapon has a special activated effect beyond ordinary bodily use, preserve that effect here. Do not preserve mundane expertise, combat techniques, hidden bonuses, passive traits, or broad skill competence as abilities.\n' +
+                'SPELLS: preserve explicit spells only, maximum 5. Preserve healing spells, but do not preserve resurrection, time/fate/luck manipulation, mind control/charm, broad magic mastery, or vague spell categories unless explicitly central canon.\n' +
+                'INVENTORY: preserve explicit carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, or body armaments here.\n' +
+                'CURRENCY: preserve explicit money only. Normalize obvious fantasy money to sv when possible, such as 12 silver coins -> 12 sv. Do not invent money.\n' +
+                'GEAR: preserve explicit worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, pack contents, carried supplies, natural weapons, or body anatomy here.\n' +
+                'CHARACTER ANCHORS: preserve all important persona notes, origin facts, limits, fighting style, known possessions, and secrecy rules.\n\n' +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
 
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
@@ -9497,50 +9508,41 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
     ];
 
-    const sheetText = sanitizeGeneratedSheet(await requestPlayerSetupText(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, {
-
+    const payload = await requestPlayerSetupStructured(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, generationOptions, {
         temperature: 0.1,
-
-    }));
+    }, context);
+    const sheetText = renderCharacterSheet(payload, generationOptions);
     validatePlayerCreatorSheet(sheetText, creator);
     return sheetText;
-
-}
-
-
-
-function sanitizeGeneratedSheet(raw) {
-
-    const text = extractGeneratedText(raw)
-
-        .replace(/^```(?:markdown|md|text)?\s*/i, '')
-
-        .replace(/```\s*$/i, '')
-
-        .trim();
-
-    if (!text) throw new Error('Character sheet generation returned empty text.');
-
-    return text;
 
 }
 
 function validatePlayerCreatorSheet(sheetText, creator = {}) {
     const identity = creator.identity || {};
     const genre = creator.flow === 'new' ? normalizePlayerAdventureGenre(identity.genre || 'Fantasy') : 'Fantasy';
-    const expectedRace = creator.flow === 'new'
-        ? identity.raceMode === 'specify'
-            ? String(identity.specifiedRace || '').trim()
-            : identity.raceMode === 'pick'
-                ? String(identity.pickedRace || 'Human').trim()
-                : ''
-        : '';
+    const expectedRace = creator.flow === 'new' ? getLockedPlayerCreatorRace(identity) : '';
     return assertValidCharacterSheet(sheetText, {
         stats: normalizeCoreStats(creator.stats || {}),
         expectedRace,
         genre,
         requireNumericAge: creator.flow === 'new' && genre === 'Isekai',
     });
+}
+
+function getLockedPlayerCreatorRace(identity = {}) {
+    if (identity.raceMode === 'specify') return String(identity.specifiedRace || '').trim();
+    if (identity.raceMode === 'pick') return String(identity.pickedRace || 'Human').trim();
+    return '';
+}
+
+function getLockedPlayerCreatorUserNonHuman(identity = {}) {
+    if (identity.raceMode === 'pick') {
+        return /^human$/i.test(String(identity.pickedRace || 'Human').trim()) ? 'N' : 'Y';
+    }
+    if (identity.raceMode === 'specify' && /^human$/i.test(String(identity.specifiedRace || '').trim())) {
+        return 'N';
+    }
+    return '';
 }
 
 
@@ -9585,6 +9587,98 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
     } finally {
         promptReadyBypassGate.release(bypassToken);
     }
+}
+
+async function requestPlayerSetupStructured(prompt, responseLength, generationOptions = {}, requestOptions = {}, context = getContext()) {
+    if (!isStoryEngineEnabled()) {
+        throw new Error('Story Engine is disabled.');
+    }
+    if (!context) {
+        throw new Error('SillyTavern context is unavailable for character-sheet generation.');
+    }
+
+    const requestIdentity = createStoryEngineEpochIdentity(context);
+    const modelRequestOptions = {
+        isCurrent: () => isCurrentStoryEngineEpoch(requestIdentity, context),
+        expiredMessage: 'Character-sheet generation expired because the active chat changed.',
+    };
+    const runStructuredModelRequest = callback => withStoryEngineModelRequest(callback, modelRequestOptions);
+    const bypassToken = promptReadyBypassGate.acquire();
+    try {
+        const failures = [];
+        const usesChatCompletion = String(context.mainApi || '').toLowerCase() === 'openai';
+        if (usesChatCompletion) {
+            try {
+                return await runStructuredModelRequest(async () => {
+                    const raw = await sendDefaultChatCompletionToolRequest(
+                        appendCharacterSheetOutputInstruction(prompt, 'tool'),
+                        responseLength,
+                        {
+                            purpose: 'character-sheet tool call',
+                            temperature: requestOptions.temperature,
+                            buildTool: source => buildCharacterSheetTool(source, generationOptions),
+                            buildToolChoice: buildCharacterSheetToolChoice,
+                            preparePayload: applyStoryEngineThinkingDisabledPayload,
+                        },
+                    );
+                    if (raw?.error) {
+                        throw createCharacterSheetProviderResponseError(raw);
+                    }
+                    return normalizeCharacterSheetPayload(extractCharacterSheetToolPayload(raw), generationOptions);
+                });
+            } catch (error) {
+                assertStoryEngineModelRequestCurrent(modelRequestOptions);
+                if (!shouldRetryCharacterSheetToolFailure(error)) {
+                    throw error;
+                }
+                failures.push(`native tool call: ${summarizePlayerSetupError(error)}`);
+                console.warn('[Story Engine] Character-sheet structured output failed; retrying once with JSON schema.', summarizePlayerSetupError(error));
+            }
+        }
+
+        try {
+            return await runStructuredModelRequest(async () => {
+                const jsonSchema = buildCharacterSheetJsonSchema(generationOptions);
+                const schemaPrompt = appendCharacterSheetOutputInstruction(prompt, 'json', usesChatCompletion ? null : jsonSchema.value);
+                const raw = await generateRawData({
+                    prompt: schemaPrompt,
+                    responseLength,
+                    ...(usesChatCompletion ? { jsonSchema } : {}),
+                }, context, { purpose: 'structured character-sheet generation' });
+                const structuredPayload = usesChatCompletion ? raw : extractGeneratedText(raw);
+                return normalizeCharacterSheetPayload(parseCharacterSheetJsonPayload(structuredPayload), generationOptions);
+            });
+        } catch (error) {
+            assertStoryEngineModelRequestCurrent(modelRequestOptions);
+            failures.push(`JSON-schema ${failures.length ? 'retry' : 'request'}: ${summarizePlayerSetupError(error)}`);
+            throw new Error(`Character-sheet generation failed. ${failures.join(' | ')}`, { cause: error });
+        }
+    } finally {
+        promptReadyBypassGate.release(bypassToken);
+    }
+}
+
+function createCharacterSheetProviderResponseError(raw) {
+    let body = '';
+    try {
+        body = JSON.stringify(raw?.error ?? raw).slice(0, 700);
+    } catch {
+        body = String(raw?.error ?? raw ?? '').slice(0, 700);
+    }
+    const error = new Error(`Provider returned an error object. ${describeCharacterSheetRaw(raw)}${body ? ` ${body}` : ''}`);
+    error.name = 'CharacterSheetProviderResponseError';
+    error.stage = 'response';
+    error.body = body;
+    const status = Number(raw?.status ?? raw?.error?.status);
+    if (Number.isFinite(status)) error.status = status;
+    return error;
+}
+
+function summarizePlayerSetupError(error) {
+    const name = String(error?.name || 'Error');
+    const stage = String(error?.stage || '').trim();
+    const message = error instanceof Error ? error.message : String(error || 'Unknown failure');
+    return `${name}${stage ? ` [${stage}]` : ''}: ${message}`.replace(/\s+/g, ' ').slice(0, 700);
 }
 
 
