@@ -566,7 +566,8 @@ function CHAOS_INTERRUPT(resolutionPacket, npcHandoffList, sceneSummary, diceLis
 
   classifyBand(O):
     if O <= 5 -> HOSTILE
-    else if O <= 15 -> COMPLICATION
+    else if O <= 10 -> COMPLICATION
+    else if O <= 15 -> INTERRUPTION
     else -> BENEFICIAL
 
   classifyMagnitude(O):
@@ -1465,7 +1466,8 @@ export function getChaosContext(handoffs, sceneSummary) {
 
 export function classifyBand(o) {
     if (o <= 5) return 'HOSTILE';
-    if (o <= 15) return 'COMPLICATION';
+    if (o <= 10) return 'COMPLICATION';
+    if (o <= 15) return 'INTERRUPTION';
     return 'BENEFICIAL';
 }
 

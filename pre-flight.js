@@ -2176,6 +2176,8 @@ function chaosBandGuide(band) {
             return 'worsens danger or opposition.';
         case 'COMPLICATION':
             return 'adds friction, cost, delay, or uncertainty.';
+        case 'INTERRUPTION':
+            return 'briefly changes the scene without meaningful harm; it may create a small incidental opening, but never a major advantage.';
         case 'BENEFICIAL':
             return 'creates a useful opening, information, or advantage.';
         default:
