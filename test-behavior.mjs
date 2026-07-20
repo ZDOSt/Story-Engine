@@ -13,7 +13,7 @@ import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState }
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { applyHiddenHealthEvents } from './health-state.js';
 import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character-sheet-validation.js';
-import { appendCharacterSheetOutputInstruction, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, extractCharacterSheetToolPayload, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
+import { appendCharacterSheetOutputInstruction, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 
@@ -13981,7 +13981,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.14');
+      assert.equal(manifest.version, '0.9.16');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
       assert.match(source, /proseGuardEmbodiedPerceptionBannedPhrases:\s*DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES/);
@@ -14429,7 +14429,7 @@ const tests = [
       assert.doesNotMatch(source, /id="spe_player_appearance"/);
       assert.match(source, /delete creator\.identity\.characterName/);
       assert.match(source, /creator\.identity\.sex = String\(document\.getElementById\('spe_player_sex'\)/);
-      assert.match(source, /creator\.identity\.genre = PLAYER_GENRE_CHOICES\.includes\(genre\) \? genre : 'Fantasy'/);
+      assert.match(source, /creator\.identity\.genre = normalizePlayerAdventureGenre\(genre\)/);
       assert.match(source, /const additionalDetailsMode = document\.getElementById\('spe_player_additional_details_mode'\)/);
       assert.match(source, /creator\.identity\.additionalDetailsMode = additionalDetailsMode === 'user' \? 'user' : 'system'/);
       assert.match(source, /creator\.identity\.additionalDetails = String\(document\.getElementById\('spe_player_additional_details'\)/);
@@ -14438,6 +14438,10 @@ const tests = [
       assert.match(source, /buildNewCharacterGenreInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterStatInstruction\(stats\)/);
       assert.match(source, /buildNewCharacterAdditionalDetailsInstruction\(identity\)/);
+      assert.match(source, /explicitAnchorSource: getNewCharacterExplicitAnchorSource\(identity\)/);
+      assert.match(source, /explicitAppearanceSource: getNewCharacterExplicitAppearanceSource\(identity\)/);
+      assert.match(source, /function getNewCharacterExplicitAnchorSource\(identity = \{\}\)/);
+      assert.match(source, /function getNewCharacterExplicitAppearanceSource\(identity = \{\}\)/);
       assert.match(source, /function getPlayerSetupPersonaName\(\)/);
       assert.match(source, /return '\{\{user\}\}'/);
       assert.match(source, /Deterministic rendering uses \{\{user\}\} exactly as the character name/);
@@ -14452,13 +14456,15 @@ const tests = [
       assert.match(source, /Do not establish time since crossing, prior new-world life, adaptation, local knowledge, previous-life memory state/);
       assert.match(source, /The user-provided additional character details are locked starting facts/);
       assert.match(source, /Use them to shape background, Earth life, arrival\/origin, appearance, clothing/);
+      assert.doesNotMatch(source, /placeholder="Optional background,[^"]*scars/);
       assert.match(source, /Because the selected genre is Isekai, any Earth-life details/);
       assert.match(source, /before death and reincarnation/);
       assert.match(source, /LOCKED USER ADDITIONAL DETAILS/);
       assert.match(source, /You generate a SillyTavern user persona character sheet for roleplay/);
       assert.match(source, /This is a playable user character shell, not an authored protagonist/);
       assert.match(source, /Do not decide future choices, personality, habits, emotional reactions/);
-      assert.match(source, /Generate flavorful but grounded details with enough specificity to use as a full persona sheet/);
+      assert.match(source, /Generate flavorful, concrete details with enough specificity to use as a full persona sheet/);
+      assert.match(source, /Abilities and spells must follow the selected genre power direction/);
       assert.match(source, /Produce the complete character-sheet data through the required structured output/);
       assert.match(source, /deterministic code owns the final headings, order, labels, name, and locked stats/);
       assert.match(generationSource, /\['BASIC INFO', basicLines\.join\('\\n'\)\]/);
@@ -14467,6 +14473,7 @@ const tests = [
       assert.match(source, /relative weak point/);
       assert.match(source, /Do not contradict the locked stats/);
       assert.match(source, /Appearance must reflect PHY when relevant/);
+      assert.match(source, /Do not invent scars or permanent marks; preserve them only when explicitly supplied by the user/);
       assert.match(source, /Do not soften high PHY into a default lean, wiry, fragile, noncombatant, or untrained description/);
       assert.match(source, /const PLAYER_CREATION_MAX_STARTING_SPELLS = 1/);
       assert.match(source, /NATURAL WEAPONS: concrete offensive body parts only, if any/);
@@ -14474,19 +14481,20 @@ const tests = [
       assert.match(source, /Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells/);
       assert.match(source, /Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust/);
       assert.match(source, /const PROGRESSION_REQUIRED_ABILITIES = 1/);
-      assert.match(source, /ABILITIES: exactly \$\{PROGRESSION_REQUIRED_ABILITIES\} activated non-spell ability/);
-      assert.match(source, /protagonist-grade, genuinely useful capability/);
-      assert.match(source, /one clear observable effect/);
-      assert.match(source, /Choose a varied result from that context rather than copying a stock template or example/);
+      assert.match(source, /ABILITIES: exactly \$\{PROGRESSION_REQUIRED_ABILITIES\} simple, deliberately activated protagonist ability/);
+      assert.match(source, /\$\{powerProfile\.abilityContract\}/);
+      assert.match(source, /\$\{powerProfile\.ability\}/);
+      assert.match(source, /State what \{\{user\}\} can do and what directly happens/);
+      assert.match(source, /do not turn any stat into an amplified ordinary action/);
+      assert.match(source, /Choose a varied concept rather than copying a stock template or example/);
       assert.match(source, /Do not include permission, attempt, numerical, mechanical, measurement/);
-      assert.match(source, /Do not make it a passive trait, ordinary skill, cosmetic or lore-only detail/);
+      assert.match(source, /Do not make it a spell, passive trait, broad ordinary skill, cosmetic or lore-only detail/);
       assert.match(source, /On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept/);
-      assert.match(source, /SPELLS: exactly \$\{PLAYER_CREATION_MAX_STARTING_SPELLS\} starting spell when MND is 7 or higher/);
-      assert.match(source, /Every genre is eligible/);
+      assert.match(source, /SPELLS: exactly \$\{PLAYER_CREATION_MAX_STARTING_SPELLS\} starting spell entry when MND is 7 or higher/);
+      assert.match(source, /\$\{powerProfile\.spell\}/);
       assert.match(source, /exactly one primary purpose: offensive, healing, or utilitarian/);
       assert.match(source, /Do not combine purposes or generate barriers/);
-      assert.match(source, /Adapt the expression and underlying logic to the selected genre/);
-      assert.doesNotMatch(source, /selected genre\/concept supports magic/);
+      assert.doesNotMatch(source, /genre-native activated spell or equivalent/);
       assert.match(source, /INVENTORY: carried or stowed items only/);
       assert.match(source, /Do not list clothing worn on the body, armor, weapons worn ready, currency/);
       assert.match(source, /CURRENCY: money only, using the genre currency when possible/);
@@ -14498,11 +14506,10 @@ const tests = [
       assert.match(source, /CURRENCY: preserve explicit money only/);
       assert.match(source, /12 silver coins -> 12 sv/);
       assert.match(source, /GEAR: preserve explicit worn, equipped, or immediately ready items only/);
-      assert.match(source, /CHARACTER ANCHORS: preserve all important persona notes/);
-      assert.match(source, /This section must add context the user can play with, not decisions made for them/);
-      assert.match(source, /Focus on intrinsic facts about the character, not assumptions about how the new world is experienced/);
-      assert.match(source, /Do not establish discovery states such as memory retention, memory loss, language comprehension/);
-      assert.match(source, /current emotional reaction, personality, future plans, preferred tactics, combat style/);
+      assert.match(source, /CHARACTER ANCHORS: include only explicit user-provided durable facts that cannot fit BASIC INFO/);
+      assert.match(source, /Otherwise return an empty array/);
+      assert.match(source, /Do not invent anchor content, summarize or repeat another section, interpret stats, add meta-disclaimers, invent unresolved hooks/);
+      assert.match(source, /CHARACTER ANCHORS: preserve only explicit durable persona facts that cannot fit another structured field/);
       assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
     },
   },
@@ -14511,6 +14518,10 @@ const tests = [
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      const existingPersonaGeneration = source.slice(
+        source.indexOf('async function generateExistingPersonaCharacterSheet'),
+        source.indexOf('function validatePlayerCreatorSheet'),
+      );
       const genreBlock = source.match(/const PLAYER_GENRE_CHOICES = Object\.freeze\(\[\n([\s\S]*?)\n\]\);/)?.[1] || '';
       const genres = [...genreBlock.matchAll(/'([^']+)'/g)].map(match => match[1]);
       const frameBlock = source.match(/const PLAYER_ADVENTURE_GENRE_FRAMES = Object\.freeze\(\{\n([\s\S]*?)\n\}\);/)?.[1] || '';
@@ -14528,6 +14539,14 @@ const tests = [
       assert.match(source, /stage === 'approved'\s*\?\s*buildPlayerAdventureStartHtml\(root\)/);
       assert.match(source, /data-spe-player-action="start-adventure"/);
       assert.match(source, /data-spe-player-action="dismiss-adventure-start"/);
+      assert.match(source, /function buildPersonaPointBuyState\(analysis, genre = 'Fantasy'\)/);
+      assert.match(source, /root\.creator = buildPersonaPointBuyState\(analysis, getActiveAdventureGenre\(context\)\)/);
+      assert.match(source, /function buildPlayerPersonaSheetHtml[\s\S]*?<select id="spe_player_genre"/);
+      assert.match(source, /syncPlayerGenreInput\(root\.creator\);\s*\n\s*state\.playerSetupBusy = true/);
+      assert.match(existingPersonaGeneration, /const genre = normalizePlayerAdventureGenre\(creator\.identity\?\.genre \|\| 'Fantasy'\)/);
+      assert.match(existingPersonaGeneration, /genre,/);
+      assert.match(existingPersonaGeneration, /SELECTED GENRE: \$\{genre\}/);
+      assert.doesNotMatch(existingPersonaGeneration, /genre: 'Fantasy'/);
       assert.match(source, /function buildPlayerAdventureStartPrompt/);
       assert.match(source, /GENRE OPENING:/);
       assert.match(source, /You MUST begin in the selected genre: \$\{genre\}\./);
@@ -14575,7 +14594,7 @@ const tests = [
       assert.match(handoffSource, /PRESERVE \{\{user\}\}\\'s existing race, body, abilities, gear, identity, backstory/);
       assert.doesNotMatch(source, /discovers themselves through play/);
       assert.doesNotMatch(source, /hooded figures chanting|throne room with exposition|white void/i);
-      assert.match(source, /const genre = creator\.flow === 'new'/);
+      assert.match(source, /const genre = normalizePlayerAdventureGenre\(creator\.identity\?\.genre \|\| 'Fantasy'\)/);
       assert.match(source, /root\.adventureStartPending = true/);
       assert.match(source, /delete root\.adventureStartPrompt/);
       assert.match(source, /data-spe-player-action="back-from-adventure-start"/);
@@ -14655,6 +14674,10 @@ const tests = [
       assert.doesNotMatch(source, /LEGACY_PROGRESSION_PROFILE_CURRENT/);
       assert.doesNotMatch(source, /function normalizeProgressionProfileSetting/);
       assert.match(source, /Generated ability and spell options use the current narrator profile/);
+      assert.equal((source.match(/const genre = getActiveAdventureGenre\(context\);/g) || []).length >= 2, true);
+      assert.equal((source.match(/const powerProfile = getCharacterSheetPowerProfile\(genre\);/g) || []).length >= 3, true);
+      assert.equal((source.match(/`SELECTED GENRE: \$\{genre\}\\n`/g) || []).length, 3);
+      assert.match(source, /Stats may inform flavor but must never become a stat boost or an amplified ordinary action/);
       assert.match(source, /async function requestProgressionText[\s\S]*return await generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{ purpose: 'progression generation' \}\)/);
       assert.match(source, /function getProgressionRoot/);
       assert.match(source, /function progressionPending/);
@@ -15232,14 +15255,59 @@ const tests = [
     name: '62b character-sheet generation uses strict structured data and deterministic rendering',
     run() {
       const stats = { PHY: 9, MND: 7, CHA: 8 };
-      const options = { mode: 'new', stats, fixedRace: 'Half-Elf', fixedUserNonHuman: 'Y', genre: 'Isekai' };
+      const options = {
+        mode: 'new',
+        stats,
+        fixedRace: 'Half-Elf',
+        fixedUserNonHuman: 'Y',
+        genre: 'Isekai',
+        explicitAnchorSource: 'The character is the secret heir to the fallen House Valen.',
+        explicitAppearanceSource: '',
+      };
       const schema = buildCharacterSheetSchema(options);
+      const fantasyProfile = getCharacterSheetPowerProfile('Fantasy');
+      assert.strictEqual(getCharacterSheetPowerProfile('Isekai'), fantasyProfile);
+      assert.match(fantasyProfile.ability, /simple, unmistakably supernatural fantasy power/);
+      assert.match(fantasyProfile.spell, /unmistakably magical in both name and effect/);
+      assert.match(fantasyProfile.ability, /never scientific, clinical, technological, bureaucratic, pseudo-technical, or game-system framing/);
+      assert.equal(fantasyProfile.grounded, false);
+      assert.equal(getCharacterSheetPowerProfile('Modern').grounded, true);
+      assert.equal(getCharacterSheetPowerProfile('Slice of Life').grounded, true);
+      assert.equal(getCharacterSheetPowerProfile('Historical').grounded, true);
+      assert.match(getCharacterSheetPowerProfile('Modern').abilityContract, /signature technique grounded in exceptional training/);
+      assert.match(getCharacterSheetPowerProfile('Fantasy').abilityContract, /qualitatively new capability/);
+      for (const genre of [
+        'Fantasy',
+        'Sci-fi',
+        'Modern',
+        'Slice of Life',
+        'Isekai',
+        'Urban Fantasy',
+        'Cyberpunk',
+        'Post-Apocalyptic',
+        'Horror',
+        'Supernatural',
+        'Superhero',
+        'Steampunk',
+        'Historical',
+        'Wuxia / Xianxia',
+      ]) {
+        const profile = getCharacterSheetPowerProfile(genre);
+        assert.ok(profile.ability.length > 40, `${genre} needs an explicit ability profile.`);
+        assert.ok(profile.spell.length > 40, `${genre} needs an explicit spell profile.`);
+      }
+      assert.notStrictEqual(getCharacterSheetPowerProfile('Sci-fi'), fantasyProfile);
       assert.deepEqual(schema.properties.basicInfo.properties.race.enum, ['Half-Elf']);
       assert.deepEqual(schema.properties.basicInfo.properties.userNonHuman.enum, ['Y']);
       assert.equal(schema.properties.abilities.minItems, 1);
       assert.equal(schema.properties.abilities.maxItems, 1);
+      assert.match(schema.properties.abilities.description, /unmistakably supernatural fantasy power/);
       assert.equal(schema.properties.spells.minItems, 1);
       assert.equal(schema.properties.spells.maxItems, 1);
+      assert.match(schema.properties.spells.description, /unmistakably magical in both name and effect/);
+      assert.equal(schema.properties.characterAnchors.minItems, 0);
+      assert.equal(schema.properties.characterAnchors.maxItems, 3);
+      assert.match(schema.properties.appearance.description, /Do not include scars, tattoos, birthmarks, brands, or other permanent marks/);
       assert.equal(buildCharacterSheetJsonSchema(options).strict, true);
 
       const deepSeekTool = buildCharacterSheetTool('deepseek', options);
@@ -15324,6 +15392,44 @@ const tests = [
       assert.match(rendered, /The character died on Earth and was reincarnated in another world\./);
       assert.equal(assertValidCharacterSheet(rendered, { stats, expectedRace: 'Half-Elf', genre: 'Isekai', requireNumericAge: true }), rendered);
 
+      const noGeneratedAnchorsPayload = structuredCharacterSheetPayload({ characterAnchors: [] });
+      assert.deepEqual(normalizeCharacterSheetPayload(noGeneratedAnchorsPayload, options).characterAnchors, []);
+      const noGeneratedAnchorsRendered = renderCharacterSheet(noGeneratedAnchorsPayload, options);
+      assert.equal((noGeneratedAnchorsRendered.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
+      const anchorsDisabledOptions = { ...options, explicitAnchorSource: '' };
+      assert.equal(buildCharacterSheetSchema(anchorsDisabledOptions).properties.characterAnchors.maxItems, 0);
+      assert.match(buildCharacterSheetSchema(anchorsDisabledOptions).properties.characterAnchors.description, /Must be empty because the user supplied no custom facts/);
+      assert.deepEqual(normalizeCharacterSheetPayload(payload, anchorsDisabledOptions).characterAnchors, []);
+      const anchorsDisabledRendered = renderCharacterSheet(payload, anchorsDisabledOptions);
+      assert.equal((anchorsDisabledRendered.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
+      assert.doesNotMatch(anchorsDisabledRendered, /Worked as a courier before the adventure began/);
+      assert.throws(
+        () => normalizeCharacterSheetPayload(structuredCharacterSheetPayload({ characterAnchors: ['One', 'Two', 'Three', 'Four'] }), options),
+        /characterAnchors may contain at most 3 entries/,
+      );
+
+      const groundedAnchor = 'The character is the secret heir to the fallen House Valen.';
+      const groundedAnchorPayload = structuredCharacterSheetPayload({ characterAnchors: [groundedAnchor] });
+      assert.deepEqual(normalizeCharacterSheetPayload(groundedAnchorPayload, options).characterAnchors, [groundedAnchor]);
+      const inventedAnchorPayload = structuredCharacterSheetPayload({ characterAnchors: ['A royal assassin is hunting the character.'] });
+      assert.deepEqual(normalizeCharacterSheetPayload(inventedAnchorPayload, options).characterAnchors, []);
+      const duplicateAnchorOptions = { ...options, explicitAnchorSource: 'The character has broad shoulders and an athletic build.' };
+      const duplicateAnchorPayload = structuredCharacterSheetPayload({ characterAnchors: ['Broad-shouldered and athletic.'] });
+      assert.deepEqual(normalizeCharacterSheetPayload(duplicateAnchorPayload, duplicateAnchorOptions).characterAnchors, []);
+
+      const unrequestedScarPayload = structuredCharacterSheetPayload({
+        appearance: [
+          { label: 'Build', detail: 'Broad-shouldered and athletic' },
+          { label: 'Scar', detail: 'A pale scar crosses the left cheek' },
+        ],
+      });
+      assert.deepEqual(normalizeCharacterSheetPayload(unrequestedScarPayload, options).appearance, [
+        { label: 'Build', detail: 'Broad-shouldered and athletic' },
+      ]);
+      const requestedScarOptions = { ...options, explicitAppearanceSource: 'A pale scar crosses the left cheek.' };
+      assert.match(buildCharacterSheetSchema(requestedScarOptions).properties.appearance.description, /Preserve only scars or other permanent marks explicitly supplied by the user/);
+      assert.equal(normalizeCharacterSheetPayload(unrequestedScarPayload, requestedScarOptions).appearance.length, 2);
+
       const randomOptions = { mode: 'new', stats, fixedRace: '', fixedUserNonHuman: '', genre: 'Fantasy' };
       assert.deepEqual(buildCharacterSheetSchema(randomOptions).properties.basicInfo.properties.userNonHuman.enum, ['Y', 'N']);
       const unspecifiedRandomRace = structuredCharacterSheetPayload({
@@ -15331,7 +15437,7 @@ const tests = [
       });
       assert.throws(() => normalizeCharacterSheetPayload(unspecifiedRandomRace, randomOptions), /must be one of: Y, N/);
 
-      const customHumanOptions = { mode: 'new', stats, fixedRace: 'Terran', fixedUserNonHuman: '', genre: 'Science Fiction' };
+      const customHumanOptions = { mode: 'new', stats, fixedRace: 'Terran', fixedUserNonHuman: '', genre: 'Sci-fi' };
       const customHumanPayload = structuredCharacterSheetPayload({
         basicInfo: { race: 'Terran', userNonHuman: 'N' },
       });
@@ -15354,7 +15460,9 @@ const tests = [
       const existing = normalizeCharacterSheetPayload(existingPayload, { mode: 'existing', stats });
       assert.equal(existing.abilities.length, 2);
       assert.equal(existing.spells.length, 5);
-      assert.deepEqual(buildCharacterSheetSchema({ mode: 'existing', stats }).properties.basicInfo.properties.userNonHuman.enum, ['Y', 'N', 'Not specified']);
+      const existingSchema = buildCharacterSheetSchema({ mode: 'existing', stats });
+      assert.deepEqual(existingSchema.properties.basicInfo.properties.userNonHuman.enum, ['Y', 'N', 'Not specified']);
+      assert.equal(existingSchema.properties.characterAnchors.maxItems, 48);
 
       const toolPrompt = appendCharacterSheetOutputInstruction([{ role: 'user', content: 'Build it.' }], 'tool');
       assert.match(toolPrompt.at(-1).content, /Call submit_character_sheet exactly once/);

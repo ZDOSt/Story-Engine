@@ -33,7 +33,7 @@ import {
 } from './st-adapter.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
-import { appendCharacterSheetOutputInstruction, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, describeCharacterSheetRaw, extractCharacterSheetToolPayload, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
+import { appendCharacterSheetOutputInstruction, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
@@ -3453,7 +3453,7 @@ function buildNewCharacterPointBuyState() {
 }
 
 
-function buildPersonaPointBuyState(analysis) {
+function buildPersonaPointBuyState(analysis, genre = 'Fantasy') {
     return {
         stage: 'stats',
         flow: 'persona',
@@ -3461,6 +3461,9 @@ function buildPersonaPointBuyState(analysis) {
         stats: suggestedPersonaPointBuyStats(analysis),
         retryNotes: [],
         personaAnalysis: analysis,
+        identity: {
+            genre: normalizePlayerAdventureGenre(genre),
+        },
     };
 }
 
@@ -7982,7 +7985,7 @@ function buildPlayerIdentityHtml(creator) {
                 </select>
             </label>
             <label class="flex1 spe-player-full" data-spe-player-additional-details ${additionalDetailsMode === 'user' ? '' : 'hidden'}>Your character details
-                <textarea id="spe_player_additional_details" class="text_pole" placeholder="Optional background, Earth life, appearance, clothing, training, inventory, origin, scars, or other fixed starting facts.">${escapeHtml(additionalDetails)}</textarea>
+                <textarea id="spe_player_additional_details" class="text_pole" placeholder="Optional background, Earth life, appearance, clothing, training, inventory, origin, or other fixed starting facts.">${escapeHtml(additionalDetails)}</textarea>
             </label>
         </div>
         <div class="spe-player-actions">
@@ -8060,9 +8063,18 @@ function buildPlayerAdventureStartPrompt(root = {}) {
 
 function buildPlayerPersonaSheetHtml(creator) {
     const analysis = creator.personaAnalysis || {};
+    const genre = normalizePlayerAdventureGenre(creator.identity?.genre || 'Fantasy');
     return `
         ${buildStatsGridHtml(creator)}
         <div class="spe-player-muted">Existing persona conversion: strongest-stat reading <code>${escapeHtml(analysis.PrimaryStat || 'PHY')}</code>. The model will reformat the current persona into the character-sheet template and copy the locked stats exactly.</div>
+
+        <div class="spe-player-form-grid">
+            <label class="flex1">Genre
+                <select id="spe_player_genre" class="text_pole">
+                    ${PLAYER_GENRE_CHOICES.map(item => `<option value="${escapeHtml(item)}" ${genre === item ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}
+                </select>
+            </label>
+        </div>
 
         <div class="spe-player-actions">
 
@@ -8242,7 +8254,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
             const analysis = await analyzePersonaForPrimaryStat(context);
 
-            root.creator = buildPersonaPointBuyState(analysis);
+            root.creator = buildPersonaPointBuyState(analysis, getActiveAdventureGenre(context));
 
         } else if (action === 'skip-chat') {
 
@@ -8272,10 +8284,16 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
         } else if (action === 'back-to-stats') {
 
-            if (root.creator.flow === 'new' && root.creator.stage === 'identity') syncIdentityInputs(root.creator);
+            if (root.creator.flow === 'new' && root.creator.stage === 'identity') {
+                syncIdentityInputs(root.creator);
+            } else if (root.creator.flow === 'persona' && root.creator.stage === 'persona-sheet') {
+                syncPlayerGenreInput(root.creator);
+            }
             root.creator.stage = 'stats';
 
         } else if (action === 'generate-persona-sheet') {
+
+            syncPlayerGenreInput(root.creator);
 
             state.playerSetupBusy = true;
 
@@ -8336,6 +8354,10 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
                     stage: 'persona-sheet',
                     stats: isValidCoreStats(root.creator?.stats) ? normalizeCoreStats(root.creator.stats) : normalizeCoreStats(root.stats),
                     sheetText: root.creator?.sheetText || root.sheet?.text || '',
+                    identity: {
+                        ...(root.creator?.identity || {}),
+                        genre: normalizePlayerAdventureGenre(root.creator?.identity?.genre || root.sheet?.genre || root.adventureGenre || 'Fantasy'),
+                    },
                 };
             } else {
                 root.creator = {
@@ -8415,8 +8437,7 @@ function syncIdentityInputs(creator) {
     creator.identity = creator.identity || {};
     delete creator.identity.characterName;
     creator.identity.sex = String(document.getElementById('spe_player_sex')?.value || creator.identity.sex || '').trim();
-    const genre = document.getElementById('spe_player_genre')?.value || creator.identity.genre || 'Fantasy';
-    creator.identity.genre = PLAYER_GENRE_CHOICES.includes(genre) ? genre : 'Fantasy';
+    syncPlayerGenreInput(creator);
     const raceValue = document.getElementById('spe_player_race')?.value || (creator.identity.raceMode === 'pick' ? creator.identity.pickedRace : creator.identity.raceMode) || 'random';
     if (raceValue === 'custom') {
         creator.identity.raceMode = 'specify';
@@ -8433,6 +8454,12 @@ function syncIdentityInputs(creator) {
     creator.identity.additionalDetailsMode = additionalDetailsMode === 'user' ? 'user' : 'system';
     creator.identity.additionalDetails = String(document.getElementById('spe_player_additional_details')?.value || creator.identity.additionalDetails || creator.identity.appearance || '').trim();
     delete creator.identity.appearance;
+}
+
+function syncPlayerGenreInput(creator) {
+    creator.identity = creator.identity || {};
+    const genre = document.getElementById('spe_player_genre')?.value || creator.identity.genre || 'Fantasy';
+    creator.identity.genre = normalizePlayerAdventureGenre(genre);
 }
 
 function submitPlayerAdventureStartPrompt(prompt, context = getContext(), actionIdentity = null) {
@@ -8483,9 +8510,7 @@ async function approvePlayerSheet(root, context = getContext(), actionIdentity =
     root.forceCreator = false;
     root.stats = normalizeCoreStats(creator.stats);
     root.personaBeforeSetup = root.personaBeforeSetup || personaWrite.previous || '';
-    const genre = creator.flow === 'new'
-        ? normalizePlayerAdventureGenre(creator.identity?.genre || 'Fantasy')
-        : 'Fantasy';
+    const genre = normalizePlayerAdventureGenre(creator.identity?.genre || 'Fantasy');
     root.adventureGenre = genre;
     root.adventureStartPending = true;
     root.adventureStarted = false;
@@ -8705,6 +8730,8 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
     const abilities = extractPersonaAbilities(persona);
     const spells = extractPersonaSpells(persona);
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || {};
+    const genre = getActiveAdventureGenre(context);
+    const powerProfile = getCharacterSheetPowerProfile(genre);
     const recent = getProgressionRecentAccomplishments(getProgressionRoot(context), pending);
     const replacing = pending?.choice === 'swapAbility'
         ? abilities[Math.max(0, Math.floor(Number(pending.swapAbilityIndex || 0)))]
@@ -8715,11 +8742,13 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
             role: 'system',
             content:
             'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
-                'Each ability is one activated, protagonist-grade non-spell capability that creates a genuinely useful action ordinary PHY/MND/CHA mechanics do not already cover. ' +
-                'Adapt each option to the character race/body/origin, selected genre, stats, existing entries, and recent accomplishments. Choose varied concepts from that context; do not copy a stock template or repeat an existing concept. ' +
-                'Each option must have one clear observable effect and be practical in play. Describe the capability directly in plain language, not as a permission, attempt, limitation, or rules explanation. Runtime mechanics decide contested outcomes. ' +
+                'Each ability must be one simple, activated protagonist capability. ' +
+                `${powerProfile.abilityContract} ` +
+                `${powerProfile.ability} ` +
+                'Adapt each option to the character race, body, origin, selected genre, existing entries, and recent accomplishments. Stats may inform flavor but must never become a stat boost or an amplified ordinary action. Choose varied concepts from that context; do not copy a stock template or repeat an existing concept. ' +
+                'State what the character can do and what directly happens in one or two plain sentences. Do not write permission, attempt, limitation, or rules language. Runtime mechanics decide contested outcomes. ' +
                 'On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
-                'Abilities must not be spells, passive traits, ordinary skills, cosmetic or lore-only details, passive perception, detection-only effects, or disguised stat bonuses. Do not encode numerical or mechanical rules, measurements, cooldowns, uses, or guaranteed outcomes. ' +
+                'Abilities must not be spells, passive traits, broad ordinary skills, cosmetic or lore-only details, passive perception, detection-only effects, or disguised stat bonuses. Do not encode numerical or mechanical rules, measurements, cooldowns, uses, or guaranteed outcomes. ' +
                 'Do not duplicate existing abilities or spells. Return exactly three meaningfully different replacement options without forcing a fixed category coverage.',
         },
         {
@@ -8735,6 +8764,7 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
                 'Option3Description=one or two plain sentences stating what the ability does, with no mechanics, measurements, or outcome guarantees\n' +
                 'END_PROGRESSION_ABILITIES\n\n' +
                 'MODE: SWAP_ABILITY\n' +
+                `SELECTED GENRE: ${genre}\n` +
                 `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `EXISTING ABILITIES:\n${abilities.length ? abilities.map((ability, index) => `${index + 1}. ${ability.text}`).join('\n') : 'none'}\n\n` +
@@ -8750,6 +8780,8 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
     const persona = getPersonaText(context);
     const spells = extractPersonaSpells(persona);
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || {};
+    const genre = getActiveAdventureGenre(context);
+    const powerProfile = getCharacterSheetPowerProfile(genre);
     const recent = getProgressionRecentAccomplishments(getProgressionRoot(context), pending);
     const retryNotes = Array.isArray(pending?.retryNotes) ? pending.retryNotes : [];
     return [
@@ -8757,11 +8789,12 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
             role: 'system',
             content:
             'You generate concise RPG spell options for a deterministic SillyTavern extension. ' +
-                'Each spell is one activated, setting-native spell or equivalent with one clear observable effect. Every genre is eligible: adapt the expression and underlying logic to the selected genre instead of importing incompatible conventions. ' +
+                'Each spell entry must be one directly activated, setting-native power or technique with one concrete effect. ' +
+                `${powerProfile.spell} ` +
                 'Each option must have exactly one primary purpose: offensive, healing, or utilitarian. Do not combine purposes, and do not generate barriers. ' +
-                'Choose useful, varied concepts from the character and setting context; do not copy a stock template or repeat an existing spell. Describe the effect directly in plain language, not as a permission, attempt, limitation, or rules explanation. Runtime mechanics decide contested outcomes. ' +
+                'Choose useful, varied concepts from the character and setting context; do not copy a stock template or repeat an existing spell. State what is activated and what directly happens in one or two plain sentences. Do not write permission, attempt, limitation, or rules language. Runtime mechanics decide contested outcomes. ' +
                 'On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
-                'Spells must not be passive traits, broad schools, vague categories, ordinary expertise, or guaranteed outcomes. Do not encode numerical or mechanical rules, measurements, cooldowns, uses, or success guarantees. ' +
+                'Spells must not be passive traits, broad schools, vague categories, broad ordinary expertise, or guaranteed outcomes. Do not encode numerical or mechanical rules, measurements, cooldowns, uses, or success guarantees. ' +
                 'Do not duplicate existing spells. Return exactly three meaningfully different learnable options without forcing one purpose per option.',
         },
         {
@@ -8777,6 +8810,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
                 'Option3Description=one or two plain sentences stating what the spell does, with no mechanics, measurements, or outcome guarantees\n' +
                 'END_PROGRESSION_SPELLS\n\n' +
                 'MODE: LEARN_SPELL\n' +
+                `SELECTED GENRE: ${genre}\n` +
                 `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `SPELL LIMIT: current ${spells.length}; maximum ${PROGRESSION_MAX_SPELLS}\n` +
@@ -9243,6 +9277,8 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
         fixedRace: getLockedPlayerCreatorRace(identity),
         fixedUserNonHuman: getLockedPlayerCreatorUserNonHuman(identity),
         genre,
+        explicitAnchorSource: getNewCharacterExplicitAnchorSource(identity),
+        explicitAppearanceSource: getNewCharacterExplicitAppearanceSource(identity),
     };
     const retryNotes = Array.isArray(creator.retryNotes) ? creator.retryNotes : [];
     const statInstruction = buildNewCharacterStatInstruction(stats);
@@ -9251,6 +9287,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
     const nameInstruction = buildNewCharacterNameInstruction();
     const sexInstruction = buildNewCharacterSexInstruction(identity);
     const additionalDetailsInstruction = buildNewCharacterAdditionalDetailsInstruction(identity);
+    const powerProfile = getCharacterSheetPowerProfile(genre);
     const prompt = [
         {
             role: 'system',
@@ -9259,7 +9296,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 'This is a playable user character shell, not an authored protagonist. Fill only fixed starting facts the user can step into. ' +
                 'Do not decide future choices, personality, habits, emotional reactions, combat preferences, social strategy, morals, goals, fears, or how the character will behave in play. ' +
                 'The numeric stats are locked and must be copied exactly. Do not reroll, rebalance, or assign new numbers. ' +
-                'Generate flavorful but grounded details with enough specificity to use as a full persona sheet, not a terse summary. Make abilities and spells useful, distinctive, protagonist-grade, and appropriate to the character, genre, and setting. Keep starting inventory, currency, and gear appropriate to the character, genre, and setting.',
+                'Generate flavorful, concrete details with enough specificity to use as a full persona sheet, not a terse summary. Keep ordinary background, appearance, inventory, currency, and gear grounded in the character, genre, and setting. Abilities and spells must follow the selected genre power direction.',
         },
         {
             role: 'user',
@@ -9270,14 +9307,14 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 'Required structured fields:\n' +
                 'BASIC INFO: Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age as one integer, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies. Use an empty string only for an inapplicable optional text field.\n' +
-                'APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, scars, marks, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Return each fact as a plain label/detail pair. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
+                'APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Return each fact as a plain label/detail pair. Do not invent scars or permanent marks; preserve them only when explicitly supplied by the user. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 'NATURAL WEAPONS: concrete offensive body parts only, if any. Use an empty array when the race/body has no clear natural weapon. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
-                `ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} activated non-spell ability. It must be a protagonist-grade, genuinely useful capability that ordinary PHY/MND/CHA mechanics do not already cover. It must be deliberately activated, have one clear observable effect, and fit the character's race, body, origin, genre, stats, and concept. Choose a varied result from that context rather than copying a stock template or example. Do not make it a passive trait, ordinary skill, cosmetic or lore-only detail, passive perception, detection-only effect, disguised stat bonus, or spell. Describe what it does in one or two plain sentences. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
-                `SPELLS: exactly ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell when MND is 7 or higher; otherwise return an empty array. Every genre is eligible. The spell must be a genre-native activated spell or equivalent with one clear observable effect and exactly one primary purpose: offensive, healing, or utilitarian. Do not combine purposes or generate barriers. Adapt the expression and underlying logic to the selected genre, character, and concept rather than importing incompatible conventions. Choose a varied result from that context rather than copying a stock template or example. Describe what it does in one or two plain sentences. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language, and do not create passive traits, broad schools, vague categories, or guaranteed outcomes.\n` +
+                `ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} simple, deliberately activated protagonist ability. ${powerProfile.abilityContract} ${powerProfile.ability} State what {{user}} can do and what directly happens in one or two plain sentences. Fit the result to the character's race, body, origin, genre, and concept, but do not turn any stat into an amplified ordinary action. Choose a varied concept rather than copying a stock template or example. Do not make it a spell, passive trait, broad ordinary skill, cosmetic or lore-only detail, passive perception, detection-only effect, or disguised stat bonus. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
+                `SPELLS: exactly ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell entry when MND is 7 or higher; otherwise return an empty array. ${powerProfile.spell} Give it one direct effect with exactly one primary purpose: offensive, healing, or utilitarian. Do not combine purposes or generate barriers. Fit the result to the selected genre, character, and concept. Choose a varied concept rather than copying a stock template or example. State what is activated and what directly happens in one or two plain sentences. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language, and do not create passive traits, broad schools, vague categories, or guaranteed outcomes.\n` +
                 'INVENTORY: carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy here.\n' +
                 'CURRENCY: money only, using the genre currency when possible. For fantasy and isekai use silver (sv), for modern use dollars ($), for cyberpunk use credits (cr), and otherwise choose a simple fitting currency. Write exact starting money such as 12 sv, $40, or 30 cr. Use an empty array if none. Do not put currency in INVENTORY or GEAR.\n' +
                 'GEAR: worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, carried supplies, pack contents, natural weapons, or body anatomy here. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
-                'CHARACTER ANCHORS: concise character-centered background facts, origin flavor, prior role, prior training, body history, scars, marks, known possessions, ability limits, unresolved hooks, or secrecy facts if relevant. This section must add context the user can play with, not decisions made for them. Focus on intrinsic facts about the character, not assumptions about how the new world is experienced. Do not establish discovery states such as memory retention, memory loss, language comprehension, local knowledge, world-system knowledge, reincarnation mechanics, status screens, destiny, current emotional reaction, personality, future plans, preferred tactics, combat style, social strategy, goals, fears, habits, or what the character will/may/usually/tends to do unless the user explicitly provided that detail. For Isekai, deterministic rendering supplies the required death-and-reincarnation premise; do not restate that generic premise.',
+                'CHARACTER ANCHORS: include only explicit user-provided durable facts that cannot fit BASIC INFO, APPEARANCE, STATS, NATURAL WEAPONS, ABILITIES, SPELLS, INVENTORY, CURRENCY, or GEAR. Otherwise return an empty array. Do not invent anchor content, summarize or repeat another section, interpret stats, add meta-disclaimers, invent unresolved hooks, or restate the selected genre premise. For Isekai, deterministic rendering supplies the required death-and-reincarnation premise.',
         },
     ];
     const payload = await requestPlayerSetupStructured(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, generationOptions, {
@@ -9310,7 +9347,7 @@ function buildNewCharacterAdditionalDetailsInstruction(identity = {}) {
     if (identity.additionalDetailsMode === 'user' && details) {
         return [
             'The user-provided additional character details are locked starting facts. Preserve their meaning exactly.',
-            'Use them to shape background, Earth life, arrival/origin, appearance, clothing, profession, prior training, inventory, scars, marks, body type, race flavor, or other fixed sheet details as applicable.',
+            'Use them to shape background, Earth life, arrival/origin, appearance, clothing, profession, prior training, inventory, body type, race flavor, or other fixed sheet details as applicable.',
             'Fill missing details normally, but do not contradict, replace, weaken, intensify, or ignore these notes.',
             'Do not turn these notes into personality, future choices, goals, fears, habits, tactics, morals, emotional reactions, preferred behavior, or statements about what the character will/may/usually/tends to do.',
             identity.genre === 'Isekai'
@@ -9320,6 +9357,19 @@ function buildNewCharacterAdditionalDetailsInstruction(identity = {}) {
         ].filter(Boolean).join('\n');
     }
     return 'Generate fitting background, origin, appearance, clothing, training, inventory, and fixed details from the chosen race, genre, stats, and concept.';
+}
+
+function getNewCharacterExplicitAnchorSource(identity = {}) {
+    if (identity.additionalDetailsMode !== 'user') return '';
+    return String(identity.additionalDetails || identity.appearance || '').trim();
+}
+
+function getNewCharacterExplicitAppearanceSource(identity = {}) {
+    const sources = [getNewCharacterExplicitAnchorSource(identity)];
+    if (identity.raceMode === 'specify' && identity.specifiedRaceDescriptionMode === 'user') {
+        sources.push(String(identity.specifiedRaceDescription || '').trim());
+    }
+    return sources.filter(Boolean).join('\n');
 }
 
 function buildNewCharacterStatInstruction(stats = {}) {
@@ -9431,12 +9481,13 @@ function buildNewCharacterRaceInstruction(identity = {}) {
 async function generateExistingPersonaCharacterSheet(creator, context = getContext()) {
 
     const stats = normalizeCoreStats(creator.stats || {});
+    const genre = normalizePlayerAdventureGenre(creator.identity?.genre || 'Fantasy');
     const generationOptions = {
         mode: 'existing',
         stats,
         fixedRace: '',
         fixedUserNonHuman: '',
-        genre: 'Fantasy',
+        genre,
     };
 
     const persona = getPersonaText(context);
@@ -9458,7 +9509,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
             content:
 
-                'You convert an existing SillyTavern user persona into a clean character sheet for fantasy roleplay. ' +
+                `You convert an existing SillyTavern user persona into a clean character sheet for ${genre} roleplay. ` +
 
                 'Preserve explicit persona facts exactly in meaning. Do not rewrite the character, add new biography, invent missing facts, or contradict the persona. ' +
 
@@ -9477,6 +9528,8 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 'Produce the complete character-sheet data through the required structured output. Do not write Markdown, a preface, or questions. Supply plain field values only; deterministic code owns the final headings, order, labels, name, and locked stats.\n\n' +
 
                 `LOCKED STATS:\nPHY: ${stats.PHY}\nMND: ${stats.MND}\nCHA: ${stats.CHA}\n\n` +
+
+                `SELECTED GENRE: ${genre}\n` +
 
                 `PERSONA PRIMARY STAT READING: ${analysis.PrimaryStat || 'PHY'}\n` +
 
@@ -9499,7 +9552,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 'INVENTORY: preserve explicit carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, or body armaments here.\n' +
                 'CURRENCY: preserve explicit money only. Normalize obvious fantasy money to sv when possible, such as 12 silver coins -> 12 sv. Do not invent money.\n' +
                 'GEAR: preserve explicit worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, pack contents, carried supplies, natural weapons, or body anatomy here.\n' +
-                'CHARACTER ANCHORS: preserve all important persona notes, origin facts, limits, fighting style, known possessions, and secrecy rules.\n\n' +
+                'CHARACTER ANCHORS: preserve only explicit durable persona facts that cannot fit another structured field. Do not duplicate basic information, appearance, stats, natural weapons, abilities, spells, inventory, currency, or gear, and do not add summaries or interpretations.\n\n' +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
 
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
@@ -9519,7 +9572,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
 function validatePlayerCreatorSheet(sheetText, creator = {}) {
     const identity = creator.identity || {};
-    const genre = creator.flow === 'new' ? normalizePlayerAdventureGenre(identity.genre || 'Fantasy') : 'Fantasy';
+    const genre = normalizePlayerAdventureGenre(identity.genre || 'Fantasy');
     const expectedRace = creator.flow === 'new' ? getLockedPlayerCreatorRace(identity) : '';
     return assertValidCharacterSheet(sheetText, {
         stats: normalizeCoreStats(creator.stats || {}),
