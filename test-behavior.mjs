@@ -13956,7 +13956,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.10');
+      assert.equal(manifest.version, '0.9.11');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
       assert.match(source, /proseGuardEmbodiedPerceptionBannedPhrases:\s*DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES/);
@@ -14394,6 +14394,10 @@ const tests = [
       assert.match(source, /data-spe-player-additional-details/);
       assert.match(source, /function updatePlayerIdentityOptionalFields/);
       assert.match(source, /\[hidden\]\s*\{\s*display: none !important;/);
+      assert.doesNotMatch(source, /max-height: min\(74vh, 42rem\)/);
+      assert.doesNotMatch(source, /max-height: 72vh;/);
+      assert.match(source, /#\$\{PLAYER_SETUP_CARD_ID\} textarea \{\s*min-height: 5\.5rem;\s*max-height: 90vh;\s*max-height: 90dvh;\s*overflow-y: auto;\s*resize: vertical;/);
+      assert.match(source, /#\$\{PLAYER_SETUP_CARD_ID\} pre \{\s*white-space: pre-wrap;\s*height: min\(26rem, 70vh\);\s*height: min\(26rem, 70dvh\);\s*max-height: 90vh;\s*max-height: 90dvh;\s*overflow: auto;\s*resize: vertical;/);
       assert.doesNotMatch(source, /id="spe_player_race_mode"/);
       assert.doesNotMatch(source, /id="spe_player_race_pick"/);
       assert.doesNotMatch(source, /id="spe_player_appearance"/);

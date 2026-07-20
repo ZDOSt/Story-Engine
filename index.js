@@ -7348,8 +7348,6 @@ function ensurePlayerSetupStyles() {
             color: var(--SmartThemeBodyColor, inherit);
             box-shadow: 0 6px 18px rgba(0,0,0,0.18);
             line-height: 1.45;
-            max-height: min(74vh, 42rem);
-            overflow: auto;
         }
         #${PLAYER_SETUP_CARD_ID} .spe-player-shell {
             display: flex;
@@ -7514,12 +7512,19 @@ function ensurePlayerSetupStyles() {
         }
         #${PLAYER_SETUP_CARD_ID} textarea {
             min-height: 5.5rem;
+            max-height: 90vh;
+            max-height: 90dvh;
+            overflow-y: auto;
             resize: vertical;
         }
         #${PLAYER_SETUP_CARD_ID} pre {
             white-space: pre-wrap;
-            max-height: 26rem;
+            height: min(26rem, 70vh);
+            height: min(26rem, 70dvh);
+            max-height: 90vh;
+            max-height: 90dvh;
             overflow: auto;
+            resize: vertical;
             padding: 0.65rem;
             border-radius: 6px;
             background: rgba(0,0,0,0.24);
@@ -7533,7 +7538,6 @@ function ensurePlayerSetupStyles() {
         @media (max-width: 520px) {
             #${PLAYER_SETUP_CARD_ID} {
                 width: calc(100% - 0.6rem);
-                max-height: 72vh;
                 margin: 0.45rem auto;
             }
             #${PLAYER_SETUP_CARD_ID} .spe-player-shell {
