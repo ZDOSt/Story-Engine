@@ -1082,7 +1082,7 @@ function RenderControlEngine(response, input, context) {
       This rule applies to narration, not quoted character dialogue.
 
     FORBIDDEN:
-      - DO NOT use stock phrasing, cliches, or formulaic copular contrast templates such as "X is not A, but B" or "It is not A, it is B".
+      - DO NOT use stock phrasing, cliches, or formulaic corrective contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B".
       - DO NOT replace direct scene description with generic rhetorical formulas.
   }
 

@@ -13537,7 +13537,7 @@ const tests = [
 
       assert.match(mainRulesSource, /function antiStockPhrasing\(response, context\):/);
       assert.match(mainRulesSource, /Use FRESH, ORIGINAL, CONTEXT-APPROPRIATE language grounded in the immediate scene/);
-      assert.match(mainRulesSource, /formulaic copular contrasts such as "X is not A, but B", "X is not A, rather B", or "It is not A, it is B"/);
+      assert.match(mainRulesSource, /formulaic corrective contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B"/);
 
       assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
       assert.match(mainRulesSource, /You MUST reveal information ONLY through DIRECT sensory evidence available in the scene/);
@@ -13991,7 +13991,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.27');
+      assert.equal(manifest.version, '0.9.28');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -14118,7 +14118,7 @@ const tests = [
     },
   },
   {
-    name: '47a.1 anti-stock patterns detect narrow copular antithesis and ignore ordinary narration',
+    name: '47a.1 anti-stock patterns detect narrow short-description contrasts and ignore ordinary narration',
     run() {
       const rules = [{
         ruleName: 'antiStockPhrasing',
@@ -14134,7 +14134,7 @@ const tests = [
 
       assert.equal(findings.length, 3);
       assert.ok(findings.every(finding => finding.ruleNames[0] === 'antiStockPhrasing'));
-      assert.ok(findings.every(finding => finding.matches[0].phrase === 'copular not X, but Y'));
+      assert.ok(findings.every(finding => finding.matches[0].phrase === 'short not/no X, but Y contrast'));
       assert.equal(findings[0].matches[0].matchedPhrase, 'is not white, but bright');
       assert.equal(findings[1].matches[0].matchedPhrase, 'is not a question, but a statement');
       assert.equal(findings[2].matches[0].matchedPhrase, 'is not open, but securely locked');
@@ -14146,6 +14146,10 @@ const tests = [
         ["The light isn\u2019t white, but bright.", "isn\u2019t white, but bright"],
         ['It is not a question but a statement.', 'is not a question but a statement'],
         ['It is not very bright, but quite dark.', 'is not very bright, but quite dark'],
+        ['It is not an earthquake, but something else.', 'is not an earthquake, but something else'],
+        ['Not an earthquake, but something else.', 'Not an earthquake, but something else'],
+        ['Not a warning but a threat.', 'Not a warning but a threat'],
+        ['No accident, but sabotage.', 'No accident, but sabotage'],
       ]) {
         const variantFindings = collectProseGuardSentenceFindings(variant, rules);
         assert.equal(variantFindings.length, 1, `Expected one anti-stock finding for: ${variant}`);
@@ -14157,13 +14161,21 @@ const tests = [
         'She did not move, but watched him.',
         'The guard not only bars the door but also calls for help.',
         'It is not because he left, but because he was forced.',
+        'The door is locked, but you can open it.',
         'The door is not locked, but you can open it.',
         'The gate is not open, but he is checking the lock.',
         'The gate is not open, he is checking the lock.',
         'The room is not quiet, but the child is sleeping.',
         'Maria is not angry, but Maria is walking away.',
         'She is not angry, but she is afraid.',
+        'Not the door, but you can open it.',
+        'No warning came, but the bell rang.',
+        'There was no earthquake, but the building continued shaking.',
+        'The report describes not an earthquake, but something else.',
+        'The vibration changed: not an earthquake, but something else.',
         'Maria says, "It is not white, but bright."',
+        'Maria says, "Not an earthquake, but something else."',
+        'Maria says, "No accident, but sabotage."',
         "Maria says, 'It is not white, but bright.'",
         'Maria says, "It isn\u2019t white, but bright."',
       ]) {

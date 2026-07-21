@@ -414,7 +414,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - "barely above a murmur"
         - "barely above a whisper"
         - "barely above a breath"
-        - formulaic copular contrasts such as "X is not A, but B", "X is not A, rather B", or "It is not A, it is B"
+        - formulaic corrective contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B"
       - DO NOT use close grammatical variations that preserve the same stock phrasing.
       - DO NOT replace direct scene description with another cliche, metaphor, emotional shortcut, or generic rhetorical formula.
   }
@@ -532,7 +532,7 @@ const PROSE_GUARD_TARGETED_BAN_FIELDS = Object.freeze([
         key: 'proseGuardAntiStockPhrasingBannedPhrases',
         ruleName: 'antiStockPhrasing',
         label: 'antiStockPhrasing',
-        description: 'Repetitive stock expressions and narrow copular contrast templates.',
+        description: 'Repetitive stock expressions and narrow corrective-contrast templates.',
         defaultValue: DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES,
         patternNames: ['notXButY'],
     },

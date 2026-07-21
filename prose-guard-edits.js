@@ -7,13 +7,24 @@ const STRUCTURED_ARTIFACT_PATTERN = /(?:BEGIN|END)_(?:FINAL_NARRATION|PROSE_GUAR
 const PHRASE_MARKUP = String.raw`(?:<[^>\r\n]*>|&[^;\r\n]+;|[*_~])`;
 const PHRASE_SEPARATOR = String.raw`(?:${PHRASE_MARKUP}|[\s,;:\u2013\u2014"'\u2018\u2019\u201c\u201d()\[\]{}-])+`;
 const WORD_SOURCE = String.raw`[\p{L}\p{N}]+(?:[-'\u2019][\p{L}\p{N}]+)*`;
+const ELSE_COMPLEMENT_SOURCE = String.raw`(?:something|anything|nothing|someone|anyone|everyone|somebody|anybody|everybody|nobody|somewhere|anywhere|everywhere|nowhere)\s+else`;
 const ARTICLE_COMPLEMENT_SOURCE = String.raw`(?:a|an|the)\s+${WORD_SOURCE}`;
 const MODIFIED_COMPLEMENT_SOURCE = String.raw`(?:[\p{L}]+ly|very|quite|too|so|more|less|most|least)\s+${WORD_SOURCE}`;
-const SHORT_COMPLEMENT_SOURCE = String.raw`(?:${ARTICLE_COMPLEMENT_SOURCE}|${MODIFIED_COMPLEMENT_SOURCE}|${WORD_SOURCE})`;
+const SHORT_COMPLEMENT_SOURCE = String.raw`(?:${ELSE_COMPLEMENT_SOURCE}|${ARTICLE_COMPLEMENT_SOURCE}|${MODIFIED_COMPLEMENT_SOURCE}|${WORD_SOURCE})`;
+const NO_COMPLEMENT_SOURCE = String.raw`(?:${MODIFIED_COMPLEMENT_SOURCE}|${WORD_SOURCE})`;
 const NEGATED_COPULA_SOURCE = String.raw`(?:(?:am|is|are|was|were)\s+not|(?:ain['\u2019]t|isn['\u2019]t|aren['\u2019]t|wasn['\u2019]t|weren['\u2019]t)|(?:i['\u2019]m|you['\u2019]re|he['\u2019]s|she['\u2019]s|it['\u2019]s|we['\u2019]re|they['\u2019]re)\s+not)`;
-const NOT_X_BUT_Y_PATTERN = new RegExp(
-    String.raw`\b${NEGATED_COPULA_SOURCE}\s+(?!(?:only|just|because|whether)\b)${SHORT_COMPLEMENT_SOURCE}\s*,?\s+but\s+${SHORT_COMPLEMENT_SOURCE}(?=\s*(?:[.!?](?:["'\u2019\u201d)\]]*)?\s*|$))`,
+const SHORT_CONTRAST_END_SOURCE = String.raw`(?=\s*(?:[.!?](?:["'\u2019\u201d)\]]*)?\s*|$))`;
+const COPULAR_NOT_X_BUT_Y_PATTERN = new RegExp(
+    String.raw`\b${NEGATED_COPULA_SOURCE}\s+(?!(?:only|just|because|whether)\b)${SHORT_COMPLEMENT_SOURCE}\s*,?\s+but\s+${SHORT_COMPLEMENT_SOURCE}${SHORT_CONTRAST_END_SOURCE}`,
     'giu',
+);
+const ELLIPTICAL_NOT_X_BUT_Y_PATTERN = new RegExp(
+    String.raw`^not\s+(?!(?:only|just|because|whether)\b)${SHORT_COMPLEMENT_SOURCE}\s*,?\s+but\s+${SHORT_COMPLEMENT_SOURCE}${SHORT_CONTRAST_END_SOURCE}`,
+    'iu',
+);
+const NOMINAL_NO_X_BUT_Y_PATTERN = new RegExp(
+    String.raw`^no\s+(?!(?:only|just|because|whether)\b)${NO_COMPLEMENT_SOURCE}\s*,?\s+but\s+${SHORT_COMPLEMENT_SOURCE}${SHORT_CONTRAST_END_SOURCE}`,
+    'iu',
 );
 const SENTENCE_SEGMENTER = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
     ? new Intl.Segmenter(undefined, { granularity: 'sentence' })
@@ -126,7 +137,7 @@ export function collectProseGuardSentenceFindings(narrationText, rules, limit = 
             for (const match of collectNotXButYMatches(source)) {
                 recordMatch(
                     rule,
-                    'copular not X, but Y',
+                    'short not/no X, but Y contrast',
                     match.matchedPhrase,
                     match.start,
                     match.end,
@@ -200,12 +211,26 @@ export function applyProseGuardSentenceRepairs(narrationText, findings, rawPaylo
 }
 
 function collectNotXButYMatches(source) {
-    const pattern = new RegExp(NOT_X_BUT_Y_PATTERN.source, NOT_X_BUT_Y_PATTERN.flags);
-    return [...String(source).matchAll(pattern)].map(match => ({
-        matchedPhrase: String(match[0] || ''),
-        start: Number(match.index || 0),
-        end: Number(match.index || 0) + String(match[0] || '').length,
-    }));
+    const value = String(source);
+    const matches = [];
+    const recordMatch = (match, offset = 0) => {
+        const matchedPhrase = String(match?.[0] || '');
+        if (!matchedPhrase) return;
+        const start = offset + Number(match.index || 0);
+        matches.push({ matchedPhrase, start, end: start + matchedPhrase.length });
+    };
+
+    const copularPattern = new RegExp(COPULAR_NOT_X_BUT_Y_PATTERN.source, COPULAR_NOT_X_BUT_Y_PATTERN.flags);
+    for (const match of value.matchAll(copularPattern)) recordMatch(match);
+
+    for (const span of splitProseSentenceSpans(value)) {
+        for (const sourcePattern of [ELLIPTICAL_NOT_X_BUT_Y_PATTERN, NOMINAL_NO_X_BUT_Y_PATTERN]) {
+            const sentencePattern = new RegExp(sourcePattern.source, sourcePattern.flags);
+            recordMatch(sentencePattern.exec(span.text), span.start);
+        }
+    }
+
+    return matches.sort((left, right) => left.start - right.start);
 }
 
 function parseRepairValue(raw) {
