@@ -1034,14 +1034,18 @@ function RenderControlEngine(response, input, context) {
 
   function embodiedPerception(response, context): {
     MANDATE:
-      You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position. PRIORITIZE sight, hearing, and touch.
+      You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position.
 
-      Include smell and taste ONLY when:
+      Smell and taste, including ALL synonymous sensory descriptions, are BANNED by default.
+
+      Smell or taste may appear ONLY when:
       - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
       - A CLOSE-RANGE physical source is overpowering and unavoidable.
 
     FORBIDDEN:
-      - DO NOT use ambient smell or taste as a property of the air or room, or as a substitute for concrete scene narration.
+      - Unless an exception above applies, DO NOT mention or imply smell or taste through any synonym.
+      - DO NOT attach smell or taste language to the air, wind, room, atmosphere, or another ambient condition. "The air is cool and dry" is allowed; appending "it carries a mineral tang" is FORBIDDEN.
+      - DO NOT substitute ambient smell or taste for concrete scene narration.
   }
 
   function diegeticPhysicality(response, context): {

@@ -13548,8 +13548,9 @@ const tests = [
       assert.match(mainRulesSource, /A name may appear ONLY when explicitly spoken in dialogue/);
 
       assert.match(mainRulesSource, /function embodiedPerception\(response, context\):/);
-      assert.match(mainRulesSource, /PRIORITIZE sight, hearing, and touch/);
+      assert.match(mainRulesSource, /Smell and taste, including ALL synonymous sensory descriptions, are BANNED by default/);
       assert.match(mainRulesSource, /A CLOSE-RANGE physical source is overpowering and unavoidable/);
+      assert.match(mainRulesSource, /The air is cool and dry, and it carries a mineral tang/);
       assert.doesNotMatch(mainRulesSource, /SPATIAL CONTINUITY|relative positions|perceive, reach, or interact through/);
 
       assert.match(mainRulesSource, /function denotativePhysicality\(response, context\):/);
@@ -13991,7 +13992,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.28');
+      assert.equal(manifest.version, '0.9.29');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);

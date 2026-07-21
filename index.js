@@ -452,14 +452,18 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
   function embodiedPerception(response, context): {
     MANDATE:
-      You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position. PRIORITIZE sight, hearing, and touch.
+      You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position.
 
-      Include smell and taste ONLY when:
+      Smell and taste, including ALL synonymous sensory descriptions, are BANNED by default.
+
+      Smell or taste may appear ONLY when:
       - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
       - A CLOSE-RANGE physical source is overpowering and unavoidable.
 
     FORBIDDEN:
-      - DO NOT describe smells or tastes as ambient properties of the air or room.
+      - Unless an exception above applies, DO NOT mention or imply any smell or taste. This includes, but is not limited to, scent, odor, aroma, fragrance, stench, reek, musk, tang, whiff, trace, or hint.
+      - DO NOT attach smell or taste language to the air, wind, breeze, room, atmosphere, temperature, humidity, or another ambient condition.
+      - Example: "The air is cool and dry" is allowed. "The air is cool and dry, and it carries a mineral tang" is FORBIDDEN.
       - DO NOT use ambient smell or taste in place of concrete, descriptive scene narration.
   }
 
