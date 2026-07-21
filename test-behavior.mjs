@@ -13535,6 +13535,10 @@ const tests = [
       assert.match(mainRulesSource, /ABSOLUTELY NO breath or voice hitching\/catching/);
       assert.match(mainRulesSource, /ABSOLUTELY NO interpretive, figurative, or invisible eye-language/);
 
+      assert.match(mainRulesSource, /function antiStockPhrasing\(response, context\):/);
+      assert.match(mainRulesSource, /Use FRESH, ORIGINAL, CONTEXT-APPROPRIATE language grounded in the immediate scene/);
+      assert.match(mainRulesSource, /formulaic copular contrasts such as "X is not A, but B", "X is not A, rather B", or "It is not A, it is B"/);
+
       assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
       assert.match(mainRulesSource, /You MUST reveal information ONLY through DIRECT sensory evidence available in the scene/);
       assert.match(mainRulesSource, /DO NOT reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore/);
@@ -13587,8 +13591,9 @@ const tests = [
         'activeHandoff',
         'dialogueTurn',
         'inputChronology',
-        'agencySeparation',
         'strictBehaviorism',
+        'antiStockPhrasing',
+        'agencySeparation',
         'strictEpistemology',
         'diegeticPhysicality',
         'embodiedPerception',
@@ -13980,23 +13985,25 @@ const tests = [
     },
   },
   {
-    name: '47 Prose Guard uses only three targeted phrase fields and exact rule blocks',
+    name: '47 Prose Guard is a deterministic four-field sentence repair pipeline',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.18');
+      assert.equal(manifest.version, '0.9.27');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
+      assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
       assert.match(source, /proseGuardEmbodiedPerceptionBannedPhrases:\s*DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES/);
-      assert.doesNotMatch(source, /proseGuardInanimateObjectivityBannedPhrases/);
-      assert.doesNotMatch(source, /ruleName:\s*'inanimateObjectivity'/);
+      assert.doesNotMatch(source, /proseGuardInanimateObjectivityBannedPhrases|ruleName:\s*'inanimateObjectivity'/);
       assert.match(source, /rulePrompt:\s*getProseRuleBlock\(field\.ruleName\)/);
       assert.match(source, /function getProseRuleBlock\(ruleName\)/);
-      assert.match(source, /function strictBehaviorism\(response, context\)/);
-      assert.match(source, /function denotativePhysicality\(response, context\)/);
-      assert.match(source, /function embodiedPerception\(response, context\)/);
+      assert.match(source, /patternNames: \['notXButY'\]/);
+      assert.match(source, /\.filter\(rule => rule\.phrases\.length > 0 \|\| rule\.patternNames\?\.length > 0\)/);
+      assert.match(source, /const PROSE_GUARD_MAX_REPAIR_ATTEMPTS = 2/);
+      assert.match(source, /for \(let attempt = 1; attempt <= PROSE_GUARD_MAX_REPAIR_ATTEMPTS; attempt \+= 1\)/);
+      assert.match(source, /fallbackAfterStructuredFailure: false/);
       assert.match(source, /if \(extension_settings\[SETTINGS_KEY\]\[key\] === undefined\)/);
       assert.match(source, /data-structured-preflight-reset-prose-guard-bans/);
 
@@ -14006,10 +14013,12 @@ const tests = [
       assert.match(source, /includeSentenceRepairs/);
       assert.doesNotMatch(source, /includeProseEdits|proseEdits/);
       assert.doesNotMatch(source, /buildProseGuardPrompt|requestProseGuardCorrection|requestCombinedPostNarrationPass|STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
+      assert.doesNotMatch(source, /PROSE_GUARD_MAX_REPAIR_ROUNDS|writeProseGuardMessageText|rollbackProseGuardTrackerCommit|proseGuardProtection/);
+      assert.doesNotMatch(editSource, /TARGETED_REPAIR_ACTOR_TOKENS|lexical anchor|isNearDuplicateNarration|assertNonDestructiveReplacement|rejectRepeatedNarration/);
     },
   },
   {
-    name: '47a deterministic phrase findings ignore dialogue and group one sentence',
+    name: '47a deterministic phrase findings enforce configured phrases in dialogue and group one sentence',
     run() {
       const rules = [
         { ruleName: 'strictBehaviorism', phrases: ['breath catches'] },
@@ -14019,33 +14028,31 @@ const tests = [
       const source = 'Maria says, "Her breath catches." Outside, her breath catches while silence stretches and the room smells of smoke.';
       const findings = collectProseGuardSentenceFindings(source, rules);
 
-      assert.equal(findings.length, 1);
+      assert.equal(findings.length, 2);
       assert.equal(findings[0].id, 'PG_SENTENCE_1');
-      assert.equal(findings[0].sentence, 'Outside, her breath catches while silence stretches and the room smells of smoke.');
-      assert.deepEqual(findings[0].ruleNames, ['strictBehaviorism', 'denotativePhysicality', 'embodiedPerception']);
-      assert.equal(findings[0].matches.length, 3);
-      assert.equal(findings[0].matches.filter(match => match.ruleName === 'strictBehaviorism').length, 1);
+      assert.equal(findings[0].sentence, 'Maria says, "Her breath catches."');
+      assert.deepEqual(findings[0].ruleNames, ['strictBehaviorism']);
+      assert.equal(findings[0].matches.length, 1);
+      assert.equal(findings[0].matches[0].matchedPhrase, 'breath catches');
+      assert.equal(findings[1].id, 'PG_SENTENCE_2');
+      assert.equal(findings[1].sentence, 'Outside, her breath catches while silence stretches and the room smells of smoke.');
+      assert.deepEqual(findings[1].ruleNames, ['strictBehaviorism', 'denotativePhysicality', 'embodiedPerception']);
+      assert.equal(findings[1].matches.length, 3);
+      assert.equal(findings[1].matches.filter(match => match.ruleName === 'strictBehaviorism').length, 1);
 
-      assert.deepEqual(
-        collectProseGuardSentenceFindings('Maria says, "Her breath catches."', rules),
-        [],
-      );
-      assert.deepEqual(
-        collectProseGuardSentenceFindings("Maria says, 'Her breath catches.'", rules),
-        [],
-      );
-      assert.deepEqual(
-        collectProseGuardSentenceFindings('Maria says, \u2018Her breath catches.\u2019', rules),
-        [],
-      );
-      assert.deepEqual(
-        collectProseGuardSentenceFindings('Maria says, \u2018I don\u2019t think her breath catches.\u2019', rules),
-        [],
-      );
-      assert.deepEqual(
-        collectProseGuardSentenceFindings("Maria says, 'I don't think her breath catches.'", rules),
-        [],
-      );
+      for (const quotedText of [
+        'Maria says, "Her breath catches."',
+        "Maria says, 'Her breath catches.'",
+        'Maria says, ‘Her breath catches.’',
+        'Maria says, ‘I don’t think her breath catches.’',
+        "Maria says, 'I don't think her breath catches.'",
+      ]) {
+        assert.equal(
+          collectProseGuardSentenceFindings(quotedText, rules).length,
+          1,
+          `Expected configured phrase to be enforced in dialogue: ${quotedText}`,
+        );
+      }
       assert.equal(collectProseGuardSentenceFindings("Maria's breath catches.", rules).length, 1);
 
       const quotedContinuation = collectProseGuardSentenceFindings(
@@ -14059,177 +14066,336 @@ const tests = [
         rules,
       );
       assert.equal(separateSentence[0].sentence, 'Her breath catches.');
+
+      const manyFindingsSource = Array.from(
+        { length: 30 },
+        (_value, index) => `Sentence ${index + 1}: her breath catches.`,
+      ).join(' ');
+      assert.equal(collectProseGuardSentenceFindings(manyFindingsSource, rules).length, 30);
+      assert.equal(collectProseGuardSentenceFindings(manyFindingsSource, rules, 24).length, 24);
+
+      assert.equal(
+        collectProseGuardSentenceFindings(
+          'She can\u2019t leave.',
+          [{ ruleName: 'custom', phrases: ["can't leave"] }],
+        ).length,
+        1,
+      );
+      assert.equal(
+        collectProseGuardSentenceFindings(
+          "She can't leave.",
+          [{ ruleName: 'custom', phrases: ['can\u2019t leave'] }],
+        ).length,
+        1,
+      );
+      assert.equal(
+        collectProseGuardSentenceFindings(
+          'The tag is #forbidden.',
+          [{ ruleName: 'custom', phrases: ['#forbidden'] }],
+        ).length,
+        1,
+      );
+
+      const beforeConfiguration = collectProseGuardSentenceFindings(
+        'She tucks a strand of hair behind her ear.',
+        rules,
+      );
+      const afterConfiguration = collectProseGuardSentenceFindings(
+        'She tucks a strand of hair behind her ear.',
+        [...rules, { ruleName: 'antiStockPhrasing', phrases: ['tucks a strand of hair'] }],
+      );
+      assert.equal(beforeConfiguration.length, 0);
+      assert.equal(afterConfiguration.length, 1);
+      assert.equal(afterConfiguration[0].matches[0].matchedPhrase, 'tucks a strand of hair');
+
+      assert.equal(
+        collectProseGuardSentenceFindings(
+          'Her <em>breath</em> catches.',
+          rules,
+        ).length,
+        1,
+      );
     },
   },
   {
-    name: '47b sentence repairs are code-owned, non-deleting, and quote-preserving',
+    name: '47a.1 anti-stock patterns detect narrow copular antithesis and ignore ordinary narration',
     run() {
-      const rules = [{ ruleName: 'strictBehaviorism', phrases: ['breath catches', 'breath hitches'] }];
-      const source = 'Maria says, "Stay here," while her breath catches.';
+      const rules = [{
+        ruleName: 'antiStockPhrasing',
+        phrases: [],
+        patternNames: ['notXButY'],
+      }];
+      const source = [
+        'The light is not white, but bright.',
+        'It is not a question, but a statement.',
+        'The gate is not open, but securely locked.',
+      ].join(' ');
       const findings = collectProseGuardSentenceFindings(source, rules);
-      assert.equal(findings.length, 1);
-      const findingId = findings[0].id;
+
+      assert.equal(findings.length, 3);
+      assert.ok(findings.every(finding => finding.ruleNames[0] === 'antiStockPhrasing'));
+      assert.ok(findings.every(finding => finding.matches[0].phrase === 'copular not X, but Y'));
+      assert.equal(findings[0].matches[0].matchedPhrase, 'is not white, but bright');
+      assert.equal(findings[1].matches[0].matchedPhrase, 'is not a question, but a statement');
+      assert.equal(findings[2].matches[0].matchedPhrase, 'is not open, but securely locked');
+
+      for (const [variant, expectedMatch] of [
+        ["It's not white, but bright.", "It's not white, but bright"],
+        ["The light isn't white, but bright.", "isn't white, but bright"],
+        ["I'm not asking, but telling.", "I'm not asking, but telling"],
+        ["The light isn\u2019t white, but bright.", "isn\u2019t white, but bright"],
+        ['It is not a question but a statement.', 'is not a question but a statement'],
+        ['It is not very bright, but quite dark.', 'is not very bright, but quite dark'],
+      ]) {
+        const variantFindings = collectProseGuardSentenceFindings(variant, rules);
+        assert.equal(variantFindings.length, 1, `Expected one anti-stock finding for: ${variant}`);
+        assert.equal(variantFindings[0].matches[0].matchedPhrase, expectedMatch);
+      }
+
+      for (const ordinaryNarration of [
+        'He could not see her, but he heard her.',
+        'She did not move, but watched him.',
+        'The guard not only bars the door but also calls for help.',
+        'It is not because he left, but because he was forced.',
+        'The door is not locked, but you can open it.',
+        'The gate is not open, but he is checking the lock.',
+        'The gate is not open, he is checking the lock.',
+        'The room is not quiet, but the child is sleeping.',
+        'Maria is not angry, but Maria is walking away.',
+        'She is not angry, but she is afraid.',
+        'Maria says, "It is not white, but bright."',
+        "Maria says, 'It is not white, but bright.'",
+        'Maria says, "It isn\u2019t white, but bright."',
+      ]) {
+        assert.deepEqual(
+          collectProseGuardSentenceFindings(ordinaryNarration, rules),
+          [],
+          `Expected no anti-stock finding for: ${ordinaryNarration}`,
+        );
+      }
+    },
+  },
+  {
+    name: '47b sentence repairs enforce only structure and a complete deterministic rescan',
+    run() {
+      const rules = [
+        { ruleName: 'strictBehaviorism', phrases: ['breath catches', 'breath hitches'] },
+        { ruleName: 'denotativePhysicality', phrases: ['silence stretches'] },
+      ];
+      const source = 'Maria says, "Stay here," while her breath catches. The silence stretches.';
+      const findings = collectProseGuardSentenceFindings(source, rules);
+      assert.equal(findings.length, 2);
 
       const validPayload = parseProseGuardRepairPayload([
         PROSE_GUARD_EDITS_START,
         JSON.stringify({
-          sentenceRepairs: [{
-            findingId,
-            replacementSentence: 'Maria says, "Stay here," while her breathing remains steady.',
-          }],
+          sentenceRepairs: [
+            {
+              findingId: findings[0].id,
+              replacementSentence: 'Maria says, "Stay here," while keeping her gaze on the door.',
+            },
+            {
+              findingId: findings[1].id,
+              replacementSentence: 'No one speaks for several seconds.',
+            },
+          ],
         }),
         PROSE_GUARD_EDITS_END,
       ].join('\n'));
       const repaired = applyProseGuardSentenceRepairs(source, findings, validPayload, { rules });
-      assert.equal(repaired.narrationText, 'Maria says, "Stay here," while her breathing remains steady.');
-      assert.equal(repaired.appliedRepairs.length, 1);
+      assert.equal(
+        repaired.narrationText,
+        'Maria says, "Stay here," while keeping her gaze on the door. No one speaks for several seconds.',
+      );
+      assert.equal(repaired.appliedRepairs.length, 2);
+      assert.equal(repaired.rejectedRepairs.length, 0);
+      assert.deepEqual(collectProseGuardSentenceFindings(repaired.narrationText, rules), []);
 
       const unknownFinding = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId: 'PG_SENTENCE_999',
-          replacementSentence: 'Maria says, "Stay here," while her breathing remains steady.',
+          replacementSentence: 'Maria remains beside the door.',
         }],
       }, { rules });
       assert.equal(unknownFinding.narrationText, source);
       assert.match(unknownFinding.rejectedRepairs[0].reason, /unknown findingId/);
 
-      const unsafeReplacement = applyProseGuardSentenceRepairs(source, findings, {
+      const unchangedFinding = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
-          findingId,
-          replacementSentence: 'Maria says, "Leave now," while her breathing remains steady.',
+          findingId: findings[0].id,
+          replacementSentence: findings[0].sentence,
         }],
       }, { rules });
-      assert.equal(unsafeReplacement.narrationText, source);
-      assert.match(unsafeReplacement.rejectedRepairs[0].reason, /changed quoted dialogue/);
+      assert.equal(unchangedFinding.narrationText, source);
+      assert.match(unchangedFinding.rejectedRepairs[0].reason, /targeted phrase violation|did not change/);
 
       const replacementWithViolation = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
-          findingId,
+          findingId: findings[0].id,
           replacementSentence: 'Maria says, "Stay here," while her breath hitches.',
         }],
       }, { rules });
       assert.equal(replacementWithViolation.narrationText, source);
       assert.match(replacementWithViolation.rejectedRepairs[0].reason, /targeted phrase violation/);
 
-      const destructiveReplacement = applyProseGuardSentenceRepairs(
-        'Maria lifts the cup by the window while her breath catches.',
-        collectProseGuardSentenceFindings(
-          'Maria lifts the cup by the window while her breath catches.',
-          rules,
-        ),
-        {
-          sentenceRepairs: [{
-            findingId: 'PG_SENTENCE_1',
-            replacementSentence: 'Maria steps away from the window.',
-          }],
-        },
-        { rules },
-      );
-      assert.equal(destructiveReplacement.narrationText, 'Maria lifts the cup by the window while her breath catches.');
-      assert.match(destructiveReplacement.rejectedRepairs[0].reason, /outside the targeted phrase span/);
+      const multiSentenceReplacement = applyProseGuardSentenceRepairs(source, findings, {
+        sentenceRepairs: [{
+          findingId: findings[0].id,
+          replacementSentence: 'Maria remains by the door. She raises one hand.',
+        }],
+      }, { rules });
+      assert.equal(multiSentenceReplacement.narrationText, source);
+      assert.match(multiSentenceReplacement.rejectedRepairs[0].reason, /not one sentence/);
 
-      for (const [factSource, factReplacement] of [
-        ['Maria lifts the cup while her breath catches.', 'Maria drops the cup while her breathing remains steady.'],
-        ["The guard grips Maria's wrist while his breath catches.", "The guard releases Maria's wrist while his breathing remains steady."],
-        ['Maria lifts the cup while her breath catches.', 'Maria lifts the cup while her breathing remains steady and then leaves the room.'],
-        ['Maria lifts the cup while her breath catches.', 'Maria lifts the cup while her breathing remains steady and she leaves.'],
-        ['Maria lifts the cup while her breath catches.', 'Maria lifts the cup while her steps move away.'],
-      ]) {
-        const factFindings = collectProseGuardSentenceFindings(factSource, rules);
-        const factMutation = applyProseGuardSentenceRepairs(factSource, factFindings, {
-          sentenceRepairs: [{ findingId: factFindings[0].id, replacementSentence: factReplacement }],
-        }, { rules });
-        assert.equal(factMutation.narrationText, factSource);
-        assert.match(factMutation.rejectedRepairs[0].reason, /outside the targeted phrase span|excessive content inside a targeted phrase span|new actor reference|another action or clause|lacked a lexical anchor/);
-      }
+      const partialRepair = applyProseGuardSentenceRepairs(source, findings, {
+        sentenceRepairs: [{
+          findingId: findings[0].id,
+          replacementSentence: 'Maria says, "Stay here," while keeping her gaze on the door.',
+        }],
+      }, { rules });
+      const partialRemaining = collectProseGuardSentenceFindings(partialRepair.narrationText, rules);
+      assert.equal(partialRemaining.length, 1);
+      assert.equal(partialRemaining[0].matches[0].matchedPhrase, 'silence stretches');
 
       assert.throws(
-        () => parseProseGuardRepairPayload({
-          sentenceRepairs: [],
-          commentary: 'rewrite complete',
-        }),
+        () => parseProseGuardRepairPayload({ sentenceRepairs: [], commentary: 'rewrite complete' }),
         /unauthorized field/,
       );
-
-      const duplicateSource = 'Her eyes narrow. Her eyes soften.';
-      const duplicateFindings = collectProseGuardSentenceFindings(duplicateSource, [
-        { ruleName: 'strictBehaviorism', phrases: ['eyes soften'] },
-      ]);
-      const duplicateRepair = applyProseGuardSentenceRepairs(duplicateSource, duplicateFindings, {
-        sentenceRepairs: [{
-          findingId: duplicateFindings[0].id,
-          replacementSentence: 'Her eyes narrow.',
-        }],
-      }, { rules: [{ ruleName: 'strictBehaviorism', phrases: ['eyes soften'] }] });
-      assert.equal(duplicateRepair.narrationText, duplicateSource);
-      assert.match(duplicateRepair.rejectedRepairs[0].reason, /duplicated existing narration/);
-
-      const repeatedRepairSource = 'The silence stretches. The silence stretches.';
-      const repeatedRepairRules = [
-        { ruleName: 'denotativePhysicality', phrases: ['silence stretches'] },
-      ];
-      const repeatedRepairFindings = collectProseGuardSentenceFindings(repeatedRepairSource, repeatedRepairRules);
-      const repeatedRepair = applyProseGuardSentenceRepairs(repeatedRepairSource, repeatedRepairFindings, {
-        sentenceRepairs: repeatedRepairFindings.map(finding => ({
-          findingId: finding.id,
-          replacementSentence: 'The silence continues.',
-        })),
-      }, { rules: repeatedRepairRules });
-      assert.equal(repeatedRepair.appliedRepairs.length, 1);
-      assert.equal(repeatedRepair.rejectedRepairs.length, 1);
-      assert.match(repeatedRepair.rejectedRepairs[0].reason, /repeated the same narration/);
-
       assert.throws(
         () => parseProseGuardRepairPayload({
-          sentenceRepairs: [{ findingId, replacementSentence: '' }],
+          sentenceRepairs: [{ findingId: findings[0].id, replacementSentence: '' }],
         }),
         /attempted to delete narration/,
       );
       assert.throws(
         () => parseProseGuardRepairPayload({
-          sentenceRepairs: [{ findingId, replacementSentence: 'First sentence.\nSecond sentence.' }],
+          sentenceRepairs: [{ findingId: findings[0].id, replacementSentence: 'First sentence.\nSecond sentence.' }],
         }),
         /crossed a line boundary/,
       );
       assert.throws(
         () => parseProseGuardRepairPayload({
-          sentenceRepairs: [{ findingId, replacementSentence: 'BEGIN_FINAL_NARRATION Maria steps back.' }],
+          sentenceRepairs: [{ findingId: findings[0].id, replacementSentence: 'BEGIN_FINAL_NARRATION Maria steps back.' }],
         }),
         /structured-output artifact/,
       );
     },
   },
   {
-    name: '48 targeted Prose Guard runs before one separate tracker call',
+    name: '47b.1 automatic anti-stock findings use the same sentence replacement path',
+    run() {
+      const rules = [{ ruleName: 'antiStockPhrasing', phrases: [], patternNames: ['notXButY'] }];
+      const source = 'The light is not white, but bright.';
+      const findings = collectProseGuardSentenceFindings(source, rules);
+      const repaired = applyProseGuardSentenceRepairs(source, findings, {
+        sentenceRepairs: [{
+          findingId: findings[0].id,
+          replacementSentence: 'The light is bright white.',
+        }],
+      }, { rules });
+
+      assert.equal(repaired.narrationText, 'The light is bright white.');
+      assert.equal(repaired.appliedRepairs.length, 1);
+      assert.equal(repaired.rejectedRepairs.length, 0);
+      assert.deepEqual(collectProseGuardSentenceFindings(repaired.narrationText, rules), []);
+    },
+  },
+  {
+    name: '48 targeted Prose Guard scans locally, batches repairs, then runs tracker once',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
       const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
 
-      const targetedIndex = source.indexOf('const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions);');
-      const trackerRequestIndex = source.indexOf('const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout({', targetedIndex);
-      const trackerParseIndex = source.indexOf('const postNarrationDelta = parsePostNarrationTrackerResponse(trackerRaw, narrationText);', trackerRequestIndex);
-      const displayIndex = source.indexOf('message.extra.display_text = narrationText', trackerParseIndex);
+      const repairStart = source.indexOf('async function applyTargetedProseBanRepairIfNeeded(');
+      const repairEnd = source.indexOf('function parsePostNarrationTrackerResponse(', repairStart);
+      const repairSource = source.slice(repairStart, repairEnd);
+      const cleanReturnIndex = repairSource.indexOf('if (!findings.length)');
+      const repairRequestIndex = repairSource.indexOf('await requestTargetedProseBanRepairWithTimeout(');
+      const completeRescanIndex = repairSource.indexOf('const remainingFindings = collectProseGuardSentenceFindings(currentText, rules);');
+
+      assert.ok(repairStart > 0, 'Targeted Prose Guard repair function is missing.');
+      assert.ok(cleanReturnIndex >= 0 && cleanReturnIndex < repairRequestIndex, 'Clean narration must return before any repair model request.');
+      assert.ok(completeRescanIndex > repairRequestIndex, 'Every repair must be followed by a complete deterministic rescan.');
+      assert.equal((repairSource.match(/requestTargetedProseBanRepairWithTimeout\(/g) || []).length, 1);
+      assert.match(repairSource, /const rules = getTargetedProseBanRules\(\)/);
+      assert.match(repairSource, /PROSE_GUARD_REPAIR_BATCH_SIZE/);
+      assert.match(repairSource, /Prose Guard could not produce clean narration after one repair retry/);
+
+      const finalizerStart = source.indexOf('async function finalizePostNarrationMessage(');
+      const finalizerEnd = source.indexOf('async function handleMessageDeleted(', finalizerStart);
+      const finalizerSource = source.slice(finalizerStart, finalizerEnd);
+      const targetedIndex = finalizerSource.indexOf('const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions);');
+      const trackerRequestIndex = finalizerSource.indexOf('const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout({', targetedIndex);
+      const trackerParseIndex = finalizerSource.indexOf('const postNarrationDelta = parsePostNarrationTrackerResponse(trackerRaw, narrationText);', trackerRequestIndex);
+      const formattingIndex = finalizerSource.indexOf('narrationText = applyDeterministicNarrationFormatting(narrationText, {', trackerParseIndex);
+      const displayIndex = finalizerSource.indexOf('message.extra.display_text = narrationText', formattingIndex);
 
       assert.ok(targetedIndex > 0, 'Targeted Prose Guard call is missing.');
       assert.ok(trackerRequestIndex > targetedIndex, 'Tracker call must follow targeted Prose Guard.');
       assert.ok(trackerParseIndex > trackerRequestIndex, 'Tracker response must be parsed after its request.');
-      assert.ok(displayIndex > trackerParseIndex, 'Final display must follow the tracker call.');
+      assert.ok(formattingIndex > trackerParseIndex, 'Deterministic formatting must follow the tracker call.');
+      assert.ok(displayIndex > formattingIndex, 'Final display must be the last narration stage.');
+      assert.equal((finalizerSource.match(/applyTargetedProseBanRepairIfNeeded\(/g) || []).length, 1);
+      assert.equal((finalizerSource.match(/requestPostNarrationTrackerDeltaWithTimeout\(/g) || []).length, 1);
+      assert.doesNotMatch(finalizerSource.slice(trackerRequestIndex), /applyTargetedProseBanRepairIfNeeded\(/);
       assert.match(source, /if \(proseGuardEnabled && narrationText\)/);
-      assert.match(source, /const trackerRaw = await requestPostNarrationTrackerDeltaWithTimeout\(\{/);
-      assert.match(source, /narrationText,\s*\n\s*trackerDisplaySnapshot/);
       assert.match(source, /function requestPostNarrationUtility/);
       assert.match(source, /requestPostNarrationUtility\([\s\S]*?requestOptions = \{\}/);
-      assert.match(source, /catch \(error\) \{\s*assertStoryEngineModelRequestCurrent\(requestOptions\);/);
+      assert.match(source, /fallbackAfterStructuredFailure: false/);
       assert.match(source, /abortController\?\.abort\(\)/);
       assert.match(source, /sendDeepSeekProfileStructuredRequest/);
-      assert.match(source, /official DeepSeek \$\{purpose\} tool call failed; falling back to validated text output/);
-      assert.match(source, /function applyTargetedProseBanRepairIfNeeded[\s\S]*if \(!findings\.length\)/);
       assert.doesNotMatch(source, /buildProseGuardPrompt|requestProseGuardCorrection|requestCombinedPostNarrationPass|parseCombinedPostNarrationResponse|combinedTrackerDelta|broadProseGuardAlreadyApplied|STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
-      assert.doesNotMatch(source, /includeProseEdits|proseEdits/);
+      assert.doesNotMatch(source, /includeProseEdits|proseEdits|rollbackProseGuardTrackerCommit/);
+      assert.doesNotMatch(editSource, /semantic|action classifier|lexical anchor|duplicate narration/i);
       assert.match(semanticSource, /signal: options\.signal/);
       assert.match(adapterSource, /processRequest\(\s*requestPayload,\s*\{\},\s*extractData,\s*signal,/);
+    },
+  },
+  {
+    name: '48c Prose Guard restores reused drafts, removes failed new drafts, and rejects null IDs',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const normalizeStart = source.indexOf('function normalizeProseGuardMessageId(');
+      const normalizeEnd = source.indexOf('function getProseGuardChatMessage(', normalizeStart);
+      const normalizeSource = source.slice(normalizeStart, normalizeEnd);
+      assert.ok(normalizeSource.indexOf("value === null || value === undefined || value === ''") < normalizeSource.indexOf('Number(value)'));
+
+      const captureStart = source.indexOf('function captureProseGuardDraftSnapshot(');
+      const restoreStart = source.indexOf('async function restoreProseGuardDraftSnapshot(', captureStart);
+      const discardStart = source.indexOf('async function discardFailedProseGuardDraft(', restoreStart);
+      const resolveStart = source.indexOf('async function resolveFailedProseGuardDraft(', discardStart);
+      const restoreEnd = discardStart;
+      const captureSource = source.slice(captureStart, restoreStart);
+      const restoreSource = source.slice(restoreStart, restoreEnd);
+      const discardSource = source.slice(discardStart, resolveStart);
+      const resolveEnd = source.indexOf('function reapplyProseGuardHiddenMessages(', resolveStart);
+      const resolveSource = source.slice(resolveStart, resolveEnd);
+      assert.match(captureSource, /originalChatLength:/);
+      assert.match(captureSource, /originalMessage: originalMessage && !originalMessage\.is_user \? clone\(originalMessage\) : null/);
+      assert.match(restoreSource, /Object\.assign\(targetMessage, original\)/);
+      assert.match(restoreSource, /restoreTrackerFromMessageDisplaySnapshot\(targetId, context\)/);
+      assert.match(restoreSource, /restoreProgressionFromMessageSwipe\(targetId, context\)/);
+      assert.match(restoreSource, /context\.chat\.splice\(targetId, 1\)/);
+      assert.match(restoreSource, /await saveChat\(context, \{ fallbackToMetadata: true \}\)/);
+      assert.match(discardSource, /context\.chat\.splice\(targetId, 1\)/);
+      assert.match(discardSource, /targetMessage\.mes = ''/);
+      assert.match(discardSource, /targetMessage\.extra\.display_text = ''/);
+      assert.match(discardSource, /targetMessage\.swipes = targetMessage\.swipes\.map/);
+      assert.match(discardSource, /await saveChat\(context, \{ fallbackToMetadata: true \}\)/);
+      assert.ok(resolveSource.indexOf('await restoreProseGuardDraftSnapshot(context, messageId)') < resolveSource.indexOf('await discardFailedProseGuardDraft(context, messageId)'));
+      assert.match(resolveSource, /textElement\.textContent = ''/);
+
+      const withholdStart = source.indexOf('async function withholdPostNarrationForProseGuard(');
+      const withholdEnd = source.indexOf('function prependComputedDebug(', withholdStart);
+      const withholdSource = source.slice(withholdStart, withholdEnd);
+      assert.ok(withholdSource.indexOf('await resolveFailedProseGuardDraft(context, messageId)') < withholdSource.indexOf('releaseProseGuardDisplayIntercept'));
+      assert.doesNotMatch(withholdSource, /keepHidden/);
+      assert.match(withholdSource, /state\.pendingRun = null/);
+
+      assert.match(source, /captureProseGuardDraftSnapshot\(context, normalizedType, state\.proseGuardExpectedMessageId\)/);
+      assert.doesNotMatch(source, /keepHidden|proseGuardProtectionChatId|proseGuardProtectionChatRef|writeProseGuardMessageText|rollbackProseGuardTrackerCommit/);
     },
   },
   {
@@ -14888,7 +15054,7 @@ const tests = [
       assert.match(invalidationSource, /clearRuntimePrompts\(\)/);
       assert.match(runtimeSource, /clearPromptOptionPrompts\(\)/);
       assert.match(invalidationSource, /setChatInputLocked\(false\)/);
-      assert.match(invalidationSource, /releaseProseGuardDisplayIntercept\(\{ restore: true \}\)/);
+      assert.match(invalidationSource, /releaseProseGuardDisplayIntercept\(\)/);
       assert.match(runtimeSource, /removeStreamingArtifactRegex\(\)/);
       assert.match(runtimeSource, /document\.getElementById\(TRACKER_WIDGET_ID\)\?\.remove\(\)/);
       assert.match(runtimeSource, /document\.getElementById\(PLAYER_SETUP_CARD_ID\)\?\.remove\(\)/);
@@ -14912,7 +15078,7 @@ const tests = [
       assert.match(source, /function renderPlayerSetupCard\(context = getContext\(\)\)[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*existing\?\.remove\(\);\s*return;/);
       assert.match(source, /function renderProgressionCard\(context = getContext\(\)\)[\s\S]*if \(!isStoryEngineEnabled\(\) \|\| getSettings\(\)\.characterProgressionEnabled === false/);
       assert.match(source, /function maybeRecordProgressionAccomplishment[\s\S]*if \(!isStoryEngineEnabled\(\)\) return false;/);
-      assert.match(source, /async function finalizePostNarrationMessage[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*clearRuntimePrompts\(\);\s*releaseProseGuardDisplayIntercept\(\{ restore: true, messageId \}\);\s*return;/);
+      assert.match(source, /async function finalizePostNarrationMessage[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*clearRuntimePrompts\(\);\s*releaseProseGuardDisplayIntercept\(\{ messageId \}\);\s*return;/);
       assert.match(source, /async function requestTargetedProseBanRepair[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
       assert.match(source, /async function requestPostNarrationTrackerDelta[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);
       assert.match(source, /async function requestPlayerSetupText[\s\S]*if \(!isStoryEngineEnabled\(\)\) \{\s*throw new Error\('Story Engine is disabled\.'\);/);

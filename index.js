@@ -53,7 +53,7 @@ import {
 } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
-import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
+import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START, PROSE_GUARD_REPAIR_BATCH_SIZE, removeProseGuardPhraseLines } from './prose-guard-edits.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
 import { applyCurrencyDelta, applyEconomyDelta, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, renderEconomyTrackerContext } from './economy.js';
 
@@ -95,12 +95,13 @@ const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-bloc
 const NARRATOR_HANDOFF_VERSION = 1;
 const PROSE_GUARD_DISPLAY_STYLE_ID = 'structured_preflight_prose_guard_display_styles';
 const PROSE_GUARD_EXPECTED_STYLE_ID = 'structured_preflight_prose_guard_expected_styles';
-const PROSE_GUARD_HIDE_NEXT_CLASS = 'structured-preflight-proseguard-hide-next';
 const PROSE_GUARD_HIDDEN_MESSAGE_CLASS = 'structured-preflight-proseguard-hidden-message';
-const PROSE_GUARD_HIDDEN_TEXT_CLASS = 'structured-preflight-proseguard-hidden-text';
 const PROSE_GUARD_DEFER_MS = 0;
 const PROSE_GUARD_TIMEOUT_MS = 90000;
+const PROSE_GUARD_MAX_REPAIR_ATTEMPTS = 2;
 const PROSE_GUARD_TOOL_NAME = 'submit_prose_guard_edits';
+const PROSE_GUARD_SETTINGS_MIGRATION_VERSION = 1;
+const PROSE_GUARD_MOVED_BANNED_PHRASES = Object.freeze(['barely above a whisper', 'barely above a breath']);
 const TRACKER_DELTA_TOOL_NAME = 'submit_tracker_delta';
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
 const PLAYER_SETUP_VERSION = 1;
@@ -298,9 +299,11 @@ mouth opens, then closes
 jaw opens, closes
 jaw opens, then closes`;
 
-const DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES = String.raw`barely above a whisper
-barely above a breath
-silence stretches
+const DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES = String.raw`barely above a murmur
+barely above a whisper
+barely above a breath`;
+
+const DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES = String.raw`silence stretches
 words hang in the air
 tension hangs
 tension coils
@@ -384,20 +387,6 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - DO NOT repeat, paraphrase, or re-stage previously narrated actions or dialogue.
   }
 
-  function agencySeparation(response, input, context): {
-    MANDATE:
-      You control ONLY the world and NPCs. The human player EXCLUSIVELY controls {{user}}. Narrate TO {{user}}, NEVER AS {{user}}.
-
-      You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop a held item when startled, cover their eyes against a sudden blinding glare, or be awakened by an external sound, touch, or impact.
-
-      Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
-
-    FORBIDDEN:
-      - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
-      - DO NOT narrate {{user}}'s thoughts, feelings, choices, decisions, voluntary actions, or dialogue.
-      - DO NOT interpret, assume, or complete {{user}}'s intent.
-  }
-
   function strictBehaviorism(response, context): {
     MANDATE:
       When character/NPC state or emotion is conveyed, you MUST convey it ONLY through directly observable behavior, action, or dialogue.
@@ -410,6 +399,38 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - ABSOLUTELY NO flushing, reddening, skin turning pink or red, color rising, knuckle whitening, or paling.
       - ABSOLUTELY NO breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth, jaw, or lips opening and closing in loops.
       - ABSOLUTELY NO interpretive, figurative, or invisible eye-language such as "her eyes burn," "something flickers in her eyes," "her eyes soften," or equivalent language.
+  }
+
+  function antiStockPhrasing(response, context): {
+    MANDATE:
+      Use FRESH, ORIGINAL, CONTEXT-APPROPRIATE language grounded in the immediate scene.
+
+      Describe observations, actions, and contrasts directly and specifically, using wording that feels natural to this scene rather than a reusable rhetorical template.
+
+      This rule applies to narration, not quoted character dialogue.
+
+    FORBIDDEN:
+      - DO NOT use stock phrasing such as:
+        - "barely above a murmur"
+        - "barely above a whisper"
+        - "barely above a breath"
+        - formulaic copular contrasts such as "X is not A, but B", "X is not A, rather B", or "It is not A, it is B"
+      - DO NOT use close grammatical variations that preserve the same stock phrasing.
+      - DO NOT replace direct scene description with another cliche, metaphor, emotional shortcut, or generic rhetorical formula.
+  }
+
+  function agencySeparation(response, input, context): {
+    MANDATE:
+      You control ONLY the world and NPCs. The human player EXCLUSIVELY controls {{user}}. Narrate TO {{user}}, NEVER AS {{user}}.
+
+      You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop an item when startled, cover their eyes against a sudden blinding glare, or be awakened by an external sound, touch, or impact.
+
+      Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
+
+    FORBIDDEN:
+      - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
+      - DO NOT narrate {{user}}'s thoughts, feelings, choices, decisions, voluntary actions, or dialogue.
+      - DO NOT interpret, assume, or complete {{user}}'s intent.
   }
 
   function strictEpistemology(response, context): {
@@ -478,6 +499,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     postNarrationTrackerEnabled: true,
     postNarrationProseGuardEnabled: true,
     proseGuardStrictBehaviorismBannedPhrases: DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES,
+    proseGuardAntiStockPhrasingBannedPhrases: DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES,
     proseGuardDenotativePhysicalityBannedPhrases: DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES,
     proseGuardEmbodiedPerceptionBannedPhrases: DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES,
     characterProgressionEnabled: true,
@@ -504,6 +526,15 @@ const PROSE_GUARD_TARGETED_BAN_FIELDS = Object.freeze([
         label: 'strictBehaviorism',
         description: 'Emotional/body-cue shorthand.',
         defaultValue: DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES,
+    },
+    {
+        id: 'structured_preflight_prose_guard_bans_anti_stock_phrasing',
+        key: 'proseGuardAntiStockPhrasingBannedPhrases',
+        ruleName: 'antiStockPhrasing',
+        label: 'antiStockPhrasing',
+        description: 'Repetitive stock expressions and narrow copular contrast templates.',
+        defaultValue: DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES,
+        patternNames: ['notXButY'],
     },
     {
         id: 'structured_preflight_prose_guard_bans_denotative_physicality',
@@ -589,12 +620,9 @@ const state = {
     proseGuardHideNextMessage: false,
     proseGuardGenerationType: null,
     proseGuardChatObserver: null,
-    proseGuardStreamObserver: null,
-    proseGuardStreamElement: null,
-    proseGuardStreamMessageId: null,
     proseGuardExpectedMessageId: null,
-    proseGuardStreamResetting: false,
     proseGuardHiddenMessageIds: new Set(),
+    proseGuardDraftSnapshot: null,
     postNarrationFinalizers: new Map(),
     postNarrationFinalizerTimers: new Map(),
     trackerWidgetActiveTab: 'scene',
@@ -619,6 +647,7 @@ function getContext() {
 
 function getSettings() {
     extension_settings[SETTINGS_KEY] = extension_settings[SETTINGS_KEY] || {};
+    const settings = extension_settings[SETTINGS_KEY];
     delete extension_settings[SETTINGS_KEY].disableSemanticThinking;
     delete extension_settings[SETTINGS_KEY].writingStylePrompt;
     delete extension_settings[SETTINGS_KEY].writingStyleDialoguePrompt;
@@ -633,10 +662,25 @@ function getSettings() {
             extension_settings[SETTINGS_KEY][key] = value;
         }
     }
-    extension_settings[SETTINGS_KEY].semanticReasoningEffort = normalizeSemanticReasoningEffort(
-        extension_settings[SETTINGS_KEY].semanticReasoningEffort,
+    if (migrateProseGuardSettings(settings)) {
+        saveExtensionSettings();
+    }
+    settings.semanticReasoningEffort = normalizeSemanticReasoningEffort(
+        settings.semanticReasoningEffort,
     );
-    return extension_settings[SETTINGS_KEY];
+    return settings;
+}
+
+function migrateProseGuardSettings(settings) {
+    const currentVersion = Number(settings?.proseGuardBannedPhraseMigrationVersion || 0);
+    if (Number.isFinite(currentVersion) && currentVersion >= PROSE_GUARD_SETTINGS_MIGRATION_VERSION) return false;
+
+    const key = 'proseGuardDenotativePhysicalityBannedPhrases';
+    if (settings[key] !== undefined) {
+        settings[key] = removeProseGuardPhraseLines(settings[key], PROSE_GUARD_MOVED_BANNED_PHRASES);
+    }
+    settings.proseGuardBannedPhraseMigrationVersion = PROSE_GUARD_SETTINGS_MIGRATION_VERSION;
+    return true;
 }
 
 function isStoryEngineEnabled() {
@@ -1539,7 +1583,7 @@ function renderSettingsPanel() {
                     <section class="spe-settings-section" data-spe-settings-step="prose-guard">
                         <span class="spe-settings-kicker">3. After narration</span>
                         <h4 class="spe-settings-title">Prose Guard</h4>
-                        <small class="spe-settings-description">Optionally checks final narration for prose-rule violations before anything is shown as final.</small>
+                        <small class="spe-settings-description">Deterministically scans final narration for configured phrases and the narrow stock-contrast pattern before anything is shown.</small>
                         <div class="spe-settings-body">
                             <label class="checkbox_label flexNoGap">
                                 <input id="structured_preflight_prose_guard_enabled" type="checkbox">
@@ -2236,7 +2280,7 @@ function failPreflightDryRun(dryRun, error) {
     state.lastNarratorHandoff = '';
     state.startAdventureReasoningCleanupPending = false;
     clearRuntimePrompts();
-    releaseProseGuardDisplayIntercept({ restore: true });
+    releaseProseGuardDisplayIntercept();
     clearAllProgress();
     showBlockingError(error);
     return true;
@@ -2289,7 +2333,7 @@ function failNarratorGeneration(generation, error) {
     state.pendingGeneration = null;
     state.activeRunId = null;
     clearInternalGenerationStopState();
-    releaseProseGuardDisplayIntercept({ restore: true });
+    releaseProseGuardDisplayIntercept();
     clearAllProgress();
     showBlockingError(error);
 }
@@ -2493,7 +2537,7 @@ function invalidateStoryEnginePipeline() {
     clearAllProgress();
     clearRuntimePrompts();
     setChatInputLocked(false);
-    releaseProseGuardDisplayIntercept({ restore: true });
+    releaseProseGuardDisplayIntercept();
     clearThinkingDisableRuntimeState();
     state.generationActive = false;
     state.runningSemanticPass = false;
@@ -6595,32 +6639,164 @@ function getMessageTextElement(messageId) {
     return getMessageElement(messageId)?.querySelector?.('.mes_text') || null;
 }
 
+function normalizeProseGuardMessageId(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const normalizedId = Number(value);
+    return Number.isInteger(normalizedId) && normalizedId >= 0 ? normalizedId : null;
+}
+
+function getProseGuardChatMessage(messageId, context = getContext()) {
+    const normalizedId = normalizeProseGuardMessageId(messageId);
+    if (normalizedId == null || !Array.isArray(context?.chat)) return null;
+    return context.chat[normalizedId] || null;
+}
+
+function captureProseGuardDraftSnapshot(context, type, expectedMessageId) {
+    const normalizedId = normalizeProseGuardMessageId(expectedMessageId);
+    const originalMessage = normalizedId == null ? null : getProseGuardChatMessage(normalizedId, context);
+    state.proseGuardDraftSnapshot = {
+        chatId: String(getChatId(context) || ''),
+        chatRef: context?.chat || null,
+        type: String(type || 'normal'),
+        expectedMessageId: normalizedId,
+        originalChatLength: Array.isArray(context?.chat) ? context.chat.length : 0,
+        originalMessage: originalMessage && !originalMessage.is_user ? clone(originalMessage) : null,
+    };
+}
+
+function isCurrentProseGuardDraftSnapshot(context, snapshot = state.proseGuardDraftSnapshot) {
+    if (!snapshot || !Array.isArray(context?.chat)) return false;
+    if (snapshot.chatRef && snapshot.chatRef === context.chat) return true;
+    const chatId = String(getChatId(context) || '');
+    return Boolean(snapshot.chatId && chatId && snapshot.chatId === chatId);
+}
+
+async function restoreProseGuardDraftSnapshot(context, messageId) {
+    const snapshot = state.proseGuardDraftSnapshot;
+    if (!isCurrentProseGuardDraftSnapshot(context, snapshot)) return false;
+
+    const targetId = normalizeProseGuardMessageId(messageId) ?? snapshot.expectedMessageId;
+    if (targetId == null || targetId !== snapshot.expectedMessageId) return false;
+    const targetMessage = context.chat[targetId];
+    let restored = false;
+    let trackerRestored = false;
+    let progressionRestored = false;
+
+    if (snapshot.originalMessage && targetMessage && !targetMessage.is_user) {
+        const original = clone(snapshot.originalMessage);
+        for (const key of Object.keys(targetMessage)) delete targetMessage[key];
+        Object.assign(targetMessage, original);
+        if (typeof context.updateMessageBlock === 'function') {
+            try {
+                await context.updateMessageBlock(targetId, targetMessage);
+            } catch (error) {
+                console.warn(`[${EXTENSION_NAME}] could not rerender the restored message after Prose Guard failure.`, error);
+            }
+        }
+        const textElement = getMessageTextElement(targetId);
+        if (textElement) textElement.textContent = String(targetMessage.extra?.display_text ?? targetMessage.mes ?? '');
+        trackerRestored = restoreTrackerFromMessageDisplaySnapshot(targetId, context);
+        progressionRestored = restoreProgressionFromMessageSwipe(targetId, context);
+        restored = true;
+    } else if (!snapshot.originalMessage
+        && targetId >= snapshot.originalChatLength
+        && targetId === context.chat.length - 1
+        && targetMessage
+        && !targetMessage.is_user) {
+        context.chat.splice(targetId, 1);
+        getMessageElement(targetId)?.remove();
+        restored = true;
+    }
+
+    if (!restored) return false;
+    try {
+        await saveChat(context, { fallbackToMetadata: true });
+    } catch (error) {
+        console.warn(`[${EXTENSION_NAME}] could not persist the restored chat after Prose Guard failure.`, error);
+    }
+    state.chatSignature = captureChatSignature(context);
+    if (trackerRestored) renderTrackerWidget(context);
+    if (progressionRestored) renderProgressionCard(context);
+    return true;
+}
+
+async function discardFailedProseGuardDraft(context, messageId) {
+    const targetId = normalizeProseGuardMessageId(messageId);
+    if (targetId == null || !Array.isArray(context?.chat)) return false;
+
+    const targetMessage = context.chat[targetId];
+    if (!targetMessage || targetMessage.is_user) return false;
+
+    if (targetId === context.chat.length - 1) {
+        context.chat.splice(targetId, 1);
+        getMessageElement(targetId)?.remove();
+    } else {
+        const failedText = String(targetMessage.mes ?? '');
+        targetMessage.extra = targetMessage.extra || {};
+        targetMessage.mes = '';
+        targetMessage.extra.display_text = '';
+        if (Array.isArray(targetMessage.swipes)) {
+            const activeSwipe = Number(targetMessage.swipe_id);
+            targetMessage.swipes = targetMessage.swipes.map((swipe, index) => (
+                index === activeSwipe || String(swipe ?? '') === failedText ? '' : swipe
+            ));
+        }
+        if (typeof context.updateMessageBlock === 'function') {
+            try {
+                await context.updateMessageBlock(targetId, targetMessage);
+            } catch (error) {
+                console.warn(`[${EXTENSION_NAME}] could not rerender the discarded message after Prose Guard failure.`, error);
+            }
+        }
+        const textElement = getMessageTextElement(targetId);
+        if (textElement) textElement.textContent = '';
+    }
+
+    try {
+        await saveChat(context, { fallbackToMetadata: true });
+    } catch (error) {
+        console.warn(`[${EXTENSION_NAME}] could not persist the discarded message after Prose Guard failure.`, error);
+    }
+    state.chatSignature = captureChatSignature(context);
+    return true;
+}
+
+async function resolveFailedProseGuardDraft(context, messageId) {
+    if (await restoreProseGuardDraftSnapshot(context, messageId)) return 'restored';
+    if (await discardFailedProseGuardDraft(context, messageId)) return 'discarded';
+
+    const textElement = getMessageTextElement(messageId);
+    if (textElement) textElement.textContent = '';
+    return 'cleared';
+}
+
+function reapplyProseGuardHiddenMessages() {
+    if (typeof document === 'undefined') return;
+    for (const messageId of state.proseGuardHiddenMessageIds) {
+        const messageElement = getMessageElement(messageId);
+        if (messageElement) hideProseGuardMessageElement(messageElement, messageId);
+    }
+}
+
 function ensureProseGuardDisplayStyles() {
     if (typeof document === 'undefined' || document.getElementById(PROSE_GUARD_DISPLAY_STYLE_ID)) return;
 
     const style = document.createElement('style');
     style.id = PROSE_GUARD_DISPLAY_STYLE_ID;
     style.textContent = `
-        #chat .mes.${PROSE_GUARD_HIDDEN_MESSAGE_CLASS} .mes_text,
-        #chat .mes_text.${PROSE_GUARD_HIDDEN_TEXT_CLASS} {
+        #chat .mes.${PROSE_GUARD_HIDDEN_MESSAGE_CLASS} .mes_text {
             display: none !important;
         }
     `;
     document.head.append(style);
 }
 
-function setProseGuardNextMessageHidden(enabled) {
-    if (typeof document === 'undefined') return;
-    ensureProseGuardDisplayStyles();
-    document.getElementById('chat')?.classList?.toggle(PROSE_GUARD_HIDE_NEXT_CLASS, Boolean(enabled));
-}
-
 function setProseGuardExpectedMessageHidden(messageId = null) {
     if (typeof document === 'undefined') return;
 
     document.getElementById(PROSE_GUARD_EXPECTED_STYLE_ID)?.remove();
-    const normalizedId = Number(messageId);
-    if (!Number.isFinite(normalizedId)) return;
+    const normalizedId = normalizeProseGuardMessageId(messageId);
+    if (normalizedId == null) return;
     if (!canHideExpectedProseGuardMessage(normalizedId)) return;
 
     ensureProseGuardDisplayStyles();
@@ -6637,11 +6813,11 @@ function setProseGuardExpectedMessageHidden(messageId = null) {
 function isExpectedProseGuardMessageElement(node) {
     if (!node || node.getAttribute?.('is_user') === 'true') return false;
 
-    const expectedMessageId = Number(state.proseGuardExpectedMessageId);
-    if (!Number.isFinite(expectedMessageId)) return false;
+    const expectedMessageId = normalizeProseGuardMessageId(state.proseGuardExpectedMessageId);
+    if (expectedMessageId == null) return false;
 
-    const messageId = Number(node.getAttribute?.('mesid'));
-    return Number.isFinite(messageId) && messageId === expectedMessageId;
+    const messageId = normalizeProseGuardMessageId(node.getAttribute?.('mesid'));
+    return messageId != null && messageId === expectedMessageId;
 }
 
 function hideProseGuardMessageElement(messageElement, messageId = null) {
@@ -6649,10 +6825,8 @@ function hideProseGuardMessageElement(messageElement, messageId = null) {
 
     ensureProseGuardDisplayStyles();
     messageElement.classList?.add(PROSE_GUARD_HIDDEN_MESSAGE_CLASS);
-    const normalizedId = Number(messageId ?? messageElement.getAttribute?.('mesid'));
-    if (Number.isFinite(normalizedId)) {
-        state.proseGuardHiddenMessageIds.add(normalizedId);
-    }
+    const normalizedId = normalizeProseGuardMessageId(messageId ?? messageElement.getAttribute?.('mesid'));
+    if (normalizedId != null) state.proseGuardHiddenMessageIds.add(normalizedId);
     return true;
 }
 
@@ -6672,8 +6846,8 @@ function hasActiveProseGuardDisplayRun() {
 }
 
 function canHideExpectedProseGuardMessage(messageId) {
-    const normalizedId = Number(messageId);
-    if (!Number.isFinite(normalizedId) || normalizedId < 0) return false;
+    const normalizedId = normalizeProseGuardMessageId(messageId);
+    if (normalizedId == null) return false;
     if (!hasActiveProseGuardDisplayRun()) return false;
     if (state.pendingRun?.adventureIntro) return true;
 
@@ -6686,16 +6860,16 @@ function canHideExpectedProseGuardMessage(messageId) {
 function tryAttachProseGuardPendingMessage() {
     if (!state.proseGuardHideNextMessage || typeof document === 'undefined') return false;
     if (!hasActiveProseGuardDisplayRun()) {
-        releaseProseGuardDisplayIntercept({ restore: true });
+        releaseProseGuardDisplayIntercept();
         return false;
     }
 
     const chatElement = document.getElementById('chat');
     if (!chatElement) return false;
 
-    const expectedMessageId = Number(state.proseGuardExpectedMessageId);
-    if (!Number.isFinite(expectedMessageId) || !canHideExpectedProseGuardMessage(expectedMessageId)) {
-        releaseProseGuardDisplayIntercept({ restore: true });
+    const expectedMessageId = normalizeProseGuardMessageId(state.proseGuardExpectedMessageId);
+    if (expectedMessageId == null || !canHideExpectedProseGuardMessage(expectedMessageId)) {
+        releaseProseGuardDisplayIntercept();
         return false;
     }
 
@@ -6703,7 +6877,7 @@ function tryAttachProseGuardPendingMessage() {
     if (!messageElement) return false;
 
     state.proseGuardHideNextMessage = false;
-    hideProseGuardMessageElement(messageElement, Number.isFinite(expectedMessageId) ? expectedMessageId : null);
+    hideProseGuardMessageElement(messageElement, expectedMessageId);
     return true;
 }
 
@@ -6718,60 +6892,28 @@ function shouldUseProseGuardDisplayIntercept(type) {
         && ['normal', 'swipe', 'regenerate', 'continue'].includes(normalizedType);
 }
 
-function releaseProseGuardDisplayIntercept({ restore = false, messageId = null } = {}) {
-    if (state.proseGuardStreamObserver) {
-        state.proseGuardStreamObserver.disconnect();
+function releaseProseGuardDisplayIntercept({ messageId = null } = {}) {
+    const normalizedMessageId = normalizeProseGuardMessageId(messageId);
+    const hasSpecificMessageId = normalizedMessageId != null;
+    const idsToRelease = hasSpecificMessageId
+        ? [normalizedMessageId]
+        : [...state.proseGuardHiddenMessageIds];
+    for (const id of idsToRelease) {
+        getMessageElement(id)?.classList?.remove(PROSE_GUARD_HIDDEN_MESSAGE_CLASS);
+        state.proseGuardHiddenMessageIds.delete(id);
     }
-    state.proseGuardStreamElement?.classList?.remove(PROSE_GUARD_HIDDEN_TEXT_CLASS);
-    if (typeof document !== 'undefined') {
-        const idsToRelease = Number.isFinite(Number(messageId))
-            ? [Number(messageId)]
-            : [...state.proseGuardHiddenMessageIds];
-        for (const id of idsToRelease) {
-            getMessageElement(id)?.classList?.remove(PROSE_GUARD_HIDDEN_MESSAGE_CLASS);
-            state.proseGuardHiddenMessageIds.delete(id);
-        }
-        if (!Number.isFinite(Number(messageId))) {
-            document
-                .querySelectorAll(`#chat .mes.${PROSE_GUARD_HIDDEN_MESSAGE_CLASS}`)
-                .forEach(element => element.classList.remove(PROSE_GUARD_HIDDEN_MESSAGE_CLASS));
-            state.proseGuardHiddenMessageIds.clear();
-        }
+    if (!hasSpecificMessageId && typeof document !== 'undefined') {
         document
-            .querySelectorAll(`#chat .mes_text.${PROSE_GUARD_HIDDEN_TEXT_CLASS}`)
-            .forEach(element => element.classList.remove(PROSE_GUARD_HIDDEN_TEXT_CLASS));
+            .querySelectorAll(`#chat .mes.${PROSE_GUARD_HIDDEN_MESSAGE_CLASS}`)
+            .forEach(element => element.classList.remove(PROSE_GUARD_HIDDEN_MESSAGE_CLASS));
+        state.proseGuardHiddenMessageIds.clear();
     }
-    setProseGuardNextMessageHidden(false);
     setProseGuardExpectedMessageHidden(null);
 
-    state.proseGuardStreamObserver = null;
-    state.proseGuardStreamElement = null;
-    state.proseGuardStreamMessageId = null;
     state.proseGuardExpectedMessageId = null;
-    state.proseGuardStreamResetting = false;
     state.proseGuardHideNextMessage = false;
     state.proseGuardGenerationType = null;
-}
-
-function disconnectProseGuardStreamObserver() {
-    if (state.proseGuardStreamObserver) {
-        state.proseGuardStreamObserver.disconnect();
-    }
-    state.proseGuardStreamObserver = null;
-    state.proseGuardStreamResetting = false;
-}
-
-function attachProseGuardStreamIntercept(textElement, { preserveText = false, messageId = null } = {}) {
-    if (!textElement) return;
-
-    releaseProseGuardDisplayIntercept();
-    ensureProseGuardDisplayStyles();
-    const messageElement = Number.isFinite(Number(messageId)) ? getMessageElement(messageId) : textElement.closest?.('.mes');
-    if (hideProseGuardMessageElement(messageElement, messageId)) return;
-
-    state.proseGuardStreamElement = textElement;
-    state.proseGuardStreamMessageId = messageId;
-    textElement.classList?.add(PROSE_GUARD_HIDDEN_TEXT_CLASS);
+    state.proseGuardDraftSnapshot = null;
 }
 
 function beginProseGuardDisplayIntercept(type, dryRun = false) {
@@ -6783,26 +6925,22 @@ function beginProseGuardDisplayIntercept(type, dryRun = false) {
     }
 
     const normalizedType = String(type || 'normal');
+    releaseProseGuardDisplayIntercept();
     state.proseGuardGenerationType = normalizedType;
-
-    if (['swipe', 'regenerate', 'continue'].includes(normalizedType)) {
-        const context = getContext();
-        const messageId = Array.isArray(context?.chat) ? context.chat.length - 1 : null;
-        if (messageId != null && !context.chat[messageId]?.is_user) {
-            state.proseGuardExpectedMessageId = messageId;
-            setProseGuardExpectedMessageHidden(messageId);
-            if (!hideProseGuardMessageById(messageId)) {
-                state.proseGuardHideNextMessage = true;
-            }
-        }
-        return;
-    }
-
     const context = getContext();
-    state.proseGuardExpectedMessageId = Array.isArray(context?.chat) ? context.chat.length : null;
+    const lastMessageId = Array.isArray(context?.chat) ? context.chat.length - 1 : null;
+    const lastMessage = getProseGuardChatMessage(lastMessageId, context);
+    const reusesAssistantMessage = ['swipe', 'regenerate', 'continue'].includes(normalizedType)
+        && lastMessageId != null
+        && lastMessage
+        && !lastMessage.is_user;
+    state.proseGuardExpectedMessageId = reusesAssistantMessage
+        ? lastMessageId
+        : Array.isArray(context?.chat) ? context.chat.length : null;
+    captureProseGuardDraftSnapshot(context, normalizedType, state.proseGuardExpectedMessageId);
     setProseGuardExpectedMessageHidden(state.proseGuardExpectedMessageId);
+    if (reusesAssistantMessage && hideProseGuardMessageById(state.proseGuardExpectedMessageId)) return;
     state.proseGuardHideNextMessage = true;
-    setProseGuardNextMessageHidden(true);
     tryAttachProseGuardPendingMessage();
 }
 
@@ -6814,7 +6952,7 @@ function ensureProseGuardDisplayInterceptor() {
     }
     ensureProseGuardDisplayStyles();
     if (!hasActiveProseGuardDisplayRun()) {
-        releaseProseGuardDisplayIntercept({ restore: true });
+        releaseProseGuardDisplayIntercept();
     }
     tryAttachProseGuardPendingMessage();
     if (state.proseGuardChatObserver) return;
@@ -6823,11 +6961,13 @@ function ensureProseGuardDisplayInterceptor() {
     if (!chatElement) return;
 
     state.proseGuardChatObserver = new MutationObserver(mutations => {
-        if (!state.proseGuardHideNextMessage) return;
+        if (!state.proseGuardHideNextMessage && !state.proseGuardHiddenMessageIds.size) return;
         if (!hasActiveProseGuardDisplayRun()) {
-            releaseProseGuardDisplayIntercept({ restore: true });
+            releaseProseGuardDisplayIntercept();
             return;
         }
+
+        reapplyProseGuardHiddenMessages();
 
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
@@ -6838,11 +6978,13 @@ function ensureProseGuardDisplayInterceptor() {
                     ...Array.from(node.querySelectorAll?.('.mes') || []),
                 ];
                 for (const messageNode of messageNodes) {
-                    if (!isExpectedProseGuardMessageElement(messageNode)) continue;
+                    const messageId = normalizeProseGuardMessageId(messageNode.getAttribute('mesid'));
+                    const isProtected = messageId != null
+                        && state.proseGuardHiddenMessageIds.has(messageId);
+                    if (!isProtected && !isExpectedProseGuardMessageElement(messageNode)) continue;
 
-                    const messageId = Number(messageNode.getAttribute('mesid'));
                     state.proseGuardHideNextMessage = false;
-                    hideProseGuardMessageElement(messageNode, Number.isFinite(messageId) ? messageId : null);
+                    hideProseGuardMessageElement(messageNode, messageId);
                     return;
                 }
             }
@@ -10192,7 +10334,7 @@ function parseProseGuardBannedPhraseList(value) {
     return uniqueStrings(String(value ?? '')
         .split(/\r?\n/)
         .map(line => line.trim())
-        .filter(line => line && !line.startsWith('#')));
+        .filter(Boolean));
 }
 
 function getTargetedProseBanRules(settings = getSettings()) {
@@ -10202,28 +10344,21 @@ function getTargetedProseBanRules(settings = getSettings()) {
             rulePrompt: getProseRuleBlock(field.ruleName),
             phrases: parseProseGuardBannedPhraseList(settings[field.key] ?? field.defaultValue),
         }))
-        .filter(rule => rule.phrases.length > 0);
+        .filter(rule => rule.phrases.length > 0 || rule.patternNames?.length > 0);
 }
 
-
-
-function formatTargetedProseBanFindings(findings) {
+function formatTargetedProseBanFindings(findings, rules) {
     return (findings || []).map(finding => [
         `FINDING_ID: ${finding.id}`,
         `MATCHED_PHRASES: ${finding.matches.map(match => `${match.ruleName}=${JSON.stringify(match.matchedPhrase)}`).join('; ')}`,
         'SENTENCE_TO_REPAIR:',
         finding.sentence,
         '',
-        `APPLICABLE_RULES: ${finding.ruleNames.join(', ')}`,
+        'MATCHING_PROSE_RULES:',
+        ...(finding.ruleNames || [])
+            .map(name => rules.find(rule => rule.ruleName === name)?.rulePrompt || '')
+            .filter(Boolean),
     ].join('\n')).join('\n\n');
-}
-
-function formatTargetedProseBanRuleBlocks(findings, rules) {
-    const names = [...new Set((findings || []).flatMap(finding => finding.ruleNames || []))];
-    return names
-        .map(name => rules.find(rule => rule.ruleName === name)?.rulePrompt || '')
-        .filter(Boolean)
-        .join('\n\n');
 }
 
 function buildTargetedProseBanRepairPrompt(findings, rules) {
@@ -10233,31 +10368,27 @@ function buildTargetedProseBanRepairPrompt(findings, rules) {
         'You are PROSE_GUARD_TARGETED_REPAIR, a strict sentence-level prose repair tool.',
         '',
         'TASK:',
-        'The deterministic scanner has already confirmed the listed phrase matches outside dialogue.',
-        'Rewrite ONLY the supplied sentence for its confirmed violation. Do not audit, improve, or rewrite anything else.',
-        'If no compliant repair can preserve the sentence without invention or deletion, omit that finding.',
+        'The deterministic scanner has already confirmed the listed phrase matches. Configured phrase bans are absolute for this pass, including matches inside quoted dialogue.',
+        'Repair ONLY each supplied sentence for its confirmed match. Do not audit or improve anything else.',
+        'Every supplied FINDING_ID MUST receive exactly one compliant replacement. If a safe repair is impossible, the request fails closed; do not omit the finding.',
         '',
         'REPAIR LIMITS:',
-        '- Return at most one replacement sentence for each supplied FINDING_ID.',
-        '- Change ONLY the exact matched phrase text. Copy every character outside the matched phrase spans exactly as supplied.',
-        '- The deterministic validator rejects changes anywhere outside the confirmed phrase spans.',
+        '- Return exactly one replacement sentence for each supplied FINDING_ID.',
+        '- Change only enough wording to remove the confirmed match and satisfy its matching Prose Rule.',
         '- Preserve all facts, names, dialogue, quoted wording, actions, consequences, order, tone, intensity, and meaning.',
         '- Do not add, remove, summarize, soften, or reinterpret scene content.',
         '- Do not invent gestures, actions, emotions, motives, information, object handling, or consequences.',
-        '- Quoted dialogue is immutable. Copy every quoted span exactly.',
+        '- Preserve quoted dialogue exactly except when the confirmed match itself occurs inside that dialogue.',
         '- Do not replace a banned phrase with another banned phrase or an equivalent workaround.',
         '- Return no commentary, analysis, corrected narration, or labels outside the required edit block.',
         '',
-        'APPLICABLE PROSE RULES:',
-        formatTargetedProseBanRuleBlocks(findings, rules),
-        '',
         'DETERMINISTIC FINDINGS:',
-        formatTargetedProseBanFindings(findings),
+        formatTargetedProseBanFindings(findings, rules),
         '',
         'OUTPUT CONTRACT:',
         `Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
         '{"sentenceRepairs":[{"findingId":"PG_SENTENCE_1","replacementSentence":"one corrected sentence"}]}',
-        'Use {"sentenceRepairs":[]} when no safe repair is possible.',
+        'Do not return an empty sentenceRepairs array when findings are supplied.',
         '',
         'The only authorized source text is the supplied SENTENCE_TO_REPAIR for each FINDING_ID.',
     ].join('\n');
@@ -10289,6 +10420,7 @@ async function requestTargetedProseBanRepair(findings, rules, requestOptions = {
                 purpose: 'targeted Prose Guard repair',
                 validateStructured: raw => parseTargetedProseGuardResponse(raw),
                 generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' }),
+                fallbackAfterStructuredFailure: false,
             }, requestOptions);
         }), requestOptions);
     } finally {
@@ -10318,35 +10450,88 @@ async function requestTargetedProseBanRepairWithTimeout(findings, rules, request
     }
 }
 
+class ProseGuardEnforcementError extends Error {
+    constructor(message, details = {}) {
+        super(message);
+        this.name = 'ProseGuardEnforcementError';
+        this.findings = details.findings || [];
+        this.remainingFindings = details.remainingFindings || [];
+        this.rejectedRepairs = details.rejectedRepairs || [];
+        this.cause = details.cause;
+    }
+}
+
 async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions = {}) {
-    const rules = getTargetedProseBanRules();
-    const findings = collectProseGuardSentenceFindings(narrationText, rules);
-    if (!findings.length) {
-        return { narrationText, changed: false, findings, remainingFindings: [], rejectedRepairs: [] };
+    let currentText = String(narrationText ?? '');
+    let changed = false;
+    let lastFindings = [];
+    let lastRemainingFindings = [];
+    let lastRejectedRepairs = [];
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= PROSE_GUARD_MAX_REPAIR_ATTEMPTS; attempt += 1) {
+        const rules = getTargetedProseBanRules();
+        try {
+            const findings = collectProseGuardSentenceFindings(
+                currentText,
+                rules,
+                PROSE_GUARD_REPAIR_BATCH_SIZE,
+            );
+            lastFindings = findings;
+            if (!findings.length) {
+                return {
+                    narrationText: currentText,
+                    changed,
+                    findings: lastFindings,
+                    remainingFindings: [],
+                    rejectedRepairs: [],
+                };
+            }
+
+            const repairRaw = await requestTargetedProseBanRepairWithTimeout(findings, rules, requestOptions);
+            const repairPayload = parseTargetedProseGuardResponse(repairRaw);
+            const repaired = applyProseGuardSentenceRepairs(currentText, findings, repairPayload, { rules });
+            const appliedFindingIds = new Set(repaired.appliedRepairs.map(repair => repair.findingId));
+            const unresolvedFindings = findings.filter(finding => !appliedFindingIds.has(finding.id));
+            currentText = repaired.narrationText;
+            changed = changed || repaired.changed;
+            const remainingFindings = collectProseGuardSentenceFindings(currentText, rules);
+            lastRemainingFindings = remainingFindings;
+            lastRejectedRepairs = repaired.rejectedRepairs;
+
+            if (!remainingFindings.length && !repaired.rejectedRepairs.length && !unresolvedFindings.length) {
+                return {
+                    narrationText: currentText,
+                    changed,
+                    findings,
+                    remainingFindings: [],
+                    rejectedRepairs: [],
+                };
+            }
+            lastError = new Error('One or more sentence repairs were missing, rejected, or still contained a targeted finding.');
+        } catch (error) {
+            let current = true;
+            try {
+                current = typeof requestOptions.isCurrent !== 'function' || requestOptions.isCurrent();
+            } catch {
+                current = false;
+            }
+            if (!current) throw error;
+            lastError = error;
+        }
     }
 
-    try {
-        const repairRaw = await requestTargetedProseBanRepairWithTimeout(findings, rules, requestOptions);
-        const repairPayload = parseTargetedProseGuardResponse(repairRaw);
-        const repaired = applyProseGuardSentenceRepairs(narrationText, findings, repairPayload, { rules });
-        const remainingFindings = collectProseGuardSentenceFindings(repaired.narrationText, rules);
-        if (repaired.rejectedRepairs.length) {
-            console.warn(`[${EXTENSION_NAME}] targeted Prose Guard rejected sentence repairs.`, repaired.rejectedRepairs);
-        }
-        if (remainingFindings.length) {
-            console.warn(`[${EXTENSION_NAME}] targeted Prose Guard findings remain after validated repairs.`, remainingFindings);
-        }
-        return {
-            narrationText: repaired.narrationText,
-            changed: repaired.changed,
-            findings,
-            remainingFindings,
-            rejectedRepairs: repaired.rejectedRepairs,
-        };
-    } catch (error) {
-        console.warn(`[${EXTENSION_NAME}] targeted Prose Guard repair failed; keeping current narration text.`, error);
-        return { narrationText, changed: false, findings, remainingFindings: findings, rejectedRepairs: [] };
-    }
+    const enforcementError = new ProseGuardEnforcementError(
+        'Prose Guard could not produce clean narration after one repair retry.',
+        {
+            findings: lastFindings,
+            remainingFindings: lastRemainingFindings.length ? lastRemainingFindings : lastFindings,
+            rejectedRepairs: lastRejectedRepairs,
+            cause: lastError,
+        },
+    );
+    console.error(`[${EXTENSION_NAME}] targeted Prose Guard repair failed closed.`, enforcementError);
+    throw enforcementError;
 }
 
 
@@ -10366,7 +10551,7 @@ function buildPostNarrationToolDefinition(name, { includeSentenceRepairs = false
         required.push('sentenceRepairs');
         properties.sentenceRepairs = {
             type: 'array',
-            description: 'Code-authorized, sentence-level replacement repairs for confirmed targeted phrase violations. Empty when no safe repair is certain.',
+            description: 'Exactly one code-authorized sentence-level replacement for every confirmed targeted phrase finding. Missing or rejected repairs fail closed.',
             items: {
                 type: 'object',
                 additionalProperties: false,
@@ -10405,7 +10590,7 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     const fields = Object.keys(toolDefinition?.parameters?.properties || {});
     const fieldInstructions = [];
     if (fields.includes('sentenceRepairs')) {
-        fieldInstructions.push('Put only repairs for the supplied FINDING_ID values in sentenceRepairs. Change only the exact matched phrase text and copy every character outside its spans unchanged. Return one replacementSentence per finding at most. Preserve all facts, order, tone, and quoted dialogue. Never return full rewritten narration, delete a sentence, invent content, or repair a finding the deterministic scanner did not supply. Use [] when no safe repair is possible.');
+        fieldInstructions.push('Put exactly one repaired sentence for every supplied FINDING_ID in sentenceRepairs. Change only enough wording to remove the confirmed match. Preserve all facts, actors, actions, order, tone, meaning, and unaffected dialogue. Never delete a sentence, invent content, omit a finding, or repair anything the deterministic scanner did not supply.');
     }
     if (fields.includes('trackerDelta')) {
         fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on the supplied final narration exactly as provided.');
@@ -10424,7 +10609,7 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     ];
 }
 
-async function requestPostNarrationUtility({ settings, prompt, responseLength, toolDefinition, purpose, validateStructured, generateFallback }, requestOptions = {}) {
+async function requestPostNarrationUtility({ settings, prompt, responseLength, toolDefinition, purpose, validateStructured, generateFallback, fallbackAfterStructuredFailure = true }, requestOptions = {}) {
     assertStoryEngineModelRequestCurrent(requestOptions);
     const profileSettings = {
         ...settings,
@@ -10439,6 +10624,7 @@ async function requestPostNarrationUtility({ settings, prompt, responseLength, t
                 return structured;
             } catch (error) {
                 assertStoryEngineModelRequestCurrent(requestOptions);
+                if (!fallbackAfterStructuredFailure) throw error;
                 console.warn(`[${EXTENSION_NAME}] official DeepSeek ${purpose} tool call failed; falling back to validated text output.`, error);
             }
         }
@@ -10740,11 +10926,36 @@ async function requestPostNarrationTrackerDeltaWithTimeout(args, requestOptions 
     }
 }
 
+async function withholdPostNarrationForProseGuard({ messageId, context, error }) {
+    const disposition = await resolveFailedProseGuardDraft(context, messageId);
+    releaseProseGuardDisplayIntercept({ messageId });
+    clearPendingRunCleanupTimer();
+    clearRuntimePrompts();
+    clearInternalGenerationStopState();
+    state.generationActive = false;
+    state.pendingGeneration = null;
+    state.pendingRun = null;
+    state.activeRunId = null;
+    state.lastNarratorHandoff = '';
+    state.lastNarratorHandoffKey = null;
+    clearAllProgress();
+    console.error(`[${EXTENSION_NAME}] narration withheld after an unresolved Prose Guard finding.`, {
+        findingCount: error?.findings?.length || 0,
+        remainingFindingCount: error?.remainingFindings?.length || 0,
+    });
+    notifyError(
+        'Narration was withheld because Prose Guard could not remove a configured banned phrase.',
+        `${EXTENSION_NAME}: narration blocked`,
+        { timeOut: 15000, extendedTimeOut: 15000 },
+    );
+    return { disposition };
+}
+
 
 
 function prependComputedDebug(messageId, type) {
     if (!isStoryEngineEnabled()) {
-        releaseProseGuardDisplayIntercept({ restore: true, messageId });
+        releaseProseGuardDisplayIntercept({ messageId });
         clearRuntimePrompts();
         return;
     }
@@ -10757,14 +10968,14 @@ function prependComputedDebug(messageId, type) {
     }
 
     if (!state.lastNarratorHandoff || state.lastNarratorHandoffKey === messageKey || type === 'impersonate') {
-        releaseProseGuardDisplayIntercept({ restore: true, messageId });
+        releaseProseGuardDisplayIntercept({ messageId });
         clearRuntimePrompts();
         return;
     }
 
     const message = context?.chat?.[messageId];
     if (!message || message.is_user) {
-        releaseProseGuardDisplayIntercept({ restore: true, messageId });
+        releaseProseGuardDisplayIntercept({ messageId });
         clearRuntimePrompts();
         return;
     }
@@ -10816,14 +11027,20 @@ function prependComputedDebug(messageId, type) {
 
 async function finalizePostNarrationMessage(messageId, type, messageKey, finalizingToast = null, captured = {}) {
     let finalNarrationRendered = false;
+    let proseGuardFailureHandled = false;
+    let proseGuardEnabled = true;
+    let finalizerContext = null;
+    let trackerCommitted = false;
+    let publishableNarrationText = '';
 
     try {
         if (!isStoryEngineEnabled()) {
             clearRuntimePrompts();
-            releaseProseGuardDisplayIntercept({ restore: true, messageId });
+            releaseProseGuardDisplayIntercept({ messageId });
             return;
         }
         const context = getContext();
+        finalizerContext = context;
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
             return;
         }
@@ -10849,7 +11066,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         const pendingRun = captured?.pendingRun ?? state.pendingRun;
         let trackerDeltaWarning = null;
         const settings = getSettings();
-        const proseGuardEnabled = settings.postNarrationProseGuardEnabled !== false;
+        proseGuardEnabled = settings.postNarrationProseGuardEnabled !== false;
         const root = getTrackerRoot(context);
         let finalTrackerDisplaySnapshot = null;
 
@@ -10865,9 +11082,25 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                 narrationText = targetedRepair.narrationText;
             } catch (error) {
-                console.warn(`[${EXTENSION_NAME}] targeted Prose Guard failed; keeping sanitized narrator text.`, error);
+                let current = true;
+                try {
+                    current = typeof requestOptions.isCurrent !== 'function' || requestOptions.isCurrent();
+                } catch {
+                    current = false;
+                }
+                if (!current) throw error;
+                const enforcementError = error instanceof ProseGuardEnforcementError
+                    ? error
+                    : new ProseGuardEnforcementError(
+                        'Prose Guard could not produce validated narration.',
+                        { cause: error },
+                    );
+                await withholdPostNarrationForProseGuard({ messageId, context, error: enforcementError });
+                proseGuardFailureHandled = true;
+                return;
             }
         }
+        publishableNarrationText = narrationText;
 
         if (root && pendingRun) {
             let trackerDisplaySnapshot = buildDisplayTrackerSnapshot({
@@ -11005,8 +11238,8 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
             };
             pruneRootTrackerSnapshots(root);
+            trackerCommitted = true;
 
-            setMessageTrackerDisplaySnapshot(message, trackerDisplaySnapshot);
             finalTrackerDisplaySnapshot = trackerDisplaySnapshot;
             if (state.pendingRun === pendingRun) state.pendingRun = null;
         }
@@ -11015,14 +11248,16 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             return;
         }
 
-        maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context });
-        setMessageProgressionSwipeSnapshot(message, buildProgressionSwipeSnapshot(messageKey, context));
-
         narrationText = applyDeterministicNarrationFormatting(narrationText, {
             trackerDisplaySnapshot: finalTrackerDisplaySnapshot,
             pendingRun,
             context,
         });
+        publishableNarrationText = narrationText;
+
+        maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context });
+        if (finalTrackerDisplaySnapshot) setMessageTrackerDisplaySnapshot(message, finalTrackerDisplaySnapshot);
+        setMessageProgressionSwipeSnapshot(message, buildProgressionSwipeSnapshot(messageKey, context));
 
         message.mes = narrationText;
         message.extra.display_text = narrationText;
@@ -11030,10 +11265,9 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         state.lastNarratorHandoffKey = messageKey;
         state.lastNarratorHandoff = '';
 
-        disconnectProseGuardStreamObserver();
         hideProseGuardMessageById(messageId);
         if (typeof context.updateMessageBlock === 'function') {
-            context.updateMessageBlock(messageId, message);
+            await context.updateMessageBlock(messageId, message);
         } else {
             const textElement = getMessageTextElement(messageId);
             if (textElement) textElement.textContent = narrationText;
@@ -11051,10 +11285,42 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
         clearRuntimePrompts();
         state.chatSignature = captureChatSignature(context);
+    } catch (error) {
+        let current = true;
+        try {
+            current = typeof captured?.runEpoch !== 'undefined'
+                ? isPostNarrationFinalizerCurrent(finalizerContext || getContext(), messageId, messageKey, captured)
+                : true;
+        } catch {
+            current = false;
+        }
+
+        if (current && !finalNarrationRendered && !proseGuardFailureHandled) {
+            const context = finalizerContext || getContext();
+            if (trackerCommitted && publishableNarrationText) {
+                const message = context?.chat?.[messageId];
+                if (message && !message.is_user) {
+                    message.extra = message.extra || {};
+                    message.mes = publishableNarrationText;
+                    message.extra.display_text = publishableNarrationText;
+                    const textElement = getMessageTextElement(messageId);
+                    if (textElement) textElement.textContent = publishableNarrationText;
+                    releaseProseGuardDisplayIntercept({ messageId });
+                    finalNarrationRendered = true;
+                }
+            } else {
+                await resolveFailedProseGuardDraft(context, messageId);
+                releaseProseGuardDisplayIntercept({ messageId });
+                proseGuardFailureHandled = true;
+            }
+        }
+        throw error;
     } finally {
         clearProgress(finalizingToast);
         if (isCurrentStoryEngineEpoch(captured)) {
-            releaseProseGuardDisplayIntercept({ restore: !finalNarrationRendered, messageId });
+            if (!finalNarrationRendered && !proseGuardFailureHandled) {
+                releaseProseGuardDisplayIntercept({ messageId });
+            }
             setChatInputLocked(false);
         }
     }
@@ -11259,7 +11525,7 @@ function handleGenerationLifecycleEnd() {
     clearRuntimePrompts();
 
     if (!state.pendingRun) {
-        releaseProseGuardDisplayIntercept({ restore: true });
+        releaseProseGuardDisplayIntercept();
     } else if (!state.pendingRunCleanupTimer) {
         setChatInputLocked(true, 'Finalizing narration...');
         const pendingRun = state.pendingRun;
@@ -11274,7 +11540,7 @@ function handleGenerationLifecycleEnd() {
             state.pendingRun = null;
             state.lastNarratorHandoff = '';
             state.lastNarratorHandoffKey = null;
-            releaseProseGuardDisplayIntercept({ restore: true });
+            releaseProseGuardDisplayIntercept();
             setChatInputLocked(false);
             console.warn(`[${EXTENSION_NAME}] cleared pending pre-flight handoff because no assistant message was received after generation ended.`);
         }, 5000);
@@ -11391,7 +11657,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
             clearRuntimePrompts();
             state.pendingRun = null;
             state.lastNarratorHandoff = '';
-            releaseProseGuardDisplayIntercept({ restore: true });
+            releaseProseGuardDisplayIntercept();
             clearAllProgress();
             showBlockingError(error);
             if (typeof abort === 'function') abort(true);
@@ -11491,7 +11757,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         createdAt: Date.now(),
     };
     state.activeRunId = runIdentity.runId;
-    releaseProseGuardDisplayIntercept({ restore: true });
+    releaseProseGuardDisplayIntercept();
     showProgress('Computing structured pre-flight...');
 
     const pendingGeneration = state.pendingGeneration;
@@ -11723,7 +11989,7 @@ async function handleChatCompletionPromptReady(eventData) {
         state.lastNarratorHandoff = '';
         state.pendingRun = null;
         state.startAdventureReasoningCleanupPending = false;
-        releaseProseGuardDisplayIntercept({ restore: true });
+        releaseProseGuardDisplayIntercept();
         clearAllProgress();
         clearRuntimePrompts();
         showBlockingError(error);
@@ -11864,7 +12130,7 @@ export function onDisable() {
         }
         state.subscribed = false;
     }
-    releaseProseGuardDisplayIntercept({ restore: true });
+    releaseProseGuardDisplayIntercept();
     if (state.proseGuardChatObserver) {
         state.proseGuardChatObserver.disconnect();
         state.proseGuardChatObserver = null;
