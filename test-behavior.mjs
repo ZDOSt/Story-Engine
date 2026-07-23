@@ -11741,8 +11741,8 @@ const tests = [
       assert.match(semanticSource, /userAbilityUse:\s*normalizeUserAbilityUse/);
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /When an ability, spell, power, trait, or supernatural effect is activated by \{\{user\}\} or a character\/NPC, narrate ONLY its OBSERVABLE effects and consequences\./i);
-      assert.match(preflightSource, /DO NOT label, announce, name, or explain abilities or supernatural effects outside explicitly spoken dialogue\./i);
+      assert.match(preflightSource, /When an ability, spell, power, trait, or supernatural effect is used, narrate ONLY its OBSERVABLE effects and consequences\./i);
+      assert.match(preflightSource, /DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration\. A name may appear ONLY when explicitly spoken in dialogue\./i);
       assert.match(preflightSource, /DO NOT explain activation, casting, or system mechanics\./i);
 
       const report = runCase({
@@ -13491,16 +13491,13 @@ const tests = [
 
       assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
       assert.match(mainRulesSource, /function activeHandoff\(response, context\):/);
-      assert.match(mainRulesSource, /When a character\/NPC actively participates in the current exchange, you MUST end your response on ONE of the following/);
-      assert.match(mainRulesSource, /ENVIRONMENTAL:[\s\S]*A visible environmental or scene change that requires \{\{user\}\}'s input/);
-      assert.match(mainRulesSource, /CONVERSATIONAL:[\s\S]*A statement or question to which \{\{user\}\} can naturally respond/);
-      assert.match(mainRulesSource, /It does not need to be phrased as a question/);
-      assert.match(mainRulesSource, /ACTION\/GESTURE:[\s\S]*A concrete action or gesture directed at \{\{user\}\} or materially affecting the immediate exchange/);
-      assert.match(mainRulesSource, /These are alternative ending types, not a checklist/);
+      assert.match(mainRulesSource, /If a character\/NPC actively participates in the current exchange, your response MUST end on ONE of/);
+      assert.match(mainRulesSource, /ENVIRONMENTAL BEAT:[\s\S]*A visible environmental or scene change that requires \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /CONVERSATIONAL BEAT:[\s\S]*A statement or question to which \{\{user\}\} can naturally respond/);
+      assert.match(mainRulesSource, /ACTION BEAT:[\s\S]*A concrete action or gesture directed at \{\{user\}\} or materially affecting the immediate exchange/);
       assert.match(mainRulesSource, /DO NOT ask \{\{user\}\} meta questions/);
       assert.match(mainRulesSource, /DO NOT describe a character waiting for or expecting \{\{user\}\}'s response/);
-      assert.match(mainRulesSource, /DO NOT manufacture a question, statement, gesture, interruption, or scene change solely to create a handoff/);
-      assert.match(mainRulesSource, /DO NOT apply these rules when \{\{user\}\} is alone/);
+      assert.match(mainRulesSource, /DO NOT manufacture a question, statement, action, gesture, interruption, or scene change solely to create a handoff/);
       assert.doesNotMatch(mainRulesSource, /You MUST end every response on ONE of the following|Dialogue directed at \{\{user\}\}/);
 
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
@@ -13520,6 +13517,13 @@ const tests = [
       assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s input/);
       assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue/);
 
+      assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
+      assert.match(mainRulesSource, /You MUST describe actions, sensations, objects, and events DIRECTLY by stating what they are, what they do, or what concrete effects they produce/);
+      assert.match(mainRulesSource, /This rule applies to narration, not quoted character dialogue/);
+      assert.match(mainRulesSource, /DO NOT describe or intensify something by first stating what it is NOT/);
+      assert.match(mainRulesSource, /DO NOT use formulaic negation-led rhetoric, including corrective antithesis, negative anaphora, or category rejection/);
+      assert.match(mainRulesSource, /DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation/);
+
       assert.match(mainRulesSource, /function agencySeparation\(response, input, context\):/);
       assert.match(mainRulesSource, /The human player EXCLUSIVELY controls \{\{user\}\}/);
       assert.match(mainRulesSource, /You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects/);
@@ -13534,14 +13538,16 @@ const tests = [
 
       assert.match(mainRulesSource, /function antiStockPhrasing\(response, context\):/);
       assert.match(mainRulesSource, /You MUST describe the exact action, sound, movement, object, or physical condition in the scene using DIRECT, SPECIFIC language/);
-      assert.match(mainRulesSource, /DO NOT use formulaic corrective antithesis or contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B"/);
+      assert.doesNotMatch(mainRulesSource, /DO NOT use formulaic corrective antithesis or contrasts between two short descriptions/);
 
       assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
-      assert.match(mainRulesSource, /You MUST reveal information ONLY through DIRECT sensory evidence available in the scene/);
-      assert.match(mainRulesSource, /DO NOT reveal unknown names, identities, roles, hidden causes, private thoughts, unseen actions, background lore/);
+      assert.match(mainRulesSource, /Treat ALL unstated information as HIDDEN and UNKNOWN by default/);
+      assert.match(mainRulesSource, /Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established/);
+      assert.match(mainRulesSource, /Information may enter narration ONLY through DIRECT sensory evidence available to \{\{user\}\} in the current scene, explicit dialogue, readable text, or previously established scene facts/);
+      assert.match(mainRulesSource, /DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above/);
 
       assert.match(mainRulesSource, /function diegeticPhysicality\(response, context\):/);
-      assert.match(mainRulesSource, /narrate ONLY its OBSERVABLE effects and consequences/);
+      assert.match(mainRulesSource, /When an ability, spell, power, trait, or supernatural effect is used, narrate ONLY its OBSERVABLE effects and consequences/);
       assert.match(mainRulesSource, /A name may appear ONLY when explicitly spoken in dialogue/);
 
       assert.match(mainRulesSource, /function embodiedPerception\(response, context\):/);
@@ -13552,15 +13558,15 @@ const tests = [
       assert.doesNotMatch(mainRulesSource, /SPATIAL CONTINUITY|relative positions|perceive, reach, or interact through/);
 
       assert.match(mainRulesSource, /function denotativePhysicality\(response, context\):/);
-      assert.match(mainRulesSource, /You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived in the scene/);
-      assert.match(mainRulesSource, /Objects, weather, architecture, atmosphere, and abstract concepts may ONLY be described through their physical state, movement, or concrete effects/);
-      assert.match(mainRulesSource, /NEVER attribute agency, intention, awareness, memory, or emotion to inanimate things or abstract concepts/);
+      assert.match(mainRulesSource, /You MUST narrate using LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived in the scene/);
+      assert.match(mainRulesSource, /Describe objects, weather, architecture, and atmosphere ONLY through their physical state, movement, or concrete effects\. Express abstract conditions ONLY through concrete, observable evidence/);
+      assert.match(mainRulesSource, /DO NOT attribute agency, intention, awareness, memory, or emotion to inanimate things or abstract concepts/);
       assert.match(mainRulesSource, /Rooms DO NOT breathe/);
       assert.match(mainRulesSource, /Words DO NOT hang/);
       assert.match(mainRulesSource, /Silence DOES NOT stretch/);
 
       assert.match(mainRulesSource, /function cohesiveSceneBeats\(response, context\):/);
-      assert.match(mainRulesSource, /When the scene already contains closely related physical events, narrate them as one clear, connected sequence/);
+      assert.match(mainRulesSource, /Closely related physical events MUST be narrated as one clear, connected sequence/);
       assert.match(mainRulesSource, /DO NOT invent movement, gestures, object handling, or reactions merely to make prose feel active/);
       assert.match(mainRulesSource, /DO NOT split one physical event into staccato sentences, micro-reaction loops, or body-cue pileups/);
 
@@ -13590,6 +13596,7 @@ const tests = [
         'activeHandoff',
         'dialogueTurn',
         'inputChronology',
+        'antiRhetoricalNegation',
         'strictBehaviorism',
         'antiStockPhrasing',
         'agencySeparation',
@@ -13653,7 +13660,7 @@ const tests = [
         );
       }
 
-      for (const name of ['dialogueTurn', 'inputChronology', 'strictBehaviorism', 'antiStockPhrasing', 'embodiedPerception']) {
+      for (const name of ['activeHandoff', 'dialogueTurn', 'inputChronology', 'antiRhetoricalNegation', 'strictBehaviorism', 'antiStockPhrasing', 'strictEpistemology', 'diegeticPhysicality', 'embodiedPerception', 'denotativePhysicality', 'cohesiveSceneBeats']) {
         assert.equal(
           extractRuleBlock(handoffRulesSource, name).replace(/\r/g, ''),
           extractRuleBlock(mainRulesSource, name).replace(/\r/g, ''),
@@ -13998,7 +14005,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.30');
+      assert.equal(manifest.version, '0.9.32');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -14006,7 +14013,9 @@ const tests = [
       assert.doesNotMatch(source, /proseGuardInanimateObjectivityBannedPhrases|ruleName:\s*'inanimateObjectivity'/);
       assert.match(source, /rulePrompt:\s*getProseRuleBlock\(field\.ruleName\)/);
       assert.match(source, /function getProseRuleBlock\(ruleName\)/);
-      assert.match(source, /patternNames: \['notXButY'\]/);
+      assert.match(source, /const PROSE_GUARD_AUTOMATIC_PATTERN_RULES = Object\.freeze/);
+      assert.match(source, /ruleName: 'antiRhetoricalNegation',[\s\S]{0,120}patternNames: \['notXButY'\]/);
+      assert.match(source, /rulePrompt:\s*getProseRuleBlock\(rule\.ruleName\)/);
       assert.match(source, /\.filter\(rule => rule\.phrases\.length > 0 \|\| rule\.patternNames\?\.length > 0\)/);
       assert.match(source, /const PROSE_GUARD_MAX_REPAIR_ATTEMPTS = 2/);
       assert.match(source, /for \(let attempt = 1; attempt <= PROSE_GUARD_MAX_REPAIR_ATTEMPTS; attempt \+= 1\)/);
@@ -14125,10 +14134,10 @@ const tests = [
     },
   },
   {
-    name: '47a.1 anti-stock patterns detect narrow short-description contrasts and ignore ordinary narration',
+    name: '47a.1 rhetorical-negation patterns detect narrow short-description contrasts and ignore ordinary narration',
     run() {
       const rules = [{
-        ruleName: 'antiStockPhrasing',
+        ruleName: 'antiRhetoricalNegation',
         phrases: [],
         patternNames: ['notXButY'],
       }];
@@ -14140,7 +14149,7 @@ const tests = [
       const findings = collectProseGuardSentenceFindings(source, rules);
 
       assert.equal(findings.length, 3);
-      assert.ok(findings.every(finding => finding.ruleNames[0] === 'antiStockPhrasing'));
+      assert.ok(findings.every(finding => finding.ruleNames[0] === 'antiRhetoricalNegation'));
       assert.ok(findings.every(finding => finding.matches[0].phrase === 'short not/no X, but Y contrast'));
       assert.equal(findings[0].matches[0].matchedPhrase, 'is not white, but bright');
       assert.equal(findings[1].matches[0].matchedPhrase, 'is not a question, but a statement');
@@ -14159,7 +14168,7 @@ const tests = [
         ['No accident, but sabotage.', 'No accident, but sabotage'],
       ]) {
         const variantFindings = collectProseGuardSentenceFindings(variant, rules);
-        assert.equal(variantFindings.length, 1, `Expected one anti-stock finding for: ${variant}`);
+        assert.equal(variantFindings.length, 1, `Expected one rhetorical-negation finding for: ${variant}`);
         assert.equal(variantFindings[0].matches[0].matchedPhrase, expectedMatch);
       }
 
@@ -14189,7 +14198,7 @@ const tests = [
         assert.deepEqual(
           collectProseGuardSentenceFindings(ordinaryNarration, rules),
           [],
-          `Expected no anti-stock finding for: ${ordinaryNarration}`,
+          `Expected no rhetorical-negation finding for: ${ordinaryNarration}`,
         );
       }
     },
@@ -14301,9 +14310,9 @@ const tests = [
     },
   },
   {
-    name: '47b.1 automatic anti-stock findings use the same sentence replacement path',
+    name: '47b.1 automatic rhetorical-negation findings use the same sentence replacement path',
     run() {
-      const rules = [{ ruleName: 'antiStockPhrasing', phrases: [], patternNames: ['notXButY'] }];
+      const rules = [{ ruleName: 'antiRhetoricalNegation', phrases: [], patternNames: ['notXButY'] }];
       const source = 'The light is not white, but bright.';
       const findings = collectProseGuardSentenceFindings(source, rules);
       const repaired = applyProseGuardSentenceRepairs(source, findings, {

@@ -1014,22 +1014,28 @@ function RenderControlEngine(response, input, context) {
 
   function cohesiveSceneBeats(response, context): {
     MANDATE:
-      When the scene already contains closely related physical events, narrate them as one clear, connected sequence.
+      Closely related physical events MUST be narrated as one clear, connected sequence.
 
     FORBIDDEN:
-      - DO NOT invent movement, gestures, object handling, or reactions merely to make prose active.
-      - DO NOT fragment one physical event into staccato sentences, micro-reaction loops, or body-cue pileups.
+      - DO NOT invent movement, gestures, object handling, or reactions merely to make prose feel active.
+      - DO NOT split one physical event into staccato sentences, micro-reaction loops, or body-cue pileups.
   }
 
   function denotativePhysicality(response, context): {
     MANDATE:
-      You MUST use LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived in the scene.
+      You MUST narrate using LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived in the scene.
 
-      Objects, weather, architecture, atmosphere, and abstract concepts may ONLY be described through their physical state, movement, or concrete effects.
+      Describe objects, weather, architecture, and atmosphere ONLY through their physical state, movement, or concrete effects. Express abstract conditions ONLY through concrete, observable evidence.
 
     FORBIDDEN:
-      - NEVER use figurative narration, decorative abstraction, emotional physics, or personification.
-      - NEVER attribute agency, intention, awareness, memory, or emotion to inanimate things or abstract concepts.
+      - DO NOT use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.
+      - DO NOT attribute agency, intention, awareness, memory, or emotion to inanimate things or abstract concepts.
+      - DO NOT describe inanimate things as wanting, watching, waiting, threatening, breathing, intending, remembering, or feeling.
+
+    REMEMBER:
+      - Rooms DO NOT breathe.
+      - Words DO NOT hang.
+      - Silence DOES NOT stretch.
   }
 
   function embodiedPerception(response, context): {
@@ -1050,19 +1056,23 @@ function RenderControlEngine(response, input, context) {
 
   function diegeticPhysicality(response, context): {
     MANDATE:
-      When an ability, spell, power, trait, or supernatural effect is activated by {{user}} or a character/NPC, narrate ONLY its OBSERVABLE effects and consequences.
+      When an ability, spell, power, trait, or supernatural effect is used, narrate ONLY its OBSERVABLE effects and consequences.
 
     FORBIDDEN:
-      - DO NOT label, announce, name, or explain abilities or supernatural effects outside explicitly spoken dialogue.
+      - DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration. A name may appear ONLY when explicitly spoken in dialogue.
       - DO NOT explain activation, casting, or system mechanics.
   }
 
   function strictEpistemology(response, context): {
     MANDATE:
-      You MUST reveal information ONLY through DIRECT sensory evidence available in the scene, dialogue, readable text, or previously established scene facts.
+      Treat ALL unstated information as HIDDEN and UNKNOWN by default.
+
+      Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established.
+
+      Information may enter narration ONLY through DIRECT sensory evidence available to {{user}} in the current scene, explicit dialogue, readable text, or previously established scene facts.
 
     FORBIDDEN:
-      - DO NOT reveal unknown identities, roles, causes, thoughts, unseen actions, background lore, or other unearned information.
+      - DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above.
   }
 
   function agencySeparation(response, input, context): {
@@ -1088,7 +1098,6 @@ function RenderControlEngine(response, input, context) {
         - "barely above a murmur"
         - "barely above a whisper"
         - "barely above a breath"
-      - DO NOT use formulaic corrective antithesis or contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B".
       - DO NOT use close grammatical variations that preserve the same stock phrasing.
       - DO NOT replace direct scene description with another cliche, metaphor, emotional shortcut, or generic rhetorical formula.
   }
@@ -1102,6 +1111,18 @@ function RenderControlEngine(response, input, context) {
       - DO NOT use skin-color or skin-temperature changes as emotional shorthand, including flushing, reddening, turning pink or red, warming, color rising, knuckle whitening, or paling.
       - DO NOT use breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth, jaw, or lips opening and closing in loops.
       - DO NOT use interpretive, figurative, or invisible eye-language such as "her eyes burn," "something flickers in her eyes," "her eyes soften," or equivalent language.
+  }
+
+  function antiRhetoricalNegation(response, context): {
+    MANDATE:
+      You MUST describe actions, sensations, objects, and events DIRECTLY by stating what they are, what they do, or what concrete effects they produce.
+
+      This rule applies to narration, not quoted character dialogue.
+
+    FORBIDDEN:
+      - DO NOT describe or intensify something by first stating what it is NOT.
+      - DO NOT use formulaic negation-led rhetoric, including corrective antithesis, negative anaphora, or category rejection, such as "It is not X, but Y," "Not X—Y," or "Not X. Not Y."
+      - DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation.
   }
 
   function inputChronology(response, input, context): {
@@ -1134,23 +1155,22 @@ function RenderControlEngine(response, input, context) {
 
   function activeHandoff(response, context): {
     MANDATE:
-      When a character/NPC actively participates in the current exchange, you MUST end your response on ONE of the following:
+      If a character/NPC actively participates in the current exchange, your response MUST end on ONE of:
 
-      - ENVIRONMENTAL:
+      - ENVIRONMENTAL BEAT:
         A visible environmental or scene change that requires {{user}}'s input.
 
-      - CONVERSATIONAL:
-        A statement or question to which {{user}} can naturally respond. It does not need to be phrased as a question.
+      - CONVERSATIONAL BEAT:
+        A statement or question to which {{user}} can naturally respond.
 
-      - ACTION/GESTURE:
+      - ACTION BEAT:
         A concrete action or gesture directed at {{user}} or materially affecting the immediate exchange.
 
-      These are alternative ending types, not a checklist. Use only the ending that naturally results from the scene.
-
     FORBIDDEN:
-      - DO NOT use meta questions, waiting/expecting language, filler, or unrelated environmental detail.
-      - DO NOT manufacture a handoff solely to satisfy this rule.
-      - DO NOT apply these rules when {{user}} is alone.
+      - DO NOT ask {{user}} meta questions (e.g., "What do you do?").
+      - DO NOT describe a character waiting for or expecting {{user}}'s response.
+      - DO NOT end on filler or distant environmental detail unrelated to the current scene.
+      - DO NOT manufacture a question, statement, action, gesture, interruption, or scene change solely to create a handoff.
   }
 }`;
 }
