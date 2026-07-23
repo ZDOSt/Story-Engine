@@ -358,54 +358,46 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
   function dialogueTurn(response, context): {
     MANDATE:
-      Dialogue MUST follow a natural back-and-forth exchange.
+      When a character/NPC responds to {{user}} or another present character/NPC, they may make ONLY ONE conversational contribution per response.
 
-      Each character/NPC may make only ONE conversational contribution per response, directly addressing the current input from {{user}} or another character/NPC.
+      That contribution MUST account for the FULL input directed at them, including all questions and statements, rather than only the last sentence or question.
 
-      That contribution MUST account for the FULL input directed at them, NOT merely the final sentence or question. Related points may be addressed together in one natural response.
+      Related points may be combined into one natural response. Do not answer them point by point.
 
-      Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly expressed through dialogue or observable behavior rather than accidental omission.
+      Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly shown through dialogue or observable behavior rather than accidental omission.
 
-      Once that single contribution is complete, their turn ENDS.
+      Once this contribution is complete, that character/NPC's turn ENDS.
 
     FORBIDDEN:
-      - DO NOT answer or acknowledge {{user}}'s input point by point or as a list.
-      - DO NOT ignore earlier parts of the input merely to answer its final sentence or question.
-      - DO NOT allow a character/NPC multiple conversational turns.
-      - DO NOT introduce another topic or continue after the single contribution is complete.
-      - DO NOT disguise a monologue as one turn by chaining multiple replies, arguments, explanations, anecdotes, or follow-ups.
+      - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups.
+      - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn.
   }
 
   function inputChronology(response, input, context): {
     MANDATE:
-      {{user}}'s input is IN THE PAST. You MUST begin narration with the immediate response, consequence, obstruction, or result that follows {{user}}'s actions or dialogue.
+      {{user}}'s input has already occurred. Previously narrated actions and dialogue are also in the past.
 
-      Previously narrated actions and dialogue have already occurred. Continue from the scene state they established.
+      You MUST narrate forward from {{user}}'s input. Begin with the immediate result, consequence, obstruction, reaction, response, or other observable development that follows it.
 
     FORBIDDEN:
-      - DO NOT repeat, paraphrase, echo, summarize, re-stage, or narrate ANY part of {{user}}'s input.
-      - DO NOT repeat, paraphrase, or re-stage previously narrated actions or dialogue.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue.
   }
 
   function strictBehaviorism(response, context): {
     MANDATE:
-      When character/NPC state or emotion is conveyed, you MUST convey it ONLY through directly observable behavior, action, or dialogue.
-
-      Dialogue does NOT require an accompanying gesture, action, or physical cue.
+      When conveying character/NPC state or emotion, you MUST show it ONLY through directly observable behavior, action, or dialogue.
 
     FORBIDDEN:
       - DO NOT name, explain, or interpret a character/NPC's internal, emotional, or psychological state in narration.
-      - DO NOT add behavior, actions, or gestures merely to signal emotion.
-      - ABSOLUTELY NO flushing, reddening, skin turning pink or red, color rising, knuckle whitening, or paling.
-      - ABSOLUTELY NO breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth, jaw, or lips opening and closing in loops.
-      - ABSOLUTELY NO interpretive, figurative, or invisible eye-language such as "her eyes burn," "something flickers in her eyes," "her eyes soften," or equivalent language.
+      - DO NOT use skin-color or skin-temperature changes as emotional shorthand, including flushing, reddening, turning pink or red, warming, color rising, knuckle whitening, or paling.
+      - DO NOT use breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth, jaw, or lips opening and closing in loops.
+      - DO NOT use interpretive, figurative, or invisible eye-language such as "her eyes burn," "something flickers in her eyes," "her eyes soften," or equivalent language.
   }
 
   function antiStockPhrasing(response, context): {
     MANDATE:
-      Use FRESH, ORIGINAL, CONTEXT-APPROPRIATE language grounded in the immediate scene.
-
-      Describe observations, actions, and contrasts directly and specifically, using wording that feels natural to this scene rather than a reusable rhetorical template.
+      You MUST describe the exact action, sound, movement, object, or physical condition in the scene using DIRECT, SPECIFIC language.
 
       This rule applies to narration, not quoted character dialogue.
 
@@ -414,7 +406,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
         - "barely above a murmur"
         - "barely above a whisper"
         - "barely above a breath"
-        - formulaic corrective contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B"
+      - DO NOT use formulaic corrective antithesis or contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B".
       - DO NOT use close grammatical variations that preserve the same stock phrasing.
       - DO NOT replace direct scene description with another cliche, metaphor, emotional shortcut, or generic rhetorical formula.
   }
@@ -452,19 +444,18 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
   function embodiedPerception(response, context): {
     MANDATE:
-      You MUST narrate the scene using CONCRETE physical evidence from {{user}}'s physical position.
-
-      Smell and taste, including ALL synonymous sensory descriptions, are BANNED by default.
-
-      Smell or taste may appear ONLY when:
-      - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
-      - A CLOSE-RANGE physical source is overpowering and unavoidable.
+      You MUST base sensory narration on sight, hearing, or touch available from {{user}}'s physical position.
 
     FORBIDDEN:
-      - Unless an exception above applies, DO NOT mention or imply any smell or taste. This includes, but is not limited to, scent, odor, aroma, fragrance, stench, reek, musk, tang, whiff, trace, or hint.
-      - DO NOT attach smell or taste language to the air, wind, breeze, room, atmosphere, temperature, humidity, or another ambient condition.
-      - Example: "The air is cool and dry" is allowed. "The air is cool and dry, and it carries a mineral tang" is FORBIDDEN.
-      - DO NOT use ambient smell or taste in place of concrete, descriptive scene narration.
+      - DO NOT narrate ANY smell or taste. This includes scent, odor, aroma, fragrance, flavor, stench, reek, musk, tang, whiff, or equivalent odor/flavor language.
+      - NEVER attach smell or taste to air, wind, breeze, room, atmosphere, temperature, humidity, or another ambient condition.
+
+    EXCEPTIONS TO THE SMELL/TASTE BAN:
+      Smell or taste may appear ONLY when:
+      - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
+      - A CLOSE-RANGE PHYSICAL source is so overpowering that the sensation is unavoidable.
+
+      When an exception applies, attribute the smell or taste directly to its physical source. NEVER attribute it to the air, room, or atmosphere.
   }
 
   function denotativePhysicality(response, context): {

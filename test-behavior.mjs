@@ -13504,22 +13504,21 @@ const tests = [
       assert.doesNotMatch(mainRulesSource, /You MUST end every response on ONE of the following|Dialogue directed at \{\{user\}\}/);
 
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
-      assert.match(mainRulesSource, /Dialogue MUST follow a natural back-and-forth exchange/);
-      assert.match(mainRulesSource, /Each character\/NPC may make only ONE conversational contribution per response/);
-      assert.match(mainRulesSource, /That contribution MUST account for the FULL input directed at them, NOT merely the final sentence or question/);
-      assert.match(mainRulesSource, /Related points may be addressed together in one natural response/);
+      assert.match(mainRulesSource, /When a character\/NPC responds to \{\{user\}\} or another present character\/NPC, they may make ONLY ONE conversational contribution per response/);
+      assert.match(mainRulesSource, /That contribution MUST account for the FULL input directed at them, including all questions and statements, rather than only the last sentence or question/);
+      assert.match(mainRulesSource, /Related points may be combined into one natural response\. Do not answer them point by point/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
-      assert.match(mainRulesSource, /Once that single contribution is complete, their turn ENDS/);
-      assert.match(mainRulesSource, /DO NOT ignore earlier parts of the input merely to answer its final sentence or question/);
-      assert.match(mainRulesSource, /DO NOT disguise a monologue as one turn/);
+      assert.match(mainRulesSource, /Once this contribution is complete, that character\/NPC's turn ENDS/);
+      assert.match(mainRulesSource, /DO NOT allow a character\/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups/);
+      assert.match(mainRulesSource, /DO NOT allow ANY character\/NPC to make multiple response-seeking questions or statements in one turn/);
       assert.doesNotMatch(mainRulesSource, /The contribution MUST leave the current exchange active|ONE brief continuation tied to the SAME exchange|response-seeking continuation/);
       assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
-      assert.match(mainRulesSource, /\{\{user\}\}'s input is IN THE PAST/);
-      assert.match(mainRulesSource, /Previously narrated actions and dialogue have already occurred\. Continue from the scene state they established/);
-      assert.match(mainRulesSource, /DO NOT repeat, paraphrase, echo, summarize, re-stage, or narrate ANY part of \{\{user\}\}'s input/);
-      assert.match(mainRulesSource, /DO NOT repeat, paraphrase, or re-stage previously narrated actions or dialogue/);
+      assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Previously narrated actions and dialogue are also in the past/);
+      assert.match(mainRulesSource, /You MUST narrate forward from \{\{user\}\}'s input\. Begin with the immediate result, consequence, obstruction, reaction, response, or other observable development that follows it/);
+      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue/);
 
       assert.match(mainRulesSource, /function agencySeparation\(response, input, context\):/);
       assert.match(mainRulesSource, /The human player EXCLUSIVELY controls \{\{user\}\}/);
@@ -13528,16 +13527,14 @@ const tests = [
       assert.match(mainRulesSource, /DO NOT narrate \{\{user\}\}'s thoughts, feelings, choices, decisions, voluntary actions, or dialogue/);
 
       assert.match(mainRulesSource, /function strictBehaviorism\(response, context\):/);
-      assert.match(mainRulesSource, /When character\/NPC state or emotion is conveyed, you MUST convey it ONLY through directly observable behavior, action, or dialogue/);
-      assert.match(mainRulesSource, /Dialogue does NOT require an accompanying gesture, action, or physical cue/);
-      assert.match(mainRulesSource, /DO NOT add behavior, actions, or gestures merely to signal emotion/);
-      assert.match(mainRulesSource, /ABSOLUTELY NO flushing, reddening/);
-      assert.match(mainRulesSource, /ABSOLUTELY NO breath or voice hitching\/catching/);
-      assert.match(mainRulesSource, /ABSOLUTELY NO interpretive, figurative, or invisible eye-language/);
+      assert.match(mainRulesSource, /When conveying character\/NPC state or emotion, you MUST show it ONLY through directly observable behavior, action, or dialogue/);
+      assert.match(mainRulesSource, /DO NOT use skin-color or skin-temperature changes as emotional shorthand/);
+      assert.match(mainRulesSource, /DO NOT use breath or voice hitching\/catching/);
+      assert.match(mainRulesSource, /DO NOT use interpretive, figurative, or invisible eye-language/);
 
       assert.match(mainRulesSource, /function antiStockPhrasing\(response, context\):/);
-      assert.match(mainRulesSource, /Use FRESH, ORIGINAL, CONTEXT-APPROPRIATE language grounded in the immediate scene/);
-      assert.match(mainRulesSource, /formulaic corrective contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B"/);
+      assert.match(mainRulesSource, /You MUST describe the exact action, sound, movement, object, or physical condition in the scene using DIRECT, SPECIFIC language/);
+      assert.match(mainRulesSource, /DO NOT use formulaic corrective antithesis or contrasts between two short descriptions, such as "X is not A, but B", "Not A, but B", or "No A, but B"/);
 
       assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
       assert.match(mainRulesSource, /You MUST reveal information ONLY through DIRECT sensory evidence available in the scene/);
@@ -13548,9 +13545,10 @@ const tests = [
       assert.match(mainRulesSource, /A name may appear ONLY when explicitly spoken in dialogue/);
 
       assert.match(mainRulesSource, /function embodiedPerception\(response, context\):/);
-      assert.match(mainRulesSource, /Smell and taste, including ALL synonymous sensory descriptions, are BANNED by default/);
-      assert.match(mainRulesSource, /A CLOSE-RANGE physical source is overpowering and unavoidable/);
-      assert.match(mainRulesSource, /The air is cool and dry, and it carries a mineral tang/);
+      assert.match(mainRulesSource, /You MUST base sensory narration on sight, hearing, or touch available from \{\{user\}\}'s physical position/);
+      assert.match(mainRulesSource, /DO NOT narrate ANY smell or taste/);
+      assert.match(mainRulesSource, /A CLOSE-RANGE PHYSICAL source is so overpowering that the sensation is unavoidable/);
+      assert.match(mainRulesSource, /When an exception applies, attribute the smell or taste directly to its physical source/);
       assert.doesNotMatch(mainRulesSource, /SPATIAL CONTINUITY|relative positions|perceive, reach, or interact through/);
 
       assert.match(mainRulesSource, /function denotativePhysicality\(response, context\):/);
@@ -13652,6 +13650,14 @@ const tests = [
           extractMandate(handoffRulesSource, name),
           extractMandate(mainRulesSource, name),
           name + ' MANDATE must mirror the full rule exactly.',
+        );
+      }
+
+      for (const name of ['dialogueTurn', 'inputChronology', 'strictBehaviorism', 'antiStockPhrasing', 'embodiedPerception']) {
+        assert.equal(
+          extractRuleBlock(handoffRulesSource, name).replace(/\r/g, ''),
+          extractRuleBlock(mainRulesSource, name).replace(/\r/g, ''),
+          name + ' must mirror the full rule exactly in the narrator reminder.',
         );
       }
 
@@ -13992,7 +13998,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.29');
+      assert.equal(manifest.version, '0.9.30');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
