@@ -119,6 +119,51 @@ export function getCharacterSheetPowerProfile(genre) {
     return CHARACTER_POWER_PROFILES[normalized] || FANTASY_ISEKAI_POWER_PROFILE;
 }
 
+export function buildAbilityGenerationRules(outputRequirement, powerProfile = FANTASY_ISEKAI_POWER_PROFILE) {
+    const profile = powerProfile && typeof powerProfile === 'object'
+        ? powerProfile
+        : FANTASY_ISEKAI_POWER_PROFILE;
+    return [
+        'MANDATE:',
+        String(outputRequirement || 'Generate one ability entry.').trim(),
+        'Every generated ability MUST be a deliberately activated, protagonist-grade, NON-SPELL UTILITY ability.',
+        profile.abilityContract,
+        profile.ability,
+        'It MUST activate on demand, produce one immediate and unmistakable effect, materially expand what {{user}} can do, and remain genuinely useful across many plausible scenes.',
+        'It MUST be powerful within one clearly bounded capability. It may provide a decisive new option, but it must not automatically resolve unrelated obstacles, entire conflicts, or contested outcomes.',
+        'It MUST be fundamentally distinct from every spell in its core effect, purpose, and practical scene use.',
+        'State what {{user}} can do and what directly happens in one or two plain sentences.',
+        '',
+        'FORBIDDEN:',
+        '- DO NOT generate a spell, direct attack, healing effect, passive or conditional trait, detection-only effect, ordinary skill, cosmetic detail, lore-only feature, or disguised stat improvement.',
+        '- DO NOT balance the ability by making it unreliable, dependent on rare circumstances, or burdened with arbitrary drawbacks.',
+        '- DO NOT include permission, attempt, numerical mechanics, bonuses, measurements, cooldowns, charges, use limits, resource bookkeeping, outcome-adjudication language, or guaranteed contested outcomes.',
+        '- DO NOT duplicate, approximate, extend, or rename another generated option or any existing ability or spell.',
+    ].join('\n');
+}
+
+export function buildSpellGenerationRules(outputRequirement, powerProfile = FANTASY_ISEKAI_POWER_PROFILE) {
+    const profile = powerProfile && typeof powerProfile === 'object'
+        ? powerProfile
+        : FANTASY_ISEKAI_POWER_PROFILE;
+    return [
+        'MANDATE:',
+        String(outputRequirement || 'Generate one spell entry.').trim(),
+        'Every generated spell MUST be a directly activated, genre-appropriate spell, power, or technique.',
+        profile.spell,
+        'It MUST have exactly ONE primary purpose: OFFENSIVE or HEALING.',
+        'It MUST produce one immediate, concrete, unmistakable effect and be strong enough to materially affect the immediate situation.',
+        'It MUST remain bounded to its stated effect and MUST be fundamentally distinct from the character\'s ability and every other spell in core effect, purpose, and practical scene use.',
+        'State what is activated and what directly happens in one or two plain sentences.',
+        '',
+        'FORBIDDEN:',
+        '- DO NOT generate utilitarian spells, barriers, passive or conditional effects, broad schools, vague categories, or multi-purpose spells.',
+        '- DO NOT automatically resolve an entire conflict, guarantee a contested outcome, or override another character\'s agency.',
+        '- DO NOT include permission, attempt, numerical mechanics, bonuses, measurements, cooldowns, charges, use limits, resource bookkeeping, outcome-adjudication language, or system language.',
+        '- DO NOT duplicate, approximate, extend, or rename an ability, another generated option, or any existing spell.',
+    ].join('\n');
+}
+
 export class CharacterSheetStructureError extends Error {
     constructor(message, details = {}) {
         super(message);
@@ -225,7 +270,7 @@ export function buildCharacterSheetSchema(options = {}) {
             abilities: {
                 type: 'array',
                 description: mode === 'new'
-                    ? `Exactly one simple, activated protagonist ability. ${powerProfile.abilityContract} ${powerProfile.ability}`
+                    ? buildAbilityGenerationRules('Return exactly one ability entry.', powerProfile)
                     : 'Explicit activated non-spell abilities preserved from the persona.',
                 minItems: mode === 'new' ? 1 : 0,
                 maxItems: mode === 'new' ? 1 : 24,
@@ -234,7 +279,7 @@ export function buildCharacterSheetSchema(options = {}) {
             spells: {
                 type: 'array',
                 description: mode === 'new'
-                    ? (needsStartingSpell ? `Exactly one directly activated spell entry with one concrete effect. ${powerProfile.spell}` : 'Must be empty because locked MND is below 7.')
+                    ? (needsStartingSpell ? buildSpellGenerationRules('Return exactly one starting spell entry.', powerProfile) : 'Must be empty because locked MND is below 7.')
                     : 'Explicit spells preserved from the persona, with no more than five entries.',
                 minItems: needsStartingSpell ? 1 : 0,
                 maxItems: mode === 'new' ? (needsStartingSpell ? 1 : 0) : 5,

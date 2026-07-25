@@ -13,7 +13,7 @@ import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState }
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { applyHiddenHealthEvents } from './health-state.js';
 import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character-sheet-validation.js';
-import { appendCharacterSheetOutputInstruction, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
+import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 
@@ -14005,7 +14005,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.32');
+      assert.equal(manifest.version, '0.9.33');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -14680,19 +14680,26 @@ const tests = [
       assert.match(source, /Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells/);
       assert.match(source, /Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust/);
       assert.match(source, /const PROGRESSION_REQUIRED_ABILITIES = 1/);
-      assert.match(source, /ABILITIES: exactly \$\{PROGRESSION_REQUIRED_ABILITIES\} simple, deliberately activated protagonist ability/);
-      assert.match(source, /\$\{powerProfile\.abilityContract\}/);
-      assert.match(source, /\$\{powerProfile\.ability\}/);
-      assert.match(source, /State what \{\{user\}\} can do and what directly happens/);
+      assert.match(source, /ABILITIES:\\n\$\{buildAbilityGenerationRules/);
+      assert.match(source, /Generate exactly \$\{PROGRESSION_REQUIRED_ABILITIES\} ability entry/);
+      assert.match(generationSource, /Every generated ability MUST be a deliberately activated, protagonist-grade, NON-SPELL UTILITY ability/);
+      assert.match(generationSource, /remain genuinely useful across many plausible scenes/);
+      assert.match(generationSource, /powerful within one clearly bounded capability/);
+      assert.match(generationSource, /fundamentally distinct from every spell in its core effect, purpose, and practical scene use/);
+      assert.match(generationSource, /DO NOT generate a spell, direct attack, healing effect/);
+      assert.match(generationSource, /DO NOT balance the ability by making it unreliable/);
+      assert.match(generationSource, /DO NOT duplicate, approximate, extend, or rename another generated option or any existing ability or spell/);
       assert.match(source, /do not turn any stat into an amplified ordinary action/);
       assert.match(source, /Choose a varied concept rather than copying a stock template or example/);
-      assert.match(source, /Do not include permission, attempt, numerical, mechanical, measurement/);
-      assert.match(source, /Do not make it a spell, passive trait, broad ordinary skill, cosmetic or lore-only detail/);
       assert.match(source, /On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept/);
-      assert.match(source, /SPELLS: exactly \$\{PLAYER_CREATION_MAX_STARTING_SPELLS\} starting spell entry when MND is 7 or higher/);
-      assert.match(source, /\$\{powerProfile\.spell\}/);
-      assert.match(source, /exactly one primary purpose: offensive, healing, or utilitarian/);
-      assert.match(source, /Do not combine purposes or generate barriers/);
+      assert.match(source, /SPELLS:\\n\$\{buildSpellGenerationRules/);
+      assert.match(source, /Generate exactly \$\{PLAYER_CREATION_MAX_STARTING_SPELLS\} starting spell entry when MND is 7 or higher/);
+      assert.match(generationSource, /exactly ONE primary purpose: OFFENSIVE or HEALING/);
+      assert.match(generationSource, /strong enough to materially affect the immediate situation/);
+      assert.match(generationSource, /fundamentally distinct from the character\\'s ability and every other spell/);
+      assert.match(generationSource, /DO NOT generate utilitarian spells, barriers/);
+      assert.match(generationSource, /DO NOT duplicate, approximate, extend, or rename an ability/);
+      assert.doesNotMatch(generationSource, /offensive, healing, or utilitarian/i);
       assert.doesNotMatch(source, /genre-native activated spell or equivalent/);
       assert.match(source, /INVENTORY: carried or stowed items only/);
       assert.match(source, /Do not list clothing worn on the body, armor, weapons worn ready, currency/);
@@ -14930,12 +14937,9 @@ const tests = [
       assert.match(source, /appendSpellToPersona/);
       assert.match(source, /updatePersonaStatText/);
       assert.match(source, /writePlayerSheetToPersona\(nextText, context, actionIdentity\)/);
-      assert.match(source, /Each option must have exactly one primary purpose: offensive, healing, or utilitarian/);
-      assert.match(source, /Do not combine purposes, and do not generate barriers/);
-      assert.match(source, /Return exactly three meaningfully different replacement options without forcing a fixed category coverage/);
-      assert.match(source, /Return exactly three meaningfully different learnable options without forcing one purpose per option/);
-      assert.match(source, /Return exactly three meaningfully different replacement options/);
-      assert.match(source, /Return exactly three meaningfully different learnable options/);
+      assert.match(source, /Generate exactly \$\{PROGRESSION_ABILITY_OPTIONS\} meaningfully different replacement ability options/);
+      assert.match(source, /Generate exactly \$\{PROGRESSION_SPELL_OPTIONS\} meaningfully different learnable spell options/);
+      assert.match(source, /function buildProgressionSpellPrompt[\s\S]*?const abilities = extractPersonaAbilities\(persona\)[\s\S]*?EXISTING ABILITIES/);
       assert.match(source, /Progression ability generation did not return three valid options/);
       assert.match(source, /Progression spell generation did not return three valid options/);
       assert.match(source, /Generated ability ".+" included mechanical language/);
@@ -15465,6 +15469,8 @@ const tests = [
       };
       const schema = buildCharacterSheetSchema(options);
       const fantasyProfile = getCharacterSheetPowerProfile('Fantasy');
+      const abilityRules = buildAbilityGenerationRules('Return exactly one ability entry.', fantasyProfile);
+      const spellRules = buildSpellGenerationRules('Return exactly one starting spell entry.', fantasyProfile);
       assert.strictEqual(getCharacterSheetPowerProfile('Isekai'), fantasyProfile);
       assert.match(fantasyProfile.ability, /simple, unmistakably supernatural fantasy power/);
       assert.match(fantasyProfile.spell, /unmistakably magical in both name and effect/);
@@ -15475,6 +15481,12 @@ const tests = [
       assert.equal(getCharacterSheetPowerProfile('Historical').grounded, true);
       assert.match(getCharacterSheetPowerProfile('Modern').abilityContract, /signature technique grounded in exceptional training/);
       assert.match(getCharacterSheetPowerProfile('Fantasy').abilityContract, /qualitatively new capability/);
+      assert.match(abilityRules, /^MANDATE:/);
+      assert.match(abilityRules, /protagonist-grade, NON-SPELL UTILITY ability/);
+      assert.match(abilityRules, /FORBIDDEN:/);
+      assert.match(spellRules, /^MANDATE:/);
+      assert.match(spellRules, /exactly ONE primary purpose: OFFENSIVE or HEALING/);
+      assert.match(spellRules, /FORBIDDEN:/);
       for (const genre of [
         'Fantasy',
         'Sci-fi',
@@ -15501,9 +15513,11 @@ const tests = [
       assert.equal(schema.properties.abilities.minItems, 1);
       assert.equal(schema.properties.abilities.maxItems, 1);
       assert.match(schema.properties.abilities.description, /unmistakably supernatural fantasy power/);
+      assert.match(schema.properties.abilities.description, /protagonist-grade, NON-SPELL UTILITY ability/);
       assert.equal(schema.properties.spells.minItems, 1);
       assert.equal(schema.properties.spells.maxItems, 1);
       assert.match(schema.properties.spells.description, /unmistakably magical in both name and effect/);
+      assert.match(schema.properties.spells.description, /exactly ONE primary purpose: OFFENSIVE or HEALING/);
       assert.equal(schema.properties.characterAnchors.minItems, 0);
       assert.equal(schema.properties.characterAnchors.maxItems, 3);
       assert.match(schema.properties.appearance.description, /Do not include scars, tattoos, birthmarks, brands, or other permanent marks/);

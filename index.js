@@ -33,7 +33,7 @@ import {
 } from './st-adapter.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
-import { appendCharacterSheetOutputInstruction, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
+import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
@@ -8903,15 +8903,13 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
         {
             role: 'system',
             content:
-            'You generate concise RPG character ability options for a deterministic SillyTavern extension. ' +
-                'Each ability must be one simple, activated protagonist capability. ' +
-                `${powerProfile.abilityContract} ` +
-                `${powerProfile.ability} ` +
+                'You generate concise RPG character ability options for a deterministic SillyTavern extension.\n\n' +
+                buildAbilityGenerationRules(
+                    `Generate exactly ${PROGRESSION_ABILITY_OPTIONS} meaningfully different replacement ability options.`,
+                    powerProfile,
+                ) + '\n\n' +
                 'Adapt each option to the character race, body, origin, selected genre, existing entries, and recent accomplishments. Stats may inform flavor but must never become a stat boost or an amplified ordinary action. Choose varied concepts from that context; do not copy a stock template or repeat an existing concept. ' +
-                'State what the character can do and what directly happens in one or two plain sentences. Do not write permission, attempt, limitation, or rules language. Runtime mechanics decide contested outcomes. ' +
-                'On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
-                'Abilities must not be spells, passive traits, broad ordinary skills, cosmetic or lore-only details, passive perception, detection-only effects, or disguised stat bonuses. Do not encode numerical or mechanical rules, measurements, cooldowns, uses, or guaranteed outcomes. ' +
-                'Do not duplicate existing abilities or spells. Return exactly three meaningfully different replacement options without forcing a fixed category coverage.',
+                'Runtime mechanics decide dangerous or contested outcomes. On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.',
         },
         {
             role: 'user',
@@ -8940,6 +8938,7 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
 
 function buildProgressionSpellPrompt(pending, context = getContext()) {
     const persona = getPersonaText(context);
+    const abilities = extractPersonaAbilities(persona);
     const spells = extractPersonaSpells(persona);
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context) || {};
     const genre = getActiveAdventureGenre(context);
@@ -8950,14 +8949,13 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
         {
             role: 'system',
             content:
-            'You generate concise RPG spell options for a deterministic SillyTavern extension. ' +
-                'Each spell entry must be one directly activated, setting-native power or technique with one concrete effect. ' +
-                `${powerProfile.spell} ` +
-                'Each option must have exactly one primary purpose: offensive, healing, or utilitarian. Do not combine purposes, and do not generate barriers. ' +
-                'Choose useful, varied concepts from the character and setting context; do not copy a stock template or repeat an existing spell. State what is activated and what directly happens in one or two plain sentences. Do not write permission, attempt, limitation, or rules language. Runtime mechanics decide contested outcomes. ' +
-                'On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt. ' +
-                'Spells must not be passive traits, broad schools, vague categories, broad ordinary expertise, or guaranteed outcomes. Do not encode numerical or mechanical rules, measurements, cooldowns, uses, or success guarantees. ' +
-                'Do not duplicate existing spells. Return exactly three meaningfully different learnable options without forcing one purpose per option.',
+                'You generate concise RPG spell options for a deterministic SillyTavern extension.\n\n' +
+                buildSpellGenerationRules(
+                    `Generate exactly ${PROGRESSION_SPELL_OPTIONS} meaningfully different learnable spell options.`,
+                    powerProfile,
+                ) + '\n\n' +
+                'Adapt each option to the character, selected genre, existing entries, and recent accomplishments. Choose varied concepts from that context; do not copy a stock template or repeat an existing concept. ' +
+                'Runtime mechanics decide dangerous or contested outcomes. On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.',
         },
         {
             role: 'user',
@@ -8976,6 +8974,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
                 `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
                 `SPELL LIMIT: current ${spells.length}; maximum ${PROGRESSION_MAX_SPELLS}\n` +
+                `EXISTING ABILITIES:\n${abilities.length ? abilities.map((ability, index) => `${index + 1}. ${ability.text}`).join('\n') : 'none'}\n\n` +
                 `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
                 `RECENT ADVANCEMENT ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
                 `PERSONA SHEET:\n${clipText(persona, 5000)}`,
@@ -9471,8 +9470,8 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 'BASIC INFO: Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age as one integer, and fixed origin, prior role, or prior training if relevant. Do not include personality, future plans, preferred behavior, or emotional tendencies. Use an empty string only for an inapplicable optional text field.\n' +
                 'APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Return each fact as a plain label/detail pair. Do not invent scars or permanent marks; preserve them only when explicitly supplied by the user. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 'NATURAL WEAPONS: concrete offensive body parts only, if any. Use an empty array when the race/body has no clear natural weapon. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
-                `ABILITIES: exactly ${PROGRESSION_REQUIRED_ABILITIES} simple, deliberately activated protagonist ability. ${powerProfile.abilityContract} ${powerProfile.ability} State what {{user}} can do and what directly happens in one or two plain sentences. Fit the result to the character's race, body, origin, genre, and concept, but do not turn any stat into an amplified ordinary action. Choose a varied concept rather than copying a stock template or example. Do not make it a spell, passive trait, broad ordinary skill, cosmetic or lore-only detail, passive perception, detection-only effect, or disguised stat bonus. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
-                `SPELLS: exactly ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell entry when MND is 7 or higher; otherwise return an empty array. ${powerProfile.spell} Give it one direct effect with exactly one primary purpose: offensive, healing, or utilitarian. Do not combine purposes or generate barriers. Fit the result to the selected genre, character, and concept. Choose a varied concept rather than copying a stock template or example. State what is activated and what directly happens in one or two plain sentences. Do not include permission, attempt, numerical, mechanical, measurement, cooldown, use-limit, or outcome-adjudication language, and do not create passive traits, broad schools, vague categories, or guaranteed outcomes.\n` +
+                `ABILITIES:\n${buildAbilityGenerationRules(`Generate exactly ${PROGRESSION_REQUIRED_ABILITIES} ability entry.`, powerProfile)}\nFit the result to the character's race, body, origin, genre, and concept, but do not turn any stat into an amplified ordinary action. Choose a varied concept rather than copying a stock template or example. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
+                `SPELLS:\n${buildSpellGenerationRules(`Generate exactly ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell entry when MND is 7 or higher; otherwise return an empty array.`, powerProfile)}\nFit the result to the selected genre, character, and concept. Choose a varied concept rather than copying a stock template or example. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
                 'INVENTORY: carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, body armaments, claws, fangs, horns, talons, tusks, tails, stingers, jaws, or other anatomy here.\n' +
                 'CURRENCY: money only, using the genre currency when possible. For fantasy and isekai use silver (sv), for modern use dollars ($), for cyberpunk use credits (cr), and otherwise choose a simple fitting currency. Write exact starting money such as 12 sv, $40, or 30 cr. Use an empty array if none. Do not put currency in INVENTORY or GEAR.\n' +
                 'GEAR: worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, carried supplies, pack contents, natural weapons, or body anatomy here. Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment unless the fixed background, race, genre, or single activated ability specifically justifies them.\n' +
