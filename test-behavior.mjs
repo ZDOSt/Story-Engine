@@ -10929,7 +10929,7 @@ const tests = [
     },
   },
   {
-    name: '33c.1 visible tracker uses scene-first tabs and compact item rows',
+    name: '33c.1 visible tracker uses five state-oriented tabs and compact item rows',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const displaySource = source.slice(
@@ -10954,18 +10954,18 @@ const tests = [
       assert.match(source, /function formatBoundCompanionVessel/);
       assert.match(source, /return '\{\{user\}\}'/);
       assert.match(source, /userVesselPattern/);
-      assert.match(source, /trackerWidgetActiveTab: 'scene'/);
-      assert.match(displaySource, /structured-preflight-tracker-card/);
-      assert.match(displaySource, /structured-preflight-tracker-player-card/);
+      assert.match(source, /trackerWidgetActiveTab: 'overview'/);
+      assert.match(source, /const TRACKER_WIDGET_TABS = Object\.freeze\(\['overview', 'character', 'npcs', 'inventory', 'threads'\]\)/);
       assert.match(displaySource, /structured-preflight-tracker-name-player/);
       assert.match(displaySource, /structured-preflight-tracker-name-npc/);
-      assert.match(displaySource, /structured-preflight-tracker-role/);
       assert.match(displaySource, /trackerTabNav\(activeTab, counts\)/);
-      assert.match(displaySource, /data-spe-tracker-panel="scene"/);
+      assert.match(displaySource, /data-spe-tracker-panel="overview"/);
+      assert.match(displaySource, /data-spe-tracker-panel="character"/);
+      assert.match(displaySource, /data-spe-tracker-panel="npcs"/);
       assert.match(displaySource, /data-spe-tracker-panel="inventory"/);
-      assert.match(displaySource, /data-spe-tracker-panel="tasks"/);
-      assert.doesNotMatch(displaySource, /data-spe-tracker-panel="player"/);
-      assert.match(displaySource, /const renderPlayerCard = \(\) =>/);
+      assert.match(displaySource, /data-spe-tracker-panel="threads"/);
+      assert.doesNotMatch(displaySource, /data-spe-tracker-panel="scene"/);
+      assert.doesNotMatch(displaySource, /data-spe-tracker-panel="tasks"/);
       assert.match(displaySource, /const renderBoundCompanionSection = \(\) =>/);
       assert.match(displaySource, /if \(!boundCompanion\.active\) return ''/);
       assert.match(displaySource, /structured-preflight-tracker-bound-companion/);
@@ -10979,52 +10979,37 @@ const tests = [
       assert.match(displaySource, /trackerDisplaySnapshot\.boundCompanion|snapshot\?\.boundCompanion/);
       assert.match(displaySource, /boundCompanionExcludedName/);
       assert.match(displaySource, /name\.toLowerCase\(\) !== boundCompanionExcludedName/);
+      assert.match(displaySource, /previousBoundCompanionExcludedName/);
+      assert.match(displaySource, /const archived = names\.filter/);
+      assert.match(displaySource, /present\[0\] \|\| knownElsewhere\[0\] \|\| archived\[0\]/);
+      assert.match(displaySource, /before\.lifecycle !== after\.lifecycle/);
+      assert.match(displaySource, /trackerField\('Lifecycle'/);
       assert.match(displaySource, /Present NPCs/);
-      assert.match(displaySource, /structured-preflight-tracker-npc-scroll/);
-      assert.match(displaySource, /structured-preflight-tracker-chip-row/);
-      assert.match(displaySource, /structured-preflight-tracker-card-top-row/);
-      assert.match(displaySource, /structured-preflight-tracker-npc-rows/);
-      assert.match(displaySource, /structured-preflight-tracker-npc-row/);
-      assert.match(displaySource, /structured-preflight-tracker-detail-grid/);
-      assert.match(displaySource, /structured-preflight-tracker-detail-grid-compact/);
-      assert.match(displaySource, /structured-preflight-tracker-detail-wide/);
       assert.match(displaySource, /structured-preflight-tracker-item-list-grid/);
-      assert.match(displaySource, /trackerChip\('Toward User'/);
       assert.match(displaySource, /trackerChip\('Condition'/);
-      assert.match(displaySource, /trackerChip\('B\/F\/H'/);
-      assert.match(displaySource, /trackerChip\('Lock'/);
-      assert.match(displaySource, /trackerChip\('Behavior'/);
-      assert.match(displaySource, /trackerChip\('Rapport'/);
-      assert.match(displaySource, /trackerChip\('Relationship'/);
-      assert.match(displaySource, /boundCompanionNpc\?\.personalitySummary \|\| 'Developing'/);
-      assert.match(displaySource, /trackerStatCluster\(entry\.currentCoreStats\)/);
       assert.match(displaySource, /trackerStatCluster\(userCore\)/);
       assert.match(displaySource, /structured-preflight-tracker-detail-label-personality/);
-      assert.match(displaySource, /trackerDetailLine\('Wounds'/);
-      assert.match(displaySource, /trackerDetailLine\('Status'/);
-      assert.match(displaySource, /trackerDisplayItemList\('Gear', user\.gear, \{ empty: 'No equipped gear' \}\)/);
-      assert.match(displaySource, /trackerDisplayItemList\('Gear', entry\.gear, \{ empty: 'No gear' \}\)/);
-      assert.match(displaySource, /trackerListCount\(entry\.inventory\)/);
-      assert.match(displaySource, /trackerDisplayItemList\('Inventory', entry\.inventory, \{ empty: 'No revealed possessions' \}\)/);
-      assert.match(displaySource, /trackerListCount\(entry\.currency\)/);
-      assert.match(displaySource, /trackerDisplayItemList\('Currency', entry\.currency, \{ empty: 'No revealed currency' \}\)/);
-      assert.match(displaySource, /trackerListCount\(entry\.statusEffects\)/);
-      assert.match(displaySource, /trackerListCount\(user\.statusEffects\)/);
       assert.match(displaySource, /trackerDisplayItemList\('Inventory'/);
       assert.match(displaySource, /trackerDisplayItemList\('Gear'/);
-      assert.match(displaySource, /trackerDisplayItemList\('Tasks'/);
-      assert.match(displaySource, /trackerDisplayItemList\('Commitments'/);
-      assert.doesNotMatch(displaySource, /Inactive NPCs/);
-      assert.doesNotMatch(displaySource, /const inactive/);
+      assert.match(displaySource, /renderThreadRows\(openThreads/);
+      assert.match(displaySource, /renderChangeRows\(recentThreadChanges/);
+      assert.match(displaySource, /data-spe-tracker-select-npc/);
+      assert.match(displaySource, /data-spe-tracker-select-item/);
+      assert.doesNotMatch(displaySource, /favors|grievances|powerActors|latentFavors|latentGrievances/i);
       assert.doesNotMatch(source, /trackerTabButton\('player'/);
       assert.doesNotMatch(source, /renderPlayerPanel/);
       assert.match(source, /target\.matches\('\[data-spe-tracker-tab\]'\)/);
+      assert.match(source, /target\.matches\('\[data-spe-tracker-select-npc\]'\)/);
+      assert.match(source, /target\.matches\('\[data-spe-tracker-select-item\]'\)/);
+      assert.match(source, /function restoreTrackerWidgetControlFocus/);
+      assert.doesNotMatch(source, /function trackerScenePill/);
       assert.match(styleSource, /structured-preflight-tracker-chip-good/);
       assert.match(styleSource, /structured-preflight-tracker-chip-warn/);
       assert.match(styleSource, /structured-preflight-tracker-chip-danger/);
       assert.match(styleSource, /structured-preflight-tracker-tabs/);
       assert.match(styleSource, /structured-preflight-tracker-tab-active/);
-      assert.match(styleSource, /structured-preflight-tracker-scene-strip/);
+      assert.doesNotMatch(styleSource, /structured-preflight-tracker-scene-(?:strip|pill)/);
+      assert.doesNotMatch(styleSource, /structured-preflight-tracker-(?:card|player-card|name-block|role)(?:\b|-)/);
       assert.match(styleSource, /structured-preflight-tracker-bound-companion/);
       assert.match(styleSource, /structured-preflight-tracker-bound-companion > summary/);
       assert.match(styleSource, /structured-preflight-tracker-bound-body/);
@@ -11038,13 +11023,19 @@ const tests = [
       assert.match(styleSource, /structured-preflight-tracker-chip-label-behavior/);
       assert.match(styleSource, /structured-preflight-tracker-chip-label-rapport/);
       assert.match(styleSource, /structured-preflight-tracker-chip-label-relationship/);
-      assert.match(styleSource, /width: min\(540px, calc\(100vw - 36px\)\)/);
-      assert.match(styleSource, /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
-      assert.match(styleSource, /structured-preflight-tracker-card-top-row/);
-      assert.match(styleSource, /structured-preflight-tracker-npc-rows/);
-      assert.match(styleSource, /structured-preflight-tracker-npc-row/);
-      assert.match(styleSource, /structured-preflight-tracker-npc-scroll/);
-      assert.match(styleSource, /max-height: clamp\(13rem, 42vh, 24rem\)/);
+      assert.match(styleSource, /width: min\(780px, calc\(100vw - 36px\)\)/);
+      assert.match(styleSource, /grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/);
+      assert.match(styleSource, /structured-preflight-tracker-panel-head/);
+      assert.match(styleSource, /structured-preflight-tracker-dashboard-grid/);
+      assert.match(styleSource, /structured-preflight-tracker-master-detail/);
+      assert.match(styleSource, /structured-preflight-tracker-choice-active/);
+      assert.match(styleSource, /structured-preflight-tracker-progress/);
+      assert.match(styleSource, /structured-preflight-tracker-change-row/);
+      assert.match(styleSource, /structured-preflight-tracker-badge \{[\s\S]*white-space: normal/);
+      assert.doesNotMatch(styleSource, /structured-preflight-tracker-card-top-row/);
+      assert.doesNotMatch(styleSource, /structured-preflight-tracker-npc-rows/);
+      assert.doesNotMatch(styleSource, /structured-preflight-tracker-npc-row/);
+      assert.doesNotMatch(styleSource, /structured-preflight-tracker-npc-scroll/);
       assert.match(styleSource, /structured-preflight-tracker-stat-cluster/);
       assert.match(styleSource, /structured-preflight-tracker-stat-cluster-label/);
       assert.match(styleSource, /structured-preflight-tracker-stat-pill-row/);
@@ -11054,15 +11045,15 @@ const tests = [
       assert.match(styleSource, /structured-preflight-tracker-stat-phy/);
       assert.match(styleSource, /structured-preflight-tracker-stat-mnd/);
       assert.match(styleSource, /structured-preflight-tracker-stat-cha/);
-      assert.match(styleSource, /structured-preflight-tracker-detail-label-wounds/);
-      assert.match(styleSource, /structured-preflight-tracker-detail-label-status/);
       assert.match(styleSource, /structured-preflight-tracker-detail-label-gear/);
       assert.match(styleSource, /structured-preflight-tracker-detail-label-inventory/);
-      assert.match(styleSource, /structured-preflight-tracker-detail-label-tasks/);
-      assert.match(styleSource, /structured-preflight-tracker-detail-label-commitments/);
+      assert.match(styleSource, /structured-preflight-tracker-detail-label-abilities/);
+      assert.match(styleSource, /structured-preflight-tracker-detail-label-spells/);
+      assert.doesNotMatch(styleSource, /structured-preflight-tracker-detail-label-(?:wounds|status|tasks|commitments|changes|pressure)/);
       assert.match(styleSource, /structured-preflight-tracker-name-player/);
       assert.match(styleSource, /structured-preflight-tracker-name-npc/);
       assert.match(styleSource, /grid-template-columns: repeat\(auto-fit/);
+      assert.match(styleSource, /@media \(max-width: 760px\)/);
       assert.match(styleSource, /@media \(max-width: 520px\)/);
     },
   },
@@ -11083,10 +11074,10 @@ const tests = [
       assert.match(indexSource, /restoreCandidate[\s\S]*beforeWorldState/);
       assert.match(indexSource, /root\.worldState = normalizeWorldState\(restoreCandidate\.beforeWorldState/);
       assert.match(indexSource, /formatWorldStateForDisplay\(snapshot\?\.worldState/);
-      assert.match(indexSource, /trackerScenePill\('Place'/);
-      assert.match(indexSource, /trackerScenePill\('Area'/);
-      assert.match(indexSource, /trackerScenePill\('Time'/);
-      assert.match(indexSource, /trackerScenePill\('Weather'/);
+      assert.match(indexSource, /const renderOverviewPanel = \(\) =>/);
+      assert.match(indexSource, /sceneLocation/);
+      assert.match(indexSource, /worldDisplay\.place/);
+      assert.match(indexSource, /worldDisplay\.weather/);
       assert.match(indexSource, /applyWorldStateDelta\(merged\.worldState/);
 
       assert.match(deterministicSource, /export function buildWorldStateSnapshot/);
@@ -14006,7 +13997,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.34');
+      assert.equal(manifest.version, '0.9.35');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
