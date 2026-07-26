@@ -353,6 +353,18 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - DO NOT manufacture a question, statement, action, gesture, interruption, or scene change solely to create a handoff.
   }
 
+  function inputChronology(response, input, context): {
+    MANDATE:
+      {{user}}'s input has already occurred. Your response MUST begin at the FIRST moment AFTER the final action, observation, or line of dialogue in {{user}}'s input.
+
+      Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development.
+
+    FORBIDDEN:
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input.
+      - DO NOT re-describe unchanged environments, objects, or characters already established in {{user}}'s input or previous narration.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue.
+  }
+
   function dialogueTurn(response, context): {
     MANDATE:
       When a character/NPC responds to {{user}} or another present character/NPC, they may make ONLY ONE conversational contribution per response.
@@ -368,17 +380,6 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
     FORBIDDEN:
       - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups.
       - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn.
-  }
-
-  function inputChronology(response, input, context): {
-    MANDATE:
-      {{user}}'s input has already occurred. Previously narrated actions and dialogue are also in the past.
-
-      You MUST narrate forward from {{user}}'s input. Begin with the immediate result, consequence, obstruction, reaction, response, or other observable development that follows it.
-
-    FORBIDDEN:
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input.
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue.
   }
 
   function antiRhetoricalNegation(response, context): {

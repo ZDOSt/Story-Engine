@@ -13512,9 +13512,10 @@ const tests = [
       assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
-      assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Previously narrated actions and dialogue are also in the past/);
-      assert.match(mainRulesSource, /You MUST narrate forward from \{\{user\}\}'s input\. Begin with the immediate result, consequence, obstruction, reaction, response, or other observable development that follows it/);
+      assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Your response MUST begin at the FIRST moment AFTER the final action, observation, or line of dialogue in \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development/);
       assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /DO NOT re-describe unchanged environments, objects, or characters already established in \{\{user\}\}'s input or previous narration/);
       assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue/);
 
       assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
@@ -13594,8 +13595,8 @@ const tests = [
       );
       const mainRuleOrder = [
         'activeHandoff',
-        'dialogueTurn',
         'inputChronology',
+        'dialogueTurn',
         'antiRhetoricalNegation',
         'strictBehaviorism',
         'antiStockPhrasing',
@@ -14005,7 +14006,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.33');
+      assert.equal(manifest.version, '0.9.34');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
