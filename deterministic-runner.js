@@ -92,7 +92,8 @@ import {
     normalizeHiddenHealth,
     safeSceneHealingAmount,
 } from './health-state.js';
-import { normalizeWorldState } from './world-state.js';
+import { normalizeWorldState, projectWorldStateTransition } from './world-state.js';
+import { advanceDueWorldPlans, normalizeDescriptiveArchive, normalizeWorldProgression, prepareWorldMemoryNarration, progressionHasActivePlanForActor } from './world-memory.js';
 import { buildDeterministicLootEnvelope, getNpcLootRankProfile, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
 
@@ -665,6 +666,14 @@ export function buildWorldStateSnapshot(context) {
     return normalizeWorldState(context?.chatMetadata?.structuredPreflightTracker?.worldState || {});
 }
 
+export function buildDescriptiveArchiveSnapshot(context) {
+    return normalizeDescriptiveArchive(context?.chatMetadata?.structuredPreflightTracker?.descriptiveArchive || {});
+}
+
+export function buildWorldProgressionSnapshot(context) {
+    return normalizeWorldProgression(context?.chatMetadata?.structuredPreflightTracker?.worldProgression || {});
+}
+
 export function buildEconomySnapshot(context) {
     return normalizeEconomyState(context?.chatMetadata?.structuredPreflightTracker?.economy || {});
 }
@@ -872,6 +881,8 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.userReputation = normalizeUserReputation(root.userReputation || {});
     root.worldState = normalizeWorldState(root.worldState || {});
+    root.descriptiveArchive = normalizeDescriptiveArchive(root.descriptiveArchive || {});
+    root.worldProgression = normalizeWorldProgression(root.worldProgression || {});
     root.economy = normalizeEconomyState(root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(root.pendingBoundary || {});
@@ -913,6 +924,12 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.worldState) {
         root.worldState = normalizeWorldState(trackerUpdate.worldState);
     }
+    if (trackerUpdate.descriptiveArchive) {
+        root.descriptiveArchive = normalizeDescriptiveArchive(trackerUpdate.descriptiveArchive);
+    }
+    if (trackerUpdate.worldProgression) {
+        root.worldProgression = normalizeWorldProgression(trackerUpdate.worldProgression);
+    }
     if (trackerUpdate.economy) {
         root.economy = normalizeEconomyState(trackerUpdate.economy);
     }
@@ -951,7 +968,9 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const dice = createDice();
     const refereeContext = buildRefereeContext(context);
     const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
-    const worldState = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
+    const worldStateBefore = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
+    const descriptiveArchive = normalizeDescriptiveArchive(options?.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context));
+    const worldProgressionBefore = normalizeWorldProgression(options?.worldProgressionSnapshot || buildWorldProgressionSnapshot(context));
     const boundCompanionBefore = normalizeBoundCompanionState(options?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context));
     const pendingBoundaryBefore = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context));
     const latentGrievancesBefore = normalizeLatentGrievances(options?.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context));
@@ -963,6 +982,13 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     });
     const rapportClock = advanceRapportClock(context, audit);
     const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot, healthBefore, pendingBoundaryBefore);
+    const worldState = projectWorldStateTransition(worldStateBefore, ledger?.worldTransition || {}, {
+        resolutionPacket: resolution.packet,
+        seed: options?.latestUserText || resolution.packet?.GOAL || '',
+    });
+    if (JSON.stringify(worldState) !== JSON.stringify(worldStateBefore)) {
+        audit.push(`WORLD_TRANSITION=${JSON.stringify(worldState)}`);
+    }
     const relationships = runRelationships(ledger, trackerSnapshot, resolution.packet, audit, refereeContext, context, rapportClock, dice);
     const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
     const name = runNameGeneration(ledger, audit, context, type);
@@ -1019,7 +1045,24 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         latentFavorsBefore,
         trackerSnapshot,
         healthBefore,
+        worldProgressionBefore,
     );
+    const worldProgressionResult = advanceDueWorldPlans(
+        worldProgressionBefore,
+        ledger?.worldProgression?.advancements || [],
+        worldState,
+        {
+            allowUnexpected: true,
+            messageKey: options?.worldProgressionProjectionKey || `pending-${Date.now()}`,
+            powerActors: {
+                ...buildPowerActorSnapshot(context),
+                ...powerActors.trackerUpdate,
+            },
+            protectedUserNames: refereeContext.userReferenceNames || [],
+        },
+    );
+    const worldProgression = worldProgressionResult.progression;
+    audit.push(...worldProgressionResult.audit.map(line => `WORLD_PROGRESSION ${line}`));
     const boundCompanion = runBoundCompanionEngine({
         before: boundCompanionBefore,
         semanticDelta: ledger?.trackerUpdateEngine?.boundCompanion,
@@ -1030,6 +1073,17 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         rapportClock,
         dice,
         audit,
+    });
+    const worldMemory = prepareWorldMemoryNarration({
+        archive: descriptiveArchive,
+        progression: worldProgression,
+        worldState,
+        powerActors: {
+            ...buildPowerActorSnapshot(context),
+            ...powerActors.trackerUpdate,
+        },
+        resolutionPacket: resolution.packet,
+        latestUserText: options?.latestUserText || '',
     });
 
     const visibleTrackerUpdate = {
@@ -1046,6 +1100,8 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         pendingBoundary: pendingBoundaryBefore,
         latentGrievances: powerActors.latentGrievances,
         latentFavors: powerActors.latentFavors,
+        descriptiveArchive,
+        worldProgression,
     };
     const narrativeResolutionPacket = applyHiddenHealthToResolutionPacket(resolution.packet, healthAfter);
     const generatedNpcStats = mergeGeneratedNpcStats([
@@ -1071,6 +1127,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         powerActorPressure: powerActors.handoff,
         powerActorFavor: powerActors.favorOpportunity,
         boundCompanion: boundCompanion.handoff,
+        worldMemory,
         generatedNpcStats,
         npcEquipmentProfiles,
         sceneState: worldState,
@@ -1088,6 +1145,10 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         semanticLedger: ledger,
         finalNarrativeHandoff,
         trackerUpdate,
+        worldProgressionProjection: {
+            duePlanIds: worldProgressionResult.duePlanIds,
+            advancements: worldProgressionResult.advancements,
+        },
         hiddenHealth: {
             before: healthBefore,
             after: healthAfter,
@@ -1387,7 +1448,7 @@ function advanceRapportClock(context, audit) {
     return clock;
 }
 
-function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null, playerTrackerSnapshot = null, resolutionPacket = {}, latentGrievanceSnapshot = [], latentFavorSnapshot = [], trackerSnapshot = {}, hiddenHealthSnapshot = null) {
+function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normalizeRapportClock(), nameGeneration = null, playerTrackerSnapshot = null, resolutionPacket = {}, latentGrievanceSnapshot = [], latentFavorSnapshot = [], trackerSnapshot = {}, hiddenHealthSnapshot = null, worldProgressionSnapshot = {}) {
     const before = buildPowerActorSnapshot(context);
     const trackerUpdate = {};
     const handoffEntries = [];
@@ -1742,7 +1803,7 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
 
     const proactivity = shapedEventHandoff
         ? { handoffEvent: shapedEventHandoff }
-        : runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice, rapportClock, nameGeneration, audit });
+        : runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice, rapportClock, nameGeneration, audit, worldProgression: worldProgressionSnapshot });
 
     for (const [name, state] of Object.entries({ ...before, ...trackerUpdate })) {
         const normalized = normalizePowerActorState(state);
@@ -2546,7 +2607,7 @@ function powerActorHandoffEntry(state) {
     };
 }
 
-function runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice, rapportClock, nameGeneration, audit }) {
+function runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice, rapportClock, nameGeneration, audit, worldProgression = {} }) {
     const activeMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
     const actors = Object.entries({ ...before, ...trackerUpdate })
         .map(([name, state]) => normalizePowerActorState({ ...(state || {}), name: state?.name || name }))
@@ -2559,9 +2620,12 @@ function runPowerActorProactivity({ before, trackerUpdate, handoffEntries, dice,
         return { handoffEvent: null };
     }
 
-    const candidatePool = actors.filter(state => activeMs >= state.cooldownUntilActiveMs);
+    const candidatePool = actors.filter(state =>
+        activeMs >= state.cooldownUntilActiveMs
+        && !progressionHasActivePlanForActor(worldProgression, state.name),
+    );
     if (!candidatePool.length) {
-        audit.push('3P.8 powerActorProactivityBlocked=cooldown_or_no_actor');
+        audit.push('3P.8 powerActorProactivityBlocked=cooldown_world_plan_or_no_actor');
         return { handoffEvent: null };
     }
 

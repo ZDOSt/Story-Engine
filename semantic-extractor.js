@@ -1,7 +1,8 @@
 import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import { canGenerateRawData, generateRawData, getChatCompletionProfileRoute, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
-import { normalizeWorldState, normalizeWorldStateDelta } from './world-state.js';
+import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
+import { buildWorldProgressionSemanticContext, normalizeWorldProgression, normalizeWorldProgressionAdvancements, validateWorldProgressionAdvancementCoverage } from './world-memory.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
 
 export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
@@ -141,6 +142,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
 
     const normalized = normalizeLedger(ledger);
     validateNormalizedLedger(normalized, raw);
+    validateSemanticWorldProgression(normalized, options, context);
     validateRelationshipCoverage(normalized.resolutionEngine, normalized.relationshipEngine);
     normalized.deterministicOverrides = {
         ...(normalized.deterministicOverrides || {}),
@@ -208,8 +210,10 @@ function estimateSceneNpcCount(promptContext, options = {}) {
 
 function estimatePromptComplexity(promptContext, options = {}) {
     const text = extractRecentPromptText(promptContext, options);
-    if (!text) return 0;
-    return Math.min(2048, Math.floor(text.length / 3000) * 256);
+    const activePlanCount = normalizeWorldProgression(options?.worldProgressionSnapshot || {}).plans
+        .filter(plan => plan.status === 'active').length;
+    const textComplexity = text ? Math.min(2048, Math.floor(text.length / 3000) * 256) : 0;
+    return textComplexity + Math.min(4608, activePlanCount * 256);
 }
 
 function extractRecentPromptText(promptContext, options = {}) {
@@ -526,7 +530,7 @@ export function buildSemanticToolPrompt(prompt) {
         'Do not output narration, prose, markdown, visible JSON, or a compact text ledger.',
         'Fill every required tool argument from the semantic/contextual engine outputs.',
         'The Engine reference and semantic field guidance are authoritative for every argument.',
-        'The tool argument paths mirror the engine function names: resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.challengeType = ResolutionEngine.challengeType, resolutionEngine.socialTactic = ResolutionEngine.socialTactic, relationshipEngine[index].initPreset = RelationshipEngine.initPreset semantic tags, relationshipEngine[index] = RelationshipEngine(npc), and chaosSemantic = CHAOS_INTERRUPT.',
+        'The tool argument paths mirror the engine function names: worldTransition = WorldTransition, worldProgression.advancements = WorldProgressionAdvancement, resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.challengeType = ResolutionEngine.challengeType, resolutionEngine.socialTactic = ResolutionEngine.socialTactic, relationshipEngine[index].initPreset = RelationshipEngine.initPreset semantic tags, relationshipEngine[index] = RelationshipEngine(npc), and chaosSemantic = CHAOS_INTERRUPT.',
         'Use empty arrays for no targets/obstacles/observers. Use "none" string values only for enum/string fields that require none.',
         'engineContext.trackerRelevantNPCs may be an empty array; the extension already has the canonical tracker snapshot locally.',
     ].join('\n');
@@ -1068,10 +1072,52 @@ function buildSemanticPreflightSchema() {
             },
         },
     };
+    const worldTransitionSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['reputationLocation', 'place', 'area', 'indoors', 'timeAdvance', 'timeAdvanceCount', 'timeOfDay', 'requiresSuccess', 'evidence'],
+        properties: {
+            reputationLocation: { type: 'string' },
+            place: { type: 'string' },
+            area: { type: 'string' },
+            indoors: { type: 'string', enum: ['unchanged', 'indoors', 'outdoors'] },
+            timeAdvance: { type: 'string', enum: ['none', 'slot', 'overnight', 'day', 'explicit'] },
+            timeAdvanceCount: { type: 'integer', minimum: 1, maximum: 3650 },
+            timeOfDay: { type: 'string', enum: ['unchanged', 'morning', 'afternoon', 'evening', 'night'] },
+            requiresSuccess: { type: 'boolean' },
+            evidence: { type: 'string' },
+        },
+    };
+    const worldEvidenceSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['topic', 'text', 'route', 'location', 'actor'],
+        properties: {
+            topic: { type: 'string' },
+            text: { type: 'string' },
+            route: { type: 'string', enum: ['location', 'actor', 'news', 'investigation'] },
+            location: { type: 'string' },
+            actor: { type: 'string' },
+        },
+    };
+    const worldAdvancementSchema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['planId', 'stageLabel', 'consequence', 'status', 'nextDelayDays', 'nextDelaySlots', 'evidence'],
+        properties: {
+            planId: { type: 'string' },
+            stageLabel: { type: 'string' },
+            consequence: { type: 'string' },
+            status: { type: 'string', enum: ['active', 'completed'] },
+            nextDelayDays: { type: 'integer', minimum: 0, maximum: 120 },
+            nextDelaySlots: { type: 'integer', minimum: 0, maximum: 480 },
+            evidence: { type: 'array', minItems: 1, maxItems: 4, items: worldEvidenceSchema },
+        },
+    };
     return {
         type: 'object',
         additionalProperties: false,
-        required: ['engineContext', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'userKnowledgeApplication', 'powerActorEnmity', 'powerEventShape', 'trackerUpdateEngine', 'chaosSemantic'],
+        required: ['engineContext', 'worldTransition', 'worldProgression', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'userKnowledgeApplication', 'powerActorEnmity', 'powerEventShape', 'trackerUpdateEngine', 'chaosSemantic'],
         properties: {
             engineContext: {
                 type: 'object',
@@ -1099,6 +1145,19 @@ function buildSemanticPreflightSchema() {
                                 description: 'Current settlement/community/route/region for deterministic fame/infamy lookup, or (none). Do not decide reputation effects here.',
                             },
                         },
+                    },
+                },
+            },
+            worldTransition: worldTransitionSchema,
+            worldProgression: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['advancements'],
+                properties: {
+                    advancements: {
+                        type: 'array',
+                        maxItems: 18,
+                        items: worldAdvancementSchema,
                     },
                 },
             },
@@ -1631,12 +1690,15 @@ const COMPACT_LEDGER_OUTPUT_CONTRACT = [
     '- Begin with BEGIN_SEMANTIC_PREFLIGHT and end the ledger with END_SEMANTIC_PREFLIGHT.',
     `- After END_SEMANTIC_PREFLIGHT, output ${SEMANTIC_PREFLIGHT_STOP_SENTINEL} on its own final line. Do not output anything after it.`,
     '- Fill every required line exactly once. Keep the exact function/key names shown below.',
+    '- WorldProgressionAdvancement.count must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one row per due plan.',
     '- When RelationshipEngine.count is greater than 0, every indexed relationship row MUST include standingInfluence=none|aware|constrained and standingBasis; omit indexed relationship lines only when count=0.',
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
     '- Use comma-separated names or (none) for lists. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
 ].join('\n');
 
 const SEMANTIC_FIELD_GUIDANCE = [
+    '- WorldTransition is a strict scene-state projection from the latest user input. Change only location, indoor/outdoor state, or time that the latest input explicitly moves through, enters, leaves, waits through, sleeps through, or otherwise advances. Use unchanged/none when no transition is explicit. requiresSuccess=Y only when the transition depends on the current stakes-bearing action succeeding; otherwise N. evidence must quote the latest user input that establishes the transition, or (none) when unchanged. Never choose weather here.',
+    '- WorldProgressionAdvancement is private off-screen development wording for deterministic deadlines. Read PRIVATE_WORLD_PROGRESSION_ACTIVE_PLANS. Output exactly one advancement for every active plan whose nextCheckpoint is already due or would become due if WorldTransition succeeds, and no other plans. Copy the exact plan id. Advance one stage only. Consequence and evidence must remain entirely in world/NPC terms, must not mention {{user}}, second-person pronouns, or the player persona, and must never retroactively injure {{user}}, remove possessions, or force action. Each advancement requires at least one concise physically discoverable evidence item with a narrow location, actor, news, or investigation route. Do not reveal hidden causes in evidence.',
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, stealth contest against a specific established living detector/opponent, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest against a specific established living detector/opponent, speed contest, dangerous movement, contested access, or another explicit stakes-bearing objective.',
     '- ResolutionEngine must separate user-authored internal prose from external action. First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction. When mixed, extract only concrete present external actions and spoken dialogue for identifyGoal, identifyChallenge, targets, challengeType, and actionUnits.',
     '- ResolutionEngine.restraintControl is a simple fact detector. Mark Present=Y only when the latest user input explicitly holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a specific living NPC. Do not mark it for hand-on-wall proximity, leaning close, flirting, hand-holding, ordinary touch, or movement that does not restrict the NPC body or movement.',
@@ -1699,6 +1761,28 @@ const SEMANTIC_FIELD_GUIDANCE = [
 
 const COMPACT_LEDGER_TEMPLATE = `BEGIN_SEMANTIC_PREFLIGHT
 EngineContext.userReputationContext.location=(none)
+WorldTransition.reputationLocation=unchanged
+WorldTransition.place=unchanged
+WorldTransition.area=unchanged
+WorldTransition.indoors=unchanged
+WorldTransition.timeAdvance=none
+WorldTransition.timeAdvanceCount=1
+WorldTransition.timeOfDay=unchanged
+WorldTransition.requiresSuccess=N
+WorldTransition.evidence=(none)
+WorldProgressionAdvancement.count=0
+WorldProgressionAdvancement[0].planId=(none)
+WorldProgressionAdvancement[0].stageLabel=(none)
+WorldProgressionAdvancement[0].consequence=(none)
+WorldProgressionAdvancement[0].status=active
+WorldProgressionAdvancement[0].nextDelayDays=0
+WorldProgressionAdvancement[0].nextDelaySlots=1
+WorldProgressionAdvancement[0].evidence.count=0
+WorldProgressionAdvancement[0].evidence[0].topic=(none)
+WorldProgressionAdvancement[0].evidence[0].text=(none)
+WorldProgressionAdvancement[0].evidence[0].route=location
+WorldProgressionAdvancement[0].evidence[0].location=(none)
+WorldProgressionAdvancement[0].evidence[0].actor=(none)
 ResolutionEngine.identifyGoal=Normal_Interaction
 ResolutionEngine.identifyChallenge=Normal_Interaction
 ResolutionEngine.explicitMeans=(none)
@@ -1888,30 +1972,37 @@ CHAOS_INTERRUPT.sceneSummary=short scene summary
 END_SEMANTIC_PREFLIGHT
 ${SEMANTIC_PREFLIGHT_STOP_SENTINEL}`;
 
-function getPersonaIdentityHints(context) {
+export function getPersonaIdentityHints(context) {
     const fields = getCharacterCardFields(context);
     const persona = String(fields.persona ?? '').trim();
     const hints = [];
     const add = value => {
+        if (typeof value !== 'string' && typeof value !== 'number') return;
         const text = cleanScalar(value);
         if (!text || isNoneValue(text)) return;
         if (text.length < 2 || text.length > 40) return;
-        const key = text.toLowerCase();
-        if (hints.some(item => item.toLowerCase() === key)) return;
+        const key = text.normalize('NFKC').toLowerCase();
+        if (hints.some(item => item.normalize('NFKC').toLowerCase() === key)) return;
         hints.push(text);
     };
 
     add(context?.name1);
+    add(context?.user);
+    add(context?.userName);
+    add(context?.personaName);
+    add(fields.user);
+    add(fields.userName);
+    add(fields.personaName);
     const patterns = [
-        /\bName\s*[:=]\s*([^\n\r|#*]+)/i,
-        /\bYou\s+are\s+(?:\*\*)?([A-Z][A-Za-z' -]{1,38})(?:\*\*)?\b/,
-        /\bYou\s+are\s+(?:an?|the)\s+([A-Z][A-Za-z' -]{1,38})\b/,
+        /(?:^|\n)\s*(?:[-*]\s*)?(?:\*\*)?Name(?:\*\*)?\s*[:=]\s*(?:\*\*)?([^\n\r|#*]+?)(?:\*\*)?\s*(?=$|\n)/iu,
+        /(?:^|[.!?\n]\s*)(?:Your name is|You are called)\s+(?:\*\*)?([\p{L}\p{N}][\p{L}\p{M}\p{N}' -]{1,38})(?:\*\*)?(?=[,.!?;\n]|$)/iu,
+        /(?:^|[.!?\n]\s*)You are\s+(?:\*\*)?([A-Z\p{Lu}][\p{L}\p{M}' -]{1,38})(?:\*\*)?(?=[,.!?;\n]|$)/u,
     ];
     for (const pattern of patterns) {
         const match = persona.match(pattern);
-        if (match?.[1]) add(match[1].replace(/\s+[-–—].*$/, ''));
+        if (match?.[1]) add(match[1].replace(/\s+[-\u2013\u2014].*$/, ''));
     }
-    return hints.slice(0, 5);
+    return hints.slice(0, 8);
 }
 
 function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTrackerSnapshot = {}, options = {}) {
@@ -2001,6 +2092,8 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
     const latentFavorSnapshot = sanitizeLatentFavorSnapshotForSemantic(options?.latentFavorSnapshot || []);
     const userKnowledgeSnapshot = sanitizeUserKnowledgeSnapshotForSemantic(options?.userKnowledgeSnapshot || {});
     const worldStateSnapshot = normalizeWorldState(options?.worldStateSnapshot || {});
+    const worldProgressionSnapshot = normalizeWorldProgression(options?.worldProgressionSnapshot || {});
+    const worldProgressionContext = buildWorldProgressionSemanticContext(worldProgressionSnapshot, worldStateSnapshot);
     const boundCompanionSnapshot = normalizeBoundCompanionState(options?.boundCompanionSnapshot || {});
     const pendingBoundarySnapshot = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || {});
     const semanticPlayerTrackerSnapshot = sanitizeTrackerUserStateForModel(playerTrackerSnapshot);
@@ -2012,6 +2105,7 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         `Latent favor snapshot JSON (hidden unresolved favor memory; use only for exact PowerActorEnmity.favorAffiliationLinks, never visible tracker text or narration):\n${JSON.stringify(latentFavorSnapshot)}\n\n` +
         `User knowledge snapshot JSON (hidden memory about authored or personal facts people may know about {{user}}; use for UserKnowledgeApplication context only, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         `World state snapshot JSON (hidden current scene continuity; use reputationLocation/place as the default current community for EngineContext.userReputationContext.location when applicable):\n${JSON.stringify(worldStateSnapshot, null, 2)}\n\n` +
+        `PRIVATE_WORLD_PROGRESSION_ACTIVE_PLANS JSON (hidden deadline state; use only for WorldProgressionAdvancement and never expose hidden causes or plans):\n${JSON.stringify(worldProgressionContext, null, 2)}\n\n` +
         `Bound companion snapshot JSON (hidden user state; current established inner companion, possession/shared vessel, intelligent item/weapon, bound spirit/artifact, or implant if any):\n${JSON.stringify(boundCompanionSnapshot, null, 2)}\n\n` +
         `Pending boundary snapshot JSON (hidden next-turn boundary memory; use only for ResolutionEngine.boundaryBreak):\n${JSON.stringify(pendingBoundarySnapshot, null, 2)}\n\n` +
         'You are the semantic extraction pass for a SillyTavern roleplay rules extension. ' +
@@ -2360,6 +2454,10 @@ function validateRawLedgerContract(ledger, raw) {
     const missing = [];
     if (!ledger?.engineContext) missing.push('engineContext');
     if (!Array.isArray(ledger?.engineContext?.trackerRelevantNPCs)) missing.push('engineContext.trackerRelevantNPCs');
+    if (!ledger?.worldTransition) missing.push('worldTransition');
+    if (typeof ledger?.worldTransition?.requiresSuccess !== 'boolean') missing.push('worldTransition.requiresSuccess:boolean');
+    if (!ledger?.worldProgression) missing.push('worldProgression');
+    if (!Array.isArray(ledger?.worldProgression?.advancements)) missing.push('worldProgression.advancements');
     if (!ledger?.resolutionEngine) missing.push('resolutionEngine');
     if (!ledger?.resolutionEngine?.identifyGoal) missing.push('resolutionEngine.identifyGoal');
     if (!ledger?.resolutionEngine?.identifyChallenge) missing.push('resolutionEngine.identifyChallenge');
@@ -2471,6 +2569,16 @@ function parseCompactLedger(text, trackerSnapshot) {
 
     const required = [
         'EngineContext.userReputationContext.location',
+        'WorldTransition.reputationLocation',
+        'WorldTransition.place',
+        'WorldTransition.area',
+        'WorldTransition.indoors',
+        'WorldTransition.timeAdvance',
+        'WorldTransition.timeAdvanceCount',
+        'WorldTransition.timeOfDay',
+        'WorldTransition.requiresSuccess',
+        'WorldTransition.evidence',
+        'WorldProgressionAdvancement.count',
         'ResolutionEngine.identifyGoal',
         'ResolutionEngine.identifyChallenge',
         'ResolutionEngine.explicitMeans',
@@ -2574,6 +2682,34 @@ function parseCompactLedger(text, trackerSnapshot) {
         'PowerEventShape.count',
     ];
     const missing = required.filter(key => !fields.has(key));
+    if (missing.length) {
+        throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
+    }
+
+    const worldProgressionAdvancementCount = clampNumber(readNumber(fields, 'WorldProgressionAdvancement.count', 0), 0, 18);
+    for (let index = 0; index < worldProgressionAdvancementCount; index += 1) {
+        const prefix = `WorldProgressionAdvancement[${index}]`;
+        const advancementRequired = [
+            `${prefix}.planId`,
+            `${prefix}.stageLabel`,
+            `${prefix}.consequence`,
+            `${prefix}.status`,
+            `${prefix}.nextDelayDays`,
+            `${prefix}.nextDelaySlots`,
+            `${prefix}.evidence.count`,
+        ];
+        for (const key of advancementRequired) {
+            if (!fields.has(key)) missing.push(key);
+        }
+        const evidenceCount = clampNumber(readNumber(fields, `${prefix}.evidence.count`, 0), 0, 4);
+        for (let evidenceIndex = 0; evidenceIndex < evidenceCount; evidenceIndex += 1) {
+            const evidencePrefix = `${prefix}.evidence[${evidenceIndex}]`;
+            for (const field of ['topic', 'text', 'route', 'location', 'actor']) {
+                const key = `${evidencePrefix}.${field}`;
+                if (!fields.has(key)) missing.push(key);
+            }
+        }
+    }
     if (missing.length) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
@@ -2928,6 +3064,44 @@ function parseCompactLedger(text, trackerSnapshot) {
         });
     }
 
+    const worldTransition = normalizeWorldTransition({
+        reputationLocation: fields.get('WorldTransition.reputationLocation'),
+        place: fields.get('WorldTransition.place'),
+        area: fields.get('WorldTransition.area'),
+        indoors: fields.get('WorldTransition.indoors'),
+        timeAdvance: fields.get('WorldTransition.timeAdvance'),
+        timeAdvanceCount: fields.get('WorldTransition.timeAdvanceCount'),
+        timeOfDay: fields.get('WorldTransition.timeOfDay'),
+        requiresSuccess: readBoolean(fields, 'WorldTransition.requiresSuccess', false),
+        evidence: fields.get('WorldTransition.evidence'),
+    });
+    const worldProgression = { advancements: [] };
+    for (let index = 0; index < worldProgressionAdvancementCount; index += 1) {
+        const prefix = `WorldProgressionAdvancement[${index}]`;
+        const evidenceCount = clampNumber(readNumber(fields, `${prefix}.evidence.count`, 0), 0, 4);
+        const evidence = [];
+        for (let evidenceIndex = 0; evidenceIndex < evidenceCount; evidenceIndex += 1) {
+            const evidencePrefix = `${prefix}.evidence[${evidenceIndex}]`;
+            evidence.push({
+                topic: fields.get(`${evidencePrefix}.topic`),
+                text: fields.get(`${evidencePrefix}.text`),
+                route: fields.get(`${evidencePrefix}.route`),
+                location: fields.get(`${evidencePrefix}.location`),
+                actor: fields.get(`${evidencePrefix}.actor`),
+            });
+        }
+        worldProgression.advancements.push({
+            planId: fields.get(`${prefix}.planId`),
+            stageLabel: fields.get(`${prefix}.stageLabel`),
+            consequence: fields.get(`${prefix}.consequence`),
+            status: fields.get(`${prefix}.status`),
+            nextDelayDays: readNumber(fields, `${prefix}.nextDelayDays`, 0),
+            nextDelaySlots: readNumber(fields, `${prefix}.nextDelaySlots`, 0),
+            evidence,
+        });
+    }
+    worldProgression.advancements = normalizeWorldProgressionAdvancements(worldProgression.advancements);
+
     const rollNeeded = readBoolean(fields, 'ResolutionEngine.rollNeeded', false);
     const challengeType = normalizeChallengeType(fields.get('ResolutionEngine.challengeType'), rollNeeded);
     const socialTactic = normalizeSocialTactic(fields.get('ResolutionEngine.socialTactic'), challengeType);
@@ -3223,6 +3397,8 @@ function parseCompactLedger(text, trackerSnapshot) {
                 location: normalizeReputationLocationText(fields.get('EngineContext.userReputationContext.location')) || '(none)',
             },
         },
+        worldTransition,
+        worldProgression,
         resolutionEngine,
         relationshipEngine,
         injuryEffectEngine,
@@ -3431,6 +3607,7 @@ function parseNarratorTrackerDeltaText(text) {
         area: fields.get('WorldStateDelta.area'),
         indoors: fields.get('WorldStateDelta.indoors'),
         timeAdvance: fields.get('WorldStateDelta.timeAdvance'),
+        timeAdvanceCount: fields.get('WorldStateDelta.timeAdvanceCount'),
         timeOfDay: fields.get('WorldStateDelta.timeOfDay'),
         weatherCondition: fields.get('WorldStateDelta.weatherCondition'),
         weatherTick: fields.get('WorldStateDelta.weatherTick'),
@@ -4303,6 +4480,11 @@ function normalizeLedger(ledger) {
     ledger.engineContext.userReputationContext = {
         location: normalizeReputationLocationText(ledger.engineContext.userReputationContext?.location) || '(none)',
     };
+    ledger.worldTransition = normalizeWorldTransition(ledger.worldTransition || {});
+    ledger.worldProgression = ledger.worldProgression && typeof ledger.worldProgression === 'object'
+        ? ledger.worldProgression
+        : {};
+    ledger.worldProgression.advancements = normalizeWorldProgressionAdvancements(ledger.worldProgression.advancements);
     ledger.resolutionEngine = ledger.resolutionEngine || {};
     ledger.resolutionEngine.identifyGoal = ledger.resolutionEngine.identifyGoal || 'Normal_Interaction';
     ledger.resolutionEngine.identifyChallenge = ledger.resolutionEngine.identifyChallenge || ledger.resolutionEngine.explicitMeans || ledger.resolutionEngine.identifyGoal;
@@ -5156,6 +5338,10 @@ function validateNormalizedLedger(ledger, raw) {
     if (!ledger.engineContext) missing.push('engineContext');
     if (!ledger.engineContext?.userCoreStats) missing.push('engineContext.userCoreStats');
     if (!Array.isArray(ledger.engineContext?.trackerRelevantNPCs)) missing.push('engineContext.trackerRelevantNPCs');
+    if (!ledger.worldTransition) missing.push('worldTransition');
+    if (typeof ledger.worldTransition?.requiresSuccess !== 'boolean') missing.push('worldTransition.requiresSuccess:boolean');
+    if (!ledger.worldProgression) missing.push('worldProgression');
+    if (!Array.isArray(ledger.worldProgression?.advancements)) missing.push('worldProgression.advancements');
     if (!ledger.resolutionEngine) missing.push('resolutionEngine');
     if (!ledger.resolutionEngine?.identifyGoal) missing.push('resolutionEngine.identifyGoal');
     if (!ledger.resolutionEngine?.identifyChallenge) missing.push('resolutionEngine.identifyChallenge');
@@ -5230,6 +5416,74 @@ function validateNormalizedLedger(ledger, raw) {
     if (missing.length) {
         throw new Error(`Mandatory semantic ledger contract failed; response invalid. Missing/invalid fields (${missing.join(', ')}): ${extractTextCandidates(raw).join('\n').slice(0, 240)}`);
     }
+}
+
+export function validateSemanticWorldProgression(ledger, options = {}, context = {}) {
+    const transition = normalizeWorldTransition(ledger?.worldTransition || {});
+    const transitionChangesState = transition.reputationLocation !== null
+        || transition.place !== null
+        || transition.area !== null
+        || transition.indoors !== null
+        || transition.timeAdvance !== 'none'
+        || Boolean(transition.timeOfDay);
+    if (transitionChangesState && !semanticEvidenceAppearsInLatestInput(transition.evidence, options.latestUserText)) {
+        throw new Error('WorldTransition changed scene state without an exact quote grounded in the latest user input.');
+    }
+    const beforeWorldState = normalizeWorldState(options?.worldStateSnapshot || {});
+    const assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
+        assumeSuccess: true,
+        seed: 'semantic-world-transition',
+    });
+    const progression = normalizeWorldProgression(options?.worldProgressionSnapshot || {});
+    const coverage = validateWorldProgressionAdvancementCoverage(
+        progression,
+        ledger?.worldProgression?.advancements || [],
+        assumedWorldState,
+    );
+    if (!coverage.valid) {
+        const details = [
+            coverage.missing.length ? `missing=${coverage.missing.join(',')}` : '',
+            coverage.duplicate.length ? `duplicate=${coverage.duplicate.join(',')}` : '',
+            coverage.unexpected.length ? `unexpected=${coverage.unexpected.join(',')}` : '',
+            coverage.incomplete.length ? `missingEvidence=${coverage.incomplete.join(',')}` : '',
+        ].filter(Boolean).join(' ');
+        throw new Error(`World progression advancement coverage failed. ${details}`.trim());
+    }
+
+    const protectedNames = getPersonaIdentityHints(context);
+    const unsafeText = ledger.worldProgression.advancements.flatMap(item => [
+        item.consequence,
+        ...item.evidence.map(evidence => evidence.text),
+    ]).find(text => semanticWorldAdvancementMentionsPlayer(text, protectedNames));
+    if (unsafeText) {
+        throw new Error('World progression advancement described an off-screen effect on the player persona.');
+    }
+}
+
+function semanticWorldAdvancementMentionsPlayer(value, protectedNames = []) {
+    const text = String(value ?? '').normalize('NFKC');
+    if (/\b(?:you|your|yours|yourself|yourselves|the user|the player(?: character)?|the protagonist)\b|\{\{user\}\}/i.test(text)) {
+        return true;
+    }
+    return protectedNames.some(name => {
+        if (name.length < 2) return false;
+        const escaped = name.normalize('NFKC').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'iu').test(text);
+    });
+}
+
+function semanticEvidenceAppearsInLatestInput(value, latestUserText) {
+    const evidence = normalizedSemanticEvidence(value);
+    const input = normalizedSemanticEvidence(latestUserText);
+    return evidence.length >= 3 && input.includes(evidence);
+}
+
+function normalizedSemanticEvidence(value) {
+    return String(value ?? '')
+        .normalize('NFKC')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
 }
 
 function toBoolean(value, fallback) {

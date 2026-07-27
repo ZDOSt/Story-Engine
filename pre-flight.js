@@ -1199,6 +1199,7 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         ['claimOrDeception', narrativeClaimFact(resolution.ClaimCheck, resolution, summary)],
         ['environment', narrativeEnvironmentFact(resolution)],
         ['sceneState', narrativeSceneStateFact(handoff?.sceneState || options?.worldState)],
+        ['worldMemory', narrativeWorldMemoryFact(handoff?.worldMemory)],
         ['presentCharacters', narrativePresentCharacters(resolution, handoff)],
         ['knowledgeAboutUser', narrativeUserKnowledgeFact(ledger?.userKnowledgeApplication?.applications)],
         ['worldEvent', narrativeWorldEventFact(handoff)],
@@ -1310,6 +1311,43 @@ function narrativeSceneStateFact(worldState = {}) {
     const summary = summarizeWorldStateForNarration(state);
     if (!summary) return '';
     return `${summary}. ONLY the listed values are established, authoritative continuity. Omitted position, time, or weather is unknown and must not be inferred from internal defaults. Preserve listed values unless another narrativeFact explicitly changes them; do not choose new weather or time changes on your own.`;
+}
+
+function narrativeWorldMemoryFact(value = {}) {
+    const archive = Array.isArray(value?.establishedArchive) ? value.establishedArchive : [];
+    const evidence = Array.isArray(value?.observableEvidence) ? value.observableEvidence : [];
+    const parts = [];
+
+    if (archive.length) {
+        const facts = archive.map(entry => {
+            const details = [
+                entry?.summary,
+                entry?.role ? `role: ${entry.role}` : '',
+                entry?.affiliation ? `affiliation: ${entry.affiliation}` : '',
+                entry?.description,
+                Array.isArray(entry?.history) && entry.history.length ? `recent history: ${entry.history.slice(-3).join(' | ')}` : '',
+                Array.isArray(entry?.connections) && entry.connections.length ? `connections: ${entry.connections.join(', ')}` : '',
+                entry?.lastKnownStatus ? `last known status: ${entry.lastKnownStatus}` : '',
+                entry?.lastKnownLocation ? `last known location: ${entry.lastKnownLocation}` : '',
+            ].filter(item => !isNoneText(item));
+            return `${valueOrNone(entry?.name)} (${valueOrNone(entry?.type)}): ${details.join('; ') || 'no additional established detail'}.`;
+        });
+        parts.push(`These are already discovered facts relevant to the current scene. Preserve them for continuity without reciting or explaining them unless the exchange naturally calls for them: ${facts.join(' ')}`);
+    }
+
+    if (evidence.length) {
+        const observations = evidence.map(item => {
+            const route = item?.route === 'actor' && item?.actor
+                ? `through ${item.actor}`
+                : item?.location
+                    ? `at ${item.location}`
+                    : `through ${valueOrNone(item?.route)}`;
+            return `${valueOrNone(item?.topic)}: ${valueOrNone(item?.text)} (${route}).`;
+        });
+        parts.push(`Reveal these newly observable developments in this response through direct sensory evidence, dialogue, readable text, news, or investigation as specified. Reveal only the listed observable facts. Do not explain hidden causes, plans, actors, timing logic, or off-screen bookkeeping: ${observations.join(' ')}`);
+    }
+
+    return parts.join(' ');
 }
 
 function narrativePresentCharacters(resolution = {}, handoff = {}) {

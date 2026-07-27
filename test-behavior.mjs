@@ -8,8 +8,9 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticToolChoice, buildSemanticToolPrompt, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sanitizeSemanticAssembledText } from './semantic-extractor.js';
-import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
+import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticToolChoice, buildSemanticToolPrompt, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
+import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { applyHiddenHealthEvents } from './health-state.js';
 import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character-sheet-validation.js';
@@ -460,6 +461,9 @@ function context(latestUserText = '', tracker = {}, user = {}, persona = 'PHY: 6
         pendingBoundary: cardFields.pendingBoundary || {},
         snapshots: {},
         userReputation: cardFields.userReputation || {},
+        worldState: cardFields.worldState || {},
+        descriptiveArchive: cardFields.descriptiveArchive || {},
+        worldProgression: cardFields.worldProgression || {},
       },
     },
     getCharacterCardFields() {
@@ -11083,7 +11087,8 @@ const tests = [
       assert.match(indexSource, /sceneLocation/);
       assert.match(indexSource, /worldDisplay\.place/);
       assert.match(indexSource, /worldDisplay\.weather/);
-      assert.match(indexSource, /applyWorldStateDelta\(merged\.worldState/);
+      assert.match(indexSource, /removeAlreadyProjectedWorldStateDelta\(/);
+      assert.match(indexSource, /applyWorldStateDelta\(projectedWorldState, postNarrationWorldStateDelta/);
 
       assert.match(deterministicSource, /export function buildWorldStateSnapshot/);
       assert.match(deterministicSource, /sceneState: worldState/);
@@ -11095,7 +11100,9 @@ const tests = [
       assert.match(preflightSource, /do not choose new weather or time changes on your own/);
       assert.match(contractSource, /WORLD_STATE_DELTA/);
       assert.match(contractSource, /WorldStateDelta\.reputationLocation=unchanged/);
+      assert.match(contractSource, /WorldStateDelta\.timeAdvanceCount=1/);
       assert.match(contractSource, /WorldStateDelta\.weatherTick=auto/);
+      assert.match(contractSource, /MECHANICAL_TRACKER_AFTER\.worldState already includes the current semantic WorldTransition/);
 
       const deltaText = TRACKER_DELTA_TEMPLATE
         .replace('WorldStateDelta.reputationLocation=unchanged', 'WorldStateDelta.reputationLocation=Urakami Village')
@@ -11111,6 +11118,7 @@ const tests = [
       assert.equal(parsed.worldState.area, 'reception hall');
       assert.equal(parsed.worldState.indoors, true);
       assert.equal(parsed.worldState.timeAdvance, 'slot');
+      assert.equal(parsed.worldState.timeAdvanceCount, 1);
       assert.equal(parsed.worldState.timeOfDay, 'evening');
       assert.equal(parsed.worldState.weatherTick, 'tick');
 
@@ -11129,6 +11137,1169 @@ const tests = [
       assert.equal(after.timeOfDay, 'evening');
       assert.equal(after.weather.condition, 'clear');
       assert.equal(after.weather.remainingSlots, 1);
+
+      const projected = projectWorldStateTransition(before, {
+        reputationLocation: 'Urakami Village',
+        place: "Adventurer's Guild",
+        area: 'reception hall',
+        indoors: true,
+        timeAdvance: 'slot',
+        timeAdvanceCount: 1,
+        timeOfDay: 'evening',
+      });
+      const duplicateDelta = removeAlreadyProjectedWorldStateDelta(parsed.worldState, before, projected);
+      assert.equal(duplicateDelta.reputationLocation, null);
+      assert.equal(duplicateDelta.place, null);
+      assert.equal(duplicateDelta.area, null);
+      assert.equal(duplicateDelta.indoors, null);
+      assert.equal(duplicateDelta.timeAdvance, 'none');
+      assert.equal(duplicateDelta.timeOfDay, '');
+      assert.equal(duplicateDelta.weatherTick, 'none');
+      assert.deepEqual(applyWorldStateDelta(projected, duplicateDelta), projected);
+
+      const additionalArea = removeAlreadyProjectedWorldStateDelta({
+        place: "Adventurer's Guild",
+        area: 'records desk',
+      }, before, projected);
+      assert.equal(additionalArea.place, null);
+      assert.equal(additionalArea.area, 'records desk');
+    },
+  },
+  {
+    name: '33c.3 world state advances exact multi-slot and multi-day durations',
+    run() {
+      const threeDayDelta = parseNarratorTrackerDelta(
+        TRACKER_DELTA_TEMPLATE
+          .replace('WorldStateDelta.timeAdvance=none', 'WorldStateDelta.timeAdvance=day')
+          .replace('WorldStateDelta.timeAdvanceCount=1', 'WorldStateDelta.timeAdvanceCount=3')
+          .replace('WorldStateDelta.timeOfDay=unchanged', 'WorldStateDelta.timeOfDay=morning')
+          .replace('WorldStateDelta.weatherTick=auto', 'WorldStateDelta.weatherTick=none'),
+        'Three days pass.',
+      );
+      assert.equal(threeDayDelta.worldState.timeAdvance, 'day');
+      assert.equal(threeDayDelta.worldState.timeAdvanceCount, 3);
+      const afterThreeDays = applyWorldStateDelta({ dayIndex: 1, timeOfDay: 'morning' }, threeDayDelta.worldState);
+      assert.equal(afterThreeDays.dayIndex, 4);
+      assert.equal(afterThreeDays.timeOfDay, 'morning');
+
+      const afterFiveSlots = applyWorldStateDelta(
+        { dayIndex: 2, timeOfDay: 'evening' },
+        { timeAdvance: 'slot', timeAdvanceCount: 5 },
+      );
+      assert.equal(afterFiveSlots.dayIndex, 3);
+      assert.equal(afterFiveSlots.timeOfDay, 'night');
+
+      const afterTwoNights = applyWorldStateDelta(
+        { dayIndex: 4, timeOfDay: 'evening' },
+        { timeAdvance: 'overnight', timeAdvanceCount: 2 },
+      );
+      assert.equal(afterTwoNights.dayIndex, 6);
+      assert.equal(afterTwoNights.timeOfDay, 'morning');
+
+      const optionalCount = parseNarratorTrackerDelta(
+        TRACKER_DELTA_TEMPLATE.replace(/^WorldStateDelta\.timeAdvanceCount=.*\r?\n/m, ''),
+        'Nothing changes.',
+      );
+      assert.equal(optionalCount.worldState.timeAdvanceCount, 1);
+    },
+  },
+  {
+    name: '33c.4 descriptive archive is bounded deduplicated and mechanically separate',
+    run() {
+      const duplicateArchive = normalizeDescriptiveArchive({
+        entries: [
+          {
+            id: 'rick-first',
+            type: 'npc',
+            name: 'Rick',
+            summary: 'A dockworker who plans to leave town.',
+            history: ['He mentioned the northern road.'],
+            stats: { PHY: 9 },
+            inventory: ['Knife'],
+          },
+          {
+            id: 'rick-second',
+            type: 'npc',
+            name: 'rick',
+            lastKnownLocation: 'South Dock',
+            history: ['He packed his room.'],
+            wounds: ['Bruised'],
+          },
+        ],
+      });
+      assert.equal(duplicateArchive.entries.length, 1);
+      assert.equal(duplicateArchive.entries[0].lastKnownLocation, 'South Dock');
+      assert.deepEqual(duplicateArchive.entries[0].history, [
+        'He mentioned the northern road.',
+        'He packed his room.',
+      ]);
+      assert.equal('stats' in duplicateArchive.entries[0], false);
+      assert.equal('inventory' in duplicateArchive.entries[0], false);
+      assert.equal('wounds' in duplicateArchive.entries[0], false);
+
+      const bounded = normalizeDescriptiveArchive({
+        entries: Array.from({ length: 80 }, (_, index) => ({
+          type: 'location',
+          name: `Location ${index}`,
+          summary: `Established location ${index}`,
+        })),
+      });
+      assert.equal(bounded.entries.length, 72);
+      assert.equal(bounded.entries[0].name, 'Location 8');
+
+      const parsed = parseWorldMemoryDelta(WORLD_MEMORY_DELTA_TEMPLATE);
+      assert.deepEqual(parsed.archive, []);
+      assert.deepEqual(parsed.plans.create, []);
+      assert.match(WORLD_MEMORY_DELTA_CONTRACT, /Do not duplicate stats, wounds, status effects, inventory, gear, currency, rapport, disposition, rolls, or mechanics/);
+
+      const grounded = applyWorldMemoryDelta({}, {
+        archive: [
+          {
+            type: 'npc',
+            name: 'Rick',
+            summary: 'Rick closes the dockside stall.',
+            evidence: 'Rick closes the dockside stall',
+          },
+          {
+            type: 'faction',
+            name: 'Invented Council',
+            summary: 'A council absent from the narration.',
+            evidence: 'The Invented Council controls the harbor.',
+          },
+        ],
+      }, {
+        narrationText: 'Rick closes the dockside stall and locks its shutters.',
+        messageKey: 'chat:archive-grounding',
+      });
+      assert.deepEqual(grounded.archive.entries.map(entry => entry.name), ['Rick']);
+      assert.ok(grounded.audit.includes('archive_rejected_ungrounded:faction/Invented Council'));
+
+      const identityProtected = applyWorldMemoryDelta({
+        archive: {
+          entries: [{
+            id: 'south-dock',
+            type: 'location',
+            name: 'South Dock',
+            summary: 'A working harbor district.',
+          }],
+        },
+      }, {
+        archive: [{
+          id: 'south-dock',
+          type: 'faction',
+          name: 'Invented Council',
+          summary: 'A conflicting identity reuse.',
+          evidence: 'South Dock remains open after sunset.',
+        }],
+      }, {
+        narrationText: 'South Dock remains open after sunset.',
+        messageKey: 'chat:archive-identity',
+      });
+      assert.equal(identityProtected.archive.entries[0].type, 'location');
+      assert.equal(identityProtected.archive.entries[0].name, 'South Dock');
+      assert.ok(identityProtected.audit.includes('archive_rejected_identity_conflict:south-dock/faction/Invented Council'));
+    },
+  },
+  {
+    name: '33c.4d world memory preserves Unicode identities and narration grounding',
+    run() {
+      const archive = normalizeDescriptiveArchive({
+        entries: [
+          { type: 'npc', name: 'Мария', summary: 'Купец у восточных ворот.' },
+          { type: 'npc', name: 'Анна', summary: 'Стражник у западных ворот.' },
+        ],
+      });
+      assert.deepEqual(archive.entries.map(entry => entry.name), ['Мария', 'Анна']);
+
+      const grounded = applyWorldMemoryDelta({}, {
+        archive: [{
+          type: 'npc',
+          name: 'Анна',
+          summary: 'Анна закрывает ворота.',
+          evidence: 'Анна закрывает ворота',
+        }],
+      }, {
+        narrationText: 'Анна закрывает ворота и запирает засов.',
+        messageKey: 'chat:unicode-grounding',
+      });
+      assert.deepEqual(grounded.archive.entries.map(entry => entry.name), ['Анна']);
+      assert.equal(grounded.audit.some(line => line.startsWith('archive_rejected_ungrounded:')), false);
+    },
+  },
+  {
+    name: '33c.4e player identity protection is case-insensitive and Unicode-aware',
+    run() {
+      const playerMemory = applyWorldMemoryDelta({}, {
+        archive: [
+          { type: 'npc', name: 'ari', summary: 'The player persona.', evidence: 'ari stands at the gate.' },
+          { type: 'npc', name: 'мария', summary: 'Игрок.', evidence: 'мария стоит у ворот.' },
+        ],
+        plans: {
+          create: [{
+            kind: 'scheduled',
+            actor: 'мария',
+            objective: 'Уйти на рассвете',
+            cause: 'мария говорит, что уйдет на рассвете.',
+            delayDays: 1,
+          }],
+        },
+      }, {
+        narrationText: 'ari stands at the gate. мария стоит у ворот и говорит, что уйдет на рассвете.',
+        protectedUserNames: ['Ari', 'Мария'],
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:unicode-player-protection',
+      });
+      assert.equal(playerMemory.archive.entries.length, 0);
+      assert.equal(playerMemory.progression.plans.length, 0);
+      assert.ok(playerMemory.audit.includes('archive_rejected_player:ari'));
+      assert.ok(playerMemory.audit.includes('archive_rejected_player:мария'));
+      assert.ok(playerMemory.audit.includes('create_rejected:мария/Уйти на рассвете'));
+
+      const unsafeProgression = normalizeWorldProgression({
+        plans: [{
+          id: 'unsafe-player-plan',
+          kind: 'faction',
+          actor: 'Road Bandits',
+          objective: 'Raid the camp',
+          status: 'active',
+          nextCheckpoint: { dayIndex: 1, timeOfDay: 'morning' },
+        }],
+      });
+      const rejected = advanceDueWorldPlans(unsafeProgression, [{
+        planId: 'unsafe-player-plan',
+        stageLabel: 'Raid',
+        consequence: 'The bandits abducted ari from the camp.',
+        status: 'completed',
+        evidence: [{ topic: 'Raid', text: 'A cut rope lies beside the empty tent.', route: 'location', location: 'Camp' }],
+      }], { dayIndex: 1, timeOfDay: 'morning' }, {
+        strict: false,
+        protectedUserNames: ['Ari'],
+        messageKey: 'chat:lowercase-player-protection',
+      });
+      assert.equal(rejected.progression.plans[0].stage, 0);
+      assert.ok(rejected.audit.includes('advance_rejected:unsafe-player-plan'));
+    },
+  },
+  {
+    name: '33c.4a active world plans survive completed-plan history overflow',
+    run() {
+      const activePlans = Array.from({ length: 18 }, (_, index) => ({
+        id: `active-${index}`,
+        kind: 'npc',
+        actor: `Actor ${index}`,
+        objective: `Complete objective ${index}`,
+        status: 'active',
+        nextCheckpoint: { dayIndex: 10, timeOfDay: 'morning' },
+      }));
+      const completedPlans = Array.from({ length: 30 }, (_, index) => ({
+        id: `completed-${index}`,
+        kind: 'faction',
+        actor: `Faction ${index}`,
+        objective: `Completed objective ${index}`,
+        status: 'completed',
+        nextCheckpoint: { dayIndex: 2, timeOfDay: 'morning' },
+      }));
+      const normalized = normalizeWorldProgression({ plans: [...activePlans, ...completedPlans] });
+      assert.equal(normalized.plans.length, 18);
+      assert.ok(normalized.plans.every(plan => plan.status === 'active'));
+      assert.deepEqual(normalized.plans.map(plan => plan.id), activePlans.map(plan => plan.id));
+
+      const atCapacity = applyWorldMemoryDelta({ progression: normalized }, {
+        plans: {
+          create: [{
+            kind: 'npc',
+            actor: 'Overflow Actor',
+            objective: 'Start a nineteenth active plan',
+            cause: 'Overflow Actor says the work begins tomorrow.',
+            delayDays: 1,
+          }],
+        },
+      }, {
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:capacity',
+      });
+      assert.equal(atCapacity.progression.plans.length, 18);
+      assert.ok(atCapacity.audit.includes('create_rejected_capacity:Overflow Actor/Start a nineteenth active plan'));
+    },
+  },
+  {
+    name: '33c.4b updated archive facts receive recent continuity priority',
+    run() {
+      const archive = normalizeDescriptiveArchive({
+        entries: Array.from({ length: 9 }, (_, index) => ({
+          id: `archive-${index}`,
+          type: 'npc',
+          name: `Archivist ${index}`,
+          summary: `Established summary ${index}`,
+          history: [`Earlier history ${index}`],
+          connections: [`Witness ${index}`],
+          lastKnownLocation: 'Archive Hall',
+        })),
+      });
+      const updated = applyWorldMemoryDelta({ archive }, {
+        archive: [{
+          id: 'archive-0',
+          type: 'npc',
+          name: 'Archivist 0',
+          summary: 'The most recently updated archivist.',
+          history: ['Latest history 0'],
+          connections: ['Witness 0'],
+          lastKnownLocation: 'Archive Hall',
+          evidence: 'Archivist 0 records the latest change in the hall ledger.',
+        }],
+      }, {
+        afterWorldState: { place: 'Archive Hall' },
+        messageKey: 'chat:archive-update',
+      });
+      const narrationMemory = prepareWorldMemoryNarration({
+        archive: updated.archive,
+        worldState: { place: 'Archive Hall' },
+      });
+      assert.equal(narrationMemory.establishedArchive.length, 8);
+      assert.ok(narrationMemory.establishedArchive.some(entry => entry.name === 'Archivist 0'));
+      assert.ok(!narrationMemory.establishedArchive.some(entry => entry.name === 'Archivist 1'));
+      const recent = narrationMemory.establishedArchive.find(entry => entry.name === 'Archivist 0');
+      assert.deepEqual(recent.history, ['Earlier history 0', 'Latest history 0']);
+      assert.deepEqual(recent.connections, ['Witness 0']);
+
+      const narratorPrompt = formatNarratorPromptContext({
+        semanticLedger: {},
+        finalNarrativeHandoff: {
+          resolutionPacket: {},
+          worldMemory: narrationMemory,
+        },
+      });
+      assert.match(narratorPrompt, /recent history: Earlier history 0 \| Latest history 0/);
+      assert.match(narratorPrompt, /connections: Witness 0/);
+    },
+  },
+  {
+    name: '33c.4c post-narration world memory context stays compact and actionable',
+    run() {
+      const fill = (length, character) => character.repeat(length);
+      const archive = normalizeDescriptiveArchive({
+        entries: Array.from({ length: 72 }, (_, index) => ({
+          type: 'npc',
+          name: `NPC ${index}`,
+          summary: fill(280, 's'),
+          role: fill(160, 'r'),
+          affiliation: fill(160, 'a'),
+          description: fill(280, 'd'),
+          history: Array.from({ length: 6 }, (__, historyIndex) => `${historyIndex}-${fill(230, 'h')}`),
+          connections: Array.from({ length: 8 }, (__, connectionIndex) => `Connection ${connectionIndex} ${fill(130, 'c')}`),
+          lastKnownStatus: fill(200, 't'),
+          lastKnownLocation: 'Archive Hall',
+        })),
+      });
+      const progression = normalizeWorldProgression({
+        plans: Array.from({ length: 18 }, (_, index) => ({
+          id: `plan-${index}`,
+          kind: 'npc',
+          actor: `Actor ${index}`,
+          objective: fill(240, 'o'),
+          cause: fill(280, 'c'),
+          resources: Array.from({ length: 8 }, (__, itemIndex) => `${itemIndex}-${fill(150, 'r')}`),
+          prerequisites: Array.from({ length: 8 }, (__, itemIndex) => `${itemIndex}-${fill(170, 'p')}`),
+          status: 'active',
+          nextCheckpoint: { dayIndex: 10, timeOfDay: 'morning' },
+          consequences: Array.from({ length: 8 }, (__, itemIndex) => ({
+            stage: itemIndex + 1,
+            label: `Stage ${itemIndex + 1}`,
+            summary: fill(350, 'q'),
+          })),
+          evidence: Array.from({ length: 12 }, (__, itemIndex) => ({
+            id: `evidence-${index}-${itemIndex}`,
+            topic: `Topic ${itemIndex}`,
+            text: fill(310, 'e'),
+            route: 'location',
+            location: 'Archive Hall',
+          })),
+        })),
+      });
+      const compact = buildWorldMemoryUpdateContext({
+        archive,
+        progression,
+        worldState: { place: 'Archive Hall' },
+        focusText: 'The scene continues in Archive Hall.',
+      });
+      assert.equal(compact.archive.index.length, 72);
+      assert.equal(compact.archive.relevantDetails.length, 12);
+      assert.equal(compact.progression.activePlans.length, 18);
+      assert.ok(JSON.stringify(compact).length < 100000);
+      assert.ok(JSON.stringify({ archive, progression }).length > JSON.stringify(compact).length * 4);
+    },
+  },
+  {
+    name: '33c.5 private world progression enforces deadlines safety and narrow disclosure',
+    run() {
+      const created = applyWorldMemoryDelta({}, {
+        plans: {
+          create: [{
+            kind: 'scheduled',
+            actor: 'Rick',
+            objective: 'Leave town by the northern road',
+            target: 'Northern Road',
+            location: 'South Dock',
+            cause: 'Rick explicitly said he would leave in three days.',
+            resources: ['Packed travel bag'],
+            prerequisites: [],
+            delayDays: 3,
+            delaySlots: 0,
+          }],
+        },
+      }, {
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:1',
+      });
+      assert.equal(created.progression.plans.length, 1);
+      const createdPlan = created.progression.plans[0];
+      assert.deepEqual(createdPlan.nextCheckpoint, { dayIndex: 4, timeOfDay: 'morning' });
+      assert.equal(isPlanDue(createdPlan, { dayIndex: 3, timeOfDay: 'night' }), false);
+      assert.equal(isPlanDue(createdPlan, { dayIndex: 4, timeOfDay: 'morning' }), true);
+
+      const groundedCreation = applyWorldMemoryDelta({}, {
+        plans: {
+          create: [
+            {
+              kind: 'scheduled',
+              actor: 'Mira',
+              objective: 'Leave at dawn',
+              cause: 'I leave at dawn',
+              delayDays: 1,
+            },
+            {
+              kind: 'faction',
+              actor: 'Invented Council',
+              objective: 'Seize the harbor',
+              cause: 'The council secretly decides to seize the harbor.',
+              delayDays: 1,
+            },
+          ],
+        },
+      }, {
+        narrationText: 'Mira shoulders her pack. "I leave at dawn," she says.',
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:plan-grounding',
+      });
+      assert.deepEqual(groundedCreation.progression.plans.map(plan => plan.actor), ['Mira']);
+      assert.ok(groundedCreation.audit.includes('create_rejected:Invented Council/Seize the harbor'));
+
+      const cancellationBlocked = applyWorldMemoryDelta({ archive: created.archive, progression: created.progression }, {
+        plans: {
+          cancel: [{
+            planId: createdPlan.id,
+            reason: 'Rick abandoned his departure.',
+          }],
+        },
+      }, {
+        narrationText: 'Rick keeps packing for the northern road.',
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:cancel-ungrounded',
+      });
+      assert.equal(cancellationBlocked.progression.plans[0].status, 'active');
+      assert.ok(cancellationBlocked.audit.includes(`cancel_rejected_ungrounded:${createdPlan.id}`));
+
+      const cancellationAllowed = applyWorldMemoryDelta({ archive: created.archive, progression: created.progression }, {
+        plans: {
+          cancel: [{
+            planId: createdPlan.id,
+            reason: 'The journey is cancelled',
+          }],
+        },
+      }, {
+        narrationText: 'Rick sets down his pack. "The journey is cancelled," he says.',
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:cancel-grounded',
+      });
+      assert.equal(cancellationAllowed.progression.plans[0].status, 'cancelled');
+
+      const advancement = {
+        planId: createdPlan.id,
+        stageLabel: 'Departed',
+        consequence: 'Rick departed South Dock and took the northern road.',
+        status: 'active',
+        nextDelayDays: 1,
+        nextDelaySlots: 0,
+        evidence: [
+          { topic: 'Rick departed', text: 'Rick\'s rented berth is empty and his travel bag is gone.', route: 'location', location: 'South Dock' },
+          { topic: 'Rick departed', text: 'Rick says he left the dock at dawn.', route: 'actor', actor: 'Rick' },
+          { topic: 'Rick departed', text: 'Dockside reports say Rick took the northern road.', route: 'news', location: 'Market' },
+          { topic: 'Rick departed', text: 'Fresh boot marks lead north from Rick\'s locked room.', route: 'investigation', location: 'Old Mill' },
+        ],
+      };
+      const early = advanceDueWorldPlans(
+        created.progression,
+        [],
+        { dayIndex: 3, timeOfDay: 'night' },
+        { messageKey: 'chat:2' },
+      );
+      assert.equal(early.progression.plans[0].stage, 0);
+      assert.throws(() => advanceDueWorldPlans(
+        created.progression,
+        [advancement],
+        { dayIndex: 3, timeOfDay: 'night' },
+        { messageKey: 'chat:2-unexpected' },
+      ), /unexpected=/);
+
+      assert.throws(() => advanceDueWorldPlans(
+        early.progression,
+        [
+          advancement,
+          { ...advancement, stageLabel: 'Arrived', consequence: 'Rick reached the northern gate.' },
+        ],
+        { dayIndex: 4, timeOfDay: 'morning' },
+        { messageKey: 'chat:3-duplicate' },
+      ), /duplicate=/);
+
+      const dueResult = advanceDueWorldPlans(
+        early.progression,
+        [advancement],
+        { dayIndex: 4, timeOfDay: 'morning' },
+        { messageKey: 'chat:3' },
+      );
+      const due = { archive: created.archive, progression: dueResult.progression };
+      assert.equal(due.progression.plans[0].stage, 1);
+      assert.equal(due.progression.plans[0].consequences.length, 1);
+      assert.equal(due.progression.plans[0].evidence.length, 4);
+
+      const hidden = prepareWorldMemoryNarration({
+        archive: due.archive,
+        progression: due.progression,
+        worldState: { place: 'Hill Farm', area: 'kitchen' },
+        latestUserText: 'I remember Rick and South Dock.',
+        resolutionPacket: {},
+      });
+      assert.equal(hidden.observableEvidence.length, 0);
+      assert.doesNotMatch(JSON.stringify(hidden), /northern road|explicitly said|Packed travel bag/i);
+
+      const atLocation = prepareWorldMemoryNarration({
+        archive: due.archive,
+        progression: due.progression,
+        worldState: { place: 'South Dock' },
+        latestUserText: 'I look around.',
+        resolutionPacket: {},
+      });
+      assert.deepEqual(atLocation.observableEvidence.map(item => item.route), ['location']);
+
+      const withActor = prepareWorldMemoryNarration({
+        archive: due.archive,
+        progression: due.progression,
+        worldState: { place: 'Roadside Inn' },
+        latestUserText: 'I speak to him.',
+        resolutionPacket: { NPCInScene: ['Rick'] },
+      });
+      assert.deepEqual(withActor.observableEvidence.map(item => item.route), ['actor']);
+
+      const strategicActorOnly = prepareWorldMemoryNarration({
+        archive: due.archive,
+        progression: due.progression,
+        worldState: { place: 'Roadside Inn' },
+        latestUserText: 'I consider who might be involved.',
+        resolutionPacket: { PowerActors: ['Rick'] },
+      });
+      assert.equal(strategicActorOnly.observableEvidence.length, 0);
+
+      const throughNews = prepareWorldMemoryNarration({
+        archive: due.archive,
+        progression: due.progression,
+        worldState: { place: 'Market' },
+        latestUserText: 'I ask around for news.',
+        resolutionPacket: {},
+      });
+      assert.deepEqual(throughNews.observableEvidence.map(item => item.route), ['news']);
+
+      const throughInvestigation = prepareWorldMemoryNarration({
+        archive: due.archive,
+        progression: due.progression,
+        worldState: { place: 'Old Mill' },
+        latestUserText: 'I search the room and inspect the floor.',
+        resolutionPacket: {},
+      });
+      assert.deepEqual(throughInvestigation.observableEvidence.map(item => item.route), ['investigation']);
+
+      const locationEvidenceId = atLocation.observableEvidence[0].id;
+      const unauthorized = applyWorldMemoryDelta({ archive: due.archive, progression: due.progression }, {
+        discoveries: [{
+          id: 'invented-evidence-id',
+          quote: "Rick's rented berth is empty and his travel bag is gone.",
+        }],
+      }, {
+        authorizedEvidence: atLocation.observableEvidence,
+        narrationText: "Rick's rented berth is empty and his travel bag is gone.",
+        afterWorldState: { dayIndex: 4, timeOfDay: 'morning', place: 'South Dock' },
+        messageKey: 'chat:4',
+      });
+      assert.equal(unauthorized.progression.plans[0].evidence.find(item => item.id === locationEvidenceId).discovered, false);
+      assert.equal(unauthorized.archive.entries.length, 0);
+      assert.ok(unauthorized.audit.includes('discovery_rejected_unauthorized:invented-evidence-id'));
+
+      const unquoted = applyWorldMemoryDelta({ archive: due.archive, progression: due.progression }, {
+        discoveries: [{
+          id: locationEvidenceId,
+          quote: "Rick's rented berth is empty and his travel bag is gone.",
+        }],
+      }, {
+        authorizedEvidence: atLocation.observableEvidence,
+        narrationText: 'The shutters remain closed.',
+        afterWorldState: { dayIndex: 4, timeOfDay: 'morning', place: 'South Dock' },
+        messageKey: 'chat:4-unquoted',
+      });
+      assert.equal(unquoted.progression.plans[0].evidence.find(item => item.id === locationEvidenceId).discovered, false);
+      assert.ok(unquoted.audit.includes(`discovery_rejected_unquoted:${locationEvidenceId}`));
+
+      const mismatched = applyWorldMemoryDelta({ archive: due.archive, progression: due.progression }, {
+        discoveries: [{
+          id: locationEvidenceId,
+          quote: 'The harbor bell rings twice.',
+        }],
+      }, {
+        authorizedEvidence: atLocation.observableEvidence,
+        narrationText: "Rick's rented berth is empty and his travel bag is gone. The harbor bell rings twice.",
+        afterWorldState: { dayIndex: 4, timeOfDay: 'morning', place: 'South Dock' },
+        messageKey: 'chat:4-mismatched',
+      });
+      assert.equal(mismatched.progression.plans[0].evidence.find(item => item.id === locationEvidenceId).discovered, false);
+      assert.ok(mismatched.audit.includes(`discovery_rejected_mismatched_quote:${locationEvidenceId}`));
+
+      const topicOnly = applyWorldMemoryDelta({ archive: due.archive, progression: due.progression }, {
+        discoveries: [{
+          id: locationEvidenceId,
+          quote: 'Rick departed quietly.',
+        }],
+      }, {
+        authorizedEvidence: atLocation.observableEvidence,
+        narrationText: "Rick's rented berth is empty and his travel bag is gone. Rick departed quietly.",
+        afterWorldState: { dayIndex: 4, timeOfDay: 'morning', place: 'South Dock' },
+        messageKey: 'chat:4-topic-only',
+      });
+      assert.equal(topicOnly.progression.plans[0].evidence.find(item => item.id === locationEvidenceId).discovered, false);
+      assert.ok(topicOnly.audit.includes(`discovery_rejected_mismatched_quote:${locationEvidenceId}`));
+
+      const discovered = applyWorldMemoryDelta({ archive: due.archive, progression: due.progression }, {
+        discoveries: [{
+          id: locationEvidenceId,
+          quote: "Rick's rented berth is empty and his travel bag is gone.",
+        }],
+      }, {
+        authorizedEvidence: atLocation.observableEvidence,
+        narrationText: "Rick's rented berth is empty and his travel bag is gone.",
+        afterWorldState: { dayIndex: 4, timeOfDay: 'morning', place: 'South Dock' },
+        messageKey: 'chat:5',
+      });
+      assert.equal(discovered.progression.plans[0].evidence.find(item => item.id === locationEvidenceId).discovered, true);
+      assert.equal(discovered.archive.entries[0].type, 'event');
+      assert.equal(discovered.archive.entries[0].name, 'Rick departed');
+
+      const unsafe = advanceDueWorldPlans(discovered.progression, [{
+        planId: createdPlan.id,
+        stageLabel: 'Retaliation',
+        consequence: '{{user}} is injured while asleep.',
+        status: 'completed',
+        evidence: [],
+      }], { dayIndex: 5, timeOfDay: 'morning' }, {
+        strict: false,
+        messageKey: 'chat:6',
+      });
+      assert.equal(unsafe.progression.plans[0].stage, 1);
+      assert.ok(unsafe.audit.includes(`advance_rejected:${createdPlan.id}`));
+
+      for (const [index, unsafeConsequence] of [
+        'Bandits injured Ari while she slept.',
+        "Ari's sword was stolen from camp.",
+        'An arrow struck Ari beside the road.',
+      ].entries()) {
+        const rejected = advanceDueWorldPlans(discovered.progression, [{
+          planId: createdPlan.id,
+          stageLabel: 'Retaliation',
+          consequence: unsafeConsequence,
+          status: 'completed',
+          evidence: [],
+        }], { dayIndex: 5, timeOfDay: 'morning' }, {
+          strict: false,
+          messageKey: `chat:persona-safety-${index}`,
+          protectedUserNames: ['Ari'],
+        });
+        assert.equal(rejected.progression.plans[0].stage, 1);
+        assert.ok(rejected.audit.includes(`advance_rejected:${createdPlan.id}`));
+      }
+
+      const unsafeEvidence = advanceDueWorldPlans(discovered.progression, [{
+        planId: createdPlan.id,
+        stageLabel: 'Occupied',
+        consequence: 'Bandits occupied the roadside camp.',
+        status: 'completed',
+        evidence: [{
+          topic: 'Roadside attack',
+          text: 'A bloodied arrow that struck Ari lies beside the road.',
+          route: 'location',
+          location: 'Roadside Camp',
+        }],
+      }], { dayIndex: 5, timeOfDay: 'morning' }, {
+        strict: false,
+        messageKey: 'chat:persona-evidence-safety',
+        protectedUserNames: ['Ari'],
+      });
+      assert.equal(unsafeEvidence.progression.plans[0].stage, 1);
+      assert.ok(unsafeEvidence.audit.includes(`advance_rejected:${createdPlan.id}`));
+
+      const playerAsNpc = applyWorldMemoryDelta({}, {
+        archive: [{
+          type: 'npc',
+          name: 'Ari',
+          summary: 'The player character.',
+          evidence: 'Ari is present.',
+        }],
+        plans: {
+          create: [{
+            kind: 'scheduled',
+            actor: 'Ari',
+            objective: 'Leave town tomorrow',
+            cause: 'Ari mentioned leaving town.',
+            delayDays: 1,
+          }, {
+            kind: 'scheduled',
+            actor: 'I',
+            objective: 'Choose the player path tomorrow',
+            cause: 'I will choose the path tomorrow.',
+            delayDays: 1,
+          }],
+        },
+      }, {
+        afterWorldState: { dayIndex: 5, timeOfDay: 'morning' },
+        messageKey: 'chat:player-actor-safety',
+        protectedUserNames: ['Ari'],
+      });
+      assert.equal(playerAsNpc.archive.entries.length, 0);
+      assert.equal(playerAsNpc.progression.plans.length, 0);
+      assert.ok(playerAsNpc.audit.includes('archive_rejected_player:Ari'));
+      assert.ok(playerAsNpc.audit.includes('create_rejected:Ari/Leave town tomorrow'));
+      assert.ok(playerAsNpc.audit.includes('create_rejected:I/Choose the player path tomorrow'));
+    },
+  },
+  {
+    name: '33c.5a world memory applies stored and incoming NPC name promotions',
+    run() {
+      const memory = {
+        archive: {
+          entries: [{
+            id: 'masked-npc',
+            type: 'npc',
+            name: 'hooded woman',
+            summary: 'A hooded traveler at the east gate.',
+            connections: ['hooded woman'],
+          }],
+        },
+        progression: {
+          plans: [{
+            id: 'masked-plan',
+            kind: 'npc',
+            actor: 'hooded woman',
+            objective: 'Reach the old observatory',
+            target: 'hooded woman',
+            status: 'active',
+            nextCheckpoint: { dayIndex: 2, timeOfDay: 'morning' },
+            evidence: [{
+              id: 'masked-evidence',
+              topic: 'Traveler sighting',
+              text: 'The hooded traveler stands beside the gate.',
+              route: 'actor',
+              actor: 'hooded woman',
+            }],
+          }],
+        },
+      };
+      const promoted = applyWorldMemoryDelta(memory, {
+        archive: [{
+          id: 'masked-npc',
+          type: 'npc',
+          name: 'hooded woman',
+          summary: 'Mara identifies herself at the east gate.',
+          connections: ['hooded woman'],
+          evidence: 'The traveler says her name is Mara.',
+        }],
+        plans: {
+          create: [{
+            kind: 'npc',
+            actor: 'hooded woman',
+            objective: 'Return to the east gate',
+            target: 'hooded woman',
+            cause: 'Mara says she will return after visiting the observatory.',
+            delayDays: 1,
+          }],
+        },
+      }, {
+        promotions: [
+          { oldName: 'hooded woman', newName: 'Mara' },
+          { oldName: 'Mara', newName: 'Maria' },
+        ],
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:name-promotion',
+      });
+      assert.deepEqual(promoted.archive.entries.map(entry => entry.name), ['Maria']);
+      assert.deepEqual(promoted.archive.entries[0].connections, ['Maria']);
+      assert.equal(promoted.progression.plans.length, 2);
+      assert.ok(promoted.progression.plans.every(plan => plan.actor === 'Maria'));
+      assert.ok(promoted.progression.plans.every(plan => plan.target === 'Maria'));
+      assert.equal(promoted.progression.plans[0].evidence[0].actor, 'Maria');
+    },
+  },
+  {
+    name: '33c.5b due world plans advance before the same narrator response',
+    run() {
+      const created = applyWorldMemoryDelta({}, {
+        plans: {
+          create: [{
+            kind: 'scheduled',
+            actor: 'Rick',
+            objective: 'Leave South Dock after three days',
+            location: 'South Dock',
+            cause: 'Rick says he will leave South Dock in three days.',
+            delayDays: 3,
+          }],
+        },
+      }, {
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning', place: 'South Dock' },
+        messageKey: 'chat:same-turn-plan',
+      });
+      const plan = created.progression.plans[0];
+      const advancement = {
+        planId: plan.id,
+        stageLabel: 'Departed',
+        consequence: 'Rick left South Dock by the northern road.',
+        status: 'active',
+        nextDelayDays: 1,
+        evidence: [{
+          topic: 'Rick departed',
+          text: "Rick's rented berth is empty and his travel bag is gone.",
+          route: 'location',
+          location: 'South Dock',
+        }],
+      };
+      const ledger = baseLedger();
+      ledger.worldTransition = {
+        timeAdvance: 'day',
+        timeAdvanceCount: 3,
+        timeOfDay: 'morning',
+        requiresSuccess: false,
+        evidence: 'I wait three days.',
+      };
+      ledger.worldProgression = { advancements: [advancement] };
+      const worldState = normalizeWorldState({
+        dayIndex: 1,
+        timeOfDay: 'morning',
+        timeEstablished: true,
+        place: 'South Dock',
+      });
+      const testContext = context('I wait three days.', {}, {}, undefined, null, {}, {
+        worldState,
+        worldProgression: created.progression,
+      });
+      const report = withDice(Array(24).fill(10), () => runDeterministicEngines(
+        ledger,
+        {},
+        testContext,
+        'normal',
+        {
+          worldStateSnapshot: worldState,
+          worldProgressionSnapshot: created.progression,
+          latestUserText: 'I wait three days.',
+          worldProgressionProjectionKey: 'projection:same-turn',
+        },
+      ));
+
+      assert.equal(report.trackerUpdate.worldState.dayIndex, 4);
+      assert.equal(report.trackerUpdate.worldProgression.plans[0].stage, 1);
+      assert.equal(report.trackerUpdate.worldProgression.plans[0].lastAdvancedKey, 'projection:same-turn');
+      assert.deepEqual(report.worldProgressionProjection.duePlanIds, [plan.id]);
+      assert.equal(report.worldProgressionProjection.advancements.length, 1);
+      assert.equal(report.worldProgressionProjection.advancements[0].planId, plan.id);
+      assert.equal(report.worldProgressionProjection.advancements[0].consequence, advancement.consequence);
+      assert.equal(report.finalNarrativeHandoff.worldMemory.observableEvidence.length, 1);
+      assert.match(prompt(report), /Rick's rented berth is empty and his travel bag is gone/);
+
+      const failedTransition = projectWorldStateTransition(worldState, {
+        timeAdvance: 'day',
+        timeAdvanceCount: 3,
+        requiresSuccess: true,
+      }, {
+        resolutionPacket: { RollNeeded: 'Y', Outcome: 'failure', OutcomeTier: 'FAILURE' },
+      });
+      assert.deepEqual(failedTransition, worldState);
+    },
+  },
+  {
+    name: '33c.5d semantic transitions require latest-input evidence and protect persona aliases',
+    run() {
+      const transitionLedger = {
+        worldTransition: {
+          timeAdvance: 'day',
+          timeAdvanceCount: 1,
+          evidence: 'I wait until morning.',
+        },
+        worldProgression: { advancements: [] },
+      };
+      assert.throws(() => validateSemanticWorldProgression(
+        transitionLedger,
+        { latestUserText: 'I open the eastern door.' },
+        context('I open the eastern door.'),
+      ), /exact quote grounded in the latest user input/);
+      assert.doesNotThrow(() => validateSemanticWorldProgression(
+        transitionLedger,
+        { latestUserText: 'I wait until morning.' },
+        context('I wait until morning.'),
+      ));
+
+      const personaContext = context('', {}, {}, '**Name:** Мария\nPHY: 6\nMND: 6\nCHA: 6', null, {}, {
+        name1: 'Ari',
+        personaName: 'Maria',
+      });
+      const identityHints = getPersonaIdentityHints(personaContext);
+      assert.ok(identityHints.includes('Ari'));
+      assert.ok(identityHints.includes('Maria'));
+      assert.ok(identityHints.includes('Мария'));
+
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const finalizerStart = indexSource.indexOf('const protectedUserNames = getPersonaIdentityHints(context);');
+      const finalizerEnd = indexSource.indexOf('const hiddenHealthAfter', finalizerStart);
+      const finalizerSource = indexSource.slice(finalizerStart, finalizerEnd);
+      assert.ok(finalizerStart >= 0 && finalizerEnd > finalizerStart);
+      assert.match(finalizerSource, /advanceDueWorldPlans[\s\S]*?protectedUserNames/);
+      assert.match(finalizerSource, /applyWorldMemoryDelta[\s\S]*?protectedUserNames/);
+
+      const semanticPassStart = indexSource.indexOf('async function runSemanticPassWithPromptReadyBypass');
+      const semanticPassEnd = indexSource.indexOf('\nasync function ', semanticPassStart + 1);
+      const semanticPassSource = indexSource.slice(semanticPassStart, semanticPassEnd > semanticPassStart ? semanticPassEnd : undefined);
+      assert.match(semanticPassSource, /latestUserText:\s*pendingGeneration\?\.latestUserText\s*\|\|\s*getLatestUserText\(context\?\.chat\)/);
+    },
+  },
+  {
+    name: '33c.5c world memory patches replay exact state without per-message full snapshots',
+    run() {
+      const archive = normalizeDescriptiveArchive({
+        entries: Array.from({ length: 24 }, (_, index) => ({
+          id: `archive-${index}`,
+          type: 'location',
+          name: `District ${index}`,
+          summary: `Established district ${index} with durable descriptive continuity.`,
+          history: [`Recorded history ${index}`],
+        })),
+      });
+      const created = applyWorldMemoryDelta({ archive }, {
+        plans: {
+          create: [{
+            kind: 'faction',
+            actor: 'North Gate Wardens',
+            objective: 'Close the northern gate at dusk',
+            location: 'North Gate',
+            cause: 'The wardens announce that the northern gate closes at dusk.',
+            delaySlots: 1,
+          }],
+        },
+      }, {
+        afterWorldState: { dayIndex: 1, timeOfDay: 'afternoon' },
+        messageKey: 'chat:patch-base',
+      });
+      const plan = created.progression.plans[0];
+      const advanced = advanceDueWorldPlans(created.progression, [{
+        planId: plan.id,
+        stageLabel: 'Gate closed',
+        consequence: 'The North Gate Wardens closed the northern gate.',
+        status: 'completed',
+        evidence: [{
+          topic: 'North gate closure',
+          text: 'The northern gate stands shut beneath the warden seal.',
+          route: 'location',
+          location: 'North Gate',
+        }],
+      }], { dayIndex: 1, timeOfDay: 'evening' }, {
+        messageKey: 'chat:patch-after',
+      });
+      const before = normalizeWorldMemoryState({
+        archive: created.archive,
+        progression: created.progression,
+      });
+      const after = normalizeWorldMemoryState({
+        archive: created.archive,
+        progression: advanced.progression,
+      });
+      const patch = createWorldMemoryPatch(before, after);
+      const replayed = applyWorldMemoryPatch(before, patch);
+
+      assert.deepEqual(replayed, after);
+      assert.equal(patch.archiveUpsert.length, 0);
+      assert.equal(patch.planPatches.length, 1);
+      assert.ok(JSON.stringify(patch).length < JSON.stringify(after).length / 3);
+
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const rootSnapshotBlock = indexSource.slice(
+        indexSource.indexOf('root.snapshots[messageKey] = {'),
+        indexSource.indexOf('pruneRootTrackerSnapshots(root);', indexSource.indexOf('root.snapshots[messageKey] = {')),
+      );
+      assert.doesNotMatch(rootSnapshotBlock, /descriptiveArchive|worldProgression/);
+      assert.match(indexSource, /function buildWorldMemorySwipeSnapshot[\s\S]*patch: createWorldMemoryPatch\(before, after\)/);
+      assert.match(indexSource, /function rebuildWorldMemoryFromSelectedSwipes[\s\S]*applyWorldMemoryPatch\(memory, snapshot\.patch/);
+      assert.match(indexSource, /const WORLD_MEMORY_SWIPE_VERSION = 2/);
+    },
+  },
+  {
+    name: '33c.6 world progression integrates with power actors and the existing post-narration call',
+    run() {
+      const pendingPowerActor = {
+        'Iron Regent': {
+          name: 'Iron Regent',
+          enmity: 3,
+          pendingEvent: { id: 'power-event-1' },
+        },
+      };
+      const genericImpostor = applyWorldMemoryDelta({}, {
+        plans: {
+          create: [{
+            kind: 'npc',
+            actor: 'Iron Regent',
+            objective: 'Close the eastern road',
+            cause: 'The Regent controls the road wardens.',
+            delayDays: 1,
+          }],
+        },
+      }, {
+        powerActors: pendingPowerActor,
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:power-1',
+      });
+      assert.equal(genericImpostor.progression.plans.length, 0);
+
+      const pendingConflict = applyWorldMemoryDelta({}, {
+        plans: {
+          create: [{
+            kind: 'power_actor',
+            actor: 'Iron Regent',
+            objective: 'Close the eastern road',
+            cause: 'The Regent controls the road wardens.',
+            delayDays: 1,
+          }],
+        },
+      }, {
+        powerActors: pendingPowerActor,
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:power-2',
+      });
+      assert.equal(pendingConflict.progression.plans.length, 0);
+
+      const activePlan = applyWorldMemoryDelta({}, {
+        plans: {
+          create: [{
+            kind: 'power_actor',
+            actor: 'Iron Regent',
+            objective: 'Close the eastern road',
+            cause: 'The Regent controls the road wardens.',
+            delayDays: 1,
+          }],
+        },
+      }, {
+        powerActors: { 'Iron Regent': { name: 'Iron Regent', enmity: 3, pendingEvent: {} } },
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:power-3',
+      });
+      assert.equal(activePlan.progression.plans.length, 1);
+      assert.equal(progressionHasActivePlanForActor(activePlan.progression, 'iron regent'), true);
+
+      const continuingPlan = advanceDueWorldPlans(activePlan.progression, [{
+        planId: activePlan.progression.plans[0].id,
+        stageLabel: 'Road wardens deployed',
+        consequence: 'The Iron Regent deployed road wardens along the eastern route.',
+        status: 'active',
+        nextDelayDays: 1,
+        evidence: [{
+          topic: 'Eastern road patrols',
+          text: 'New road wardens inspect travelers at the eastern checkpoint.',
+          route: 'location',
+          location: 'Eastern Checkpoint',
+        }],
+      }], { dayIndex: 2, timeOfDay: 'morning' }, {
+        powerActors: { 'Iron Regent': { name: 'Iron Regent', enmity: 0, pendingEvent: {} } },
+        messageKey: 'chat:power-plan-continues',
+      });
+      assert.equal(continuingPlan.progression.plans[0].stage, 1);
+
+      const duplicateActorPlan = applyWorldMemoryDelta({ archive: activePlan.archive, progression: activePlan.progression }, {
+        plans: {
+          create: [{
+            kind: 'power_actor',
+            actor: 'Iron Regent',
+            objective: 'Recruit a second patrol',
+            cause: 'The Regent has available troops.',
+            delayDays: 2,
+          }],
+        },
+      }, {
+        powerActors: { 'Iron Regent': { name: 'Iron Regent', enmity: 3, pendingEvent: {} } },
+        afterWorldState: { dayIndex: 1, timeOfDay: 'morning' },
+        messageKey: 'chat:power-4',
+      });
+      assert.equal(duplicateActorPlan.progression.plans.length, 1);
+
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const deterministicSource = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
+      const preflightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      const requestSource = indexSource.slice(
+        indexSource.indexOf('async function requestPostNarrationTrackerDelta('),
+        indexSource.indexOf('async function requestPostNarrationTrackerDeltaWithTimeout('),
+      );
+      assert.equal((requestSource.match(/requestPostNarrationUtility\(/g) || []).length, 1);
+      assert.match(requestSource, /includeTrackerDelta: true/);
+      assert.match(requestSource, /includeWorldMemoryDelta: true/);
+      assert.match(indexSource, /let worldMemoryDelta = null;[\s\S]*preserving private world state/);
+      assert.match(indexSource, /advanceDueWorldPlans\([\s\S]*pendingRun\.worldProgressionAdvancements/);
+      assert.match(indexSource, /applyWorldMemoryDelta\([\s\S]*worldMemoryDelta \|\| \{\}/);
+      assert.match(indexSource, /const WORLD_MEMORY_SWIPE_EXTRA_KEY/);
+      assert.match(indexSource, /function setMessageWorldMemorySwipeSnapshot/);
+      assert.match(indexSource, /function rebuildWorldMemoryFromSelectedSwipes/);
+      assert.match(indexSource, /function restoreTrackerFromLatestDisplaySnapshot[\s\S]*rebuildWorldMemoryFromSelectedSwipes\(context\)/);
+      assert.match(indexSource, /function restoreTrackerFromMessageDisplaySnapshot[\s\S]*rebuildWorldMemoryFromSelectedSwipes\(context\)/);
+      assert.match(indexSource, /worldMemoryRestored/);
+      assert.match(indexSource, /worldProgressionSnapshot: pendingGeneration\?\.worldProgressionSnapshot/);
+      assert.match(indexSource, /worldProgressionProjectionKey: pendingGeneration\.runId \|\| runIdentity\.runId/);
+      assert.match(indexSource, /worldProgressionDuePlanIds: report\.worldProgressionProjection\?\.duePlanIds/);
+      assert.match(indexSource, /worldProgressionAdvancements: report\.worldProgressionProjection\?\.advancements/);
+      assert.match(deterministicSource, /!progressionHasActivePlanForActor\(worldProgression, state\.name\)/);
+      assert.match(preflightSource, /\['worldMemory', narrativeWorldMemoryFact\(handoff\?\.worldMemory\)\]/);
+      assert.doesNotMatch(preflightSource, /handoff\?\.worldProgression|handoff\?\.descriptiveArchive/);
+      assert.doesNotMatch(WORLD_MEMORY_DELTA_CONTRACT, /plans\.advance/);
+
+      const normalized = normalizeWorldProgression(activePlan.progression);
+      assert.equal(normalized.plans[0].kind, 'power_actor');
+    },
+  },
+  {
+    name: '33c.6a active world plans suppress overlapping power actor proactivity',
+    run() {
+      const report = runCase({
+        userText: 'I continue through the market.',
+        dice: Array(24).fill(20),
+        ledger: baseLedger(),
+        powerActors: {
+          'Red Glass Syndicate': {
+            name: 'Red Glass Syndicate',
+            type: 'criminal syndicate',
+            enmity: 5,
+            reasons: ['User disrupted their operation'],
+          },
+        },
+        cardFields: {
+          worldProgression: {
+            plans: [{
+              id: 'red-glass-plan',
+              kind: 'power_actor',
+              actor: 'Red Glass Syndicate',
+              objective: 'Rebuild the disrupted smuggling route',
+              status: 'active',
+              nextCheckpoint: { dayIndex: 3, timeOfDay: 'morning' },
+            }],
+          },
+        },
+      });
+      assert.equal(report.trackerUpdate.powerActors['Red Glass Syndicate'], undefined);
+      assert.equal(auditIncludes(report, 'powerActorProactivityBlocked=cooldown_world_plan_or_no_actor'), true);
     },
   },
   {

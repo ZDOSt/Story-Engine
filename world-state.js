@@ -74,10 +74,90 @@ export function normalizeWorldStateDelta(value = {}) {
         area: cleanWorldDeltaText(source.area, 120),
         indoors: normalizeWorldDeltaBool(source.indoors),
         timeAdvance: normalizeTimeAdvance(source.timeAdvance),
+        timeAdvanceCount: clampInt(source.timeAdvanceCount, 1, 3650, 1),
         timeOfDay: normalizeTimeOfDay(source.timeOfDay ?? source.explicitTimeOfDay),
         weatherCondition: normalizeWeatherCondition(source.weatherCondition) || null,
         weatherTick: normalizeWeatherTick(source.weatherTick),
     };
+}
+
+export function normalizeWorldTransition(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        ...normalizeWorldStateDelta({
+            reputationLocation: source.reputationLocation,
+            place: source.place,
+            area: source.area,
+            indoors: source.indoors,
+            timeAdvance: source.timeAdvance,
+            timeAdvanceCount: source.timeAdvanceCount,
+            timeOfDay: source.timeOfDay,
+            weatherCondition: 'unchanged',
+            weatherTick: 'auto',
+        }),
+        requiresSuccess: normalizeWorldBool(source.requiresSuccess, false),
+        evidence: cleanWorldText(source.evidence, 280),
+    };
+}
+
+export function projectWorldStateTransition(before = {}, transition = {}, options = {}) {
+    const normalized = normalizeWorldTransition(transition);
+    if (normalized.requiresSuccess
+        && options.assumeSuccess !== true
+        && !worldTransitionResolutionSucceeded(options.resolutionPacket)) {
+        return normalizeWorldState(before);
+    }
+    return applyWorldStateDelta(before, normalized, {
+        adventureIntro: options.adventureIntro === true,
+        seed: options.seed || '',
+    });
+}
+
+export function removeAlreadyProjectedWorldStateDelta(delta, beforeValue = {}, projectedValue = {}) {
+    const next = normalizeWorldStateDelta(delta || {});
+    const before = normalizeWorldState(beforeValue || {});
+    const projected = normalizeWorldState(projectedValue || {});
+    let removedProjectedChange = false;
+
+    for (const field of ['reputationLocation', 'place', 'area', 'indoors']) {
+        if (next[field] === null) continue;
+        if (before[field] !== projected[field] && next[field] === projected[field]) {
+            next[field] = null;
+            removedProjectedChange = true;
+        }
+    }
+
+    const projectedClockChanged = before.dayIndex !== projected.dayIndex
+        || before.timeOfDay !== projected.timeOfDay;
+    if (projectedClockChanged && (next.timeAdvance !== 'none' || next.timeOfDay)) {
+        const candidate = applyWorldStateDelta(before, {
+            reputationLocation: null,
+            place: null,
+            area: null,
+            indoors: null,
+            timeAdvance: next.timeAdvance,
+            timeAdvanceCount: next.timeAdvanceCount,
+            timeOfDay: next.timeOfDay,
+            weatherCondition: null,
+            weatherTick: 'none',
+        });
+        if (candidate.dayIndex === projected.dayIndex && candidate.timeOfDay === projected.timeOfDay) {
+            next.timeAdvance = 'none';
+            next.timeAdvanceCount = 1;
+            next.timeOfDay = '';
+            removedProjectedChange = true;
+        }
+    }
+
+    const hasRemainingTransition = ['reputationLocation', 'place', 'area', 'indoors']
+        .some(field => next[field] !== null)
+        || next.timeAdvance !== 'none'
+        || Boolean(next.timeOfDay);
+    if (removedProjectedChange && !hasRemainingTransition) {
+        next.weatherTick = 'none';
+    }
+
+    return next;
 }
 
 export function applyWorldStateDelta(before = {}, delta = {}, options = {}) {
@@ -96,6 +176,7 @@ export function applyWorldStateDelta(before = {}, delta = {}, options = {}) {
         next.positionEstablished = true;
     }
 
+    const beforeClockIndex = worldTimeIndex(next);
     const beforeTimeOfDay = next.timeOfDay;
     applyTimeAdvance(next, patch);
     const timeChanged = beforeTimeOfDay !== next.timeOfDay || patch.timeAdvance !== 'none';
@@ -116,8 +197,9 @@ export function applyWorldStateDelta(before = {}, delta = {}, options = {}) {
         && (patch.weatherTick === 'tick'
             || (patch.weatherTick === 'auto' && (timeChanged || changedPlace || changedReputationLocation)));
     if (shouldTickWeather) {
-        next.weather = advanceWeatherState(next.weather, {
-            seed: [
+        const elapsedSlots = Math.max(1, worldTimeIndex(next) - beforeClockIndex);
+        for (let index = 0; index < elapsedSlots; index += 1) {
+            const seedParts = [
                 options.seed || '',
                 next.dayIndex,
                 next.timeOfDay,
@@ -125,8 +207,12 @@ export function applyWorldStateDelta(before = {}, delta = {}, options = {}) {
                 next.place,
                 next.weather.condition,
                 next.weather.remainingSlots,
-            ].join('|'),
-        });
+            ];
+            if (index > 0) seedParts.push(index);
+            next.weather = advanceWeatherState(next.weather, {
+                seed: seedParts.join('|'),
+            });
+        }
         next.weatherEstablished = true;
     }
 
@@ -203,6 +289,15 @@ function normalizeWorldBool(value, fallback = false) {
     return Boolean(fallback);
 }
 
+function worldTransitionResolutionSucceeded(resolutionPacket = {}) {
+    const rollNeeded = String(resolutionPacket?.RollNeeded ?? resolutionPacket?.rollNeeded ?? '').trim().toUpperCase();
+    if (rollNeeded === 'N') return true;
+    const outcome = String(resolutionPacket?.Outcome ?? resolutionPacket?.outcome ?? '').trim().toLowerCase();
+    if (!outcome || outcome === 'no_roll') return true;
+    const tier = String(resolutionPacket?.OutcomeTier ?? resolutionPacket?.outcomeTier ?? '').trim().toLowerCase();
+    return outcome === 'success' || tier.includes('success');
+}
+
 function normalizeWorldDeltaBool(value) {
     const text = String(value ?? '').trim().toLowerCase();
     if (!text || UNCHANGED_VALUES.has(text)) return null;
@@ -268,16 +363,17 @@ function normalizeWeatherTick(value) {
 }
 
 function applyTimeAdvance(next, patch) {
+    const count = clampInt(patch.timeAdvanceCount, 1, 3650, 1);
     switch (patch.timeAdvance) {
         case 'slot':
-            advanceTimeSlot(next);
+            advanceTimeSlots(next, count);
             break;
         case 'overnight':
-            next.dayIndex = clampInt(next.dayIndex + 1, 1, 9999, next.dayIndex);
+            next.dayIndex = clampInt(next.dayIndex + count, 1, 9999, next.dayIndex);
             next.timeOfDay = 'morning';
             break;
         case 'day':
-            next.dayIndex = clampInt(next.dayIndex + 1, 1, 9999, next.dayIndex);
+            next.dayIndex = clampInt(next.dayIndex + count, 1, 9999, next.dayIndex);
             next.timeOfDay = patch.timeOfDay || 'morning';
             return;
         case 'explicit':
@@ -288,14 +384,22 @@ function applyTimeAdvance(next, patch) {
     if (patch.timeOfDay) next.timeOfDay = patch.timeOfDay;
 }
 
-function advanceTimeSlot(state) {
+function advanceTimeSlots(state, count = 1) {
     const index = WORLD_TIME_SLOTS.indexOf(state.timeOfDay);
     const current = index >= 0 ? index : WORLD_TIME_SLOTS.indexOf(DEFAULT_WORLD_STATE.timeOfDay);
-    const nextIndex = (current + 1) % WORLD_TIME_SLOTS.length;
-    if (WORLD_TIME_SLOTS[current] === 'night' && WORLD_TIME_SLOTS[nextIndex] === 'morning') {
-        state.dayIndex = clampInt(state.dayIndex + 1, 1, 9999, state.dayIndex);
-    }
+    const elapsed = clampInt(count, 1, 3650, 1);
+    const absolute = current + elapsed;
+    const elapsedDays = Math.floor(absolute / WORLD_TIME_SLOTS.length);
+    const nextIndex = absolute % WORLD_TIME_SLOTS.length;
+    state.dayIndex = clampInt(state.dayIndex + elapsedDays, 1, 9999, state.dayIndex);
     state.timeOfDay = WORLD_TIME_SLOTS[nextIndex];
+}
+
+function worldTimeIndex(state = {}) {
+    const dayIndex = clampInt(state.dayIndex, 1, 9999, DEFAULT_WORLD_STATE.dayIndex);
+    const slotIndex = WORLD_TIME_SLOTS.indexOf(normalizeTimeOfDay(state.timeOfDay));
+    const slot = slotIndex >= 0 ? slotIndex : WORLD_TIME_SLOTS.indexOf(DEFAULT_WORLD_STATE.timeOfDay);
+    return (dayIndex - 1) * WORLD_TIME_SLOTS.length + slot;
 }
 
 function advanceWeatherState(weather = {}, options = {}) {

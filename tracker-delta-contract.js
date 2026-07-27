@@ -162,9 +162,11 @@ export const TRACKER_DELTA_CONTRACT = [
     '',
     'WORLD_STATE_DELTA:',
     '- Also output WorldStateDelta lines. This hidden state tracks broad scene continuity: current settlement/community, specific place, area, indoor/outdoor state, broad time of day, and deterministic weather.',
+    '- MECHANICAL_TRACKER_AFTER.worldState already includes the current semantic WorldTransition. Do not repeat a location, indoor/outdoor, or time transition already represented there. WorldStateDelta contains only additional state explicitly established by FINAL_NARRATION and not already present in MECHANICAL_TRACKER_AFTER.worldState.',
     '- Update location only from explicit FINAL_NARRATION facts. reputationLocation is the settlement/community/route/region used for fame/infamy lookup. place is the specific location/building/site. area is the room, street section, counter, field, campsite, road segment, or local sub-area.',
     '- Use unchanged for any field not explicitly changed or clarified. Use (none) only when the narration explicitly leaves the prior place/community behind and no replacement is knowable.',
-    '- timeAdvance is none unless FINAL_NARRATION completes a meaningful transition: travel, waiting, sleep/rest, a completed long activity, later that day, overnight rest, or explicit time skip. Use slot for movement to the next broad time period, overnight for a completed overnight stay, day for a full-day or longer skip, and explicit only when timeOfDay is directly stated without implying a slot advance.',
+    '- timeAdvance is none unless FINAL_NARRATION completes a meaningful transition: travel, waiting, sleep/rest, a completed long activity, later that day, overnight rest, or explicit time skip. Use slot for movement across broad time periods, overnight for completed overnight stays, day for a full-day or longer skip, and explicit only when timeOfDay is directly stated without implying elapsed time.',
+    '- timeAdvanceCount is the exact number of timeAdvance units completed in FINAL_NARRATION. Use 1 for none, explicit, and ordinary single transitions. For example, three days passing is timeAdvance=day and timeAdvanceCount=3; two broad time periods passing is timeAdvance=slot and timeAdvanceCount=2.',
     '- timeOfDay must be unchanged, morning, afternoon, evening, or night. Use it only when explicitly stated or implied by a completed transition such as dawn, noon, dusk, nightfall, or morning after rest.',
     '- In ordinary turns, weatherCondition must be unchanged; do not choose weather. A separate ADVENTURE INTRO instruction may allow copying an explicitly narrated opening condition. Weather progression remains deterministic code-owned. Set weatherTick=tick only when a completed time/location transition should allow the stored weather pattern to advance; otherwise use auto or none.',
     '',
@@ -256,6 +258,7 @@ WorldStateDelta.place=unchanged
 WorldStateDelta.area=unchanged
 WorldStateDelta.indoors=unchanged
 WorldStateDelta.timeAdvance=none
+WorldStateDelta.timeAdvanceCount=1
 WorldStateDelta.timeOfDay=unchanged
 WorldStateDelta.weatherCondition=unchanged
 WorldStateDelta.weatherTick=auto

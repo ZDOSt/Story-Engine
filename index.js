@@ -35,8 +35,8 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
-import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
+import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -54,7 +54,8 @@ import {
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START, PROSE_GUARD_REPAIR_BATCH_SIZE, removeProseGuardPhraseLines } from './prose-guard-edits.js';
-import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState } from './world-state.js';
+import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
+import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, getNpcLootRankProfile, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, normalizeEquipmentTierAssignments, renderEconomyTrackerContext } from './economy.js';
 
 
@@ -77,10 +78,12 @@ const LEGACY_PROSE_RULES_PROMPT_KEY = 'structured_preflight_prose_rules';
 const PROFILE_NONE = '<None>';
 const TRACKER_DISPLAY_EXTRA_KEY = 'structured_preflight_tracker_display';
 const PROGRESSION_SWIPE_EXTRA_KEY = 'structured_preflight_progression_swipe';
+const WORLD_MEMORY_SWIPE_EXTRA_KEY = 'structured_preflight_world_memory_swipe';
 const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 
 const TRACKER_DISPLAY_VERSION = 1;
 const PROGRESSION_SWIPE_VERSION = 1;
+const WORLD_MEMORY_SWIPE_VERSION = 2;
 const TRACKER_ROOT_SNAPSHOT_LIMIT = 120;
 
 const TRACKER_VISIBLE_INACTIVE_LIMIT = 2;
@@ -2732,6 +2735,18 @@ function getTrackerRoot(context = getContext()) {
     root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
     root.worldState = normalizeWorldState(root.worldState || {});
+    root.descriptiveArchive = normalizeDescriptiveArchive(root.descriptiveArchive || {});
+    root.worldProgression = normalizeWorldProgression(root.worldProgression || {});
+    if (!root.worldMemoryBase || typeof root.worldMemoryBase !== 'object') {
+        const hasReplayPatches = Array.isArray(context.chat)
+            && context.chat.some(message => getMessageWorldMemorySwipeSnapshot(message)?.version === WORLD_MEMORY_SWIPE_VERSION);
+        root.worldMemoryBase = normalizeWorldMemoryState(hasReplayPatches ? {} : {
+            archive: root.descriptiveArchive,
+            progression: root.worldProgression,
+        });
+    } else {
+        root.worldMemoryBase = normalizeWorldMemoryState(root.worldMemoryBase);
+    }
     root.economy = normalizeEconomyState(root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(root.pendingBoundary || {});
@@ -4168,6 +4183,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     syncPendingRunHealthNamePromotions(pendingRun, promotionResult.promotions);
     syncPendingRunLatentGrievanceNamePromotions(pendingRun, promotionResult.promotions);
     syncPendingRunLatentFavorNamePromotions(pendingRun, promotionResult.promotions);
+    syncPendingRunWorldMemoryNamePromotions(pendingRun, promotionResult.promotions);
     latentGrievances = normalizeLatentGrievances(
         pendingRun?.latentGrievancesAfter ?? latentGrievances,
     );
@@ -4219,6 +4235,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
+    const descriptiveArchiveSnapshot = pendingGeneration?.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context);
+    const worldProgressionSnapshot = pendingGeneration?.worldProgressionSnapshot || buildWorldProgressionSnapshot(context);
     const economySnapshot = pendingGeneration?.economySnapshot || buildEconomySnapshot(context);
     const boundCompanionSnapshot = pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context);
     const pendingBoundarySnapshot = pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context);
@@ -4226,6 +4244,13 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
         npcs: trackerSnapshot,
+    });
+    const worldMemory = prepareWorldMemoryNarration({
+        archive: descriptiveArchiveSnapshot,
+        progression: worldProgressionSnapshot,
+        worldState: worldStateSnapshot,
+        resolutionPacket: {},
+        latestUserText: '',
     });
     const report = {
         semanticLedger: {},
@@ -4250,6 +4275,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             nameGeneration,
             isekaiOpeningSeed: pendingGeneration?.isekaiOpeningSeed || null,
             sceneState: worldStateSnapshot,
+            worldMemory,
         },
         trackerUpdate: {
             npcs: {},
@@ -4260,6 +4286,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             userKnowledge: {},
             userReputation: {},
             worldState: worldStateSnapshot,
+            descriptiveArchive: descriptiveArchiveSnapshot,
+            worldProgression: worldProgressionSnapshot,
             economy: economySnapshot,
             boundCompanion: boundCompanionSnapshot,
             pendingBoundary: pendingBoundarySnapshot,
@@ -4289,6 +4317,10 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         userReputationAfter: {},
         worldStateBefore: worldStateSnapshot,
         worldStateAfter: worldStateSnapshot,
+        descriptiveArchiveBefore: descriptiveArchiveSnapshot,
+        descriptiveArchiveAfter: descriptiveArchiveSnapshot,
+        worldProgressionBefore: worldProgressionSnapshot,
+        worldProgressionAfter: worldProgressionSnapshot,
         economyBefore: economySnapshot,
         economyAfter: economySnapshot,
         boundCompanionBefore: boundCompanionSnapshot,
@@ -4380,6 +4412,26 @@ function syncPendingRunLatentFavorNamePromotions(pendingRun, promotions = []) {
         pendingRun.latentFavorsAfter ?? pendingRun.latentFavorsBefore ?? [],
         promotions,
     );
+}
+
+function syncPendingRunWorldMemoryNamePromotions(pendingRun, promotions = []) {
+    if (!pendingRun || !Array.isArray(promotions) || !promotions.length) return;
+    const combined = [
+        ...(Array.isArray(pendingRun.worldMemoryNamePromotions) ? pendingRun.worldMemoryNamePromotions : []),
+        ...promotions,
+    ];
+    const seen = new Set();
+    pendingRun.worldMemoryNamePromotions = combined.filter(item => {
+        const oldName = String(item?.oldName || '').trim();
+        const newName = String(item?.newName || '').trim();
+        const key = `${oldName.toLowerCase()}=>${newName.toLowerCase()}`;
+        if (!oldName || !newName || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    }).map(item => ({
+        oldName: String(item.oldName).trim(),
+        newName: String(item.newName).trim(),
+    }));
 }
 
 
@@ -4499,12 +4551,13 @@ function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null, pendin
         syncPendingRunHealthNamePromotions(pendingRun, promotions);
         syncPendingRunLatentGrievanceNamePromotions(pendingRun, promotions);
         syncPendingRunLatentFavorNamePromotions(pendingRun, promotions);
+        syncPendingRunWorldMemoryNamePromotions(pendingRun, promotions);
     }
     return normalized;
 }
 
 
-function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = [], latentFavors = []) {
+function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = [], latentFavors = [], worldMemory = {}) {
     const update = {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
         user: normalizeTrackerUserState(displaySnapshot?.user || {}),
@@ -4517,6 +4570,8 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, 
         economy: normalizeEconomyState(displaySnapshot?.economy || {}),
         boundCompanion: normalizeBoundCompanionState(displaySnapshot?.boundCompanion || {}),
         pendingBoundary: normalizePendingBoundaryState(displaySnapshot?.pendingBoundary || {}),
+        descriptiveArchive: normalizeDescriptiveArchive(worldMemory.descriptiveArchive || {}),
+        worldProgression: normalizeWorldProgression(worldMemory.worldProgression || {}),
     };
     if (hiddenHealth) {
         update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
@@ -4549,7 +4604,13 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     });
     merged.userKnowledge = mergeUserKnowledgeLedger(merged.userKnowledge || options.userKnowledgeBefore || {}, delta.userKnowledge || {});
     merged.userReputation = mergeUserReputationLedger(merged.userReputation || options.userReputationBefore || {}, delta.userReputation || {});
-    merged.worldState = applyWorldStateDelta(merged.worldState || options.worldStateBefore || {}, delta.worldState || {}, {
+    const projectedWorldState = normalizeWorldState(merged.worldState || options.worldStateBefore || {});
+    const postNarrationWorldStateDelta = removeAlreadyProjectedWorldStateDelta(
+        delta.worldState || {},
+        options.worldStateBefore || {},
+        projectedWorldState,
+    );
+    merged.worldState = applyWorldStateDelta(projectedWorldState, postNarrationWorldStateDelta, {
         seed: options.messageKey || options.assistantText || '',
         adventureIntro: options.pendingRun?.adventureIntro === true,
         allowExplicitWeather: options.pendingRun?.adventureIntro === true,
@@ -4582,6 +4643,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
             syncPendingRunHealthNamePromotions(options.pendingRun, promotions);
             syncPendingRunLatentGrievanceNamePromotions(options.pendingRun, promotions);
             syncPendingRunLatentFavorNamePromotions(options.pendingRun, promotions);
+            syncPendingRunWorldMemoryNamePromotions(options.pendingRun, promotions);
         }
     }
     assignMissingDisplayNpcPersonalitySummaries(npcs, 'post-narration', options.context);
@@ -4589,6 +4651,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
     syncPendingRunHealthNamePromotions(options.pendingRun, textPromotions.promotions);
     syncPendingRunLatentGrievanceNamePromotions(options.pendingRun, textPromotions.promotions);
     syncPendingRunLatentFavorNamePromotions(options.pendingRun, textPromotions.promotions);
+    syncPendingRunWorldMemoryNamePromotions(options.pendingRun, textPromotions.promotions);
     merged.npcs = reconcileNamedNpcDuplicates(textPromotions.npcs, options.beforeNpcs, delta, options.pendingRun);
     merged.latentGrievanceIds = latentGrievanceIds(
         options.pendingRun?.latentGrievancesAfter ?? options.pendingRun?.latentGrievancesBefore ?? [],
@@ -4620,7 +4683,7 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         userChanged: trackerDeltaHasChanges(userDelta, true),
         npcChanged: (delta.npcs || []).some(item => trackerDeltaHasChanges(item, false)),
         userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
-        worldStateChanged: worldStateDeltaHasChanges(delta.worldState),
+        worldStateChanged: worldStateDeltaHasChanges(postNarrationWorldStateDelta),
         economyChanged: economyDeltaHasChanges(economyDelta),
         boundCompanionChanged: boundCompanionDeltaHasChanges(delta.boundCompanion),
         pendingBoundaryChanged: pendingBoundaryDeltaHasChanges(delta.pendingBoundary),
@@ -5159,6 +5222,76 @@ function getMessageTrackerDisplaySnapshot(message) {
 }
 
 
+function buildWorldMemorySwipeSnapshot(messageKey, pendingRun = {}) {
+    const before = {
+        archive: pendingRun.descriptiveArchiveBefore || {},
+        progression: pendingRun.worldProgressionBefore || {},
+    };
+    const after = {
+        archive: pendingRun.descriptiveArchiveAfter || pendingRun.descriptiveArchiveBefore || {},
+        progression: pendingRun.worldProgressionAfter || pendingRun.worldProgressionBefore || {},
+    };
+    return {
+        version: WORLD_MEMORY_SWIPE_VERSION,
+        messageKey,
+        savedAt: Date.now(),
+        patch: createWorldMemoryPatch(before, after),
+    };
+}
+
+
+function setMessageWorldMemorySwipeSnapshot(message, snapshot) {
+    if (!message || message.is_user || !snapshot) return;
+    const swipeId = getMessageSwipeId(message);
+    message.extra = message.extra || {};
+    message.extra[WORLD_MEMORY_SWIPE_EXTRA_KEY] = message.extra[WORLD_MEMORY_SWIPE_EXTRA_KEY] || {};
+    message.extra[WORLD_MEMORY_SWIPE_EXTRA_KEY][swipeId] = clone(snapshot);
+
+    const swipeInfo = ensureSwipeInfoEntry(message, swipeId);
+    if (swipeInfo) {
+        swipeInfo.extra[WORLD_MEMORY_SWIPE_EXTRA_KEY] = swipeInfo.extra[WORLD_MEMORY_SWIPE_EXTRA_KEY] || {};
+        swipeInfo.extra[WORLD_MEMORY_SWIPE_EXTRA_KEY][swipeId] = clone(snapshot);
+    }
+}
+
+
+function getMessageWorldMemorySwipeSnapshot(message) {
+    if (!message || message.is_user) return null;
+    const swipeId = getMessageSwipeId(message);
+    return message.extra?.[WORLD_MEMORY_SWIPE_EXTRA_KEY]?.[swipeId]
+        || message.swipe_info?.[swipeId]?.extra?.[WORLD_MEMORY_SWIPE_EXTRA_KEY]?.[swipeId]
+        || null;
+}
+
+
+function rebuildWorldMemoryFromSelectedSwipes(context = getContext(), options = {}) {
+    const root = getTrackerRoot(context);
+    if (!root) return false;
+    const previous = normalizeWorldMemoryState({
+        archive: root.descriptiveArchive,
+        progression: root.worldProgression,
+    });
+    let memory = normalizeWorldMemoryState(root.worldMemoryBase || {});
+    let applied = false;
+    const beforeMessageId = Number.isFinite(Number(options.beforeMessageId))
+        ? Number(options.beforeMessageId)
+        : null;
+    for (let messageId = 0; messageId < (context?.chat?.length || 0); messageId += 1) {
+        if (beforeMessageId != null && messageId >= beforeMessageId) break;
+        const message = context.chat[messageId];
+        if (!message || message.is_user) continue;
+        const snapshot = getMessageWorldMemorySwipeSnapshot(message);
+        if (!snapshot || snapshot.version !== WORLD_MEMORY_SWIPE_VERSION) continue;
+        if (snapshot.messageKey !== getMessageKey(messageId, context)) continue;
+        memory = applyWorldMemoryPatch(memory, snapshot.patch || {});
+        applied = true;
+    }
+    root.descriptiveArchive = memory.archive;
+    root.worldProgression = memory.progression;
+    return applied || JSON.stringify(previous) !== JSON.stringify(memory);
+}
+
+
 function buildProgressionSwipeSnapshot(messageKey, context = getContext()) {
     const root = getProgressionRoot(context);
     const records = root?.accomplishments
@@ -5235,7 +5368,7 @@ function restoreProgressionFromMessageSwipe(messageId, context = getContext()) {
 
 
 
-function getLatestTrackerDisplaySnapshot(context = getContext()) {
+function getLatestTrackerDisplayRecord(context = getContext()) {
 
     const chat = context?.chat;
 
@@ -5245,11 +5378,19 @@ function getLatestTrackerDisplaySnapshot(context = getContext()) {
 
         const snapshot = getMessageTrackerDisplaySnapshot(chat[index]);
 
-        if (snapshot?.npcs) return snapshot;
+        if (snapshot?.npcs) return { messageId: index, snapshot };
 
     }
 
     return null;
+
+}
+
+
+
+function getLatestTrackerDisplaySnapshot(context = getContext()) {
+
+    return getLatestTrackerDisplayRecord(context)?.snapshot || null;
 
 }
 
@@ -5285,7 +5426,9 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
 
     const root = getTrackerRoot(context);
 
-    const snapshot = getLatestTrackerDisplaySnapshot(context);
+    const record = getLatestTrackerDisplayRecord(context);
+
+    const snapshot = record?.snapshot;
 
     if (!root || !snapshot?.npcs) return false;
 
@@ -5306,6 +5449,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
+    rebuildWorldMemoryFromSelectedSwipes(context);
     root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(snapshot.pendingBoundary || root.pendingBoundary || {});
@@ -5342,6 +5486,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
+    rebuildWorldMemoryFromSelectedSwipes(context);
     root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(snapshot.pendingBoundary || root.pendingBoundary || {});
@@ -11094,6 +11239,7 @@ function restoreTrackerForRegeneration(type) {
         root.userKnowledge = mergeUserKnowledgeLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserKnowledge || root.userKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserReputation || root.userReputation || {}, {});
         root.worldState = normalizeWorldState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeWorldState || root.worldState || {});
+        rebuildWorldMemoryFromSelectedSwipes(context, { beforeMessageId: targetMessageId });
         root.economy = normalizeEconomyState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeEconomy || root.economy || {});
         root.boundCompanion = normalizeBoundCompanionState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeBoundCompanion || root.boundCompanion || {});
         root.pendingBoundary = normalizePendingBoundaryState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforePendingBoundary || root.pendingBoundary || {});
@@ -11347,7 +11493,15 @@ function parsePostNarrationTrackerResponse(raw, narrationText) {
     return parseNarratorTrackerDelta(trackerDeltaText, narrationText);
 }
 
-function buildPostNarrationToolDefinition(name, { includeSentenceRepairs = false, includeTrackerDelta = false } = {}) {
+function parsePostNarrationWorldMemoryResponse(raw) {
+    const structuredWorldMemoryDelta = raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? String(raw.worldMemoryDelta || '')
+        : '';
+    const rawText = structuredWorldMemoryDelta || extractGeneratedText(raw) || String(raw || '');
+    return parseWorldMemoryDelta(rawText, { requireEnvelope: true });
+}
+
+function buildPostNarrationToolDefinition(name, { includeSentenceRepairs = false, includeTrackerDelta = false, includeWorldMemoryDelta = false } = {}) {
     const properties = {};
     const required = [];
     if (includeSentenceRepairs) {
@@ -11373,10 +11527,19 @@ function buildPostNarrationToolDefinition(name, { includeSentenceRepairs = false
             description: 'The complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger derived from the supplied final narration.',
         };
     }
+    if (includeWorldMemoryDelta) {
+        required.push('worldMemoryDelta');
+        properties.worldMemoryDelta = {
+            type: 'string',
+            description: 'The complete BEGIN_WORLD_MEMORY_DELTA through END_WORLD_MEMORY_DELTA JSON block derived from final narration and the supplied private world state.',
+        };
+    }
     return {
         name,
         description: includeSentenceRepairs && includeTrackerDelta
             ? 'Submit sentence-level Prose Guard repairs and the tracker delta derived from the corrected narration.'
+            : includeTrackerDelta && includeWorldMemoryDelta
+                ? 'Submit the validated tracker delta and private world-memory delta derived from final narration.'
             : includeSentenceRepairs
                 ? 'Submit code-authorized sentence-level repairs for confirmed targeted prose violations.'
                 : 'Submit the validated post-narration tracker delta.',
@@ -11397,6 +11560,9 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     }
     if (fields.includes('trackerDelta')) {
         fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on the supplied final narration exactly as provided.');
+    }
+    if (fields.includes('worldMemoryDelta')) {
+        fieldInstructions.push('Put the complete BEGIN_WORLD_MEMORY_DELTA through END_WORLD_MEMORY_DELTA JSON block in worldMemoryDelta. Keep hidden progression private and mark only evidence actually presented in the supplied final narration as discovered.');
     }
     return [
         { role: 'user', content: String(prompt || '') },
@@ -11518,6 +11684,22 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         pendingBoundary: pendingRun?.pendingBoundaryAfter || pendingRun?.pendingBoundaryBefore || {},
     };
     const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
+    const descriptiveArchive = normalizeDescriptiveArchive(pendingRun?.descriptiveArchiveAfter || pendingRun?.descriptiveArchiveBefore || {});
+    const worldProgression = normalizeWorldProgression(pendingRun?.worldProgressionAfter || pendingRun?.worldProgressionBefore || {});
+    const worldMemoryUpdateContext = buildWorldMemoryUpdateContext({
+        archive: descriptiveArchive,
+        progression: worldProgression,
+        worldState: trackerDisplaySnapshot?.worldState || pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
+        resolutionPacket: resolution,
+        focusText: narrationText,
+    });
+    const powerActorState = {
+        ...(pendingRun?.powerActorsBefore || {}),
+        ...(pendingRun?.powerActorsAfter || {}),
+    };
+    const authorizedWorldEvidence = Array.isArray(handoff?.worldMemory?.observableEvidence)
+        ? handoff.worldMemory.observableEvidence
+        : [];
     const economyContext = renderEconomyTrackerContext({
         adventureGenre: pendingRun?.adventureGenre || getActiveAdventureGenre(),
         economyState: pendingRun?.economyAfter || pendingRun?.economyBefore || {},
@@ -11604,8 +11786,8 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
     return [
         'STORY_ENGINE_POST_NARRATION_TRACKER_UPDATE',
         '',
-        'You update tracker state only. Do not narrate, roleplay, explain, or add prose.',
-        'Return exactly one story_engine_tracker_delta fenced block and nothing else.',
+        'You update tracker state and private world memory only. Do not narrate, roleplay, explain, or add prose.',
+        'Return exactly one story_engine_tracker_delta fenced block followed by one story_engine_world_memory_delta fenced block, and nothing else.',
 
         '',
 
@@ -11614,6 +11796,25 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         introTrackerInstruction,
         'Use this exact shape:',
         TRACKER_DELTA_TEMPLATE,
+        '',
+
+        '==WORLD_MEMORY_CONTRACT==',
+        WORLD_MEMORY_DELTA_CONTRACT,
+        'Use this exact shape:',
+        WORLD_MEMORY_DELTA_TEMPLATE,
+        '',
+
+        '==DESCRIPTIVE_ARCHIVE_UPDATE_CONTEXT==',
+        JSON.stringify(worldMemoryUpdateContext.archive),
+        '',
+        '==PRIVATE_WORLD_PROGRESSION_UPDATE_CONTEXT==',
+        JSON.stringify(worldMemoryUpdateContext.progression),
+        '',
+        '==POWER_ACTOR_STATE==',
+        JSON.stringify(powerActorState),
+        '',
+        '==AUTHORIZED_WORLD_EVIDENCE==',
+        JSON.stringify(authorizedWorldEvidence),
         '',
 
         '==ECONOMY_CONTEXT==',
@@ -11687,8 +11888,13 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
         throw new Error('Story Engine is disabled.');
     }
     const prompt = buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText, trackerDisplaySnapshot });
-    const responseLength = 2400 + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320);
-    const toolDefinition = buildPostNarrationToolDefinition(TRACKER_DELTA_TOOL_NAME, { includeTrackerDelta: true });
+    const responseLength = 3600
+        + Math.min(4000, Object.keys(trackerDisplaySnapshot?.npcs || {}).length * 320)
+        + Math.min(2400, normalizeWorldProgression(pendingRun?.worldProgressionAfter || pendingRun?.worldProgressionBefore || {}).plans.length * 160);
+    const toolDefinition = buildPostNarrationToolDefinition(TRACKER_DELTA_TOOL_NAME, {
+        includeTrackerDelta: true,
+        includeWorldMemoryDelta: true,
+    });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
         return await withStoryEngineModelRequest(() => withTrackerGenerationSettings(async settings => {
@@ -11698,7 +11904,10 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
                 responseLength,
                 toolDefinition,
                 purpose: 'post-narration tracker update',
-                validateStructured: raw => parsePostNarrationTrackerResponse(raw, narrationText),
+                validateStructured: raw => {
+                    parsePostNarrationTrackerResponse(raw, narrationText);
+                    parsePostNarrationWorldMemoryResponse(raw);
+                },
                 generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' }),
             }, requestOptions);
         }), requestOptions);
@@ -11916,6 +12125,8 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 assistantText: narrationText,
 
             });
+            let worldMemoryDelta = null;
+            let namePromotions = [];
 
             try {
 
@@ -11932,6 +12143,13 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 }, requestOptions);
                 if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                 const postNarrationDelta = parsePostNarrationTrackerResponse(trackerRaw, narrationText);
+                try {
+                    worldMemoryDelta = parsePostNarrationWorldMemoryResponse(trackerRaw);
+                } catch (error) {
+                    const warning = error instanceof Error ? error.message : String(error);
+                    trackerDeltaWarning = `World memory delta was rejected: ${warning}`;
+                    console.warn(`[${EXTENSION_NAME}] world memory delta failed validation; preserving private world state.`, error);
+                }
 
                 const presentedLatentFavorId = verifyLatentFavorPresentation(
                     postNarrationDelta,
@@ -11964,6 +12182,12 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     throw new Error(`Loot tracker transaction was incomplete: ${lootCompletion.reason}.`);
                 }
                 mergedTrackerDisplaySnapshot.npcs = lootCompletion.npcs;
+                namePromotions = (postNarrationDelta.npcs || [])
+                    .map(item => ({
+                        oldName: String(item?.NPC || '').trim(),
+                        newName: String(item?.revealedName || '').trim(),
+                    }))
+                    .filter(item => item.oldName && item.newName);
                 if (presentedLatentFavorId) {
                     pendingRun.latentFavorsAfter = consumeLatentFavorById(
                         pendingRun.latentFavorsAfter ?? pendingRun.latentFavorsBefore ?? [],
@@ -11987,6 +12211,50 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
             }
 
+            const finalWorldState = trackerDisplaySnapshot.worldState || pendingRun.worldStateAfter || pendingRun.worldStateBefore || {};
+            const finalPowerActors = {
+                ...(pendingRun.powerActorsBefore || {}),
+                ...(trackerDisplaySnapshot.powerActors || pendingRun.powerActorsAfter || {}),
+            };
+            const protectedUserNames = getPersonaIdentityHints(context);
+            const finalizedProgression = advanceDueWorldPlans(
+                pendingRun.worldProgressionBefore || {},
+                pendingRun.worldProgressionAdvancements || [],
+                finalWorldState,
+                {
+                    requiredPlanIds: pendingRun.worldProgressionDuePlanIds || [],
+                    allowUnexpected: true,
+                    messageKey,
+                    powerActors: finalPowerActors,
+                    protectedUserNames,
+                },
+            );
+            pendingRun.worldProgressionAfter = finalizedProgression.progression;
+            if (Array.isArray(pendingRun.report?.auditLines) && finalizedProgression.audit.length) {
+                pendingRun.report.auditLines.push(...finalizedProgression.audit.map(line => `WORLD_PROGRESSION_FINAL ${line}`));
+            }
+            const worldMemoryResult = applyWorldMemoryDelta({
+                archive: pendingRun.descriptiveArchiveBefore || {},
+                progression: pendingRun.worldProgressionAfter || {},
+            }, worldMemoryDelta || {}, {
+                beforeWorldState: pendingRun.worldStateBefore || {},
+                afterWorldState: finalWorldState,
+                powerActors: finalPowerActors,
+                authorizedEvidence: pendingRun?.report?.finalNarrativeHandoff?.worldMemory?.observableEvidence || [],
+                promotions: [
+                    ...(pendingRun.worldMemoryNamePromotions || []),
+                    ...namePromotions,
+                ],
+                protectedUserNames,
+                narrationText,
+                messageKey,
+            });
+            pendingRun.descriptiveArchiveAfter = worldMemoryResult.archive;
+            pendingRun.worldProgressionAfter = worldMemoryResult.progression;
+            if (Array.isArray(pendingRun.report?.auditLines) && worldMemoryResult.audit.length) {
+                pendingRun.report.auditLines.push(...worldMemoryResult.audit.map(line => `WORLD_MEMORY ${line}`));
+            }
+
 
 
             const hiddenHealthAfter = pendingRun.healthAfter
@@ -12000,6 +12268,10 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 hiddenHealthAfter,
                 pendingRun.latentGrievancesAfter ?? pendingRun.latentGrievancesBefore ?? [],
                 pendingRun.latentFavorsAfter ?? pendingRun.latentFavorsBefore ?? [],
+                {
+                    descriptiveArchive: pendingRun.descriptiveArchiveAfter || pendingRun.descriptiveArchiveBefore || {},
+                    worldProgression: pendingRun.worldProgressionAfter || pendingRun.worldProgressionBefore || {},
+                },
             ), {
                 save: false,
                 retainLatentFavorStates: [pendingRun.latentFavorsBefore || [], pendingRun.latentFavorsAfter || []],
@@ -12060,6 +12332,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
         maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context });
         if (finalTrackerDisplaySnapshot) setMessageTrackerDisplaySnapshot(message, finalTrackerDisplaySnapshot);
+        if (pendingRun) setMessageWorldMemorySwipeSnapshot(message, buildWorldMemorySwipeSnapshot(messageKey, pendingRun));
         setMessageProgressionSwipeSnapshot(message, buildProgressionSwipeSnapshot(messageKey, context));
 
         message.mes = narrationText;
@@ -12197,6 +12470,7 @@ async function handleMessageDeleted(newLength) {
         root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(restoreCandidate.beforeUserReputation || {}, {});
         root.worldState = normalizeWorldState(restoreCandidate.beforeWorldState || root.worldState || {});
+        rebuildWorldMemoryFromSelectedSwipes(context);
         root.economy = normalizeEconomyState(restoreCandidate.beforeEconomy || root.economy || {});
         root.boundCompanion = normalizeBoundCompanionState(restoreCandidate.beforeBoundCompanion || root.boundCompanion || {});
         root.pendingBoundary = normalizePendingBoundaryState(restoreCandidate.beforePendingBoundary || root.pendingBoundary || {});
@@ -12211,6 +12485,10 @@ async function handleMessageDeleted(newLength) {
 
         console.info(`[${EXTENSION_NAME}] restored tracker display snapshot after message deletion.`);
 
+    } else {
+        rebuildWorldMemoryFromSelectedSwipes(context);
+        await persistMetadata(context);
+        if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
     }
 
     if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
@@ -12238,10 +12516,11 @@ async function handleMessageSwiped(messageId) {
         ? restoreTrackerFromMessageDisplaySnapshot(resolvedMessageId, context)
         : false;
     const fallbackTrackerRestored = trackerRestored ? false : restoreTrackerFromLatestDisplaySnapshot(context);
+    const worldMemoryRestored = rebuildWorldMemoryFromSelectedSwipes(context);
     const progressionRestored = resolvedMessageId != null
         ? restoreProgressionFromMessageSwipe(resolvedMessageId, context)
         : false;
-    if (trackerRestored || fallbackTrackerRestored || progressionRestored) {
+    if (trackerRestored || fallbackTrackerRestored || worldMemoryRestored || progressionRestored) {
         await persistMetadata(context);
         if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
     }
@@ -12270,7 +12549,8 @@ function handleChatChanged() {
     if (generationActive) abortActiveGeneration(context);
     injectPromptOptionPrompts();
     getPlayerRoot(context);
-    restoreTrackerFromLatestDisplaySnapshot(context);
+    const trackerRestored = restoreTrackerFromLatestDisplaySnapshot(context);
+    if (!trackerRestored) rebuildWorldMemoryFromSelectedSwipes(context);
     cleanVisibleDebugDisplays(context);
     state.chatSignature = captureChatSignature();
     const renderIdentity = createStoryEngineEpochIdentity(context);
@@ -12551,6 +12831,8 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
+        descriptiveArchiveSnapshot: buildDescriptiveArchiveSnapshot(context),
+        worldProgressionSnapshot: buildWorldProgressionSnapshot(context),
         economySnapshot: buildEconomySnapshot(context),
         boundCompanionSnapshot: buildBoundCompanionSnapshot(context),
         pendingBoundarySnapshot: buildPendingBoundarySnapshot(context),
@@ -12708,9 +12990,13 @@ async function handleChatCompletionPromptReady(eventData) {
             latentGrievanceSnapshot: pendingGeneration.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
             latentFavorSnapshot: pendingGeneration.latentFavorSnapshot || buildLatentFavorSnapshot(context),
             worldStateSnapshot: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            descriptiveArchiveSnapshot: pendingGeneration.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context),
+            worldProgressionSnapshot: pendingGeneration.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
             boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             adventureGenre: pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
+            latestUserText: pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
+            worldProgressionProjectionKey: pendingGeneration.runId || runIdentity.runId,
         });
 
 
@@ -12749,6 +13035,12 @@ async function handleChatCompletionPromptReady(eventData) {
             userReputationAfter: report.trackerUpdate?.userReputation || {},
             worldStateBefore: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             worldStateAfter: report.trackerUpdate?.worldState || pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            descriptiveArchiveBefore: pendingGeneration.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context),
+            descriptiveArchiveAfter: report.trackerUpdate?.descriptiveArchive || pendingGeneration.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context),
+            worldProgressionBefore: pendingGeneration.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
+            worldProgressionAfter: report.trackerUpdate?.worldProgression || pendingGeneration.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
+            worldProgressionDuePlanIds: report.worldProgressionProjection?.duePlanIds || [],
+            worldProgressionAdvancements: report.worldProgressionProjection?.advancements || [],
             economyBefore: pendingGeneration.economySnapshot || buildEconomySnapshot(context),
             economyAfter: report.trackerUpdate?.economy || pendingGeneration.economySnapshot || buildEconomySnapshot(context),
             boundCompanionBefore: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
@@ -12839,6 +13131,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             userKnowledgeSnapshot: pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userReputationSnapshot: pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
             worldStateSnapshot: pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),
+            worldProgressionSnapshot: pendingGeneration?.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
             boundCompanionSnapshot: pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundarySnapshot: pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
@@ -12846,6 +13139,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             semanticReasoningEffort: settings?.semanticReasoningEffort,
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',
+            latestUserText: pendingGeneration?.latestUserText || getLatestUserText(context?.chat),
             proxyUserAction: pendingGeneration?.mode === 'proxy' ? pendingGeneration?.latestUserText : '',
             inlineProxyInstructions: pendingGeneration?.inlineProxyInstructions || [],
         })), {
