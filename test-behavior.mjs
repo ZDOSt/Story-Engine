@@ -10929,7 +10929,7 @@ const tests = [
     },
   },
   {
-    name: '33c.1 visible tracker is a resizable side rail with concise state views',
+    name: '33c.1 visible tracker is a draggable resizable window with concise state views',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const displaySource = source.slice(
@@ -10967,12 +10967,14 @@ const tests = [
       assert.match(source, /function formatTrackerItemDisplayName/);
       assert.match(source, /function formatTrackerItemQuality/);
       assert.match(source, /function clampTrackerWidgetHeight/);
-      assert.match(source, /function getTrackerChatColumnRect/);
-      assert.match(source, /\['#sheld', '#chat', '#form_sheld', '#chat_col'\]/);
-      assert.match(source, /const leftCandidate = chatRect\.left - panelWidth - gap/);
-      assert.match(source, /const rightCandidate = chatRect\.right \+ gap/);
-      assert.match(source, /const availableLeft = Math\.max\(0, chatRect\.left - gap - viewportLeft\)/);
-      assert.match(source, /panel\.style\.width = `\$\{Math\.floor\(fittedWidth\)\}px`/);
+      assert.match(source, /function clampTrackerWidgetPanelPosition/);
+      assert.doesNotMatch(source, /function getTrackerChatColumnRect|#sheld|#form_sheld|#chat_col/);
+      assert.match(source, /const rightCandidate = \{ left: buttonRect\.right \+ gap, top: alignedTop \}/);
+      assert.match(source, /const leftCandidate = \{ left: buttonRect\.left - panelWidth - gap, top: alignedTop \}/);
+      assert.match(source, /const belowCandidate = \{ left: alignedLeft, top: buttonRect\.bottom \+ gap \}/);
+      assert.match(source, /trackerWidgetPanelPosition: null/);
+      assert.match(source, /title\?\.addEventListener\('pointerdown'/);
+      assert.match(source, /state\.trackerWidgetPanelPosition = pos/);
       assert.match(source, /data-spe-tracker-resize-handle/);
       assert.match(source, /settings\.trackerWidgetHeight = clampTrackerWidgetHeight/);
       assert.match(source, /body\.onchange = event =>/);
@@ -11043,7 +11045,9 @@ const tests = [
       assert.match(displaySource, /present\[0\] \|\| knownElsewhere\[0\] \|\| archived\[0\]/);
 
       assert.match(styleSource, /width: min\(\$\{TRACKER_WIDGET_DEFAULT_WIDTH\}px, calc\(100vw - 16px\)\)/);
+      assert.match(styleSource, /min-width: min\(\$\{TRACKER_WIDGET_MIN_WIDTH\}px, calc\(100vw - 16px\)\)/);
       assert.match(styleSource, /grid-template-columns: 50px minmax\(0, 1fr\)/);
+      assert.match(styleSource, /\.structured-preflight-tracker-widget-title \{[\s\S]*cursor: grab;[\s\S]*touch-action: none/);
       assert.match(styleSource, /\.structured-preflight-tracker-tabs \{[\s\S]*flex-direction: column/);
       assert.match(styleSource, /\.structured-preflight-tracker-scroll-region \{[\s\S]*overflow-y: auto/);
       assert.match(styleSource, /\.structured-preflight-tracker-resize-handle \{[\s\S]*cursor: ns-resize/);
@@ -13998,7 +14002,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.36');
+      assert.equal(manifest.version, '0.9.37');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);

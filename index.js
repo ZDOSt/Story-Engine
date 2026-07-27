@@ -649,6 +649,7 @@ const state = {
     trackerWidgetActiveTab: 'overview',
     trackerWidgetEditingUserItems: false,
     trackerWidgetSelectedNpc: '',
+    trackerWidgetPanelPosition: null,
 };
 
 const semanticStopController = createEphemeralStopController({
@@ -6338,6 +6339,7 @@ function ensureTrackerDisplayStyles() {
             display: grid;
             grid-template-rows: auto minmax(0, 1fr) 15px;
             width: min(${TRACKER_WIDGET_DEFAULT_WIDTH}px, calc(100vw - 16px));
+            min-width: min(${TRACKER_WIDGET_MIN_WIDTH}px, calc(100vw - 16px));
             height: min(${TRACKER_WIDGET_DEFAULT_HEIGHT}px, calc(100vh - 16px));
             min-height: min(${TRACKER_WIDGET_MIN_HEIGHT}px, calc(100vh - 16px));
             max-height: min(${TRACKER_WIDGET_MAX_HEIGHT}px, calc(100vh - 16px));
@@ -6369,6 +6371,12 @@ function ensureTrackerDisplayStyles() {
             padding: 0.45rem 0.55rem 0.45rem 0.7rem;
             border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
             font-weight: 700;
+            cursor: grab;
+            touch-action: none;
+        }
+
+        .structured-preflight-tracker-widget-title:active {
+            cursor: grabbing;
         }
 
         .structured-preflight-tracker-widget-name {
@@ -6401,7 +6409,14 @@ function ensureTrackerDisplayStyles() {
             color: inherit;
 
             cursor: pointer;
+            touch-action: auto;
 
+        }
+
+        #${TRACKER_WIDGET_ID}.spe-tracker-panel-dragging,
+        #${TRACKER_WIDGET_ID}.spe-tracker-panel-dragging * {
+            cursor: grabbing !important;
+            user-select: none !important;
         }
 
         .${TRACKER_DISPLAY_BLOCK_CLASS} {
@@ -7765,8 +7780,9 @@ function renderTrackerWidget(context = getContext()) {
     const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
 
     if (panel) {
-
-        panel.hidden = settings.trackerWidgetCollapsed !== false;
+        const nextHidden = settings.trackerWidgetCollapsed !== false;
+        if (nextHidden || panel.hidden) state.trackerWidgetPanelPosition = null;
+        panel.hidden = nextHidden;
 
         panel.style.height = `${clampTrackerWidgetHeight(settings.trackerWidgetHeight)}px`;
 
@@ -7962,9 +7978,13 @@ function attachTrackerWidgetHandlers(widget) {
 
     const close = widget.querySelector('.structured-preflight-tracker-widget-close');
 
+    const title = widget.querySelector('.structured-preflight-tracker-widget-title');
+
     const resizeHandle = widget.querySelector('[data-spe-tracker-resize-handle]');
 
     let drag = null;
+
+    let panelDrag = null;
 
     let resize = null;
 
@@ -8068,6 +8088,49 @@ function attachTrackerWidgetHandlers(widget) {
 
     });
 
+    title?.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || event.target?.closest?.('button')) return;
+        const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
+        if (!panel || panel.hidden) return;
+        const rect = panel.getBoundingClientRect();
+        panelDrag = {
+            startX: event.clientX,
+            startY: event.clientY,
+            startLeft: rect.left,
+            startTop: rect.top,
+            width: rect.width,
+            height: rect.height,
+        };
+        widget.classList.add('spe-tracker-panel-dragging');
+        title.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+    });
+
+    title?.addEventListener('pointermove', event => {
+        if (!panelDrag) return;
+        const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
+        if (!panel || panel.hidden) return;
+        const pos = clampTrackerWidgetPanelPosition(
+            panelDrag.startLeft + event.clientX - panelDrag.startX,
+            panelDrag.startTop + event.clientY - panelDrag.startY,
+            panelDrag.width,
+            panelDrag.height,
+        );
+        state.trackerWidgetPanelPosition = pos;
+        panel.style.left = `${pos.x}px`;
+        panel.style.top = `${pos.y}px`;
+    });
+
+    const finishPanelDrag = event => {
+        if (!panelDrag) return;
+        panelDrag = null;
+        widget.classList.remove('spe-tracker-panel-dragging');
+        if (title?.hasPointerCapture?.(event.pointerId)) title.releasePointerCapture(event.pointerId);
+    };
+
+    title?.addEventListener('pointerup', finishPanelDrag);
+    title?.addEventListener('pointercancel', finishPanelDrag);
+
     resizeHandle?.addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
         const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
@@ -8135,18 +8198,19 @@ function clampTrackerWidgetPosition(x, y) {
 
 
 
-function getTrackerChatColumnRect() {
-    if (typeof document === 'undefined') return null;
-    const selectors = ['#sheld', '#chat', '#form_sheld', '#chat_col'];
-    const candidates = [];
-    for (const selector of selectors) {
-        const element = document.querySelector(selector);
-        if (!element) continue;
-        const rect = element.getBoundingClientRect?.();
-        if (!rect || rect.width < 240 || rect.height < 120) continue;
-        candidates.push(rect);
-    }
-    return candidates.sort((left, right) => left.width - right.width)[0] || null;
+function clampTrackerWidgetPanelPosition(x, y, width, height) {
+    const viewportWidth = globalThis.innerWidth || 1200;
+    const viewportHeight = globalThis.innerHeight || 800;
+    const panelWidth = Math.min(Number(width) || TRACKER_WIDGET_DEFAULT_WIDTH, Math.max(180, viewportWidth - 16));
+    const panelHeight = Math.min(Number(height) || TRACKER_WIDGET_DEFAULT_HEIGHT, Math.max(180, viewportHeight - 16));
+    const maxX = Math.max(8, viewportWidth - panelWidth - 8);
+    const maxY = Math.max(8, viewportHeight - panelHeight - 8);
+    const rawX = Number(x);
+    const rawY = Number(y);
+    return {
+        x: Math.round(Math.max(8, Math.min(Number.isFinite(rawX) ? rawX : 8, maxX))),
+        y: Math.round(Math.max(8, Math.min(Number.isFinite(rawY) ? rawY : 8, maxY))),
+    };
 }
 
 
@@ -8179,52 +8243,42 @@ function positionTrackerWidgetPanel(widget, panel) {
 
 
 
-    let panelRect = panel.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
 
-    let panelWidth = Math.min(panelRect.width || TRACKER_WIDGET_DEFAULT_WIDTH, Math.max(180, viewportWidth - 16));
+    const panelWidth = Math.min(panelRect.width || TRACKER_WIDGET_DEFAULT_WIDTH, Math.max(180, viewportWidth - 16));
     const panelHeight = Math.min(panelRect.height || TRACKER_WIDGET_DEFAULT_HEIGHT, Math.max(180, viewportHeight - 16));
-    const chatRect = getTrackerChatColumnRect();
-    const preferredLeft = chatRect
-        ? buttonRect.left + buttonRect.width / 2 <= chatRect.left + chatRect.width / 2
-        : buttonRect.left + buttonRect.width / 2 <= viewportWidth / 2;
-    const viewportLeft = 8;
-    const viewportRight = Math.max(viewportLeft, viewportWidth - panelWidth - 8);
-    let left = preferredLeft ? viewportLeft : viewportRight;
-
-    if (chatRect) {
-        const availableLeft = Math.max(0, chatRect.left - gap - viewportLeft);
-        const availableRight = Math.max(0, viewportWidth - 8 - chatRect.right - gap);
-        const preferredAvailable = preferredLeft ? availableLeft : availableRight;
-        const widestAvailable = Math.max(availableLeft, availableRight);
-        const fittedWidth = preferredAvailable >= TRACKER_WIDGET_MIN_WIDTH
-            ? preferredAvailable
-            : widestAvailable;
-        if (panelWidth > fittedWidth && fittedWidth >= TRACKER_WIDGET_MIN_WIDTH) {
-            panel.style.width = `${Math.floor(fittedWidth)}px`;
-            panelRect = panel.getBoundingClientRect();
-            panelWidth = panelRect.width;
-        }
-
-        const fittedViewportRight = Math.max(viewportLeft, viewportWidth - panelWidth - 8);
-        const leftCandidate = chatRect.left - panelWidth - gap;
-        const rightCandidate = chatRect.right + gap;
-        const leftFits = leftCandidate >= viewportLeft;
-        const rightFits = rightCandidate + panelWidth <= viewportWidth - 8;
-        if (preferredLeft && leftFits) left = leftCandidate;
-        else if (!preferredLeft && rightFits) left = rightCandidate;
-        else if (leftFits) left = leftCandidate;
-        else if (rightFits) left = rightCandidate;
-        else {
-            const leftOverlap = Math.max(0, Math.min(viewportLeft + panelWidth, chatRect.right) - Math.max(viewportLeft, chatRect.left));
-            const rightOverlap = Math.max(0, Math.min(fittedViewportRight + panelWidth, chatRect.right) - Math.max(fittedViewportRight, chatRect.left));
-            left = leftOverlap === rightOverlap ? (preferredLeft ? viewportLeft : fittedViewportRight) : leftOverlap < rightOverlap ? viewportLeft : fittedViewportRight;
-        }
+    const detached = state.trackerWidgetPanelPosition;
+    if (detached) {
+        const pos = clampTrackerWidgetPanelPosition(detached.x, detached.y, panelWidth, panelHeight);
+        state.trackerWidgetPanelPosition = pos;
+        panel.style.left = `${pos.x}px`;
+        panel.style.top = `${pos.y}px`;
+        return;
     }
 
-    const fittedViewportRight = Math.max(viewportLeft, viewportWidth - panelWidth - 8);
-    const top = Math.max(8, Math.min(buttonRect.top, viewportHeight - panelHeight - 8));
-    panel.style.left = `${Math.round(Math.max(viewportLeft, Math.min(left, fittedViewportRight)))}px`;
-    panel.style.top = `${Math.round(top)}px`;
+    const alignedTop = Math.max(8, Math.min(buttonRect.top, viewportHeight - panelHeight - 8));
+    const alignedLeft = Math.max(8, Math.min(buttonRect.left, viewportWidth - panelWidth - 8));
+    const rightCandidate = { left: buttonRect.right + gap, top: alignedTop };
+    const leftCandidate = { left: buttonRect.left - panelWidth - gap, top: alignedTop };
+    const belowCandidate = { left: alignedLeft, top: buttonRect.bottom + gap };
+    const aboveCandidate = { left: alignedLeft, top: buttonRect.top - panelHeight - gap };
+    const rightFits = rightCandidate.left + panelWidth <= viewportWidth - 8;
+    const leftFits = leftCandidate.left >= 8;
+    const belowFits = belowCandidate.top + panelHeight <= viewportHeight - 8;
+    const aboveFits = aboveCandidate.top >= 8;
+    const preferRight = buttonRect.left + buttonRect.width / 2 <= viewportWidth / 2;
+    let candidate;
+    if (preferRight && rightFits) candidate = rightCandidate;
+    else if (!preferRight && leftFits) candidate = leftCandidate;
+    else if (rightFits) candidate = rightCandidate;
+    else if (leftFits) candidate = leftCandidate;
+    else if (belowFits) candidate = belowCandidate;
+    else if (aboveFits) candidate = aboveCandidate;
+    else candidate = preferRight ? rightCandidate : leftCandidate;
+
+    const pos = clampTrackerWidgetPanelPosition(candidate.left, candidate.top, panelWidth, panelHeight);
+    panel.style.left = `${pos.x}px`;
+    panel.style.top = `${pos.y}px`;
 
 }
 
