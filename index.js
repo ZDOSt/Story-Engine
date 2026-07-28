@@ -93,11 +93,13 @@ const TRACKER_WIDGET_ID = 'structured_preflight_tracker_widget';
 const TRACKER_WIDGET_BUTTON_ID = 'structured_preflight_tracker_toggle';
 
 const TRACKER_WIDGET_PANEL_ID = 'structured_preflight_tracker_panel';
-const TRACKER_WIDGET_DEFAULT_WIDTH = 360;
+const TRACKER_WIDGET_BUTTON_SIZE = 36;
+const TRACKER_WIDGET_DEFAULT_WIDTH = 450;
 const TRACKER_WIDGET_MIN_WIDTH = 280;
-const TRACKER_WIDGET_DEFAULT_HEIGHT = 520;
+const TRACKER_WIDGET_DEFAULT_HEIGHT = 550;
 const TRACKER_WIDGET_MIN_HEIGHT = 420;
-const TRACKER_WIDGET_MAX_HEIGHT = 760;
+const TRACKER_WIDGET_MAX_HEIGHT = 900;
+const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
 const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
 const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
 const NARRATOR_HANDOFF_VERSION = 1;
@@ -532,6 +534,8 @@ const DEFAULT_SETTINGS = Object.freeze({
 
     trackerWidgetY: 120,
 
+    trackerWidgetWidth: TRACKER_WIDGET_DEFAULT_WIDTH,
+
     trackerWidgetHeight: TRACKER_WIDGET_DEFAULT_HEIGHT,
 
 });
@@ -652,7 +656,7 @@ const state = {
     trackerWidgetActiveTab: 'overview',
     trackerWidgetEditingUserItems: false,
     trackerWidgetSelectedNpc: '',
-    trackerWidgetPanelPosition: null,
+    trackerWidgetViewportHandler: null,
 };
 
 const semanticStopController = createEphemeralStopController({
@@ -688,6 +692,9 @@ function getSettings() {
             extension_settings[SETTINGS_KEY][key] = value;
         }
     }
+    if (migrateTrackerWidgetSettings(settings)) {
+        saveExtensionSettings();
+    }
     if (migrateProseGuardSettings(settings)) {
         saveExtensionSettings();
     }
@@ -695,6 +702,30 @@ function getSettings() {
         settings.semanticReasoningEffort,
     );
     return settings;
+}
+
+function migrateTrackerWidgetSettings(settings) {
+    const currentVersion = Number(settings?.trackerWidgetLayoutMigrationVersion || 0);
+    const versionReady = Number.isFinite(currentVersion) && currentVersion >= TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION;
+    let changed = false;
+    const setNumericDefault = (key, value) => {
+        if (Number(settings[key]) === value) return;
+        settings[key] = value;
+        changed = true;
+    };
+    const storedHeight = Number(settings.trackerWidgetHeight);
+    if ((!versionReady && storedHeight === 520) || !Number.isFinite(storedHeight) || storedHeight <= 0) {
+        setNumericDefault('trackerWidgetHeight', TRACKER_WIDGET_DEFAULT_HEIGHT);
+    }
+    const storedWidth = Number(settings.trackerWidgetWidth);
+    if (!Number.isFinite(storedWidth) || storedWidth <= 0) {
+        setNumericDefault('trackerWidgetWidth', TRACKER_WIDGET_DEFAULT_WIDTH);
+    }
+    if (!versionReady) {
+        settings.trackerWidgetLayoutMigrationVersion = TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION;
+        changed = true;
+    }
+    return changed;
 }
 
 function migrateProseGuardSettings(settings) {
@@ -1740,6 +1771,7 @@ function renderSettingsPanel() {
     });
     document.getElementById('structured_preflight_post_tracker_enabled')?.addEventListener('change', event => {
         settings.postNarrationTrackerEnabled = Boolean(event.target?.checked);
+        renderTrackerWidget(getContext());
         refreshSettingsControls();
         saveExtensionSettings();
 
@@ -2588,6 +2620,7 @@ function disableStoryEngineRuntime() {
         state.proseGuardChatObserver.disconnect();
         state.proseGuardChatObserver = null;
     }
+    clearTrackerWidgetViewportHandler();
     removeStreamingArtifactRegex();
     document.querySelectorAll?.(`.${TRACKER_DISPLAY_BLOCK_CLASS}, .${NARRATOR_HANDOFF_BLOCK_CLASS}`)?.forEach(element => element.remove());
     document.getElementById(TRACKER_WIDGET_ID)?.remove();
@@ -5987,8 +6020,8 @@ function buildTrackerDisplayHtml(snapshot) {
     const renderPanelHeader = (eyebrow, title, subtitle = '', actionHtml = '') => `
         <div class="structured-preflight-tracker-panel-head${actionHtml ? ' structured-preflight-tracker-panel-head-with-action' : ''}">
             <div class="structured-preflight-tracker-panel-copy">
-                <span class="structured-preflight-tracker-eyebrow">${escapeHtml(eyebrow)}</span>
-                <h2>${escapeHtml(title)}</h2>
+                ${eyebrow ? `<span class="structured-preflight-tracker-eyebrow">${escapeHtml(eyebrow)}</span>` : ''}
+                ${title ? `<h2>${escapeHtml(title)}</h2>` : ''}
                 ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ''}
             </div>
             ${actionHtml}
@@ -6276,7 +6309,7 @@ function buildTrackerDisplayHtml(snapshot) {
         <div class="structured-preflight-tracker-tab-panel" id="structured-preflight-tracker-panel-npcs" role="tabpanel" aria-labelledby="structured-preflight-tracker-tab-npcs" data-spe-tracker-panel="npcs">
             ${renderPanelHeader(
                 'NPCs',
-                'Character sheet',
+                '',
                 `${names.length} tracked character${names.length === 1 ? '' : 's'}`,
                 npcSelector,
             )}
@@ -6287,7 +6320,7 @@ function buildTrackerDisplayHtml(snapshot) {
         <div class="structured-preflight-tracker-tab-panel" id="structured-preflight-tracker-panel-inventory" role="tabpanel" aria-labelledby="structured-preflight-tracker-tab-inventory" data-spe-tracker-panel="inventory">
             ${renderPanelHeader(
                 'Inventory',
-                'Possessions',
+                '',
                 `${trackerListCount(user.gear) + trackerListCount(user.inventory)} items`,
                 userItemControls,
             )}
@@ -6323,7 +6356,7 @@ function buildTrackerDisplayHtml(snapshot) {
         <div class="structured-preflight-tracker-tab-panel" id="structured-preflight-tracker-panel-threads" role="tabpanel" aria-labelledby="structured-preflight-tracker-tab-threads" data-spe-tracker-panel="threads">
             ${renderPanelHeader(
                 'Threads',
-                'Ongoing state',
+                '',
                 `${openThreads.length} open`,
             )}
             <section class="structured-preflight-tracker-dashboard-section">
@@ -6428,7 +6461,13 @@ function ensureTrackerDisplayStyles() {
 
             top: 120px;
 
-            z-index: 40000;
+            width: 0;
+
+            height: 0;
+
+            z-index: 1900;
+
+            overflow: visible;
 
             color: var(--SmartThemeBodyColor, #eee);
 
@@ -6444,9 +6483,15 @@ function ensureTrackerDisplayStyles() {
 
         #${TRACKER_WIDGET_BUTTON_ID} {
 
-            width: 50px;
+            position: absolute;
 
-            height: 50px;
+            left: 0;
+
+            top: 0;
+
+            width: ${TRACKER_WIDGET_BUTTON_SIZE}px;
+
+            height: ${TRACKER_WIDGET_BUTTON_SIZE}px;
 
             display: grid;
 
@@ -6454,7 +6499,7 @@ function ensureTrackerDisplayStyles() {
 
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.24));
 
-            border-radius: 10px;
+            border-radius: 8px;
 
             background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 72%, transparent);
 
@@ -6463,6 +6508,10 @@ function ensureTrackerDisplayStyles() {
             box-shadow: 0 10px 26px rgba(0,0,0,0.28);
 
             cursor: grab;
+
+            touch-action: none;
+
+            user-select: none;
 
             backdrop-filter: blur(8px);
 
@@ -6476,18 +6525,26 @@ function ensureTrackerDisplayStyles() {
 
         #${TRACKER_WIDGET_BUTTON_ID} i {
 
-            font-size: 1.45rem;
+            font-size: 1.05rem;
 
         }
+        #${TRACKER_WIDGET_BUTTON_ID}[hidden] {
+            display: none;
+        }
         #${TRACKER_WIDGET_PANEL_ID} {
-            position: fixed;
+            position: absolute;
+            left: 0;
+            top: 0;
             display: grid;
-            grid-template-rows: auto minmax(0, 1fr) 15px;
-            width: min(${TRACKER_WIDGET_DEFAULT_WIDTH}px, calc(100vw - 16px));
-            min-width: min(${TRACKER_WIDGET_MIN_WIDTH}px, calc(100vw - 16px));
-            height: min(${TRACKER_WIDGET_DEFAULT_HEIGHT}px, calc(100vh - 16px));
-            min-height: min(${TRACKER_WIDGET_MIN_HEIGHT}px, calc(100vh - 16px));
+            grid-template-rows: auto minmax(0, 1fr);
+            width: ${TRACKER_WIDGET_DEFAULT_WIDTH}px;
+            min-width: 1px;
+            max-width: max(1px, calc(100vw - 16px));
+            max-width: max(1px, calc(100dvw - 16px));
+            height: ${TRACKER_WIDGET_DEFAULT_HEIGHT}px;
+            min-height: 1px;
             max-height: min(${TRACKER_WIDGET_MAX_HEIGHT}px, calc(100vh - 16px));
+            max-height: min(${TRACKER_WIDGET_MAX_HEIGHT}px, calc(100dvh - 16px));
             margin: 0;
             padding: 0;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2));
@@ -6509,7 +6566,7 @@ function ensureTrackerDisplayStyles() {
         .structured-preflight-tracker-widget-title {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-start;
             gap: 0.75rem;
             min-width: 0;
             min-height: 43px;
@@ -6535,7 +6592,7 @@ function ensureTrackerDisplayStyles() {
             color: #73d0ff;
         }
 
-        .structured-preflight-tracker-widget-close {
+        .structured-preflight-tracker-widget-minimize {
 
             width: 28px;
 
@@ -6556,6 +6613,12 @@ function ensureTrackerDisplayStyles() {
             cursor: pointer;
             touch-action: auto;
 
+        }
+
+        .structured-preflight-tracker-widget-minimize:hover,
+        .structured-preflight-tracker-widget-minimize:focus-visible {
+            border-color: color-mix(in srgb, #73d0ff 70%, var(--SmartThemeBorderColor, rgba(255,255,255,0.2)));
+            color: #73d0ff;
         }
 
         #${TRACKER_WIDGET_ID}.spe-tracker-panel-dragging,
@@ -7252,23 +7315,28 @@ function ensureTrackerDisplayStyles() {
             text-align: center;
         }
         .structured-preflight-tracker-resize-handle {
-            display: grid;
-            place-items: center;
-            min-width: 0;
-            cursor: ns-resize;
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            z-index: 2;
+            width: 20px;
+            height: 20px;
+            cursor: nwse-resize;
             touch-action: none;
-            border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 54%, transparent);
+            background: transparent;
         }
         .structured-preflight-tracker-resize-grip {
-            width: 40px;
-            height: 4px;
-            border-radius: 2px;
-            background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 34%, transparent);
+            position: absolute;
+            right: 4px;
+            bottom: 4px;
+            width: 10px;
+            height: 10px;
+            border-right: 2px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 48%, transparent);
+            border-bottom: 2px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 48%, transparent);
         }
         #${TRACKER_WIDGET_ID}.spe-tracker-resizing,
         #${TRACKER_WIDGET_ID}.spe-tracker-resizing * {
-            cursor: ns-resize !important;
+            cursor: nwse-resize !important;
             user-select: none !important;
         }
         .structured-preflight-tracker-edit-actions {
@@ -7879,6 +7947,7 @@ function renderTrackerWidget(context = getContext()) {
 
     const settings = getSettings();
     if (!isStoryEngineEnabled() || settings.postNarrationTrackerEnabled === false) {
+        clearTrackerWidgetViewportHandler();
         document.getElementById(TRACKER_WIDGET_ID)?.remove();
         return;
     }
@@ -7898,11 +7967,11 @@ function renderTrackerWidget(context = getContext()) {
 
             <div id="${TRACKER_WIDGET_PANEL_ID}" hidden>
                 <div class="structured-preflight-tracker-widget-title">
-                    <span class="structured-preflight-tracker-widget-name"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Tracker</span></span>
-                    <button class="structured-preflight-tracker-widget-close" type="button" title="Collapse tracker" aria-label="Collapse tracker"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+                    <button class="structured-preflight-tracker-widget-minimize" type="button" title="Minimize tracker" aria-label="Minimize tracker"><i class="fa-solid fa-book-open" aria-hidden="true"></i></button>
+                    <span class="structured-preflight-tracker-widget-name"><span>Tracker</span></span>
                 </div>
                 <div data-structured-preflight-tracker-widget-body></div>
-                <div class="structured-preflight-tracker-resize-handle" data-spe-tracker-resize-handle title="Resize tracker vertically" aria-label="Resize tracker vertically">
+                <div class="structured-preflight-tracker-resize-handle" data-spe-tracker-resize-handle title="Resize tracker" aria-label="Resize tracker">
                     <span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span>
                 </div>
             </div>`;
@@ -7912,26 +7981,8 @@ function renderTrackerWidget(context = getContext()) {
 
     }
 
-
-
-    const pos = clampTrackerWidgetPosition(settings.trackerWidgetX, settings.trackerWidgetY);
-
-    widget.style.left = `${pos.x}px`;
-
-    widget.style.top = `${pos.y}px`;
-
-
-
-    const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
-
-    if (panel) {
-        const nextHidden = settings.trackerWidgetCollapsed !== false;
-        if (nextHidden || panel.hidden) state.trackerWidgetPanelPosition = null;
-        panel.hidden = nextHidden;
-
-        panel.style.height = `${clampTrackerWidgetHeight(settings.trackerWidgetHeight)}px`;
-
-    }
+    ensureTrackerWidgetViewportHandler();
+    syncTrackerWidgetViewport();
 
 
 
@@ -7947,8 +7998,6 @@ function renderTrackerWidget(context = getContext()) {
 
         : '<div class="structured-preflight-tracker-empty">No tracker data yet.</div>';
     attachTrackerWidgetEditorHandlers(body, context);
-
-    if (panel && !panel.hidden) positionTrackerWidgetPanel(widget, panel);
 
 }
 
@@ -8105,14 +8154,133 @@ function attachTrackerWidgetEditorHandlers(body, context = getContext()) {
 
 
 
-function clampTrackerWidgetHeight(value, panelTop = 8) {
-    const viewportHeight = globalThis.innerHeight || 800;
-    const availableHeight = Math.max(180, viewportHeight - Math.max(8, Number(panelTop) || 8) - 8);
+function clampTrackerWidgetHeight(value) {
+    const viewportHeight = Math.max(1, Number(globalThis.innerHeight) || 800);
+    const availableHeight = Math.max(1, viewportHeight - 16);
     const maximum = Math.min(TRACKER_WIDGET_MAX_HEIGHT, availableHeight);
     const minimum = Math.min(TRACKER_WIDGET_MIN_HEIGHT, maximum);
     const numeric = Number(value);
     const desired = Number.isFinite(numeric) ? numeric : TRACKER_WIDGET_DEFAULT_HEIGHT;
     return Math.round(Math.max(minimum, Math.min(desired, maximum)));
+}
+
+function clampTrackerWidgetWidth(value) {
+    const viewportWidth = Math.max(1, Number(globalThis.innerWidth) || 1200);
+    const availableWidth = Math.max(1, viewportWidth - 16);
+    const maximum = availableWidth;
+    const minimum = Math.min(TRACKER_WIDGET_MIN_WIDTH, maximum);
+    const numeric = Number(value);
+    const desired = Number.isFinite(numeric) ? numeric : TRACKER_WIDGET_DEFAULT_WIDTH;
+    return Math.round(Math.max(minimum, Math.min(desired, maximum)));
+}
+
+function clampTrackerWidgetPosition(x, y, width = TRACKER_WIDGET_BUTTON_SIZE, height = TRACKER_WIDGET_BUTTON_SIZE) {
+    const viewportWidth = Math.max(1, Number(globalThis.innerWidth) || 1200);
+    const viewportHeight = Math.max(1, Number(globalThis.innerHeight) || 800);
+    const horizontalInset = Math.min(8, viewportWidth / 2);
+    const verticalInset = Math.min(8, viewportHeight / 2);
+    const maximumWidth = Math.max(1, viewportWidth - (horizontalInset * 2));
+    const maximumHeight = Math.max(1, viewportHeight - (verticalInset * 2));
+    const numericWidth = Number(width);
+    const numericHeight = Number(height);
+    const safeWidth = Math.min(Math.max(1, Number.isFinite(numericWidth) ? numericWidth : TRACKER_WIDGET_BUTTON_SIZE), maximumWidth);
+    const safeHeight = Math.min(Math.max(1, Number.isFinite(numericHeight) ? numericHeight : TRACKER_WIDGET_BUTTON_SIZE), maximumHeight);
+    const maxX = Math.max(horizontalInset, viewportWidth - safeWidth - horizontalInset);
+    const maxY = Math.max(verticalInset, viewportHeight - safeHeight - verticalInset);
+    const rawX = Number(x);
+    const rawY = Number(y);
+    return {
+        x: Math.round(Math.max(horizontalInset, Math.min(Number.isFinite(rawX) ? rawX : 24, maxX))),
+        y: Math.round(Math.max(verticalInset, Math.min(Number.isFinite(rawY) ? rawY : 120, maxY))),
+    };
+}
+
+function getTrackerWidgetLayout(settings = getSettings()) {
+    const collapsed = settings.trackerWidgetCollapsed !== false;
+    let x = Number(settings.trackerWidgetX);
+    let y = Number(settings.trackerWidgetY);
+    x = Number.isFinite(x) ? x : 24;
+    y = Number.isFinite(y) ? y : 120;
+    const storedWidth = Number(settings.trackerWidgetWidth);
+    const storedHeight = Number(settings.trackerWidgetHeight);
+    let width = collapsed ? TRACKER_WIDGET_BUTTON_SIZE : storedWidth;
+    let height = collapsed ? TRACKER_WIDGET_BUTTON_SIZE : storedHeight;
+    width = Number.isFinite(width) && width > 0 ? width : TRACKER_WIDGET_DEFAULT_WIDTH;
+    height = Number.isFinite(height) && height > 0 ? height : TRACKER_WIDGET_DEFAULT_HEIGHT;
+
+    if (!collapsed) {
+        width = clampTrackerWidgetWidth(width);
+        height = clampTrackerWidgetHeight(height);
+    }
+    const position = clampTrackerWidgetPosition(x, y, width, height);
+    x = position.x;
+    y = position.y;
+
+    return {
+        collapsed,
+        x,
+        y,
+        width: collapsed ? TRACKER_WIDGET_BUTTON_SIZE : width,
+        height: collapsed ? TRACKER_WIDGET_BUTTON_SIZE : height,
+    };
+}
+
+function applyTrackerWidgetLayout(widget, settings = getSettings()) {
+    if (!widget) return null;
+    const layout = getTrackerWidgetLayout(settings);
+    widget.style.left = `${layout.x}px`;
+    widget.style.top = `${layout.y}px`;
+
+    const button = widget.querySelector(`#${TRACKER_WIDGET_BUTTON_ID}`);
+    const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
+    if (button) button.hidden = !layout.collapsed;
+    if (panel) {
+        panel.hidden = layout.collapsed;
+        panel.style.width = `${layout.width}px`;
+        panel.style.height = `${layout.height}px`;
+        panel.style.left = '0px';
+        panel.style.top = '0px';
+    }
+    return layout;
+}
+
+function syncTrackerWidgetViewport() {
+    if (typeof document === 'undefined') return;
+    const widget = document.getElementById(TRACKER_WIDGET_ID);
+    if (!widget) return;
+    const settings = getSettings();
+    const layout = applyTrackerWidgetLayout(widget, settings);
+    if (!layout) return;
+    let changed = false;
+    const nextValues = {
+        trackerWidgetX: layout.x,
+        trackerWidgetY: layout.y,
+    };
+    if (!layout.collapsed) {
+        nextValues.trackerWidgetWidth = layout.width;
+        nextValues.trackerWidgetHeight = layout.height;
+    }
+    for (const [key, value] of Object.entries(nextValues)) {
+        if (Number(settings[key]) !== Number(value)) {
+            settings[key] = value;
+            changed = true;
+        }
+    }
+    if (changed) saveExtensionSettings();
+}
+
+function ensureTrackerWidgetViewportHandler() {
+    if (!state.trackerWidgetViewportHandler && typeof globalThis.addEventListener === 'function') {
+        state.trackerWidgetViewportHandler = () => syncTrackerWidgetViewport();
+        globalThis.addEventListener('resize', state.trackerWidgetViewportHandler);
+    }
+}
+
+function clearTrackerWidgetViewportHandler() {
+    if (state.trackerWidgetViewportHandler && typeof globalThis.removeEventListener === 'function') {
+        globalThis.removeEventListener('resize', state.trackerWidgetViewportHandler);
+        state.trackerWidgetViewportHandler = null;
+    }
 }
 
 
@@ -8121,7 +8289,7 @@ function attachTrackerWidgetHandlers(widget) {
 
     const button = widget.querySelector(`#${TRACKER_WIDGET_BUTTON_ID}`);
 
-    const close = widget.querySelector('.structured-preflight-tracker-widget-close');
+    const minimize = widget.querySelector('.structured-preflight-tracker-widget-minimize');
 
     const title = widget.querySelector('.structured-preflight-tracker-widget-title');
 
@@ -8129,9 +8297,19 @@ function attachTrackerWidgetHandlers(widget) {
 
     let drag = null;
 
-    let panelDrag = null;
-
     let resize = null;
+
+    const cancelButtonDrag = () => {
+
+        if (!drag) return;
+
+        drag = null;
+
+        widget.classList.remove('spe-tracker-dragging');
+
+        syncTrackerWidgetViewport();
+
+    };
 
 
 
@@ -8177,33 +8355,31 @@ function attachTrackerWidgetHandlers(widget) {
 
         widget.style.top = `${pos.y}px`;
 
-        const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
-
-        if (panel && !panel.hidden) positionTrackerWidgetPanel(widget, panel);
-
     });
 
     button?.addEventListener('pointerup', event => {
 
         if (!drag) return;
 
-        button.releasePointerCapture?.(event.pointerId);
-
-        widget.classList.remove('spe-tracker-dragging');
+        const moved = drag.moved;
 
         const settings = getSettings();
 
         const rect = widget.getBoundingClientRect();
 
-        const pos = clampTrackerWidgetPosition(rect.left, rect.top);
+        const pos = clampTrackerWidgetPosition(rect.left, rect.top, TRACKER_WIDGET_BUTTON_SIZE, TRACKER_WIDGET_BUTTON_SIZE);
+
+        drag = null;
+
+        widget.classList.remove('spe-tracker-dragging');
+
+        if (button.hasPointerCapture?.(event.pointerId)) button.releasePointerCapture(event.pointerId);
 
         settings.trackerWidgetX = pos.x;
 
         settings.trackerWidgetY = pos.y;
 
-        if (!drag.moved) settings.trackerWidgetCollapsed = settings.trackerWidgetCollapsed === false;
-
-        drag = null;
+        if (!moved) settings.trackerWidgetCollapsed = settings.trackerWidgetCollapsed === false;
 
         saveExtensionSettings();
 
@@ -8213,13 +8389,13 @@ function attachTrackerWidgetHandlers(widget) {
 
     button?.addEventListener('pointercancel', () => {
 
-        drag = null;
-
-        widget.classList.remove('spe-tracker-dragging');
+        cancelButtonDrag();
 
     });
 
-    close?.addEventListener('click', event => {
+    button?.addEventListener('lostpointercapture', cancelButtonDrag);
+
+    minimize?.addEventListener('click', event => {
 
         event.preventDefault();
 
@@ -8238,13 +8414,15 @@ function attachTrackerWidgetHandlers(widget) {
         const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
         if (!panel || panel.hidden) return;
         const rect = panel.getBoundingClientRect();
-        panelDrag = {
+        const widgetRect = widget.getBoundingClientRect();
+        widget._speTrackerPanelDrag = {
             startX: event.clientX,
             startY: event.clientY,
-            startLeft: rect.left,
-            startTop: rect.top,
+            startLeft: widgetRect.left,
+            startTop: widgetRect.top,
             width: rect.width,
             height: rect.height,
+            moved: false,
         };
         widget.classList.add('spe-tracker-panel-dragging');
         title.setPointerCapture?.(event.pointerId);
@@ -8252,29 +8430,48 @@ function attachTrackerWidgetHandlers(widget) {
     });
 
     title?.addEventListener('pointermove', event => {
+        const panelDrag = widget._speTrackerPanelDrag;
         if (!panelDrag) return;
         const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
         if (!panel || panel.hidden) return;
-        const pos = clampTrackerWidgetPanelPosition(
+        if (Math.abs(event.clientX - panelDrag.startX) > 3 || Math.abs(event.clientY - panelDrag.startY) > 3) panelDrag.moved = true;
+        const pos = clampTrackerWidgetPosition(
             panelDrag.startLeft + event.clientX - panelDrag.startX,
             panelDrag.startTop + event.clientY - panelDrag.startY,
             panelDrag.width,
             panelDrag.height,
         );
-        state.trackerWidgetPanelPosition = pos;
-        panel.style.left = `${pos.x}px`;
-        panel.style.top = `${pos.y}px`;
+        widget.style.left = `${pos.x}px`;
+        widget.style.top = `${pos.y}px`;
+        panel.style.left = '0px';
+        panel.style.top = '0px';
     });
 
-    const finishPanelDrag = event => {
+    const finishPanelDrag = (event, canceled = false) => {
+        const panelDrag = widget._speTrackerPanelDrag;
         if (!panelDrag) return;
-        panelDrag = null;
+        widget._speTrackerPanelDrag = null;
         widget.classList.remove('spe-tracker-panel-dragging');
-        if (title?.hasPointerCapture?.(event.pointerId)) title.releasePointerCapture(event.pointerId);
+        if (title?.hasPointerCapture?.(event?.pointerId)) title.releasePointerCapture(event.pointerId);
+        if (canceled) {
+            syncTrackerWidgetViewport();
+            return;
+        }
+        const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
+        if (!panel || panel.hidden) return;
+        const settings = getSettings();
+        const rect = widget.getBoundingClientRect();
+        const pos = clampTrackerWidgetPosition(rect.left, rect.top, panelDrag.width, panelDrag.height);
+        settings.trackerWidgetX = pos.x;
+        settings.trackerWidgetY = pos.y;
+        saveExtensionSettings();
+        if (panelDrag.moved) renderTrackerWidget();
     };
 
     title?.addEventListener('pointerup', finishPanelDrag);
-    title?.addEventListener('pointercancel', finishPanelDrag);
+    title?.addEventListener('pointercancel', event => finishPanelDrag(event, true));
+
+    title?.addEventListener('lostpointercapture', event => finishPanelDrag(event, true));
 
     resizeHandle?.addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
@@ -8282,9 +8479,10 @@ function attachTrackerWidgetHandlers(widget) {
         if (!panel || panel.hidden) return;
         const rect = panel.getBoundingClientRect();
         resize = {
+            startX: event.clientX,
             startY: event.clientY,
+            startWidth: rect.width,
             startHeight: rect.height,
-            panelTop: rect.top,
         };
         widget.classList.add('spe-tracker-resizing');
         resizeHandle.setPointerCapture?.(event.pointerId);
@@ -8295,135 +8493,52 @@ function attachTrackerWidgetHandlers(widget) {
         if (!resize) return;
         const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
         if (!panel || panel.hidden) return;
+        const nextWidth = clampTrackerWidgetWidth(
+            resize.startWidth + event.clientX - resize.startX,
+        );
         const nextHeight = clampTrackerWidgetHeight(
             resize.startHeight + event.clientY - resize.startY,
-            resize.panelTop,
         );
+        panel.style.width = `${nextWidth}px`;
         panel.style.height = `${nextHeight}px`;
+        const widgetRect = widget.getBoundingClientRect();
+        const pos = clampTrackerWidgetPosition(widgetRect.left, widgetRect.top, nextWidth, nextHeight);
+        widget.style.left = `${pos.x}px`;
+        widget.style.top = `${pos.y}px`;
     });
 
-    const finishResize = event => {
+    const finishResize = (event, canceled = false) => {
         if (!resize) return;
         const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
-        const settings = getSettings();
-        settings.trackerWidgetHeight = clampTrackerWidgetHeight(panel?.getBoundingClientRect?.().height, resize.panelTop);
         resize = null;
         widget.classList.remove('spe-tracker-resizing');
-        if (resizeHandle?.hasPointerCapture?.(event.pointerId)) resizeHandle.releasePointerCapture(event.pointerId);
+        if (resizeHandle?.hasPointerCapture?.(event?.pointerId)) resizeHandle.releasePointerCapture(event.pointerId);
+        if (canceled) {
+            syncTrackerWidgetViewport();
+            return;
+        }
+        if (!panel || panel.hidden) return;
+        const settings = getSettings();
+        const widgetRect = widget.getBoundingClientRect();
+        const panelRect = panel?.getBoundingClientRect?.();
+        settings.trackerWidgetWidth = clampTrackerWidgetWidth(panelRect?.width);
+        settings.trackerWidgetHeight = clampTrackerWidgetHeight(panelRect?.height);
+        const pos = clampTrackerWidgetPosition(
+            widgetRect.left,
+            widgetRect.top,
+            settings.trackerWidgetWidth,
+            settings.trackerWidgetHeight,
+        );
+        settings.trackerWidgetX = pos.x;
+        settings.trackerWidgetY = pos.y;
         saveExtensionSettings();
-        if (panel && !panel.hidden) positionTrackerWidgetPanel(widget, panel);
+        syncTrackerWidgetViewport();
     };
 
     resizeHandle?.addEventListener('pointerup', finishResize);
-    resizeHandle?.addEventListener('pointercancel', finishResize);
+    resizeHandle?.addEventListener('pointercancel', event => finishResize(event, true));
 
-}
-
-
-
-function clampTrackerWidgetPosition(x, y) {
-
-    const rawX = Number(x);
-
-    const rawY = Number(y);
-
-    const maxX = Math.max(0, (globalThis.innerWidth || 1200) - 62);
-
-    const maxY = Math.max(0, (globalThis.innerHeight || 800) - 62);
-
-    return {
-
-        x: Math.max(8, Math.min(Number.isFinite(rawX) ? rawX : 24, maxX)),
-
-        y: Math.max(8, Math.min(Number.isFinite(rawY) ? rawY : 120, maxY)),
-
-    };
-
-}
-
-
-
-function clampTrackerWidgetPanelPosition(x, y, width, height) {
-    const viewportWidth = globalThis.innerWidth || 1200;
-    const viewportHeight = globalThis.innerHeight || 800;
-    const panelWidth = Math.min(Number(width) || TRACKER_WIDGET_DEFAULT_WIDTH, Math.max(180, viewportWidth - 16));
-    const panelHeight = Math.min(Number(height) || TRACKER_WIDGET_DEFAULT_HEIGHT, Math.max(180, viewportHeight - 16));
-    const maxX = Math.max(8, viewportWidth - panelWidth - 8);
-    const maxY = Math.max(8, viewportHeight - panelHeight - 8);
-    const rawX = Number(x);
-    const rawY = Number(y);
-    return {
-        x: Math.round(Math.max(8, Math.min(Number.isFinite(rawX) ? rawX : 8, maxX))),
-        y: Math.round(Math.max(8, Math.min(Number.isFinite(rawY) ? rawY : 8, maxY))),
-    };
-}
-
-
-
-function positionTrackerWidgetPanel(widget, panel) {
-
-    if (!widget || !panel || panel.hidden) return;
-
-    const gap = 8;
-
-    const viewportWidth = globalThis.innerWidth || 1200;
-
-    const viewportHeight = globalThis.innerHeight || 800;
-
-    const button = widget.querySelector(`#${TRACKER_WIDGET_BUTTON_ID}`) || widget;
-
-    const buttonRect = button.getBoundingClientRect();
-
-
-
-    panel.style.left = '0px';
-
-    panel.style.top = '0px';
-
-    panel.style.right = 'auto';
-
-    panel.style.bottom = 'auto';
-
-    panel.style.width = '';
-
-
-
-    const panelRect = panel.getBoundingClientRect();
-
-    const panelWidth = Math.min(panelRect.width || TRACKER_WIDGET_DEFAULT_WIDTH, Math.max(180, viewportWidth - 16));
-    const panelHeight = Math.min(panelRect.height || TRACKER_WIDGET_DEFAULT_HEIGHT, Math.max(180, viewportHeight - 16));
-    const detached = state.trackerWidgetPanelPosition;
-    if (detached) {
-        const pos = clampTrackerWidgetPanelPosition(detached.x, detached.y, panelWidth, panelHeight);
-        state.trackerWidgetPanelPosition = pos;
-        panel.style.left = `${pos.x}px`;
-        panel.style.top = `${pos.y}px`;
-        return;
-    }
-
-    const alignedTop = Math.max(8, Math.min(buttonRect.top, viewportHeight - panelHeight - 8));
-    const alignedLeft = Math.max(8, Math.min(buttonRect.left, viewportWidth - panelWidth - 8));
-    const rightCandidate = { left: buttonRect.right + gap, top: alignedTop };
-    const leftCandidate = { left: buttonRect.left - panelWidth - gap, top: alignedTop };
-    const belowCandidate = { left: alignedLeft, top: buttonRect.bottom + gap };
-    const aboveCandidate = { left: alignedLeft, top: buttonRect.top - panelHeight - gap };
-    const rightFits = rightCandidate.left + panelWidth <= viewportWidth - 8;
-    const leftFits = leftCandidate.left >= 8;
-    const belowFits = belowCandidate.top + panelHeight <= viewportHeight - 8;
-    const aboveFits = aboveCandidate.top >= 8;
-    const preferRight = buttonRect.left + buttonRect.width / 2 <= viewportWidth / 2;
-    let candidate;
-    if (preferRight && rightFits) candidate = rightCandidate;
-    else if (!preferRight && leftFits) candidate = leftCandidate;
-    else if (rightFits) candidate = rightCandidate;
-    else if (leftFits) candidate = leftCandidate;
-    else if (belowFits) candidate = belowCandidate;
-    else if (aboveFits) candidate = aboveCandidate;
-    else candidate = preferRight ? rightCandidate : leftCandidate;
-
-    const pos = clampTrackerWidgetPanelPosition(candidate.left, candidate.top, panelWidth, panelHeight);
-    panel.style.left = `${pos.x}px`;
-    panel.style.top = `${pos.y}px`;
+    resizeHandle?.addEventListener('lostpointercapture', event => finishResize(event, true));
 
 }
 
@@ -9184,6 +9299,7 @@ function buildPlayerPersonaSheetHtml(creator) {
 function bindPlayerSetupCardEvents(card, context = getContext()) {
     if (!card) return;
     const updateOptionalFields = () => updatePlayerIdentityOptionalFields(card);
+    const syncDraft = () => syncPlayerSetupDraft(card, getContext() || context);
     const runButtonAction = async button => {
         if (!button || state.playerSetupBusy) return;
         const action = button.getAttribute('data-spe-player-action');
@@ -9201,6 +9317,10 @@ function bindPlayerSetupCardEvents(card, context = getContext()) {
 
             await runButtonAction(button);
         };
+    });
+    card.querySelectorAll('#spe_player_sex, #spe_player_genre, #spe_player_race, #spe_player_race_specify, #spe_player_race_description_mode, #spe_player_race_description, #spe_player_additional_details_mode, #spe_player_additional_details').forEach(input => {
+        input.addEventListener('input', syncDraft);
+        input.addEventListener('change', syncDraft);
     });
     card.querySelector('#spe_player_race')?.addEventListener('change', updateOptionalFields);
     card.querySelector('#spe_player_race_description_mode')?.addEventListener('change', updateOptionalFields);
@@ -9376,15 +9496,15 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
         } else if (action === 'back-to-stats') {
 
             if (root.creator.flow === 'new' && root.creator.stage === 'identity') {
-                syncIdentityInputs(root.creator);
+                syncIdentityInputs(root.creator, details.card || document);
             } else if (root.creator.flow === 'persona' && root.creator.stage === 'persona-sheet') {
-                syncPlayerGenreInput(root.creator);
+                syncPlayerGenreInput(root.creator, details.card || document);
             }
             root.creator.stage = 'stats';
 
         } else if (action === 'generate-persona-sheet') {
 
-            syncPlayerGenreInput(root.creator);
+            syncPlayerGenreInput(root.creator, details.card || document);
 
             state.playerSetupBusy = true;
 
@@ -9398,7 +9518,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
 
         } else if (action === 'generate-sheet') {
 
-            syncIdentityInputs(root.creator);
+            syncIdentityInputs(root.creator, details.card || document);
 
             state.playerSetupBusy = true;
 
@@ -9524,12 +9644,26 @@ function resetPlayerCreationStats(creator) {
 
 
 
-function syncIdentityInputs(creator) {
+function syncPlayerSetupDraft(card, context = getContext()) {
+    if (!card || !card.querySelector('#spe_player_sex, #spe_player_genre, #spe_player_race, #spe_player_race_specify, #spe_player_race_description_mode, #spe_player_race_description, #spe_player_additional_details_mode, #spe_player_additional_details')) return false;
+    const root = getPlayerRoot(context);
+    if (!root?.creator) return false;
+    syncIdentityInputs(root.creator, card);
+    saveMetadataDebounced(context);
+    return true;
+}
+
+function syncIdentityInputs(creator, source = document) {
     creator.identity = creator.identity || {};
     delete creator.identity.characterName;
-    creator.identity.sex = String(document.getElementById('spe_player_sex')?.value || creator.identity.sex || '').trim();
-    syncPlayerGenreInput(creator);
-    const raceValue = document.getElementById('spe_player_race')?.value || (creator.identity.raceMode === 'pick' ? creator.identity.pickedRace : creator.identity.raceMode) || 'random';
+    const getField = id => source?.querySelector?.(`#${id}`) || null;
+    const sexInput = getField('spe_player_sex');
+    if (sexInput) creator.identity.sex = String(sexInput.value ?? '').trim();
+    syncPlayerGenreInput(creator, source);
+    const raceInput = getField('spe_player_race');
+    const raceValue = raceInput
+        ? String(raceInput.value ?? '')
+        : (creator.identity.raceMode === 'pick' ? creator.identity.pickedRace : creator.identity.raceMode) || 'random';
     if (raceValue === 'custom') {
         creator.identity.raceMode = 'specify';
     } else if (raceValue === 'random') {
@@ -9538,19 +9672,26 @@ function syncIdentityInputs(creator) {
         creator.identity.raceMode = 'pick';
         creator.identity.pickedRace = PLAYER_RACE_CHOICES.includes(raceValue) ? raceValue : 'Human';
     }
-    creator.identity.specifiedRace = String(document.getElementById('spe_player_race_specify')?.value || creator.identity.specifiedRace || '').trim();
-    creator.identity.specifiedRaceDescriptionMode = document.getElementById('spe_player_race_description_mode')?.value || creator.identity.specifiedRaceDescriptionMode || 'system';
-    creator.identity.specifiedRaceDescription = String(document.getElementById('spe_player_race_description')?.value || creator.identity.specifiedRaceDescription || '').trim();
-    const additionalDetailsMode = document.getElementById('spe_player_additional_details_mode')?.value || creator.identity.additionalDetailsMode || 'system';
-    creator.identity.additionalDetailsMode = additionalDetailsMode === 'user' ? 'user' : 'system';
-    creator.identity.additionalDetails = String(document.getElementById('spe_player_additional_details')?.value || creator.identity.additionalDetails || creator.identity.appearance || '').trim();
+    const specifiedRaceInput = getField('spe_player_race_specify');
+    if (specifiedRaceInput) creator.identity.specifiedRace = String(specifiedRaceInput.value ?? '').trim();
+    const raceDescriptionModeInput = getField('spe_player_race_description_mode');
+    if (raceDescriptionModeInput) creator.identity.specifiedRaceDescriptionMode = raceDescriptionModeInput.value || 'system';
+    const raceDescriptionInput = getField('spe_player_race_description');
+    if (raceDescriptionInput) creator.identity.specifiedRaceDescription = String(raceDescriptionInput.value ?? '').trim();
+    const additionalDetailsModeInput = getField('spe_player_additional_details_mode');
+    const additionalDetailsInput = getField('spe_player_additional_details');
+    if (additionalDetailsModeInput) {
+        const additionalDetailsMode = additionalDetailsModeInput.value || 'system';
+        creator.identity.additionalDetailsMode = additionalDetailsMode === 'user' ? 'user' : 'system';
+    }
+    if (additionalDetailsInput) creator.identity.additionalDetails = String(additionalDetailsInput.value ?? '').trim();
     delete creator.identity.appearance;
 }
 
-function syncPlayerGenreInput(creator) {
+function syncPlayerGenreInput(creator, source = document) {
     creator.identity = creator.identity || {};
-    const genre = document.getElementById('spe_player_genre')?.value || creator.identity.genre || 'Fantasy';
-    creator.identity.genre = normalizePlayerAdventureGenre(genre);
+    const genreInput = source?.querySelector?.('#spe_player_genre');
+    if (genreInput) creator.identity.genre = normalizePlayerAdventureGenre(genreInput.value);
 }
 
 function submitPlayerAdventureStartPrompt(prompt, context = getContext(), actionIdentity = null) {

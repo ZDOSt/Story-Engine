@@ -10956,30 +10956,90 @@ const tests = [
         displaySource.indexOf('const itemRecordsForNpc'),
         displaySource.indexOf('const formatPhysicalState'),
       );
+      const trackerLayoutSource = source.slice(
+        source.indexOf('function clampTrackerWidgetHeight'),
+        source.indexOf('function applyTrackerWidgetLayout'),
+      );
+      const trackerMigrationSource = source.slice(
+        source.indexOf('function migrateTrackerWidgetSettings'),
+        source.indexOf('function migrateProseGuardSettings'),
+      );
+      const trackerMath = new Function(
+        'globalThis',
+        `const TRACKER_WIDGET_BUTTON_SIZE = 36;
+         const TRACKER_WIDGET_DEFAULT_WIDTH = 450;
+         const TRACKER_WIDGET_MIN_WIDTH = 280;
+         const TRACKER_WIDGET_DEFAULT_HEIGHT = 550;
+         const TRACKER_WIDGET_MIN_HEIGHT = 420;
+         const TRACKER_WIDGET_MAX_HEIGHT = 900;
+         ${trackerLayoutSource}
+         return { clampTrackerWidgetHeight, clampTrackerWidgetWidth, clampTrackerWidgetPosition };`,
+      );
+      const trackerMigration = new Function(
+        `const TRACKER_WIDGET_DEFAULT_WIDTH = 450;
+         const TRACKER_WIDGET_DEFAULT_HEIGHT = 550;
+         const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
+         ${trackerMigrationSource}
+         return migrateTrackerWidgetSettings;`,
+      )();
       const formatTrackerItemDisplayName = new Function(
         'cleanTrackerDeltaText',
         `${itemFormatterSource}; return formatTrackerItemDisplayName;`,
       )(value => String(value ?? '').trim().slice(0, 140));
 
-      assert.match(source, /const TRACKER_WIDGET_DEFAULT_WIDTH = 360/);
+      assert.match(source, /const TRACKER_WIDGET_BUTTON_SIZE = 36/);
+      assert.match(source, /const TRACKER_WIDGET_DEFAULT_WIDTH = 450/);
       assert.match(source, /const TRACKER_WIDGET_MIN_WIDTH = 280/);
-      assert.match(source, /const TRACKER_WIDGET_DEFAULT_HEIGHT = 520/);
+      assert.match(source, /const TRACKER_WIDGET_DEFAULT_HEIGHT = 550/);
       assert.match(source, /const TRACKER_WIDGET_MIN_HEIGHT = 420/);
-      assert.match(source, /const TRACKER_WIDGET_MAX_HEIGHT = 760/);
+      assert.match(source, /const TRACKER_WIDGET_MAX_HEIGHT = 900/);
+      assert.match(source, /trackerWidgetWidth: TRACKER_WIDGET_DEFAULT_WIDTH/);
       assert.match(source, /trackerWidgetHeight: TRACKER_WIDGET_DEFAULT_HEIGHT/);
+      assert.match(source, /const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 1/);
       assert.match(source, /const TRACKER_WIDGET_TABS = Object\.freeze\(\['overview', 'character', 'npcs', 'inventory', 'threads'\]\)/);
       assert.match(source, /function formatTrackerItemDisplayName/);
       assert.match(source, /function formatTrackerItemQuality/);
       assert.match(source, /function clampTrackerWidgetHeight/);
-      assert.match(source, /function clampTrackerWidgetPanelPosition/);
+      assert.match(source, /function clampTrackerWidgetWidth/);
+      assert.match(source, /function clampTrackerWidgetPosition/);
+      assert.match(source, /function applyTrackerWidgetLayout/);
+      assert.match(trackerLayoutSource, /width = clampTrackerWidgetWidth\(width\);\s*height = clampTrackerWidgetHeight\(height\);\s*}\s*const position = clampTrackerWidgetPosition\(x, y, width, height\)/);
+      assert.doesNotMatch(trackerLayoutSource, /clampTrackerWidget(?:Width|Height)\([^)]*,\s*[xy]\)/);
+      assert.doesNotMatch(source, /trackerWidgetHostObserver|trackerWidgetHostSyncTimer|trackerWidgetOverlayObservers/);
+      assert.doesNotMatch(source, /hasVisibleTrackerWidgetOverlay|ensureTrackerWidgetHostObserver|spe-tracker-host-suppressed/);
+      const mathAt1080p = trackerMath({ innerWidth: 1920, innerHeight: 1080 });
+      assert.deepEqual(mathAt1080p.clampTrackerWidgetPosition(1876, 1036, 450, 550), { x: 1462, y: 522 });
+      assert.deepEqual(mathAt1080p.clampTrackerWidgetPosition(1500, 500, 450, 550), { x: 1462, y: 500 });
+      const migrated = { trackerWidgetHeight: 520, trackerWidgetWidth: '', trackerWidgetLayoutMigrationVersion: 0 };
+      assert.equal(trackerMigration(migrated), true);
+      assert.deepEqual(migrated, {
+        trackerWidgetHeight: 550,
+        trackerWidgetWidth: 450,
+        trackerWidgetLayoutMigrationVersion: 1,
+      });
+      const malformed = { trackerWidgetHeight: -10, trackerWidgetWidth: Number.NaN, trackerWidgetLayoutMigrationVersion: 0 };
+      trackerMigration(malformed);
+      assert.equal(malformed.trackerWidgetHeight, 550);
+      assert.equal(malformed.trackerWidgetWidth, 450);
+      const repairedCurrent = { trackerWidgetHeight: 0, trackerWidgetWidth: null, trackerWidgetLayoutMigrationVersion: 1 };
+      assert.equal(trackerMigration(repairedCurrent), true);
+      assert.equal(repairedCurrent.trackerWidgetHeight, 550);
+      assert.equal(repairedCurrent.trackerWidgetWidth, 450);
+      assert.equal(repairedCurrent.trackerWidgetLayoutMigrationVersion, 1);
       assert.doesNotMatch(source, /function getTrackerChatColumnRect|#sheld|#form_sheld|#chat_col/);
-      assert.match(source, /const rightCandidate = \{ left: buttonRect\.right \+ gap, top: alignedTop \}/);
-      assert.match(source, /const leftCandidate = \{ left: buttonRect\.left - panelWidth - gap, top: alignedTop \}/);
-      assert.match(source, /const belowCandidate = \{ left: alignedLeft, top: buttonRect\.bottom \+ gap \}/);
-      assert.match(source, /trackerWidgetPanelPosition: null/);
+      assert.doesNotMatch(source, /rightCandidate|leftCandidate|belowCandidate|aboveCandidate/);
+      assert.doesNotMatch(source, /trackerWidgetPanelPosition/);
       assert.match(source, /title\?\.addEventListener\('pointerdown'/);
-      assert.match(source, /state\.trackerWidgetPanelPosition = pos/);
+      assert.match(source, /widget\._speTrackerPanelDrag/);
       assert.match(source, /data-spe-tracker-resize-handle/);
+      assert.match(source, /#\$\{TRACKER_WIDGET_BUTTON_ID\}[\s\S]*touch-action: none/);
+      assert.match(source, /button\?\.addEventListener\('lostpointercapture', cancelButtonDrag\)/);
+      assert.match(source, /title\?\.addEventListener\('pointercancel', event => finishPanelDrag\(event, true\)\)/);
+      assert.match(source, /resizeHandle\?\.addEventListener\('pointercancel', event => finishResize\(event, true\)\)/);
+      assert.match(source, /const finishPanelDrag = \(event, canceled = false\)/);
+      assert.match(source, /const finishResize = \(event, canceled = false\)/);
+      assert.match(source, /settings\.postNarrationTrackerEnabled = Boolean\(event\.target\?\.checked\);\s*renderTrackerWidget\(getContext\(\)\)/);
+      assert.match(source, /settings\.trackerWidgetWidth = clampTrackerWidgetWidth/);
       assert.match(source, /settings\.trackerWidgetHeight = clampTrackerWidgetHeight/);
       assert.match(source, /body\.onchange = event =>/);
       assert.match(source, /event\.target\?\.closest\?\.\('\[data-spe-tracker-select-npc\]'\)/);
@@ -11048,13 +11108,17 @@ const tests = [
       assert.match(displaySource, /previousBoundCompanionExcludedName/);
       assert.match(displaySource, /present\[0\] \|\| knownElsewhere\[0\] \|\| archived\[0\]/);
 
-      assert.match(styleSource, /width: min\(\$\{TRACKER_WIDGET_DEFAULT_WIDTH\}px, calc\(100vw - 16px\)\)/);
-      assert.match(styleSource, /min-width: min\(\$\{TRACKER_WIDGET_MIN_WIDTH\}px, calc\(100vw - 16px\)\)/);
+      assert.match(styleSource, /width: \$\{TRACKER_WIDGET_DEFAULT_WIDTH\}px/);
+      assert.match(styleSource, /min-width: 1px/);
+      assert.match(styleSource, /max-width: max\(1px, calc\(100vw - 16px\)\)/);
       assert.match(styleSource, /grid-template-columns: 50px minmax\(0, 1fr\)/);
+      assert.match(styleSource, /#\$\{TRACKER_WIDGET_BUTTON_ID\}[\s\S]*width: \$\{TRACKER_WIDGET_BUTTON_SIZE\}px/);
+      assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\}[\s\S]*position: absolute[\s\S]*left: 0[\s\S]*top: 0/);
+      assert.match(styleSource, /z-index: 1900/);
       assert.match(styleSource, /\.structured-preflight-tracker-widget-title \{[\s\S]*cursor: grab;[\s\S]*touch-action: none/);
       assert.match(styleSource, /\.structured-preflight-tracker-tabs \{[\s\S]*flex-direction: column/);
       assert.match(styleSource, /\.structured-preflight-tracker-scroll-region \{[\s\S]*overflow-y: auto/);
-      assert.match(styleSource, /\.structured-preflight-tracker-resize-handle \{[\s\S]*cursor: ns-resize/);
+      assert.match(styleSource, /\.structured-preflight-tracker-resize-handle \{[\s\S]*cursor: nwse-resize/);
       assert.match(styleSource, /\.structured-preflight-tracker-quality-row/);
       assert.match(styleSource, /\.structured-preflight-tracker-quality/);
       assert.match(styleSource, /\.structured-preflight-tracker-npc-select/);
@@ -15785,8 +15849,13 @@ const tests = [
       assert.match(source, /id="spe_player_additional_details"/);
       assert.match(source, /Use my notes \+ fill the rest/);
       assert.match(source, /data-spe-player-additional-details/);
-      assert.match(source, /function updatePlayerIdentityOptionalFields/);
-      assert.match(source, /\[hidden\]\s*\{\s*display: none !important;/);
+       assert.match(source, /function updatePlayerIdentityOptionalFields/);
+       assert.match(source, /function syncPlayerSetupDraft\(card, context = getContext\(\)\)/);
+       assert.match(source, /input\.addEventListener\('input', syncDraft\)/);
+       assert.match(source, /input\.addEventListener\('change', syncDraft\)/);
+       assert.match(source, /syncIdentityInputs\(root\.creator, card\)/);
+       assert.match(source, /saveMetadataDebounced\(context\)/);
+       assert.match(source, /\[hidden\]\s*\{\s*display: none !important;/);
       assert.doesNotMatch(source, /max-height: min\(74vh, 42rem\)/);
       assert.doesNotMatch(source, /max-height: 72vh;/);
       assert.match(source, /#\$\{PLAYER_SETUP_CARD_ID\} textarea \{\s*min-height: 5\.5rem;\s*max-height: 90vh;\s*max-height: 90dvh;\s*overflow-y: auto;\s*resize: vertical;/);
@@ -15795,11 +15864,11 @@ const tests = [
       assert.doesNotMatch(source, /id="spe_player_race_pick"/);
       assert.doesNotMatch(source, /id="spe_player_appearance"/);
       assert.match(source, /delete creator\.identity\.characterName/);
-      assert.match(source, /creator\.identity\.sex = String\(document\.getElementById\('spe_player_sex'\)/);
-      assert.match(source, /creator\.identity\.genre = normalizePlayerAdventureGenre\(genre\)/);
-      assert.match(source, /const additionalDetailsMode = document\.getElementById\('spe_player_additional_details_mode'\)/);
-      assert.match(source, /creator\.identity\.additionalDetailsMode = additionalDetailsMode === 'user' \? 'user' : 'system'/);
-      assert.match(source, /creator\.identity\.additionalDetails = String\(document\.getElementById\('spe_player_additional_details'\)/);
+       assert.match(source, /if \(sexInput\) creator\.identity\.sex = String\(sexInput\.value \?\? ''\)\.trim\(\)/);
+       assert.match(source, /if \(genreInput\) creator\.identity\.genre = normalizePlayerAdventureGenre\(genreInput\.value\)/);
+       assert.match(source, /const additionalDetailsModeInput = getField\('spe_player_additional_details_mode'\)/);
+       assert.match(source, /creator\.identity\.additionalDetailsMode = additionalDetailsMode === 'user' \? 'user' : 'system'/);
+       assert.match(source, /if \(additionalDetailsInput\) creator\.identity\.additionalDetails = String\(additionalDetailsInput\.value \?\? ''\)\.trim\(\)/);
       assert.match(source, /buildNewCharacterNameInstruction\(\)/);
       assert.match(source, /buildNewCharacterSexInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterGenreInstruction\(identity\)/);
@@ -15916,7 +15985,7 @@ const tests = [
       assert.match(source, /function buildPersonaPointBuyState\(analysis, genre = 'Fantasy'\)/);
       assert.match(source, /root\.creator = buildPersonaPointBuyState\(analysis, getActiveAdventureGenre\(context\)\)/);
       assert.match(source, /function buildPlayerPersonaSheetHtml[\s\S]*?<select id="spe_player_genre"/);
-      assert.match(source, /syncPlayerGenreInput\(root\.creator\);\s*\n\s*state\.playerSetupBusy = true/);
+       assert.match(source, /syncPlayerGenreInput\(root\.creator, details\.card \|\| document\);\s*\n\s*state\.playerSetupBusy = true/);
       assert.match(existingPersonaGeneration, /const genre = normalizePlayerAdventureGenre\(creator\.identity\?\.genre \|\| 'Fantasy'\)/);
       assert.match(existingPersonaGeneration, /genre,/);
       assert.match(existingPersonaGeneration, /SELECTED GENRE: \$\{genre\}/);
