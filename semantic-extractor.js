@@ -5420,20 +5420,15 @@ function validateNormalizedLedger(ledger, raw) {
 
 export function validateSemanticWorldProgression(ledger, options = {}, context = {}) {
     const transition = normalizeWorldTransition(ledger?.worldTransition || {});
-    const transitionChangesState = transition.reputationLocation !== null
-        || transition.place !== null
-        || transition.area !== null
-        || transition.indoors !== null
-        || transition.timeAdvance !== 'none'
-        || Boolean(transition.timeOfDay);
-    if (transitionChangesState && !semanticEvidenceAppearsInLatestInput(transition.evidence, options.latestUserText)) {
-        throw new Error('WorldTransition changed scene state without an exact quote grounded in the latest user input.');
-    }
     const beforeWorldState = normalizeWorldState(options?.worldStateSnapshot || {});
     const assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
         assumeSuccess: true,
         seed: 'semantic-world-transition',
     });
+    const transitionChangesState = JSON.stringify(beforeWorldState) !== JSON.stringify(assumedWorldState);
+    if (transitionChangesState && !semanticEvidenceAppearsInLatestInput(transition.evidence, options.latestUserText)) {
+        throw new Error('WorldTransition changed scene state without an exact quote grounded in the latest user input.');
+    }
     const progression = normalizeWorldProgression(options?.worldProgressionSnapshot || {});
     const coverage = validateWorldProgressionAdvancementCoverage(
         progression,

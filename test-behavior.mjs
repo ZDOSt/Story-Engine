@@ -12094,6 +12094,24 @@ const tests = [
   {
     name: '33c.5d semantic transitions require latest-input evidence and protect persona aliases',
     run() {
+      const dialogueOnlyLedger = {
+        worldTransition: {
+          reputationLocation: 'none',
+          place: '(none)',
+          area: 'none',
+          indoors: 'unchanged',
+          timeAdvance: 'none',
+          timeOfDay: 'unchanged',
+          evidence: '(none)',
+        },
+        worldProgression: { advancements: [] },
+      };
+      assert.doesNotThrow(() => validateSemanticWorldProgression(
+        dialogueOnlyLedger,
+        { latestUserText: '"Hello there."' },
+        context('"Hello there."'),
+      ));
+
       const transitionLedger = {
         worldTransition: {
           timeAdvance: 'day',
@@ -15237,7 +15255,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.37');
+      assert.equal(manifest.version, '0.9.38');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
