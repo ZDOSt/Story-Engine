@@ -85,6 +85,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
             semanticProfile: options?.semanticProfileName || undefined,
         };
         } catch (error) {
+            options?.signal?.throwIfAborted?.();
             if (!isRecoverableSemanticToolCallError(error)) {
                 const message = error instanceof Error ? error.message : String(error);
                 throw new Error(`Semantic tool-call pass returned no valid ledger. Generation aborted before narration. ${message}`);
@@ -98,7 +99,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
             console.warn('[Structured Preflight Engines] semantic tool-call failed; falling back to compact ledger.', error);
             raw = options?.semanticProfileId
                 ? await generateSemanticRawWithProfile(prompt, responseLength, options)
-                : await generateSemanticRaw(context, prompt, responseLength);
+                : await generateSemanticRaw(context, prompt, responseLength, options);
             extractionMeta = {
                 source: options?.semanticProfileId
                     ? `SillyTavern direct connection profile compact preflight ledger fallback + local validation (${options.semanticProfileName || options.semanticProfileId})`
@@ -114,7 +115,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
     } else {
         raw = options?.semanticProfileId
             ? await generateSemanticRawWithProfile(prompt, responseLength, options)
-            : await generateSemanticRaw(context, prompt, responseLength);
+            : await generateSemanticRaw(context, prompt, responseLength, options);
         extractionMeta = {
             source: options?.semanticProfileId
                 ? `SillyTavern direct connection profile compact preflight ledger + local validation (${options.semanticProfileName || options.semanticProfileId})`
@@ -230,12 +231,16 @@ function extractRecentPromptText(promptContext, options = {}) {
     return texts.reverse().join('\n');
 }
 
-async function generateSemanticRaw(context, prompt, responseLength) {
+async function generateSemanticRaw(context, prompt, responseLength, requestOptions = {}) {
     const options = { prompt };
     if (Number.isFinite(responseLength) && responseLength > 0) {
         options.responseLength = responseLength;
     }
-    return await generateRawData(options, context, { purpose: 'semantic preflight' });
+    return await generateRawData(options, context, {
+        purpose: 'semantic preflight',
+        signal: requestOptions.signal,
+        beforeAbort: requestOptions.beforeRawAbort,
+    });
 }
 
 async function generateSemanticRawWithProfile(prompt, responseLength, options = {}) {
@@ -252,6 +257,7 @@ async function generateSemanticRawWithProfile(prompt, responseLength, options = 
         },
         extractData: true,
         preparePayload: applyStoryEngineThinkingDisabledPayload,
+        signal: options.signal,
     });
     return extractGeneratedText(result);
 }
@@ -284,9 +290,11 @@ async function generateSemanticToolCall(context, prompt, responseLength, options
     const toolPrompt = buildSemanticToolPrompt(prompt);
     try {
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
+            purpose: 'semantic preflight tool call',
             buildTool: buildSemanticPreflightTool,
             buildToolChoice: buildSemanticToolChoice,
             preparePayload: payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort),
+            signal: options.signal,
         });
         if (raw?.error) {
             throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });

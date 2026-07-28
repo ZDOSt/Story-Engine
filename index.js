@@ -642,6 +642,7 @@ const state = {
 
     progressToasts: new Set(),
     lastStoryEngineModelCallEndedAt: 0,
+    modelRequestAbortControllers: new Set(),
     pendingRunCleanupTimer: null,
     playerSetupBusy: false,
     progressionBusy: false,
@@ -932,6 +933,21 @@ function assertStoryEngineModelRequestCurrent(options = {}) {
 async function withStoryEngineModelRequest(callback, options = {}) {
     await waitForStoryEngineModelCallSpacing('Story Engine model call');
     assertStoryEngineModelRequestCurrent(options);
+    const requestController = typeof AbortController === 'function' ? new AbortController() : null;
+    const parentSignal = options?.signal || null;
+    const abortFromParent = () => requestController?.abort(parentSignal?.reason);
+    if (requestController) {
+        state.modelRequestAbortControllers.add(requestController);
+        if (parentSignal?.aborted) {
+            abortFromParent();
+        } else {
+            parentSignal?.addEventListener?.('abort', abortFromParent, { once: true });
+        }
+    }
+    const scopedOptions = {
+        ...options,
+        signal: requestController?.signal || parentSignal,
+    };
     const requestToken = storyEngineModelRequestGate.acquire();
     const releaseRequestToken = () => {
         if (storyEngineModelRequestGate.release(requestToken)) {
@@ -942,16 +958,30 @@ async function withStoryEngineModelRequest(callback, options = {}) {
         ? options.registerCancellation(releaseRequestToken)
         : null;
     try {
-        const result = await callback();
-        assertStoryEngineModelRequestCurrent(options);
+        scopedOptions.signal?.throwIfAborted?.();
+        const result = await callback(scopedOptions);
+        scopedOptions.signal?.throwIfAborted?.();
+        assertStoryEngineModelRequestCurrent(scopedOptions);
         return result;
     } finally {
         unregisterCancellation?.();
+        parentSignal?.removeEventListener?.('abort', abortFromParent);
+        if (requestController) state.modelRequestAbortControllers.delete(requestController);
         releaseRequestToken();
     }
 }
 
+function abortStoryEngineModelRequests(reason = 'Story Engine pipeline invalidated.') {
+    const error = new Error(reason);
+    error.name = 'AbortError';
+    for (const controller of state.modelRequestAbortControllers) {
+        if (!controller.signal.aborted) controller.abort(error);
+    }
+    state.modelRequestAbortControllers.clear();
+}
+
 function clearThinkingDisableRuntimeState() {
+    abortStoryEngineModelRequests();
     storyEngineModelRequestGate.clear();
     state.startAdventureReasoningCleanupPending = false;
 }
@@ -2386,6 +2416,7 @@ function failNarratorGeneration(generation, error) {
     clearPendingRunCleanupTimer();
     setChatInputLocked(false);
     clearRuntimePrompts();
+    state.generationActive = false;
     state.pendingRun = null;
     state.lastNarratorHandoff = '';
     state.pendingGeneration = null;
@@ -4590,7 +4621,7 @@ function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null, pendin
 }
 
 
-function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = [], latentFavors = [], worldMemory = {}) {
+function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = [], latentFavors = [], hiddenState = {}) {
     const update = {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
         user: normalizeTrackerUserState(displaySnapshot?.user || {}),
@@ -4603,9 +4634,12 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, 
         economy: normalizeEconomyState(displaySnapshot?.economy || {}),
         boundCompanion: normalizeBoundCompanionState(displaySnapshot?.boundCompanion || {}),
         pendingBoundary: normalizePendingBoundaryState(displaySnapshot?.pendingBoundary || {}),
-        descriptiveArchive: normalizeDescriptiveArchive(worldMemory.descriptiveArchive || {}),
-        worldProgression: normalizeWorldProgression(worldMemory.worldProgression || {}),
+        descriptiveArchive: normalizeDescriptiveArchive(hiddenState.descriptiveArchive || {}),
+        worldProgression: normalizeWorldProgression(hiddenState.worldProgression || {}),
     };
+    if (hiddenState.rapportClock) {
+        update.rapportClock = normalizeRapportClockState(hiddenState.rapportClock);
+    }
     if (hiddenHealth) {
         update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
     }
@@ -10258,11 +10292,15 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
     const requestIdentity = createStoryEngineEpochIdentity(context);
     const bypassToken = promptReadyBypassGate.acquire();
     try {
-        return await withStoryEngineModelRequest(async () => {
+        return await withStoryEngineModelRequest(async modelRequest => {
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'progression generation' });
+            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, {
+                purpose: 'progression generation',
+                signal: modelRequest.signal,
+                beforeAbort: markInternalGenerationStop,
+            });
         }, {
             isCurrent: () => isCurrentStoryEngineEpoch(requestIdentity, context),
             expiredMessage: 'Progression generation expired because the active chat changed.',
@@ -10859,11 +10897,15 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
     const requestIdentity = createStoryEngineEpochIdentity(context);
     const bypassToken = promptReadyBypassGate.acquire();
     try {
-        return await withStoryEngineModelRequest(async () => {
+        return await withStoryEngineModelRequest(async modelRequest => {
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'player setup' });
+            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, {
+                purpose: 'player setup',
+                signal: modelRequest.signal,
+                beforeAbort: markInternalGenerationStop,
+            });
         }, {
             isCurrent: () => isCurrentStoryEngineEpoch(requestIdentity, context),
             expiredMessage: 'Player setup generation expired because the active chat changed.',
@@ -10893,7 +10935,7 @@ async function requestPlayerSetupStructured(prompt, responseLength, generationOp
         const usesChatCompletion = String(context.mainApi || '').toLowerCase() === 'openai';
         if (usesChatCompletion) {
             try {
-                return await runStructuredModelRequest(async () => {
+                return await runStructuredModelRequest(async modelRequest => {
                     const raw = await sendDefaultChatCompletionToolRequest(
                         appendCharacterSheetOutputInstruction(prompt, 'tool'),
                         responseLength,
@@ -10903,6 +10945,7 @@ async function requestPlayerSetupStructured(prompt, responseLength, generationOp
                             buildTool: source => buildCharacterSheetTool(source, generationOptions),
                             buildToolChoice: buildCharacterSheetToolChoice,
                             preparePayload: applyStoryEngineThinkingDisabledPayload,
+                            signal: modelRequest.signal,
                         },
                     );
                     if (raw?.error) {
@@ -10921,14 +10964,18 @@ async function requestPlayerSetupStructured(prompt, responseLength, generationOp
         }
 
         try {
-            return await runStructuredModelRequest(async () => {
+            return await runStructuredModelRequest(async modelRequest => {
                 const jsonSchema = buildCharacterSheetJsonSchema(generationOptions);
                 const schemaPrompt = appendCharacterSheetOutputInstruction(prompt, 'json', usesChatCompletion ? null : jsonSchema.value);
                 const raw = await generateRawData({
                     prompt: schemaPrompt,
                     responseLength,
                     ...(usesChatCompletion ? { jsonSchema } : {}),
-                }, context, { purpose: 'structured character-sheet generation' });
+                }, context, {
+                    purpose: 'structured character-sheet generation',
+                    signal: modelRequest.signal,
+                    beforeAbort: markInternalGenerationStop,
+                });
                 const structuredPayload = usesChatCompletion ? raw : extractGeneratedText(raw);
                 return normalizeCharacterSheetPayload(parseCharacterSheetJsonPayload(structuredPayload), generationOptions);
             });
@@ -11501,7 +11548,7 @@ async function requestTargetedProseBanRepair(findings, rules, requestOptions = {
     const toolDefinition = buildPostNarrationToolDefinition(PROSE_GUARD_TOOL_NAME, { includeSentenceRepairs: true });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
-        return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
+        return await withStoryEngineModelRequest(modelRequest => withProseGuardGenerationSettings(async settings => {
             return await requestPostNarrationUtility({
                 settings,
                 prompt,
@@ -11509,9 +11556,13 @@ async function requestTargetedProseBanRepair(findings, rules, requestOptions = {
                 toolDefinition,
                 purpose: 'targeted Prose Guard repair',
                 validateStructured: raw => parseTargetedProseGuardResponse(raw),
-                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' }),
+                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), {
+                    purpose: 'targeted Prose Guard repair',
+                    signal: modelRequest.signal,
+                    beforeAbort: markInternalGenerationStop,
+                }),
                 fallbackAfterStructuredFailure: false,
-            }, requestOptions);
+            }, modelRequest);
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -12038,7 +12089,7 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
     });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
-        return await withStoryEngineModelRequest(() => withTrackerGenerationSettings(async settings => {
+        return await withStoryEngineModelRequest(modelRequest => withTrackerGenerationSettings(async settings => {
             return await requestPostNarrationUtility({
                 settings,
                 prompt,
@@ -12049,8 +12100,12 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
                     parsePostNarrationTrackerResponse(raw, narrationText);
                     parsePostNarrationWorldMemoryResponse(raw);
                 },
-                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' }),
-            }, requestOptions);
+                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), {
+                    purpose: 'post-narration tracker update',
+                    signal: modelRequest.signal,
+                    beforeAbort: markInternalGenerationStop,
+                }),
+            }, modelRequest);
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -12412,6 +12467,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 {
                     descriptiveArchive: pendingRun.descriptiveArchiveAfter || pendingRun.descriptiveArchiveBefore || {},
                     worldProgression: pendingRun.worldProgressionAfter || pendingRun.worldProgressionBefore || {},
+                    rapportClock: pendingRun.rapportClockAfter,
                 },
             ), {
                 save: false,
@@ -13188,6 +13244,7 @@ async function handleChatCompletionPromptReady(eventData) {
             boundCompanionAfter: report.trackerUpdate?.boundCompanion || pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundaryBefore: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             pendingBoundaryAfter: report.trackerUpdate?.pendingBoundary || pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+            rapportClockAfter: report.trackerUpdate?.rapportClock || null,
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
@@ -13263,7 +13320,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             throw new Error('Story Engine semantic run expired before model generation.');
         }
 
-        const semanticLedger = await withStoryEngineModelRequest(() => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
+        const semanticLedger = await withStoryEngineModelRequest(modelRequest => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
             playerTrackerSnapshot: pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             powerActorSnapshot: pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
@@ -13283,6 +13340,8 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             latestUserText: pendingGeneration?.latestUserText || getLatestUserText(context?.chat),
             proxyUserAction: pendingGeneration?.mode === 'proxy' ? pendingGeneration?.latestUserText : '',
             inlineProxyInstructions: pendingGeneration?.inlineProxyInstructions || [],
+            signal: modelRequest.signal,
+            beforeRawAbort: markInternalGenerationStop,
         })), {
             isCurrent: () => isCurrentStoryEngineRun(runIdentity, context),
             expiredMessage: 'Story Engine semantic run expired before its model request completed.',

@@ -939,6 +939,13 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.pendingBoundary) {
         root.pendingBoundary = normalizePendingBoundaryState(trackerUpdate.pendingBoundary);
     }
+    if (trackerUpdate.rapportClock) {
+        const rapportClock = normalizeRapportClock(trackerUpdate.rapportClock);
+        root.rapportClock = {
+            activeMs: rapportClock.activeMs,
+            lastActivityAt: rapportClock.lastActivityAt,
+        };
+    }
     if (trackerUpdate.health) {
         root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
     } else {
@@ -1096,6 +1103,10 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const trackerUpdate = {
         ...visibleTrackerUpdate,
         health: healthAfter,
+        rapportClock: {
+            activeMs: rapportClock.activeMs,
+            lastActivityAt: rapportClock.lastActivityAt,
+        },
         boundCompanion: boundCompanion.state,
         pendingBoundary: pendingBoundaryBefore,
         latentGrievances: powerActors.latentGrievances,
@@ -1424,8 +1435,7 @@ function advanceRapportClock(context, audit) {
         return clock;
     }
 
-    const root = context.chatMetadata.structuredPreflightTracker || { npcs: {}, user: {}, rapportClock: normalizeRapportClock() };
-    const previous = normalizeRapportClock(root.rapportClock);
+    const previous = normalizeRapportClock(context.chatMetadata.structuredPreflightTracker?.rapportClock);
     const now = Date.now();
     const elapsedMs = previous.lastActivityAt > 0 ? Math.max(0, now - previous.lastActivityAt) : 0;
     const activeDeltaMs = elapsedMs > 0 && elapsedMs <= RAPPORT_ACTIVE_IDLE_LIMIT_MS ? elapsedMs : 0;
@@ -1437,13 +1447,6 @@ function advanceRapportClock(context, audit) {
         idleGapIgnored,
     };
 
-    root.npcs = root.npcs || {};
-    root.user = root.user || {};
-    root.rapportClock = {
-        activeMs: clock.activeMs,
-        lastActivityAt: clock.lastActivityAt,
-    };
-    context.chatMetadata.structuredPreflightTracker = root;
     audit.push(`RAPPORT_CLOCK=${compact({ ...clock, elapsedMs, activeDeltaMs, idleGapIgnored })}`);
     return clock;
 }

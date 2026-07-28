@@ -17,6 +17,7 @@ import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
+import { generateRawData as generateRawDataAdapter } from './st-adapter.js';
 
 const stakeKeys = [
   'no_roll',
@@ -2339,6 +2340,38 @@ const tests = [
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 1);
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEligible, 'N');
+    },
+  },
+  {
+    name: '12a.0 rapport clock is projected during resolution and committed with tracker state',
+    async run() {
+      const realDateNow = Date.now;
+      const now = 1700000000000;
+      const initialClock = { activeMs: 5000, lastActivityAt: now - 1000 };
+      const testContext = context('I look around.', {}, {}, undefined, null, { ...initialClock });
+      try {
+        Date.now = () => now;
+        const report = withDice([10, 10, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(
+          baseLedger(),
+          {},
+          testContext,
+          'normal',
+        ));
+
+        assert.deepEqual(testContext.chatMetadata.structuredPreflightTracker.rapportClock, initialClock);
+        assert.deepEqual(report.trackerUpdate.rapportClock, {
+          activeMs: 6000,
+          lastActivityAt: now,
+        });
+
+        await saveTrackerUpdate(testContext, report.trackerUpdate, { save: false });
+        assert.deepEqual(testContext.chatMetadata.structuredPreflightTracker.rapportClock, {
+          activeMs: 6000,
+          lastActivityAt: now,
+        });
+      } finally {
+        Date.now = realDateNow;
+      }
     },
   },
   {
@@ -15255,7 +15288,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.38');
+      assert.equal(manifest.version, '0.9.39');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -16139,7 +16172,7 @@ const tests = [
       assert.equal((source.match(/const powerProfile = getCharacterSheetPowerProfile\(genre\);/g) || []).length >= 3, true);
       assert.equal((source.match(/`SELECTED GENRE: \$\{genre\}\\n`/g) || []).length, 3);
       assert.match(source, /Stats may inform flavor but must never become a stat boost or an amplified ordinary action/);
-      assert.match(source, /async function requestProgressionText[\s\S]*return await generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{ purpose: 'progression generation' \}\)/);
+      assert.match(source, /async function requestProgressionText[\s\S]*return await generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{[\s\S]*?purpose: 'progression generation',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
       assert.match(source, /function getProgressionRoot/);
       assert.match(source, /function progressionPending/);
       assert.match(source, /renderProgressionCard\(context\)/);
@@ -16417,11 +16450,14 @@ const tests = [
       assert.match(adapterSource, /export async function generate\(type = 'normal', options = \{\}, dryRun = false, context = getContext\(\)\)/);
       assert.match(indexSource, /generateRawData,/);
       assert.match(indexSource, /generate as generateSillyTavern,/);
-      assert.match(indexSource, /generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{ purpose: 'player setup' \}\)/);
-      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{ purpose: 'targeted Prose Guard repair' \}\)/);
+      assert.match(indexSource, /generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{[\s\S]*?purpose: 'player setup',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
+      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{[\s\S]*?purpose: 'targeted Prose Guard repair',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
       assert.doesNotMatch(indexSource, /purpose: 'Prose Guard'/);
-      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{ purpose: 'post-narration tracker update' \}\)/);
-      assert.match(semanticSource, /generateRawData\(options, context, \{ purpose: 'semantic preflight' \}\)/);
+      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{[\s\S]*?purpose: 'post-narration tracker update',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
+      assert.match(semanticSource, /generateRawData\(options, context, \{[\s\S]*?purpose: 'semantic preflight',[\s\S]*?signal: requestOptions\.signal,[\s\S]*?beforeAbort: requestOptions\.beforeRawAbort/);
+      assert.match(adapterSource, /export async function generateRawData[\s\S]*stopGeneration\(context\)[\s\S]*signal\.addEventListener\('abort', abortHandler/);
+      assert.match(adapterSource, /sendDefaultChatCompletionToolRequest[\s\S]*?const signal = options\?\.signal \|\| null;/);
+      assert.match(adapterSource, /sendDefaultChatCompletionToolRequest[\s\S]*?fetch\('\/api\/backends\/chat-completions\/generate',[\s\S]*?signal,[\s\S]*?\}\);/);
       assert.doesNotMatch(indexSource, /context(?:\?\.|\.)generateRawData\s*\(/);
       assert.doesNotMatch(semanticSource, /context(?:\?\.|\.)generateRawData\s*\(/);
       assert.doesNotMatch(indexSource, /context(?:\?\.|\.)generate\s*\(/);
@@ -17259,13 +17295,13 @@ const tests = [
       assert.match(source, /semanticStopController\.claim\(stopOwnerId, SEMANTIC_PREFLIGHT_STOP_SENTINEL\)/);
       assert.match(source, /semanticStopController\.release\(stopOwnerId\)/);
       assert.match(source, /function invalidateStoryEnginePipeline\(\) \{[\s\S]*semanticStopController\.invalidate\(\)/);
-      assert.match(source, /function withStoryEngineModelRequest\(callback, options = \{\}\)[\s\S]*assertStoryEngineModelRequestCurrent\(options\)[\s\S]*await callback\(\)[\s\S]*assertStoryEngineModelRequestCurrent\(options\)/);
+      assert.match(source, /function withStoryEngineModelRequest\(callback, options = \{\}\)[\s\S]*modelRequestAbortControllers\.add\(requestController\)[\s\S]*await callback\(scopedOptions\)[\s\S]*assertStoryEngineModelRequestCurrent\(scopedOptions\)/);
       assert.match(source, /promptReadyBypassGate\.clear\(\)/);
       assert.match(source, /function invalidateStoryEnginePipeline\(\) \{[\s\S]*state\.preflightDryRun = null/);
       assert.doesNotMatch(source, /bypassPromptReady/);
       assert.match(source, /storyEngineModelRequestGate\.acquire\(\)/);
       assert.match(source, /storyEngineModelRequestGate\.release\(requestToken\)/);
-      assert.match(source, /function clearThinkingDisableRuntimeState\(\) \{[\s\S]*storyEngineModelRequestGate\.clear\(\)/);
+      assert.match(source, /function clearThinkingDisableRuntimeState\(\) \{[\s\S]*abortStoryEngineModelRequests\(\)[\s\S]*storyEngineModelRequestGate\.clear\(\)/);
       assert.doesNotMatch(source, /storyEngineModelRequestDepth/);
       assert.match(source, /function createTimedInternalRequestControl[\s\S]*isCurrent: \(\) => !cancelled && parentIsCurrent\(\)[\s\S]*cancel\(\) \{[\s\S]*release\(\)/);
       assert.match(source, /function createTimedInternalRequestControl[\s\S]*registerCancellation\(handler\)[\s\S]*for \(const handler of cancellationHandlers\) handler\(\)/);
@@ -17276,7 +17312,7 @@ const tests = [
       assert.match(source, /postNarrationFinalizers: new Map\(\)/);
       assert.match(source, /state\.postNarrationFinalizers\.get\(messageKey\) === finalizerOwner/);
       assert.match(source, /function failPreflightDryRun[\s\S]*state\.generationActive = false[\s\S]*state\.pendingGeneration = null[\s\S]*state\.activeRunId = null/);
-      assert.match(source, /function failNarratorGeneration[\s\S]*setChatInputLocked\(false\)[\s\S]*state\.pendingGeneration = null[\s\S]*state\.activeRunId = null/);
+      assert.match(source, /function failNarratorGeneration[\s\S]*setChatInputLocked\(false\)[\s\S]*state\.generationActive = false[\s\S]*state\.pendingGeneration = null[\s\S]*state\.activeRunId = null/);
       assert.match(source, /Promise\.resolve\(generateSillyTavern\(generation\.type \|\| 'normal', generateOptions, false, narratorContext\)\)[\s\S]*\.catch\(error => failNarratorGeneration\(generation, error\)\)/);
       assert.match(source, /function handleMessageDeleted[\s\S]*invalidateStoryEnginePipeline\(\)/);
       assert.match(source, /function handleMessageSwiped[\s\S]*invalidateStoryEnginePipeline\(\)/);
@@ -17289,6 +17325,52 @@ const tests = [
       assert.match(source, /structured_preflight_reset_player_setup[\s\S]*operationIdentity = createStoryEngineEpochIdentity\(context\)[\s\S]*isCurrentStoryEngineEpoch\(operationIdentity, context\)/);
       assert.match(source, /function saveManualUserTrackerItems[\s\S]*operationIdentity = createStoryEngineEpochIdentity\(context\)[\s\S]*isCurrentStoryEngineEpoch\(operationIdentity, context\)/);
       assert.match(source, /saveManualUserTrackerItems\([\s\S]*context, operationIdentity\)[\s\S]*isCurrentStoryEngineEpoch\(operationIdentity, context\)/);
+    },
+  },
+  {
+    name: '67d raw internal requests propagate cancellation into SillyTavern',
+    async run() {
+      const controller = new AbortController();
+      let stopCalls = 0;
+      let beforeAbortCalls = 0;
+      let rejectRawRequest = null;
+      const testContext = {
+        generateRawData() {
+          return new Promise((_, reject) => {
+            rejectRawRequest = reject;
+          });
+        },
+        stopGeneration() {
+          stopCalls += 1;
+          rejectRawRequest?.(new Error('Native raw generation stopped.'));
+        },
+      };
+
+      const request = generateRawDataAdapter({ prompt: 'test' }, testContext, {
+        signal: controller.signal,
+        beforeAbort: () => {
+          beforeAbortCalls += 1;
+        },
+      });
+      await Promise.resolve();
+      controller.abort(new Error('Request timed out.'));
+
+      await assert.rejects(request);
+      assert.equal(beforeAbortCalls, 1);
+      assert.equal(stopCalls, 1);
+
+      const immediateController = new AbortController();
+      let immediateStarts = 0;
+      const immediateRequest = generateRawDataAdapter({ prompt: 'test' }, {
+        generateRawData() {
+          immediateStarts += 1;
+          return Promise.resolve('unexpected');
+        },
+        stopGeneration() {},
+      }, { signal: immediateController.signal });
+      immediateController.abort(new Error('Request cancelled before transport start.'));
+      await assert.rejects(immediateRequest);
+      assert.equal(immediateStarts, 0);
     },
   },
   {
