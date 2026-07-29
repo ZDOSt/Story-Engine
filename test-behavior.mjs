@@ -12125,7 +12125,7 @@ const tests = [
     },
   },
   {
-    name: '33c.5d semantic transitions require latest-input evidence and protect persona aliases',
+    name: '33c.5d semantic transitions reject ungrounded state changes and protect persona aliases',
     run() {
       const dialogueOnlyLedger = {
         worldTransition: {
@@ -12145,7 +12145,52 @@ const tests = [
         context('"Hello there."'),
       ));
 
-      const transitionLedger = {
+      const establishedWorldState = normalizeWorldState({
+        reputationLocation: 'Eldermere',
+        place: 'The Copper Cup',
+        area: 'common room',
+        indoors: true,
+        positionEstablished: true,
+        dayIndex: 2,
+        timeOfDay: 'evening',
+        timeEstablished: true,
+      });
+      const inferredTransitions = [
+        { place: 'Market Square' },
+        { indoors: 'outdoors' },
+        { timeAdvance: 'slot' },
+        { timeOfDay: 'night' },
+      ];
+      for (const inferredTransition of inferredTransitions) {
+        const inferredLedger = {
+          worldTransition: {
+            reputationLocation: 'unchanged',
+            place: 'unchanged',
+            area: 'unchanged',
+            indoors: 'unchanged',
+            timeAdvance: 'none',
+            timeAdvanceCount: 1,
+            timeOfDay: 'unchanged',
+            requiresSuccess: false,
+            evidence: '(none)',
+            ...inferredTransition,
+          },
+          worldProgression: { advancements: [] },
+        };
+        assert.doesNotThrow(() => validateSemanticWorldProgression(
+          inferredLedger,
+          {
+            latestUserText: '"Hello there."',
+            worldStateSnapshot: establishedWorldState,
+          },
+          context('"Hello there."'),
+        ));
+        assert.deepEqual(projectWorldStateTransition(establishedWorldState, inferredLedger.worldTransition, {
+          assumeSuccess: true,
+        }), establishedWorldState);
+      }
+
+      const ungroundedTransitionLedger = {
         worldTransition: {
           timeAdvance: 'day',
           timeAdvanceCount: 1,
@@ -12153,16 +12198,77 @@ const tests = [
         },
         worldProgression: { advancements: [] },
       };
-      assert.throws(() => validateSemanticWorldProgression(
-        transitionLedger,
+      assert.doesNotThrow(() => validateSemanticWorldProgression(
+        ungroundedTransitionLedger,
         { latestUserText: 'I open the eastern door.' },
         context('I open the eastern door.'),
-      ), /exact quote grounded in the latest user input/);
+      ));
+      assert.equal(ungroundedTransitionLedger.worldTransition.timeAdvance, 'none');
+
+      const futurePlanState = applyWorldMemoryDelta({}, {
+        plans: {
+          create: [{
+            kind: 'scheduled',
+            actor: 'Rick',
+            objective: 'Leave Eldermere after three days',
+            location: 'Eldermere',
+            cause: 'Rick says he will leave Eldermere in three days.',
+            delayDays: 3,
+          }],
+        },
+      }, {
+        afterWorldState: establishedWorldState,
+        messageKey: 'chat:ungrounded-transition-plan',
+      });
+      const futurePlan = futurePlanState.progression.plans[0];
+      const ungroundedPlanLedger = {
+        worldTransition: {
+          timeAdvance: 'day',
+          timeAdvanceCount: 3,
+          evidence: 'I wait three days.',
+        },
+        worldProgression: {
+          advancements: [{
+            planId: futurePlan.id,
+            stageLabel: 'Departed',
+            consequence: 'Rick left Eldermere by the northern road.',
+            status: 'active',
+            nextDelayDays: 1,
+            evidence: [{
+              topic: 'Rick departed',
+              text: "Rick's room is empty and his travel bag is gone.",
+              route: 'location',
+              location: 'Eldermere',
+            }],
+          }],
+        },
+      };
       assert.doesNotThrow(() => validateSemanticWorldProgression(
-        transitionLedger,
+        ungroundedPlanLedger,
+        {
+          latestUserText: '"Hello there."',
+          worldStateSnapshot: establishedWorldState,
+          worldProgressionSnapshot: futurePlanState.progression,
+        },
+        context('"Hello there."'),
+      ));
+      assert.equal(ungroundedPlanLedger.worldTransition.timeAdvance, 'none');
+      assert.deepEqual(ungroundedPlanLedger.worldProgression.advancements, []);
+
+      const groundedTransitionLedger = {
+        worldTransition: {
+          timeAdvance: 'day',
+          timeAdvanceCount: 1,
+          evidence: 'I wait until morning.',
+        },
+        worldProgression: { advancements: [] },
+      };
+      assert.doesNotThrow(() => validateSemanticWorldProgression(
+        groundedTransitionLedger,
         { latestUserText: 'I wait until morning.' },
         context('I wait until morning.'),
       ));
+      assert.equal(groundedTransitionLedger.worldTransition.timeAdvance, 'day');
 
       const personaContext = context('', {}, {}, '**Name:** Мария\nPHY: 6\nMND: 6\nCHA: 6', null, {}, {
         name1: 'Ari',
@@ -15288,7 +15394,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.39');
+      assert.equal(manifest.version, '0.9.40');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);

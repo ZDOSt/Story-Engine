@@ -1085,15 +1085,47 @@ function buildSemanticPreflightSchema() {
         additionalProperties: false,
         required: ['reputationLocation', 'place', 'area', 'indoors', 'timeAdvance', 'timeAdvanceCount', 'timeOfDay', 'requiresSuccess', 'evidence'],
         properties: {
-            reputationLocation: { type: 'string' },
-            place: { type: 'string' },
-            area: { type: 'string' },
-            indoors: { type: 'string', enum: ['unchanged', 'indoors', 'outdoors'] },
-            timeAdvance: { type: 'string', enum: ['none', 'slot', 'overnight', 'day', 'explicit'] },
-            timeAdvanceCount: { type: 'integer', minimum: 1, maximum: 3650 },
-            timeOfDay: { type: 'string', enum: ['unchanged', 'morning', 'afternoon', 'evening', 'night'] },
-            requiresSuccess: { type: 'boolean' },
-            evidence: { type: 'string' },
+            reputationLocation: {
+                type: 'string',
+                description: 'Use unchanged unless the latest user input explicitly changes the current settlement, route, region, or reputation jurisdiction. Never copy or infer the existing scene state.',
+            },
+            place: {
+                type: 'string',
+                description: 'Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different place. Never copy or infer the existing place from context.',
+            },
+            area: {
+                type: 'string',
+                description: 'Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different sub-area. Never copy or infer the existing area from context.',
+            },
+            indoors: {
+                type: 'string',
+                enum: ['unchanged', 'indoors', 'outdoors'],
+                description: 'Use unchanged unless the latest user input explicitly crosses between indoors and outdoors.',
+            },
+            timeAdvance: {
+                type: 'string',
+                enum: ['none', 'slot', 'overnight', 'day', 'explicit'],
+                description: 'Use none unless the latest user input explicitly waits, sleeps, travels through, or skips time.',
+            },
+            timeAdvanceCount: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 3650,
+                description: 'Number of timeAdvance units explicitly established by the latest user input; use 1 when timeAdvance is none.',
+            },
+            timeOfDay: {
+                type: 'string',
+                enum: ['unchanged', 'morning', 'afternoon', 'evening', 'night'],
+                description: 'Use unchanged unless the latest user input explicitly establishes a new time of day.',
+            },
+            requiresSuccess: {
+                type: 'boolean',
+                description: 'True only when this explicit transition depends on the current stakes-bearing action succeeding.',
+            },
+            evidence: {
+                type: 'string',
+                description: 'Exact contiguous quote from the latest user input that establishes this transition, or (none) when every transition field is unchanged/none.',
+            },
         },
     };
     const worldEvidenceSchema = {
@@ -5427,22 +5459,40 @@ function validateNormalizedLedger(ledger, raw) {
 }
 
 export function validateSemanticWorldProgression(ledger, options = {}, context = {}) {
-    const transition = normalizeWorldTransition(ledger?.worldTransition || {});
+    let transition = normalizeWorldTransition(ledger?.worldTransition || {});
     const beforeWorldState = normalizeWorldState(options?.worldStateSnapshot || {});
-    const assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
+    let assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
         assumeSuccess: true,
         seed: 'semantic-world-transition',
     });
     const transitionChangesState = JSON.stringify(beforeWorldState) !== JSON.stringify(assumedWorldState);
+    let rejectedUngroundedTransition = false;
     if (transitionChangesState && !semanticEvidenceAppearsInLatestInput(transition.evidence, options.latestUserText)) {
-        throw new Error('WorldTransition changed scene state without an exact quote grounded in the latest user input.');
+        console.warn('[Story Engine] Rejected ungrounded WorldTransition; continuing without changing scene state.', transition);
+        transition = normalizeWorldTransition({});
+        ledger.worldTransition = transition;
+        assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
+            assumeSuccess: true,
+            seed: 'semantic-world-transition',
+        });
+        rejectedUngroundedTransition = true;
     }
     const progression = normalizeWorldProgression(options?.worldProgressionSnapshot || {});
-    const coverage = validateWorldProgressionAdvancementCoverage(
+    let coverage = validateWorldProgressionAdvancementCoverage(
         progression,
         ledger?.worldProgression?.advancements || [],
         assumedWorldState,
     );
+    if (rejectedUngroundedTransition && coverage.unexpected.length) {
+        const duePlanIds = new Set(coverage.duePlanIds);
+        ledger.worldProgression.advancements = coverage.advancements
+            .filter(advancement => duePlanIds.has(advancement.planId));
+        coverage = validateWorldProgressionAdvancementCoverage(
+            progression,
+            ledger.worldProgression.advancements,
+            assumedWorldState,
+        );
+    }
     if (!coverage.valid) {
         const details = [
             coverage.missing.length ? `missing=${coverage.missing.join(',')}` : '',
