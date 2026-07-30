@@ -1185,23 +1185,8 @@ function runBoundCompanionEngine({ before = {}, semanticDelta = {}, resolutionPa
         return { state, handoff: null };
     }
 
-    const directAddress = isBoundCompanionDirectAddress(state, resolutionPacket);
-    const triggers = directAddress
-        ? ['direct_address']
-        : collectBoundCompanionTriggers({ resolutionPacket, worldState, relationships });
+    const triggers = collectBoundCompanionTriggers({ resolutionPacket, worldState, relationships });
     const activeMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
-
-    if (directAddress) {
-        audit.push(`STEP 6.8 BOUND_COMPANION=direct_response triggers=${compact(triggers)}`);
-        return {
-            state,
-            handoff: buildBoundCompanionHandoff(state, {
-                mode: 'direct_response',
-                triggers,
-                reason: 'The latest user input directly addressed the established bound companion.',
-            }),
-        };
-    }
 
     if (!triggers.length) {
         audit.push('STEP 6.8 BOUND_COMPANION=silence reason=no_trigger');
@@ -1287,23 +1272,6 @@ function boundCompanionInterjectionThreshold(triggers = []) {
 function boundCompanionTriggerKey(triggers = [], context = {}) {
     const chatLength = Array.isArray(context?.chat) ? context.chat.length : 0;
     return `${chatLength}:${triggers.join('|')}`.slice(0, 120);
-}
-
-function isBoundCompanionDirectAddress(state = {}, resolutionPacket = {}) {
-    const source = boundCompanionSourceText(resolutionPacket);
-    if (!source) return false;
-    const name = String(state.name || '').trim();
-    if (name && new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(source)) {
-        return /\b(?:ask|asks|asked|say|says|said|tell|tells|told|speak|speaks|spoke|call|calls|called|answer|answers|answered|reply|replies|replied|whisper|whispers|whispered|think|thinks|thought)\b/i.test(source)
-            || /["']/.test(source);
-    }
-    const vessel = String(state.vessel || '').trim();
-    const vesselAddressed = vessel
-        && vessel.length <= 60
-        && !/\{\{user\}\}|user|body|mind|head/i.test(vessel)
-        && new RegExp(`\\b${escapeRegExp(vessel)}\\b`, 'i').test(source);
-    return (vesselAddressed || /\b(?:inner voice|voice in my head|voice inside|inside my head|inside my mind|in my mind|mentally)\b/i.test(source))
-        && /\b(?:ask|say|tell|speak|call|answer|reply|whisper|think)\b/i.test(source);
 }
 
 function collectBoundCompanionTriggers({ resolutionPacket = {}, relationships = [] } = {}) {

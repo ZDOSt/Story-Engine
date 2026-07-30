@@ -14877,6 +14877,10 @@ const tests = [
         indexSource.indexOf('const DEFAULT_SETTINGS'),
       );
 
+      assert.match(mainRulesSource, /INPUT COMMUNICATION BOUNDARY:/);
+      assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
+      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content/);
+      assert.match(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard/);
       assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
       assert.match(mainRulesSource, /function activeHandoff\(response, context\):/);
       assert.match(mainRulesSource, /If a character\/NPC actively participates in the current exchange, your response MUST end on ONE of/);
@@ -14890,7 +14894,9 @@ const tests = [
 
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
       assert.match(mainRulesSource, /When a character\/NPC responds to \{\{user\}\} or another present character\/NPC, they may make ONLY ONE conversational contribution per response/);
-      assert.match(mainRulesSource, /That contribution MUST account for the FULL input directed at them, including all questions and statements, rather than only the last sentence or question/);
+      assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content, NEVER audible dialogue/);
+      assert.match(mainRulesSource, /That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them/);
+      assert.match(mainRulesSource, /ONLY the intended recipient of explicit mental communication through an established link may respond to it/);
       assert.match(mainRulesSource, /Related points may be combined into one natural response\. Do not answer them point by point/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
       assert.match(mainRulesSource, /Once this contribution is complete, that character\/NPC's turn ENDS/);
@@ -14900,11 +14906,11 @@ const tests = [
       assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
-      assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Your response MUST begin at the FIRST moment AFTER the final action, observation, or line of dialogue in \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Your response MUST begin at the FIRST moment AFTER the final action, observation, line of audible dialogue, or private mental communication in \{\{user\}\}'s input/);
       assert.match(mainRulesSource, /Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development/);
       assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s input/);
       assert.match(mainRulesSource, /DO NOT re-describe unchanged environments, objects, or characters already established in \{\{user\}\}'s input or previous narration/);
-      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue/);
+      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication/);
 
       assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
       assert.match(mainRulesSource, /You MUST describe actions, sensations, objects, and events DIRECTLY by stating what they are, what they do, or what concrete effects they produce/);
@@ -14932,7 +14938,14 @@ const tests = [
       assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
       assert.match(mainRulesSource, /Treat ALL unstated information as HIDDEN and UNKNOWN by default/);
       assert.match(mainRulesSource, /Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established/);
-      assert.match(mainRulesSource, /Information may enter narration ONLY through DIRECT sensory evidence available to \{\{user\}\} in the current scene, explicit dialogue, readable text, or previously established scene facts/);
+      assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
+      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content/);
+      assert.match(mainRulesSource, /Any permitted mental communication in your response MUST be enclosed in single asterisks, NEVER in double quotation marks/);
+      assert.match(mainRulesSource, /Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when \{\{user\}\} does not italicize them/);
+      assert.match(mainRulesSource, /Information may enter narration ONLY through DIRECT sensory evidence available to \{\{user\}\} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts/);
+      assert.match(mainRulesSource, /A character\/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them/);
+      assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
+      assert.match(mainRulesSource, /even when \{\{user\}\} leaves it unformatted/);
       assert.match(mainRulesSource, /DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above/);
 
       assert.match(mainRulesSource, /function diegeticPhysicality\(response, context\):/);
@@ -15027,9 +15040,20 @@ const tests = [
           .replace(/\n{3,}/g, '\n\n')
           .trim();
       };
+      const extractInputBoundary = source => {
+        const start = source.indexOf('INPUT COMMUNICATION BOUNDARY:');
+        const end = source.indexOf('\n\nfunction RenderControlEngine', start);
+        assert.ok(start >= 0 && end > start, 'Input communication boundary should precede RenderControlEngine.');
+        return source.slice(start, end).replace(/\r/g, '');
+      };
 
       assertRuleOrder(mainRulesSource, mainRuleOrder, 'the full prose rules');
       assertRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator reminder');
+      assert.equal(
+        extractInputBoundary(handoffRulesSource),
+        extractInputBoundary(mainRulesSource),
+        'The narrator reminder must mirror the full input communication boundary exactly.',
+      );
 
       for (const name of mainRuleOrder) {
         assert.equal(
@@ -15394,7 +15418,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.40');
+      assert.equal(manifest.version, '0.9.41');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -16648,27 +16672,17 @@ const tests = [
       assert.equal(report.trackerUpdate.boundCompanion.active, true);
       assert.equal(report.trackerUpdate.boundCompanion.name, 'Surel');
       assert.equal(handoff.mode, 'silence');
-      assert.match(modelPrompt, /Surel: BOUND COMPANION SILENCE/);
-      assert.match(modelPrompt, /does NOT initiate dialogue this beat/);
+      assert.match(modelPrompt, /Surel: BOUND COMPANION RESPONSE RULE/);
+      assert.match(modelPrompt, /It may answer ONLY if the latest input genuinely directs audible dialogue or private mental communication to it/);
+      assert.match(modelPrompt, /Otherwise, it MUST remain silent because no unsolicited interjection is authorized this beat/);
     },
   },
   {
-    name: '59 directly addressing active bound companion allows a private response',
+    name: '59 established bound companion response authorization stays narrator-facing',
     run() {
       const report = runCase({
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Ask Surel what she thinks about the room.',
-            explicitMeans: 'I ask Surel, "What do you make of this place?"',
-            actionUnits: [
-              {
-                id: 'A1',
-                action: 'I ask Surel, "What do you make of this place?"',
-                evidence: 'directly addressed Surel',
-              },
-            ],
-          },
-        }),
+        userText: '*Surel, what do you think about this room?*',
+        ledger: baseLedger(),
         cardFields: {
           boundCompanion: {
             active: true,
@@ -16682,11 +16696,54 @@ const tests = [
       });
       const handoff = report.finalNarrativeHandoff.boundCompanion;
       const modelPrompt = prompt(report);
+      const deterministicSource = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
 
-      assert.equal(handoff.mode, 'direct_response');
-      assert.deepEqual(handoff.triggers, ['direct_address']);
-      assert.match(modelPrompt, /Surel: DIRECT RESPONSE ALLOWED/);
-      assert.match(modelPrompt, /Keep it distinct from \{\{user\}\}/);
+      assert.equal(handoff.mode, 'silence');
+      assert.deepEqual(handoff.triggers, []);
+      assert.match(modelPrompt, /Surel: BOUND COMPANION RESPONSE RULE/);
+      assert.match(modelPrompt, /Merely mentioning or thinking about the companion is NOT direct address/);
+      assert.match(modelPrompt, /Render any private companion response or interjection in single asterisks, never in double quotation marks/);
+      assert.match(modelPrompt, /Outside characters\/NPCs cannot perceive private mental content or the companion's private response/);
+      assert.doesNotMatch(deterministicSource, /isBoundCompanionDirectAddress|extractSingleAsteriskSegments|inputExplicitlyFramesMentalAddress|mode: 'direct_response'/);
+    },
+  },
+  {
+    name: '59a user phrasing cannot alter the deterministic companion interjection gate',
+    run() {
+      const boundCompanion = {
+        active: true,
+        name: 'Surel',
+        type: 'shared_vessel',
+        vessel: '{{user}}',
+        voice: 'dry, precise',
+        evidence: 'established shared vessel companion',
+      };
+      const runInput = userText => runCase({
+        userText,
+        ledger: baseLedger(),
+        cardFields: { boundCompanion },
+      }).finalNarrativeHandoff.boundCompanion;
+
+      const inputs = [
+        '*Surel, what do you think?*',
+        '*Should I ask Surel what she thinks?*',
+        '*I do not want to tell Surel yet.*',
+        'I remember Mira saying, "Surel, what do you think?"',
+        'I decide not to send a thought to Surel.',
+        '*Surel,\nwhat do you think?*',
+      ];
+      for (const input of inputs) {
+        const handoff = runInput(input);
+        assert.equal(handoff.mode, 'silence');
+        assert.deepEqual(handoff.triggers, []);
+      }
+
+      const unnamedReport = runCase({
+        userText: '*Can you hear me?*',
+        ledger: baseLedger(),
+        cardFields: { boundCompanion: { ...boundCompanion, name: '' } },
+      });
+      assert.match(prompt(unnamedReport), /\(unnamed bound companion\): BOUND COMPANION RESPONSE RULE/);
     },
   },
   {

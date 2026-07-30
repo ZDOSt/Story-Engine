@@ -339,7 +339,14 @@ room tastes
 place smells
 place tastes`;
 
-const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
+const DEFAULT_PROSE_RULES_PROMPT = String.raw`INPUT COMMUNICATION BOUNDARY:
+  - Text enclosed in double quotation marks ("...") is audible dialogue.
+  - Text enclosed in single asterisks (*...*) is private mental content.
+  - Italicized mental content is communication ONLY when explicitly directed to a recipient through an established telepathic, internal, or supernatural link. Otherwise, it is private inner thought.
+  - Unformatted text normally describes narration or action. It is NEVER audible dialogue.
+  - Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when {{user}} does not italicize them. Formatting is an explicit signal, not the sole privacy safeguard.
+
+function RenderControlEngine(response, input, context) {
   MANDATE:
     Your final response MUST STRICTLY follow the constraints below. Failure will render your response INVALID.
 
@@ -365,21 +372,23 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
   function inputChronology(response, input, context): {
     MANDATE:
-      {{user}}'s input has already occurred. Your response MUST begin at the FIRST moment AFTER the final action, observation, or line of dialogue in {{user}}'s input.
+      {{user}}'s input has already occurred. Your response MUST begin at the FIRST moment AFTER the final action, observation, line of audible dialogue, or private mental communication in {{user}}'s input.
 
       Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development.
 
     FORBIDDEN:
       - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input.
       - DO NOT re-describe unchanged environments, objects, or characters already established in {{user}}'s input or previous narration.
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication.
   }
 
   function dialogueTurn(response, context): {
     MANDATE:
       When a character/NPC responds to {{user}} or another present character/NPC, they may make ONLY ONE conversational contribution per response.
 
-      That contribution MUST account for the FULL input directed at them, including all questions and statements, rather than only the last sentence or question.
+      ONLY text enclosed in double quotation marks ("...") is audible dialogue. Text enclosed in single asterisks (*...*) is private mental content, NEVER audible dialogue.
+
+      That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them.
 
       Related points may be combined into one natural response. Do not answer them point by point.
 
@@ -388,6 +397,7 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       Once this contribution is complete, that character/NPC's turn ENDS.
 
     FORBIDDEN:
+      - DO NOT treat private thoughts, memories, observations, plans, conclusions, exposition, or other private information as something a character/NPC can answer. ONLY the intended recipient of explicit mental communication through an established link may respond to it.
       - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups.
       - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn.
   }
@@ -450,9 +460,21 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
       Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established.
 
-      Information may enter narration ONLY through DIRECT sensory evidence available to {{user}} in the current scene, explicit dialogue, readable text, or previously established scene facts.
+      Text enclosed in double quotation marks ("...") is audible dialogue.
+
+      Text enclosed in single asterisks (*...*) is private mental content. It is communication ONLY when explicitly directed to a recipient through an established telepathic, internal, or supernatural link. Otherwise, it is private inner thought. ALL other unquoted text is unspoken.
+
+      Any permitted mental communication in your response MUST be enclosed in single asterisks, NEVER in double quotation marks.
+
+      Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when {{user}} does not italicize them.
+
+      Information may enter narration ONLY through DIRECT sensory evidence available to {{user}} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts.
+
+      A character/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them.
 
     FORBIDDEN:
+      - DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication.
+      - DO NOT let a character/NPC hear, know, answer, quote, paraphrase, confirm, or react to private thoughts, memories, observations, intentions, plans, conclusions, exposition, or other private information, even when {{user}} leaves it unformatted.
       - DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above.
   }
 
