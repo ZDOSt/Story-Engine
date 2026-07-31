@@ -14877,10 +14877,12 @@ const tests = [
         indexSource.indexOf('const DEFAULT_SETTINGS'),
       );
 
-      assert.match(mainRulesSource, /INPUT COMMUNICATION BOUNDARY:/);
+      assert.match(mainRulesSource, /INPUT FORMAT:/);
       assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
-      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content/);
-      assert.match(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard/);
+      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
+      assert.match(mainRulesSource, /Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue/);
+      assert.match(mainRulesSource, /Unformatted text describes narration or action\. It is NEVER audible dialogue/);
+      assert.doesNotMatch(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard|Otherwise, it is private inner thought/);
       assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
       assert.match(mainRulesSource, /function activeHandoff\(response, context\):/);
       assert.match(mainRulesSource, /If a character\/NPC actively participates in the current exchange, your response MUST end on ONE of/);
@@ -14894,9 +14896,9 @@ const tests = [
 
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
       assert.match(mainRulesSource, /When a character\/NPC responds to \{\{user\}\} or another present character\/NPC, they may make ONLY ONE conversational contribution per response/);
-      assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content, NEVER audible dialogue/);
+      assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link\. It is NEVER ordinary inner thought or audible dialogue/);
       assert.match(mainRulesSource, /That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them/);
-      assert.match(mainRulesSource, /ONLY the intended recipient of explicit mental communication through an established link may respond to it/);
+      assert.match(mainRulesSource, /ONLY the intended recipient of private mental communication through an established link may respond to it/);
       assert.match(mainRulesSource, /Related points may be combined into one natural response\. Do not answer them point by point/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
       assert.match(mainRulesSource, /Once this contribution is complete, that character\/NPC's turn ENDS/);
@@ -14939,13 +14941,12 @@ const tests = [
       assert.match(mainRulesSource, /Treat ALL unstated information as HIDDEN and UNKNOWN by default/);
       assert.match(mainRulesSource, /Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established/);
       assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
-      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content/);
+      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
       assert.match(mainRulesSource, /Any permitted mental communication in your response MUST be enclosed in single asterisks, NEVER in double quotation marks/);
-      assert.match(mainRulesSource, /Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when \{\{user\}\} does not italicize them/);
       assert.match(mainRulesSource, /Information may enter narration ONLY through DIRECT sensory evidence available to \{\{user\}\} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts/);
       assert.match(mainRulesSource, /A character\/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them/);
       assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
-      assert.match(mainRulesSource, /even when \{\{user\}\} leaves it unformatted/);
+      assert.doesNotMatch(mainRulesSource, /even when \{\{user\}\} (?:does not italicize|leaves it unformatted)/);
       assert.match(mainRulesSource, /DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above/);
 
       assert.match(mainRulesSource, /function diegeticPhysicality\(response, context\):/);
@@ -15041,9 +15042,9 @@ const tests = [
           .trim();
       };
       const extractInputBoundary = source => {
-        const start = source.indexOf('INPUT COMMUNICATION BOUNDARY:');
+        const start = source.indexOf('INPUT FORMAT:');
         const end = source.indexOf('\n\nfunction RenderControlEngine', start);
-        assert.ok(start >= 0 && end > start, 'Input communication boundary should precede RenderControlEngine.');
+        assert.ok(start >= 0 && end > start, 'Input format should precede RenderControlEngine.');
         return source.slice(start, end).replace(/\r/g, '');
       };
 
@@ -15052,7 +15053,7 @@ const tests = [
       assert.equal(
         extractInputBoundary(handoffRulesSource),
         extractInputBoundary(mainRulesSource),
-        'The narrator reminder must mirror the full input communication boundary exactly.',
+        'The narrator reminder must mirror the full input format exactly.',
       );
 
       for (const name of mainRuleOrder) {
@@ -16703,7 +16704,7 @@ const tests = [
       assert.match(modelPrompt, /Surel: BOUND COMPANION RESPONSE RULE/);
       assert.match(modelPrompt, /Merely mentioning or thinking about the companion is NOT direct address/);
       assert.match(modelPrompt, /Render any private companion response or interjection in single asterisks, never in double quotation marks/);
-      assert.match(modelPrompt, /Outside characters\/NPCs cannot perceive private mental content or the companion's private response/);
+      assert.match(modelPrompt, /Outside characters\/NPCs cannot perceive private mental communication or the companion's private response/);
       assert.doesNotMatch(deterministicSource, /isBoundCompanionDirectAddress|extractSingleAsteriskSegments|inputExplicitlyFramesMentalAddress|mode: 'direct_response'/);
     },
   },

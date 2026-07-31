@@ -339,12 +339,11 @@ room tastes
 place smells
 place tastes`;
 
-const DEFAULT_PROSE_RULES_PROMPT = String.raw`INPUT COMMUNICATION BOUNDARY:
+const DEFAULT_PROSE_RULES_PROMPT = String.raw`INPUT FORMAT:
   - Text enclosed in double quotation marks ("...") is audible dialogue.
-  - Text enclosed in single asterisks (*...*) is private mental content.
-  - Italicized mental content is communication ONLY when explicitly directed to a recipient through an established telepathic, internal, or supernatural link. Otherwise, it is private inner thought.
-  - Unformatted text normally describes narration or action. It is NEVER audible dialogue.
-  - Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when {{user}} does not italicize them. Formatting is an explicit signal, not the sole privacy safeguard.
+  - Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.
+  - Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue.
+  - Unformatted text describes narration or action. It is NEVER audible dialogue.
 
 function RenderControlEngine(response, input, context) {
   MANDATE:
@@ -386,7 +385,7 @@ function RenderControlEngine(response, input, context) {
     MANDATE:
       When a character/NPC responds to {{user}} or another present character/NPC, they may make ONLY ONE conversational contribution per response.
 
-      ONLY text enclosed in double quotation marks ("...") is audible dialogue. Text enclosed in single asterisks (*...*) is private mental content, NEVER audible dialogue.
+      ONLY text enclosed in double quotation marks ("...") is audible dialogue. Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link. It is NEVER ordinary inner thought or audible dialogue.
 
       That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them.
 
@@ -397,7 +396,7 @@ function RenderControlEngine(response, input, context) {
       Once this contribution is complete, that character/NPC's turn ENDS.
 
     FORBIDDEN:
-      - DO NOT treat private thoughts, memories, observations, plans, conclusions, exposition, or other private information as something a character/NPC can answer. ONLY the intended recipient of explicit mental communication through an established link may respond to it.
+      - ONLY the intended recipient of private mental communication through an established link may respond to it.
       - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups.
       - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn.
   }
@@ -462,11 +461,9 @@ function RenderControlEngine(response, input, context) {
 
       Text enclosed in double quotation marks ("...") is audible dialogue.
 
-      Text enclosed in single asterisks (*...*) is private mental content. It is communication ONLY when explicitly directed to a recipient through an established telepathic, internal, or supernatural link. Otherwise, it is private inner thought. ALL other unquoted text is unspoken.
+      Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link. It is NEVER ordinary inner thought, emphasis, narration, or audible dialogue.
 
       Any permitted mental communication in your response MUST be enclosed in single asterisks, NEVER in double quotation marks.
-
-      Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when {{user}} does not italicize them.
 
       Information may enter narration ONLY through DIRECT sensory evidence available to {{user}} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts.
 
@@ -474,7 +471,6 @@ function RenderControlEngine(response, input, context) {
 
     FORBIDDEN:
       - DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication.
-      - DO NOT let a character/NPC hear, know, answer, quote, paraphrase, confirm, or react to private thoughts, memories, observations, intentions, plans, conclusions, exposition, or other private information, even when {{user}} leaves it unformatted.
       - DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above.
   }
 
