@@ -545,10 +545,12 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
         label: 'Summoning From Earth',
         guidance: 'Use a magic circle, ritual pull, classroom light, office interruption, or unseen summoning force that removes the character from Earth.',
         requiredOpeningTags: ['summon'],
+        schoolAgeCompatible: true,
         ageVariants: {
             school_age: {
-                label: 'Classroom / School Summoning',
-                guidance: 'Use a magic circle, classroom light, school corridor, club room, school trip, or unseen summoning force that removes {{user}} from an ordinary student context on Earth. Do not place {{user}} at work or in an adult professional role.',
+                label: 'Classroom / School Group Summoning',
+                guidance: 'Use a magic circle, classroom, school club, school trip, school festival, sports event, or summer activity involving {{user}} and classmates. Include a teacher or chaperone when naturally appropriate. The student group must be drawn from Earth together. Do not place {{user}} at work or in an adult professional role.',
+                requiredOpeningTags: ['group'],
             },
             adult_context: {
                 guidance: 'Use a magic circle, ritual pull, workplace interruption, home, street, transit, or unseen summoning force that removes {{user}} from Earth. Do not place {{user}} in a high-school classroom or high-school student role.',
@@ -584,10 +586,11 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
         label: 'Class / Group Transfer',
         guidance: 'Use classmates, coworkers, passengers, a party, a convention crowd, or strangers pulled at the same time. The group can be nearby, separated, or only partly visible.',
         requiredOpeningTags: ['group'],
+        schoolAgeCompatible: true,
         ageVariants: {
             school_age: {
                 label: 'Class / School Group Transfer',
-                guidance: 'Use classmates, a school club, a school trip, or another student group pulled from Earth at the same time. The group can be nearby, separated, or only partly visible. Do not use coworkers or an adult workplace.',
+                guidance: 'Use a school class, school club, school trip, school festival, sports event, or summer activity involving {{user}} and classmates. Include a teacher or chaperone when naturally appropriate. Pull the student group from Earth at the same time; the group can arrive together, separated, or only partly visible. Do not use coworkers or an adult workplace.',
             },
             adult_context: {
                 label: 'Adult Group Transfer',
@@ -852,10 +855,13 @@ function normalizeIsekaiCharacterAge(value) {
 
 function classifyIsekaiCharacterAge(age) {
     if (!Number.isInteger(age)) return 'unknown';
-    return age <= 18 ? 'school_age' : 'adult_context';
+    return age < 18 ? 'school_age' : 'adult_context';
 }
 
 function compatibleIsekaiEarthTransitionsForAge(ageGroup) {
+    if (ageGroup === 'school_age') {
+        return ISEKAI_EARTH_TRANSITIONS.filter(transition => transition.schoolAgeCompatible === true);
+    }
     const compatible = ISEKAI_EARTH_TRANSITIONS.filter(transition => {
         const allowedAgeGroups = normalizeSeedTagList(transition.ageGroups);
         return !allowedAgeGroups.length || allowedAgeGroups.includes(ageGroup);
@@ -864,7 +870,7 @@ function compatibleIsekaiEarthTransitionsForAge(ageGroup) {
 }
 
 function specializeIsekaiSeedEntry(entry = {}, ageGroup = 'unknown') {
-    const { ageGroups, ageVariants, ...base } = entry;
+    const { ageGroups, ageVariants, schoolAgeCompatible, ...base } = entry;
     const variants = ageVariants && typeof ageVariants === 'object' ? ageVariants : {};
     const variant = variants[ageGroup] || variants.unknown || {};
     return { ...base, ...variant };
@@ -931,10 +937,10 @@ function renderIsekaiOpeningSeed(seed = null) {
 
 function isekaiAgeCompatibilityInstruction(ageGroup) {
     if (ageGroup === 'school_age') {
-        return '{{user}} is 18 or younger. The Earth scene MUST remain student-compatible. NEVER place {{user}} in a workplace or adult professional role.';
+        return '{{user}} is younger than 18. The Earth scene MUST be a school-related group event involving classmates, including a school class, club, trip, festival, sports event, or summer activity. Include a teacher or chaperone when naturally appropriate. NEVER place {{user}} in a workplace or adult professional role.';
     }
     if (ageGroup === 'adult_context') {
-        return '{{user}} is 19 or older. The Earth scene MUST remain adult-compatible. NEVER place {{user}} in a high-school classroom or high-school student role.';
+        return '{{user}} is 18 or older. The Earth scene MUST remain adult-compatible. NEVER place {{user}} in a high-school classroom or high-school student role.';
     }
     return '{{user}}\'s age is not explicitly numeric. Keep the Earth scene age-neutral and occupation-neutral; do not assign a school or workplace role.';
 }

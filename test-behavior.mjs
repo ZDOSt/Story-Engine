@@ -15213,17 +15213,18 @@ const tests = [
       assert.equal(normalDeathOpeningSeed.earthTransition.label, 'Traffic Fatality / Rescue Accident');
       assert.doesNotMatch(normalDeathOpeningSeed.newWorldOpening.label, /^Game-/);
 
-      const schoolExhaustionRolls = [0.27, 0];
-      const schoolExhaustionSeed = buildIsekaiOpeningSeed({
+      const schoolSummoningRolls = [0, 0];
+      const schoolSummoningSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
-        characterText: '# BASIC INFO\n**Age:** 18',
-        rng: () => schoolExhaustionRolls.shift() ?? 0,
+        characterText: '# BASIC INFO\n**Age:** 17',
+        rng: () => schoolSummoningRolls.shift() ?? 0,
       });
-      assert.equal(schoolExhaustionSeed.characterAge, 18);
-      assert.equal(schoolExhaustionSeed.ageGroup, 'school_age');
-      assert.equal(schoolExhaustionSeed.earthTransition.label, 'Study / Exhaustion Collapse');
-      assert.match(schoolExhaustionSeed.earthTransition.guidance, /schoolwork, exam pressure, late-night studying/);
-      assert.match(schoolExhaustionSeed.earthTransition.guidance, /Keep \{\{user\}\} out of workplaces and adult professional roles/);
+      assert.equal(schoolSummoningSeed.characterAge, 17);
+      assert.equal(schoolSummoningSeed.ageGroup, 'school_age');
+      assert.equal(schoolSummoningSeed.earthTransition.label, 'Classroom / School Group Summoning');
+      assert.match(schoolSummoningSeed.earthTransition.guidance, /classroom, school club, school trip/);
+      assert.match(schoolSummoningSeed.earthTransition.guidance, /\{\{user\}\} and classmates/);
+      assert.equal(schoolSummoningSeed.newWorldOpening.label, 'Pulled With Classmates');
 
       const tableAgeSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
@@ -15231,7 +15232,7 @@ const tests = [
         rng: () => 0,
       });
       assert.equal(tableAgeSeed.characterAge, 18);
-      assert.equal(tableAgeSeed.ageGroup, 'school_age');
+      assert.equal(tableAgeSeed.ageGroup, 'adult_context');
 
       const adultExhaustionRolls = [0.26, 0];
       const adultExhaustionSeed = buildIsekaiOpeningSeed({
@@ -15248,7 +15249,7 @@ const tests = [
       const schoolGroupRolls = [0.75, 0];
       const schoolGroupSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
-        characterAge: 18,
+        characterAge: 17,
         rng: () => schoolGroupRolls.shift() ?? 0,
       });
       assert.equal(schoolGroupSeed.earthTransition.label, 'Class / School Group Transfer');
@@ -15275,6 +15276,19 @@ const tests = [
           });
           assert.notEqual(seed.earthTransition.key, 'scientific_experiment');
         }
+      }
+
+      for (let index = 0; index < 19; index += 1) {
+        const seed = buildIsekaiOpeningSeed({
+          adventureGenre: 'Isekai',
+          characterAge: 17,
+          rng: (() => {
+            const rolls = [(index + 0.1) / 19, 0];
+            return () => rolls.shift() ?? 0;
+          })(),
+        });
+        assert.ok(['summoned_from_earth', 'group_transfer'].includes(seed.earthTransition.key));
+        assert.match(seed.newWorldOpening.label, /Classmates|School Group/);
       }
 
       const scientificRolls = [0.86, 0];
@@ -15320,7 +15334,7 @@ const tests = [
       assert.match(introPrompt, /You MUST narrate BOTH required beats below, in order\./);
       assert.match(introPrompt, /Do NOT skip either beat\. Do NOT choose a different Earth last moment or Isekai opening\./);
       assert.match(introPrompt, /AGE COMPATIBILITY:/);
-      assert.match(introPrompt, /\{\{user\}\} is 19 or older/);
+      assert.match(introPrompt, /\{\{user\}\} is 18 or older/);
       assert.match(introPrompt, /NEVER place \{\{user\}\} in a high-school classroom or high-school student role/);
       assert.match(introPrompt, /BEAT #1: EARTH LAST MOMENTS/);
       assert.match(introPrompt, /BEAT #2: ISEKAI OPENING/);
@@ -15419,7 +15433,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.41');
+      assert.equal(manifest.version, '0.9.42');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
