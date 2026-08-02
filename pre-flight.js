@@ -551,6 +551,12 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
                 label: 'Classroom / School Group Summoning',
                 guidance: 'Use a magic circle, classroom, school club, school trip, school festival, sports event, or summer activity involving {{user}} and classmates. Include a teacher or chaperone when naturally appropriate. The student group must be drawn from Earth together. Do not place {{user}} at work or in an adult professional role.',
                 requiredOpeningTags: ['group'],
+                studentOpeningEligible: true,
+                groupProfile: {
+                    present: true,
+                    type: 'classmates_and_teacher',
+                    arrivalState: 'together',
+                },
             },
             adult_context: {
                 guidance: 'Use a magic circle, ritual pull, workplace interruption, home, street, transit, or unseen summoning force that removes {{user}} from Earth. Do not place {{user}} in a high-school classroom or high-school student role.',
@@ -591,10 +597,21 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
             school_age: {
                 label: 'Class / School Group Transfer',
                 guidance: 'Use a school class, school club, school trip, school festival, sports event, or summer activity involving {{user}} and classmates. Include a teacher or chaperone when naturally appropriate. Pull the student group from Earth at the same time; the group can arrive together, separated, or only partly visible. Do not use coworkers or an adult workplace.',
+                studentOpeningEligible: true,
+                groupProfile: {
+                    present: true,
+                    type: 'classmates_and_teacher',
+                    arrivalState: 'separated_or_together',
+                },
             },
             adult_context: {
                 label: 'Adult Group Transfer',
                 guidance: 'Use coworkers, passengers, a party, a convention crowd, or adult strangers pulled from Earth at the same time. The group can be nearby, separated, or only partly visible. Do not use a high-school class or high-school setting.',
+                groupProfile: {
+                    present: true,
+                    type: 'adult_group',
+                    arrivalState: 'separated_or_together',
+                },
             },
             unknown: {
                 label: 'Group Transfer',
@@ -628,6 +645,138 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
         label: 'No Earth Death / Sudden Displacement',
         guidance: 'Use a clean disappearance from Earth without confirmed death. The crossing may remain unexplained at first.',
     },
+    {
+        key: 'student_school_festival_transfer',
+        label: 'School Festival Crossing',
+        guidance: 'Use a school festival, cultural event, or public school performance involving {{user}} and classmates. The crossing may begin as a summons, portal, blackout, or unexplained displacement.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates_and_teacher',
+            arrivalState: 'together',
+        },
+    },
+    {
+        key: 'student_sports_event_transfer',
+        label: 'School Sports Event Crossing',
+        guidance: 'Use a sports day, tournament, practice, or athletic event involving {{user}} and classmates. Keep the Earth-side moment brief and move directly into the crossing.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates_and_teacher',
+            arrivalState: 'together',
+        },
+    },
+    {
+        key: 'student_after_school_club_crossing',
+        label: 'After-School Club Crossing',
+        guidance: 'Use an after-school club room, rehearsal, meeting, or activity involving {{user}} and other students. An advisor may be present when appropriate.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates_and_club_advisor',
+            arrivalState: 'together',
+        },
+    },
+    {
+        key: 'student_teacher_excursion_rift',
+        label: 'Teacher-Led Excursion Rift',
+        guidance: 'Use a supervised field trip, educational excursion, or class outing disrupted by a portal, rift, or supernatural event. Include the teacher or chaperone and classmates in the Earth-side group.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates_and_teacher',
+            arrivalState: 'together_or_separated',
+        },
+    },
+    {
+        key: 'student_summer_activity_crossing',
+        label: 'Summer Class Activity Crossing',
+        guidance: 'Use a summer camp, class vacation, beach outing, hiking trip, or other activity involving {{user}} and classmates. Keep the event age-appropriate and group-based.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates',
+            arrivalState: 'together_or_separated',
+        },
+    },
+    {
+        key: 'student_group_evacuation_transfer',
+        label: 'School Evacuation Transfer',
+        guidance: 'Use a school evacuation, emergency drill, or real disaster in which {{user}} and classmates are displaced together or scattered during the crossing.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates_and_teacher',
+            arrivalState: 'separated',
+        },
+    },
+    {
+        key: 'student_school_object_trigger',
+        label: 'School Relic Activation',
+        guidance: 'Use a book, phone, charm, artifact, or other object discovered or activated by {{user}} at school. Do not require classmates to be transported unless another fact establishes it.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+    },
+    {
+        key: 'student_school_portal',
+        label: 'School-Building Portal',
+        guidance: 'Use a portal or spatial rupture in a school corridor, rooftop, gymnasium, classroom, or empty campus area. The crossing may affect {{user}} alone or draw in nearby students if established.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+    },
+    {
+        key: 'student_classmate_rescue_accident',
+        label: 'Classmate Rescue Accident',
+        guidance: 'Use {{user}} attempting to protect or rescue a classmate during an accident, fire, collapse, traffic danger, or other immediate hazard. Keep the Earth-side moment brief.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmate',
+            arrivalState: 'together',
+        },
+    },
+    {
+        key: 'student_school_disaster_crossing',
+        label: 'School Disaster Crossing',
+        guidance: 'Use an earthquake, fire, structural collapse, supernatural attack, or other school emergency as the immediate crossing trigger. Keep {{user}} with classmates or show their separation clearly.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates_and_teacher',
+            arrivalState: 'separated',
+        },
+    },
+    {
+        key: 'student_journey_home_blackout',
+        label: 'Journey-Home Blackout',
+        guidance: 'Use an unexplained blackout, disappearance, or supernatural interruption while {{user}} is traveling home from school. Do not assign a workplace or adult role.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+    },
+    {
+        key: 'student_late_study_crossing',
+        label: 'Late Study or Gaming Crossing',
+        guidance: 'Use late-night studying, homework, or gaming after school as the brief Earth-side final moment before the crossing. Do not erase memories or infantize {{user}}.',
+        ageGroups: ['school_age'],
+        studentOpeningEligible: true,
+    },
 ]);
 
 const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
@@ -635,19 +784,19 @@ const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
         key: 'organized_faction_summons',
         label: 'Organized Faction Summons',
         guidance: 'Begin inside a controlled ritual, official chamber, temple, guild hall, military site, or similar summoning location. Let the summoners react to the character as they are.',
-        tags: ['summon'],
+        tags: ['summon', 'social', 'group'],
     },
     {
         key: 'desperate_village_summons',
         label: 'Desperate Village Summons',
         guidance: 'Begin with ordinary people, village elders, minor priests, or local survivors attempting a crude or desperate summons for protection.',
-        tags: ['summon'],
+        tags: ['summon', 'social', 'group'],
     },
     {
         key: 'enemy_cult_summons',
         label: 'Enemy or Cult Summons',
         guidance: 'Begin with hostile, secretive, or morally suspect summoners who may have expected a weapon, sacrifice, demon, hero, servant, or omen.',
-        tags: ['summon'],
+        tags: ['summon', 'social', 'group'],
     },
     {
         key: 'pulled_with_classmates_or_strangers',
@@ -690,132 +839,329 @@ const ISEKAI_NEW_WORLD_OPENINGS = Object.freeze([
     },
     {
         key: 'wildland_awakening',
-        label: 'Wildland Awakening',
-        guidance: 'Begin in forest, grassland, mountain pass, shoreline, swamp, snowy road, or another natural place with immediate sensory contrast and a playable next step.',
+        label: 'Remote Forest Clearing',
+        guidance: 'Begin with {{user}} alone in a remote forest clearing. Provide only concrete surroundings and a playable next step.',
+        tags: ['isolated', 'isolated_only'],
     },
     {
         key: 'ancient_ruin_awakening',
-        label: 'Ancient Ruin Awakening',
-        guidance: 'Begin among old stones, sealed halls, shrine remains, broken statues, inscriptions, or ruins that imply the world without explaining it.',
+        label: 'Remote Ruined Shrine',
+        guidance: 'Begin with {{user}} alone at a remote ruined shrine. Let the place provide atmosphere and a next step without adding a hidden revelation as fact.',
+        tags: ['isolated', 'isolated_only'],
     },
     {
         key: 'dungeon_threshold',
-        label: 'Dungeon Threshold',
-        guidance: 'Begin at or near a dungeon entrance, first chamber, labyrinth threshold, monster nest, trial door, or abandoned underground route.',
+        label: 'Dungeon Threshold Under Pressure',
+        guidance: 'Begin at or near a dungeon entrance, first chamber, labyrinth threshold, monster nest, or trial door while an immediate physical problem is visible.',
+        tags: ['dungeon', 'danger', 'group'],
     },
     {
         key: 'prison_or_holding_cell',
-        label: 'Prison or Holding Cell',
-        guidance: 'Begin with confinement, chains, a guarded room, slave pen, cell, wagon cage, or holding chamber. Do not assume guilt or permanent status unless established.',
+        label: 'Prisoner Awaiting Sacrifice',
+        guidance: 'Begin with {{user}} discovering a prisoner held for a visible ritual or sacrifice. Do not assume guilt, innocence, identity, or required intervention.',
+        tags: ['dungeon', 'rescue', 'group'],
     },
     {
         key: 'trade_road_portal_arrival',
-        label: 'Trade Road Portal Arrival',
-        guidance: 'Begin on a road, bridge, milestone, ferry path, or crossroads where travelers, guards, monsters, weather, or distance create immediate context.',
+        label: 'Travelers Attacked on a Road',
+        guidance: 'Begin with travelers under immediate attack on a road or pass. Do not make {{user}} responsible for rescuing them.',
+        tags: ['danger', 'rescue', 'group'],
     },
     {
         key: 'city_alley_or_market_arrival',
-        label: 'City Alley or Market Arrival',
-        guidance: 'Begin in an alley, market, plaza, station-like gate, festival lane, or crowded city space where local reactions can reveal the setting.',
+        label: 'Market or Inn Evacuation',
+        guidance: 'Begin during an evacuation from a market, inn, or public street caused by a visible monster, fire, collapse, or other immediate threat.',
+        tags: ['social', 'danger', 'group'],
     },
     {
         key: 'village_outskirts',
-        label: 'Village Outskirts',
-        guidance: 'Begin near fields, fences, watch posts, mills, livestock, smoke, or a small settlement edge, with locals able to notice or react.',
+        label: 'Village Under Monster Attack',
+        guidance: 'Begin during a visible monster attack on a village. Show concrete danger and consequences without forcing {{user}} to intervene.',
+        tags: ['danger', 'rescue', 'group'],
     },
     {
         key: 'fortified_town_gate',
-        label: 'Fortified Town Gate',
-        guidance: 'Begin near guards, walls, banners, inspection lines, refugees, merchants, or an entry checkpoint.',
+        label: 'Border Checkpoint During Invasion',
+        guidance: 'Begin at a border checkpoint during a visible invasion, evacuation, or military emergency. Do not assign {{user}} a side.',
+        tags: ['social', 'danger', 'group'],
     },
     {
         key: 'caravan_or_travelers',
-        label: 'Caravan or Traveling Company',
-        guidance: 'Begin near wagons, merchants, pilgrims, guards, refugees, performers, or travelers already moving through the world.',
+        label: 'Caravan Ambush',
+        guidance: 'Begin as a caravan is visibly ambushed by attackers or monsters. Keep the immediate exchange focused and playable.',
+        tags: ['danger', 'rescue', 'group'],
     },
     {
         key: 'avatar_body_login_failure',
         label: 'Game-Trapped Avatar Body',
         guidance: 'Begin with the premade character as the avatar/body that has become real. The world treats that body and identity as physically present.',
-        tags: ['game'],
+        tags: ['game', 'body'],
     },
     {
         key: 'guild_base_materialization',
         label: 'Game Guild Base Materialization',
         guidance: 'Begin in a player base, guild hall, safe room, clan estate, headquarters, inventory room, or familiar game-like location that has become real.',
-        tags: ['game'],
+        tags: ['game', 'social'],
     },
     {
         key: 'game_dungeon_or_boss_arena',
         label: 'Game Dungeon or Boss Arena',
         guidance: 'Begin where a game encounter, dungeon floor, raid arena, or boss chamber has become real and immediately dangerous or strange.',
-        tags: ['game'],
+        tags: ['game', 'dungeon', 'danger'],
     },
     {
         key: 'deity_audience',
         label: 'Liminal Deity Audience',
         guidance: 'Begin in a threshold place with a deity, spirit, goddess, demon lord, angel, or world envoy. Treat the meeting as the playable first scene, not a waiting room.',
+        tags: ['summon', 'powerfulBeing', 'social', 'group'],
     },
     {
         key: 'administrator_chamber',
         label: 'Administrator or Cosmic Clerk Chamber',
         guidance: 'Begin in an otherworldly administrative, system, tribunal, reincarnation, or sorting space with someone who can explain only what the moment needs.',
-        tags: ['system'],
+        tags: ['summon', 'system', 'social', 'group'],
     },
     {
         key: 'world_spirit_dispatch',
         label: 'World Spirit Dispatch',
         guidance: 'Begin with a world spirit, sealed ancient being, dying guardian, or landscape-scale presence sending or requesting the character into the world.',
+        tags: ['summon', 'powerfulBeing', 'social', 'group'],
     },
     {
         key: 'battlefield_arrival',
         label: 'Battlefield Arrival Between Factions',
         guidance: 'Begin amid battle, aftermath, siege, skirmish, war camp pressure, or a line between factions. NPCs may assume allegiance, but do not permanently assign it unless established.',
+        tags: ['danger', 'group'],
     },
     {
         key: 'military_or_adventurer_camp',
         label: 'Military or Adventurer Camp Arrival',
         guidance: 'Begin in a camp, staging area, guild expedition, mercenary bivouac, patrol stop, or quest muster where armed people immediately assess the character.',
+        tags: ['social', 'danger', 'group'],
     },
     {
         key: 'noble_court',
         label: 'Noble Court or Audience Hall',
         guidance: 'Begin in a court, manor, throne room, embassy, aristocratic event, or formal audience where etiquette and power shape the first reactions.',
+        tags: ['social', 'group'],
     },
     {
         key: 'demon_monster_faction',
         label: 'Demon or Monster Faction Camp',
         guidance: 'Begin among demons, monsters, beastfolk, nonhuman soldiers, cultists, or faction agents who may recognize, fear, test, or claim the character.',
+        tags: ['social', 'group'],
     },
     {
         key: 'adventurer_guild_contact',
-        label: 'Adventurer Guild First Contact',
-        guidance: 'Begin at, near, or through an adventurer guild, quest board, registration desk, training yard, or branch office without turning it into paperwork exposition.',
+        label: 'Adventurer Guild Under Attack',
+        guidance: 'Begin at an adventurer guild during an active attack, emergency, or evacuation. Do not use a passive registration scene.',
+        tags: ['social', 'danger', 'group'],
     },
     {
-        key: 'academy_training_ground',
-        label: 'Academy or Training Ground',
-        guidance: 'Begin near a magic academy, martial school, exam site, lecture yard, arena, or trial ground where status and skill are being measured.',
+        key: 'powerful_being_in_isolation',
+        label: 'Powerful Being in an Isolated Place',
+        guidance: 'Begin with {{user}} encountering a powerful, unusual, or legendary being in an isolated location. Leave gender, species, appearance, motives, and relationship open-ended.',
+        tags: ['powerfulBeing', 'encounter', 'group'],
     },
     {
         key: 'rebel_safehouse',
         label: 'Rebel Cell or Safehouse',
         guidance: 'Begin in a hidden room, resistance hideout, smuggler den, hunted faction shelter, or secret meeting where trust is scarce.',
+        tags: ['social', 'mystery', 'group'],
     },
     {
         key: 'mistaken_prophecy_figure',
         label: 'Mistaken Prophecy Figure',
         guidance: 'Begin with locals, priests, soldiers, or monsters believing the character matches a prophecy, omen, old portrait, summoned hero, or taboo sign.',
+        tags: ['social', 'mystery', 'group'],
     },
     {
         key: 'mistaken_enemy_or_calamity',
         label: 'Mistaken Enemy Commander or Calamity',
         guidance: 'Begin with fear, alarm, pursuit, worship, military response, or confusion because the character resembles a feared enemy, noble, monster, or disaster figure.',
+        tags: ['social', 'danger', 'group'],
     },
     {
         key: 'rescue_or_monster_attack',
         label: 'Rescue Scene or Monster Attack',
         guidance: 'Begin with someone nearby in immediate danger from monsters, bandits, a magical hazard, collapsing terrain, or pursuit. Do not force {{user}} to help; present the situation.',
+        tags: ['rescue', 'danger', 'group'],
+    },
+    { key: 'empty_meadow_or_moor', label: 'Empty Meadow or Moor', guidance: 'Begin with {{user}} alone in an open meadow or moor. Do not add a social scene or active event.', tags: ['isolated', 'isolated_only'] },
+    { key: 'remote_riverbank', label: 'Remote Riverbank', guidance: 'Begin with {{user}} alone beside a remote river. Keep the opening event-free unless the selected transition requires otherwise.', tags: ['isolated', 'isolated_only'] },
+    { key: 'isolated_shore_or_island', label: 'Isolated Shore or Island', guidance: 'Begin with {{user}} alone on an isolated shore or island. Establish only directly observable physical surroundings.', tags: ['isolated', 'isolated_only'] },
+    { key: 'snowfield_or_glacier_edge', label: 'Snowfield or Glacier Edge', guidance: 'Begin with {{user}} alone at a snowfield or glacier edge. Use cold, terrain, visibility, and distance as immediate constraints.', tags: ['isolated', 'isolated_only'] },
+    { key: 'desert_wasteland_landmark', label: 'Desert or Wasteland Landmark', guidance: 'Begin with {{user}} alone near a visible desert or wasteland landmark. Do not add an encounter or settlement without a selected event.', tags: ['isolated', 'isolated_only'] },
+    { key: 'marsh_or_swamp_trail', label: 'Marsh or Swamp Trail', guidance: 'Begin with {{user}} alone on a marsh or swamp trail. Describe the terrain and immediate hazards without inventing an encounter.', tags: ['isolated', 'isolated_only'] },
+    { key: 'captive_behind_magical_barrier', label: 'Captive Behind a Magical Barrier', guidance: 'Begin with {{user}} discovering a person or being visibly confined behind a magical barrier. Keep identity, motives, and relationship unestablished.', tags: ['dungeon', 'rescue', 'group'] },
+    { key: 'powerful_being_chained', label: 'Powerful Being Chained in a Chamber', guidance: 'Begin with {{user}} discovering a powerful being physically bound in a dungeon or ruin. Keep its gender, species, motives, and relationship open-ended.', tags: ['dungeon', 'powerfulBeing', 'group'] },
+    { key: 'wounded_traveler_under_rubble', label: 'Wounded Traveler Beneath Rubble', guidance: 'Begin with {{user}} finding a wounded traveler visibly trapped beneath rubble. Show the immediate physical problem without forcing {{user}} to help.', tags: ['dungeon', 'rescue', 'group'] },
+    { key: 'stranger_cornered_by_monster', label: 'Stranger Cornered by a Monster', guidance: 'Begin with {{user}} witnessing a person or being cornered by a monster. Present the danger without authoring {{user}}\'s response.', tags: ['rescue', 'danger', 'group'] },
+    { key: 'failing_magical_laboratory', label: 'Failing Magical Laboratory', guidance: 'Begin with {{user}} entering a magical laboratory where a visible test subject, device, or containment system is failing. Explain nothing beyond observable evidence.', tags: ['dungeon', 'mystery', 'group'] },
+    { key: 'expedition_trapped_by_puzzle', label: 'Expedition Trapped by a Puzzle', guidance: 'Begin with {{user}} encountering an expedition or traveler group visibly trapped by a sealed door, mechanism, or puzzle.', tags: ['dungeon', 'mystery', 'group'] },
+    { key: 'survivor_guarding_last_refuge', label: 'Survivor Guarding a Last Refuge', guidance: 'Begin with {{user}} finding a survivor protecting a small refuge from an immediate threat. Keep the survivor history unknown unless shown.', tags: ['rescue', 'danger', 'group'] },
+    { key: 'ancient_creature_awakening', label: 'Ancient Creature Awakening', guidance: 'Begin as an ancient creature or being visibly awakens nearby. Do not decide whether it is ally, enemy, or romantic interest.', tags: ['dungeon', 'powerfulBeing', 'danger', 'group'] },
+    { key: 'dungeon_collapse_sealed_chamber', label: 'Dungeon Collapse Exposes a Chamber', guidance: 'Begin with a collapse that exposes a sealed chamber and an immediately observable consequence. Do not reveal what lies within beyond direct evidence.', tags: ['dungeon', 'danger', 'group'] },
+    { key: 'overturned_caravan_survivors', label: 'Survivors Beside an Overturned Caravan', guidance: 'Begin with visible survivors beside an overturned caravan and the physical aftermath of the incident.', tags: ['danger', 'rescue', 'group'] },
+    { key: 'battlefield_survivors', label: 'Battlefield Survivors', guidance: 'Begin among visible battlefield survivors after a recent clash. Do not assign faction allegiance or prior knowledge without evidence.', tags: ['danger', 'group'] },
+    { key: 'monster_stampede_settlement', label: 'Monster Stampede Through a Settlement', guidance: 'Begin as a monster stampede moves through a settlement. Present immediate movement, danger, and consequences without controlling {{user}}.', tags: ['danger', 'rescue', 'group'] },
+    { key: 'flood_sweeping_village', label: 'Flood Sweeping Through a Village', guidance: 'Begin during a visible flood that is affecting a village or settlement. Keep the danger physical and immediate.', tags: ['danger', 'rescue', 'group'] },
+    { key: 'wildfire_enclosing_travelers', label: 'Wildfire Enclosing Travelers', guidance: 'Begin with travelers or a settlement visibly threatened by a spreading wildfire. Do not force {{user}} to choose a response.', tags: ['danger', 'rescue', 'group'] },
+    { key: 'magical_storm_stranded_vessel', label: 'Magical Storm Stranding a Vessel', guidance: 'Begin with a vessel stranded or damaged by a visible magical storm. Keep the first scene grounded in the vessel and its occupants.', tags: ['danger', 'group'] },
+    { key: 'collapsing_bridge_or_road', label: 'Collapsing Bridge or Mountain Road', guidance: 'Begin as a bridge or mountain road visibly collapses beneath or near travelers. Do not narrate {{user}} voluntary response.', tags: ['danger', 'rescue', 'group'] },
+    { key: 'shipwreck_survivors', label: 'Shipwreck Survivors', guidance: 'Begin with visible survivors and wreckage after a shipwreck. Keep the cause and wider situation unknown unless directly shown.', tags: ['danger', 'rescue', 'group'] },
+    { key: 'airship_crash', label: 'Airship Crash', guidance: 'Begin in the immediate aftermath of an airship crash with visible wreckage, survivors, and physical hazards.', tags: ['danger', 'rescue', 'group'] },
+    { key: 'refugee_convoy_fleeing_invasion', label: 'Refugee Convoy Fleeing an Invasion', guidance: 'Begin with a moving refugee convoy fleeing a visible invasion or advancing threat.', tags: ['danger', 'rescue', 'group'] },
+    { key: 'monster_containment_breach', label: 'Monster Containment Breach', guidance: 'Begin as a visible containment failure releases a monster or dangerous creature into a facility or settlement.', tags: ['danger', 'group'] },
+    { key: 'cursed_fog_separates_travelers', label: 'Cursed Fog Separating Travelers', guidance: 'Begin with visible cursed fog separating travelers or a group. Keep what lies beyond the fog unknown.', tags: ['danger', 'mystery', 'group'] },
+    { key: 'sudden_magical_freeze', label: 'Sudden Magical Freeze', guidance: 'Begin as a visible magical freeze overtakes a place, person, or traveling group. Show effects, not hidden causes.', tags: ['danger', 'group'] },
+    { key: 'quarantined_settlement_threat', label: 'Quarantined Settlement Under Threat', guidance: 'Begin at a settlement under visible quarantine or emergency restriction. Do not state the cause as fact without evidence.', tags: ['danger', 'mystery', 'group'] },
+    { key: 'world_seal_beginning_to_fail', label: 'World Seal Beginning to Fail', guidance: 'Begin with a visible seal, barrier, or ward beginning to fail. Do not explain its origin or consequences beyond what the scene establishes.', tags: ['danger', 'mystery', 'group'] },
+    { key: 'powerful_being_wounded', label: 'Powerful Being Wounded or Diminished', guidance: 'Begin with a powerful being visibly wounded, weakened, or temporarily constrained. Keep its identity and motives open.', tags: ['powerfulBeing', 'rescue', 'group'] },
+    { key: 'powerful_being_in_disguise', label: 'Powerful Being in Disguise', guidance: 'Begin with {{user}} meeting a being who appears ordinary while its true power remains undiscovered. Do not reveal the identity without scene evidence.', tags: ['powerfulBeing', 'encounter', 'group'] },
+    { key: 'powerful_being_asleep', label: 'Powerful Being Asleep', guidance: 'Begin with {{user}} finding a powerful being asleep or dormant. Do not determine whether it wakes, attacks, helps, or speaks until the scene supports it.', tags: ['powerfulBeing', 'dungeon', 'group'] },
+    { key: 'powerful_being_threshold_guardian', label: 'Powerful Threshold Guardian', guidance: 'Begin with a powerful being visibly guarding a passage, boundary, relic, or forbidden place. Its purpose and terms remain open.', tags: ['powerfulBeing', 'mystery', 'group'] },
+    { key: 'powerful_being_requests_help', label: 'Powerful Being Requests Help', guidance: 'Begin when a powerful being presents a concrete request or immediate problem. Do not assume {{user}} accepts it.', tags: ['powerfulBeing', 'encounter', 'group'] },
+    { key: 'powerful_being_hunted', label: 'Powerful Being Hunted', guidance: 'Begin with a powerful being visibly pursued, cornered, or threatened by a greater force. Do not force {{user}} to take sides.', tags: ['powerfulBeing', 'danger', 'group'] },
+    { key: 'powerful_beings_standoff', label: 'Powerful Beings in a Standoff', guidance: 'Begin with two powerful beings visibly opposed or negotiating under pressure. Keep their identities and motives discoverable.', tags: ['powerfulBeing', 'danger', 'group'] },
+    { key: 'powerful_being_alters_environment', label: 'Powerful Being Alters the Environment', guidance: 'Begin with a powerful being whose presence produces visible physical effects in the surrounding area. Do not explain the power or relationship.', tags: ['powerfulBeing', 'encounter', 'group'] },
+    { key: 'responsive_artifact', label: 'Artifact Responds to the Protagonist', guidance: 'Begin when a visible artifact reacts to {{user}}\'s presence. Show the reaction without explaining its history or intended purpose.', tags: ['mystery', 'group'] },
+    { key: 'sealed_door_opens', label: 'Sealed Door Opens', guidance: 'Begin as a sealed door, gate, or chamber opens in response to an observable event involving {{user}}. Do not reveal what lies beyond.', tags: ['mystery', 'dungeon', 'group'] },
+    { key: 'plea_from_inaccessible_chamber', label: 'Plea From an Inaccessible Chamber', guidance: 'Begin with a clearly heard plea or signal from behind a sealed or inaccessible chamber. Do not reveal the speaker until discovered.', tags: ['mystery', 'rescue', 'group'] },
+    { key: 'abandoned_settlement_fresh_signs', label: 'Abandoned Settlement With Fresh Signs', guidance: 'Begin in an apparently abandoned settlement containing recent, concrete signs of activity. Do not state where anyone went.', tags: ['mystery', 'group'] },
+    { key: 'vanished_expedition_camp', label: 'Vanished Expedition Camp', guidance: 'Begin at a recently abandoned expedition camp with visible supplies, tracks, or damage. Keep the expedition fate unknown.', tags: ['mystery', 'group'] },
+    { key: 'place_frozen_in_time', label: 'Place Frozen in Time', guidance: 'Begin in a place where visible people, objects, or events are unnaturally frozen. Describe only the physical evidence.', tags: ['mystery', 'group'] },
+    { key: 'living_egg_in_danger', label: 'Living Egg or Hatchling in Danger', guidance: 'Begin with a living egg, hatchling, or newly emerged creature in immediate physical danger. Do not assign its species or bond with {{user}} without evidence.', tags: ['mystery', 'rescue', 'group'] },
+    { key: 'blighted_shrine_or_world_tree', label: 'Blighted Shrine or World Tree', guidance: 'Begin at a shrine, sacred tree, or world landmark visibly affected by blight or damage. Do not explain the cause.', tags: ['mystery', 'danger', 'group'] },
+    { key: 'return_blocking_barrier', label: 'Barrier Preventing Return', guidance: 'Begin with a visible barrier, gate, or boundary blocking the route back. Do not claim that return is impossible unless the scene establishes it.', tags: ['mystery', 'group'] },
+    { key: 'monument_depicts_unknown_figure', label: 'Monument Depicts an Unknown Figure', guidance: 'Begin with a monument, portrait, or record depicting a figure who resembles {{user}} or an unknown person. Show the object without declaring its meaning.', tags: ['mystery', 'group'] },
+    { key: 'mistaken_or_misdirected_summons', label: 'Mistaken or Misdirected Summons', guidance: 'Begin when a summoning ritual produces an unexpected target, location, body, or result. Do not explain the mistake beyond observable reactions.', tags: ['summon', 'mystery', 'group'] },
+    { key: 'group_arrival_separated', label: 'Group Arrival Followed by Separation', guidance: 'Begin with the transferred group arriving together or in the same aftermath, then show their immediate separation or scattered positions.', tags: ['summon', 'group', 'group_separated'] },
+    { key: 'summoned_weapon_anomaly', label: 'Summoned Weapon or Hero Anomaly', guidance: 'Begin with summoners expecting a weapon, hero, servant, or champion, but the ritual produces an unexpected result. Do not define the character for them.', tags: ['summon', 'social', 'group'] },
+    { key: 'summoned_into_retreating_crisis', label: 'Summoned Into a Retreating Crisis', guidance: 'Begin as defenders retreat from an immediate threat and the summoning occurs amid the confusion. Do not assign {{user}} allegiance or voluntary action.', tags: ['summon', 'danger', 'group'] },
+    { key: 'ruler_crisis_audience', label: 'Ruler During a Crisis', guidance: 'Begin before a ruler, council, or governing figure while an active crisis affects the room or settlement. Do not turn the opening into exposition.', tags: ['social', 'crisis', 'group'] },
+    { key: 'court_faction_conflict', label: 'Court Faction Conflict', guidance: 'Begin during a visible conflict between court factions, envoys, or officials. Let motives remain discoverable.', tags: ['social', 'crisis', 'group'] },
+    { key: 'execution_interrupted', label: 'Execution Interrupted by Arrival', guidance: 'Begin at a public execution interrupted by the protagonist arrival or another immediate event. Do not decide guilt or force intervention.', tags: ['social', 'danger', 'group'] },
+    { key: 'accused_prisoner', label: 'Prisoner Accused of a Crime', guidance: 'Begin with {{user}} or another foreground person held under an accusation. Do not establish guilt, innocence, or hidden causes without evidence.', tags: ['social', 'danger', 'group'] },
+    { key: 'noble_household_disappearance', label: 'Noble Household After a Disappearance', guidance: 'Begin in a noble household responding to a recent disappearance, breach, or emergency. Do not reveal who is responsible.', tags: ['social', 'mystery', 'group'] },
+    { key: 'rebel_safehouse_raided', label: 'Rebel Safehouse Raided', guidance: 'Begin as a rebel cell, resistance shelter, or hidden safehouse is discovered or raided. Do not assign allegiance to {{user}}.', tags: ['social', 'danger', 'group'] },
+    { key: 'game_avatar_active_dungeon', label: 'Game Avatar in an Active Dungeon', guidance: 'Begin with the realized avatar inside an active game dungeon or dangerous floor. Do not invent system menus or mechanics unless directly established.', tags: ['game', 'dungeon', 'danger'] },
+    { key: 'game_boss_arena_realized', label: 'Realized Game Boss Arena', guidance: 'Begin in a game dungeon, raid arena, or boss chamber that has become real and immediately consequential.', tags: ['game', 'dungeon', 'danger'] },
+    { key: 'nonhuman_body_isolated_den', label: 'Nonhuman Body in an Isolated Den', guidance: 'Begin with the protagonist awake in a nonhuman body inside an isolated den. Do not start with infancy or erase established memories.', tags: ['body', 'isolated'] },
+    { key: 'small_creature_near_danger', label: 'Small Creature Near Danger', guidance: 'Begin with the protagonist reincarnated as a small creature near a visible danger. The protagonist is not an infant and retains established memories.', tags: ['body', 'danger', 'isolated'] },
+    { key: 'weapon_or_relic_in_dungeon', label: 'Weapon or Relic in a Dungeon', guidance: 'Begin with the protagonist awake as a weapon, relic, or other object inside a dungeon. Do not invent an owner or purpose until discovered.', tags: ['body', 'dungeon', 'mystery'] },
+    { key: 'bound_object_in_possession', label: "Bound Object in Someone's Possession", guidance: 'Begin with the protagonist embodied in an object currently held or carried by another person. Keep the holder\'s motives and relationship unknown.', tags: ['body', 'mystery', 'group'] },
+    { key: 'missing_person_body', label: 'Body of a Missing Person', guidance: 'Begin with the protagonist awake in the body of a missing person while retaining established memories. Do not reveal the body\'s history as fact without evidence.', tags: ['body', 'mystery', 'social', 'group'] },
+    { key: 'crafted_construct_body', label: 'Crafted Construct Body', guidance: 'Begin with the protagonist awakening in a constructed or homunculus body. Describe only the body and immediate surroundings that can be perceived.', tags: ['body', 'mystery'] },
+    { key: 'creature_being_hunted', label: 'Creature Being Hunted', guidance: 'Begin with the protagonist in a nonhuman body while visible hunters or predators close in. Do not force an escape or response.', tags: ['body', 'danger', 'group'] },
+    { key: 'moving_vessel_arrival', label: 'Arrival Inside a Moving Vessel', guidance: 'Begin inside a moving train, ship, airship, carriage, or other vehicle already carrying foreground people. Establish the immediate physical situation.', tags: ['event', 'group'] },
+    { key: 'portal_into_ritual_or_arena', label: 'Portal Into a Ritual or Arena', guidance: 'Begin as the protagonist appears inside an active ritual, contest, arena, or public supernatural event. Do not decide the protagonist response.', tags: ['event', 'danger', 'group'] },
+    { key: 'mistaken_for_casualty', label: 'Mistaken for a Casualty', guidance: 'Begin with a healer, guard, or survivor treating the protagonist as a casualty of a recent event. Do not establish the mistake cause beyond visible evidence.', tags: ['rescue', 'group'] },
+]);
+
+const ISEKAI_STUDENT_NEW_WORLD_OPENINGS = Object.freeze([
+    {
+        key: 'student_group_summoning_chamber',
+        label: 'Classmates and Teacher in a Summoning Chamber',
+        guidance: 'Begin with {{user}}, classmates, and a teacher or chaperone visibly arriving together in a summoning chamber. Keep local motives and roles undisclosed unless shown.',
+        tags: ['student', 'group', 'summon', 'social'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+        groupRequired: true,
+    },
+    {
+        key: 'student_group_arrival_separated',
+        label: 'Classmates Scattered After Transfer',
+        guidance: 'Begin after a student group has arrived in the new world and been visibly scattered. Show the separation without deciding where every missing student is.',
+        tags: ['student', 'group', 'group_separated', 'danger'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+        groupRequired: true,
+    },
+    {
+        key: 'student_academy_entrance_ceremony',
+        label: 'Academy Entrance Ceremony',
+        guidance: 'Begin during an academy entrance, orientation, or formal acceptance event. Establish the academy through visible people, architecture, and procedure only.',
+        tags: ['student', 'academy', 'social'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+    },
+    {
+        key: 'student_academy_exam_crisis',
+        label: 'Academy Examination Turns Dangerous',
+        guidance: 'Begin during a practical academy examination or training exercise when a visible hazard makes the situation unsafe. Do not force {{user}} to act.',
+        tags: ['student', 'academy', 'danger'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+    },
+    {
+        key: 'student_school_event_anomaly',
+        label: 'School Event Interrupted by an Anomaly',
+        guidance: 'Begin during a school festival, club activity, or class event interrupted by a visible supernatural disturbance. Keep classmates and staff present when established.',
+        tags: ['student', 'school', 'event', 'group'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+        groupRequired: true,
+    },
+    {
+        key: 'student_hero_sorting',
+        label: 'Student Group Sorted as Heroes',
+        guidance: 'Begin as summoned students are being assessed, assigned roles, or separated by local authorities. Do not assign {{user}} an identity, power, or allegiance beyond the selected facts.',
+        tags: ['student', 'group', 'summon', 'social'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+        groupRequired: true,
+    },
+    {
+        key: 'student_settlement_crisis',
+        label: 'Classmates Arrive During a Settlement Crisis',
+        guidance: 'Begin with {{user}}, classmates, and a teacher or chaperone arriving near a settlement facing a visible emergency. Do not force the group to help.',
+        tags: ['student', 'group', 'danger', 'rescue'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+        groupRequired: true,
+    },
+    {
+        key: 'student_missing_teacher',
+        label: 'Teacher Missing After Transfer',
+        guidance: 'Begin with students visibly regrouping after transfer while the teacher or chaperone is absent. Do not reveal whether the teacher is safe or where they went.',
+        tags: ['student', 'group', 'group_separated', 'mystery'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+        groupRequired: true,
+    },
+    {
+        key: 'student_academy_evacuation',
+        label: 'Academy Under Evacuation',
+        guidance: 'Begin inside or near an academy during a visible evacuation caused by an attack, breach, fire, or other immediate event.',
+        tags: ['student', 'academy', 'danger', 'group'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+    },
+    {
+        key: 'student_younger_rebirth_enrollment',
+        label: 'Younger Rebirth and Academy Enrollment',
+        guidance: 'Begin with the protagonist retaining established memories after reincarnating into a human body under 18 and entering academy enrollment or orientation. Do not begin in infancy.',
+        tags: ['student', 'academy', 'younger_body'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+    },
+    {
+        key: 'student_powerful_being_after_separation',
+        label: 'Separated Student Meets a Powerful Being',
+        guidance: 'Begin after a student-group transfer separates {{user}} from classmates and {{user}} encounters a powerful, unusual, or legendary being. Keep the being open-ended.',
+        tags: ['student', 'group_separated', 'powerfulBeing', 'encounter'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+    },
+    {
+        key: 'student_class_arrival_dungeon',
+        label: 'Student Group Arrives in a Dungeon',
+        guidance: 'Begin with classmates and a teacher or chaperone arriving in a dungeon, ruin, or underground passage. They may be together or visibly scattered, as the arrival profile requires.',
+        tags: ['student', 'group', 'dungeon', 'danger'],
+        ageGroups: ['school_age'],
+        studentOnly: true,
+        groupRequired: true,
     },
 ]);
 
@@ -826,12 +1172,14 @@ export function buildIsekaiOpeningSeed(options = {}) {
     const ageGroup = classifyIsekaiCharacterAge(characterAge);
     const earthPool = compatibleIsekaiEarthTransitionsForAge(ageGroup);
     const earthTransition = specializeIsekaiSeedEntry(pickSeedEntry(earthPool, rng), ageGroup);
-    const openingPool = compatibleIsekaiOpeningsForEarthSeed(earthTransition);
+    const arrivalProfile = buildIsekaiArrivalProfile(ageGroup, earthTransition);
+    const openingPool = compatibleIsekaiOpeningsForEarthSeed(earthTransition, arrivalProfile);
     return {
         type: 'isekaiOpeningSeed',
         version: 2,
         characterAge,
         ageGroup,
+        arrivalProfile,
         earthTransition,
         newWorldOpening: specializeIsekaiSeedEntry(pickSeedEntry(openingPool, rng), ageGroup),
     };
@@ -860,7 +1208,11 @@ function classifyIsekaiCharacterAge(age) {
 
 function compatibleIsekaiEarthTransitionsForAge(ageGroup) {
     if (ageGroup === 'school_age') {
-        return ISEKAI_EARTH_TRANSITIONS.filter(transition => transition.schoolAgeCompatible === true);
+        const compatible = ISEKAI_EARTH_TRANSITIONS.filter(transition => {
+            const allowedAgeGroups = normalizeSeedTagList(transition.ageGroups);
+            return transition.schoolAgeCompatible === true || allowedAgeGroups.includes('school_age');
+        });
+        return compatible.length ? compatible : ISEKAI_EARTH_TRANSITIONS.filter(transition => transition.schoolAgeCompatible === true);
     }
     const compatible = ISEKAI_EARTH_TRANSITIONS.filter(transition => {
         const allowedAgeGroups = normalizeSeedTagList(transition.ageGroups);
@@ -883,18 +1235,62 @@ function pickSeedEntry(entries, rng) {
     return { ...entries[index], index };
 }
 
-function compatibleIsekaiOpeningsForEarthSeed(earthTransition = {}) {
+function buildIsekaiArrivalProfile(ageGroup = 'unknown', earthTransition = {}) {
+    const groupProfile = earthTransition?.groupProfile && typeof earthTransition.groupProfile === 'object'
+        ? earthTransition.groupProfile
+        : {};
+    const requiredTags = normalizeSeedTagList(earthTransition?.requiredOpeningTags);
+    const group = groupProfile.present === true || requiredTags.includes('group');
+    const studentContext = ageGroup === 'school_age';
+    return {
+        ageGroup,
+        studentContext,
+        group,
+        groupType: group
+            ? String(groupProfile.type || (studentContext ? 'student_group' : ageGroup === 'adult_context' ? 'adult_group' : 'mixed_group')).trim()
+            : 'none',
+        arrivalState: group
+            ? String(groupProfile.arrivalState || 'together_or_separated').trim()
+            : 'alone',
+    };
+}
+
+function compatibleIsekaiOpeningsForEarthSeed(earthTransition = {}, arrivalProfile = {}) {
     const requiredTags = normalizeSeedTagList(earthTransition.requiredOpeningTags);
     const excludedTags = normalizeSeedTagList(earthTransition.excludedOpeningTags);
     const permitsGameOpening = earthTransition.allowGameOpenings === true || requiredTags.includes('game') || requiredTags.includes('system');
     if (!permitsGameOpening && !excludedTags.includes('game')) excludedTags.push('game');
-    const compatible = ISEKAI_NEW_WORLD_OPENINGS.filter(opening => {
+    const ageGroup = arrivalProfile?.ageGroup || 'unknown';
+    const studentContext = arrivalProfile?.studentContext === true || ageGroup === 'school_age';
+    const group = arrivalProfile?.group === true;
+    const arrivalState = String(arrivalProfile?.arrivalState || '').toLowerCase();
+    const studentOpeningsAllowed = studentContext && earthTransition.studentOpeningEligible === true;
+    const candidateOpenings = [
+        ...ISEKAI_NEW_WORLD_OPENINGS,
+        ...(studentOpeningsAllowed ? ISEKAI_STUDENT_NEW_WORLD_OPENINGS : []),
+    ];
+    const compatible = candidateOpenings.filter(opening => {
         const openingTags = normalizeSeedTagList(opening.tags);
+        const openingAgeGroups = normalizeSeedTagList(opening.ageGroups);
+        if (openingAgeGroups.length && !openingAgeGroups.includes(ageGroup)) return false;
+        if (opening.studentOnly === true && !studentContext) return false;
+        if (opening.studentOnly === true && !studentOpeningsAllowed) return false;
+        if (opening.groupRequired === true && !group) return false;
+        if (openingTags.includes('group_separated') && (!group || !arrivalState.includes('separat'))) return false;
+        if (group && openingTags.includes('isolated_only')) return false;
         if (excludedTags.some(tag => openingTags.includes(tag))) return false;
         if (requiredTags.length && !requiredTags.some(tag => openingTags.includes(tag))) return false;
         return true;
     });
-    return compatible.length ? compatible : ISEKAI_NEW_WORLD_OPENINGS;
+    if (compatible.length) return compatible;
+
+    const fallback = ISEKAI_NEW_WORLD_OPENINGS.filter(opening => {
+        const openingTags = normalizeSeedTagList(opening.tags);
+        if (openingTags.includes('game')) return false;
+        if (group && openingTags.includes('isolated_only')) return false;
+        return true;
+    });
+    return fallback.length ? fallback : ISEKAI_NEW_WORLD_OPENINGS;
 }
 
 function normalizeSeedTagList(value) {
@@ -909,12 +1305,21 @@ function renderIsekaiOpeningSeed(seed = null) {
     const transitionGuidance = String(transition.guidance || '').trim();
     const openingGuidance = String(opening.guidance || '').trim();
     const ageCompatibility = isekaiAgeCompatibilityInstruction(seed?.ageGroup);
+    const arrivalProfile = seed?.arrivalProfile || buildIsekaiArrivalProfile(seed?.ageGroup || 'unknown', transition);
+    const groupStatus = arrivalProfile.group ? 'PRESENT' : 'NOT PRESENT';
     return [
         'You MUST narrate BOTH required beats below, in order.',
         'Do NOT skip either beat. Do NOT choose a different Earth last moment or Isekai opening.',
         '',
         'AGE COMPATIBILITY:',
         ageCompatibility,
+        '',
+        'ARRIVAL PROFILE:',
+        `Age group: ${arrivalProfile.ageGroup}. Student context: ${arrivalProfile.studentContext ? 'YES' : 'NO'}.`,
+        `Earth-arrival group: ${groupStatus}. Group type: ${arrivalProfile.groupType}. Arrival state: ${arrivalProfile.arrivalState}.`,
+        arrivalProfile.group
+            ? 'PRESERVE the listed Earth-arrival group in the opening. Keep the stated group type and arrival state visible; do not silently remove, replace, or convert the group into an isolated arrival.'
+            : 'No Earth-arrival group is selected. Do not add classmates, coworkers, or companions solely because of this profile.',
         '',
         'BEAT #1: EARTH LAST MOMENTS',
         `Selected Earth Last Moment: ${transition.label}.`,
@@ -937,7 +1342,7 @@ function renderIsekaiOpeningSeed(seed = null) {
 
 function isekaiAgeCompatibilityInstruction(ageGroup) {
     if (ageGroup === 'school_age') {
-        return '{{user}} is younger than 18. The Earth scene MUST be a school-related group event involving classmates, including a school class, club, trip, festival, sports event, or summer activity. Include a teacher or chaperone when naturally appropriate. NEVER place {{user}} in a workplace or adult professional role.';
+        return '{{user}} is younger than 18. The Earth scene MUST be school-related and age-appropriate. When the arrival profile includes a group, it MUST involve classmates or other students, with a teacher or chaperone when the selected profile specifies one. NEVER place {{user}} in a workplace or adult professional role.';
     }
     if (ageGroup === 'adult_context') {
         return '{{user}} is 18 or older. The Earth scene MUST remain adult-compatible. NEVER place {{user}} in a high-school classroom or high-school student role.';

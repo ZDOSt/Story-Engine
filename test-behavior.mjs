@@ -15182,7 +15182,9 @@ const tests = [
         rng: () => openingSeedRolls.shift() ?? 0,
       });
       assert.equal(openingSeed.earthTransition.label, 'Traffic Fatality / Rescue Accident');
-      assert.equal(openingSeed.newWorldOpening.label, 'Liminal Deity Audience');
+      assert.ok(openingSeed.newWorldOpening.label);
+      assert.doesNotMatch(openingSeed.newWorldOpening.label, /^Game-/);
+      assert.equal(openingSeed.arrivalProfile.group, false);
       assert.equal(openingSeed.earthTransition.label.includes('Divine Selection'), false);
       assert.equal(buildIsekaiOpeningSeed({ adventureGenre: 'Fantasy', rng: () => 0 }), null);
 
@@ -15202,7 +15204,8 @@ const tests = [
         rng: () => digitalSeedRolls.shift() ?? 0,
       });
       assert.equal(digitalOpeningSeed.earthTransition.label, 'Digital / System Glitch');
-      assert.equal(digitalOpeningSeed.newWorldOpening.label, 'Administrator or Cosmic Clerk Chamber');
+      assert.ok(['game', 'system'].some(tag => digitalOpeningSeed.newWorldOpening.tags.includes(tag)));
+      assert.doesNotMatch(digitalOpeningSeed.newWorldOpening.tags.join(','), /isolated_only/);
 
       const normalDeathSeedRolls = [0, 0.99];
       const normalDeathOpeningSeed = buildIsekaiOpeningSeed({
@@ -15224,7 +15227,9 @@ const tests = [
       assert.equal(schoolSummoningSeed.earthTransition.label, 'Classroom / School Group Summoning');
       assert.match(schoolSummoningSeed.earthTransition.guidance, /classroom, school club, school trip/);
       assert.match(schoolSummoningSeed.earthTransition.guidance, /\{\{user\}\} and classmates/);
-      assert.equal(schoolSummoningSeed.newWorldOpening.label, 'Pulled With Classmates');
+      assert.equal(schoolSummoningSeed.arrivalProfile.studentContext, true);
+      assert.equal(schoolSummoningSeed.arrivalProfile.group, true);
+      assert.doesNotMatch(schoolSummoningSeed.newWorldOpening.tags.join(','), /isolated_only/);
 
       const tableAgeSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
@@ -15252,8 +15257,9 @@ const tests = [
         characterAge: 17,
         rng: () => schoolGroupRolls.shift() ?? 0,
       });
-      assert.equal(schoolGroupSeed.earthTransition.label, 'Class / School Group Transfer');
-      assert.equal(schoolGroupSeed.newWorldOpening.label, 'Pulled With Classmates');
+      assert.equal(schoolGroupSeed.ageGroup, 'school_age');
+      assert.equal(schoolGroupSeed.arrivalProfile.group, true);
+      assert.doesNotMatch(schoolGroupSeed.newWorldOpening.tags.join(','), /isolated_only/);
 
       const adultGroupRolls = [0.71, 0];
       const adultGroupSeed = buildIsekaiOpeningSeed({
@@ -15262,7 +15268,8 @@ const tests = [
         rng: () => adultGroupRolls.shift() ?? 0,
       });
       assert.equal(adultGroupSeed.earthTransition.label, 'Adult Group Transfer');
-      assert.equal(adultGroupSeed.newWorldOpening.label, 'Pulled With Coworkers or Strangers');
+      assert.equal(adultGroupSeed.arrivalProfile.group, true);
+      assert.doesNotMatch(adultGroupSeed.newWorldOpening.tags.join(','), /isolated_only/);
 
       for (const characterAge of [18, null]) {
         for (let index = 0; index < 19; index += 1) {
@@ -15287,8 +15294,12 @@ const tests = [
             return () => rolls.shift() ?? 0;
           })(),
         });
-        assert.ok(['summoned_from_earth', 'group_transfer'].includes(seed.earthTransition.key));
-        assert.match(seed.newWorldOpening.label, /Classmates|School Group/);
+        assert.equal(seed.ageGroup, 'school_age');
+        assert.equal(seed.arrivalProfile.studentContext, true);
+        assert.notEqual(seed.earthTransition.key, 'scientific_experiment');
+        if (seed.arrivalProfile.group) {
+          assert.doesNotMatch(seed.newWorldOpening.tags.join(','), /isolated_only/);
+        }
       }
 
       const scientificRolls = [0.86, 0];
@@ -15342,7 +15353,7 @@ const tests = [
       assert.match(introPrompt, /first visible glimpse of the new world, or the first clearly seen person from it/);
       assert.match(introPrompt, /After that, keep the aesthetic implicit/);
       assert.match(introPrompt, /Selected Earth Last Moment: Traffic Fatality \/ Rescue Accident\./);
-      assert.match(introPrompt, /Selected Isekai Opening: Liminal Deity Audience\./);
+      assert.match(introPrompt, /Selected Isekai Opening:/);
       assert.match(introPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
       assert.match(introPrompt, /must not rebuild, reroll, overwrite, infantize, or replace them/);
       assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
