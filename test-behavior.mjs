@@ -14877,12 +14877,10 @@ const tests = [
         indexSource.indexOf('const DEFAULT_SETTINGS'),
       );
 
-      assert.match(mainRulesSource, /INPUT FORMAT:/);
+      assert.match(mainRulesSource, /INPUT COMMUNICATION BOUNDARY:/);
       assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
-      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
-      assert.match(mainRulesSource, /Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue/);
-      assert.match(mainRulesSource, /Unformatted text describes narration or action\. It is NEVER audible dialogue/);
-      assert.doesNotMatch(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard|Otherwise, it is private inner thought/);
+      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content/);
+      assert.match(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard/);
       assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
       assert.match(mainRulesSource, /function activeHandoff\(response, context\):/);
       assert.match(mainRulesSource, /If a character\/NPC actively participates in the current exchange, your response MUST end on ONE of/);
@@ -14896,9 +14894,9 @@ const tests = [
 
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
       assert.match(mainRulesSource, /When a character\/NPC responds to \{\{user\}\} or another present character\/NPC, they may make ONLY ONE conversational contribution per response/);
-      assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link\. It is NEVER ordinary inner thought or audible dialogue/);
+      assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content, NEVER audible dialogue/);
       assert.match(mainRulesSource, /That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them/);
-      assert.match(mainRulesSource, /ONLY the intended recipient of private mental communication through an established link may respond to it/);
+      assert.match(mainRulesSource, /ONLY the intended recipient of explicit mental communication through an established link may respond to it/);
       assert.match(mainRulesSource, /Related points may be combined into one natural response\. Do not answer them point by point/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
       assert.match(mainRulesSource, /Once this contribution is complete, that character\/NPC's turn ENDS/);
@@ -14941,12 +14939,13 @@ const tests = [
       assert.match(mainRulesSource, /Treat ALL unstated information as HIDDEN and UNKNOWN by default/);
       assert.match(mainRulesSource, /Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established/);
       assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
-      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
+      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is private mental content/);
       assert.match(mainRulesSource, /Any permitted mental communication in your response MUST be enclosed in single asterisks, NEVER in double quotation marks/);
+      assert.match(mainRulesSource, /Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when \{\{user\}\} does not italicize them/);
       assert.match(mainRulesSource, /Information may enter narration ONLY through DIRECT sensory evidence available to \{\{user\}\} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts/);
       assert.match(mainRulesSource, /A character\/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them/);
       assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
-      assert.doesNotMatch(mainRulesSource, /even when \{\{user\}\} (?:does not italicize|leaves it unformatted)/);
+      assert.match(mainRulesSource, /even when \{\{user\}\} leaves it unformatted/);
       assert.match(mainRulesSource, /DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above/);
 
       assert.match(mainRulesSource, /function diegeticPhysicality\(response, context\):/);
@@ -15042,9 +15041,9 @@ const tests = [
           .trim();
       };
       const extractInputBoundary = source => {
-        const start = source.indexOf('INPUT FORMAT:');
+        const start = source.indexOf('INPUT COMMUNICATION BOUNDARY:');
         const end = source.indexOf('\n\nfunction RenderControlEngine', start);
-        assert.ok(start >= 0 && end > start, 'Input format should precede RenderControlEngine.');
+        assert.ok(start >= 0 && end > start, 'Input communication boundary should precede RenderControlEngine.');
         return source.slice(start, end).replace(/\r/g, '');
       };
 
@@ -15053,7 +15052,7 @@ const tests = [
       assert.equal(
         extractInputBoundary(handoffRulesSource),
         extractInputBoundary(mainRulesSource),
-        'The narrator reminder must mirror the full input format exactly.',
+        'The narrator reminder must mirror the full input communication boundary exactly.',
       );
 
       for (const name of mainRuleOrder) {
@@ -15182,9 +15181,7 @@ const tests = [
         rng: () => openingSeedRolls.shift() ?? 0,
       });
       assert.equal(openingSeed.earthTransition.label, 'Traffic Fatality / Rescue Accident');
-      assert.ok(openingSeed.newWorldOpening.label);
-      assert.doesNotMatch(openingSeed.newWorldOpening.label, /^Game-/);
-      assert.equal(openingSeed.arrivalProfile.group, false);
+      assert.equal(openingSeed.newWorldOpening.label, 'Liminal Deity Audience');
       assert.equal(openingSeed.earthTransition.label.includes('Divine Selection'), false);
       assert.equal(buildIsekaiOpeningSeed({ adventureGenre: 'Fantasy', rng: () => 0 }), null);
 
@@ -15204,8 +15201,7 @@ const tests = [
         rng: () => digitalSeedRolls.shift() ?? 0,
       });
       assert.equal(digitalOpeningSeed.earthTransition.label, 'Digital / System Glitch');
-      assert.ok(['game', 'system'].some(tag => digitalOpeningSeed.newWorldOpening.tags.includes(tag)));
-      assert.doesNotMatch(digitalOpeningSeed.newWorldOpening.tags.join(','), /isolated_only/);
+      assert.equal(digitalOpeningSeed.newWorldOpening.label, 'Administrator or Cosmic Clerk Chamber');
 
       const normalDeathSeedRolls = [0, 0.99];
       const normalDeathOpeningSeed = buildIsekaiOpeningSeed({
@@ -15216,20 +15212,17 @@ const tests = [
       assert.equal(normalDeathOpeningSeed.earthTransition.label, 'Traffic Fatality / Rescue Accident');
       assert.doesNotMatch(normalDeathOpeningSeed.newWorldOpening.label, /^Game-/);
 
-      const schoolSummoningRolls = [0, 0];
-      const schoolSummoningSeed = buildIsekaiOpeningSeed({
+      const schoolExhaustionRolls = [0.27, 0];
+      const schoolExhaustionSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
-        characterText: '# BASIC INFO\n**Age:** 17',
-        rng: () => schoolSummoningRolls.shift() ?? 0,
+        characterText: '# BASIC INFO\n**Age:** 18',
+        rng: () => schoolExhaustionRolls.shift() ?? 0,
       });
-      assert.equal(schoolSummoningSeed.characterAge, 17);
-      assert.equal(schoolSummoningSeed.ageGroup, 'school_age');
-      assert.equal(schoolSummoningSeed.earthTransition.label, 'Classroom / School Group Summoning');
-      assert.match(schoolSummoningSeed.earthTransition.guidance, /classroom, school club, school trip/);
-      assert.match(schoolSummoningSeed.earthTransition.guidance, /\{\{user\}\} and classmates/);
-      assert.equal(schoolSummoningSeed.arrivalProfile.studentContext, true);
-      assert.equal(schoolSummoningSeed.arrivalProfile.group, true);
-      assert.doesNotMatch(schoolSummoningSeed.newWorldOpening.tags.join(','), /isolated_only/);
+      assert.equal(schoolExhaustionSeed.characterAge, 18);
+      assert.equal(schoolExhaustionSeed.ageGroup, 'school_age');
+      assert.equal(schoolExhaustionSeed.earthTransition.label, 'Study / Exhaustion Collapse');
+      assert.match(schoolExhaustionSeed.earthTransition.guidance, /schoolwork, exam pressure, late-night studying/);
+      assert.match(schoolExhaustionSeed.earthTransition.guidance, /Keep \{\{user\}\} out of workplaces and adult professional roles/);
 
       const tableAgeSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
@@ -15237,7 +15230,7 @@ const tests = [
         rng: () => 0,
       });
       assert.equal(tableAgeSeed.characterAge, 18);
-      assert.equal(tableAgeSeed.ageGroup, 'adult_context');
+      assert.equal(tableAgeSeed.ageGroup, 'school_age');
 
       const adultExhaustionRolls = [0.26, 0];
       const adultExhaustionSeed = buildIsekaiOpeningSeed({
@@ -15254,12 +15247,11 @@ const tests = [
       const schoolGroupRolls = [0.75, 0];
       const schoolGroupSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
-        characterAge: 17,
+        characterAge: 18,
         rng: () => schoolGroupRolls.shift() ?? 0,
       });
-      assert.equal(schoolGroupSeed.ageGroup, 'school_age');
-      assert.equal(schoolGroupSeed.arrivalProfile.group, true);
-      assert.doesNotMatch(schoolGroupSeed.newWorldOpening.tags.join(','), /isolated_only/);
+      assert.equal(schoolGroupSeed.earthTransition.label, 'Class / School Group Transfer');
+      assert.equal(schoolGroupSeed.newWorldOpening.label, 'Pulled With Classmates');
 
       const adultGroupRolls = [0.71, 0];
       const adultGroupSeed = buildIsekaiOpeningSeed({
@@ -15268,8 +15260,7 @@ const tests = [
         rng: () => adultGroupRolls.shift() ?? 0,
       });
       assert.equal(adultGroupSeed.earthTransition.label, 'Adult Group Transfer');
-      assert.equal(adultGroupSeed.arrivalProfile.group, true);
-      assert.doesNotMatch(adultGroupSeed.newWorldOpening.tags.join(','), /isolated_only/);
+      assert.equal(adultGroupSeed.newWorldOpening.label, 'Pulled With Coworkers or Strangers');
 
       for (const characterAge of [18, null]) {
         for (let index = 0; index < 19; index += 1) {
@@ -15282,23 +15273,6 @@ const tests = [
             })(),
           });
           assert.notEqual(seed.earthTransition.key, 'scientific_experiment');
-        }
-      }
-
-      for (let index = 0; index < 19; index += 1) {
-        const seed = buildIsekaiOpeningSeed({
-          adventureGenre: 'Isekai',
-          characterAge: 17,
-          rng: (() => {
-            const rolls = [(index + 0.1) / 19, 0];
-            return () => rolls.shift() ?? 0;
-          })(),
-        });
-        assert.equal(seed.ageGroup, 'school_age');
-        assert.equal(seed.arrivalProfile.studentContext, true);
-        assert.notEqual(seed.earthTransition.key, 'scientific_experiment');
-        if (seed.arrivalProfile.group) {
-          assert.doesNotMatch(seed.newWorldOpening.tags.join(','), /isolated_only/);
         }
       }
 
@@ -15345,7 +15319,7 @@ const tests = [
       assert.match(introPrompt, /You MUST narrate BOTH required beats below, in order\./);
       assert.match(introPrompt, /Do NOT skip either beat\. Do NOT choose a different Earth last moment or Isekai opening\./);
       assert.match(introPrompt, /AGE COMPATIBILITY:/);
-      assert.match(introPrompt, /\{\{user\}\} is 18 or older/);
+      assert.match(introPrompt, /\{\{user\}\} is 19 or older/);
       assert.match(introPrompt, /NEVER place \{\{user\}\} in a high-school classroom or high-school student role/);
       assert.match(introPrompt, /BEAT #1: EARTH LAST MOMENTS/);
       assert.match(introPrompt, /BEAT #2: ISEKAI OPENING/);
@@ -15353,7 +15327,7 @@ const tests = [
       assert.match(introPrompt, /first visible glimpse of the new world, or the first clearly seen person from it/);
       assert.match(introPrompt, /After that, keep the aesthetic implicit/);
       assert.match(introPrompt, /Selected Earth Last Moment: Traffic Fatality \/ Rescue Accident\./);
-      assert.match(introPrompt, /Selected Isekai Opening:/);
+      assert.match(introPrompt, /Selected Isekai Opening: Liminal Deity Audience\./);
       assert.match(introPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
       assert.match(introPrompt, /must not rebuild, reroll, overwrite, infantize, or replace them/);
       assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
@@ -15444,7 +15418,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.42');
+      assert.equal(manifest.version, '0.9.41');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -16729,7 +16703,7 @@ const tests = [
       assert.match(modelPrompt, /Surel: BOUND COMPANION RESPONSE RULE/);
       assert.match(modelPrompt, /Merely mentioning or thinking about the companion is NOT direct address/);
       assert.match(modelPrompt, /Render any private companion response or interjection in single asterisks, never in double quotation marks/);
-      assert.match(modelPrompt, /Outside characters\/NPCs cannot perceive private mental communication or the companion's private response/);
+      assert.match(modelPrompt, /Outside characters\/NPCs cannot perceive private mental content or the companion's private response/);
       assert.doesNotMatch(deterministicSource, /isBoundCompanionDirectAddress|extractSingleAsteriskSegments|inputExplicitlyFramesMentalAddress|mode: 'direct_response'/);
     },
   },
