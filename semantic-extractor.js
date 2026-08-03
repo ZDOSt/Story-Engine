@@ -9,9 +9,8 @@ export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
 export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES };
 
 const SEMANTIC_RESPONSE_LENGTH_MIN = 4096;
-const SEMANTIC_RESPONSE_LENGTH_MAX = 16384;
+const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
-const SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const DEEPSEEK_CHAT_COMPLETION_SOURCE = 'deepseek';
 const SEMANTIC_REASONING_EFFORTS = Object.freeze(['low', 'medium', 'high']);
@@ -85,6 +84,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
             semanticProfile: options?.semanticProfileName || undefined,
         };
         } catch (error) {
+            options?.signal?.throwIfAborted?.();
             if (!isRecoverableSemanticToolCallError(error)) {
                 const message = error instanceof Error ? error.message : String(error);
                 throw new Error(`Semantic tool-call pass returned no valid ledger. Generation aborted before narration. ${message}`);
@@ -98,7 +98,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
             console.warn('[Structured Preflight Engines] semantic tool-call failed; falling back to compact ledger.', error);
             raw = options?.semanticProfileId
                 ? await generateSemanticRawWithProfile(prompt, responseLength, options)
-                : await generateSemanticRaw(context, prompt, responseLength);
+                : await generateSemanticRaw(context, prompt, responseLength, options);
             extractionMeta = {
                 source: options?.semanticProfileId
                     ? `SillyTavern direct connection profile compact preflight ledger fallback + local validation (${options.semanticProfileName || options.semanticProfileId})`
@@ -114,7 +114,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
     } else {
         raw = options?.semanticProfileId
             ? await generateSemanticRawWithProfile(prompt, responseLength, options)
-            : await generateSemanticRaw(context, prompt, responseLength);
+            : await generateSemanticRaw(context, prompt, responseLength, options);
         extractionMeta = {
             source: options?.semanticProfileId
                 ? `SillyTavern direct connection profile compact preflight ledger + local validation (${options.semanticProfileName || options.semanticProfileId})`
@@ -170,42 +170,33 @@ export function parseNarratorTrackerDelta(text, narration = '') {
     return sanitizeNarratorTrackerDelta(parseNarratorTrackerDeltaText(text), narration);
 }
 
-function estimateSemanticResponseLength(trackerSnapshot, promptContext = null, options = {}) {
-    const trackedNpcCount = trackerSnapshot && typeof trackerSnapshot === 'object'
-        ? Object.keys(trackerSnapshot).length
-        : 0;
-    const inferredSceneNpcCount = estimateSceneNpcCount(promptContext, options);
+export function estimateSemanticResponseLength(trackerSnapshot, promptContext = null, options = {}) {
+    const currentExchangeText = extractLatestExchangeText(promptContext, options);
+    const trackedNpcCount = countReferencedTrackedNpcs(trackerSnapshot, currentExchangeText);
     const promptComplexity = estimatePromptComplexity(promptContext, options);
     const estimated = SEMANTIC_RESPONSE_LENGTH_MIN
         + (trackedNpcCount * SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC)
-        + (Math.max(0, inferredSceneNpcCount - trackedNpcCount) * SEMANTIC_RESPONSE_LENGTH_PER_INFERRED_SCENE_NPC)
         + promptComplexity;
     return Math.max(SEMANTIC_RESPONSE_LENGTH_MIN, Math.min(SEMANTIC_RESPONSE_LENGTH_MAX, estimated));
 }
 
-function estimateSceneNpcCount(promptContext, options = {}) {
-    const text = extractRecentPromptText(promptContext, options);
-    if (!text) return 0;
+function countReferencedTrackedNpcs(trackerSnapshot, text) {
+    if (!trackerSnapshot || typeof trackerSnapshot !== 'object' || !text) return 0;
+    return Object.keys(trackerSnapshot)
+        .filter(name => trackedNpcNameAppearsInText(name, text))
+        .length;
+}
 
-    const commonWords = new Set([
-        'i', 'a', 'an', 'and', 'assistant', 'begin', 'but', 'end', 'engine', 'if', 'info', 'narrator',
-        'or', 'sillytavern', 'story', 'system', 'that', 'the', 'then', 'this', 'user', 'world', 'you',
-    ]);
-    const properNames = new Set();
-    for (const match of text.matchAll(/\b[A-Z][A-Za-z'_-]{1,38}\b/g)) {
-        const key = match[0].trim().toLowerCase();
-        if (commonWords.has(key)) continue;
-        properNames.add(key);
-    }
-
-    let roleMentions = 0;
-    const rolePattern = /\b(?:adventurer|ally|assassin|bandit|beast|captain|companion|cultist|demon|dragon|enemy|goblin|guard|knight|mage|merchant|monster|npc|ogre|orc|raider|soldier|skeleton|thug|undead|villager|wolf|zombie)s?\b/gi;
-    for (const match of text.matchAll(rolePattern)) {
-        const before = text.slice(Math.max(0, match.index - 16), match.index).toLowerCase();
-        roleMentions += /\b(two|three|four|five|six|seven|eight|nine|ten|2|3|4|5|6|7|8|9|10)\s+$/.test(before) ? 2 : 1;
-    }
-
-    return Math.min(16, properNames.size + roleMentions);
+function trackedNpcNameAppearsInText(name, text) {
+    const cleanName = String(name || '').trim();
+    if (!cleanName || !text) return false;
+    const leadingBoundary = /^[\p{L}\p{N}_]/u.test(cleanName)
+        ? '(?:^|[^\\p{L}\\p{N}_])'
+        : '';
+    const trailingBoundary = /[\p{L}\p{N}_]$/u.test(cleanName)
+        ? '(?![\\p{L}\\p{N}_])'
+        : '';
+    return new RegExp(`${leadingBoundary}${escapeRegExp(cleanName)}${trailingBoundary}`, 'iu').test(String(text));
 }
 
 function estimatePromptComplexity(promptContext, options = {}) {
@@ -217,9 +208,18 @@ function estimatePromptComplexity(promptContext, options = {}) {
 }
 
 function extractRecentPromptText(promptContext, options = {}) {
+    return extractPromptText(promptContext, options, 8);
+}
+
+function extractLatestExchangeText(promptContext, options = {}) {
+    return extractPromptText(promptContext, options, 2);
+}
+
+function extractPromptText(promptContext, options = {}, messageLimit = 8) {
     const rows = Array.isArray(promptContext) ? promptContext : [];
     const texts = [];
-    for (let index = rows.length - 1; index >= 0 && texts.length < 8; index -= 1) {
+    const limit = Math.max(1, Math.floor(Number(messageLimit) || 1));
+    for (let index = rows.length - 1; index >= 0 && texts.length < limit; index -= 1) {
         const row = rows[index];
         const role = String(row?.role || '').toLowerCase();
         if (options?.assembledPrompt && role && !['user', 'assistant'].includes(role)) continue;
@@ -230,12 +230,16 @@ function extractRecentPromptText(promptContext, options = {}) {
     return texts.reverse().join('\n');
 }
 
-async function generateSemanticRaw(context, prompt, responseLength) {
+async function generateSemanticRaw(context, prompt, responseLength, requestOptions = {}) {
     const options = { prompt };
     if (Number.isFinite(responseLength) && responseLength > 0) {
         options.responseLength = responseLength;
     }
-    return await generateRawData(options, context, { purpose: 'semantic preflight' });
+    return await generateRawData(options, context, {
+        purpose: 'semantic preflight',
+        signal: requestOptions.signal,
+        beforeAbort: requestOptions.beforeRawAbort,
+    });
 }
 
 async function generateSemanticRawWithProfile(prompt, responseLength, options = {}) {
@@ -252,6 +256,7 @@ async function generateSemanticRawWithProfile(prompt, responseLength, options = 
         },
         extractData: true,
         preparePayload: applyStoryEngineThinkingDisabledPayload,
+        signal: options.signal,
     });
     return extractGeneratedText(result);
 }
@@ -284,9 +289,11 @@ async function generateSemanticToolCall(context, prompt, responseLength, options
     const toolPrompt = buildSemanticToolPrompt(prompt);
     try {
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
+            purpose: 'semantic preflight tool call',
             buildTool: buildSemanticPreflightTool,
             buildToolChoice: buildSemanticToolChoice,
             preparePayload: payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort),
+            signal: options.signal,
         });
         if (raw?.error) {
             throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
@@ -464,10 +471,6 @@ export function applySemanticThinkingPayload(payload, reasoningEffort = DEFAULT_
 
         payload.include_reasoning = true;
         payload.reasoning_effort = normalizedEffort === 'high' ? 'max' : 'high';
-        const currentMaxTokens = Number(payload.max_tokens);
-        payload.max_tokens = Number.isFinite(currentMaxTokens)
-            ? Math.max(currentMaxTokens, SEMANTIC_RESPONSE_LENGTH_MAX)
-            : SEMANTIC_RESPONSE_LENGTH_MAX;
         return payload;
     }
 
@@ -1077,15 +1080,47 @@ function buildSemanticPreflightSchema() {
         additionalProperties: false,
         required: ['reputationLocation', 'place', 'area', 'indoors', 'timeAdvance', 'timeAdvanceCount', 'timeOfDay', 'requiresSuccess', 'evidence'],
         properties: {
-            reputationLocation: { type: 'string' },
-            place: { type: 'string' },
-            area: { type: 'string' },
-            indoors: { type: 'string', enum: ['unchanged', 'indoors', 'outdoors'] },
-            timeAdvance: { type: 'string', enum: ['none', 'slot', 'overnight', 'day', 'explicit'] },
-            timeAdvanceCount: { type: 'integer', minimum: 1, maximum: 3650 },
-            timeOfDay: { type: 'string', enum: ['unchanged', 'morning', 'afternoon', 'evening', 'night'] },
-            requiresSuccess: { type: 'boolean' },
-            evidence: { type: 'string' },
+            reputationLocation: {
+                type: 'string',
+                description: 'Use unchanged unless the latest user input explicitly changes the current settlement, route, region, or reputation jurisdiction. Never copy or infer the existing scene state.',
+            },
+            place: {
+                type: 'string',
+                description: 'Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different place. Never copy or infer the existing place from context.',
+            },
+            area: {
+                type: 'string',
+                description: 'Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different sub-area. Never copy or infer the existing area from context.',
+            },
+            indoors: {
+                type: 'string',
+                enum: ['unchanged', 'indoors', 'outdoors'],
+                description: 'Use unchanged unless the latest user input explicitly crosses between indoors and outdoors.',
+            },
+            timeAdvance: {
+                type: 'string',
+                enum: ['none', 'slot', 'overnight', 'day', 'explicit'],
+                description: 'Use none unless the latest user input explicitly waits, sleeps, travels through, or skips time.',
+            },
+            timeAdvanceCount: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 3650,
+                description: 'Number of timeAdvance units explicitly established by the latest user input; use 1 when timeAdvance is none.',
+            },
+            timeOfDay: {
+                type: 'string',
+                enum: ['unchanged', 'morning', 'afternoon', 'evening', 'night'],
+                description: 'Use unchanged unless the latest user input explicitly establishes a new time of day.',
+            },
+            requiresSuccess: {
+                type: 'boolean',
+                description: 'True only when this explicit transition depends on the current stakes-bearing action succeeding.',
+            },
+            evidence: {
+                type: 'string',
+                description: 'Exact contiguous quote from the latest user input that establishes this transition, or (none) when every transition field is unchanged/none.',
+            },
         },
     };
     const worldEvidenceSchema = {
@@ -5419,22 +5454,40 @@ function validateNormalizedLedger(ledger, raw) {
 }
 
 export function validateSemanticWorldProgression(ledger, options = {}, context = {}) {
-    const transition = normalizeWorldTransition(ledger?.worldTransition || {});
+    let transition = normalizeWorldTransition(ledger?.worldTransition || {});
     const beforeWorldState = normalizeWorldState(options?.worldStateSnapshot || {});
-    const assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
+    let assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
         assumeSuccess: true,
         seed: 'semantic-world-transition',
     });
     const transitionChangesState = JSON.stringify(beforeWorldState) !== JSON.stringify(assumedWorldState);
+    let rejectedUngroundedTransition = false;
     if (transitionChangesState && !semanticEvidenceAppearsInLatestInput(transition.evidence, options.latestUserText)) {
-        throw new Error('WorldTransition changed scene state without an exact quote grounded in the latest user input.');
+        console.warn('[Story Engine] Rejected ungrounded WorldTransition; continuing without changing scene state.', transition);
+        transition = normalizeWorldTransition({});
+        ledger.worldTransition = transition;
+        assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
+            assumeSuccess: true,
+            seed: 'semantic-world-transition',
+        });
+        rejectedUngroundedTransition = true;
     }
     const progression = normalizeWorldProgression(options?.worldProgressionSnapshot || {});
-    const coverage = validateWorldProgressionAdvancementCoverage(
+    let coverage = validateWorldProgressionAdvancementCoverage(
         progression,
         ledger?.worldProgression?.advancements || [],
         assumedWorldState,
     );
+    if (rejectedUngroundedTransition && coverage.unexpected.length) {
+        const duePlanIds = new Set(coverage.duePlanIds);
+        ledger.worldProgression.advancements = coverage.advancements
+            .filter(advancement => duePlanIds.has(advancement.planId));
+        coverage = validateWorldProgressionAdvancementCoverage(
+            progression,
+            ledger.worldProgression.advancements,
+            assumedWorldState,
+        );
+    }
     if (!coverage.valid) {
         const details = [
             coverage.missing.length ? `missing=${coverage.missing.join(',')}` : '',

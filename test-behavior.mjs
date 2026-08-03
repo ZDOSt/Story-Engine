@@ -8,7 +8,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticToolChoice, buildSemanticToolPrompt, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticToolChoice, buildSemanticToolPrompt, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -17,6 +17,7 @@ import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
+import { generateRawData as generateRawDataAdapter } from './st-adapter.js';
 
 const stakeKeys = [
   'no_roll',
@@ -2339,6 +2340,38 @@ const tests = [
       });
       assert.equal(report.trackerUpdate.npcs.Seraphina.currentDisposition.B, 1);
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].SlowBondEligible, 'N');
+    },
+  },
+  {
+    name: '12a.0 rapport clock is projected during resolution and committed with tracker state',
+    async run() {
+      const realDateNow = Date.now;
+      const now = 1700000000000;
+      const initialClock = { activeMs: 5000, lastActivityAt: now - 1000 };
+      const testContext = context('I look around.', {}, {}, undefined, null, { ...initialClock });
+      try {
+        Date.now = () => now;
+        const report = withDice([10, 10, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(
+          baseLedger(),
+          {},
+          testContext,
+          'normal',
+        ));
+
+        assert.deepEqual(testContext.chatMetadata.structuredPreflightTracker.rapportClock, initialClock);
+        assert.deepEqual(report.trackerUpdate.rapportClock, {
+          activeMs: 6000,
+          lastActivityAt: now,
+        });
+
+        await saveTrackerUpdate(testContext, report.trackerUpdate, { save: false });
+        assert.deepEqual(testContext.chatMetadata.structuredPreflightTracker.rapportClock, {
+          activeMs: 6000,
+          lastActivityAt: now,
+        });
+      } finally {
+        Date.now = realDateNow;
+      }
     },
   },
   {
@@ -12092,7 +12125,7 @@ const tests = [
     },
   },
   {
-    name: '33c.5d semantic transitions require latest-input evidence and protect persona aliases',
+    name: '33c.5d semantic transitions reject ungrounded state changes and protect persona aliases',
     run() {
       const dialogueOnlyLedger = {
         worldTransition: {
@@ -12112,7 +12145,52 @@ const tests = [
         context('"Hello there."'),
       ));
 
-      const transitionLedger = {
+      const establishedWorldState = normalizeWorldState({
+        reputationLocation: 'Eldermere',
+        place: 'The Copper Cup',
+        area: 'common room',
+        indoors: true,
+        positionEstablished: true,
+        dayIndex: 2,
+        timeOfDay: 'evening',
+        timeEstablished: true,
+      });
+      const inferredTransitions = [
+        { place: 'Market Square' },
+        { indoors: 'outdoors' },
+        { timeAdvance: 'slot' },
+        { timeOfDay: 'night' },
+      ];
+      for (const inferredTransition of inferredTransitions) {
+        const inferredLedger = {
+          worldTransition: {
+            reputationLocation: 'unchanged',
+            place: 'unchanged',
+            area: 'unchanged',
+            indoors: 'unchanged',
+            timeAdvance: 'none',
+            timeAdvanceCount: 1,
+            timeOfDay: 'unchanged',
+            requiresSuccess: false,
+            evidence: '(none)',
+            ...inferredTransition,
+          },
+          worldProgression: { advancements: [] },
+        };
+        assert.doesNotThrow(() => validateSemanticWorldProgression(
+          inferredLedger,
+          {
+            latestUserText: '"Hello there."',
+            worldStateSnapshot: establishedWorldState,
+          },
+          context('"Hello there."'),
+        ));
+        assert.deepEqual(projectWorldStateTransition(establishedWorldState, inferredLedger.worldTransition, {
+          assumeSuccess: true,
+        }), establishedWorldState);
+      }
+
+      const ungroundedTransitionLedger = {
         worldTransition: {
           timeAdvance: 'day',
           timeAdvanceCount: 1,
@@ -12120,16 +12198,77 @@ const tests = [
         },
         worldProgression: { advancements: [] },
       };
-      assert.throws(() => validateSemanticWorldProgression(
-        transitionLedger,
+      assert.doesNotThrow(() => validateSemanticWorldProgression(
+        ungroundedTransitionLedger,
         { latestUserText: 'I open the eastern door.' },
         context('I open the eastern door.'),
-      ), /exact quote grounded in the latest user input/);
+      ));
+      assert.equal(ungroundedTransitionLedger.worldTransition.timeAdvance, 'none');
+
+      const futurePlanState = applyWorldMemoryDelta({}, {
+        plans: {
+          create: [{
+            kind: 'scheduled',
+            actor: 'Rick',
+            objective: 'Leave Eldermere after three days',
+            location: 'Eldermere',
+            cause: 'Rick says he will leave Eldermere in three days.',
+            delayDays: 3,
+          }],
+        },
+      }, {
+        afterWorldState: establishedWorldState,
+        messageKey: 'chat:ungrounded-transition-plan',
+      });
+      const futurePlan = futurePlanState.progression.plans[0];
+      const ungroundedPlanLedger = {
+        worldTransition: {
+          timeAdvance: 'day',
+          timeAdvanceCount: 3,
+          evidence: 'I wait three days.',
+        },
+        worldProgression: {
+          advancements: [{
+            planId: futurePlan.id,
+            stageLabel: 'Departed',
+            consequence: 'Rick left Eldermere by the northern road.',
+            status: 'active',
+            nextDelayDays: 1,
+            evidence: [{
+              topic: 'Rick departed',
+              text: "Rick's room is empty and his travel bag is gone.",
+              route: 'location',
+              location: 'Eldermere',
+            }],
+          }],
+        },
+      };
       assert.doesNotThrow(() => validateSemanticWorldProgression(
-        transitionLedger,
+        ungroundedPlanLedger,
+        {
+          latestUserText: '"Hello there."',
+          worldStateSnapshot: establishedWorldState,
+          worldProgressionSnapshot: futurePlanState.progression,
+        },
+        context('"Hello there."'),
+      ));
+      assert.equal(ungroundedPlanLedger.worldTransition.timeAdvance, 'none');
+      assert.deepEqual(ungroundedPlanLedger.worldProgression.advancements, []);
+
+      const groundedTransitionLedger = {
+        worldTransition: {
+          timeAdvance: 'day',
+          timeAdvanceCount: 1,
+          evidence: 'I wait until morning.',
+        },
+        worldProgression: { advancements: [] },
+      };
+      assert.doesNotThrow(() => validateSemanticWorldProgression(
+        groundedTransitionLedger,
         { latestUserText: 'I wait until morning.' },
         context('I wait until morning.'),
       ));
+      assert.equal(groundedTransitionLedger.worldTransition.timeAdvance, 'day');
 
       const personaContext = context('', {}, {}, '**Name:** Мария\nPHY: 6\nMND: 6\nCHA: 6', null, {}, {
         name1: 'Ari',
@@ -14738,6 +14877,12 @@ const tests = [
         indexSource.indexOf('const DEFAULT_SETTINGS'),
       );
 
+      assert.match(mainRulesSource, /INPUT FORMAT:/);
+      assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
+      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
+      assert.match(mainRulesSource, /Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue/);
+      assert.match(mainRulesSource, /Unformatted text describes narration or action\. It is NEVER audible dialogue/);
+      assert.doesNotMatch(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard|Otherwise, it is private inner thought/);
       assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
       assert.match(mainRulesSource, /function activeHandoff\(response, context\):/);
       assert.match(mainRulesSource, /If a character\/NPC actively participates in the current exchange, your response MUST end on ONE of/);
@@ -14751,7 +14896,9 @@ const tests = [
 
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
       assert.match(mainRulesSource, /When a character\/NPC responds to \{\{user\}\} or another present character\/NPC, they may make ONLY ONE conversational contribution per response/);
-      assert.match(mainRulesSource, /That contribution MUST account for the FULL input directed at them, including all questions and statements, rather than only the last sentence or question/);
+      assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link\. It is NEVER ordinary inner thought or audible dialogue/);
+      assert.match(mainRulesSource, /That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them/);
+      assert.match(mainRulesSource, /ONLY the intended recipient of private mental communication through an established link may respond to it/);
       assert.match(mainRulesSource, /Related points may be combined into one natural response\. Do not answer them point by point/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
       assert.match(mainRulesSource, /Once this contribution is complete, that character\/NPC's turn ENDS/);
@@ -14761,11 +14908,11 @@ const tests = [
       assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
-      assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Your response MUST begin at the FIRST moment AFTER the final action, observation, or line of dialogue in \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Your response MUST begin at the FIRST moment AFTER the final action, observation, line of audible dialogue, or private mental communication in \{\{user\}\}'s input/);
       assert.match(mainRulesSource, /Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development/);
       assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s input/);
       assert.match(mainRulesSource, /DO NOT re-describe unchanged environments, objects, or characters already established in \{\{user\}\}'s input or previous narration/);
-      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue/);
+      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication/);
 
       assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
       assert.match(mainRulesSource, /You MUST describe actions, sensations, objects, and events DIRECTLY by stating what they are, what they do, or what concrete effects they produce/);
@@ -14793,7 +14940,13 @@ const tests = [
       assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
       assert.match(mainRulesSource, /Treat ALL unstated information as HIDDEN and UNKNOWN by default/);
       assert.match(mainRulesSource, /Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established/);
-      assert.match(mainRulesSource, /Information may enter narration ONLY through DIRECT sensory evidence available to \{\{user\}\} in the current scene, explicit dialogue, readable text, or previously established scene facts/);
+      assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
+      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
+      assert.match(mainRulesSource, /Any permitted mental communication in your response MUST be enclosed in single asterisks, NEVER in double quotation marks/);
+      assert.match(mainRulesSource, /Information may enter narration ONLY through DIRECT sensory evidence available to \{\{user\}\} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts/);
+      assert.match(mainRulesSource, /A character\/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them/);
+      assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
+      assert.doesNotMatch(mainRulesSource, /even when \{\{user\}\} (?:does not italicize|leaves it unformatted)/);
       assert.match(mainRulesSource, /DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above/);
 
       assert.match(mainRulesSource, /function diegeticPhysicality\(response, context\):/);
@@ -14888,9 +15041,20 @@ const tests = [
           .replace(/\n{3,}/g, '\n\n')
           .trim();
       };
+      const extractInputBoundary = source => {
+        const start = source.indexOf('INPUT FORMAT:');
+        const end = source.indexOf('\n\nfunction RenderControlEngine', start);
+        assert.ok(start >= 0 && end > start, 'Input format should precede RenderControlEngine.');
+        return source.slice(start, end).replace(/\r/g, '');
+      };
 
       assertRuleOrder(mainRulesSource, mainRuleOrder, 'the full prose rules');
       assertRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator reminder');
+      assert.equal(
+        extractInputBoundary(handoffRulesSource),
+        extractInputBoundary(mainRulesSource),
+        'The narrator reminder must mirror the full input format exactly.',
+      );
 
       for (const name of mainRuleOrder) {
         assert.equal(
@@ -15018,7 +15182,9 @@ const tests = [
         rng: () => openingSeedRolls.shift() ?? 0,
       });
       assert.equal(openingSeed.earthTransition.label, 'Traffic Fatality / Rescue Accident');
-      assert.equal(openingSeed.newWorldOpening.label, 'Liminal Deity Audience');
+      assert.ok(openingSeed.newWorldOpening.label);
+      assert.doesNotMatch(openingSeed.newWorldOpening.label, /^Game-/);
+      assert.equal(openingSeed.arrivalProfile.group, false);
       assert.equal(openingSeed.earthTransition.label.includes('Divine Selection'), false);
       assert.equal(buildIsekaiOpeningSeed({ adventureGenre: 'Fantasy', rng: () => 0 }), null);
 
@@ -15038,7 +15204,8 @@ const tests = [
         rng: () => digitalSeedRolls.shift() ?? 0,
       });
       assert.equal(digitalOpeningSeed.earthTransition.label, 'Digital / System Glitch');
-      assert.equal(digitalOpeningSeed.newWorldOpening.label, 'Administrator or Cosmic Clerk Chamber');
+      assert.ok(['game', 'system'].some(tag => digitalOpeningSeed.newWorldOpening.tags.includes(tag)));
+      assert.doesNotMatch(digitalOpeningSeed.newWorldOpening.tags.join(','), /isolated_only/);
 
       const normalDeathSeedRolls = [0, 0.99];
       const normalDeathOpeningSeed = buildIsekaiOpeningSeed({
@@ -15049,17 +15216,20 @@ const tests = [
       assert.equal(normalDeathOpeningSeed.earthTransition.label, 'Traffic Fatality / Rescue Accident');
       assert.doesNotMatch(normalDeathOpeningSeed.newWorldOpening.label, /^Game-/);
 
-      const schoolExhaustionRolls = [0.27, 0];
-      const schoolExhaustionSeed = buildIsekaiOpeningSeed({
+      const schoolSummoningRolls = [0, 0];
+      const schoolSummoningSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
-        characterText: '# BASIC INFO\n**Age:** 18',
-        rng: () => schoolExhaustionRolls.shift() ?? 0,
+        characterText: '# BASIC INFO\n**Age:** 17',
+        rng: () => schoolSummoningRolls.shift() ?? 0,
       });
-      assert.equal(schoolExhaustionSeed.characterAge, 18);
-      assert.equal(schoolExhaustionSeed.ageGroup, 'school_age');
-      assert.equal(schoolExhaustionSeed.earthTransition.label, 'Study / Exhaustion Collapse');
-      assert.match(schoolExhaustionSeed.earthTransition.guidance, /schoolwork, exam pressure, late-night studying/);
-      assert.match(schoolExhaustionSeed.earthTransition.guidance, /Keep \{\{user\}\} out of workplaces and adult professional roles/);
+      assert.equal(schoolSummoningSeed.characterAge, 17);
+      assert.equal(schoolSummoningSeed.ageGroup, 'school_age');
+      assert.equal(schoolSummoningSeed.earthTransition.label, 'Classroom / School Group Summoning');
+      assert.match(schoolSummoningSeed.earthTransition.guidance, /classroom, school club, school trip/);
+      assert.match(schoolSummoningSeed.earthTransition.guidance, /\{\{user\}\} and classmates/);
+      assert.equal(schoolSummoningSeed.arrivalProfile.studentContext, true);
+      assert.equal(schoolSummoningSeed.arrivalProfile.group, true);
+      assert.doesNotMatch(schoolSummoningSeed.newWorldOpening.tags.join(','), /isolated_only/);
 
       const tableAgeSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
@@ -15067,7 +15237,7 @@ const tests = [
         rng: () => 0,
       });
       assert.equal(tableAgeSeed.characterAge, 18);
-      assert.equal(tableAgeSeed.ageGroup, 'school_age');
+      assert.equal(tableAgeSeed.ageGroup, 'adult_context');
 
       const adultExhaustionRolls = [0.26, 0];
       const adultExhaustionSeed = buildIsekaiOpeningSeed({
@@ -15084,11 +15254,12 @@ const tests = [
       const schoolGroupRolls = [0.75, 0];
       const schoolGroupSeed = buildIsekaiOpeningSeed({
         adventureGenre: 'Isekai',
-        characterAge: 18,
+        characterAge: 17,
         rng: () => schoolGroupRolls.shift() ?? 0,
       });
-      assert.equal(schoolGroupSeed.earthTransition.label, 'Class / School Group Transfer');
-      assert.equal(schoolGroupSeed.newWorldOpening.label, 'Pulled With Classmates');
+      assert.equal(schoolGroupSeed.ageGroup, 'school_age');
+      assert.equal(schoolGroupSeed.arrivalProfile.group, true);
+      assert.doesNotMatch(schoolGroupSeed.newWorldOpening.tags.join(','), /isolated_only/);
 
       const adultGroupRolls = [0.71, 0];
       const adultGroupSeed = buildIsekaiOpeningSeed({
@@ -15097,7 +15268,8 @@ const tests = [
         rng: () => adultGroupRolls.shift() ?? 0,
       });
       assert.equal(adultGroupSeed.earthTransition.label, 'Adult Group Transfer');
-      assert.equal(adultGroupSeed.newWorldOpening.label, 'Pulled With Coworkers or Strangers');
+      assert.equal(adultGroupSeed.arrivalProfile.group, true);
+      assert.doesNotMatch(adultGroupSeed.newWorldOpening.tags.join(','), /isolated_only/);
 
       for (const characterAge of [18, null]) {
         for (let index = 0; index < 19; index += 1) {
@@ -15110,6 +15282,23 @@ const tests = [
             })(),
           });
           assert.notEqual(seed.earthTransition.key, 'scientific_experiment');
+        }
+      }
+
+      for (let index = 0; index < 19; index += 1) {
+        const seed = buildIsekaiOpeningSeed({
+          adventureGenre: 'Isekai',
+          characterAge: 17,
+          rng: (() => {
+            const rolls = [(index + 0.1) / 19, 0];
+            return () => rolls.shift() ?? 0;
+          })(),
+        });
+        assert.equal(seed.ageGroup, 'school_age');
+        assert.equal(seed.arrivalProfile.studentContext, true);
+        assert.notEqual(seed.earthTransition.key, 'scientific_experiment');
+        if (seed.arrivalProfile.group) {
+          assert.doesNotMatch(seed.newWorldOpening.tags.join(','), /isolated_only/);
         }
       }
 
@@ -15156,7 +15345,7 @@ const tests = [
       assert.match(introPrompt, /You MUST narrate BOTH required beats below, in order\./);
       assert.match(introPrompt, /Do NOT skip either beat\. Do NOT choose a different Earth last moment or Isekai opening\./);
       assert.match(introPrompt, /AGE COMPATIBILITY:/);
-      assert.match(introPrompt, /\{\{user\}\} is 19 or older/);
+      assert.match(introPrompt, /\{\{user\}\} is 18 or older/);
       assert.match(introPrompt, /NEVER place \{\{user\}\} in a high-school classroom or high-school student role/);
       assert.match(introPrompt, /BEAT #1: EARTH LAST MOMENTS/);
       assert.match(introPrompt, /BEAT #2: ISEKAI OPENING/);
@@ -15164,7 +15353,7 @@ const tests = [
       assert.match(introPrompt, /first visible glimpse of the new world, or the first clearly seen person from it/);
       assert.match(introPrompt, /After that, keep the aesthetic implicit/);
       assert.match(introPrompt, /Selected Earth Last Moment: Traffic Fatality \/ Rescue Accident\./);
-      assert.match(introPrompt, /Selected Isekai Opening: Liminal Deity Audience\./);
+      assert.match(introPrompt, /Selected Isekai Opening:/);
       assert.match(introPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
       assert.match(introPrompt, /must not rebuild, reroll, overwrite, infantize, or replace them/);
       assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
@@ -15255,7 +15444,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.38');
+      assert.equal(manifest.version, '0.9.45');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -15705,7 +15894,7 @@ const tests = [
       applySemanticThinkingPayload(deepSeekSemanticPayload);
       assert.equal(deepSeekSemanticPayload.include_reasoning, true);
       assert.equal(deepSeekSemanticPayload.reasoning_effort, 'high');
-      assert.equal(deepSeekSemanticPayload.max_tokens, 16384);
+      assert.equal(deepSeekSemanticPayload.max_tokens, 4096);
       assert.equal(deepSeekSemanticPayload.custom_include_body, 'provider_option: true');
       assert.equal(normalizeSemanticReasoningEffort('LOW'), 'low');
       assert.equal(normalizeSemanticReasoningEffort('medium'), 'medium');
@@ -15732,7 +15921,7 @@ const tests = [
       applySemanticThinkingPayload(deepSeekHighPayload, 'high');
       assert.equal(deepSeekHighPayload.include_reasoning, true);
       assert.equal(deepSeekHighPayload.reasoning_effort, 'max');
-      assert.equal(deepSeekHighPayload.max_tokens, 16384);
+      assert.equal(deepSeekHighPayload.max_tokens, 4096);
       assert.equal(buildSemanticToolChoice('deepseek'), undefined);
       assert.deepEqual(buildSemanticToolChoice('openai'), {
         type: 'function',
@@ -15803,7 +15992,65 @@ const tests = [
     },
   },
   {
-    name: '48b old text completion hook is removed',
+    name: '48b semantic response budget uses only confirmed NPCs in the current exchange',
+    run() {
+      const ordinaryScene = [
+        {
+          role: 'assistant',
+          content: 'Phoebe heads home. She returns shortly. Something catches your attention. Her mother remains away. Whatever happens next is unclear.',
+        },
+        { role: 'user', content: 'I follow her to see where she is going.' },
+      ];
+      assert.equal(
+        estimateSemanticResponseLength({}, ordinaryScene, { assembledPrompt: true }),
+        4096,
+        'Untracked capitalized prose must not be counted as NPCs.',
+      );
+
+      const currentTrackedScene = [
+        { role: 'assistant', content: 'Phoebe speaks with Mara beside the gate.' },
+        { role: 'user', content: 'I ask Phoebe and Mara what happened.' },
+      ];
+      const trackerSnapshot = {
+        Phoebe: {},
+        Mara: {},
+        'the guard': {},
+        Offscreen: {},
+      };
+      assert.equal(
+        estimateSemanticResponseLength(trackerSnapshot, currentTrackedScene, { assembledPrompt: true }),
+        4096 + (2 * 768),
+        'Only exact confirmed tracker names in the current exchange should increase the budget.',
+      );
+
+      const staleTrackedScene = [
+        { role: 'assistant', content: 'Offscreen departed yesterday.' },
+        { role: 'user', content: 'I watched them leave.' },
+        { role: 'assistant', content: 'Phoebe closes the gate.' },
+        { role: 'user', content: 'I speak to Phoebe.' },
+      ];
+      assert.equal(
+        estimateSemanticResponseLength(trackerSnapshot, staleTrackedScene, { assembledPrompt: true }),
+        4096 + 768,
+        'Tracked NPCs outside the current exchange must not inflate the current response budget.',
+      );
+
+      const crowdedTracker = Object.fromEntries(
+        ['Ari', 'Bela', 'Cato', 'Dara', 'Eris', 'Fenn'].map(name => [name, {}]),
+      );
+      const crowdedScene = [
+        { role: 'assistant', content: 'Ari, Bela, Cato, Dara, Eris, and Fenn gather around you.' },
+        { role: 'user', content: 'I address Ari, Bela, Cato, Dara, Eris, and Fenn.' },
+      ];
+      assert.equal(
+        estimateSemanticResponseLength(crowdedTracker, crowdedScene, { assembledPrompt: true }),
+        8192,
+        'Confirmed scene complexity must remain bounded by the provider-safe ceiling.',
+      );
+    },
+  },
+  {
+    name: '48b.1 old text completion hook is removed',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       assert.doesNotMatch(source, /TEXT_COMPLETION_SETTINGS_READY/);
@@ -16139,7 +16386,7 @@ const tests = [
       assert.equal((source.match(/const powerProfile = getCharacterSheetPowerProfile\(genre\);/g) || []).length >= 3, true);
       assert.equal((source.match(/`SELECTED GENRE: \$\{genre\}\\n`/g) || []).length, 3);
       assert.match(source, /Stats may inform flavor but must never become a stat boost or an amplified ordinary action/);
-      assert.match(source, /async function requestProgressionText[\s\S]*return await generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{ purpose: 'progression generation' \}\)/);
+      assert.match(source, /async function requestProgressionText[\s\S]*return await generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{[\s\S]*?purpose: 'progression generation',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
       assert.match(source, /function getProgressionRoot/);
       assert.match(source, /function progressionPending/);
       assert.match(source, /renderProgressionCard\(context\)/);
@@ -16417,11 +16664,14 @@ const tests = [
       assert.match(adapterSource, /export async function generate\(type = 'normal', options = \{\}, dryRun = false, context = getContext\(\)\)/);
       assert.match(indexSource, /generateRawData,/);
       assert.match(indexSource, /generate as generateSillyTavern,/);
-      assert.match(indexSource, /generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{ purpose: 'player setup' \}\)/);
-      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{ purpose: 'targeted Prose Guard repair' \}\)/);
+      assert.match(indexSource, /generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{[\s\S]*?purpose: 'player setup',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
+      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{[\s\S]*?purpose: 'targeted Prose Guard repair',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
       assert.doesNotMatch(indexSource, /purpose: 'Prose Guard'/);
-      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{ purpose: 'post-narration tracker update' \}\)/);
-      assert.match(semanticSource, /generateRawData\(options, context, \{ purpose: 'semantic preflight' \}\)/);
+      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{[\s\S]*?purpose: 'post-narration tracker update',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
+      assert.match(semanticSource, /generateRawData\(options, context, \{[\s\S]*?purpose: 'semantic preflight',[\s\S]*?signal: requestOptions\.signal,[\s\S]*?beforeAbort: requestOptions\.beforeRawAbort/);
+      assert.match(adapterSource, /export async function generateRawData[\s\S]*stopGeneration\(context\)[\s\S]*signal\.addEventListener\('abort', abortHandler/);
+      assert.match(adapterSource, /sendDefaultChatCompletionToolRequest[\s\S]*?const signal = options\?\.signal \|\| null;/);
+      assert.match(adapterSource, /sendDefaultChatCompletionToolRequest[\s\S]*?fetch\('\/api\/backends\/chat-completions\/generate',[\s\S]*?signal,[\s\S]*?\}\);/);
       assert.doesNotMatch(indexSource, /context(?:\?\.|\.)generateRawData\s*\(/);
       assert.doesNotMatch(semanticSource, /context(?:\?\.|\.)generateRawData\s*\(/);
       assert.doesNotMatch(indexSource, /context(?:\?\.|\.)generate\s*\(/);
@@ -16506,27 +16756,17 @@ const tests = [
       assert.equal(report.trackerUpdate.boundCompanion.active, true);
       assert.equal(report.trackerUpdate.boundCompanion.name, 'Surel');
       assert.equal(handoff.mode, 'silence');
-      assert.match(modelPrompt, /Surel: BOUND COMPANION SILENCE/);
-      assert.match(modelPrompt, /does NOT initiate dialogue this beat/);
+      assert.match(modelPrompt, /Surel: BOUND COMPANION RESPONSE RULE/);
+      assert.match(modelPrompt, /It may answer ONLY if the latest input genuinely directs audible dialogue or private mental communication to it/);
+      assert.match(modelPrompt, /Otherwise, it MUST remain silent because no unsolicited interjection is authorized this beat/);
     },
   },
   {
-    name: '59 directly addressing active bound companion allows a private response',
+    name: '59 established bound companion response authorization stays narrator-facing',
     run() {
       const report = runCase({
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Ask Surel what she thinks about the room.',
-            explicitMeans: 'I ask Surel, "What do you make of this place?"',
-            actionUnits: [
-              {
-                id: 'A1',
-                action: 'I ask Surel, "What do you make of this place?"',
-                evidence: 'directly addressed Surel',
-              },
-            ],
-          },
-        }),
+        userText: '*Surel, what do you think about this room?*',
+        ledger: baseLedger(),
         cardFields: {
           boundCompanion: {
             active: true,
@@ -16540,11 +16780,54 @@ const tests = [
       });
       const handoff = report.finalNarrativeHandoff.boundCompanion;
       const modelPrompt = prompt(report);
+      const deterministicSource = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
 
-      assert.equal(handoff.mode, 'direct_response');
-      assert.deepEqual(handoff.triggers, ['direct_address']);
-      assert.match(modelPrompt, /Surel: DIRECT RESPONSE ALLOWED/);
-      assert.match(modelPrompt, /Keep it distinct from \{\{user\}\}/);
+      assert.equal(handoff.mode, 'silence');
+      assert.deepEqual(handoff.triggers, []);
+      assert.match(modelPrompt, /Surel: BOUND COMPANION RESPONSE RULE/);
+      assert.match(modelPrompt, /Merely mentioning or thinking about the companion is NOT direct address/);
+      assert.match(modelPrompt, /Render any private companion response or interjection in single asterisks, never in double quotation marks/);
+      assert.match(modelPrompt, /Outside characters\/NPCs cannot perceive private mental communication or the companion's private response/);
+      assert.doesNotMatch(deterministicSource, /isBoundCompanionDirectAddress|extractSingleAsteriskSegments|inputExplicitlyFramesMentalAddress|mode: 'direct_response'/);
+    },
+  },
+  {
+    name: '59a user phrasing cannot alter the deterministic companion interjection gate',
+    run() {
+      const boundCompanion = {
+        active: true,
+        name: 'Surel',
+        type: 'shared_vessel',
+        vessel: '{{user}}',
+        voice: 'dry, precise',
+        evidence: 'established shared vessel companion',
+      };
+      const runInput = userText => runCase({
+        userText,
+        ledger: baseLedger(),
+        cardFields: { boundCompanion },
+      }).finalNarrativeHandoff.boundCompanion;
+
+      const inputs = [
+        '*Surel, what do you think?*',
+        '*Should I ask Surel what she thinks?*',
+        '*I do not want to tell Surel yet.*',
+        'I remember Mira saying, "Surel, what do you think?"',
+        'I decide not to send a thought to Surel.',
+        '*Surel,\nwhat do you think?*',
+      ];
+      for (const input of inputs) {
+        const handoff = runInput(input);
+        assert.equal(handoff.mode, 'silence');
+        assert.deepEqual(handoff.triggers, []);
+      }
+
+      const unnamedReport = runCase({
+        userText: '*Can you hear me?*',
+        ledger: baseLedger(),
+        cardFields: { boundCompanion: { ...boundCompanion, name: '' } },
+      });
+      assert.match(prompt(unnamedReport), /\(unnamed bound companion\): BOUND COMPANION RESPONSE RULE/);
     },
   },
   {
@@ -17259,13 +17542,13 @@ const tests = [
       assert.match(source, /semanticStopController\.claim\(stopOwnerId, SEMANTIC_PREFLIGHT_STOP_SENTINEL\)/);
       assert.match(source, /semanticStopController\.release\(stopOwnerId\)/);
       assert.match(source, /function invalidateStoryEnginePipeline\(\) \{[\s\S]*semanticStopController\.invalidate\(\)/);
-      assert.match(source, /function withStoryEngineModelRequest\(callback, options = \{\}\)[\s\S]*assertStoryEngineModelRequestCurrent\(options\)[\s\S]*await callback\(\)[\s\S]*assertStoryEngineModelRequestCurrent\(options\)/);
+      assert.match(source, /function withStoryEngineModelRequest\(callback, options = \{\}\)[\s\S]*modelRequestAbortControllers\.add\(requestController\)[\s\S]*await callback\(scopedOptions\)[\s\S]*assertStoryEngineModelRequestCurrent\(scopedOptions\)/);
       assert.match(source, /promptReadyBypassGate\.clear\(\)/);
       assert.match(source, /function invalidateStoryEnginePipeline\(\) \{[\s\S]*state\.preflightDryRun = null/);
       assert.doesNotMatch(source, /bypassPromptReady/);
       assert.match(source, /storyEngineModelRequestGate\.acquire\(\)/);
       assert.match(source, /storyEngineModelRequestGate\.release\(requestToken\)/);
-      assert.match(source, /function clearThinkingDisableRuntimeState\(\) \{[\s\S]*storyEngineModelRequestGate\.clear\(\)/);
+      assert.match(source, /function clearThinkingDisableRuntimeState\(\) \{[\s\S]*abortStoryEngineModelRequests\(\)[\s\S]*storyEngineModelRequestGate\.clear\(\)/);
       assert.doesNotMatch(source, /storyEngineModelRequestDepth/);
       assert.match(source, /function createTimedInternalRequestControl[\s\S]*isCurrent: \(\) => !cancelled && parentIsCurrent\(\)[\s\S]*cancel\(\) \{[\s\S]*release\(\)/);
       assert.match(source, /function createTimedInternalRequestControl[\s\S]*registerCancellation\(handler\)[\s\S]*for \(const handler of cancellationHandlers\) handler\(\)/);
@@ -17276,7 +17559,7 @@ const tests = [
       assert.match(source, /postNarrationFinalizers: new Map\(\)/);
       assert.match(source, /state\.postNarrationFinalizers\.get\(messageKey\) === finalizerOwner/);
       assert.match(source, /function failPreflightDryRun[\s\S]*state\.generationActive = false[\s\S]*state\.pendingGeneration = null[\s\S]*state\.activeRunId = null/);
-      assert.match(source, /function failNarratorGeneration[\s\S]*setChatInputLocked\(false\)[\s\S]*state\.pendingGeneration = null[\s\S]*state\.activeRunId = null/);
+      assert.match(source, /function failNarratorGeneration[\s\S]*setChatInputLocked\(false\)[\s\S]*state\.generationActive = false[\s\S]*state\.pendingGeneration = null[\s\S]*state\.activeRunId = null/);
       assert.match(source, /Promise\.resolve\(generateSillyTavern\(generation\.type \|\| 'normal', generateOptions, false, narratorContext\)\)[\s\S]*\.catch\(error => failNarratorGeneration\(generation, error\)\)/);
       assert.match(source, /function handleMessageDeleted[\s\S]*invalidateStoryEnginePipeline\(\)/);
       assert.match(source, /function handleMessageSwiped[\s\S]*invalidateStoryEnginePipeline\(\)/);
@@ -17289,6 +17572,52 @@ const tests = [
       assert.match(source, /structured_preflight_reset_player_setup[\s\S]*operationIdentity = createStoryEngineEpochIdentity\(context\)[\s\S]*isCurrentStoryEngineEpoch\(operationIdentity, context\)/);
       assert.match(source, /function saveManualUserTrackerItems[\s\S]*operationIdentity = createStoryEngineEpochIdentity\(context\)[\s\S]*isCurrentStoryEngineEpoch\(operationIdentity, context\)/);
       assert.match(source, /saveManualUserTrackerItems\([\s\S]*context, operationIdentity\)[\s\S]*isCurrentStoryEngineEpoch\(operationIdentity, context\)/);
+    },
+  },
+  {
+    name: '67d raw internal requests propagate cancellation into SillyTavern',
+    async run() {
+      const controller = new AbortController();
+      let stopCalls = 0;
+      let beforeAbortCalls = 0;
+      let rejectRawRequest = null;
+      const testContext = {
+        generateRawData() {
+          return new Promise((_, reject) => {
+            rejectRawRequest = reject;
+          });
+        },
+        stopGeneration() {
+          stopCalls += 1;
+          rejectRawRequest?.(new Error('Native raw generation stopped.'));
+        },
+      };
+
+      const request = generateRawDataAdapter({ prompt: 'test' }, testContext, {
+        signal: controller.signal,
+        beforeAbort: () => {
+          beforeAbortCalls += 1;
+        },
+      });
+      await Promise.resolve();
+      controller.abort(new Error('Request timed out.'));
+
+      await assert.rejects(request);
+      assert.equal(beforeAbortCalls, 1);
+      assert.equal(stopCalls, 1);
+
+      const immediateController = new AbortController();
+      let immediateStarts = 0;
+      const immediateRequest = generateRawDataAdapter({ prompt: 'test' }, {
+        generateRawData() {
+          immediateStarts += 1;
+          return Promise.resolve('unexpected');
+        },
+        stopGeneration() {},
+      }, { signal: immediateController.signal });
+      immediateController.abort(new Error('Request cancelled before transport start.'));
+      await assert.rejects(immediateRequest);
+      assert.equal(immediateStarts, 0);
     },
   },
   {
