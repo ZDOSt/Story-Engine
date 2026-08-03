@@ -1,13 +1,11 @@
 import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, applyPendingBoundaryDelta, boundCompanionDeltaHasChanges, classifyDisposition, finalizeLootSearchCompletion, findTrackerEntryName, normalizeBoundCompanionState, normalizePendingBoundaryState, normalizeTrackerEntry, normalizeTrackerUserState, pendingBoundaryDeltaHasChanges, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel } from './engines.js';
 
 import {
-    addEphemeralStoppingString,
     applyConnectionProfileName,
     canGenerate,
     canSubscribeToEvent,
     clearNotification,
     extension_settings,
-    flushEphemeralStoppingStrings,
     generate as generateSillyTavern,
     generateRawData,
     getActiveConnectionProfileName,
@@ -34,8 +32,8 @@ import {
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
-import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
-import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, SEMANTIC_PREFLIGHT_STOP_SENTINEL, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
+import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
+import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -678,10 +676,6 @@ const state = {
     trackerWidgetViewportHandler: null,
 };
 
-const semanticStopController = createEphemeralStopController({
-    add: addEphemeralStoppingString,
-    flush: flushEphemeralStoppingStrings,
-});
 const promptReadyBypassGate = createAsyncTokenGate();
 const storyEngineModelRequestGate = createAsyncTokenGate();
 
@@ -2308,12 +2302,6 @@ function assertStoryEngineEpochCurrent(runIdentity, message = 'Story Engine oper
     throw new Error(message);
 }
 
-function getStoryEngineRunOwnerId(runIdentity = {}) {
-    return [runIdentity.runEpoch, runIdentity.chatId, runIdentity.personaId, runIdentity.runId]
-        .map(value => String(value ?? ''))
-        .join(':');
-}
-
 function createPreflightDryRunMarker() {
     const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
     return `[SPE_DRY:${nonce}]`;
@@ -2636,7 +2624,6 @@ function clearRuntimePrompts({ preserveNarratorDepthPrompt = false } = {}) {
 function invalidateStoryEnginePipeline() {
     state.runEpoch += 1;
     state.preflightDryRun = null;
-    void semanticStopController.invalidate();
     promptReadyBypassGate.clear();
     clearInternalGenerationStopState();
     clearPostNarrationFinalizerTimers();
@@ -13328,12 +13315,7 @@ async function handleChatCompletionPromptReady(eventData) {
 async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type, trackerSnapshot, pendingGeneration, runIdentity) {
 
     const bypassToken = promptReadyBypassGate.acquire();
-    const stopOwnerId = getStoryEngineRunOwnerId(runIdentity);
-
     try {
-
-        await semanticStopController.claim(stopOwnerId, SEMANTIC_PREFLIGHT_STOP_SENTINEL);
-
         if (!isCurrentStoryEngineRun(runIdentity, context)) {
             throw new Error('Story Engine semantic run expired before model generation.');
         }
@@ -13359,7 +13341,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             proxyUserAction: pendingGeneration?.mode === 'proxy' ? pendingGeneration?.latestUserText : '',
             inlineProxyInstructions: pendingGeneration?.inlineProxyInstructions || [],
             signal: modelRequest.signal,
-            beforeRawAbort: markInternalGenerationStop,
         })), {
             isCurrent: () => isCurrentStoryEngineRun(runIdentity, context),
             expiredMessage: 'Story Engine semantic run expired before its model request completed.',
@@ -13370,8 +13351,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
         }
         return semanticLedger;
     } finally {
-
-        await semanticStopController.release(stopOwnerId);
 
         promptReadyBypassGate.release(bypassToken);
 

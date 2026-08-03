@@ -687,6 +687,67 @@ export async function sendChatCompletionProfileRequest(request = {}) {
     );
 }
 
+export async function sendConnectionManagerProfileRequest(request = {}) {
+    const {
+        profileId,
+        profileName = '',
+        prompt,
+        responseLength,
+        overridePayload = {},
+        extractData = false,
+        includePreset = true,
+        preparePayload = null,
+        signal = null,
+    } = request;
+    if (!profileId) {
+        throw adapterTransportError('Semantic connection profile id is missing.', { stage: 'profile' });
+    }
+
+    const context = getContext();
+    const profile = getConnectionProfile(profileId);
+    const chatCompletionSource = context?.CONNECT_API_MAP?.[profile?.api]?.source;
+    const requestService = context?.ConnectionManagerRequestService;
+    if (!requestService?.sendRequest || !chatCompletionSource) {
+        throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support native Connection Manager chat-completion requests.`, { stage: 'profile' });
+    }
+
+    const messages = Array.isArray(prompt)
+        ? prompt
+        : [{ role: 'user', content: String(prompt || '') }];
+    const requestPayload = {
+        ...overridePayload,
+        stream: false,
+        messages,
+        chat_completion_source: chatCompletionSource,
+        ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
+    };
+    preparePayload?.(requestPayload);
+    throwIfRequestAborted(signal);
+
+    try {
+        return await requestService.sendRequest(
+            profileId,
+            messages,
+            responseLength,
+            {
+                stream: false,
+                signal,
+                extractData,
+                includePreset,
+                includeInstruct: false,
+            },
+            requestPayload,
+        );
+    } catch (error) {
+        if (signal?.aborted) throw getRequestAbortError(signal);
+        const causeMessage = error?.cause?.message || error?.message || String(error);
+        throw adapterTransportError(`SillyTavern Connection Manager request failed for semantic profile "${profileName || profileId}": ${causeMessage}`, {
+            cause: error,
+            stage: 'connection-manager',
+        });
+    }
+}
+
 function getActiveUserAvatarFromDom() {
     if (typeof document === 'undefined') return '';
     const selected = document.querySelector('#user_avatar_block .avatar-container.selected[data-avatar-id]');

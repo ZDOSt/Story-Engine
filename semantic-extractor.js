@@ -1,11 +1,10 @@
 import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
-import { canGenerateRawData, generateRawData, getChatCompletionProfileRoute, getChatCompletionSourceForProfile, sendChatCompletionProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
+import { getChatCompletionProfileRoute, sendChatCompletionProfileRequest, sendConnectionManagerProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
 import { buildWorldProgressionSemanticContext, normalizeWorldProgression, normalizeWorldProgressionAdvancements, validateWorldProgressionAdvancementCoverage } from './world-memory.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
 
-export const SEMANTIC_PREFLIGHT_STOP_SENTINEL = 'SEMANTIC_PREFLIGHT_COMPLETE';
 export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES };
 
 const SEMANTIC_RESPONSE_LENGTH_MIN = 4096;
@@ -13,6 +12,29 @@ const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const DEEPSEEK_CHAT_COMPLETION_SOURCE = 'deepseek';
+const SEMANTIC_TOOL_SECTIONS = Object.freeze([
+    { name: 'engineContext', roots: ['EngineContext'] },
+    { name: 'worldTransition', roots: ['WorldTransition'] },
+    { name: 'worldProgression', roots: ['WorldProgressionAdvancement'] },
+    { name: 'resolution', roots: ['ResolutionEngine'] },
+    { name: 'relationships', roots: ['RelationshipEngine'] },
+    { name: 'userKnowledge', roots: ['UserKnowledgeApplication'] },
+    { name: 'injuries', roots: ['InjuryEffectEngine'] },
+    { name: 'tracker', roots: ['TrackerUpdateEngine'] },
+    {
+        name: 'powerActors',
+        roots: [
+            'PowerActorAssessment',
+            'PowerActorEnmity',
+            'LatentGrievance',
+            'PowerActorAffiliationLink',
+            'LatentFavor',
+            'PowerActorFavorAffiliationLink',
+        ],
+    },
+    { name: 'powerEvents', roots: ['PowerEventShape'] },
+    { name: 'chaos', roots: ['CHAOS_INTERRUPT'] },
+]);
 const SEMANTIC_REASONING_EFFORTS = Object.freeze(['low', 'medium', 'high']);
 const DEFAULT_SEMANTIC_REASONING_EFFORT = 'medium';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
@@ -50,10 +72,6 @@ const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
 ]);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
-    if (!canGenerateRawData(context) && !options?.semanticProfileId && options?.preferToolCall === false) {
-        throw new Error('SillyTavern generateRawData API is unavailable.');
-    }
-
     const playerTrackerSnapshot = options?.playerTrackerSnapshot || {};
     const prompt = options?.assembledPrompt
         ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, options)
@@ -62,91 +80,46 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
         ? options.responseLength
         : estimateSemanticResponseLength(trackerSnapshot, promptContext, options);
 
-    let raw;
-    let ledger;
-    let extractionMeta;
-    if (options?.preferToolCall !== false) {
-        try {
-            const toolResult = options?.semanticProfileId
-                ? await generateSemanticToolCallWithProfile(context, prompt, responseLength, options)
-                : await generateSemanticToolCall(context, prompt, responseLength, options);
-            raw = toolResult.raw;
-            ledger = parseSemanticLedger(toolResult.ledger, trackerSnapshot);
-            validateRawLedgerContract(ledger, raw);
-            extractionMeta = {
-                source: options?.semanticProfileId
-                    ? `SillyTavern direct connection profile forced function tool + local validation (${options.semanticProfileName || options.semanticProfileId})`
-                    : 'SillyTavern direct backend forced function tool + local validation',
-            schema: 'submit_semantic_preflight_tool_v1',
-            strict: true,
-            responseLength,
-            toolName: SEMANTIC_TOOL_NAME,
-            semanticProfile: options?.semanticProfileName || undefined,
-        };
-        } catch (error) {
-            options?.signal?.throwIfAborted?.();
-            if (!isRecoverableSemanticToolCallError(error)) {
-                const message = error instanceof Error ? error.message : String(error);
-                throw new Error(`Semantic tool-call pass returned no valid ledger. Generation aborted before narration. ${message}`);
-            }
-
-            if (!canGenerateRawData(context) && !options?.semanticProfileId) {
-                const message = error instanceof Error ? error.message : String(error);
-                throw new Error(`Semantic tool-call transport failed and generateRawData fallback is unavailable. Generation aborted before narration. ${message}`);
-            }
-
-            console.warn('[Structured Preflight Engines] semantic tool-call failed; falling back to compact ledger.', error);
-            raw = options?.semanticProfileId
-                ? await generateSemanticRawWithProfile(prompt, responseLength, options)
-                : await generateSemanticRaw(context, prompt, responseLength, options);
-            extractionMeta = {
-                source: options?.semanticProfileId
-                    ? `SillyTavern direct connection profile compact preflight ledger fallback + local validation (${options.semanticProfileName || options.semanticProfileId})`
-                    : 'SillyTavern generateRawData compact preflight ledger fallback + local validation',
-                schema: 'compact_engine_name_anchored_preflight_ledger_v1',
-                strict: true,
-                responseLength,
-                semanticProfile: options?.semanticProfileName || undefined,
-                fallbackFrom: 'submit_semantic_preflight_tool_v1',
-                fallbackReason: error instanceof Error ? error.message : String(error),
-            };
-        }
-    } else {
-        raw = options?.semanticProfileId
-            ? await generateSemanticRawWithProfile(prompt, responseLength, options)
-            : await generateSemanticRaw(context, prompt, responseLength, options);
-        extractionMeta = {
-            source: options?.semanticProfileId
-                ? `SillyTavern direct connection profile compact preflight ledger + local validation (${options.semanticProfileName || options.semanticProfileId})`
-                : 'SillyTavern generateRawData compact preflight ledger + local validation',
-            schema: 'compact_engine_name_anchored_preflight_ledger_v1',
-            strict: true,
-            responseLength,
-            semanticProfile: options?.semanticProfileName || undefined,
-        };
+    let toolResult;
+    try {
+        toolResult = options?.semanticProfileId
+            ? await generateSemanticToolCallWithProfile(prompt, responseLength, options)
+            : await generateSemanticToolCall(prompt, responseLength, options);
+    } catch (error) {
+        options?.signal?.throwIfAborted?.();
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`);
     }
 
-    if (!ledger) {
-        try {
-            ledger = parseSemanticLedger(raw, trackerSnapshot);
-            validateRawLedgerContract(ledger, raw);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            throw new Error(`Semantic pass returned no valid ledger. Generation aborted before narration. ${message}`);
-        }
+    let ledger;
+    try {
+        ledger = parseSemanticLedger(toolResult.ledgerText, trackerSnapshot);
+        validateRawLedgerContract(ledger, toolResult.ledgerText);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`);
     }
 
     if (!ledger || typeof ledger !== 'object') {
-        throw new Error(`Semantic pass returned an invalid ledger object: ${String(raw).slice(0, 200)}`);
+        throw new Error(`Semantic tool-call pass returned an invalid ledger object: ${String(toolResult.ledgerText).slice(0, 200)}`);
     }
 
     const normalized = normalizeLedger(ledger);
-    validateNormalizedLedger(normalized, raw);
+    validateNormalizedLedger(normalized, toolResult.ledgerText);
     validateSemanticWorldProgression(normalized, options, context);
     validateRelationshipCoverage(normalized.resolutionEngine, normalized.relationshipEngine);
     normalized.deterministicOverrides = {
         ...(normalized.deterministicOverrides || {}),
-        semanticLedgerExtraction: extractionMeta,
+        semanticLedgerExtraction: {
+            source: options?.semanticProfileId
+                ? `SillyTavern Connection Manager profile tool + complete local validation (${options.semanticProfileName || options.semanticProfileId})`
+                : 'SillyTavern backend tool + complete local validation',
+            schema: 'submit_semantic_preflight_sections_v2',
+            strict: true,
+            responseLength,
+            toolName: SEMANTIC_TOOL_NAME,
+            semanticProfile: options?.semanticProfileName || undefined,
+        },
     };
     const personaCoreStats = extractPersonaCoreStats(context);
     if (personaCoreStats) {
@@ -230,37 +203,6 @@ function extractPromptText(promptContext, options = {}, messageLimit = 8) {
     return texts.reverse().join('\n');
 }
 
-async function generateSemanticRaw(context, prompt, responseLength, requestOptions = {}) {
-    const options = { prompt };
-    if (Number.isFinite(responseLength) && responseLength > 0) {
-        options.responseLength = responseLength;
-    }
-    return await generateRawData(options, context, {
-        purpose: 'semantic preflight',
-        signal: requestOptions.signal,
-        beforeAbort: requestOptions.beforeRawAbort,
-    });
-}
-
-async function generateSemanticRawWithProfile(prompt, responseLength, options = {}) {
-    const result = await sendChatCompletionProfileRequest({
-        profileId: options.semanticProfileId,
-        profileName: options.semanticProfileName,
-        prompt,
-        responseLength,
-        overridePayload: {
-            temperature: 0,
-            stop: [SEMANTIC_PREFLIGHT_STOP_SENTINEL],
-            stopping_strings: [SEMANTIC_PREFLIGHT_STOP_SENTINEL],
-            stop_sequence: [SEMANTIC_PREFLIGHT_STOP_SENTINEL],
-        },
-        extractData: true,
-        preparePayload: applyStoryEngineThinkingDisabledPayload,
-        signal: options.signal,
-    });
-    return extractGeneratedText(result);
-}
-
 class SemanticToolTransportError extends Error {
     constructor(message, details = {}) {
         super(message);
@@ -275,17 +217,7 @@ function isSemanticToolTransportError(error) {
     return error instanceof SemanticToolTransportError || error?.name === 'SemanticToolTransportError';
 }
 
-function isRecoverableSemanticToolCallError(error) {
-    if (isSemanticToolTransportError(error)) return true;
-    const message = error instanceof Error ? error.message : String(error || '');
-    return /\bJSON\b/i.test(message)
-        || /semantic tool-call (?:arguments|response)/i.test(message)
-        || /did not contain submit_semantic_preflight/i.test(message)
-        || /Mandatory semantic ledger contract failed/i.test(message)
-        || /Semantic pass did not return a valid mandatory compact ledger/i.test(message);
-}
-
-async function generateSemanticToolCall(context, prompt, responseLength, options = {}) {
+async function generateSemanticToolCall(prompt, responseLength, options = {}) {
     const toolPrompt = buildSemanticToolPrompt(prompt);
     try {
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
@@ -298,8 +230,8 @@ async function generateSemanticToolCall(context, prompt, responseLength, options
         if (raw?.error) {
             throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
         }
-        const ledger = extractSemanticToolLedger(raw);
-        return { raw, ledger };
+        const ledgerText = extractSemanticToolLedger(raw);
+        return { raw, ledgerText };
     } catch (error) {
         if (isSemanticToolTransportError(error)) throw error;
         throw new SemanticToolTransportError(error instanceof Error ? error.message : String(error), {
@@ -310,12 +242,9 @@ async function generateSemanticToolCall(context, prompt, responseLength, options
     }
 }
 
-async function generateSemanticToolCallWithProfile(context, prompt, responseLength, options = {}) {
-    const chatCompletionSource = getChatCompletionSourceForProfile(options.semanticProfileId, options.semanticProfileName);
-    if (!chatCompletionSource) {
-        throw new SemanticToolTransportError(`Semantic profile "${options.semanticProfileName || options.semanticProfileId}" does not support chat-completion tool calls.`);
-    }
-
+async function generateSemanticToolCallWithProfile(prompt, responseLength, options = {}) {
+    const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
+    const chatCompletionSource = route.source;
     const toolPrompt = buildSemanticToolPrompt(prompt);
     const semanticTool = buildSemanticPreflightTool(chatCompletionSource);
     const preparePayload = isOfficialDeepSeekProfile(options)
@@ -338,7 +267,7 @@ async function generateSemanticToolCallWithProfile(context, prompt, responseLeng
 
     let raw;
     try {
-        raw = await sendChatCompletionProfileRequest({
+        raw = await sendConnectionManagerProfileRequest({
             profileId: options.semanticProfileId,
             profileName: options.semanticProfileName,
             prompt: toolPrompt,
@@ -349,15 +278,15 @@ async function generateSemanticToolCallWithProfile(context, prompt, responseLeng
             signal: options.signal,
         });
     } catch (error) {
-        throw new SemanticToolTransportError(`Direct semantic profile tool-call request failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        throw new SemanticToolTransportError(`Connection Manager semantic profile tool-call request failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
 
     if (raw?.error) {
         throw new SemanticToolTransportError(`Provider returned an error for semantic profile tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
     }
 
-    const ledger = extractSemanticToolLedger(raw);
-    return { raw, ledger };
+    const ledgerText = extractSemanticToolLedger(raw);
+    return { raw, ledgerText };
 }
 
 export async function sendSemanticProfileTextRequest(prompt, responseLength, options = {}, overridePayload = {}) {
@@ -528,14 +457,24 @@ export function buildSemanticToolPrompt(prompt) {
             break;
         }
     }
+    const sectionOwnership = SEMANTIC_TOOL_SECTIONS
+        .map(section => `- ${section.name}: ${section.roots.join(', ')}`)
+        .join('\n');
     const toolContract = [
         `MANDATORY OUTPUT CONTRACT: Call the function tool ${SEMANTIC_TOOL_NAME} exactly once.`,
-        'Do not output narration, prose, markdown, visible JSON, or a compact text ledger.',
-        'Fill every required tool argument from the semantic/contextual engine outputs.',
-        'The Engine reference and semantic field guidance are authoritative for every argument.',
-        'The tool argument paths mirror the engine function names: worldTransition = WorldTransition, worldProgression.advancements = WorldProgressionAdvancement, resolutionEngine.identifyGoal = ResolutionEngine.identifyGoal, resolutionEngine.identifyChallenge = ResolutionEngine.identifyChallenge, resolutionEngine.identifyTargets = ResolutionEngine.identifyTargets, resolutionEngine.challengeType = ResolutionEngine.challengeType, resolutionEngine.socialTactic = ResolutionEngine.socialTactic, relationshipEngine[index].initPreset = RelationshipEngine.initPreset semantic tags, relationshipEngine[index] = RelationshipEngine(npc), and chaosSemantic = CHAOS_INTERRUPT.',
-        'Use empty arrays for no targets/obstacles/observers. Use "none" string values only for enum/string fields that require none.',
-        'engineContext.trackerRelevantNPCs may be an empty array; the extension already has the canonical tracker snapshot locally.',
+        'Do not output narration, prose, markdown, visible JSON, or ordinary assistant text.',
+        'Fill all eleven required string arguments. Do not omit a section when its count is zero.',
+        'Each argument must contain only newline-separated key=value ledger lines owned by that section, without BEGIN/END wrappers.',
+        'Fill every required template line exactly once, preserving the exact key names. Indexed [0] rows are placeholders when count=0; when count>0, output every required indexed row controlled by that count.',
+        'WorldProgressionAdvancement.count must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one row per due plan.',
+        'When RelationshipEngine.count is greater than 0, every indexed relationship row must include every template field, including standingInfluence and standingBasis.',
+        'Use a vertical bar (|) between list entries, or (none) for an empty list. Commas and semicolons are literal text inside one entry. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
+        'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. The tool is only a compact transport envelope; do not reduce or reinterpret the ledger.',
+        'SECTION OWNERSHIP:',
+        sectionOwnership,
+        compactDynamicRowGuidance(),
+        'COMPLETE REQUIRED LEDGER TEMPLATE:',
+        COMPACT_LEDGER_TEMPLATE,
     ].join('\n');
 
     if (contractIndex >= 0) {
@@ -552,1004 +491,104 @@ export function buildSemanticToolPrompt(prompt) {
 }
 
 export function buildSemanticToolChoice(chatCompletionSource) {
-    const normalizedSource = String(chatCompletionSource || '').toLowerCase();
-
-    if (normalizedSource === 'claude') {
-        return 'any';
-    }
-
-    if (['openai', 'azure_openai'].includes(normalizedSource)) {
-        return {
-            type: 'function',
-            function: { name: SEMANTIC_TOOL_NAME },
-        };
-    }
-
-    return undefined;
+    void chatCompletionSource;
+    return 'auto';
 }
 
-function buildSemanticPreflightTool(chatCompletionSource) {
-    const strictSource = ['openai', 'azure_openai', DEEPSEEK_CHAT_COMPLETION_SOURCE].includes(chatCompletionSource);
+export function buildSemanticPreflightTool(chatCompletionSource) {
+    void chatCompletionSource;
     const parameters = buildSemanticPreflightSchema();
-    if (!strictSource) {
-        removeStrictOnlySchemaKeywords(parameters);
-    }
-
-    const tool = {
+    return {
         type: 'function',
         function: {
             name: SEMANTIC_TOOL_NAME,
-            description: 'Submit the mandatory structured semantic preflight ledger for the current SillyTavern roleplay action. This is data extraction only; do not narrate or roll dice.',
+            description: 'Submit every required semantic preflight ledger line in eleven compact sections. This is data extraction only; do not narrate or roll dice.',
             parameters,
         },
     };
-
-    if (strictSource) {
-        tool.function.strict = true;
-    }
-
-    return tool;
-}
-
-function removeStrictOnlySchemaKeywords(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    delete schema.additionalProperties;
-    if (schema.properties && typeof schema.properties === 'object') {
-        Object.values(schema.properties).forEach(removeStrictOnlySchemaKeywords);
-    }
-    if (schema.items) {
-        removeStrictOnlySchemaKeywords(schema.items);
-    }
-    return schema;
 }
 
 function buildSemanticPreflightSchema() {
-    const generatedStatsSeedSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['CapabilityPool', 'MainStat'],
-        properties: {
-            CapabilityPool: { type: 'string', enum: ['none', 'common', 'trained', 'elite', 'boss'] },
-            MainStat: { type: 'string', enum: ['none', 'PHY', 'MND', 'CHA', 'Balanced'] },
+    const properties = Object.fromEntries(SEMANTIC_TOOL_SECTIONS.map(section => [
+        section.name,
+        {
+            type: 'string',
+            description: `Complete newline-separated key=value lines for ${section.roots.join(', ')}. Preserve every required template key owned by this section.`,
         },
-    };
-    const stringListSchema = {
-        type: 'array',
-        items: { type: 'string' },
-    };
-    const trackerNpcDeltaSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['NPC', 'revealedName', 'personalitySummary', 'condition', ...TRACKER_NPC_DELTA_FIELDS],
-        properties: {
-            NPC: { type: 'string' },
-            revealedName: { type: 'string' },
-            personalitySummary: { type: 'string' },
-            condition: { type: 'string', enum: TRACKER_CONDITIONS },
-            woundsAdd: stringListSchema,
-            woundsRemove: stringListSchema,
-            statusAdd: stringListSchema,
-            statusRemove: stringListSchema,
-            gearAdd: stringListSchema,
-            gearRemove: stringListSchema,
-        },
-    };
-    const trackerUserDeltaSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['condition', ...TRACKER_USER_DELTA_FIELDS],
-        properties: {
-            condition: { type: 'string', enum: TRACKER_CONDITIONS },
-            woundsAdd: stringListSchema,
-            woundsRemove: stringListSchema,
-            statusAdd: stringListSchema,
-            statusRemove: stringListSchema,
-            gearAdd: stringListSchema,
-            gearRemove: stringListSchema,
-            inventoryAdd: stringListSchema,
-            inventoryRemove: stringListSchema,
-            currencyAdd: stringListSchema,
-            currencyRemove: stringListSchema,
-            tasksAdd: stringListSchema,
-            tasksRemove: stringListSchema,
-            commitmentsAdd: stringListSchema,
-            commitmentsRemove: stringListSchema,
-        },
-    };
-    const boundCompanionDeltaSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['status', 'name', 'type', 'vessel', 'voice', 'evidence'],
-        properties: {
-            status: {
-                type: 'string',
-                enum: ['unchanged', 'active', 'inactive'],
-                description: 'active only when the assembled context explicitly establishes an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant as already active/completed/accepted. inactive only when an established companion is explicitly severed, dismissed, removed, silenced permanently, or destroyed. unchanged for offers, pending pacts, invitations, unclear voices, metaphors, rumors, or no change.',
-            },
-            name: { type: 'string' },
-            type: { type: 'string', enum: ['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other'] },
-            vessel: { type: 'string' },
-            voice: { type: 'string' },
-            evidence: { type: 'string' },
-        },
-    };
-    const pendingBoundaryDeltaSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['status', 'boundaryId', 'targetNPC', 'type', 'objectOrAccess', 'evidence'],
-        properties: {
-            status: {
-                type: 'string',
-                enum: ['unchanged', 'set', 'clear'],
-                description: 'Preflight should use unchanged. Post-narration tracker deltas use set only when FINAL_NARRATION explicitly shows an NPC boundary and clear when that stored boundary is resolved.',
-            },
-            boundaryId: { type: 'string' },
-            targetNPC: { type: 'string' },
-            type: { type: 'string', enum: ['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy'] },
-            objectOrAccess: { type: 'string' },
-            evidence: { type: 'string' },
-        },
-    };
-    const injuryEffectSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['target', 'targetRole', 'effectType', 'bodyPart', 'description', 'severityFloor', 'persistence', 'affectsAction'],
-        properties: {
-            target: {
-                type: 'string',
-                description: 'Exact current tracker key for the searched NPC/body when one exists. Do not add articles, death descriptors, possessives, body, corpse, or remains.',
-            },
-            targetRole: { type: 'string', enum: ['OppTarget', 'HarmedObserver', 'ActionTarget', 'User', 'Other'] },
-            effectType: { type: 'string', enum: ['none', 'physical_injury', 'burn', 'poison', 'paralysis', 'disease', 'blindness', 'stun', 'fear', 'restraint', 'curse', 'electrical', 'exhaustion', 'mental_status', 'other_status'] },
-            bodyPart: { type: 'string' },
-            description: { type: 'string' },
-            severityFloor: { type: 'string', enum: ['minor', 'moderate', 'severe', 'critical'] },
-            persistence: { type: 'string', enum: ['none', 'lasting'] },
-            affectsAction: { type: 'boolean' },
-        },
-    };
-    const powerActorEffectSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['actor', 'actorType', 'sourceTarget', 'actionUnitId', 'explicitlyCompleted', 'hasReach', 'effect', 'severity', 'reason', 'knownToActor'],
-        properties: {
-            actor: { type: 'string' },
-            actorType: { type: 'string' },
-            sourceTarget: {
-                type: 'string',
-                description: 'Exact person, organization, or other current target whose setback creates this effect. Use the Power Actor itself when directly affected.',
-            },
-            actionUnitId: {
-                type: 'string',
-                enum: ['A1', 'A2', 'A3'],
-                description: 'Exact ResolutionEngine.actionUnits id that causes this effect.',
-            },
-            explicitlyCompleted: {
-                type: 'boolean',
-                description: 'For no-roll turns only: Y only when current input/context explicitly establishes the effect as already completed. Use N for attempts and all rolled actions.',
-            },
-            hasReach: {
-                type: 'boolean',
-                description: 'Y only for organizations or unusually influential individuals with resources, agents, authority, territory, money, magic, reputation, or information access.',
-            },
-            effect: { type: 'string', enum: POWER_ACTOR_EFFECT_TYPES },
-            severity: { type: 'string', enum: POWER_ACTOR_SEVERITIES },
-            reason: { type: 'string' },
-            knownToActor: {
-                type: 'boolean',
-                description: 'Y only if the actor plausibly knows, observes, is informed of, or can discover the user action through ordinary reach.',
-            },
-        },
-    };
-    const powerActorAssessmentSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['actor', 'scope', 'isPowerActor', 'actorType', 'reach', 'evidence', 'assessmentReason'],
-        properties: {
-            actor: { type: 'string' },
-            scope: { type: 'string', enum: POWER_ACTOR_ASSESSMENT_SCOPES },
-            isPowerActor: {
-                type: 'boolean',
-                description: 'Y when context gives any credible means to affect the user beyond the entity acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institutional/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Assess semantically, not by title keyword.',
-            },
-            actorType: { type: 'string' },
-            reach: stringListSchema,
-            evidence: { type: 'string' },
-            assessmentReason: { type: 'string' },
-        },
-    };
-    const latentGrievanceSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['target', 'actionUnitId', 'explicitlyCompleted', 'effect', 'severity', 'reason', 'evidence', 'attributionPath'],
-        properties: {
-            target: {
-                type: 'string',
-                description: 'Exact current living target label. This target is presently assessed as ordinary and has no established Power Actor affiliation.',
-            },
-            actionUnitId: {
-                type: 'string',
-                enum: ['A1', 'A2', 'A3'],
-                description: 'Exact ResolutionEngine.actionUnits id that causes this grievance.',
-            },
-            explicitlyCompleted: {
-                type: 'boolean',
-                description: 'For no-roll turns only: Y only when current input/context explicitly establishes the setback as already completed. Use N for attempts and all rolled actions.',
-            },
-            effect: { type: 'string', enum: POWER_ACTOR_EFFECT_TYPES },
-            severity: {
-                type: 'string',
-                enum: ['meaningful', 'major'],
-                description: 'Only substantial durable setbacks qualify. Ordinary friction and minor insults do not.',
-            },
-            reason: { type: 'string' },
-            evidence: { type: 'string' },
-            attributionPath: { type: 'string' },
-        },
-    };
-    const latentFavorSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['target', 'actionUnitId', 'explicitlyCompleted', 'benefit', 'severity', 'reason', 'evidence', 'uncompensated', 'beyondExpectedDuty', 'attributionPath'],
-        properties: {
-            target: {
-                type: 'string',
-                description: 'Exact current living beneficiary label. This target is presently assessed as ordinary and has no established Power Actor affiliation.',
-            },
-            actionUnitId: {
-                type: 'string',
-                enum: ['A1', 'A2', 'A3'],
-                description: 'Exact ResolutionEngine.actionUnits id that causes this favor.',
-            },
-            explicitlyCompleted: {
-                type: 'boolean',
-                description: 'For no-roll turns only: Y only when current input/context explicitly establishes the aid as already completed. Use N for attempts and all rolled actions.',
-            },
-            benefit: { type: 'string', enum: POWER_ACTOR_FAVOR_TYPES },
-            severity: {
-                type: 'string',
-                enum: ['meaningful', 'major'],
-                description: 'Only substantial help qualifies. Courtesy, small gifts, and ordinary assistance do not.',
-            },
-            reason: { type: 'string' },
-            evidence: { type: 'string' },
-            uncompensated: {
-                type: 'boolean',
-                description: 'Y only when no payment, contracted reward, exchange, or promised compensation already covers the help. N when unclear.',
-            },
-            beyondExpectedDuty: {
-                type: 'boolean',
-                description: 'Y only when the help exceeds the user normal job, contract, role, obligation, or routine professional conduct. N when unclear.',
-            },
-            attributionPath: { type: 'string' },
-        },
-    };
-    const powerActorAffiliationLinkSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['grievanceId', 'target', 'powerActor', 'actorType', 'hasReach', 'affiliationEvidence', 'knownToActor', 'knowledgeEvidence'],
-        properties: {
-            grievanceId: {
-                type: 'string',
-                description: 'Exact id copied from the hidden latent grievance snapshot.',
-            },
-            target: {
-                type: 'string',
-                description: 'Exact target copied from the referenced latent grievance.',
-            },
-            powerActor: { type: 'string' },
-            actorType: { type: 'string' },
-            hasReach: { type: 'boolean' },
-            affiliationEvidence: {
-                type: 'string',
-                description: 'Explicit established context linking the grievance target to this Power Actor. Never infer or invent an affiliation.',
-            },
-            knownToActor: {
-                type: 'boolean',
-                description: 'Y only when the Power Actor knows or has a concrete ordinary discovery/reporting path for the stored grievance.',
-            },
-            knowledgeEvidence: { type: 'string' },
-        },
-    };
-    const powerActorFavorAffiliationLinkSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['favorId', 'target', 'powerActor', 'actorType', 'hasReach', 'affiliationEvidence', 'knownToActor', 'knowledgeEvidence', 'knownToUser', 'userKnowledgeEvidence', 'fit', 'fitEvidence'],
-        properties: {
-            favorId: {
-                type: 'string',
-                description: 'Exact id copied from the hidden latent favor snapshot.',
-            },
-            target: {
-                type: 'string',
-                description: 'Exact target copied from the referenced latent favor.',
-            },
-            powerActor: { type: 'string' },
-            actorType: { type: 'string' },
-            hasReach: { type: 'boolean' },
-            affiliationEvidence: {
-                type: 'string',
-                description: 'Explicit established context linking the favor target to this Power Actor. Never infer or invent an affiliation.',
-            },
-            knownToActor: {
-                type: 'boolean',
-                description: 'Y only when the Power Actor knows or has a concrete ordinary discovery/reporting path for the stored favor.',
-            },
-            knowledgeEvidence: { type: 'string' },
-            knownToUser: {
-                type: 'boolean',
-                description: 'Y only when visible or previously established user-facing context already reveals this beneficiary affiliation and Power Actor identity. Hidden semantic knowledge is insufficient.',
-            },
-            userKnowledgeEvidence: {
-                type: 'string',
-                description: 'Direct user-facing dialogue, readable text, recognition, or established scene fact proving knownToUser=Y; otherwise (none).',
-            },
-            fit: {
-                type: 'string',
-                enum: POWER_ACTOR_FAVOR_FITS,
-                description: 'use_now only when one favorable approach can naturally enter the current scene without interrupting combat, crisis, active intimacy, urgent action, or the current dramatic beat; otherwise defer.',
-            },
-            fitEvidence: {
-                type: 'string',
-                description: 'Concise current-scene reason for use_now or defer.',
-            },
-        },
-    };
-    const powerEventShapeSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['eventId', 'actor', 'fit', 'visibleInstruction', 'contactName', 'contactGender', 'surfaceRole', 'deferReason'],
-        properties: {
-            eventId: { type: 'string' },
-            actor: { type: 'string' },
-            fit: { type: 'string', enum: POWER_EVENT_FITS },
-            visibleInstruction: {
-                type: 'string',
-                description: 'Narrator-safe surface scene instruction only. No hidden motive, allegiance, sponsor, spy, agent, infiltration, betrayal, or metadata language.',
-            },
-            contactName: { type: 'string' },
-            contactGender: { type: 'string', enum: POWER_EVENT_CONTACT_GENDERS },
-            surfaceRole: { type: 'string' },
-            deferReason: { type: 'string' },
-        },
-    };
-    const stakeChangeSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: STAKE_OUTCOME_KEYS,
-        properties: Object.fromEntries(STAKE_OUTCOME_KEYS.map(key => [key, { type: 'string', enum: ['benefit', 'harm', 'none'] }])),
-    };
-    const itemUseSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['attempted', 'available', 'item', 'source', 'evidence', 'noEffectReason'],
-        properties: {
-            attempted: {
-                type: 'boolean',
-                description: 'Y only when the latest user input claims use of an existing personal gear/inventory item already carried by the user, such as drawing, producing, retrieving, spending, consuming, presenting, unlocking with, attacking with, or defending with personal equipment. Grabbing, taking, picking up, receiving, or using scene/environment/NPC-offered objects is not itemUse. Natural weapons and body parts are not itemUse.',
-            },
-            available: {
-                type: 'boolean',
-                description: 'Y only when the attempted personal item is already listed in user gear or inventory before the latest user input; body facts and natural weapons do not need gear/inventory availability.',
-            },
-            item: { type: 'string' },
-            source: {
-                type: 'string',
-                enum: ITEM_USE_SOURCES,
-                description: 'Availability source: gear, inventory, unavailable, or none.',
-            },
-            evidence: { type: 'string' },
-            noEffectReason: { type: 'string' },
-        },
-    };
-    const lootSearchSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['attempted', 'target', 'targetKind', 'evidence'],
-        properties: {
-            attempted: {
-                type: 'boolean',
-                description: 'Y only when the latest user input explicitly searches, loots, rummages through, checks, or examines a specific body, corpse, remains, or defeated target for carried or recoverable possessions. Do not decide death, loot contents, value, or prior-search state.',
-            },
-            target: { type: 'string' },
-            targetKind: {
-                type: 'string',
-                enum: LOOT_TARGET_KINDS,
-                description: 'humanoid for personlike/civilized equipment-bearing remains, monster for creature/monster remains expected to yield a magic stone, otherwise other.',
-            },
-            evidence: { type: 'string' },
-        },
-    };
-    const claimCheckSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['present', 'claim', 'targetNPC', 'truthStatus', 'npcAccess', 'stakesImpact', 'reason'],
-        properties: {
-            present: {
-                type: 'boolean',
-                description: 'Y only when the latest user input makes a factual claim that could affect a specific NPC choice or stakes.',
-            },
-            claim: { type: 'string' },
-            targetNPC: { type: 'string' },
-            truthStatus: {
-                type: 'string',
-                enum: CLAIM_TRUTH_STATUSES,
-                description: 'known_true=explicitly supported; known_false=explicitly contradicted; unsupported=material claim not established; unknown=insufficient context; none=no relevant claim.',
-            },
-            npcAccess: {
-                type: 'string',
-                enum: CLAIM_NPC_ACCESS_LEVELS,
-                description: 'How much the target NPC can naturally verify or know the claim: direct, partial, none, or unknown.',
-            },
-            stakesImpact: {
-                type: 'boolean',
-                description: 'Y only if belief/disbelief could materially affect the NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes.',
-            },
-            reason: { type: 'string' },
-        },
-    };
-    const restraintControlSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['present', 'targetNPC', 'evidence'],
-        properties: {
-            present: {
-                type: 'boolean',
-                description: 'Y only when the latest user input explicitly holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a specific living NPC.',
-            },
-            targetNPC: { type: 'string' },
-            evidence: { type: 'string' },
-        },
-    };
-    const boundaryPressureSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['present', 'type', 'targetNPC', 'objectOrAccess', 'evidence'],
-        properties: {
-            present: {
-                type: 'boolean',
-                description: 'Y for non-restraint pressure on an NPC-controlled possession, object, space, route, doorway, access point, or departure.',
-            },
-            type: { type: 'string', enum: BOUNDARY_PRESSURE_TYPES },
-            targetNPC: { type: 'string' },
-            objectOrAccess: { type: 'string' },
-            evidence: { type: 'string' },
-        },
-    };
-    const boundaryBreakSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['present', 'boundaryId', 'targetNPC', 'type', 'response', 'evidence'],
-        properties: {
-            present: {
-                type: 'boolean',
-                description: 'Y only when hidden tracker pendingBoundary exists and the latest user input continues, escalates, ignores, or refuses to release/return/stop that same boundary behavior.',
-            },
-            boundaryId: {
-                type: 'string',
-                description: 'Copy the exact active boundaryId from hidden pendingBoundary when Present=Y; otherwise (none). Never invent an ID.',
-            },
-            targetNPC: { type: 'string' },
-            type: { type: 'string', enum: BOUNDARY_BREAK_TYPES },
-            response: { type: 'string', enum: BOUNDARY_BREAK_RESPONSES },
-            evidence: { type: 'string' },
-        },
-    };
-    const userKnowledgeApplicationSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['target', 'entryIds', 'type', 'knownBy', 'scope', 'valence', 'effect', 'line', 'reason'],
-        properties: {
-            target: {
-                type: 'string',
-                description: 'The present NPC/group this knowledge plausibly applies to, or (none).',
-            },
-            entryIds: stringListSchema,
-            type: { type: 'string', enum: USER_KNOWLEDGE_TYPES },
-            knownBy: { type: 'string' },
-            scope: { type: 'string', enum: USER_KNOWLEDGE_SCOPES },
-            valence: { type: 'string', enum: ['none', ...USER_REPUTATION_VALENCES] },
-            effect: {
-                type: 'string',
-                enum: USER_KNOWLEDGE_APPLICATION_EFFECTS,
-                description: 'How this knowledge should affect init/context: priorUserGoodRep, userBadRep, userNonHuman, contextOnly, or none.',
-            },
-            line: { type: 'string' },
-            reason: { type: 'string' },
-        },
-    };
-    const actionUnitSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['id', 'action', 'evidence'],
-        properties: {
-            id: {
-                type: 'string',
-                description: 'A1, A2, or A3. actionUnits is the only semantic source for mechanically counted actions.',
-            },
-            action: {
-                type: 'string',
-                description: 'Short clean description of this mechanically counted user action.',
-            },
-            evidence: {
-                type: 'string',
-                description: 'Brief latest-user-text evidence for this action unit. Audit only; not narration.',
-            },
-        },
-    };
-    const worldTransitionSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['reputationLocation', 'place', 'area', 'indoors', 'timeAdvance', 'timeAdvanceCount', 'timeOfDay', 'requiresSuccess', 'evidence'],
-        properties: {
-            reputationLocation: {
-                type: 'string',
-                description: 'Use unchanged unless the latest user input explicitly changes the current settlement, route, region, or reputation jurisdiction. Never copy or infer the existing scene state.',
-            },
-            place: {
-                type: 'string',
-                description: 'Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different place. Never copy or infer the existing place from context.',
-            },
-            area: {
-                type: 'string',
-                description: 'Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different sub-area. Never copy or infer the existing area from context.',
-            },
-            indoors: {
-                type: 'string',
-                enum: ['unchanged', 'indoors', 'outdoors'],
-                description: 'Use unchanged unless the latest user input explicitly crosses between indoors and outdoors.',
-            },
-            timeAdvance: {
-                type: 'string',
-                enum: ['none', 'slot', 'overnight', 'day', 'explicit'],
-                description: 'Use none unless the latest user input explicitly waits, sleeps, travels through, or skips time.',
-            },
-            timeAdvanceCount: {
-                type: 'integer',
-                minimum: 1,
-                maximum: 3650,
-                description: 'Number of timeAdvance units explicitly established by the latest user input; use 1 when timeAdvance is none.',
-            },
-            timeOfDay: {
-                type: 'string',
-                enum: ['unchanged', 'morning', 'afternoon', 'evening', 'night'],
-                description: 'Use unchanged unless the latest user input explicitly establishes a new time of day.',
-            },
-            requiresSuccess: {
-                type: 'boolean',
-                description: 'True only when this explicit transition depends on the current stakes-bearing action succeeding.',
-            },
-            evidence: {
-                type: 'string',
-                description: 'Exact contiguous quote from the latest user input that establishes this transition, or (none) when every transition field is unchanged/none.',
-            },
-        },
-    };
-    const worldEvidenceSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['topic', 'text', 'route', 'location', 'actor'],
-        properties: {
-            topic: { type: 'string' },
-            text: { type: 'string' },
-            route: { type: 'string', enum: ['location', 'actor', 'news', 'investigation'] },
-            location: { type: 'string' },
-            actor: { type: 'string' },
-        },
-    };
-    const worldAdvancementSchema = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['planId', 'stageLabel', 'consequence', 'status', 'nextDelayDays', 'nextDelaySlots', 'evidence'],
-        properties: {
-            planId: { type: 'string' },
-            stageLabel: { type: 'string' },
-            consequence: { type: 'string' },
-            status: { type: 'string', enum: ['active', 'completed'] },
-            nextDelayDays: { type: 'integer', minimum: 0, maximum: 120 },
-            nextDelaySlots: { type: 'integer', minimum: 0, maximum: 480 },
-            evidence: { type: 'array', minItems: 1, maxItems: 4, items: worldEvidenceSchema },
-        },
-    };
+    ]));
+
     return {
         type: 'object',
-        additionalProperties: false,
-        required: ['engineContext', 'worldTransition', 'worldProgression', 'resolutionEngine', 'relationshipEngine', 'injuryEffectEngine', 'userKnowledgeApplication', 'powerActorEnmity', 'powerEventShape', 'trackerUpdateEngine', 'chaosSemantic'],
-        properties: {
-            engineContext: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['trackerRelevantNPCs', 'userReputationContext'],
-                properties: {
-                    trackerRelevantNPCs: {
-                        type: 'array',
-                        items: {
-                            type: 'object',
-                            additionalProperties: false,
-                            required: ['NPC'],
-                            properties: {
-                                NPC: { type: 'string' },
-                            },
-                        },
-                    },
-                    userReputationContext: {
-                        type: 'object',
-                        additionalProperties: false,
-                        required: ['location'],
-                        properties: {
-                            location: {
-                                type: 'string',
-                                description: 'Current settlement/community/route/region for deterministic fame/infamy lookup, or (none). Do not decide reputation effects here.',
-                            },
-                        },
-                    },
-                },
-            },
-            worldTransition: worldTransitionSchema,
-            worldProgression: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['advancements'],
-                properties: {
-                    advancements: {
-                        type: 'array',
-                        maxItems: 18,
-                        items: worldAdvancementSchema,
-                    },
-                },
-            },
-            resolutionEngine: {
-                type: 'object',
-                additionalProperties: false,
-                required: [
-                    'identifyGoal',
-                    'identifyChallenge',
-                    'explicitMeans',
-                    'userAbilityUse',
-                    'itemUse',
-                    'lootSearch',
-                    'claimCheck',
-                    'identifyTargets',
-                    'intimacyAdvanceExplicit',
-                    'restraintControl',
-                    'boundaryPressure',
-                    'boundaryBreak',
-                    'harmMode',
-                    'rollNeeded',
-                    'rollReason',
-                    'challengeType',
-                    'challengeTypeEvidence',
-                    'socialTactic',
-                    'actionUnits',
-                    'environmentDifficultyTier',
-                    'activeHostileThreat',
-                    'genStats',
-                ],
-                properties: {
-                    identifyGoal: { type: 'string' },
-                    identifyChallenge: { type: 'string' },
-                    explicitMeans: { type: 'string' },
-                    userAbilityUse: {
-                        type: 'object',
-                        additionalProperties: false,
-                        required: ['used', 'attempted', 'available', 'abilityName', 'evidence', 'narrativeEffect', 'noEffectReason', 'mechanicalScope'],
-                        properties: {
-                            used: {
-                                type: 'boolean',
-                                description: 'Y only when the latest user input attempts an ability/spell and that ability/spell exists in active user/persona abilities or spells.',
-                            },
-                            attempted: {
-                                type: 'boolean',
-                                description: 'Y when the latest user input explicitly names or implicitly describes an attempted ability/spell/supernatural effect through trigger, delivery method, or desired effect.',
-                            },
-                            available: {
-                                type: 'boolean',
-                                description: 'Y only when the attempted ability/spell exists in active user/persona abilities or spells from context.',
-                            },
-                            abilityName: { type: 'string' },
-                            evidence: { type: 'string' },
-                            narrativeEffect: { type: 'string' },
-                            noEffectReason: { type: 'string' },
-                            mechanicalScope: {
-                                type: 'string',
-                                enum: ['flavor_only_no_bonus'],
-                                description: 'Always flavor_only_no_bonus. Ability use is fictional permission/method only and never changes dice, stats, stakes, or outcomes.',
-                            },
-                        },
-                    },
-                    itemUse: itemUseSchema,
-                    lootSearch: lootSearchSchema,
-                    claimCheck: claimCheckSchema,
-                    identifyTargets: {
-                        type: 'object',
-                        additionalProperties: false,
-                        required: ['hostilesInScene', 'ActionTargets', 'OppTargets', 'BenefitedObservers', 'HarmedObservers', 'NPCAwareOfUser', 'PowerActors'],
-                        properties: {
-                            hostilesInScene: {
-                                type: 'object',
-                                additionalProperties: false,
-                                required: ['NPC'],
-                                properties: {
-                                    NPC: stringListSchema,
-                                },
-                            },
-                            ActionTargets: stringListSchema,
-                            OppTargets: {
-                                type: 'object',
-                                additionalProperties: false,
-                                required: ['NPC', 'ENV'],
-                                properties: {
-                                    NPC: stringListSchema,
-                                    ENV: stringListSchema,
-                                },
-                            },
-                            BenefitedObservers: stringListSchema,
-                            HarmedObservers: stringListSchema,
-                            NPCAwareOfUser: stringListSchema,
-                            PowerActors: stringListSchema,
-                        },
-                    },
-                    intimacyAdvanceExplicit: { type: 'boolean' },
-                    restraintControl: restraintControlSchema,
-                    boundaryPressure: boundaryPressureSchema,
-                    boundaryBreak: boundaryBreakSchema,
-                    harmMode: {
-                        type: 'string',
-                        enum: HARM_MODES,
-                        description: 'Downstream damage/death gate only. lethal for weapon/improvised/natural weapon, dangerous tool, projectile, destructive magic, poison, fire/electricity, or any method that could reasonably kill/maim if it lands decisively. nonlethal for ordinary unarmed attacks, brawling, sparring/training, pulled blows, pommel/flat strikes, practice weapons, or clearly controlled force; it can deal HP damage but HP 0 means incapacitated, not dead. restraint_control for holding, pinning, grabbing, dragging, blocking, binding, immobilizing, carrying, forced positioning, or preventing movement without a separate injuring attack; no HP damage and bruised at most. none for no bodily attack/harm/control. If mixed, choose lethal > nonlethal > restraint_control > none. This must not decide rollNeeded, challengeType, boundary pressure, hostility, or relationship harm.',
-                    },
-                    rollNeeded: {
-                        type: 'boolean',
-                        description: 'The sole semantic roll gate. Y for fresh unresolved DEF.STAKES items. N only for DEF.NO_STAKES exclusions when no positive stake is present or when that exact positive stake is already resolved/suppressed. Positive stakes win over ordinary continuity.',
-                    },
-                    rollReason: {
-                        type: 'string',
-                        description: 'Concise explanation that agrees with rollNeeded. If rollNeeded=true, describe the fresh unresolved stakes. If rollNeeded=false, describe why no fresh unresolved stakes exist.',
-                    },
-                    challengeType: {
-                        type: 'string',
-                        enum: CHALLENGE_TYPES,
-                        description: 'none, social, mundane_combat, supernatural_combat, restraint, stealth, or environment. Use none when rollNeeded=false unless deterministic restraint policy overrides later.',
-                    },
-                    challengeTypeEvidence: {
-                        type: 'string',
-                        description: 'Brief evidence phrase for the selected challengeType, or (none).',
-                    },
-                    socialTactic: {
-                        type: 'string',
-                        enum: SOCIAL_TACTICS,
-                        description: 'diplomacy, bluff, or intimidate only when challengeType=social; otherwise none.',
-                    },
-                    actionUnits: {
-                        type: 'array',
-                        items: actionUnitSchema,
-                        description: 'Only semantic source for mechanically counted actions. Non-combat returns exactly one A1 unit. Combat returns one unit per explicit discrete attack/effect, capped at three.',
-                    },
-                    environmentDifficultyTier: {
-                        type: 'string',
-                        enum: ENVIRONMENT_DIFFICULTY_TIERS,
-                        description: 'Semantic environmental opposition tier only when challengeType=environment and OppTargets.ENV has a non-living obstacle or condition that makes the goal fail-able. Use easy/trivial, average, hard, or extreme; set none otherwise.',
-                    },
-                    activeHostileThreat: { type: 'boolean' },
-                    genStats: generatedStatsSeedSchema,
-                },
-            },
-            relationshipEngine: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: [
-                        'NPC',
-                        'initPreset',
-                        'auditInteraction',
-                        'establishedRelationship',
-                        'romanceStyle',
-                        'slowBondEvidence',
-                        'explicitIntimidationOrCoercion',
-                        'standingInfluence',
-                        'standingBasis',
-                        'stakeChangeByOutcome',
-                        'overrideFlags',
-                        'genStats',
-                    ],
-                    properties: {
-                        NPC: { type: 'string' },
-                        initPreset: {
-                            type: 'object',
-                            additionalProperties: false,
-                            required: ['romanticOpen', 'userBadRep', 'priorUserGoodRep', 'userNonHuman', 'fearImmunity'],
-                            properties: {
-                                romanticOpen: {
-                                    type: 'boolean',
-                                    description: 'Y when prior card/lore/scenario/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward user; not generic friendliness, politeness, casual flirting, shallow physical attraction, vague chemistry, ordinary embarrassment, or first impressions.',
-                                },
-                                userBadRep: {
-                                    type: 'boolean',
-                                    description: 'Y only for explicit authored prior hate, distrust, enemy status, pursuit, betrayal, harm, or negative relationship with this NPC from character card, lore, scenario, or pre-existing relationship context; not current-scene conflict or broad public infamy.',
-                                },
-                                priorUserGoodRep: {
-                                    type: 'boolean',
-                                    description: 'Y only for explicit authored established favorable or trust-normalizing prior history, trust, gratitude, safe familiarity, vouching, friendship, or relationship with this NPC from character card, lore, scenario, or pre-existing relationship context; not kindness, good impressions, or broad public fame.',
-                                },
-                                userNonHuman: {
-                                    type: 'boolean',
-                                    description: 'Y for visibly demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural user form when this is a fresh or unnormalized exposure, or explicit authored fear-coded relationship context with this NPC. Do not use broad public infamy here; deterministic fame/infamy handles that.',
-                                },
-                                fearImmunity: {
-                                    type: 'boolean',
-                                    description: 'Y only for same/superior supernatural kind, ancient/powerful/fear-resistant beings, or explicit constant experience with supernatural threats; not ordinary guards, soldiers, bravery, rank, or normal combat experience.',
-                                },
-                            },
-                        },
-                        auditInteraction: { type: 'boolean' },
-                        establishedRelationship: { type: 'boolean' },
-                        romanceStyle: { type: 'string', enum: ['auto', 'nervous', 'flirt'] },
-                        slowBondEvidence: {
-                            type: 'object',
-                            additionalProperties: false,
-                            required: ['respectfulContact', 'cooperation', 'comfortInProximity', 'boundaryRespect', 'sharedRoutine', 'playfulness', 'teamwork', 'personalAttention', 'blockers'],
-                            properties: {
-                                respectfulContact: { type: 'boolean' },
-                                cooperation: { type: 'boolean' },
-                                comfortInProximity: { type: 'boolean' },
-                                boundaryRespect: { type: 'boolean' },
-                                sharedRoutine: { type: 'boolean' },
-                                playfulness: { type: 'boolean' },
-                                teamwork: { type: 'boolean' },
-                                personalAttention: { type: 'boolean' },
-                                blockers: { type: 'array', items: { type: 'string' } },
-                            },
-                        },
-                        explicitIntimidationOrCoercion: { type: 'boolean' },
-                        standingInfluence: {
-                            type: 'string',
-                            enum: STANDING_INFLUENCES,
-                            description: 'How this specific NPC\'s knowledge of user standing relative to themselves affects their outward conduct. none=no recognized meaningful user-standing difference; aware=user standing changes etiquette, caution, risk, or openness without constraining the NPC; constrained=user\'s recognized higher authority, status, power, backing, lineage, or affiliation limits what the NPC openly expresses or dares to do. This changes expression only and never changes B/F/H.',
-                        },
-                        standingBasis: {
-                            type: 'string',
-                            description: 'Concise evidence for the assessment from user standing this NPC actually knows and recognizes relative to themselves: title, authority, reputation, demonstrated power, backing, lineage, or affiliation. Use (none) when standingInfluence=none. Unknown, concealed, or unsupported status must remain none/(none).',
-                        },
-                        stakeChangeByOutcome: stakeChangeSchema,
-                        overrideFlags: {
-                            type: 'object',
-                            additionalProperties: false,
-                            required: ['CurrentInvitation', 'Exploitation', 'Hedonist', 'Transactional', 'Established', 'RomanticBuildup'],
-                            properties: {
-                                CurrentInvitation: {
-                                    type: 'boolean',
-                                    description: 'Y only when this NPC has clearly and directly offered, requested, invited, strongly implied, or physically initiated sexual/intimate escalation with user in the current or immediately recent scene, and has not withdrawn, refused, panicked, or been interrupted by danger. Includes irrefutable sexual invitation hints framed as questions, such as wanting to know how tight/full they would feel and asking whether user wants to find out.',
-                                },
-                                Exploitation: {
-                                    type: 'boolean',
-                                    description: 'Y only when card/lore/context explicitly makes this NPC exploitable by user or situation: naive, easily led/persuaded, follows user lead without question, dependent, trapped, coerced, powerless, or unsafely sheltered. Not mere innocence, shyness, kindness, flirting, or low confidence.',
-                                },
-                                Hedonist: {
-                                    type: 'boolean',
-                                    description: 'Y only for explicitly sexually open, pleasure-seeking, casual, promiscuous, or eager intimacy context.',
-                                },
-                                Transactional: {
-                                    type: 'boolean',
-                                    description: 'Y only for explicit willingness to exchange intimacy for money, goods, favors, protection, status, or services.',
-                                },
-                                Established: {
-                                    type: 'boolean',
-                                    description: 'Y only for explicit prior/current intimate access with current or recent receptivity toward user, separate from establishedRelationship. Prior intimacy alone is not enough if current receptivity is absent, stale, unclear, refused, fearful, hostile, coerced, or boundary-limited.',
-                                },
-                                RomanticBuildup: {
-                                    type: 'boolean',
-                                    description: 'Y only for a B4 close-bond scene where the current and recent interaction has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior, making the user latest intimate advance a natural continuation. N for ordinary friendliness, tenderness, gratitude, warmth, single smiles, casual flirting, vague chemistry, or user-only escalation. N if refusal, withdrawal, fear, hostility, coercion, danger, public/social interruption, or a boundary limit is active.',
-                                },
-                            },
-                        },
-                        genStats: generatedStatsSeedSchema,
-                    },
-                },
-            },
-            injuryEffectEngine: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['effects'],
-                properties: {
-                    effects: {
-                        type: 'array',
-                        items: injuryEffectSchema,
-                    },
-                },
-            },
-            userKnowledgeApplication: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['applications'],
-                properties: {
-                    applications: {
-                        type: 'array',
-                        items: userKnowledgeApplicationSchema,
-                    },
-                },
-            },
-            powerActorEnmity: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['assessments', 'effects', 'latentGrievances', 'affiliationLinks', 'latentFavors', 'favorAffiliationLinks'],
-                properties: {
-                    assessments: {
-                        type: 'array',
-                        items: powerActorAssessmentSchema,
-                    },
-                    effects: {
-                        type: 'array',
-                        items: powerActorEffectSchema,
-                    },
-                    latentGrievances: {
-                        type: 'array',
-                        items: latentGrievanceSchema,
-                    },
-                    affiliationLinks: {
-                        type: 'array',
-                        items: powerActorAffiliationLinkSchema,
-                    },
-                    latentFavors: {
-                        type: 'array',
-                        items: latentFavorSchema,
-                    },
-                    favorAffiliationLinks: {
-                        type: 'array',
-                        items: powerActorFavorAffiliationLinkSchema,
-                    },
-                },
-            },
-            powerEventShape: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['events'],
-                properties: {
-                    events: {
-                        type: 'array',
-                        items: powerEventShapeSchema,
-                    },
-                },
-            },
-            trackerUpdateEngine: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['user', 'npcs', 'boundCompanion', 'pendingBoundary'],
-                properties: {
-                    user: trackerUserDeltaSchema,
-                    npcs: {
-                        type: 'array',
-                        items: trackerNpcDeltaSchema,
-                    },
-                    boundCompanion: boundCompanionDeltaSchema,
-                    pendingBoundary: pendingBoundaryDeltaSchema,
-                },
-            },
-            chaosSemantic: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['sceneSummary'],
-                properties: {
-                    sceneSummary: { type: 'string' },
-                },
-            },
-        },
+        required: SEMANTIC_TOOL_SECTIONS.map(section => section.name),
+        properties,
     };
 }
 
 function extractSemanticToolLedger(raw) {
     const calls = collectToolCalls(raw);
-    const matching = calls.find(call => getToolCallName(call) === SEMANTIC_TOOL_NAME) || calls[0];
+    const matching = calls.find(call => getToolCallName(call) === SEMANTIC_TOOL_NAME);
     if (!matching) {
         throw new Error(`semantic tool-call response did not contain ${SEMANTIC_TOOL_NAME}. RawPreview=${previewRaw(raw)}`);
     }
 
     const args = getToolCallArguments(matching);
-    const ledger = parseToolArguments(args);
-    if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
+    const sections = parseToolArguments(args);
+    if (!sections || typeof sections !== 'object' || Array.isArray(sections)) {
         throw new Error(`semantic tool-call arguments were not an object. RawPreview=${previewRaw(raw)}`);
     }
-    return ledger;
+    return reconstructSemanticToolLedger(sections);
+}
+
+export function reconstructSemanticToolLedger(sections) {
+    if (!sections || typeof sections !== 'object' || Array.isArray(sections)) {
+        throw new Error('semantic tool-call sections must be an object');
+    }
+
+    const expectedNames = new Set(SEMANTIC_TOOL_SECTIONS.map(section => section.name));
+    const unknownNames = Object.keys(sections).filter(name => !expectedNames.has(name));
+    if (unknownNames.length) {
+        throw new Error(`semantic tool-call returned unknown sections: ${unknownNames.join(', ')}`);
+    }
+
+    const ledgerLines = [];
+    const seenKeys = new Set();
+    for (const section of SEMANTIC_TOOL_SECTIONS) {
+        if (!Object.prototype.hasOwnProperty.call(sections, section.name)) {
+            throw new Error(`semantic tool-call omitted required section: ${section.name}`);
+        }
+        if (typeof sections[section.name] !== 'string' || !sections[section.name].trim()) {
+            throw new Error(`semantic tool-call section ${section.name} must be a non-empty string`);
+        }
+
+        const lines = sections[section.name].split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        for (const line of lines) {
+            const equals = line.indexOf('=');
+            if (equals < 1) {
+                throw new Error(`semantic tool-call section ${section.name} contains a malformed ledger line: ${line.slice(0, 120)}`);
+            }
+            const key = line.slice(0, equals).trim();
+            const belongsToSection = section.roots.some(root => key.startsWith(`${root}.`) || key.startsWith(`${root}[`));
+            if (!belongsToSection) {
+                throw new Error(`semantic tool-call section ${section.name} contains a line owned by another section: ${key}`);
+            }
+            if (seenKeys.has(key)) {
+                throw new Error(`semantic tool-call returned duplicate ledger line: ${key}`);
+            }
+            seenKeys.add(key);
+            ledgerLines.push(line);
+        }
+    }
+
+    return `BEGIN_SEMANTIC_PREFLIGHT\n${ledgerLines.join('\n')}\nEND_SEMANTIC_PREFLIGHT`;
+}
+
+export function parseAndValidateSemanticToolSections(sections, trackerSnapshot = {}) {
+    const ledgerText = reconstructSemanticToolLedger(sections);
+    const ledger = parseSemanticLedger(ledgerText, trackerSnapshot);
+    validateRawLedgerContract(ledger, ledgerText);
+    const normalized = normalizeLedger(ledger);
+    validateNormalizedLedger(normalized, ledgerText);
+    return normalized;
 }
 
 function collectToolCalls(raw) {
@@ -1630,7 +669,7 @@ function parseToolArgumentJson(text) {
         if (repaired && repaired !== jsonText) {
             try {
                 const parsed = JSON.parse(repaired);
-                console.warn('[Structured Preflight Engines] repaired malformed semantic tool-call JSON locally before fallback.');
+                console.warn('[Structured Preflight Engines] repaired malformed semantic tool-call JSON locally before validation.');
                 return parsed;
             } catch {
                 // Throw the original parse error below; it points to the provider payload.
@@ -1725,12 +764,11 @@ const COMPACT_LEDGER_OUTPUT_CONTRACT = [
     'STRICT COMPACT PREFLIGHT LEDGER CONTRACT:',
     '- Output only the ledger block. No markdown. No prose. No JSON. No comments. No explanations.',
     '- Begin with BEGIN_SEMANTIC_PREFLIGHT and end the ledger with END_SEMANTIC_PREFLIGHT.',
-    `- After END_SEMANTIC_PREFLIGHT, output ${SEMANTIC_PREFLIGHT_STOP_SENTINEL} on its own final line. Do not output anything after it.`,
     '- Fill every required line exactly once. Keep the exact function/key names shown below.',
     '- WorldProgressionAdvancement.count must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one row per due plan.',
     '- When RelationshipEngine.count is greater than 0, every indexed relationship row MUST include standingInfluence=none|aware|constrained and standingBasis; omit indexed relationship lines only when count=0.',
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
-    '- Use comma-separated names or (none) for lists. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
+    '- Use a vertical bar (|) between list entries, or (none) for an empty list. Commas and semicolons are literal text inside one entry. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
 ].join('\n');
 
 const SEMANTIC_FIELD_GUIDANCE = [
@@ -2006,8 +1044,7 @@ PowerEventShape[0].contactGender=none
 PowerEventShape[0].surfaceRole=(none)
 PowerEventShape[0].deferReason=(none)
 CHAOS_INTERRUPT.sceneSummary=short scene summary
-END_SEMANTIC_PREFLIGHT
-${SEMANTIC_PREFLIGHT_STOP_SENTINEL}`;
+END_SEMANTIC_PREFLIGHT`;
 
 export function getPersonaIdentityHints(context) {
     const fields = getCharacterCardFields(context);
@@ -2076,6 +1113,7 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTra
             role: 'user',
             content:
                 `${COMPACT_LEDGER_OUTPUT_CONTRACT}\n` +
+                `${compactDynamicRowGuidance()}\n` +
                 compactTemplate,
         },
     ];
@@ -2108,6 +1146,7 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
             role: 'user',
             content:
                 `${COMPACT_LEDGER_OUTPUT_CONTRACT}\n` +
+                `${compactDynamicRowGuidance()}\n` +
                 compactTemplate,
         },
     ];
@@ -2589,6 +1628,343 @@ const STAKE_OUTCOME_KEYS = [
     'avoided',
 ];
 
+const COMPACT_RELATIONSHIP_ROW_TEMPLATE = Object.freeze([
+    ['NPC', '(none)'],
+    ['initPreset.romanticOpen', 'N'],
+    ['initPreset.userBadRep', 'N'],
+    ['initPreset.priorUserGoodRep', 'N'],
+    ['initPreset.userNonHuman', 'N'],
+    ['initPreset.fearImmunity', 'N'],
+    ['establishedRelationship', 'N'],
+    ['romanceStyle', 'auto'],
+    ['slowBondEvidence.respectfulContact', 'N'],
+    ['slowBondEvidence.cooperation', 'N'],
+    ['slowBondEvidence.comfortInProximity', 'N'],
+    ['slowBondEvidence.boundaryRespect', 'N'],
+    ['slowBondEvidence.sharedRoutine', 'N'],
+    ['slowBondEvidence.playfulness', 'N'],
+    ['slowBondEvidence.teamwork', 'N'],
+    ['slowBondEvidence.personalAttention', 'N'],
+    ['slowBondEvidence.blockers', '(none)'],
+    ['auditInteraction', 'N'],
+    ['explicitIntimidationOrCoercion', 'N'],
+    ['standingInfluence', 'none'],
+    ['standingBasis', '(none)'],
+    ['checkThreshold.CurrentInvitation', 'N'],
+    ['checkThreshold.Exploitation', 'N'],
+    ['checkThreshold.Hedonist', 'N'],
+    ['checkThreshold.Transactional', 'N'],
+    ['checkThreshold.Established', 'N'],
+    ['checkThreshold.RomanticBuildup', 'N'],
+    ['genStats.CapabilityPool', 'none'],
+    ['genStats.MainStat', 'none'],
+    ...STAKE_OUTCOME_KEYS.map(key => [`stakeChangeByOutcome.${key}`, 'none']),
+]);
+const COMPACT_RELATIONSHIP_FIELD_SUFFIXES = Object.freeze(
+    COMPACT_RELATIONSHIP_ROW_TEMPLATE.map(([suffix]) => suffix),
+);
+
+const COMPACT_INJURY_ROW_TEMPLATE = Object.freeze([
+    ['target', '(none)'],
+    ['targetRole', 'Other'],
+    ['effectType', 'physical_injury'],
+    ['bodyPart', 'body'],
+    ['description', '(none)'],
+    ['severityFloor', 'minor'],
+    ['persistence', 'lasting'],
+    ['affectsAction', 'N'],
+]);
+const COMPACT_INJURY_FIELD_SUFFIXES = Object.freeze(
+    COMPACT_INJURY_ROW_TEMPLATE.map(([suffix]) => suffix),
+);
+
+function compactDynamicRowGuidance() {
+    return [
+        'DYNAMIC ROW SCHEMAS (documentation only; never output literal [i] keys):',
+        '- When RelationshipEngine.count or InjuryEffectEngine.count is greater than 0, emit one complete row for each numeric index from 0 through count-1 and replace every placeholder/default with the semantic result. When count=0, emit no rows for that engine.',
+        'RelationshipEngine[i] required row:',
+        ...COMPACT_RELATIONSHIP_ROW_TEMPLATE.map(([suffix, value]) => `RelationshipEngine[i].${suffix}=${value}`),
+        'InjuryEffectEngine[i] required row:',
+        ...COMPACT_INJURY_ROW_TEMPLATE.map(([suffix, value]) => `InjuryEffectEngine[i].${suffix}=${value}`),
+    ].join('\n');
+}
+
+const COMPACT_COUNT_LIMITS = Object.freeze({
+    'WorldProgressionAdvancement.count': 18,
+    'ResolutionEngine.actionUnits.count': 3,
+    'RelationshipEngine.count': 20,
+    'UserKnowledgeApplication.count': 20,
+    'InjuryEffectEngine.count': 20,
+    'TrackerUpdateEngine.NPC.count': 20,
+    'PowerActorAssessment.count': 20,
+    'PowerActorEnmity.count': 12,
+    'LatentGrievance.count': 12,
+    'PowerActorAffiliationLink.count': 12,
+    'LatentFavor.count': 12,
+    'PowerActorFavorAffiliationLink.count': 12,
+    'PowerEventShape.count': 4,
+});
+
+const COMPACT_INDEXED_ROOTS = Object.freeze([
+    ['WorldProgressionAdvancement', 'WorldProgressionAdvancement.count', true],
+    ['ResolutionEngine.actionUnits', 'ResolutionEngine.actionUnits.count', true],
+    ['RelationshipEngine', 'RelationshipEngine.count', false],
+    ['UserKnowledgeApplication', 'UserKnowledgeApplication.count', true],
+    ['InjuryEffectEngine', 'InjuryEffectEngine.count', false],
+    ['TrackerUpdateEngine.NPC', 'TrackerUpdateEngine.NPC.count', true],
+    ['PowerActorAssessment', 'PowerActorAssessment.count', true],
+    ['PowerActorEnmity', 'PowerActorEnmity.count', true],
+    ['LatentGrievance', 'LatentGrievance.count', true],
+    ['PowerActorAffiliationLink', 'PowerActorAffiliationLink.count', true],
+    ['LatentFavor', 'LatentFavor.count', true],
+    ['PowerActorFavorAffiliationLink', 'PowerActorFavorAffiliationLink.count', true],
+    ['PowerEventShape', 'PowerEventShape.count', true],
+]);
+
+let compactTemplateFieldEntriesCache = null;
+let compactKnownKeyPatternsCache = null;
+let compactBooleanKeyPatternsCache = null;
+
+function compactTemplateFieldEntries() {
+    if (compactTemplateFieldEntriesCache) return compactTemplateFieldEntriesCache;
+    compactTemplateFieldEntriesCache = COMPACT_LEDGER_TEMPLATE
+        .split(/\r?\n/)
+        .map(line => {
+            const equals = line.indexOf('=');
+            if (equals < 1) return null;
+            return [line.slice(0, equals).trim(), line.slice(equals + 1).trim()];
+        })
+        .filter(Boolean);
+    return compactTemplateFieldEntriesCache;
+}
+
+function compactKeyPattern(templateKey) {
+    const escapedParts = String(templateKey)
+        .split('[0]')
+        .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    return new RegExp(`^${escapedParts.join('\\[(?:0|[1-9]\\d*)\\]')}$`);
+}
+
+function compactKnownKeyPatterns() {
+    if (compactKnownKeyPatternsCache) return compactKnownKeyPatternsCache;
+    const keys = [
+        ...compactTemplateFieldEntries().map(([key]) => key),
+        ...COMPACT_RELATIONSHIP_FIELD_SUFFIXES.map(suffix => `RelationshipEngine[0].${suffix}`),
+        ...COMPACT_INJURY_FIELD_SUFFIXES.map(suffix => `InjuryEffectEngine[0].${suffix}`),
+    ];
+    compactKnownKeyPatternsCache = keys.map(compactKeyPattern);
+    return compactKnownKeyPatternsCache;
+}
+
+function compactBooleanKeyPatterns() {
+    if (compactBooleanKeyPatternsCache) return compactBooleanKeyPatternsCache;
+    compactBooleanKeyPatternsCache = [
+        ...compactTemplateFieldEntries()
+            .filter(([, value]) => value === 'Y' || value === 'N')
+            .map(([key]) => compactKeyPattern(key)),
+        /^RelationshipEngine\[(?:0|[1-9]\d*)\]\.(?:initPreset\.(?:romanticOpen|userBadRep|priorUserGoodRep|userNonHuman|fearImmunity)|establishedRelationship|slowBondEvidence\.(?:respectfulContact|cooperation|comfortInProximity|boundaryRespect|sharedRoutine|playfulness|teamwork|personalAttention)|auditInteraction|explicitIntimidationOrCoercion|checkThreshold\.(?:CurrentInvitation|Exploitation|Hedonist|Transactional|Established|RomanticBuildup))$/,
+        /^InjuryEffectEngine\[(?:0|[1-9]\d*)\]\.affectsAction$/,
+    ];
+    return compactBooleanKeyPatternsCache;
+}
+
+function compactKeyMatches(key, matcher) {
+    return typeof matcher === 'string' ? key === matcher : matcher.test(key);
+}
+
+function readRequiredInteger(fields, key, minimum, maximum) {
+    const raw = String(fields.get(key) ?? '').trim();
+    if (!/^(?:0|[1-9]\d*)$/.test(raw)) {
+        throw new Error(`compact ledger field ${key} must be a canonical integer`);
+    }
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+        throw new Error(`compact ledger field ${key} must be an integer from ${minimum} to ${maximum}`);
+    }
+    return value;
+}
+
+function validateCompactEnumFields(fields) {
+    const rules = [
+        ['WorldTransition.indoors', ['unchanged', 'indoors', 'outdoors']],
+        ['WorldTransition.timeAdvance', ['none', 'slot', 'overnight', 'day', 'explicit']],
+        ['WorldTransition.timeOfDay', ['unchanged', 'morning', 'afternoon', 'evening', 'night']],
+        [/^WorldProgressionAdvancement\[(?:0|[1-9]\d*)\]\.status$/, ['active', 'completed']],
+        [/^WorldProgressionAdvancement\[(?:0|[1-9]\d*)\]\.evidence\[(?:0|[1-9]\d*)\]\.route$/, ['location', 'actor', 'news', 'investigation']],
+        ['ResolutionEngine.userAbilityUse.MechanicalScope', ['flavor_only_no_bonus']],
+        ['ResolutionEngine.itemUse.Source', ITEM_USE_SOURCES],
+        ['ResolutionEngine.lootSearch.TargetKind', LOOT_TARGET_KINDS],
+        ['ResolutionEngine.claimCheck.TruthStatus', CLAIM_TRUTH_STATUSES],
+        ['ResolutionEngine.claimCheck.NPCAccess', CLAIM_NPC_ACCESS_LEVELS],
+        ['ResolutionEngine.boundaryPressure.Type', BOUNDARY_PRESSURE_TYPES],
+        ['ResolutionEngine.boundaryBreak.Type', BOUNDARY_BREAK_TYPES],
+        ['ResolutionEngine.boundaryBreak.Response', BOUNDARY_BREAK_RESPONSES],
+        ['ResolutionEngine.harmMode', HARM_MODES],
+        ['ResolutionEngine.challengeType', CHALLENGE_TYPES],
+        ['ResolutionEngine.socialTactic', SOCIAL_TACTICS],
+        ['ResolutionEngine.environmentDifficultyTier', ENVIRONMENT_DIFFICULTY_TIERS],
+        [/^(?:ResolutionEngine|RelationshipEngine\[(?:0|[1-9]\d*)\])\.genStats\.CapabilityPool$/, ['none', 'common', 'trained', 'elite', 'boss']],
+        [/^(?:ResolutionEngine|RelationshipEngine\[(?:0|[1-9]\d*)\])\.genStats\.MainStat$/, ['none', 'PHY', 'MND', 'CHA', 'Balanced']],
+        [/^RelationshipEngine\[(?:0|[1-9]\d*)\]\.romanceStyle$/, ['auto', 'nervous', 'flirt']],
+        [/^RelationshipEngine\[(?:0|[1-9]\d*)\]\.standingInfluence$/, STANDING_INFLUENCES],
+        [/^RelationshipEngine\[(?:0|[1-9]\d*)\]\.stakeChangeByOutcome\./, ['benefit', 'harm', 'none']],
+        [/^UserKnowledgeApplication\[(?:0|[1-9]\d*)\]\.type$/, USER_KNOWLEDGE_TYPES],
+        [/^UserKnowledgeApplication\[(?:0|[1-9]\d*)\]\.scope$/, USER_KNOWLEDGE_SCOPES],
+        [/^UserKnowledgeApplication\[(?:0|[1-9]\d*)\]\.valence$/, ['none', ...USER_REPUTATION_VALENCES]],
+        [/^UserKnowledgeApplication\[(?:0|[1-9]\d*)\]\.effect$/, USER_KNOWLEDGE_APPLICATION_EFFECTS],
+        [/^InjuryEffectEngine\[(?:0|[1-9]\d*)\]\.targetRole$/, ['OppTarget', 'HarmedObserver', 'ActionTarget', 'User', 'Other']],
+        [/^InjuryEffectEngine\[(?:0|[1-9]\d*)\]\.effectType$/, ['none', 'physical_injury', 'burn', 'poison', 'paralysis', 'disease', 'blindness', 'stun', 'fear', 'restraint', 'curse', 'electrical', 'exhaustion', 'mental_status', 'other_status']],
+        [/^InjuryEffectEngine\[(?:0|[1-9]\d*)\]\.severityFloor$/, ['minor', 'moderate', 'severe', 'critical']],
+        [/^InjuryEffectEngine\[(?:0|[1-9]\d*)\]\.persistence$/, ['none', 'lasting']],
+        [/^TrackerUpdateEngine\.(?:User|NPC\[(?:0|[1-9]\d*)\])\.condition$/, TRACKER_CONDITIONS],
+        ['TrackerUpdateEngine.BoundCompanionState.status', ['unchanged', 'active', 'inactive']],
+        ['TrackerUpdateEngine.BoundCompanionState.type', ['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other']],
+        ['TrackerUpdateEngine.PendingBoundaryState.status', ['unchanged', 'set', 'clear']],
+        ['TrackerUpdateEngine.PendingBoundaryState.type', ['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']],
+        [/^PowerActorAssessment\[(?:0|[1-9]\d*)\]\.scope$/, POWER_ACTOR_ASSESSMENT_SCOPES],
+        [/^(?:PowerActorEnmity|LatentGrievance)\[(?:0|[1-9]\d*)\]\.effect$/, POWER_ACTOR_EFFECT_TYPES],
+        [/^LatentFavor\[(?:0|[1-9]\d*)\]\.benefit$/, POWER_ACTOR_FAVOR_TYPES],
+        [/^(?:PowerActorEnmity|LatentGrievance|LatentFavor)\[(?:0|[1-9]\d*)\]\.severity$/, POWER_ACTOR_SEVERITIES],
+        [/^PowerActorFavorAffiliationLink\[(?:0|[1-9]\d*)\]\.fit$/, POWER_ACTOR_FAVOR_FITS],
+        [/^PowerEventShape\[(?:0|[1-9]\d*)\]\.fit$/, POWER_EVENT_FITS],
+        [/^PowerEventShape\[(?:0|[1-9]\d*)\]\.contactGender$/, POWER_EVENT_CONTACT_GENDERS],
+        [/^(?:PowerActorEnmity|LatentGrievance|LatentFavor)\[(?:0|[1-9]\d*)\]\.actionUnitId$/, ['A1', 'A2', 'A3']],
+    ];
+
+    for (const [key, value] of fields) {
+        for (const [matcher, allowed] of rules) {
+            if (!compactKeyMatches(key, matcher)) continue;
+            if (!allowed.includes(value)) {
+                throw new Error(`compact ledger field ${key} must be one of: ${allowed.join(', ')}`);
+            }
+            break;
+        }
+    }
+}
+
+function validateCompactListField(fields, matcher, maximum) {
+    for (const [key, rawValue] of fields) {
+        if (!compactKeyMatches(key, matcher)) continue;
+        const raw = String(rawValue).trim();
+        if (raw === '(none)') continue;
+        if (isNoneValue(raw) || raw.startsWith('[') || raw.endsWith(']')) {
+            throw new Error(`compact ledger list ${key} must use (none) or pipe-separated entries`);
+        }
+        const entries = raw.split('|').map(value => value.trim());
+        if (entries.some(value => !value || isNoneValue(value))) {
+            throw new Error(`compact ledger list ${key} contains an empty or none entry`);
+        }
+        if (entries.length > maximum) {
+            throw new Error(`compact ledger list ${key} exceeds its ${maximum}-entry limit`);
+        }
+    }
+}
+
+function validateCompactIndexedRows(fields) {
+    for (const [root, countKey, zeroPlaceholder] of COMPACT_INDEXED_ROOTS) {
+        const count = readRequiredInteger(fields, countKey, 0, COMPACT_COUNT_LIMITS[countKey]);
+        const rootPattern = new RegExp(`^${root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\[(0|[1-9]\\d*)\\]\\.`);
+        for (const key of fields.keys()) {
+            const match = key.match(rootPattern);
+            if (!match) continue;
+            const index = Number(match[1]);
+            const allowed = index < count || (count === 0 && zeroPlaceholder && index === 0);
+            if (!allowed) {
+                throw new Error(`compact ledger row ${root}[${index}] is outside declared count ${count}`);
+            }
+        }
+    }
+
+    const advancementCount = readRequiredInteger(fields, 'WorldProgressionAdvancement.count', 0, 18);
+    for (let index = 0; index < advancementCount; index += 1) {
+        const evidenceCount = readRequiredInteger(fields, `WorldProgressionAdvancement[${index}].evidence.count`, 0, 4);
+        if (evidenceCount === 0) {
+            throw new Error(`compact ledger advancement ${index} must contain at least one evidence row`);
+        }
+    }
+    for (const key of fields.keys()) {
+        const match = key.match(/^WorldProgressionAdvancement\[(0|[1-9]\d*)\]\.evidence\[(0|[1-9]\d*)\]\./);
+        if (!match) continue;
+        const advancementIndex = Number(match[1]);
+        const evidenceIndex = Number(match[2]);
+        const countKey = `WorldProgressionAdvancement[${advancementIndex}].evidence.count`;
+        if (!fields.has(countKey)) continue;
+        const evidenceCount = readRequiredInteger(fields, countKey, 0, 4);
+        const allowed = evidenceIndex < evidenceCount || (evidenceCount === 0 && evidenceIndex === 0);
+        if (!allowed) {
+            throw new Error(`compact ledger row WorldProgressionAdvancement[${advancementIndex}].evidence[${evidenceIndex}] is outside declared count ${evidenceCount}`);
+        }
+    }
+}
+
+function validateCompactLedgerLexicalContract(fields) {
+    const unknown = [...fields.keys()].filter(key => !compactKnownKeyPatterns().some(pattern => pattern.test(key)));
+    if (unknown.length) {
+        throw new Error(`compact ledger contains unknown lines: ${unknown.join(', ')}`);
+    }
+
+    const missingTemplate = compactTemplateFieldEntries()
+        .map(([key]) => key)
+        .filter(key => !fields.has(key));
+    if (missingTemplate.length) {
+        throw new Error(`compact ledger missing required template lines: ${missingTemplate.join(', ')}`);
+    }
+
+    for (const [key, value] of fields) {
+        if (!String(value).trim()) {
+            throw new Error(`compact ledger field ${key} must not be empty`);
+        }
+        if (compactBooleanKeyPatterns().some(pattern => pattern.test(key)) && value !== 'Y' && value !== 'N') {
+            throw new Error(`compact ledger field ${key} must be Y or N`);
+        }
+    }
+
+    for (const [key, maximum] of Object.entries(COMPACT_COUNT_LIMITS)) {
+        readRequiredInteger(fields, key, 0, maximum);
+    }
+    readRequiredInteger(fields, 'WorldTransition.timeAdvanceCount', 1, 3650);
+    for (const key of fields.keys()) {
+        if (/^WorldProgressionAdvancement\[(?:0|[1-9]\d*)\]\.nextDelayDays$/.test(key)) {
+            readRequiredInteger(fields, key, 0, 120);
+        } else if (/^WorldProgressionAdvancement\[(?:0|[1-9]\d*)\]\.nextDelaySlots$/.test(key)) {
+            readRequiredInteger(fields, key, 0, 480);
+        } else if (/^WorldProgressionAdvancement\[(?:0|[1-9]\d*)\]\.evidence\.count$/.test(key)) {
+            readRequiredInteger(fields, key, 0, 4);
+        }
+    }
+
+    validateCompactEnumFields(fields);
+    validateCompactIndexedRows(fields);
+
+    validateCompactListField(fields, /^ResolutionEngine\.identifyTargets\./, 40);
+    validateCompactListField(fields, /^UserKnowledgeApplication\[(?:0|[1-9]\d*)\]\.entryIds$/, 12);
+    validateCompactListField(fields, /^RelationshipEngine\[(?:0|[1-9]\d*)\]\.slowBondEvidence\.blockers$/, 40);
+    validateCompactListField(fields, /^PowerActorAssessment\[(?:0|[1-9]\d*)\]\.reach$/, 8);
+    validateCompactListField(fields, /^TrackerUpdateEngine\.User\.(?:woundsAdd|woundsRemove|statusAdd|statusRemove|gearAdd|gearRemove|inventoryAdd|inventoryRemove|currencyAdd|currencyRemove|tasksAdd|tasksRemove|commitmentsAdd|commitmentsRemove)$/, 20);
+    validateCompactListField(fields, /^TrackerUpdateEngine\.NPC\[(?:0|[1-9]\d*)\]\.(?:woundsAdd|woundsRemove|statusAdd|statusRemove|gearAdd|gearRemove)$/, 20);
+
+    for (const [key, value] of fields) {
+        const actionUnit = key.match(/^ResolutionEngine\.actionUnits\[(0|[1-9]\d*)\]\.id$/);
+        if (actionUnit && value !== `A${Number(actionUnit[1]) + 1}`) {
+            throw new Error(`compact ledger field ${key} must equal A${Number(actionUnit[1]) + 1}`);
+        }
+    }
+
+    const rollNeeded = fields.get('ResolutionEngine.rollNeeded');
+    const challengeType = fields.get('ResolutionEngine.challengeType');
+    const socialTactic = fields.get('ResolutionEngine.socialTactic');
+    const environmentTier = fields.get('ResolutionEngine.environmentDifficultyTier');
+    if ((rollNeeded === 'N' && challengeType !== 'none') || (rollNeeded === 'Y' && challengeType === 'none')) {
+        throw new Error('compact ledger rollNeeded and challengeType disagree');
+    }
+    if ((challengeType === 'social' && socialTactic === 'none') || (challengeType !== 'social' && socialTactic !== 'none')) {
+        throw new Error('compact ledger challengeType and socialTactic disagree');
+    }
+    if (challengeType !== 'environment' && environmentTier !== 'none') {
+        throw new Error('compact ledger non-environment challenge must use environmentDifficultyTier=none');
+    }
+}
+
 function parseCompactLedger(text, trackerSnapshot) {
     const match = String(text).match(/BEGIN_SEMANTIC_PREFLIGHT([\s\S]*?)END_SEMANTIC_PREFLIGHT/i);
     if (!match) throw new Error('missing BEGIN_SEMANTIC_PREFLIGHT/END_SEMANTIC_PREFLIGHT block');
@@ -2596,12 +1972,16 @@ function parseCompactLedger(text, trackerSnapshot) {
     const fields = new Map();
     for (const rawLine of match[1].split(/\r?\n/)) {
         const line = rawLine.trim();
-        if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+        if (!line) continue;
+        if (line.startsWith('#') || line.startsWith('//')) {
+            throw new Error(`comments are not allowed in the compact ledger: ${line.slice(0, 120)}`);
+        }
         const equals = line.indexOf('=');
-        if (equals < 1) continue;
+        if (equals < 1) throw new Error(`malformed compact ledger line: ${line.slice(0, 120)}`);
         const key = line.slice(0, equals).trim();
         const value = line.slice(equals + 1).trim();
-        if (key) fields.set(key, value);
+        if (fields.has(key)) throw new Error(`duplicate compact ledger line: ${key}`);
+        fields.set(key, value);
     }
 
     const required = [
@@ -2723,7 +2103,9 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const worldProgressionAdvancementCount = clampNumber(readNumber(fields, 'WorldProgressionAdvancement.count', 0), 0, 18);
+    validateCompactLedgerLexicalContract(fields);
+
+    const worldProgressionAdvancementCount = readRequiredInteger(fields, 'WorldProgressionAdvancement.count', 0, 18);
     for (let index = 0; index < worldProgressionAdvancementCount; index += 1) {
         const prefix = `WorldProgressionAdvancement[${index}]`;
         const advancementRequired = [
@@ -2738,7 +2120,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         for (const key of advancementRequired) {
             if (!fields.has(key)) missing.push(key);
         }
-        const evidenceCount = clampNumber(readNumber(fields, `${prefix}.evidence.count`, 0), 0, 4);
+        const evidenceCount = readRequiredInteger(fields, `${prefix}.evidence.count`, 0, 4);
         for (let evidenceIndex = 0; evidenceIndex < evidenceCount; evidenceIndex += 1) {
             const evidencePrefix = `${prefix}.evidence[${evidenceIndex}]`;
             for (const field of ['topic', 'text', 'route', 'location', 'actor']) {
@@ -2751,7 +2133,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const actionUnitCount = clampNumber(readNumber(fields, 'ResolutionEngine.actionUnits.count', 0), 0, 3);
+    const actionUnitCount = readRequiredInteger(fields, 'ResolutionEngine.actionUnits.count', 0, 3);
     for (let index = 0; index < actionUnitCount; index += 1) {
         const prefix = `ResolutionEngine.actionUnits[${index}]`;
         const unitRequired = [
@@ -2767,7 +2149,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const trackerNpcCount = clampNumber(readNumber(fields, 'TrackerUpdateEngine.NPC.count', 0), 0, 20);
+    const trackerNpcCount = readRequiredInteger(fields, 'TrackerUpdateEngine.NPC.count', 0, 20);
     for (let index = 0; index < trackerNpcCount; index += 1) {
         const prefix = `TrackerUpdateEngine.NPC[${index}]`;
         const trackerRequired = [
@@ -2790,19 +2172,10 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const injuryEffectCount = clampNumber(readNumber(fields, 'InjuryEffectEngine.count', 0), 0, 20);
+    const injuryEffectCount = readRequiredInteger(fields, 'InjuryEffectEngine.count', 0, 20);
     for (let index = 0; index < injuryEffectCount; index += 1) {
         const prefix = `InjuryEffectEngine[${index}]`;
-        const effectRequired = [
-            `${prefix}.target`,
-            `${prefix}.targetRole`,
-            `${prefix}.effectType`,
-            `${prefix}.bodyPart`,
-            `${prefix}.description`,
-            `${prefix}.severityFloor`,
-            `${prefix}.persistence`,
-            `${prefix}.affectsAction`,
-        ];
+        const effectRequired = COMPACT_INJURY_FIELD_SUFFIXES.map(suffix => `${prefix}.${suffix}`);
         for (const key of effectRequired) {
             if (!fields.has(key)) missing.push(key);
         }
@@ -2811,7 +2184,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const powerActorAssessmentCount = clampNumber(readNumber(fields, 'PowerActorAssessment.count', 0), 0, 20);
+    const powerActorAssessmentCount = readRequiredInteger(fields, 'PowerActorAssessment.count', 0, 20);
     for (let index = 0; index < powerActorAssessmentCount; index += 1) {
         const prefix = `PowerActorAssessment[${index}]`;
         const powerActorAssessmentRequired = [
@@ -2831,7 +2204,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const powerActorEffectCount = clampNumber(readNumber(fields, 'PowerActorEnmity.count', 0), 0, 12);
+    const powerActorEffectCount = readRequiredInteger(fields, 'PowerActorEnmity.count', 0, 12);
     for (let index = 0; index < powerActorEffectCount; index += 1) {
         const prefix = `PowerActorEnmity[${index}]`;
         const powerActorRequired = [
@@ -2854,7 +2227,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const latentGrievanceCount = clampNumber(readNumber(fields, 'LatentGrievance.count', 0), 0, 12);
+    const latentGrievanceCount = readRequiredInteger(fields, 'LatentGrievance.count', 0, 12);
     for (let index = 0; index < latentGrievanceCount; index += 1) {
         const prefix = `LatentGrievance[${index}]`;
         const latentGrievanceRequired = [
@@ -2875,7 +2248,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const powerActorAffiliationLinkCount = clampNumber(readNumber(fields, 'PowerActorAffiliationLink.count', 0), 0, 12);
+    const powerActorAffiliationLinkCount = readRequiredInteger(fields, 'PowerActorAffiliationLink.count', 0, 12);
     for (let index = 0; index < powerActorAffiliationLinkCount; index += 1) {
         const prefix = `PowerActorAffiliationLink[${index}]`;
         const affiliationLinkRequired = [
@@ -2896,7 +2269,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const latentFavorCount = clampNumber(readNumber(fields, 'LatentFavor.count', 0), 0, 12);
+    const latentFavorCount = readRequiredInteger(fields, 'LatentFavor.count', 0, 12);
     for (let index = 0; index < latentFavorCount; index += 1) {
         const prefix = `LatentFavor[${index}]`;
         const latentFavorRequired = [
@@ -2919,7 +2292,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const powerActorFavorAffiliationLinkCount = clampNumber(readNumber(fields, 'PowerActorFavorAffiliationLink.count', 0), 0, 12);
+    const powerActorFavorAffiliationLinkCount = readRequiredInteger(fields, 'PowerActorFavorAffiliationLink.count', 0, 12);
     for (let index = 0; index < powerActorFavorAffiliationLinkCount; index += 1) {
         const prefix = `PowerActorFavorAffiliationLink[${index}]`;
         const favorAffiliationLinkRequired = [
@@ -2944,7 +2317,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const powerEventShapeCount = clampNumber(readNumber(fields, 'PowerEventShape.count', 0), 0, 4);
+    const powerEventShapeCount = readRequiredInteger(fields, 'PowerEventShape.count', 0, 4);
     for (let index = 0; index < powerEventShapeCount; index += 1) {
         const prefix = `PowerEventShape[${index}]`;
         const powerEventRequired = [
@@ -2965,7 +2338,7 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const userKnowledgeApplicationCount = clampNumber(readNumber(fields, 'UserKnowledgeApplication.count', 0), 0, 20);
+    const userKnowledgeApplicationCount = readRequiredInteger(fields, 'UserKnowledgeApplication.count', 0, 20);
     for (let index = 0; index < userKnowledgeApplicationCount; index += 1) {
         const prefix = `UserKnowledgeApplication[${index}]`;
         const userKnowledgeRequired = [
@@ -2987,43 +2360,10 @@ function parseCompactLedger(text, trackerSnapshot) {
         throw new Error(`compact ledger missing required lines: ${missing.join(', ')}`);
     }
 
-    const relCount = clampNumber(readNumber(fields, 'RelationshipEngine.count', 0), 0, 20);
+    const relCount = readRequiredInteger(fields, 'RelationshipEngine.count', 0, 20);
     for (let index = 0; index < relCount; index += 1) {
         const prefix = `RelationshipEngine[${index}]`;
-        const relRequired = [
-            `${prefix}.NPC`,
-            `${prefix}.initPreset.romanticOpen`,
-            `${prefix}.initPreset.userBadRep`,
-            `${prefix}.initPreset.priorUserGoodRep`,
-            `${prefix}.initPreset.userNonHuman`,
-            `${prefix}.initPreset.fearImmunity`,
-            `${prefix}.establishedRelationship`,
-            `${prefix}.romanceStyle`,
-            `${prefix}.slowBondEvidence.respectfulContact`,
-            `${prefix}.slowBondEvidence.cooperation`,
-            `${prefix}.slowBondEvidence.comfortInProximity`,
-            `${prefix}.slowBondEvidence.boundaryRespect`,
-            `${prefix}.slowBondEvidence.sharedRoutine`,
-            `${prefix}.slowBondEvidence.playfulness`,
-            `${prefix}.slowBondEvidence.teamwork`,
-            `${prefix}.slowBondEvidence.personalAttention`,
-            `${prefix}.slowBondEvidence.blockers`,
-            `${prefix}.auditInteraction`,
-            `${prefix}.explicitIntimidationOrCoercion`,
-            `${prefix}.standingInfluence`,
-            `${prefix}.standingBasis`,
-            `${prefix}.checkThreshold.CurrentInvitation`,
-            `${prefix}.checkThreshold.Exploitation`,
-            `${prefix}.checkThreshold.Hedonist`,
-            `${prefix}.checkThreshold.Transactional`,
-            `${prefix}.checkThreshold.Established`,
-            `${prefix}.checkThreshold.RomanticBuildup`,
-            `${prefix}.genStats.CapabilityPool`,
-            `${prefix}.genStats.MainStat`,
-        ];
-        for (const outcomeKey of STAKE_OUTCOME_KEYS) {
-            relRequired.push(`${prefix}.stakeChangeByOutcome.${outcomeKey}`);
-        }
+        const relRequired = COMPACT_RELATIONSHIP_FIELD_SUFFIXES.map(suffix => `${prefix}.${suffix}`);
         for (const key of relRequired) {
             if (!fields.has(key)) missing.push(key);
         }
@@ -3115,7 +2455,7 @@ function parseCompactLedger(text, trackerSnapshot) {
     const worldProgression = { advancements: [] };
     for (let index = 0; index < worldProgressionAdvancementCount; index += 1) {
         const prefix = `WorldProgressionAdvancement[${index}]`;
-        const evidenceCount = clampNumber(readNumber(fields, `${prefix}.evidence.count`, 0), 0, 4);
+        const evidenceCount = readRequiredInteger(fields, `${prefix}.evidence.count`, 0, 4);
         const evidence = [];
         for (let evidenceIndex = 0; evidenceIndex < evidenceCount; evidenceIndex += 1) {
             const evidencePrefix = `${prefix}.evidence[${evidenceIndex}]`;
@@ -3132,8 +2472,8 @@ function parseCompactLedger(text, trackerSnapshot) {
             stageLabel: fields.get(`${prefix}.stageLabel`),
             consequence: fields.get(`${prefix}.consequence`),
             status: fields.get(`${prefix}.status`),
-            nextDelayDays: readNumber(fields, `${prefix}.nextDelayDays`, 0),
-            nextDelaySlots: readNumber(fields, `${prefix}.nextDelaySlots`, 0),
+            nextDelayDays: readRequiredInteger(fields, `${prefix}.nextDelayDays`, 0, 120),
+            nextDelaySlots: readRequiredInteger(fields, `${prefix}.nextDelaySlots`, 0, 480),
             evidence,
         });
     }
@@ -3425,6 +2765,24 @@ function parseCompactLedger(text, trackerSnapshot) {
             gearRemove: readList(fields, `${prefix}.gearRemove`),
         });
     }
+
+    assertCompactParsedCount('WorldProgressionAdvancement', worldProgressionAdvancementCount, worldProgression.advancements.length);
+    for (let index = 0; index < worldProgression.advancements.length; index += 1) {
+        const expectedEvidence = readRequiredInteger(fields, `WorldProgressionAdvancement[${index}].evidence.count`, 0, 4);
+        assertCompactParsedCount(`WorldProgressionAdvancement[${index}].evidence`, expectedEvidence, worldProgression.advancements[index].evidence.length);
+    }
+    assertCompactParsedCount('ResolutionEngine.actionUnits', actionUnitCount, resolutionEngine.actionUnits.length);
+    assertCompactParsedCount('RelationshipEngine', relCount, relationshipEngine.length);
+    assertCompactParsedCount('UserKnowledgeApplication', userKnowledgeApplicationCount, userKnowledgeApplication.applications.length);
+    assertCompactParsedCount('InjuryEffectEngine', injuryEffectCount, injuryEffectEngine.effects.length);
+    assertCompactParsedCount('TrackerUpdateEngine.NPC', trackerNpcCount, trackerUpdateEngine.npcs.length);
+    assertCompactParsedCount('PowerActorAssessment', powerActorAssessmentCount, powerActorEnmity.assessments.length);
+    assertCompactParsedCount('PowerActorEnmity', powerActorEffectCount, powerActorEnmity.effects.length);
+    assertCompactParsedCount('LatentGrievance', latentGrievanceCount, powerActorEnmity.latentGrievances.length);
+    assertCompactParsedCount('PowerActorAffiliationLink', powerActorAffiliationLinkCount, powerActorEnmity.affiliationLinks.length);
+    assertCompactParsedCount('LatentFavor', latentFavorCount, powerActorEnmity.latentFavors.length);
+    assertCompactParsedCount('PowerActorFavorAffiliationLink', powerActorFavorAffiliationLinkCount, powerActorEnmity.favorAffiliationLinks.length);
+    assertCompactParsedCount('PowerEventShape', powerEventShapeCount, powerEventShape.events.length);
 
     return {
         engineContext: {
@@ -4174,14 +3532,18 @@ function readNumber(fields, key, fallback) {
 }
 
 function readList(fields, key, fallback = []) {
-    const value = cleanScalar(fields.get(key));
-    if (!value || isNoneValue(value)) return fallback;
-    return value
-        .replace(/^\[/, '')
-        .replace(/\]$/, '')
-        .split(/[;,]/)
+    const raw = String(fields.get(key) ?? '').trim();
+    if (!raw || isNoneValue(raw)) return fallback;
+    return raw
+        .split(/\s*\|\s*/)
         .map(cleanScalar)
         .filter(item => item && !isNoneValue(item));
+}
+
+function assertCompactParsedCount(label, expected, actual) {
+    if (actual !== expected) {
+        throw new Error(`compact ledger ${label} declared ${expected} row(s) but ${actual} survived parsing`);
+    }
 }
 
 

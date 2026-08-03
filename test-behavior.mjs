@@ -8,7 +8,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticToolChoice, buildSemanticToolPrompt, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, reconstructSemanticToolLedger, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -10420,7 +10420,11 @@ const tests = [
       assert.doesNotMatch(indexSource, /beforeLatentGrievances:/);
       assert.doesNotMatch(indexSource, /afterLatentGrievances:/);
       assert.match(semanticSource, /Latent grievance snapshot JSON \(hidden unresolved grievance memory/);
-      assert.match(semanticSource, /required: \['assessments', 'effects', 'latentGrievances', 'affiliationLinks', 'latentFavors', 'favorAffiliationLinks'\]/);
+      assert.match(semanticSource, /name: 'powerActors',[\s\S]*'PowerActorEnmity',[\s\S]*'LatentGrievance',[\s\S]*'PowerActorAffiliationLink',[\s\S]*'LatentFavor',[\s\S]*'PowerActorFavorAffiliationLink'/);
+      assert.match(semanticSource, /LatentGrievance\.count=0/);
+      assert.match(semanticSource, /PowerActorAffiliationLink\.count=0/);
+      assert.match(semanticSource, /LatentFavor\.count=0/);
+      assert.match(semanticSource, /PowerActorFavorAffiliationLink\.count=0/);
       const semanticSnapshotSanitizer = semanticSource.slice(
         semanticSource.indexOf('function sanitizeLatentGrievanceSnapshotForSemantic'),
         semanticSource.indexOf('function sanitizeUserKnowledgeSnapshotForSemantic'),
@@ -12850,7 +12854,7 @@ const tests = [
       assert.match(enginesSource, /do not count setup, aiming, drawing, focusing, chanting, movement, pivoting/);
 
       assert.match(semanticSource, /ResolutionEngine\.actionUnits is the only semantic source for mechanically counted actions/);
-      assert.match(semanticSource, /Combat returns one unit per explicit discrete attack\/effect/);
+      assert.match(semanticSource, /Combat challenge types return one unit per explicit discrete attack\/effect/);
       assert.match(semanticSource, /Count separate attacks\/effects even when they share one target, one goal, one sentence, one ability name, or one combo/);
       assert.match(semanticSource, /do not count setup, aiming, focusing, movement, pivoting, defense, or flavor/);
     },
@@ -15444,7 +15448,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.46');
+      assert.equal(manifest.version, '0.9.47');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -15922,19 +15926,9 @@ const tests = [
       assert.equal(deepSeekHighPayload.include_reasoning, true);
       assert.equal(deepSeekHighPayload.reasoning_effort, 'max');
       assert.equal(deepSeekHighPayload.max_tokens, 4096);
-      assert.equal(buildSemanticToolChoice('deepseek'), undefined);
-      assert.deepEqual(buildSemanticToolChoice('openai'), {
-        type: 'function',
-        function: { name: 'submit_semantic_preflight' },
-      });
-      assert.deepEqual(buildSemanticToolChoice('azure_openai'), {
-        type: 'function',
-        function: { name: 'submit_semantic_preflight' },
-      });
-      assert.equal(buildSemanticToolChoice('claude'), 'any');
-      assert.equal(buildSemanticToolChoice('nanogpt'), undefined);
-      assert.equal(buildSemanticToolChoice('custom'), undefined);
-      assert.equal(buildSemanticToolChoice('openrouter'), undefined);
+      for (const sourceName of ['deepseek', 'openai', 'azure_openai', 'claude', 'gemini', 'nanogpt', 'custom', 'openrouter']) {
+        assert.equal(buildSemanticToolChoice(sourceName), 'auto');
+      }
 
       const nanoGptSemanticPayload = {
         chat_completion_source: 'nanogpt',
@@ -15958,7 +15952,32 @@ const tests = [
       assert.equal('reasoning_effort' in deepSeekNonSemanticPayload, false);
       assert.equal(deepSeekNonSemanticPayload.max_tokens, 2048);
 
-      assert.match(semanticSource, /\['openai', 'azure_openai', DEEPSEEK_CHAT_COMPLETION_SOURCE\]/);
+      const expectedSections = [
+        'engineContext',
+        'worldTransition',
+        'worldProgression',
+        'resolution',
+        'relationships',
+        'userKnowledge',
+        'injuries',
+        'tracker',
+        'powerActors',
+        'powerEvents',
+        'chaos',
+      ];
+      const semanticTool = buildSemanticPreflightTool('nanogpt');
+      assert.equal(semanticTool.type, 'function');
+      assert.equal(semanticTool.function.name, 'submit_semantic_preflight');
+      assert.equal(semanticTool.function.strict, undefined);
+      assert.deepEqual(semanticTool.function.parameters.required, expectedSections);
+      assert.deepEqual(Object.keys(semanticTool.function.parameters.properties), expectedSections);
+      assert.equal('additionalProperties' in semanticTool.function.parameters, false);
+      for (const section of expectedSections) {
+        assert.equal(semanticTool.function.parameters.properties[section].type, 'string');
+        assert.equal('properties' in semanticTool.function.parameters.properties[section], false);
+        assert.equal('items' in semanticTool.function.parameters.properties[section], false);
+      }
+
       assert.match(semanticSource, /const COMPACT_LEDGER_OUTPUT_CONTRACT = \[/);
       assert.match(semanticSource, /const SEMANTIC_FIELD_GUIDANCE = \[/);
       assert.doesNotMatch(semanticSource, /compact ledger wording elsewhere in the prompt/);
@@ -15973,10 +15992,246 @@ const tests = [
       assert.equal(toolPrompt.length, 2);
       assert.equal(toolPrompt[0].content, semanticEngineGuidance);
       assert.match(toolPrompt[1].content, /Call the function tool submit_semantic_preflight exactly once/);
-      assert.doesNotMatch(toolPrompt[1].content, /STRICT COMPACT PREFLIGHT LEDGER CONTRACT|BEGIN_SEMANTIC_PREFLIGHT|ResolutionEngine\.identifyGoal: test/);
+      assert.match(toolPrompt[1].content, /The tool is only a compact transport envelope; do not reduce or reinterpret the ledger/);
+      assert.match(toolPrompt[1].content, /EngineContext\.userReputationContext\.location=\(none\)/);
+      assert.match(toolPrompt[1].content, /ResolutionEngine\.identifyGoal=Normal_Interaction/);
+      assert.match(toolPrompt[1].content, /RelationshipEngine\.count=0/);
+      assert.match(toolPrompt[1].content, /RelationshipEngine\[i\]\.NPC=\(none\)/);
+      assert.match(toolPrompt[1].content, /RelationshipEngine\[i\]\.stakeChangeByOutcome\.avoided=none/);
+      assert.match(toolPrompt[1].content, /InjuryEffectEngine\[i\]\.target=\(none\)/);
+      assert.match(toolPrompt[1].content, /InjuryEffectEngine\[i\]\.affectsAction=N/);
+      assert.match(toolPrompt[1].content, /TrackerUpdateEngine\.User\.condition=unchanged/);
+      assert.match(toolPrompt[1].content, /PowerActorEnmity\.count=0/);
+      assert.match(toolPrompt[1].content, /CHAOS_INTERRUPT\.sceneSummary=short scene summary/);
+      assert.doesNotMatch(toolPrompt[1].content, /ResolutionEngine\.identifyGoal: test/);
+      assert.doesNotMatch(toolPrompt[1].content, /SEMANTIC_PREFLIGHT_COMPLETE|stop sentinel/);
+
+      const templateMatch = toolPrompt[1].content.match(/BEGIN_SEMANTIC_PREFLIGHT[\s\S]*?END_SEMANTIC_PREFLIGHT/);
+      assert.ok(templateMatch, 'The tool prompt must retain the complete compact ledger template.');
+      const sectionRoots = {
+        engineContext: ['EngineContext'],
+        worldTransition: ['WorldTransition'],
+        worldProgression: ['WorldProgressionAdvancement'],
+        resolution: ['ResolutionEngine'],
+        relationships: ['RelationshipEngine'],
+        userKnowledge: ['UserKnowledgeApplication'],
+        injuries: ['InjuryEffectEngine'],
+        tracker: ['TrackerUpdateEngine'],
+        powerActors: ['PowerActorAssessment', 'PowerActorEnmity', 'LatentGrievance', 'PowerActorAffiliationLink', 'LatentFavor', 'PowerActorFavorAffiliationLink'],
+        powerEvents: ['PowerEventShape'],
+        chaos: ['CHAOS_INTERRUPT'],
+      };
+      const sectionValues = Object.fromEntries(expectedSections.map(section => [section, []]));
+      const templateLines = templateMatch[0].split('\n').slice(1, -1);
+      for (const line of templateLines) {
+        const key = line.slice(0, line.indexOf('='));
+        const owner = Object.entries(sectionRoots).find(([, roots]) =>
+          roots.some(root => key.startsWith(`${root}.`) || key.startsWith(`${root}[`)),
+        )?.[0];
+        assert.ok(owner, `Every template line must belong to one shallow tool section: ${key}`);
+        sectionValues[owner].push(line);
+      }
+      const completeSections = Object.fromEntries(
+        Object.entries(sectionValues).map(([section, lines]) => [section, lines.join('\n')]),
+      );
+      assert.equal(reconstructSemanticToolLedger(completeSections), templateMatch[0]);
+      const replaceLedgerLine = (sections, section, key, value) => {
+        let replaced = false;
+        const lines = sections[section].split('\n').map(line => {
+          if (!line.startsWith(`${key}=`)) return line;
+          replaced = true;
+          return `${key}=${value}`;
+        });
+        assert.equal(replaced, true, `Expected compact ledger line ${key}`);
+        return { ...sections, [section]: lines.join('\n') };
+      };
+      const appendLedgerLines = (sections, section, lines) => ({
+        ...sections,
+        [section]: `${sections[section]}\n${lines.join('\n')}`,
+      });
+      const removeLedgerLine = (sections, section, key) => ({
+        ...sections,
+        [section]: sections[section]
+          .split('\n')
+          .filter(line => !line.startsWith(`${key}=`))
+          .join('\n'),
+      });
+
+      const validatedDefault = parseAndValidateSemanticToolSections(completeSections);
+      assert.equal(validatedDefault.resolutionEngine.rollNeeded, false);
+      assert.equal(validatedDefault.resolutionEngine.challengeType, 'none');
+
+      const relationshipSchemaMatch = toolPrompt[1].content.match(
+        /RelationshipEngine\[i\] required row:\n([\s\S]*?)\nInjuryEffectEngine\[i\] required row:/,
+      );
+      assert.ok(relationshipSchemaMatch, 'The provider-facing prompt must expose the complete relationship row schema.');
+      const relationshipOverrides = new Map([
+        ['RelationshipEngine[0].NPC', 'Alice'],
+        ['RelationshipEngine[0].standingInfluence', 'aware'],
+        ['RelationshipEngine[0].standingBasis', 'recognized guild rank'],
+        ['RelationshipEngine[0].checkThreshold.CurrentInvitation', 'Y'],
+        ['RelationshipEngine[0].genStats.CapabilityPool', 'trained'],
+        ['RelationshipEngine[0].genStats.MainStat', 'CHA'],
+        ['RelationshipEngine[0].stakeChangeByOutcome.no_roll', 'benefit'],
+      ]);
+      const relationshipRows = relationshipSchemaMatch[1].split('\n').map(line => {
+        const numericLine = line.replaceAll('[i]', '[0]');
+        const equals = numericLine.indexOf('=');
+        const key = numericLine.slice(0, equals);
+        return relationshipOverrides.has(key)
+          ? `${key}=${relationshipOverrides.get(key)}`
+          : numericLine;
+      });
+      let relationshipSections = replaceLedgerLine(
+        completeSections,
+        'relationships',
+        'RelationshipEngine.count',
+        '1',
+      );
+      relationshipSections = replaceLedgerLine(
+        relationshipSections,
+        'resolution',
+        'ResolutionEngine.identifyTargets.ActionTargets',
+        'Alice',
+      );
+      relationshipSections = appendLedgerLines(relationshipSections, 'relationships', relationshipRows);
+      const relationshipLedger = parseAndValidateSemanticToolSections(relationshipSections);
+      assert.equal(relationshipLedger.relationshipEngine.length, 1);
+      assert.equal(relationshipLedger.relationshipEngine[0].NPC, 'Alice');
+      assert.equal(relationshipLedger.relationshipEngine[0].standingInfluence, 'aware');
+      assert.equal(relationshipLedger.relationshipEngine[0].standingBasis, 'recognized guild rank');
+      assert.equal(relationshipLedger.relationshipEngine[0].overrideFlags.CurrentInvitation, true);
+      assert.deepEqual(relationshipLedger.relationshipEngine[0].genStats, {
+        CapabilityPool: 'trained',
+        MainStat: 'CHA',
+      });
+      assert.equal(relationshipLedger.relationshipEngine[0].stakeChangeByOutcome.no_roll, 'benefit');
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(removeLedgerLine(
+          relationshipSections,
+          'relationships',
+          'RelationshipEngine[0].standingBasis',
+        )),
+        /missing required lines: RelationshipEngine\[0\]\.standingBasis/,
+      );
+
+      let commaListSections = replaceLedgerLine(
+        completeSections,
+        'tracker',
+        'TrackerUpdateEngine.User.woundsAdd',
+        'deep cut, left forearm|burn, right shoulder',
+      );
+      const commaListLedger = parseAndValidateSemanticToolSections(commaListSections);
+      assert.deepEqual(
+        commaListLedger.trackerUpdateEngine.user.woundsAdd,
+        ['deep cut, left forearm', 'burn, right shoulder'],
+        'Compact semantic lists must preserve commas within each pipe-delimited entry.',
+      );
+
+      const malformedBooleanSections = replaceLedgerLine(
+        completeSections,
+        'resolution',
+        'ResolutionEngine.rollNeeded',
+        'MAYBE',
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(malformedBooleanSections),
+        /ResolutionEngine\.rollNeeded must be Y or N/,
+      );
+      const malformedCountSections = replaceLedgerLine(
+        completeSections,
+        'relationships',
+        'RelationshipEngine.count',
+        '1.5',
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(malformedCountSections),
+        /RelationshipEngine\.count must be a canonical integer/,
+      );
+      const malformedEnumSections = replaceLedgerLine(
+        completeSections,
+        'resolution',
+        'ResolutionEngine.challengeType',
+        'acrobatics',
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(malformedEnumSections),
+        /ResolutionEngine\.challengeType must be one of/,
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections({
+          ...completeSections,
+          resolution: `${completeSections.resolution}\nResolutionEngine.inventedFlag=Y`,
+        }),
+        /contains unknown lines: ResolutionEngine\.inventedFlag/,
+      );
+
+      let injurySections = replaceLedgerLine(
+        completeSections,
+        'injuries',
+        'InjuryEffectEngine.count',
+        '1',
+      );
+      injurySections = appendLedgerLines(injurySections, 'injuries', [
+        'InjuryEffectEngine[0].target=Bandit',
+        'InjuryEffectEngine[0].targetRole=OppTarget',
+        'InjuryEffectEngine[0].effectType=physical_injury',
+        'InjuryEffectEngine[0].bodyPart=left forearm',
+        'InjuryEffectEngine[0].description=deep cut, left forearm',
+        'InjuryEffectEngine[0].severityFloor=moderate',
+        'InjuryEffectEngine[0].persistence=lasting',
+        'InjuryEffectEngine[0].affectsAction=Y',
+      ]);
+      const injuryLedger = parseAndValidateSemanticToolSections(injurySections);
+      assert.deepEqual(injuryLedger.injuryEffectEngine.effects[0], {
+        target: 'Bandit',
+        targetRole: 'OppTarget',
+        effectType: 'physical_injury',
+        bodyPart: 'left forearm',
+        description: 'deep cut, left forearm',
+        severityFloor: 'moderate',
+        persistence: 'lasting',
+        affectsAction: true,
+      });
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(replaceLedgerLine(
+          injurySections,
+          'injuries',
+          'InjuryEffectEngine[0].targetRole',
+          'Victim',
+        )),
+        /InjuryEffectEngine\[0\]\.targetRole must be one of/,
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(replaceLedgerLine(
+          injurySections,
+          'injuries',
+          'InjuryEffectEngine[0].target',
+          '(none)',
+        )),
+        /declared 1 row\(s\) but 0 survived parsing/,
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(removeLedgerLine(
+          injurySections,
+          'injuries',
+          'InjuryEffectEngine[0].description',
+        )),
+        /missing required lines: InjuryEffectEngine\[0\]\.description/,
+      );
+
+      const missingSection = { ...completeSections };
+      delete missingSection.chaos;
+      assert.throws(() => reconstructSemanticToolLedger(missingSection), /omitted required section: chaos/);
+      assert.throws(
+        () => reconstructSemanticToolLedger({ ...completeSections, chaos: 'ResolutionEngine.rollNeeded=N' }),
+        /line owned by another section/,
+      );
+
       assert.match(semanticSource, /removeTopLevelYamlKey\(payload\.custom_include_body, 'thinking'\)/);
       assert.doesNotMatch(semanticSource, /DISABLE_THINKING_INCLUDE_BODY/);
-      assert.match(semanticSource, /generateSemanticRawWithProfile[\s\S]*?preparePayload: applyStoryEngineThinkingDisabledPayload/);
+      assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateSemanticRawWithProfile|isRecoverableSemanticToolCallError|falling back to compact ledger|fallbackFrom:/);
+      assert.match(semanticSource, /Semantic tool-call pass returned no valid complete ledger\. Generation aborted before narration/);
       assert.match(semanticSource, /export function isOfficialDeepSeekProfile/);
       assert.match(adapterSource, /export function getChatCompletionProfileRoute/);
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
@@ -15984,8 +16239,29 @@ const tests = [
       assert.match(semanticSource, /route\.usesReverseProxy !== true/);
       assert.match(semanticSource, /export async function sendDeepSeekProfileStructuredRequest/);
       assert.match(semanticSource, /sendDeepSeekProfileStructuredRequest[\s\S]*tool_choice: undefined[\s\S]*preparePayload: payload => applySemanticThinkingPayload\(payload, options\.semanticReasoningEffort\)/);
-      assert.match(semanticSource, /generateSemanticToolCallWithProfile[\s\S]*isOfficialDeepSeekProfile\(options\)[\s\S]*: applyStoryEngineThinkingDisabledPayload/);
       assert.match(source, /applyStoryEngineThinkingDisabledPayload\(generateData\)/);
+
+      const semanticProfileToolRequest = semanticSource.slice(
+        semanticSource.indexOf('async function generateSemanticToolCallWithProfile'),
+        semanticSource.indexOf('export async function sendSemanticProfileTextRequest'),
+      );
+      assert.match(semanticProfileToolRequest, /sendConnectionManagerProfileRequest/);
+      assert.match(semanticProfileToolRequest, /tool_choice: buildSemanticToolChoice\(chatCompletionSource\)/);
+      assert.doesNotMatch(semanticProfileToolRequest, /sendChatCompletionProfileRequest/);
+
+      const connectionManagerRequest = adapterSource.slice(
+        adapterSource.indexOf('export async function sendConnectionManagerProfileRequest'),
+        adapterSource.indexOf('function getActiveUserAvatarFromDom'),
+      );
+      assert.match(connectionManagerRequest, /context\?\.ConnectionManagerRequestService/);
+      assert.match(connectionManagerRequest, /requestService\.sendRequest/);
+      assert.match(connectionManagerRequest, /includePreset/);
+      assert.doesNotMatch(connectionManagerRequest, /ChatCompletionService\.processRequest/);
+      assert.ok(
+        connectionManagerRequest.indexOf('preparePayload?.(requestPayload)') < connectionManagerRequest.indexOf('requestService.sendRequest'),
+        'Semantic overrides must be prepared before being handed to the native Connection Manager as final payload overrides.',
+      );
+
       const adapterToolRequest = adapterSource.slice(
         adapterSource.indexOf('export async function sendDefaultChatCompletionToolRequest'),
         adapterSource.indexOf('export function getChatCompletionSourceForProfile'),
@@ -16676,10 +16952,13 @@ const tests = [
       assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{[\s\S]*?purpose: 'targeted Prose Guard repair',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
       assert.doesNotMatch(indexSource, /purpose: 'Prose Guard'/);
       assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{[\s\S]*?purpose: 'post-narration tracker update',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
-      assert.match(semanticSource, /generateRawData\(options, context, \{[\s\S]*?purpose: 'semantic preflight',[\s\S]*?signal: requestOptions\.signal,[\s\S]*?beforeAbort: requestOptions\.beforeRawAbort/);
+      assert.match(semanticSource, /sendDefaultChatCompletionToolRequest\(toolPrompt, responseLength,[\s\S]*?purpose: 'semantic preflight tool call',[\s\S]*?signal: options\.signal/);
+      assert.match(semanticSource, /sendConnectionManagerProfileRequest\(\{[\s\S]*?profileId: options\.semanticProfileId,[\s\S]*?signal: options\.signal/);
+      assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateRawData\(/);
       assert.match(adapterSource, /export async function generateRawData[\s\S]*stopGeneration\(context\)[\s\S]*signal\.addEventListener\('abort', abortHandler/);
       assert.match(adapterSource, /sendDefaultChatCompletionToolRequest[\s\S]*?const signal = options\?\.signal \|\| null;/);
       assert.match(adapterSource, /sendDefaultChatCompletionToolRequest[\s\S]*?fetch\('\/api\/backends\/chat-completions\/generate',[\s\S]*?signal,[\s\S]*?\}\);/);
+      assert.match(adapterSource, /sendConnectionManagerProfileRequest[\s\S]*?context\?\.ConnectionManagerRequestService[\s\S]*?requestService\.sendRequest/);
       assert.doesNotMatch(indexSource, /context(?:\?\.|\.)generateRawData\s*\(/);
       assert.doesNotMatch(semanticSource, /context(?:\?\.|\.)generateRawData\s*\(/);
       assert.doesNotMatch(indexSource, /context(?:\?\.|\.)generate\s*\(/);
@@ -17547,9 +17826,7 @@ const tests = [
       assert.match(source, /function isPostNarrationFinalizerCurrent[\s\S]*isCurrentStoryEngineEpoch\(captured, context\)/);
       assert.match(source, /if \(!isPostNarrationFinalizerCurrent\(context, messageId, messageKey, captured\)\) return/);
       assert.doesNotMatch(source, /if \(!isPostNarrationFinalizerCurrent\(context, messageId, messageKey, captured\)\) \{\s*clearRuntimePrompts\(\)/);
-      assert.match(source, /semanticStopController\.claim\(stopOwnerId, SEMANTIC_PREFLIGHT_STOP_SENTINEL\)/);
-      assert.match(source, /semanticStopController\.release\(stopOwnerId\)/);
-      assert.match(source, /function invalidateStoryEnginePipeline\(\) \{[\s\S]*semanticStopController\.invalidate\(\)/);
+      assert.doesNotMatch(source, /semanticStopController|SEMANTIC_PREFLIGHT_STOP_SENTINEL|beforeRawAbort/);
       assert.match(source, /function withStoryEngineModelRequest\(callback, options = \{\}\)[\s\S]*modelRequestAbortControllers\.add\(requestController\)[\s\S]*await callback\(scopedOptions\)[\s\S]*assertStoryEngineModelRequestCurrent\(scopedOptions\)/);
       assert.match(source, /promptReadyBypassGate\.clear\(\)/);
       assert.match(source, /function invalidateStoryEnginePipeline\(\) \{[\s\S]*state\.preflightDryRun = null/);
