@@ -33,7 +33,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isOfficialDeepSeekProfile, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sendDeepSeekProfileStructuredRequest, sendSemanticProfileTextRequest } from './semantic-extractor.js';
+import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sendStructuredToolRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -101,6 +101,15 @@ const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
 const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
 const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
 const NARRATOR_HANDOFF_VERSION = 1;
+const PROSE_GUARD_EXTRA_KEY = 'structured_preflight_prose_guard';
+const PROSE_GUARD_EXTRA_VERSION = 2;
+const PROSE_GUARD_RECONCILIATION_EXTRA_KEY = 'structured_preflight_prose_guard_reconciliation';
+const PROSE_GUARD_RECONCILIATION_EXTRA_VERSION = 1;
+const PROSE_GUARD_MODES = Object.freeze({
+    OFF: 'off',
+    REVIEW: 'review',
+    AUTOMATIC: 'automatic',
+});
 const PROSE_GUARD_DISPLAY_STYLE_ID = 'structured_preflight_prose_guard_display_styles';
 const PROSE_GUARD_EXPECTED_STYLE_ID = 'structured_preflight_prose_guard_expected_styles';
 const PROSE_GUARD_HIDDEN_MESSAGE_CLASS = 'structured-preflight-proseguard-hidden-message';
@@ -108,7 +117,7 @@ const PROSE_GUARD_DEFER_MS = 0;
 const PROSE_GUARD_TIMEOUT_MS = 90000;
 const PROSE_GUARD_MAX_REPAIR_ATTEMPTS = 2;
 const PROSE_GUARD_TOOL_NAME = 'submit_prose_guard_edits';
-const PROSE_GUARD_SETTINGS_MIGRATION_VERSION = 1;
+const PROSE_GUARD_SETTINGS_MIGRATION_VERSION = 2;
 const PROSE_GUARD_MOVED_BANNED_PHRASES = Object.freeze(['barely above a whisper', 'barely above a breath']);
 const TRACKER_DELTA_TOOL_NAME = 'submit_tracker_delta';
 const PLAYER_SETUP_KEY = 'structuredPreflightPlayer';
@@ -116,6 +125,11 @@ const PLAYER_SETUP_VERSION = 1;
 const PLAYER_SETUP_CARD_ID = 'structured_preflight_player_setup_card';
 const PLAYER_SETUP_STYLE_ID = 'structured_preflight_player_setup_styles';
 const PROGRESSION_KEY = 'structuredPreflightProgression';
+const PERSONA_METADATA_TRANSACTION_KEYS = Object.freeze([
+    PLAYER_SETUP_KEY,
+    PROGRESSION_KEY,
+    'structuredPreflightTracker',
+]);
 const PROGRESSION_VERSION = 1;
 const PROGRESSION_CARD_ID = 'structured_preflight_progression_card';
 const PROGRESSION_STYLE_ID = 'structured_preflight_progression_styles';
@@ -532,10 +546,12 @@ const DEFAULT_SETTINGS = Object.freeze({
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
     postNarrationProseGuardEnabled: true,
+    proseGuardMode: PROSE_GUARD_MODES.AUTOMATIC,
     proseGuardStrictBehaviorismBannedPhrases: DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES,
     proseGuardAntiStockPhrasingBannedPhrases: DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES,
     proseGuardDenotativePhysicalityBannedPhrases: DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES,
     proseGuardEmbodiedPerceptionBannedPhrases: DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES,
+    proseGuardCustomBannedPhrases: '',
     characterProgressionEnabled: true,
     writingStyleEnabled: true,
     writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT,
@@ -588,6 +604,15 @@ const PROSE_GUARD_TARGETED_BAN_FIELDS = Object.freeze([
         label: 'embodiedPerception',
         description: 'Ambient smell and taste phrasing.',
         defaultValue: DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES,
+    },
+    {
+        id: 'structured_preflight_prose_guard_bans_custom',
+        key: 'proseGuardCustomBannedPhrases',
+        ruleName: 'userPhraseBans',
+        label: 'User phrases',
+        description: 'Phrases added through Manual Fix. One phrase per line.',
+        defaultValue: '',
+        rulePrompt: 'Remove the exact user-configured phrase without changing scene facts, actions, dialogue, or meaning.',
     },
 ]);
 
@@ -668,6 +693,7 @@ const state = {
     proseGuardExpectedMessageId: null,
     proseGuardHiddenMessageIds: new Set(),
     proseGuardDraftSnapshot: null,
+    proseGuardCommittedRun: null,
     postNarrationFinalizers: new Map(),
     postNarrationFinalizerTimers: new Map(),
     trackerWidgetActiveTab: 'overview',
@@ -691,6 +717,8 @@ function getContext() {
 function getSettings() {
     extension_settings[SETTINGS_KEY] = extension_settings[SETTINGS_KEY] || {};
     const settings = extension_settings[SETTINGS_KEY];
+    const hadExplicitProseGuardMode = settings.proseGuardMode !== undefined;
+    const legacyProseGuardEnabled = settings.postNarrationProseGuardEnabled;
     delete extension_settings[SETTINGS_KEY].disableSemanticThinking;
     delete extension_settings[SETTINGS_KEY].writingStylePrompt;
     delete extension_settings[SETTINGS_KEY].writingStyleDialoguePrompt;
@@ -704,6 +732,9 @@ function getSettings() {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = value;
         }
+    }
+    if (!hadExplicitProseGuardMode && legacyProseGuardEnabled === false) {
+        settings.proseGuardMode = PROSE_GUARD_MODES.OFF;
     }
     if (migrateTrackerWidgetSettings(settings)) {
         saveExtensionSettings();
@@ -749,8 +780,35 @@ function migrateProseGuardSettings(settings) {
     if (settings[key] !== undefined) {
         settings[key] = removeProseGuardPhraseLines(settings[key], PROSE_GUARD_MOVED_BANNED_PHRASES);
     }
+    if (!normalizeProseGuardMode(settings.proseGuardMode)) {
+        settings.proseGuardMode = settings.postNarrationProseGuardEnabled === false
+            ? PROSE_GUARD_MODES.OFF
+            : PROSE_GUARD_MODES.AUTOMATIC;
+    }
+    settings.postNarrationProseGuardEnabled = settings.proseGuardMode !== PROSE_GUARD_MODES.OFF;
+    settings.proseGuardCustomBannedPhrases = String(settings.proseGuardCustomBannedPhrases ?? '');
     settings.proseGuardBannedPhraseMigrationVersion = PROSE_GUARD_SETTINGS_MIGRATION_VERSION;
     return true;
+}
+
+function normalizeProseGuardMode(value) {
+    const mode = String(value ?? '').trim().toLocaleLowerCase();
+    return Object.values(PROSE_GUARD_MODES).includes(mode) ? mode : null;
+}
+
+function getProseGuardMode(settings = getSettings()) {
+    const normalized = normalizeProseGuardMode(settings?.proseGuardMode);
+    if (normalized) return normalized;
+    return settings?.postNarrationProseGuardEnabled === false
+        ? PROSE_GUARD_MODES.OFF
+        : PROSE_GUARD_MODES.AUTOMATIC;
+}
+
+function setProseGuardMode(value, settings = getSettings()) {
+    const mode = normalizeProseGuardMode(value) || PROSE_GUARD_MODES.AUTOMATIC;
+    settings.proseGuardMode = mode;
+    settings.postNarrationProseGuardEnabled = mode !== PROSE_GUARD_MODES.OFF;
+    return mode;
 }
 
 function isStoryEngineEnabled() {
@@ -1267,7 +1325,7 @@ function refreshSettingsControls() {
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const reasoningEffortSelect = document.getElementById('structured_preflight_semantic_reasoning_effort');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
-    const proseGuardEnabledCheckbox = document.getElementById('structured_preflight_prose_guard_enabled');
+    const proseGuardModeSelect = document.getElementById('structured_preflight_prose_guard_mode');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
     const proseGuardBanFields = getProseGuardTargetedBanFieldControls();
     const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
@@ -1287,7 +1345,7 @@ function refreshSettingsControls() {
     if (storyEngineCheckbox) storyEngineCheckbox.checked = engineEnabled;
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
-    if (proseGuardEnabledCheckbox) proseGuardEnabledCheckbox.checked = settings.postNarrationProseGuardEnabled !== false;
+    if (proseGuardModeSelect) proseGuardModeSelect.value = getProseGuardMode(settings);
     for (const { element, key, defaultValue } of proseGuardBanFields) {
         const value = String(settings[key] ?? defaultValue);
         if (element && element.value !== value) {
@@ -1339,11 +1397,12 @@ function refreshSettingsControls() {
         reasoningEffortSelect.disabled = !engineEnabled || !enabled;
     }
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
+    const proseGuardOff = getProseGuardMode(settings) === PROSE_GUARD_MODES.OFF;
     for (const { element } of proseGuardBanFields) {
-        if (element) element.disabled = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
+        if (element) element.disabled = !engineEnabled || proseGuardOff;
     }
     if (proseGuardBansDrawer) {
-        proseGuardBansDrawer.hidden = !engineEnabled || settings.postNarrationProseGuardEnabled === false;
+        proseGuardBansDrawer.hidden = !engineEnabled || proseGuardOff;
         if (proseGuardBansDrawer.hidden) proseGuardBansDrawer.open = false;
     }
     for (const { element } of writingStyleFields) {
@@ -1355,7 +1414,7 @@ function refreshSettingsControls() {
     }
     [
         trackerEnabledCheckbox,
-        proseGuardEnabledCheckbox,
+        proseGuardModeSelect,
         progressionEnabledCheckbox,
         enabledCheckbox,
         modelCallDelayEnabledCheckbox,
@@ -1682,12 +1741,17 @@ function renderSettingsPanel() {
                     <section class="spe-settings-section" data-spe-settings-step="prose-guard">
                         <span class="spe-settings-kicker">3. After narration</span>
                         <h4 class="spe-settings-title">Prose Guard</h4>
-                        <small class="spe-settings-description">Deterministically scans final narration for configured phrases and the narrow stock-contrast pattern before anything is shown.</small>
+                        <small class="spe-settings-description">Scans final narration for configured phrases and lets you choose whether repairs are automatic or reviewed first.</small>
                         <div class="spe-settings-body">
-                            <label class="checkbox_label flexNoGap">
-                                <input id="structured_preflight_prose_guard_enabled" type="checkbox">
-                                <span>Enable Prose Guard</span>
-                            </label>
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_prose_guard_mode">Mode</label>
+                                <select id="structured_preflight_prose_guard_mode" class="text_pole flex1">
+                                    <option value="automatic">Automatic</option>
+                                    <option value="review">Review</option>
+                                    <option value="off">Off</option>
+                                </select>
+                            </div>
+                            <small class="spe-settings-note">Automatic repairs confirmed violations and records each replacement. Review reports violations and waits for Fix, Dismiss, or Delete.</small>
                             <details id="structured_preflight_prose_guard_bans_drawer" data-structured-preflight-prompt-drawer>
                                 <summary class="spe-settings-writing-summary">
                                     <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Targeted Phrase Bans</button>
@@ -1706,7 +1770,7 @@ function renderSettingsPanel() {
                                     </div>`).join('')}
                                 </div>
                             </details>
-                            <small class="spe-settings-note">Runs after narration and before tracker update. It edits only prose-rule violations and preserves scene outcomes.</small>
+                            <small class="spe-settings-note">Manual Fix accepts a specific phrase, repairs only the sentence containing it, and remembers that phrase for future scans.</small>
                         </div>
                     </section>
 
@@ -1819,8 +1883,9 @@ function renderSettingsPanel() {
 
     });
 
-    document.getElementById('structured_preflight_prose_guard_enabled')?.addEventListener('change', event => {
-        settings.postNarrationProseGuardEnabled = Boolean(event.target?.checked);
+    document.getElementById('structured_preflight_prose_guard_mode')?.addEventListener('change', event => {
+        setProseGuardMode(event.target?.value, settings);
+        renderTrackerWidget(getContext());
         refreshSettingsControls();
         saveExtensionSettings();
     });
@@ -2639,6 +2704,7 @@ function invalidateStoryEnginePipeline() {
     state.lastNarratorHandoff = '';
     state.lastNarratorHandoffKey = null;
     state.pendingRun = null;
+    state.proseGuardCommittedRun = null;
     state.pendingGeneration = null;
     state.playerSetupBusy = false;
     state.progressionBusy = false;
@@ -2807,9 +2873,7 @@ function getTrackerRoot(context = getContext()) {
     root.descriptiveArchive = normalizeDescriptiveArchive(root.descriptiveArchive || {});
     root.worldProgression = normalizeWorldProgression(root.worldProgression || {});
     if (!root.worldMemoryBase || typeof root.worldMemoryBase !== 'object') {
-        const hasReplayPatches = Array.isArray(context.chat)
-            && context.chat.some(message => getMessageWorldMemorySwipeSnapshot(message)?.version === WORLD_MEMORY_SWIPE_VERSION);
-        root.worldMemoryBase = normalizeWorldMemoryState(hasReplayPatches ? {} : {
+        root.worldMemoryBase = normalizeWorldMemoryState({
             archive: root.descriptiveArchive,
             progression: root.worldProgression,
         });
@@ -3638,6 +3702,66 @@ async function writePlayerSheetToPersona(sheetText, context = getContext(), acti
     } : {});
 }
 
+function capturePersonaMetadataTransaction(context) {
+    const metadata = context?.chatMetadata;
+    if (!metadata || typeof metadata !== 'object') {
+        throw new Error('Chat metadata is unavailable for the persona update.');
+    }
+    return {
+        metadata,
+        roots: Object.fromEntries(PERSONA_METADATA_TRANSACTION_KEYS.map(key => [key, {
+            present: Object.hasOwn(metadata, key),
+            value: Object.hasOwn(metadata, key) ? clone(metadata[key]) : undefined,
+        }])),
+    };
+}
+
+function restorePersonaMetadataTransaction(snapshot, context) {
+    if (!snapshot?.metadata || context?.chatMetadata !== snapshot.metadata) return false;
+    for (const [key, entry] of Object.entries(snapshot.roots || {})) {
+        if (entry.present) snapshot.metadata[key] = clone(entry.value);
+        else delete snapshot.metadata[key];
+    }
+    return true;
+}
+
+async function runPersonaMetadataTransaction(context, actionIdentity, operation) {
+    const previousPersona = getPersonaText(context);
+    const snapshot = capturePersonaMetadataTransaction(context);
+    try {
+        const result = await operation();
+        if (actionIdentity) {
+            assertStoryEngineEpochCurrent(actionIdentity, 'Persona transaction expired because the active chat or persona changed.');
+        }
+        await persistMetadata(context);
+        if (actionIdentity) {
+            assertStoryEngineEpochCurrent(actionIdentity, 'Persona transaction expired because the active chat or persona changed.');
+        }
+        return result;
+    } catch (error) {
+        const canRollback = !actionIdentity || isCurrentStoryEngineEpoch(actionIdentity, context);
+        if (canRollback && restorePersonaMetadataTransaction(snapshot, context)) {
+            try {
+                if (getPersonaText(context) !== previousPersona) {
+                    await writePersonaDescription(previousPersona, context, {
+                        allowEmpty: true,
+                        ...(actionIdentity ? {
+                            avatarId: actionIdentity.personaId,
+                            isCurrent: () => isCurrentStoryEngineEpoch(actionIdentity, context),
+                            expiredMessage: 'Persona rollback expired because the active chat or persona changed.',
+                        } : {}),
+                    });
+                } else {
+                    await persistMetadata(context);
+                }
+            } catch (rollbackError) {
+                console.error(`[${EXTENSION_NAME}] failed to roll back a persona and metadata transaction.`, rollbackError);
+            }
+        }
+        throw error;
+    }
+}
+
 function findPersonaSection(text, matcher) {
     const lines = String(text ?? '').split(/\r?\n/);
     let start = -1;
@@ -4028,6 +4152,17 @@ function getActiveDisplayNpcNamesFromReport(npcs, report) {
 
     return activeNames;
 
+}
+
+function getConfirmedSceneNpcNamesFromSnapshot(snapshot) {
+    const npcs = normalizeDisplayTrackerNpcs(snapshot?.npcs || {});
+    const displayState = normalizeVisibleNpcState(snapshot?.displayNpcState);
+    return Object.keys(displayState)
+        .filter(name => displayState[name].inactiveReplies === 0 && Boolean(npcs[name]));
+}
+
+function getConfirmedSceneNpcNames(context = getContext()) {
+    return getConfirmedSceneNpcNamesFromSnapshot(getLatestTrackerDisplaySnapshot(context));
 }
 
 
@@ -5335,6 +5470,161 @@ function getMessageWorldMemorySwipeSnapshot(message) {
         || null;
 }
 
+function normalizeProseGuardSpanOffset(value) {
+    const normalized = Number(value);
+    return Number.isInteger(normalized) && normalized >= 0 ? normalized : null;
+}
+
+function sanitizeProseGuardFindingForStorage(finding) {
+    if (!finding || typeof finding !== 'object') return null;
+    return {
+        id: String(finding.id || ''),
+        sentence: String(finding.sentence || ''),
+        start: normalizeProseGuardSpanOffset(finding.start),
+        end: normalizeProseGuardSpanOffset(finding.end),
+        ruleNames: Array.isArray(finding.ruleNames) ? finding.ruleNames.map(value => String(value)) : [],
+        matches: Array.isArray(finding.matches)
+            ? finding.matches.map(match => ({
+                ruleName: String(match?.ruleName || ''),
+                phrase: String(match?.phrase || ''),
+                matchedPhrase: String(match?.matchedPhrase || ''),
+            }))
+            : [],
+        status: String(finding.status || 'pending'),
+        replacementText: finding.replacementText ? String(finding.replacementText) : '',
+    };
+}
+
+function sanitizeProseGuardStateForStorage(value) {
+    if (!value || typeof value !== 'object') return null;
+    const findings = Array.isArray(value.findings)
+        ? value.findings.map(sanitizeProseGuardFindingForStorage).filter(Boolean)
+        : [];
+    const changes = Array.isArray(value.changes)
+        ? value.changes.map(change => ({
+            findingId: String(change?.findingId || ''),
+            start: normalizeProseGuardSpanOffset(change?.start),
+            end: normalizeProseGuardSpanOffset(change?.end),
+            originalText: String(change?.originalText || ''),
+            replacementText: String(change?.replacementText || ''),
+            status: String(change?.status || 'applied'),
+        })).filter(change => change.findingId && change.originalText && change.replacementText)
+        : [];
+    return {
+        version: PROSE_GUARD_EXTRA_VERSION,
+        mode: normalizeProseGuardMode(value.mode) || PROSE_GUARD_MODES.REVIEW,
+        savedAt: Number(value.savedAt) || Date.now(),
+        findings,
+        changes,
+        error: value.error ? String(value.error) : '',
+    };
+}
+
+function setMessageProseGuardState(message, value) {
+    if (!isAssistantNarrationMessage(message)) return;
+    const payload = sanitizeProseGuardStateForStorage(value);
+    if (!payload) return clearMessageProseGuardState(message);
+    const swipeId = getMessageSwipeId(message);
+    message.extra = message.extra || {};
+    message.extra[PROSE_GUARD_EXTRA_KEY] = message.extra[PROSE_GUARD_EXTRA_KEY] || {};
+    message.extra[PROSE_GUARD_EXTRA_KEY][swipeId] = payload;
+
+    const swipeInfo = ensureSwipeInfoEntry(message, swipeId);
+    if (swipeInfo) {
+        swipeInfo.extra[PROSE_GUARD_EXTRA_KEY] = swipeInfo.extra[PROSE_GUARD_EXTRA_KEY] || {};
+        swipeInfo.extra[PROSE_GUARD_EXTRA_KEY][swipeId] = clone(payload);
+    }
+}
+
+function getMessageProseGuardState(message) {
+    if (!isAssistantNarrationMessage(message)) return null;
+    const swipeId = getMessageSwipeId(message);
+    const payload = message.extra?.[PROSE_GUARD_EXTRA_KEY]?.[swipeId]
+        || message.swipe_info?.[swipeId]?.extra?.[PROSE_GUARD_EXTRA_KEY]?.[swipeId]
+        || null;
+    return sanitizeProseGuardStateForStorage(payload);
+}
+
+function clearMessageProseGuardState(message) {
+    if (!isAssistantNarrationMessage(message)) return;
+    const swipeId = getMessageSwipeId(message);
+    if (message.extra?.[PROSE_GUARD_EXTRA_KEY]) {
+        delete message.extra[PROSE_GUARD_EXTRA_KEY][swipeId];
+    }
+    const swipeInfo = message.swipe_info?.[swipeId];
+    if (swipeInfo?.extra?.[PROSE_GUARD_EXTRA_KEY]) {
+        delete swipeInfo.extra[PROSE_GUARD_EXTRA_KEY][swipeId];
+    }
+}
+
+function compactProseGuardPendingRun(pendingRun) {
+    if (!pendingRun || typeof pendingRun !== 'object') return null;
+    const compact = clone(pendingRun);
+    const report = pendingRun.report || {};
+    compact.report = {
+        finalNarrativeHandoff: clone(report.finalNarrativeHandoff || {}),
+        semanticLedger: {
+            engineContext: clone(report.semanticLedger?.engineContext || {}),
+            trackerUpdateEngine: {
+                npcs: clone(report.semanticLedger?.trackerUpdateEngine?.npcs || []),
+            },
+        },
+    };
+    return compact;
+}
+
+function sanitizeProseGuardReconciliationSeed(value) {
+    if (!value || typeof value !== 'object') return null;
+    const pendingRun = compactProseGuardPendingRun(value.pendingRun);
+    const messageKey = String(value.messageKey || '').trim();
+    if (!pendingRun || !messageKey) return null;
+    return {
+        version: PROSE_GUARD_RECONCILIATION_EXTRA_VERSION,
+        messageKey,
+        type: String(value.type || pendingRun.type || 'normal'),
+        savedAt: Number(value.savedAt) || Date.now(),
+        pendingRun,
+    };
+}
+
+function setMessageProseGuardReconciliationSeed(message, value) {
+    if (!isAssistantNarrationMessage(message)) return;
+    const payload = sanitizeProseGuardReconciliationSeed(value);
+    if (!payload) return clearMessageProseGuardReconciliationSeed(message);
+    const swipeId = getMessageSwipeId(message);
+    message.extra = message.extra || {};
+    message.extra[PROSE_GUARD_RECONCILIATION_EXTRA_KEY] = message.extra[PROSE_GUARD_RECONCILIATION_EXTRA_KEY] || {};
+    message.extra[PROSE_GUARD_RECONCILIATION_EXTRA_KEY][swipeId] = payload;
+
+    const swipeInfo = ensureSwipeInfoEntry(message, swipeId);
+    if (swipeInfo) {
+        swipeInfo.extra[PROSE_GUARD_RECONCILIATION_EXTRA_KEY] = swipeInfo.extra[PROSE_GUARD_RECONCILIATION_EXTRA_KEY] || {};
+        swipeInfo.extra[PROSE_GUARD_RECONCILIATION_EXTRA_KEY][swipeId] = clone(payload);
+    }
+}
+
+function getMessageProseGuardReconciliationSeed(message) {
+    if (!isAssistantNarrationMessage(message)) return null;
+    const swipeId = getMessageSwipeId(message);
+    const payload = message.extra?.[PROSE_GUARD_RECONCILIATION_EXTRA_KEY]?.[swipeId]
+        || message.swipe_info?.[swipeId]?.extra?.[PROSE_GUARD_RECONCILIATION_EXTRA_KEY]?.[swipeId]
+        || null;
+    if (Number(payload?.version) !== PROSE_GUARD_RECONCILIATION_EXTRA_VERSION) return null;
+    return sanitizeProseGuardReconciliationSeed(payload);
+}
+
+function clearMessageProseGuardReconciliationSeed(message) {
+    if (!isAssistantNarrationMessage(message)) return;
+    const swipeId = getMessageSwipeId(message);
+    if (message.extra?.[PROSE_GUARD_RECONCILIATION_EXTRA_KEY]) {
+        delete message.extra[PROSE_GUARD_RECONCILIATION_EXTRA_KEY][swipeId];
+    }
+    const swipeInfo = message.swipe_info?.[swipeId];
+    if (swipeInfo?.extra?.[PROSE_GUARD_RECONCILIATION_EXTRA_KEY]) {
+        delete swipeInfo.extra[PROSE_GUARD_RECONCILIATION_EXTRA_KEY][swipeId];
+    }
+}
+
 
 function rebuildWorldMemoryFromSelectedSwipes(context = getContext(), options = {}) {
     const root = getTrackerRoot(context);
@@ -6575,7 +6865,7 @@ function ensureTrackerDisplayStyles() {
             left: 0;
             top: 0;
             display: grid;
-            grid-template-rows: auto minmax(0, 1fr);
+            grid-template-rows: auto minmax(0, 1fr) auto;
             width: ${TRACKER_WIDGET_DEFAULT_WIDTH}px;
             min-width: 1px;
             max-width: max(1px, calc(100vw - 16px));
@@ -7353,6 +7643,134 @@ function ensureTrackerDisplayStyles() {
             line-height: 1.2;
             text-align: center;
         }
+        .structured-preflight-prose-guard-strip {
+            min-width: 0;
+            max-height: min(310px, 48vh);
+            border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 58%, transparent);
+            overflow: hidden;
+        }
+        .structured-preflight-prose-guard-strip[hidden],
+        .structured-preflight-prose-guard-details[hidden] {
+            display: none;
+        }
+        .structured-preflight-prose-guard-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+            width: 100%;
+            min-height: 35px;
+            padding: 0.38rem 0.62rem;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            text-align: left;
+        }
+        .structured-preflight-prose-guard-header:hover,
+        .structured-preflight-prose-guard-header:focus-visible {
+            background: color-mix(in srgb, #f0c674 10%, transparent);
+        }
+        .structured-preflight-prose-guard-heading {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.42rem;
+            min-width: 0;
+            font-weight: 750;
+        }
+        .structured-preflight-prose-guard-heading i {
+            color: #f0c674;
+        }
+        .structured-preflight-prose-guard-count {
+            display: inline-grid;
+            place-items: center;
+            min-width: 1.45rem;
+            height: 1.25rem;
+            padding: 0 0.3rem;
+            border: 1px solid color-mix(in srgb, #f0c674 48%, transparent);
+            border-radius: 5px;
+            background: color-mix(in srgb, #f0c674 13%, transparent);
+            color: color-mix(in srgb, #f0c674 88%, var(--SmartThemeBodyColor, #eee));
+            font-size: 0.7rem;
+            font-weight: 800;
+        }
+        .structured-preflight-prose-guard-details {
+            display: grid;
+            gap: 0.55rem;
+            max-height: 265px;
+            padding: 0.55rem 0.62rem 0.65rem;
+            border-top: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255,255,255,0.18)) 72%, transparent);
+            overflow-x: hidden;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+        .structured-preflight-prose-guard-finding {
+            display: grid;
+            gap: 0.36rem;
+            min-width: 0;
+            padding-bottom: 0.55rem;
+            border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255,255,255,0.18)) 72%, transparent);
+        }
+        .structured-preflight-prose-guard-finding:last-of-type {
+            padding-bottom: 0;
+            border-bottom: 0;
+        }
+        .structured-preflight-prose-guard-meta {
+            color: color-mix(in srgb, #f0c674 80%, var(--SmartThemeBodyColor, #eee));
+            font-size: 0.69rem;
+            font-weight: 750;
+            overflow-wrap: anywhere;
+        }
+        .structured-preflight-prose-guard-sentence {
+            margin: 0;
+            padding: 0.38rem 0.46rem;
+            border-left: 2px solid color-mix(in srgb, #f0c674 58%, transparent);
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 30%, transparent);
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+        }
+        .structured-preflight-prose-guard-label {
+            color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 62%, transparent);
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .structured-preflight-prose-guard-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+        }
+        .structured-preflight-prose-guard-actions .menu_button {
+            min-height: 1.75rem;
+            padding: 0.2rem 0.48rem;
+            border-radius: 5px;
+            font-size: 0.75rem;
+        }
+        .structured-preflight-prose-guard-manual {
+            display: grid;
+            gap: 0.42rem;
+            padding-top: 0.55rem;
+            border-top: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255,255,255,0.18)) 72%, transparent);
+        }
+        .structured-preflight-prose-guard-manual label {
+            display: grid;
+            gap: 0.2rem;
+            min-width: 0;
+            font-size: 0.72rem;
+            font-weight: 700;
+        }
+        .structured-preflight-prose-guard-manual .text_pole {
+            width: 100%;
+            min-width: 0;
+            min-height: 1.9rem;
+            font-size: 0.78rem;
+        }
+        .structured-preflight-prose-guard-empty {
+            color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 62%, transparent);
+            font-size: 0.76rem;
+        }
         .structured-preflight-tracker-resize-handle {
             position: absolute;
             right: 0;
@@ -7763,7 +8181,7 @@ function tryAttachProseGuardPendingMessage() {
 function shouldUseProseGuardDisplayIntercept(type) {
     const normalizedType = String(type || 'normal');
     return isStoryEngineEnabled()
-        && getSettings().postNarrationProseGuardEnabled !== false
+        && getProseGuardMode() !== PROSE_GUARD_MODES.OFF
         && normalizedType !== 'impersonate'
         && Boolean(state.pendingGeneration)
         && hasPendingProseGuardGenerationInput()
@@ -8010,6 +8428,7 @@ function renderTrackerWidget(context = getContext()) {
                     <span class="structured-preflight-tracker-widget-name"><span>Tracker</span></span>
                 </div>
                 <div data-structured-preflight-tracker-widget-body></div>
+                <div class="structured-preflight-prose-guard-strip" data-spe-prose-guard-strip hidden></div>
                 <div class="structured-preflight-tracker-resize-handle" data-spe-tracker-resize-handle title="Resize tracker" aria-label="Resize tracker">
                     <span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span>
                 </div>
@@ -8037,7 +8456,650 @@ function renderTrackerWidget(context = getContext()) {
 
         : '<div class="structured-preflight-tracker-empty">No tracker data yet.</div>';
     attachTrackerWidgetEditorHandlers(body, context);
+    renderProseGuardWidget(widget, context);
 
+}
+
+function isAssistantNarrationMessage(message) {
+    if (!message || message.is_user || message.is_system) return false;
+    const role = String(message.role || '').trim().toLocaleLowerCase();
+    return !['user', 'system', 'tool', 'function'].includes(role);
+}
+
+function getLatestAssistantMessageEntry(context = getContext()) {
+    if (!Array.isArray(context?.chat)) return null;
+    for (let messageId = context.chat.length - 1; messageId >= 0; messageId -= 1) {
+        const message = context.chat[messageId];
+        if (isAssistantNarrationMessage(message)) return { messageId, message };
+    }
+    return null;
+}
+
+function getProseGuardMessageText(message) {
+    if (!isAssistantNarrationMessage(message)) return '';
+    return typeof message.mes === 'string'
+        ? message.mes
+        : String(message.extra?.display_text ?? '');
+}
+
+function getPendingProseGuardFindings(proseGuardState) {
+    return (proseGuardState?.findings || []).filter(finding => finding.status === 'pending');
+}
+
+function buildReviewProseGuardRows(proseGuardState, messageId) {
+    const pendingFindings = getPendingProseGuardFindings(proseGuardState);
+    if (!pendingFindings.length) {
+        return '<div class="structured-preflight-prose-guard-empty">No unresolved violations in the latest response.</div>';
+    }
+    return pendingFindings.map(finding => {
+        const matched = uniqueStrings((finding.matches || [])
+            .map(match => match.matchedPhrase || match.phrase)
+            .filter(Boolean));
+        const rules = uniqueStrings(finding.ruleNames || []);
+        const meta = [matched.length ? matched.join(', ') : 'Configured violation', rules.length ? rules.join(', ') : ''].filter(Boolean).join(' | ');
+        return `
+            <div class="structured-preflight-prose-guard-finding" data-spe-prose-guard-finding="${escapeHtml(finding.id)}">
+                <div class="structured-preflight-prose-guard-meta">${escapeHtml(meta)}</div>
+                <p class="structured-preflight-prose-guard-sentence">${escapeHtml(finding.sentence)}</p>
+                <div class="structured-preflight-prose-guard-actions">
+                    <button class="menu_button" type="button" data-spe-prose-guard-review-action="fix" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Fix</button>
+                    <button class="menu_button" type="button" data-spe-prose-guard-review-action="dismiss" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-check" aria-hidden="true"></i> Dismiss</button>
+                    <button class="menu_button" type="button" data-spe-prose-guard-review-action="delete" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-trash" aria-hidden="true"></i> Delete</button>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function buildAutomaticProseGuardRows(proseGuardState, messageId) {
+    const changes = proseGuardState?.changes || [];
+    if (!changes.length) {
+        return '<div class="structured-preflight-prose-guard-empty">No automatic repairs in the latest response.</div>';
+    }
+    return changes.map((change, index) => `
+        <div class="structured-preflight-prose-guard-finding">
+            <div class="structured-preflight-prose-guard-meta">${change.status === 'restored' ? 'Restored' : 'Automatically repaired'}</div>
+            <span class="structured-preflight-prose-guard-label">Original</span>
+            <p class="structured-preflight-prose-guard-sentence">${escapeHtml(change.originalText)}</p>
+            <span class="structured-preflight-prose-guard-label">Replacement</span>
+            <p class="structured-preflight-prose-guard-sentence">${escapeHtml(change.replacementText)}</p>
+            <div class="structured-preflight-prose-guard-actions">
+                ${change.status === 'applied'
+                    ? `<button class="menu_button" type="button" data-spe-prose-guard-restore data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-change-index="${index}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Restore</button>`
+                    : '<span class="structured-preflight-prose-guard-empty">Original sentence restored.</span>'}
+            </div>
+        </div>`).join('');
+}
+
+function buildProseGuardManualRepairHtml(hasAssistantMessage) {
+    return `
+        <div class="structured-preflight-prose-guard-manual">
+            <label>
+                Offending phrase
+                <input class="text_pole" type="text" data-spe-prose-guard-manual-phrase autocomplete="off" spellcheck="false" ${hasAssistantMessage ? '' : 'disabled'}>
+            </label>
+            <label>
+                Reason (optional)
+                <textarea class="text_pole" rows="2" data-spe-prose-guard-manual-reason spellcheck="false" ${hasAssistantMessage ? '' : 'disabled'}></textarea>
+            </label>
+            <div class="structured-preflight-prose-guard-actions">
+                <button class="menu_button" type="button" data-spe-prose-guard-manual-fix ${hasAssistantMessage ? '' : 'disabled'}><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Fix</button>
+            </div>
+        </div>`;
+}
+
+function renderProseGuardWidget(widget, context = getContext()) {
+    const strip = widget?.querySelector?.('[data-spe-prose-guard-strip]');
+    if (!strip) return;
+    const mode = getProseGuardMode();
+    if (!isStoryEngineEnabled() || mode === PROSE_GUARD_MODES.OFF) {
+        strip.hidden = true;
+        strip.innerHTML = '';
+        return;
+    }
+
+    const latest = getLatestAssistantMessageEntry(context);
+    const proseGuardState = latest ? getMessageProseGuardState(latest.message) : null;
+    const reportMode = proseGuardState?.mode || mode;
+    const pendingCount = getPendingProseGuardFindings(proseGuardState).length;
+    const automaticCount = reportMode === PROSE_GUARD_MODES.AUTOMATIC
+        ? (proseGuardState?.changes?.length || 0)
+        : 0;
+    const count = reportMode === PROSE_GUARD_MODES.AUTOMATIC ? automaticCount : pendingCount;
+    const reportRows = reportMode === PROSE_GUARD_MODES.AUTOMATIC
+        ? buildAutomaticProseGuardRows(proseGuardState, latest?.messageId ?? -1)
+        : buildReviewProseGuardRows(proseGuardState, latest?.messageId ?? -1);
+
+    strip.hidden = false;
+    strip.innerHTML = `
+        <button class="structured-preflight-prose-guard-header" type="button" data-spe-prose-guard-toggle aria-expanded="false">
+            <span class="structured-preflight-prose-guard-heading"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i><span>Prose Guard</span></span>
+            <span class="structured-preflight-prose-guard-count" aria-label="${count} violations">${count}</span>
+        </button>
+        <div class="structured-preflight-prose-guard-details" data-spe-prose-guard-details hidden>
+            ${reportRows}
+            ${buildProseGuardManualRepairHtml(Boolean(latest))}
+        </div>`;
+    attachProseGuardWidgetHandlers(strip, context);
+}
+
+function resolveStoredProseGuardFinding(text, finding) {
+    const source = String(text || '');
+    const sentence = String(finding?.sentence || '');
+    if (!sentence) return null;
+    const storedStart = normalizeProseGuardSpanOffset(finding?.start);
+    const storedEnd = normalizeProseGuardSpanOffset(finding?.end);
+    if (storedStart != null
+        && storedEnd === storedStart + sentence.length
+        && source.slice(storedStart, storedEnd) === sentence) {
+        return { ...finding, start: storedStart, end: storedEnd };
+    }
+    const matches = [];
+    let cursor = 0;
+    while (cursor <= source.length) {
+        const start = source.indexOf(sentence, cursor);
+        if (start < 0) break;
+        matches.push({ start, end: start + sentence.length });
+        cursor = start + Math.max(1, sentence.length);
+    }
+    if (matches.length !== 1) return null;
+    const [match] = matches;
+    return {
+        ...finding,
+        start: match.start,
+        end: match.end,
+    };
+}
+
+function resolveStoredProseGuardChange(text, change) {
+    const source = String(text || '');
+    const replacementText = String(change?.replacementText || '');
+    if (!replacementText) return null;
+    const storedStart = normalizeProseGuardSpanOffset(change?.start);
+    const storedEnd = normalizeProseGuardSpanOffset(change?.end);
+    if (storedStart != null
+        && storedEnd === storedStart + replacementText.length
+        && source.slice(storedStart, storedEnd) === replacementText) {
+        return { ...change, start: storedStart, end: storedEnd };
+    }
+    const matches = [];
+    let cursor = 0;
+    while (cursor <= source.length) {
+        const start = source.indexOf(replacementText, cursor);
+        if (start < 0) break;
+        matches.push({ start, end: start + replacementText.length });
+        cursor = start + Math.max(1, replacementText.length);
+    }
+    if (matches.length !== 1) return null;
+    const [match] = matches;
+    return { ...change, start: match.start, end: match.end };
+}
+
+function rebaseProseGuardSpan(item, sourceText, nextText, targetText, editSpan = null) {
+    const target = String(targetText || '');
+    if (!target) return { ...item, start: null, end: null };
+    let preferredStart = normalizeProseGuardSpanOffset(item?.start);
+    if (preferredStart != null && editSpan) {
+        const editStart = normalizeProseGuardSpanOffset(editSpan.start);
+        const editEnd = normalizeProseGuardSpanOffset(editSpan.end);
+        const replacementLength = Math.max(0, Number(editSpan.replacementLength) || 0);
+        if (editStart != null && editEnd != null) {
+            if (preferredStart >= editEnd) {
+                preferredStart += replacementLength - (editEnd - editStart);
+            } else if (preferredStart > editStart) {
+                preferredStart = null;
+            }
+        }
+    }
+    if (preferredStart != null && nextText.slice(preferredStart, preferredStart + target.length) === target) {
+        return { ...item, start: preferredStart, end: preferredStart + target.length };
+    }
+    const matches = [];
+    let cursor = 0;
+    while (cursor <= nextText.length) {
+        const start = nextText.indexOf(target, cursor);
+        if (start < 0) break;
+        matches.push({ start, end: start + target.length });
+        cursor = start + Math.max(1, target.length);
+    }
+    if (matches.length === 1) {
+        return { ...item, start: matches[0].start, end: matches[0].end };
+    }
+    return { ...item, start: null, end: null };
+}
+
+function formatProseGuardStateForMessage(value, previousText, nextText, options = {}, editSpan = null) {
+    const source = String(previousText || '');
+    const formattedText = applyDeterministicNarrationFormatting(String(nextText || ''), options);
+    if (!value) return { text: formattedText, state: null };
+    const formatted = clone(value);
+    formatted.findings = Array.isArray(formatted.findings)
+        ? formatted.findings.map(finding => ({
+            ...finding,
+            sentence: applyDeterministicNarrationFormatting(finding.sentence, options),
+            replacementText: finding.replacementText
+                ? applyDeterministicNarrationFormatting(finding.replacementText, options)
+                : '',
+        }))
+        : [];
+    formatted.changes = Array.isArray(formatted.changes)
+        ? formatted.changes.map(change => ({
+            ...change,
+            originalText: applyDeterministicNarrationFormatting(change.originalText, options),
+            replacementText: applyDeterministicNarrationFormatting(change.replacementText, options),
+        }))
+        : [];
+
+    formatted.findings = formatted.findings.map(finding => {
+        if (['fixed', 'deleted'].includes(String(finding.status || ''))) {
+            return { ...finding, start: null, end: null };
+        }
+        return rebaseProseGuardSpan(finding, source, formattedText, finding.sentence, editSpan);
+    });
+    formatted.changes = formatted.changes.map(change => {
+        if (String(change.status || '') !== 'applied') {
+            return { ...change, start: null, end: null };
+        }
+        return rebaseProseGuardSpan(change, source, formattedText, change.replacementText, editSpan);
+    });
+    return { text: formattedText, state: sanitizeProseGuardStateForStorage(formatted) };
+}
+
+function removeExactProseGuardSentence(text, finding) {
+    const source = String(text || '');
+    const resolved = resolveStoredProseGuardFinding(source, finding);
+    if (!resolved) return null;
+    let prefix = source.slice(0, resolved.start);
+    let suffix = source.slice(resolved.end);
+    if (/\s$/u.test(prefix) && /^\s/u.test(suffix)) {
+        suffix = suffix.replace(/^(?:\r\n|\n|\r|[ \t])/, '');
+    }
+    let result = `${prefix}${suffix}`;
+    if (resolved.start === 0) result = result.replace(/^\s+/u, '');
+    if (resolved.end === source.length) result = result.replace(/\s+$/u, '');
+    return result;
+}
+
+function addCustomProseGuardPhrase(phrase) {
+    const normalizedPhrase = String(phrase || '').trim();
+    if (!normalizedPhrase) return false;
+    const settings = getSettings();
+    const existing = parseProseGuardBannedPhraseList(settings.proseGuardCustomBannedPhrases);
+    if (existing.some(value => value.toLocaleLowerCase() === normalizedPhrase.toLocaleLowerCase())) return false;
+    settings.proseGuardCustomBannedPhrases = [...existing, normalizedPhrase].join('\n');
+    saveExtensionSettings();
+    refreshSettingsControls();
+    return true;
+}
+
+function restoreTrackerBeforeProseGuardEdit(context, messageId, messageKey) {
+    const root = getTrackerRoot(context);
+    const snapshot = root?.snapshots?.[messageKey];
+    if (!root || !snapshot?.before || !Object.hasOwn(snapshot, 'beforeRapportClock')) {
+        throw new Error('This response no longer has a safe tracker snapshot for Prose Guard reconciliation.');
+    }
+    const progression = getProgressionRoot(context);
+    const hasSpentProgression = progression?.accomplishments?.some(record => (
+        record?.messageKey === messageKey && progressionRecordXpSpent(record) > 0
+    ));
+    if (hasSpentProgression) {
+        throw new Error('This response has already spent progression XP and cannot be reconciled safely.');
+    }
+
+    root.npcs = normalizeDisplayTrackerNpcs(snapshot.before);
+    root.user = normalizeTrackerUserState(snapshot.beforeUser || root.user || {});
+    root.health = normalizeHiddenHealth(snapshot.beforeHealth || root.health, { user: root.user, npcs: root.npcs });
+    root.powerActors = clone(snapshot.beforePowerActors || {});
+    root.latentGrievances = resolveStoredLatentGrievances(root, snapshot.beforeLatentGrievanceIds);
+    root.latentFavors = resolveStoredLatentFavors(root, snapshot.beforeLatentFavorIds);
+    root.userKnowledge = mergeUserKnowledgeLedger(snapshot.beforeUserKnowledge || {}, {});
+    root.userReputation = mergeUserReputationLedger(snapshot.beforeUserReputation || {}, {});
+    root.worldState = normalizeWorldState(snapshot.beforeWorldState || root.worldState || {});
+    root.economy = normalizeEconomyState(snapshot.beforeEconomy || root.economy || {});
+    root.boundCompanion = normalizeBoundCompanionState(snapshot.beforeBoundCompanion || root.boundCompanion || {});
+    root.pendingBoundary = normalizePendingBoundaryState(snapshot.beforePendingBoundary || root.pendingBoundary || {});
+    root.rapportClock = normalizeRapportClockState(snapshot.beforeRapportClock);
+    rebuildWorldMemoryFromSelectedSwipes(context, { beforeMessageId: messageId });
+    removeProgressionRecordsAtOrAfterMessageId(getChatId(context), messageId, context);
+}
+
+function resolveProseGuardCommittedRun(context, messageId, messageKey) {
+    const inMemory = state.proseGuardCommittedRun;
+    if (inMemory
+        && inMemory.messageId === messageId
+        && inMemory.messageKey === messageKey
+        && inMemory.pendingRun) {
+        return inMemory;
+    }
+
+    const message = context?.chat?.[messageId];
+    const persisted = getMessageProseGuardReconciliationSeed(message);
+    if (!persisted || persisted.messageKey !== messageKey) return null;
+    const currentChatId = String(getChatId(context) || '');
+    const currentPersonaId = String(getActiveUserAvatar() || '');
+    if (persisted.pendingRun.chatId && String(persisted.pendingRun.chatId) !== currentChatId) return null;
+    if (persisted.pendingRun.personaId && String(persisted.pendingRun.personaId) !== currentPersonaId) return null;
+
+    const committed = {
+        messageId,
+        messageKey,
+        type: persisted.type,
+        narratorHandoff: getMessageNarratorHandoff(message)?.text || '',
+        pendingRun: persisted.pendingRun,
+    };
+    state.proseGuardCommittedRun = committed;
+    return committed;
+}
+
+async function reconcileProseGuardEditedMessage(context, messageId, messageKey, proseGuardState) {
+    const committed = resolveProseGuardCommittedRun(context, messageId, messageKey);
+    if (!committed) {
+        throw new Error('This response cannot be reconciled safely in the current session. Regenerate it before editing.');
+    }
+
+    const metadata = context?.chatMetadata || {};
+    const previousTracker = Object.hasOwn(metadata, 'structuredPreflightTracker')
+        ? clone(metadata.structuredPreflightTracker)
+        : undefined;
+    const previousProgression = Object.hasOwn(metadata, PROGRESSION_KEY)
+        ? clone(metadata[PROGRESSION_KEY])
+        : undefined;
+    const previousPendingRun = state.pendingRun;
+    const previousLastHandoff = state.lastNarratorHandoff;
+    const previousLastHandoffKey = state.lastNarratorHandoffKey;
+    const previousCommitted = state.proseGuardCommittedRun;
+
+    try {
+        restoreTrackerBeforeProseGuardEdit(context, messageId, messageKey);
+        const pendingRun = clone(committed.pendingRun);
+        pendingRun.runEpoch = state.runEpoch;
+        pendingRun.chatId = String(getChatId(context) || '');
+        pendingRun.personaId = String(getActiveUserAvatar() || '');
+        state.pendingRun = pendingRun;
+        const identity = createStoryEngineEpochIdentity(context);
+        await finalizePostNarrationMessage(messageId, committed.type, messageKey, null, {
+            ...identity,
+            narratorHandoff: committed.narratorHandoff || '',
+            pendingRun,
+            proseGuardReconciliation: true,
+            proseGuardState: clone(proseGuardState),
+        });
+        const reconciledRun = state.proseGuardCommittedRun;
+        if (reconciledRun === previousCommitted
+            || reconciledRun?.messageId !== messageId
+            || reconciledRun?.messageKey !== messageKey
+            || state.pendingRun === pendingRun) {
+            throw new Error('Prose Guard reconciliation did not complete before the response changed.');
+        }
+        if (!isAssistantNarrationMessage(context?.chat?.[messageId])) {
+            throw new Error('The edited response changed while Prose Guard was reconciling its state.');
+        }
+    } catch (error) {
+        if (previousTracker === undefined) delete metadata.structuredPreflightTracker;
+        else metadata.structuredPreflightTracker = previousTracker;
+        if (previousProgression === undefined) delete metadata[PROGRESSION_KEY];
+        else metadata[PROGRESSION_KEY] = previousProgression;
+        state.pendingRun = previousPendingRun;
+        state.lastNarratorHandoff = previousLastHandoff;
+        state.lastNarratorHandoffKey = previousLastHandoffKey;
+        state.proseGuardCommittedRun = previousCommitted;
+        try {
+            await persistMetadata(context);
+        } catch (restoreError) {
+            console.error(`[${EXTENSION_NAME}] failed to restore tracker state after Prose Guard reconciliation failure.`, restoreError);
+        }
+        throw error;
+    }
+}
+
+async function persistProseGuardMessageEdit(context, messageId, nextText, nextState, options = {}) {
+    const message = context?.chat?.[messageId];
+    if (!isAssistantNarrationMessage(message)) throw new Error('The target response is no longer available.');
+    const previousMessage = clone(message);
+    const previousText = getProseGuardMessageText(message);
+    const formatOptions = {
+        trackerDisplaySnapshot: getMessageTrackerDisplaySnapshot(message),
+        context,
+    };
+    const prepared = formatProseGuardStateForMessage(
+        nextState,
+        previousText,
+        String(nextText || ''),
+        formatOptions,
+        options.editSpan || null,
+    );
+    const finalText = prepared.text;
+    const finalState = prepared.state;
+    const messageKey = getMessageKey(messageId, context);
+    try {
+        message.extra = message.extra || {};
+        message.mes = finalText;
+        message.extra.display_text = finalText;
+        if (Array.isArray(message.swipes)) {
+            message.swipes[getMessageSwipeId(message)] = finalText;
+        }
+        if (finalState) setMessageProseGuardState(message, finalState);
+        else clearMessageProseGuardState(message);
+
+        if (options.reconcile === true) {
+            await reconcileProseGuardEditedMessage(context, messageId, messageKey, finalState);
+        } else {
+            if (typeof context.updateMessageBlock === 'function') {
+                await context.updateMessageBlock(messageId, message);
+            } else {
+                const textElement = getMessageTextElement(messageId);
+                if (textElement) textElement.textContent = finalText;
+            }
+            await saveChat(context, { fallbackToMetadata: true });
+        }
+        state.chatSignature = captureChatSignature(context);
+        renderNarratorHandoffBlockForMessage(messageId, null, context);
+        renderTrackerDisplayBlockForMessage(messageId, null, context);
+        renderTrackerWidget(context);
+    } catch (error) {
+        for (const key of Object.keys(message)) delete message[key];
+        Object.assign(message, previousMessage);
+        try {
+            await context.updateMessageBlock?.(messageId, message);
+        } catch {
+            const textElement = getMessageTextElement(messageId);
+            if (textElement) textElement.textContent = getProseGuardMessageText(message);
+        }
+        if (options.reconcile === true) {
+            try {
+                await saveChat(context, { fallbackToMetadata: true });
+            } catch (saveError) {
+                console.error(`[${EXTENSION_NAME}] failed to persist the restored Prose Guard edit.`, saveError);
+            }
+        }
+        renderTrackerWidget(context);
+        throw error;
+    }
+}
+
+function getCurrentProseGuardTarget(context, messageId) {
+    const normalizedId = normalizeProseGuardMessageId(messageId);
+    const latest = getLatestAssistantMessageEntry(context);
+    if (normalizedId == null || !latest || latest.messageId !== normalizedId) {
+        throw new Error('Prose Guard can edit only the latest assistant response.');
+    }
+    return latest;
+}
+
+async function handleProseGuardReviewAction(context, messageId, findingId, action) {
+    const latest = getCurrentProseGuardTarget(context, messageId);
+    const proseGuardState = getMessageProseGuardState(latest.message);
+    if (!proseGuardState || proseGuardState.mode !== PROSE_GUARD_MODES.REVIEW) {
+        throw new Error('This response has no active Prose Guard review.');
+    }
+    const finding = proseGuardState.findings.find(item => item.id === findingId && item.status === 'pending');
+    if (!finding) throw new Error('That violation is no longer pending.');
+
+    const currentText = getProseGuardMessageText(latest.message);
+    if (action === 'dismiss') {
+        finding.status = 'dismissed';
+        await persistProseGuardMessageEdit(context, latest.messageId, currentText, proseGuardState);
+        return;
+    }
+    if (action === 'delete') {
+        const currentFinding = resolveStoredProseGuardFinding(currentText, finding);
+        if (!currentFinding) throw new Error('The detected sentence no longer matches the latest response.');
+        const nextText = removeExactProseGuardSentence(currentText, currentFinding);
+        if (nextText == null) throw new Error('The detected sentence no longer matches the latest response.');
+        finding.status = 'deleted';
+        await persistProseGuardMessageEdit(context, latest.messageId, nextText, proseGuardState, {
+            reconcile: true,
+            editSpan: { start: currentFinding.start, end: currentFinding.end, replacementLength: 0 },
+        });
+        return;
+    }
+    if (action !== 'fix') throw new Error('Unknown Prose Guard review action.');
+
+    const currentFinding = resolveStoredProseGuardFinding(currentText, finding);
+    if (!currentFinding) throw new Error('The detected sentence no longer matches the latest response.');
+    const rules = getTargetedProseBanRules();
+    const operationIdentity = createStoryEngineEpochIdentity(context);
+    const raw = await requestTargetedProseBanRepairWithTimeout([currentFinding], rules, {
+        isCurrent: () => isCurrentStoryEngineEpoch(operationIdentity, context)
+            && context.chat?.[latest.messageId] === latest.message
+            && getLatestAssistantMessageEntry(context)?.messageId === latest.messageId,
+        expiredMessage: 'Prose Guard review expired because the latest response changed.',
+    });
+    const payload = parseTargetedProseGuardResponse(raw);
+    const repaired = applyProseGuardSentenceRepairs(currentText, [currentFinding], payload, { rules });
+    const applied = repaired.appliedRepairs.find(item => item.findingId === currentFinding.id);
+    if (!applied || repaired.rejectedRepairs.length) {
+        throw new Error(repaired.rejectedRepairs[0]?.reason || 'Prose Guard did not return a valid sentence repair.');
+    }
+    finding.status = 'fixed';
+    finding.replacementText = applied.replacementText;
+    proseGuardState.changes.push({ ...applied, status: 'applied' });
+    await persistProseGuardMessageEdit(context, latest.messageId, repaired.narrationText, proseGuardState, {
+        reconcile: true,
+        editSpan: applied,
+    });
+}
+
+async function handleAutomaticProseGuardRestore(context, messageId, changeIndex) {
+    const latest = getCurrentProseGuardTarget(context, messageId);
+    const proseGuardState = getMessageProseGuardState(latest.message);
+    if (!proseGuardState || proseGuardState.mode !== PROSE_GUARD_MODES.AUTOMATIC) {
+        throw new Error('This response has no automatic Prose Guard repair history.');
+    }
+    const change = proseGuardState.changes[Number(changeIndex)];
+    if (!change || change.status !== 'applied') throw new Error('That repair is no longer active.');
+    const currentText = getProseGuardMessageText(latest.message);
+    const currentChange = resolveStoredProseGuardChange(currentText, change);
+    if (!currentChange) throw new Error('The repaired sentence no longer matches the latest response.');
+    const nextText = currentText.slice(0, currentChange.start)
+        + currentChange.originalText
+        + currentText.slice(currentChange.end);
+    change.status = 'restored';
+    await persistProseGuardMessageEdit(context, latest.messageId, nextText, proseGuardState, {
+        reconcile: true,
+        editSpan: { start: currentChange.start, end: currentChange.end, replacementLength: currentChange.originalText.length },
+    });
+}
+
+async function handleManualProseGuardFix(context, messageId, phrase, reason) {
+    const latest = getCurrentProseGuardTarget(context, messageId);
+    const normalizedPhrase = String(phrase || '').trim();
+    if (!normalizedPhrase) throw new Error('Enter the specific offending phrase.');
+    const currentText = getProseGuardMessageText(latest.message);
+    const rules = getTargetedProseBanRules(getSettings(), [normalizedPhrase]);
+    const finding = collectProseGuardSentenceFindings(currentText, rules)
+        .find(item => item.matches.some(match => (
+            match.ruleName === 'userPhraseBans'
+            && String(match.phrase || '').toLocaleLowerCase() === normalizedPhrase.toLocaleLowerCase()
+        )));
+    if (!finding) throw new Error('That exact phrase was not found in the latest assistant response.');
+
+    const operationIdentity = createStoryEngineEpochIdentity(context);
+    const raw = await requestTargetedProseBanRepairWithTimeout([finding], rules, {
+        guidance: String(reason || '').trim(),
+        isCurrent: () => isCurrentStoryEngineEpoch(operationIdentity, context)
+            && context.chat?.[latest.messageId] === latest.message
+            && getLatestAssistantMessageEntry(context)?.messageId === latest.messageId,
+        expiredMessage: 'Manual Prose Guard repair expired because the latest response changed.',
+    });
+    const payload = parseTargetedProseGuardResponse(raw);
+    const repaired = applyProseGuardSentenceRepairs(currentText, [finding], payload, { rules });
+    const applied = repaired.appliedRepairs.find(item => item.findingId === finding.id);
+    if (!applied || repaired.rejectedRepairs.length) {
+        throw new Error(repaired.rejectedRepairs[0]?.reason || 'Prose Guard did not return a valid sentence repair.');
+    }
+
+    const proseGuardState = getMessageProseGuardState(latest.message);
+    if (proseGuardState) {
+        const matchingFinding = proseGuardState.findings.find(item => item.status === 'pending' && item.sentence === finding.sentence);
+        if (matchingFinding) {
+            matchingFinding.status = 'fixed';
+            matchingFinding.replacementText = applied.replacementText;
+        }
+        proseGuardState.changes.push({ ...applied, status: 'applied' });
+    }
+    await persistProseGuardMessageEdit(context, latest.messageId, repaired.narrationText, proseGuardState, {
+        reconcile: true,
+        editSpan: applied,
+    });
+    addCustomProseGuardPhrase(normalizedPhrase);
+}
+
+function attachProseGuardWidgetHandlers(strip, context = getContext()) {
+    if (!strip) return;
+    strip.onclick = event => {
+        const target = event.target?.closest?.('button');
+        if (!target) return;
+
+        if (target.matches('[data-spe-prose-guard-toggle]')) {
+            event.preventDefault();
+            const details = strip.querySelector('[data-spe-prose-guard-details]');
+            if (!details) return;
+            details.hidden = !details.hidden;
+            target.setAttribute('aria-expanded', String(!details.hidden));
+            return;
+        }
+
+        const latest = getLatestAssistantMessageEntry(context);
+        if (!latest) {
+            notifyError('There is no assistant response to edit.', EXTENSION_NAME);
+            return;
+        }
+        target.disabled = true;
+        let operation = null;
+        if (target.matches('[data-spe-prose-guard-review-action]')) {
+            operation = handleProseGuardReviewAction(
+                context,
+                target.getAttribute('data-spe-prose-guard-message-id'),
+                target.getAttribute('data-spe-prose-guard-finding-id'),
+                target.getAttribute('data-spe-prose-guard-review-action'),
+            );
+        } else if (target.matches('[data-spe-prose-guard-restore]')) {
+            operation = handleAutomaticProseGuardRestore(
+                context,
+                target.getAttribute('data-spe-prose-guard-message-id'),
+                target.getAttribute('data-spe-prose-guard-change-index'),
+            );
+        } else if (target.matches('[data-spe-prose-guard-manual-fix]')) {
+            operation = handleManualProseGuardFix(
+                context,
+                latest.messageId,
+                strip.querySelector('[data-spe-prose-guard-manual-phrase]')?.value,
+                strip.querySelector('[data-spe-prose-guard-manual-reason]')?.value,
+            );
+        }
+        if (!operation) {
+            target.disabled = false;
+            return;
+        }
+        void operation
+            .catch(error => {
+                console.error(`[${EXTENSION_NAME}] Prose Guard action failed.`, error);
+                notifyError(error instanceof Error ? error.message : String(error), EXTENSION_NAME);
+            })
+            .finally(() => {
+                if (target.isConnected) target.disabled = false;
+            });
+    };
 }
 
 function trackerEditableItemRowHtml(field, value = '') {
@@ -9410,6 +10472,7 @@ async function handleProgressionAction(action, details = {}, context = getContex
     const actionIdentity = createStoryEngineEpochIdentity(context);
     root.ui = root.ui || {};
     delete root.ui.error;
+    let transactionPersisted = false;
 
     try {
         if (action === 'choose-stat') {
@@ -9427,7 +10490,12 @@ async function handleProgressionAction(action, details = {}, context = getContex
         } else if (action === 'back') {
             root.pendingAdvancement.choice = 'choose';
         } else if (action === 'apply-stat') {
-            await applyProgressionStatChoice(root, details.stat, context, actionIdentity);
+            await runPersonaMetadataTransaction(
+                context,
+                actionIdentity,
+                () => applyProgressionStatChoice(root, details.stat, context, actionIdentity),
+            );
+            transactionPersisted = true;
         } else if (action === 'generate-abilities') {
             state.progressionBusy = true;
             root.pendingAdvancement.swapAbilityIndex = getSelectedProgressionSwapAbilityIndex(context);
@@ -9443,15 +10511,28 @@ async function handleProgressionAction(action, details = {}, context = getContex
             if (!Array.isArray(root.pendingAdvancement.abilityOptions) || !root.pendingAdvancement.abilityOptions.length) {
                 root.pendingAdvancement.swapAbilityIndex = getSelectedProgressionSwapAbilityIndex(context);
             }
-            await applyProgressionAbilityChoice(root, Number(details.optionIndex), context, actionIdentity);
+            await runPersonaMetadataTransaction(
+                context,
+                actionIdentity,
+                () => applyProgressionAbilityChoice(root, Number(details.optionIndex), context, actionIdentity),
+            );
+            transactionPersisted = true;
         } else if (action === 'choose-spell') {
-            await applyProgressionSpellChoice(root, Number(details.optionIndex), context, actionIdentity);
+            await runPersonaMetadataTransaction(
+                context,
+                actionIdentity,
+                () => applyProgressionSpellChoice(root, Number(details.optionIndex), context, actionIdentity),
+            );
+            transactionPersisted = true;
         }
         assertStoryEngineEpochCurrent(actionIdentity, 'Progression action expired because the active chat changed.');
-        await persistMetadata(context);
+        if (!transactionPersisted) await persistMetadata(context);
     } catch (error) {
         if (!isCurrentStoryEngineEpoch(actionIdentity)) return;
-        root.ui.error = error instanceof Error ? error.message : String(error);
+        const currentRoot = getProgressionRoot(context);
+        if (!currentRoot) return;
+        currentRoot.ui = currentRoot.ui || {};
+        currentRoot.ui.error = error instanceof Error ? error.message : String(error);
         console.error(`[${EXTENSION_NAME}] progression action failed`, error);
         await persistMetadata(context);
     } finally {
@@ -9483,6 +10564,7 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
     const root = getPlayerRoot(context);
     if (!root) return;
     const actionIdentity = createStoryEngineEpochIdentity(context);
+    let transactionPersisted = false;
 
     root.creator = root.creator || { stage: 'offer' };
 
@@ -9588,7 +10670,13 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
         } else if (action === 'back-to-identity') {
             root.creator.stage = root.creator.flow === 'new' ? 'identity' : 'persona-sheet';
         } else if (action === 'approve-sheet') {
-            await approvePlayerSheet(root, context, actionIdentity);
+            await runPersonaMetadataTransaction(
+                context,
+                actionIdentity,
+                () => approvePlayerSheet(root, context, actionIdentity),
+            );
+            transactionPersisted = true;
+            notifySuccess('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
         } else if (action === 'back-from-adventure-start') {
             const flow = root.creator?.flow || (root.sheet?.source === 'existing_persona_conversion' ? 'persona' : 'new');
             root.ready = false;
@@ -9636,12 +10724,15 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
             root.adventureStartDismissedAt = Date.now();
         }
         assertStoryEngineEpochCurrent(actionIdentity, 'Player setup action expired because the active chat changed.');
-        await persistMetadata(context);
+        if (!transactionPersisted) await persistMetadata(context);
     } catch (error) {
 
         if (!isCurrentStoryEngineEpoch(actionIdentity)) return;
 
-        root.creator.error = error instanceof Error ? error.message : String(error);
+        const currentRoot = getPlayerRoot(context);
+        if (!currentRoot) return;
+        currentRoot.creator = currentRoot.creator || { stage: 'offer' };
+        currentRoot.creator.error = error instanceof Error ? error.message : String(error);
 
         console.error(`[${EXTENSION_NAME}] player setup action failed`, error);
 
@@ -9803,7 +10894,6 @@ async function approvePlayerSheet(root, context = getContext(), actionIdentity =
         stage: 'approved',
         sheetText,
     };
-    notifySuccess('Player sheet inserted into the active persona.', EXTENSION_NAME, { timeOut: 6000 });
 }
 
 async function applyProgressionStatChoice(root, stat, context = getContext(), actionIdentity = null) {
@@ -11472,12 +12562,17 @@ function parseProseGuardBannedPhraseList(value) {
         .filter(Boolean));
 }
 
-function getTargetedProseBanRules(settings = getSettings()) {
+function getTargetedProseBanRules(settings = getSettings(), additionalUserPhrases = []) {
     const configuredRules = PROSE_GUARD_TARGETED_BAN_FIELDS
         .map(field => ({
             ...field,
-            rulePrompt: getProseRuleBlock(field.ruleName),
-            phrases: parseProseGuardBannedPhraseList(settings[field.key] ?? field.defaultValue),
+            rulePrompt: field.rulePrompt || getProseRuleBlock(field.ruleName),
+            phrases: field.ruleName === 'userPhraseBans'
+                ? uniqueStrings([
+                    ...parseProseGuardBannedPhraseList(settings[field.key] ?? field.defaultValue),
+                    ...additionalUserPhrases,
+                ])
+                : parseProseGuardBannedPhraseList(settings[field.key] ?? field.defaultValue),
         }));
     const automaticRules = PROSE_GUARD_AUTOMATIC_PATTERN_RULES
         .map(rule => ({
@@ -11503,7 +12598,8 @@ function formatTargetedProseBanFindings(findings, rules) {
     ].join('\n')).join('\n\n');
 }
 
-function buildTargetedProseBanRepairPrompt(findings, rules) {
+function buildTargetedProseBanRepairPrompt(findings, rules, guidance = '') {
+    const manualGuidance = String(guidance || '').trim().slice(0, 1000);
     return [
         'STORY_ENGINE_TARGETED_PROSE_BAN_REPAIR',
         '',
@@ -11523,6 +12619,9 @@ function buildTargetedProseBanRepairPrompt(findings, rules) {
         '- Preserve quoted dialogue exactly except when the confirmed match itself occurs inside that dialogue.',
         '- Do not replace a banned phrase with another banned phrase or an equivalent workaround.',
         '- Return no commentary, analysis, corrected narration, or labels outside the required edit block.',
+        ...(manualGuidance
+            ? ['', 'USER REPAIR GUIDANCE:', manualGuidance, 'Use this only to clarify the prohibited construction. It does not authorize changing facts or adding content.']
+            : []),
         '',
         'DETERMINISTIC FINDINGS:',
         formatTargetedProseBanFindings(findings, rules),
@@ -11547,7 +12646,7 @@ async function requestTargetedProseBanRepair(findings, rules, requestOptions = {
     if (!isStoryEngineEnabled()) {
         throw new Error('Story Engine is disabled.');
     }
-    const prompt = buildTargetedProseBanRepairPrompt(findings, rules);
+    const prompt = buildTargetedProseBanRepairPrompt(findings, rules, requestOptions.guidance);
     const sentenceCharacters = (findings || []).reduce((total, finding) => total + finding.sentence.length, 0);
     const responseLength = Math.max(800, Math.min(5000, Math.ceil(sentenceCharacters / 2) + (findings.length * 180) + 500));
     const toolDefinition = buildPostNarrationToolDefinition(PROSE_GUARD_TOOL_NAME, { includeSentenceRepairs: true });
@@ -11561,12 +12660,6 @@ async function requestTargetedProseBanRepair(findings, rules, requestOptions = {
                 toolDefinition,
                 purpose: 'targeted Prose Guard repair',
                 validateStructured: raw => parseTargetedProseGuardResponse(raw),
-                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), {
-                    purpose: 'targeted Prose Guard repair',
-                    signal: modelRequest.signal,
-                    beforeAbort: markInternalGenerationStop,
-                }),
-                fallbackAfterStructuredFailure: false,
             }, modelRequest);
         }), requestOptions);
     } finally {
@@ -11610,6 +12703,7 @@ class ProseGuardEnforcementError extends Error {
 async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions = {}) {
     let currentText = String(narrationText ?? '');
     let changed = false;
+    const appliedRepairs = [];
     let lastFindings = [];
     let lastRemainingFindings = [];
     let lastRejectedRepairs = [];
@@ -11631,6 +12725,7 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
                     findings: lastFindings,
                     remainingFindings: [],
                     rejectedRepairs: [],
+                    appliedRepairs,
                 };
             }
 
@@ -11641,6 +12736,7 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
             const unresolvedFindings = findings.filter(finding => !appliedFindingIds.has(finding.id));
             currentText = repaired.narrationText;
             changed = changed || repaired.changed;
+            appliedRepairs.push(...repaired.appliedRepairs);
             const remainingFindings = collectProseGuardSentenceFindings(currentText, rules);
             lastRemainingFindings = remainingFindings;
             lastRejectedRepairs = repaired.rejectedRepairs;
@@ -11652,6 +12748,7 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
                     findings,
                     remainingFindings: [],
                     rejectedRepairs: [],
+                    appliedRepairs,
                 };
             }
             lastError = new Error('One or more sentence repairs were missing, rejected, or still contained a targeted finding.');
@@ -11678,6 +12775,43 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
     );
     console.error(`[${EXTENSION_NAME}] targeted Prose Guard repair failed closed.`, enforcementError);
     throw enforcementError;
+}
+
+function buildReviewProseGuardState(findings) {
+    return {
+        version: PROSE_GUARD_EXTRA_VERSION,
+        mode: PROSE_GUARD_MODES.REVIEW,
+        savedAt: Date.now(),
+        findings: (findings || []).map(finding => ({ ...finding, status: 'pending' })),
+        changes: [],
+    };
+}
+
+function buildAutomaticProseGuardState(repairResult) {
+    const changes = (repairResult?.appliedRepairs || []).map(repair => ({
+        findingId: String(repair.findingId || ''),
+        start: normalizeProseGuardSpanOffset(repair.start),
+        end: normalizeProseGuardSpanOffset(repair.end),
+        originalText: String(repair.originalText || ''),
+        replacementText: String(repair.replacementText || ''),
+        status: 'applied',
+    }));
+    return {
+        version: PROSE_GUARD_EXTRA_VERSION,
+        mode: PROSE_GUARD_MODES.AUTOMATIC,
+        savedAt: Date.now(),
+        findings: changes.map(change => ({
+            id: change.findingId,
+            sentence: change.originalText,
+            start: change.start,
+            end: change.end,
+            ruleNames: [],
+            matches: [],
+            status: 'fixed',
+            replacementText: change.replacementText,
+        })),
+        changes,
+    };
 }
 
 
@@ -11749,7 +12883,7 @@ function buildPostNarrationToolDefinition(name, { includeSentenceRepairs = false
     };
 }
 
-function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
+function buildPostNarrationToolPrompt(prompt, toolDefinition) {
     const fields = Object.keys(toolDefinition?.parameters?.properties || {});
     const fieldInstructions = [];
     if (fields.includes('sentenceRepairs')) {
@@ -11766,7 +12900,7 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
         {
             role: 'user',
             content: [
-                `NATIVE DEEPSEEK TOOL OUTPUT OVERRIDE: Call ${toolDefinition.name} exactly once.`,
+                `STORY ENGINE TOOL OUTPUT OVERRIDE: Call ${toolDefinition.name} exactly once.`,
                 'Do not emit visible text, JSON, markdown, narration, analysis, or a text ledger outside the tool call.',
                 ...fieldInstructions,
                 'The preceding task rules remain authoritative; only its text-output formatting is superseded by this tool contract.',
@@ -11775,32 +12909,18 @@ function buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition) {
     ];
 }
 
-async function requestPostNarrationUtility({ settings, prompt, responseLength, toolDefinition, purpose, validateStructured, generateFallback, fallbackAfterStructuredFailure = true }, requestOptions = {}) {
+async function requestPostNarrationUtility({ settings, prompt, responseLength, toolDefinition, purpose, validateStructured }, requestOptions = {}) {
     assertStoryEngineModelRequestCurrent(requestOptions);
     const profileSettings = {
         ...settings,
         signal: requestOptions.signal,
+        purpose,
     };
-    if (settings?.semanticProfileId) {
-        if (isOfficialDeepSeekProfile(profileSettings)) {
-            try {
-                const toolPrompt = buildDeepSeekPostNarrationToolPrompt(prompt, toolDefinition);
-                const structured = await sendDeepSeekProfileStructuredRequest(toolPrompt, responseLength, profileSettings, toolDefinition);
-                validateStructured?.(structured);
-                return structured;
-            } catch (error) {
-                assertStoryEngineModelRequestCurrent(requestOptions);
-                if (!fallbackAfterStructuredFailure) throw error;
-                console.warn(`[${EXTENSION_NAME}] official DeepSeek ${purpose} tool call failed; falling back to validated text output.`, error);
-            }
-        }
-        assertStoryEngineModelRequestCurrent(requestOptions);
-        return await sendSemanticProfileTextRequest(prompt, responseLength, profileSettings, {
-            temperature: 0,
-        });
-    }
+    const toolPrompt = buildPostNarrationToolPrompt(prompt, toolDefinition);
+    const structured = await sendStructuredToolRequest(toolPrompt, responseLength, profileSettings, toolDefinition);
     assertStoryEngineModelRequestCurrent(requestOptions);
-    return await generateFallback();
+    validateStructured?.(structured);
+    return structured;
 }
 
 function deferForProseGuardFinalization() {
@@ -11880,7 +13000,10 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         boundCompanion: pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {},
         pendingBoundary: pendingRun?.pendingBoundaryAfter || pendingRun?.pendingBoundaryBefore || {},
     };
-    const activeNpcNames = [...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report)];
+    const activeNpcNames = uniqueStrings([
+        ...getActiveDisplayNpcNamesFromReport(trackerDisplaySnapshot?.npcs || {}, report),
+        ...getConfirmedSceneNpcNamesFromSnapshot(trackerDisplaySnapshot),
+    ]);
     const descriptiveArchive = normalizeDescriptiveArchive(pendingRun?.descriptiveArchiveAfter || pendingRun?.descriptiveArchiveBefore || {});
     const worldProgression = normalizeWorldProgression(pendingRun?.worldProgressionAfter || pendingRun?.worldProgressionBefore || {});
     const worldMemoryUpdateContext = buildWorldMemoryUpdateContext({
@@ -11889,6 +13012,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         worldState: trackerDisplaySnapshot?.worldState || pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
         resolutionPacket: resolution,
         focusText: narrationText,
+        sceneNames: activeNpcNames,
     });
     const powerActorState = {
         ...(pendingRun?.powerActorsBefore || {}),
@@ -12105,11 +13229,6 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
                     parsePostNarrationTrackerResponse(raw, narrationText);
                     parsePostNarrationWorldMemoryResponse(raw);
                 },
-                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), {
-                    purpose: 'post-narration tracker update',
-                    signal: modelRequest.signal,
-                    beforeAbort: markInternalGenerationStop,
-                }),
             }, modelRequest);
         }), requestOptions);
     } finally {
@@ -12194,7 +13313,7 @@ function prependComputedDebug(messageId, type) {
     }
     state.lastStoryEngineModelCallEndedAt = Date.now();
 
-    const proseGuardEnabled = getSettings().postNarrationProseGuardEnabled !== false;
+    const proseGuardEnabled = getProseGuardMode() !== PROSE_GUARD_MODES.OFF;
     if (state.postNarrationFinalizers.has(messageKey)) return;
 
     clearPendingRunCleanupTimer();
@@ -12241,10 +13360,11 @@ function prependComputedDebug(messageId, type) {
 async function finalizePostNarrationMessage(messageId, type, messageKey, finalizingToast = null, captured = {}) {
     let finalNarrationRendered = false;
     let proseGuardFailureHandled = false;
-    let proseGuardEnabled = true;
+    let proseGuardMode = PROSE_GUARD_MODES.AUTOMATIC;
     let finalizerContext = null;
     let trackerCommitted = false;
     let publishableNarrationText = '';
+    let automaticProseGuardState = null;
 
     try {
         if (!isStoryEngineEnabled()) {
@@ -12270,30 +13390,38 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
         message.extra = message.extra || {};
 
-        const currentText = String(message.mes ?? '');
-        const displayText = message.extra.display_text == null ? null : String(message.extra.display_text);
-        const rawAssistantText = displayText ?? currentText;
+        const rawAssistantText = getProseGuardMessageText(message);
         const visibleText = stripComputedDebugPrefix(rawAssistantText);
         let narrationText = sanitizeAssistantNarration(visibleText);
         const narratorHandoff = captured?.narratorHandoff ?? state.lastNarratorHandoff;
         const pendingRun = captured?.pendingRun ?? state.pendingRun;
+        const proseGuardReconciliation = captured?.proseGuardReconciliation === true;
+        const proseGuardReconciliationSeed = compactProseGuardPendingRun(pendingRun);
         let trackerDeltaWarning = null;
         const settings = getSettings();
-        proseGuardEnabled = settings.postNarrationProseGuardEnabled !== false;
+        proseGuardMode = getProseGuardMode(settings);
         const root = getTrackerRoot(context);
+        const rapportClockBefore = clone(root?.rapportClock);
         let finalTrackerDisplaySnapshot = null;
+        if (!proseGuardReconciliation) {
+            clearMessageProseGuardState(message);
+            clearMessageProseGuardReconciliationSeed(message);
+        }
 
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) {
             return;
         }
 
-        if (proseGuardEnabled && narrationText) {
+        if (!proseGuardReconciliation && proseGuardMode === PROSE_GUARD_MODES.AUTOMATIC && narrationText) {
             try {
                 await deferForProseGuardFinalization();
                 if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                 const targetedRepair = await applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions);
                 if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;
                 narrationText = targetedRepair.narrationText;
+                if (targetedRepair.appliedRepairs.length) {
+                    automaticProseGuardState = buildAutomaticProseGuardState(targetedRepair);
+                }
             } catch (error) {
                 let current = true;
                 try {
@@ -12506,6 +13634,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterEconomy: clone(trackerDisplaySnapshot.economy || {}),
                 afterBoundCompanion: clone(trackerDisplaySnapshot.boundCompanion || {}),
                 afterPendingBoundary: clone(trackerDisplaySnapshot.pendingBoundary || {}),
+                beforeRapportClock: clone(rapportClockBefore),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
 
@@ -12516,6 +13645,18 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             };
             pruneRootTrackerSnapshots(root);
             trackerCommitted = true;
+
+            if (proseGuardReconciliationSeed) {
+                const committedRun = {
+                    messageId,
+                    messageKey,
+                    type,
+                    narratorHandoff,
+                    pendingRun: proseGuardReconciliationSeed,
+                };
+                state.proseGuardCommittedRun = committedRun;
+                setMessageProseGuardReconciliationSeed(message, committedRun);
+            }
 
             finalTrackerDisplaySnapshot = trackerDisplaySnapshot;
             if (state.pendingRun === pendingRun) state.pendingRun = null;
@@ -12530,6 +13671,34 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
             pendingRun,
             context,
         });
+        const proseGuardFormattingOptions = {
+            trackerDisplaySnapshot: finalTrackerDisplaySnapshot,
+            pendingRun,
+            context,
+        };
+        if (proseGuardReconciliation) {
+            const reconciledState = formatProseGuardStateForMessage(
+                captured.proseGuardState,
+                narrationText,
+                narrationText,
+                proseGuardFormattingOptions,
+            ).state;
+            if (reconciledState) setMessageProseGuardState(message, reconciledState);
+            else clearMessageProseGuardState(message);
+        } else if (proseGuardMode === PROSE_GUARD_MODES.REVIEW) {
+            const findings = collectProseGuardSentenceFindings(narrationText, getTargetedProseBanRules());
+            if (findings.length) {
+                setMessageProseGuardState(message, buildReviewProseGuardState(findings));
+            }
+        } else if (automaticProseGuardState) {
+            const formattedAutomaticState = formatProseGuardStateForMessage(
+                automaticProseGuardState,
+                narrationText,
+                narrationText,
+                proseGuardFormattingOptions,
+            ).state;
+            setMessageProseGuardState(message, formattedAutomaticState);
+        }
         publishableNarrationText = narrationText;
 
         maybeRecordProgressionAccomplishment({ pendingRun, messageKey, context });
@@ -12575,7 +13744,10 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
 
         if (current && !finalNarrationRendered && !proseGuardFailureHandled) {
             const context = finalizerContext || getContext();
-            if (trackerCommitted && publishableNarrationText) {
+            if (captured?.proseGuardReconciliation) {
+                releaseProseGuardDisplayIntercept({ messageId });
+                proseGuardFailureHandled = true;
+            } else if (trackerCommitted && publishableNarrationText) {
                 const message = context?.chat?.[messageId];
                 if (message && !message.is_user) {
                     message.extra = message.extra || {};
@@ -12873,12 +14045,26 @@ function subscribeMessageHandler() {
 
     const context = getContext();
 
-    if (!canSubscribeToEvent('MESSAGE_RECEIVED', context)) return;
+    if (!STORY_ENGINE_EVENT_HANDLERS.every(([eventType]) => canSubscribeToEvent(eventType, context))) return;
 
-    const [requiredEvent, requiredHandler] = STORY_ENGINE_EVENT_HANDLERS[0];
-    if (!onEvent(requiredEvent, requiredHandler, context, { warn: false })) return;
-    for (const [eventType, handler] of STORY_ENGINE_EVENT_HANDLERS.slice(1)) {
-        onEvent(eventType, handler, context, { warn: false });
+    const subscribedHandlers = [];
+    try {
+        for (const [eventType, handler] of STORY_ENGINE_EVENT_HANDLERS) {
+            if (!onEvent(eventType, handler, context, { warn: false })) {
+                throw new Error(`SillyTavern event subscription failed for ${eventType}.`);
+            }
+            subscribedHandlers.push([eventType, handler]);
+        }
+    } catch (error) {
+        for (const [eventType, handler] of subscribedHandlers.reverse()) {
+            try {
+                offEvent(eventType, handler, context, { warn: false });
+            } catch {
+                // Best-effort rollback keeps a partial subscription from being accepted as initialized.
+            }
+        }
+        console.warn(`[${EXTENSION_NAME}] event handlers were not subscribed atomically.`, error);
+        return;
     }
     state.subscribed = true;
 }
@@ -13198,6 +14384,7 @@ async function handleChatCompletionPromptReady(eventData) {
             pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             adventureGenre: pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
             latestUserText: pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
+            sceneNames: getConfirmedSceneNpcNames(context),
             worldProgressionProjectionKey: pendingGeneration.runId || runIdentity.runId,
         });
 

@@ -444,7 +444,7 @@ export async function writePersonaDescription(description, context = getContext(
     const powerUser = getPowerUserSettings();
     const current = String(descriptor.description || powerUser?.persona_description || '').trim();
     const nextDescription = String(description || '').trim();
-    if (!nextDescription) {
+    if (!nextDescription && options?.allowEmpty !== true) {
         throw new Error('Generated character sheet is empty; persona was not changed.');
     }
 
@@ -544,8 +544,12 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     throwIfRequestAborted(signal);
 
     const chatCompletionSource = generateData.chat_completion_source || chatCompletionSettings?.chat_completion_source;
-    const tool = options?.buildTool?.(chatCompletionSource);
-    const toolChoice = options?.buildToolChoice?.(chatCompletionSource);
+    const route = {
+        usesCustomUrl: hasRoutingValue(generateData.custom_url),
+        usesReverseProxy: hasRoutingValue(generateData.reverse_proxy),
+    };
+    const tool = options?.buildTool?.(chatCompletionSource, route);
+    const toolChoice = options?.buildToolChoice?.(chatCompletionSource, route);
     generateData.messages = messages;
     generateData.stream = false;
     generateData.n = undefined;
@@ -620,15 +624,16 @@ export function getChatCompletionProfileRoute(profileId, profileName = '') {
     if (!chatCompletionSource) {
         throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support chat-completion requests.`, { stage: 'profile' });
     }
-    const hasRoutingValue = value => {
-        const normalized = String(value || '').trim().toLowerCase();
-        return Boolean(normalized && normalized !== '<none>' && normalized !== '<empty>');
-    };
     return {
         source: String(chatCompletionSource),
         usesCustomUrl: hasRoutingValue(profile?.['api-url']),
         usesReverseProxy: hasRoutingValue(profile?.proxy),
     };
+}
+
+function hasRoutingValue(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return Boolean(normalized && normalized !== '<none>' && normalized !== '<empty>');
 }
 
 export async function sendChatCompletionProfileRequest(request = {}) {

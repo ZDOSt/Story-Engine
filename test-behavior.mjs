@@ -8,7 +8,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, reconstructSemanticToolLedger, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, reconstructSemanticToolLedger, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -11791,6 +11791,16 @@ const tests = [
       });
       assert.deepEqual(withActor.observableEvidence.map(item => item.route), ['actor']);
 
+      const withTrackerConfirmedActor = prepareWorldMemoryNarration({
+        archive: due.archive,
+        progression: due.progression,
+        worldState: { place: 'Roadside Inn' },
+        latestUserText: 'I speak to him.',
+        resolutionPacket: {},
+        sceneNames: ['Rick'],
+      });
+      assert.deepEqual(withTrackerConfirmedActor.observableEvidence.map(item => item.route), ['actor']);
+
       const strategicActorOnly = prepareWorldMemoryNarration({
         archive: due.archive,
         progression: due.progression,
@@ -11875,6 +11885,20 @@ const tests = [
       });
       assert.equal(topicOnly.progression.plans[0].evidence.find(item => item.id === locationEvidenceId).discovered, false);
       assert.ok(topicOnly.audit.includes(`discovery_rejected_mismatched_quote:${locationEvidenceId}`));
+
+      const weakOverlap = applyWorldMemoryDelta({ archive: due.archive, progression: due.progression }, {
+        discoveries: [{
+          id: locationEvidenceId,
+          quote: "Rick's rented berth burns.",
+        }],
+      }, {
+        authorizedEvidence: atLocation.observableEvidence,
+        narrationText: "Rick's rented berth is empty and his travel bag is gone. Rick's rented berth burns.",
+        afterWorldState: { dayIndex: 4, timeOfDay: 'morning', place: 'South Dock' },
+        messageKey: 'chat:4-weak-overlap',
+      });
+      assert.equal(weakOverlap.progression.plans[0].evidence.find(item => item.id === locationEvidenceId).discovered, false);
+      assert.ok(weakOverlap.audit.includes(`discovery_rejected_mismatched_quote:${locationEvidenceId}`));
 
       const discovered = applyWorldMemoryDelta({ archive: due.archive, progression: due.progression }, {
         discoveries: [{
@@ -13032,6 +13056,11 @@ const tests = [
       assert.equal(
         sanitizeAssistantNarration(proseGuardLeak),
         'Naomi steps into the entryway and turns once.',
+      );
+      assert.equal(
+        sanitizeAssistantNarration('BEGIN_TRACKER_DELTA\nTrackerUpdateEngine.User.condition=unchanged\nEND_TRACKER_DELTA'),
+        '',
+        'An artifact-only response must never fail open and become visible narration.',
       );
     },
   },
@@ -15442,19 +15471,26 @@ const tests = [
     },
   },
   {
-    name: '47 Prose Guard is a deterministic four-field sentence repair pipeline',
+    name: '47 Prose Guard supports automatic, review, and persistent manual phrase repair',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.51');
+      assert.equal(manifest.version, '0.9.54');
+      assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
+      assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
+      assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
       assert.match(source, /proseGuardEmbodiedPerceptionBannedPhrases:\s*DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES/);
       assert.doesNotMatch(source, /proseGuardInanimateObjectivityBannedPhrases|ruleName:\s*'inanimateObjectivity'/);
-      assert.match(source, /rulePrompt:\s*getProseRuleBlock\(field\.ruleName\)/);
+      assert.match(source, /rulePrompt:\s*field\.rulePrompt \|\| getProseRuleBlock\(field\.ruleName\)/);
+      assert.match(source, /function handleManualProseGuardFix/);
+      assert.match(source, /addCustomProseGuardPhrase\(normalizedPhrase\)/);
+      assert.match(source, /collectProseGuardSentenceFindings\(currentText, rules\)/);
+      assert.match(source, /applyProseGuardSentenceRepairs\(currentText, \[finding\], payload, \{ rules \}\)/);
       assert.match(source, /function getProseRuleBlock\(ruleName\)/);
       assert.match(source, /const PROSE_GUARD_AUTOMATIC_PATTERN_RULES = Object\.freeze/);
       assert.match(source, /ruleName: 'antiRhetoricalNegation',[\s\S]{0,120}patternNames: \['notXButY'\]/);
@@ -15462,7 +15498,7 @@ const tests = [
       assert.match(source, /\.filter\(rule => rule\.phrases\.length > 0 \|\| rule\.patternNames\?\.length > 0\)/);
       assert.match(source, /const PROSE_GUARD_MAX_REPAIR_ATTEMPTS = 2/);
       assert.match(source, /for \(let attempt = 1; attempt <= PROSE_GUARD_MAX_REPAIR_ATTEMPTS; attempt \+= 1\)/);
-      assert.match(source, /fallbackAfterStructuredFailure: false/);
+      assert.match(source, /const structured = await sendStructuredToolRequest\(toolPrompt, responseLength, profileSettings, toolDefinition\)/);
       assert.match(source, /if \(extension_settings\[SETTINGS_KEY\]\[key\] === undefined\)/);
       assert.match(source, /data-structured-preflight-reset-prose-guard-bans/);
 
@@ -15474,6 +15510,14 @@ const tests = [
       assert.doesNotMatch(source, /buildProseGuardPrompt|requestProseGuardCorrection|requestCombinedPostNarrationPass|STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
       assert.doesNotMatch(source, /PROSE_GUARD_MAX_REPAIR_ROUNDS|writeProseGuardMessageText|rollbackProseGuardTrackerCommit|proseGuardProtection/);
       assert.doesNotMatch(editSource, /TARGETED_REPAIR_ACTOR_TOKENS|lexical anchor|isNearDuplicateNarration|assertNonDestructiveReplacement|rejectRepeatedNarration/);
+
+      const manualStart = source.indexOf('async function handleManualProseGuardFix(');
+      const manualEnd = source.indexOf('function attachProseGuardWidgetHandlers(', manualStart);
+      const manualSource = source.slice(manualStart, manualEnd);
+      assert.ok(
+        manualSource.indexOf('await persistProseGuardMessageEdit(') < manualSource.indexOf('addCustomProseGuardPhrase(normalizedPhrase)'),
+        'A manual phrase must be saved only after its repair and reconciliation succeed.',
+      );
     },
   },
   {
@@ -15490,11 +15534,15 @@ const tests = [
       assert.equal(findings.length, 2);
       assert.equal(findings[0].id, 'PG_SENTENCE_1');
       assert.equal(findings[0].sentence, 'Maria says, "Her breath catches."');
+      assert.equal(findings[0].start, 0);
+      assert.equal(findings[0].end, findings[0].start + findings[0].sentence.length);
       assert.deepEqual(findings[0].ruleNames, ['strictBehaviorism']);
       assert.equal(findings[0].matches.length, 1);
       assert.equal(findings[0].matches[0].matchedPhrase, 'breath catches');
       assert.equal(findings[1].id, 'PG_SENTENCE_2');
       assert.equal(findings[1].sentence, 'Outside, her breath catches while silence stretches and the room smells of smoke.');
+      assert.equal(findings[1].start, source.indexOf(findings[1].sentence));
+      assert.equal(findings[1].end, findings[1].start + findings[1].sentence.length);
       assert.deepEqual(findings[1].ruleNames, ['strictBehaviorism', 'denotativePhysicality', 'embodiedPerception']);
       assert.equal(findings[1].matches.length, 3);
       assert.equal(findings[1].matches.filter(match => match.ruleName === 'strictBehaviorism').length, 1);
@@ -15532,6 +15580,9 @@ const tests = [
       ).join(' ');
       assert.equal(collectProseGuardSentenceFindings(manyFindingsSource, rules).length, 30);
       assert.equal(collectProseGuardSentenceFindings(manyFindingsSource, rules, 24).length, 24);
+      const boundedFindings = collectProseGuardSentenceFindings(manyFindingsSource, rules, 24);
+      assert.equal(boundedFindings[5].start, manyFindingsSource.indexOf('Sentence 6'));
+      assert.equal(boundedFindings[5].end, boundedFindings[5].start + boundedFindings[5].sentence.length);
 
       assert.equal(
         collectProseGuardSentenceFindings(
@@ -15811,12 +15862,16 @@ const tests = [
       assert.equal((finalizerSource.match(/applyTargetedProseBanRepairIfNeeded\(/g) || []).length, 1);
       assert.equal((finalizerSource.match(/requestPostNarrationTrackerDeltaWithTimeout\(/g) || []).length, 1);
       assert.doesNotMatch(finalizerSource.slice(trackerRequestIndex), /applyTargetedProseBanRepairIfNeeded\(/);
-      assert.match(source, /if \(proseGuardEnabled && narrationText\)/);
+      assert.match(source, /if \(!proseGuardReconciliation && proseGuardMode === PROSE_GUARD_MODES\.AUTOMATIC && narrationText\)/);
       assert.match(source, /function requestPostNarrationUtility/);
       assert.match(source, /requestPostNarrationUtility\([\s\S]*?requestOptions = \{\}/);
-      assert.match(source, /fallbackAfterStructuredFailure: false/);
+      const utilityStart = source.indexOf('async function requestPostNarrationUtility(');
+      const utilityEnd = source.indexOf('function deferForProseGuardFinalization(', utilityStart);
+      const utilitySource = source.slice(utilityStart, utilityEnd);
+      assert.match(utilitySource, /await sendStructuredToolRequest\(/);
+      assert.doesNotMatch(utilitySource, /generateRawData|extractGeneratedText|fallback/i);
       assert.match(source, /abortController\?\.abort\(\)/);
-      assert.match(source, /sendDeepSeekProfileStructuredRequest/);
+      assert.match(source, /sendStructuredToolRequest/);
       assert.doesNotMatch(source, /buildProseGuardPrompt|requestProseGuardCorrection|requestCombinedPostNarrationPass|parseCombinedPostNarrationResponse|combinedTrackerDelta|broadProseGuardAlreadyApplied|STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
       assert.doesNotMatch(source, /includeProseEdits|proseEdits|rollbackProseGuardTrackerCommit/);
       assert.doesNotMatch(editSource, /semantic|action classifier|lexical anchor|duplicate narration/i);
@@ -15867,6 +15922,87 @@ const tests = [
 
       assert.match(source, /captureProseGuardDraftSnapshot\(context, normalizedType, state\.proseGuardExpectedMessageId\)/);
       assert.doesNotMatch(source, /keepHidden|proseGuardProtectionChatId|proseGuardProtectionChatRef|writeProseGuardMessageText|rollbackProseGuardTrackerCommit/);
+    },
+  },
+  {
+    name: '48d Prose Guard targets assistant narration, keeps swipe text aligned, and fails closed on stale reconciliation',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const assistantStart = source.indexOf('function isAssistantNarrationMessage(');
+      const assistantEnd = source.indexOf('function getLatestAssistantMessageEntry(', assistantStart);
+      const assistantSource = source.slice(assistantStart, assistantEnd);
+      assert.match(assistantSource, /message\.is_user \|\| message\.is_system/);
+      assert.match(assistantSource, /\['user', 'system', 'tool', 'function'\]\.includes\(role\)/);
+
+      const textStart = source.indexOf('function getProseGuardMessageText(');
+      const textEnd = source.indexOf('function getPendingProseGuardFindings(', textStart);
+      const textSource = source.slice(textStart, textEnd);
+      assert.match(textSource, /typeof message\.mes === 'string'\s*\n\s*\? message\.mes/);
+      assert.match(textSource, /String\(message\.extra\?\.display_text \?\? ''\)/);
+
+      const storageStart = source.indexOf('function setMessageProseGuardState(');
+      const storageEnd = source.indexOf('function getMessageProseGuardState(', storageStart);
+      const storageSource = source.slice(storageStart, storageEnd);
+      assert.match(storageSource, /message\.extra\[PROSE_GUARD_EXTRA_KEY\]\[swipeId\] = payload/);
+      assert.match(storageSource, /swipeInfo\.extra\[PROSE_GUARD_EXTRA_KEY\]\[swipeId\] = clone\(payload\)/);
+      assert.match(source, /message\.swipes\[getMessageSwipeId\(message\)\] = finalText/);
+
+      const reconciliationStart = source.indexOf('async function reconcileProseGuardEditedMessage(');
+      const reconciliationEnd = source.indexOf('async function persistProseGuardMessageEdit(', reconciliationStart);
+      const reconciliationSource = source.slice(reconciliationStart, reconciliationEnd);
+      assert.match(reconciliationSource, /restoreTrackerBeforeProseGuardEdit\(context, messageId, messageKey\)/);
+      assert.match(reconciliationSource, /previousTracker/);
+      assert.match(reconciliationSource, /previousProgression/);
+      assert.match(reconciliationSource, /reconciledRun === previousCommitted/);
+      assert.match(reconciliationSource, /state\.pendingRun === pendingRun/);
+      assert.match(reconciliationSource, /await persistMetadata\(context\)/);
+
+      const restoreStart = source.indexOf('function restoreTrackerBeforeProseGuardEdit(');
+      const restoreEnd = source.indexOf('async function reconcileProseGuardEditedMessage(', restoreStart);
+      const restoreSource = source.slice(restoreStart, restoreEnd);
+      assert.match(restoreSource, /Object\.hasOwn\(snapshot, 'beforeRapportClock'\)/);
+      assert.match(restoreSource, /root\.rapportClock = normalizeRapportClockState\(snapshot\.beforeRapportClock\)/);
+      assert.match(restoreSource, /rebuildWorldMemoryFromSelectedSwipes\(context, \{ beforeMessageId: messageId \}\)/);
+      assert.match(restoreSource, /removeProgressionRecordsAtOrAfterMessageId\(getChatId\(context\), messageId, context\)/);
+
+      const seedStart = source.indexOf('function compactProseGuardPendingRun(');
+      const seedEnd = source.indexOf('function rebuildWorldMemoryFromSelectedSwipes(', seedStart);
+      const seedSource = source.slice(seedStart, seedEnd);
+      assert.match(seedSource, /function setMessageProseGuardReconciliationSeed/);
+      assert.match(seedSource, /function getMessageProseGuardReconciliationSeed/);
+      assert.match(seedSource, /PROSE_GUARD_RECONCILIATION_EXTRA_KEY/);
+      assert.match(source, /const persisted = getMessageProseGuardReconciliationSeed\(message\)/);
+      assert.match(source, /setMessageProseGuardReconciliationSeed\(message, committedRun\)/);
+    },
+  },
+  {
+    name: '48e audit repairs preserve world-memory migration, actor routing, and persona transactions',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const runnerSource = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
+      const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
+
+      const trackerRootStart = source.indexOf('function getTrackerRoot(');
+      const trackerRootEnd = source.indexOf('function resolveStoredLatentGrievances(', trackerRootStart);
+      const trackerRootSource = source.slice(trackerRootStart, trackerRootEnd);
+      assert.match(trackerRootSource, /root\.worldMemoryBase = normalizeWorldMemoryState\(\{\s*archive: root\.descriptiveArchive,\s*progression: root\.worldProgression,/);
+      assert.match(source, /let memory = normalizeWorldMemoryState\(root\.worldMemoryBase \|\| \{\}\)/);
+      assert.match(runnerSource, /sceneNames: options\?\.sceneNames \|\| \[\]/);
+      assert.match(source, /sceneNames: getConfirmedSceneNpcNames\(context\)/);
+      assert.match(source, /sceneNames: activeNpcNames/);
+
+      const transactionStart = source.indexOf('function capturePersonaMetadataTransaction(');
+      const transactionEnd = source.indexOf('function findPersonaSection(', transactionStart);
+      const transactionSource = source.slice(transactionStart, transactionEnd);
+      assert.match(source, /const PERSONA_METADATA_TRANSACTION_KEYS = Object\.freeze\(\[[\s\S]*PLAYER_SETUP_KEY,[\s\S]*PROGRESSION_KEY,[\s\S]*'structuredPreflightTracker'/);
+      assert.match(transactionSource, /restorePersonaMetadataTransaction\(snapshot, context\)/);
+      assert.match(transactionSource, /await writePersonaDescription\(previousPersona, context, \{[\s\S]*allowEmpty: true/);
+      assert.match(source, /await runPersonaMetadataTransaction\([\s\S]*\(\) => approvePlayerSheet\(root, context, actionIdentity\)/);
+      assert.ok(
+        source.indexOf("notifySuccess('Player sheet inserted into the active persona.'") > source.indexOf('() => approvePlayerSheet(root, context, actionIdentity)'),
+        'Player-sheet success must be announced only after the transaction succeeds.',
+      );
+      assert.match(adapterSource, /if \(!nextDescription && options\?\.allowEmpty !== true\)/);
     },
   },
   {
@@ -15926,12 +16062,22 @@ const tests = [
       assert.equal(deepSeekHighPayload.include_reasoning, true);
       assert.equal(deepSeekHighPayload.reasoning_effort, 'max');
       assert.equal(deepSeekHighPayload.max_tokens, 4096);
-      for (const sourceName of ['deepseek', 'openai', 'azure_openai', 'claude', 'gemini', 'nanogpt', 'custom', 'openrouter']) {
+      for (const sourceName of ['deepseek', 'openai']) {
         assert.deepEqual(buildSemanticToolChoice(sourceName), {
           type: 'function',
           function: { name: 'submit_semantic_preflight' },
         });
       }
+      for (const sourceName of ['azure_openai', 'claude', 'gemini', 'nanogpt', 'custom', 'openrouter']) {
+        assert.equal(buildSemanticToolChoice(sourceName), 'auto');
+      }
+      assert.equal(buildSemanticToolChoice('deepseek', { usesCustomUrl: true }), 'auto');
+      assert.equal(buildSemanticToolChoice('openai', { usesReverseProxy: true }), 'auto');
+      assert.deepEqual(buildStructuredToolChoice('submit_tracker_delta', 'openai'), {
+        type: 'function',
+        function: { name: 'submit_tracker_delta' },
+      });
+      assert.equal(buildStructuredToolChoice('submit_tracker_delta', 'openrouter'), 'auto');
 
       const nanoGptSemanticPayload = {
         chat_completion_source: 'nanogpt',
@@ -16288,17 +16434,25 @@ const tests = [
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
       assert.match(semanticSource, /route\.usesCustomUrl !== true/);
       assert.match(semanticSource, /route\.usesReverseProxy !== true/);
-      assert.match(semanticSource, /export async function sendDeepSeekProfileStructuredRequest/);
-      assert.match(semanticSource, /sendDeepSeekProfileStructuredRequest[\s\S]*tool_choice: undefined[\s\S]*preparePayload: payload => applySemanticThinkingPayload\(payload, options\.semanticReasoningEffort\)/);
+      assert.match(semanticSource, /export async function sendStructuredToolRequest/);
+      assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineThinkingDisabledPayload\(generateData\)/);
 
       const semanticProfileToolRequest = semanticSource.slice(
         semanticSource.indexOf('async function generateSemanticToolCallWithProfile'),
-        semanticSource.indexOf('export async function sendSemanticProfileTextRequest'),
+        semanticSource.indexOf('export function isOfficialDeepSeekProfile'),
       );
       assert.match(semanticProfileToolRequest, /sendConnectionManagerProfileRequest/);
-      assert.match(semanticProfileToolRequest, /tool_choice: buildSemanticToolChoice\(chatCompletionSource\)/);
+      assert.match(semanticProfileToolRequest, /tool_choice: buildSemanticToolChoice\(chatCompletionSource, route\)/);
       assert.doesNotMatch(semanticProfileToolRequest, /sendChatCompletionProfileRequest/);
+
+      const structuredToolRequest = semanticSource.slice(
+        semanticSource.indexOf('export async function sendStructuredToolRequest'),
+        semanticSource.indexOf('export function extractGeneratedText'),
+      );
+      assert.match(structuredToolRequest, /tool_choice: buildStructuredToolChoice\(toolName, route\.source, route\)/);
+      assert.match(structuredToolRequest, /if \(!matching\) \{[\s\S]*throw new Error/);
+      assert.doesNotMatch(structuredToolRequest, /extractGeneratedText|sendChatCompletionProfileRequest|fallback/i);
 
       const connectionManagerRequest = adapterSource.slice(
         adapterSource.indexOf('export async function sendConnectionManagerProfileRequest'),
@@ -16317,6 +16471,10 @@ const tests = [
         adapterSource.indexOf('export async function sendDefaultChatCompletionToolRequest'),
         adapterSource.indexOf('export function getChatCompletionSourceForProfile'),
       );
+      assert.match(adapterToolRequest, /usesCustomUrl: hasRoutingValue\(generateData\.custom_url\)/);
+      assert.match(adapterToolRequest, /usesReverseProxy: hasRoutingValue\(generateData\.reverse_proxy\)/);
+      assert.match(adapterToolRequest, /buildTool\?\.\(chatCompletionSource, route\)/);
+      assert.match(adapterToolRequest, /buildToolChoice\?\.\(chatCompletionSource, route\)/);
       assert.match(adapterToolRequest, /else if \(typeof options\?\.buildToolChoice === 'function'\) \{\s*delete generateData\.tool_choice;/);
       assert.ok(
         adapterToolRequest.indexOf("generateData.max_tokens = responseLength") < adapterToolRequest.indexOf('options?.preparePayload?.(generateData)'),
@@ -16829,7 +16987,7 @@ const tests = [
         'structured_preflight_semantic_reasoning_effort',
         'structured_preflight_refresh_semantic_settings',
         'structured_preflight_post_tracker_enabled',
-        'structured_preflight_prose_guard_enabled',
+        'structured_preflight_prose_guard_mode',
         'structured_preflight_progression_enabled',
         'structured_preflight_name_style',
         'structured_preflight_writing_style_enabled',
@@ -17000,9 +17158,12 @@ const tests = [
       assert.match(indexSource, /generateRawData,/);
       assert.match(indexSource, /generate as generateSillyTavern,/);
       assert.match(indexSource, /generateRawData\(\{ prompt: textPrompt, responseLength, \.\.\.overridePayload \}, context, \{[\s\S]*?purpose: 'player setup',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
-      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{[\s\S]*?purpose: 'targeted Prose Guard repair',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
+      assert.match(indexSource, /requestPostNarrationUtility\(\{[\s\S]*?purpose: 'targeted Prose Guard repair'/);
       assert.doesNotMatch(indexSource, /purpose: 'Prose Guard'/);
-      assert.match(indexSource, /generateRawData\(\{ prompt, responseLength \}, getContext\(\), \{[\s\S]*?purpose: 'post-narration tracker update',[\s\S]*?signal: modelRequest\.signal,[\s\S]*?beforeAbort: markInternalGenerationStop/);
+      assert.match(indexSource, /requestPostNarrationUtility\(\{[\s\S]*?purpose: 'post-narration tracker update'/);
+      const utilityStart = indexSource.indexOf('async function requestPostNarrationUtility(');
+      const utilityEnd = indexSource.indexOf('function deferForProseGuardFinalization(', utilityStart);
+      assert.doesNotMatch(indexSource.slice(utilityStart, utilityEnd), /generateRawData|extractGeneratedText|fallback/i);
       assert.match(semanticSource, /sendDefaultChatCompletionToolRequest\(toolPrompt, responseLength,[\s\S]*?purpose: 'semantic preflight tool call',[\s\S]*?signal: options\.signal/);
       assert.match(semanticSource, /sendConnectionManagerProfileRequest\(\{[\s\S]*?profileId: options\.semanticProfileId,[\s\S]*?signal: options\.signal/);
       assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateRawData\(/);
@@ -17026,9 +17187,12 @@ const tests = [
       assert.match(adapterSource, /export function offEvent\(eventType, handler, context = getContext\(\), options = \{\}\)/);
       assert.match(adapterSource, /export function emitEvent\(eventType, context = getContext\(\), \.\.\.args\)/);
       assert.match(adapterSource, /export function stopGeneration\(context = getContext\(\)\)/);
-      assert.match(indexSource, /canSubscribeToEvent\('MESSAGE_RECEIVED', context\)/);
-      assert.match(indexSource, /onEvent\(requiredEvent, requiredHandler, context, \{ warn: false \}\)/);
+      assert.match(indexSource, /const STORY_ENGINE_EVENT_HANDLERS = Object\.freeze/);
+      assert.match(indexSource, /STORY_ENGINE_EVENT_HANDLERS\.every\(\(\[eventType\]\) => canSubscribeToEvent\(eventType, context\)\)/);
+      assert.match(indexSource, /const subscribedHandlers = \[\]/);
       assert.match(indexSource, /onEvent\(eventType, handler, context, \{ warn: false \}\)/);
+      assert.match(indexSource, /subscribedHandlers\.push\(\[eventType, handler\]\)/);
+      assert.match(indexSource, /for \(const \[eventType, handler\] of subscribedHandlers\.reverse\(\)\)/);
       assert.match(indexSource, /offEvent\(eventType, handler, context, \{ warn: false \}\)/);
       assert.match(indexSource, /stopGeneration\(context\)/);
       assert.doesNotMatch(indexSource, /context(?:\?\.|\.)eventSource/);

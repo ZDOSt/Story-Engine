@@ -29,7 +29,7 @@ export function sanitizeAssistantNarration(text) {
         ? stripNarratorMetaPrefix(tagged)
         : stripNarratorMetaPrefix(stripStructuredArtifacts(original).trim());
     const cleaned = stripVisibleMechanicsLabels(stripStructuredArtifacts(source)).trim();
-    return cleaned || original;
+    return cleaned;
 }
 
 function extractFinalNarrationEnvelope(text) {

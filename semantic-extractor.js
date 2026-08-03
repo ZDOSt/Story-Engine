@@ -1,6 +1,6 @@
 import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
-import { getChatCompletionProfileRoute, sendChatCompletionProfileRequest, sendConnectionManagerProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
+import { getChatCompletionProfileRoute, sendConnectionManagerProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
 import { buildWorldProgressionSemanticContext, normalizeWorldProgression, normalizeWorldProgressionAdvancements, validateWorldProgressionAdvancementCoverage } from './world-memory.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
@@ -12,6 +12,7 @@ const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const DEEPSEEK_CHAT_COMPLETION_SOURCE = 'deepseek';
+const EXACT_NAMED_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
 const SEMANTIC_TOOL_SECTIONS = Object.freeze([
     { name: 'engineContext', roots: ['EngineContext'] },
     { name: 'worldTransition', roots: ['WorldTransition'] },
@@ -255,7 +256,7 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
         stream: false,
         messages: toolPrompt,
         tools: [semanticTool],
-        tool_choice: buildSemanticToolChoice(chatCompletionSource),
+        tool_choice: buildSemanticToolChoice(chatCompletionSource, route),
         enable_web_search: false,
         request_images: undefined,
         request_image_resolution: undefined,
@@ -289,20 +290,6 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
     return { raw, ledgerText };
 }
 
-export async function sendSemanticProfileTextRequest(prompt, responseLength, options = {}, overridePayload = {}) {
-    const result = await sendChatCompletionProfileRequest({
-        profileId: options.semanticProfileId,
-        profileName: options.semanticProfileName,
-        prompt,
-        responseLength,
-        overridePayload,
-        extractData: true,
-        preparePayload: applyStoryEngineThinkingDisabledPayload,
-        signal: options.signal,
-    });
-    return extractGeneratedText(result);
-}
-
 export function isOfficialDeepSeekProfile(options = {}) {
     if (!options?.semanticProfileId) return false;
     const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
@@ -311,63 +298,79 @@ export function isOfficialDeepSeekProfile(options = {}) {
         && route.usesReverseProxy !== true;
 }
 
-export async function sendDeepSeekProfileStructuredRequest(prompt, responseLength, options = {}, toolDefinition = {}) {
-    if (!isOfficialDeepSeekProfile(options)) {
-        throw new Error(`Connection profile "${options.semanticProfileName || options.semanticProfileId || '(none)'}" is not an official DeepSeek profile.`);
-    }
-
+export async function sendStructuredToolRequest(prompt, responseLength, options = {}, toolDefinition = {}) {
     const toolName = String(toolDefinition.name || '').trim();
     if (!toolName || !toolDefinition.parameters || typeof toolDefinition.parameters !== 'object') {
-        throw new Error('DeepSeek structured request is missing a valid tool definition.');
+        throw new Error('Structured request is missing a valid tool definition.');
     }
 
     const messages = Array.isArray(prompt)
         ? prompt
         : [{ role: 'user', content: String(prompt || '') }];
-    const tool = {
-        type: 'function',
-        function: {
-            name: toolName,
-            description: String(toolDefinition.description || 'Submit the required structured Story Engine utility result.'),
-            strict: true,
-            parameters: toolDefinition.parameters,
-        },
+    const buildTool = (chatCompletionSource, route = {}) => {
+        const useStrictSchema = supportsExactNamedToolChoice(chatCompletionSource, route);
+        return {
+            type: 'function',
+            function: {
+                name: toolName,
+                description: String(toolDefinition.description || 'Submit the required structured Story Engine utility result.'),
+                ...(useStrictSchema ? { strict: true } : {}),
+                parameters: toolDefinition.parameters,
+            },
+        };
     };
-    const result = await sendChatCompletionProfileRequest({
-        profileId: options.semanticProfileId,
-        profileName: options.semanticProfileName,
-        prompt: messages,
-        responseLength,
-        overridePayload: {
+
+    let result;
+    if (options.semanticProfileId) {
+        const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
+        const preparePayload = isOfficialDeepSeekProfile(options)
+            ? payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort)
+            : applyStoryEngineThinkingDisabledPayload;
+        result = await sendConnectionManagerProfileRequest({
+            profileId: options.semanticProfileId,
+            profileName: options.semanticProfileName,
+            prompt: messages,
+            responseLength,
+            overridePayload: {
+                temperature: 0,
+                stream: false,
+                messages,
+                tools: [buildTool(route.source, route)],
+                tool_choice: buildStructuredToolChoice(toolName, route.source, route),
+                enable_web_search: false,
+                request_images: undefined,
+                request_image_resolution: undefined,
+                request_image_aspect_ratio: undefined,
+                json_schema: undefined,
+                stop: undefined,
+                ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
+            },
+            extractData: false,
+            preparePayload,
+            signal: options.signal,
+        });
+    } else {
+        result = await sendDefaultChatCompletionToolRequest(messages, responseLength, {
+            purpose: options.purpose || 'structured Story Engine utility call',
             temperature: 0,
-            stream: false,
-            messages,
-            tools: [tool],
-            tool_choice: undefined,
-            enable_web_search: false,
-            request_images: undefined,
-            request_image_resolution: undefined,
-            request_image_aspect_ratio: undefined,
-            json_schema: undefined,
-            stop: undefined,
-            ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
-        },
-        extractData: false,
-        preparePayload: payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort),
-        signal: options.signal,
-    });
+            buildTool: (source, route) => buildTool(source, route),
+            buildToolChoice: (source, route) => buildStructuredToolChoice(toolName, source, route),
+            preparePayload: applyStoryEngineThinkingDisabledPayload,
+            signal: options.signal,
+        });
+    }
     if (result?.error) {
-        throw new Error(`DeepSeek structured request returned an error: ${previewRaw(result)}`);
+        throw new Error(`Structured request returned an error: ${previewRaw(result)}`);
     }
 
     const calls = collectToolCalls(result);
     const matching = calls.find(call => getToolCallName(call) === toolName);
     if (!matching) {
-        throw new Error(`DeepSeek structured response did not call ${toolName}. RawPreview=${previewRaw(result)}`);
+        throw new Error(`Structured response did not call ${toolName}. RawPreview=${previewRaw(result)}`);
     }
     const payload = parseToolArguments(getToolCallArguments(matching));
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-        throw new Error(`DeepSeek structured response for ${toolName} was not an object. RawPreview=${previewRaw(result)}`);
+        throw new Error(`Structured response for ${toolName} was not an object. RawPreview=${previewRaw(result)}`);
     }
     return payload;
 }
@@ -492,12 +495,23 @@ export function buildSemanticToolPrompt(prompt) {
     return messages;
 }
 
-export function buildSemanticToolChoice(chatCompletionSource) {
-    void chatCompletionSource;
+function supportsExactNamedToolChoice(chatCompletionSource, route = {}) {
+    const source = String(chatCompletionSource || '').trim().toLowerCase();
+    return EXACT_NAMED_TOOL_CHOICE_SOURCES.has(source)
+        && route?.usesCustomUrl !== true
+        && route?.usesReverseProxy !== true;
+}
+
+export function buildStructuredToolChoice(toolName, chatCompletionSource, route = {}) {
+    if (!supportsExactNamedToolChoice(chatCompletionSource, route)) return 'auto';
     return {
         type: 'function',
-        function: { name: SEMANTIC_TOOL_NAME },
+        function: { name: String(toolName || '').trim() },
     };
+}
+
+export function buildSemanticToolChoice(chatCompletionSource, route = {}) {
+    return buildStructuredToolChoice(SEMANTIC_TOOL_NAME, chatCompletionSource, route);
 }
 
 export function buildSemanticPreflightTool(chatCompletionSource) {

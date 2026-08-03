@@ -1091,6 +1091,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         },
         resolutionPacket: resolution.packet,
         latestUserText: options?.latestUserText || '',
+        sceneNames: options?.sceneNames || [],
     });
 
     const visibleTrackerUpdate = {

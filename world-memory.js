@@ -298,7 +298,7 @@ export function prepareWorldMemoryNarration(options = {}) {
         ? options.resolutionPacket
         : {};
     const latestUserText = cleanText(options.latestUserText, 2000);
-    const sceneNames = collectSceneNames(resolution);
+    const sceneNames = uniqueText([collectSceneNames(resolution), options.sceneNames], 120);
     const observableEvidence = [];
 
     for (const plan of progression.plans) {
@@ -343,7 +343,7 @@ export function buildWorldMemoryUpdateContext(options = {}) {
             ? options.resolutionPacket
             : {},
         latestUserText: cleanText(options.focusText, 12000),
-        sceneNames: collectSceneNames(options.resolutionPacket || {}),
+        sceneNames: uniqueText([collectSceneNames(options.resolutionPacket || {}), options.sceneNames], 120),
     };
     const relevant = archive.entries.filter(entry => archiveEntryIsRelevant(entry, context));
     const detailEntries = [];
@@ -1332,17 +1332,16 @@ function quoteMatchesAuthorizedEvidence(value, authorized = {}) {
     const quote = comparisonText(value, 500);
     const reference = comparisonText(authorized.text || authorized.topic, 800);
     if (!quote || !reference) return false;
-    if (quote.includes(reference) || reference.includes(quote)) return true;
+    if (quote === reference || quote.includes(reference)) return true;
 
     const quoteTokens = meaningfulEvidenceTokens(quote);
     const referenceTokens = meaningfulEvidenceTokens(reference);
     const overlap = [...quoteTokens].filter(token => referenceTokens.has(token));
-    if (referenceTokens.size === 1) {
-        const [token] = referenceTokens;
-        return overlap.length === 1 && (token.length >= 4 || /[^\x00-\x7F]/u.test(token));
-    }
-    const shorterSize = Math.min(quoteTokens.size, referenceTokens.size);
-    return overlap.length >= 2 && shorterSize > 0 && overlap.length / shorterSize >= 0.5;
+    if (referenceTokens.size < 4 || quoteTokens.size < 4 || overlap.length < 4) return false;
+
+    const referenceCoverage = overlap.length / referenceTokens.size;
+    const quoteRelevance = overlap.length / quoteTokens.size;
+    return referenceCoverage >= 0.8 && quoteRelevance >= 0.7;
 }
 
 function meaningfulEvidenceTokens(value) {
