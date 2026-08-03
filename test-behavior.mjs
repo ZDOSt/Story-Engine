@@ -15448,7 +15448,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.47');
+      assert.equal(manifest.version, '0.9.48');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -15993,6 +15993,8 @@ const tests = [
       assert.equal(toolPrompt[0].content, semanticEngineGuidance);
       assert.match(toolPrompt[1].content, /Call the function tool submit_semantic_preflight exactly once/);
       assert.match(toolPrompt[1].content, /The tool is only a compact transport envelope; do not reduce or reinterpret the ledger/);
+      assert.match(toolPrompt[1].content, /When an indexed section count is 0, copy its template \[0\] placeholder lines exactly/);
+      assert.match(toolPrompt[1].content, /valence=none\|good\|bad\|fear/);
       assert.match(toolPrompt[1].content, /EngineContext\.userReputationContext\.location=\(none\)/);
       assert.match(toolPrompt[1].content, /ResolutionEngine\.identifyGoal=Normal_Interaction/);
       assert.match(toolPrompt[1].content, /RelationshipEngine\.count=0/);
@@ -16157,6 +16159,52 @@ const tests = [
       assert.throws(
         () => parseAndValidateSemanticToolSections(malformedEnumSections),
         /ResolutionEngine\.challengeType must be one of/,
+      );
+      const inertUserKnowledgePlaceholder = replaceLedgerLine(
+        completeSections,
+        'userKnowledge',
+        'UserKnowledgeApplication[0].valence',
+        'neutral',
+      );
+      assert.equal(
+        parseAndValidateSemanticToolSections(inertUserKnowledgePlaceholder).userKnowledgeApplication.applications.length,
+        0,
+        'Inactive zero-count placeholders must not invalidate an otherwise complete ledger.',
+      );
+      let activeInvalidUserKnowledge = replaceLedgerLine(
+        completeSections,
+        'userKnowledge',
+        'UserKnowledgeApplication.count',
+        '1',
+      );
+      activeInvalidUserKnowledge = replaceLedgerLine(
+        activeInvalidUserKnowledge,
+        'userKnowledge',
+        'UserKnowledgeApplication[0].target',
+        'Alice',
+      );
+      activeInvalidUserKnowledge = replaceLedgerLine(
+        activeInvalidUserKnowledge,
+        'userKnowledge',
+        'UserKnowledgeApplication[0].effect',
+        'contextOnly',
+      );
+      activeInvalidUserKnowledge = replaceLedgerLine(
+        activeInvalidUserKnowledge,
+        'userKnowledge',
+        'UserKnowledgeApplication[0].line',
+        'Alice knows the user keeps their word.',
+      );
+      activeInvalidUserKnowledge = replaceLedgerLine(
+        activeInvalidUserKnowledge,
+        'userKnowledge',
+        'UserKnowledgeApplication[0].valence',
+        'neutral',
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(activeInvalidUserKnowledge),
+        /UserKnowledgeApplication\[0\]\.valence must be one of:[^;]+; received "neutral"/,
+        'Active semantic rows must retain strict enum validation.',
       );
       assert.throws(
         () => parseAndValidateSemanticToolSections({

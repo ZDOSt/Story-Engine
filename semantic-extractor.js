@@ -466,8 +466,10 @@ export function buildSemanticToolPrompt(prompt) {
         'Fill all eleven required string arguments. Do not omit a section when its count is zero.',
         'Each argument must contain only newline-separated key=value ledger lines owned by that section, without BEGIN/END wrappers.',
         'Fill every required template line exactly once, preserving the exact key names. Indexed [0] rows are placeholders when count=0; when count>0, output every required indexed row controlled by that count.',
+        'When an indexed section count is 0, copy its template [0] placeholder lines exactly. Those rows are inert and must not be reinterpreted.',
         'WorldProgressionAdvancement.count must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one row per due plan.',
         'When RelationshipEngine.count is greater than 0, every indexed relationship row must include every template field, including standingInfluence and standingBasis.',
+        'UserKnowledgeApplication[i] enums: type=personalKnowledge|reputationKnowledge; scope=private|local|route|faction|regional|legendary; valence=none|good|bad|fear; effect=none|priorUserGoodRep|userBadRep|userNonHuman|contextOnly.',
         'Use a vertical bar (|) between list entries, or (none) for an empty list. Commas and semicolons are literal text inside one entry. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
         'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. The tool is only a compact transport envelope; do not reduce or reinterpret the ledger.',
         'SECTION OWNERSHIP:',
@@ -1772,6 +1774,14 @@ function compactKeyMatches(key, matcher) {
     return typeof matcher === 'string' ? key === matcher : matcher.test(key);
 }
 
+function isInactiveCompactPlaceholderKey(fields, key) {
+    for (const [root, countKey, zeroPlaceholder] of COMPACT_INDEXED_ROOTS) {
+        if (!zeroPlaceholder || !key.startsWith(`${root}[0].`)) continue;
+        return String(fields.get(countKey) ?? '').trim() === '0';
+    }
+    return false;
+}
+
 function readRequiredInteger(fields, key, minimum, maximum) {
     const raw = String(fields.get(key) ?? '').trim();
     if (!/^(?:0|[1-9]\d*)$/.test(raw)) {
@@ -1832,10 +1842,11 @@ function validateCompactEnumFields(fields) {
     ];
 
     for (const [key, value] of fields) {
+        if (isInactiveCompactPlaceholderKey(fields, key)) continue;
         for (const [matcher, allowed] of rules) {
             if (!compactKeyMatches(key, matcher)) continue;
             if (!allowed.includes(value)) {
-                throw new Error(`compact ledger field ${key} must be one of: ${allowed.join(', ')}`);
+                throw new Error(`compact ledger field ${key} must be one of: ${allowed.join(', ')}; received ${JSON.stringify(value)}`);
             }
             break;
         }
@@ -1845,6 +1856,7 @@ function validateCompactEnumFields(fields) {
 function validateCompactListField(fields, matcher, maximum) {
     for (const [key, rawValue] of fields) {
         if (!compactKeyMatches(key, matcher)) continue;
+        if (isInactiveCompactPlaceholderKey(fields, key)) continue;
         const raw = String(rawValue).trim();
         if (raw === '(none)') continue;
         if (isNoneValue(raw) || raw.startsWith('[') || raw.endsWith(']')) {
@@ -1885,6 +1897,7 @@ function validateCompactIndexedRows(fields) {
     for (const key of fields.keys()) {
         const match = key.match(/^WorldProgressionAdvancement\[(0|[1-9]\d*)\]\.evidence\[(0|[1-9]\d*)\]\./);
         if (!match) continue;
+        if (isInactiveCompactPlaceholderKey(fields, key)) continue;
         const advancementIndex = Number(match[1]);
         const evidenceIndex = Number(match[2]);
         const countKey = `WorldProgressionAdvancement[${advancementIndex}].evidence.count`;
@@ -1911,6 +1924,7 @@ function validateCompactLedgerLexicalContract(fields) {
     }
 
     for (const [key, value] of fields) {
+        if (isInactiveCompactPlaceholderKey(fields, key)) continue;
         if (!String(value).trim()) {
             throw new Error(`compact ledger field ${key} must not be empty`);
         }
@@ -1924,6 +1938,7 @@ function validateCompactLedgerLexicalContract(fields) {
     }
     readRequiredInteger(fields, 'WorldTransition.timeAdvanceCount', 1, 3650);
     for (const key of fields.keys()) {
+        if (isInactiveCompactPlaceholderKey(fields, key)) continue;
         if (/^WorldProgressionAdvancement\[(?:0|[1-9]\d*)\]\.nextDelayDays$/.test(key)) {
             readRequiredInteger(fields, key, 0, 120);
         } else if (/^WorldProgressionAdvancement\[(?:0|[1-9]\d*)\]\.nextDelaySlots$/.test(key)) {
@@ -1944,6 +1959,7 @@ function validateCompactLedgerLexicalContract(fields) {
     validateCompactListField(fields, /^TrackerUpdateEngine\.NPC\[(?:0|[1-9]\d*)\]\.(?:woundsAdd|woundsRemove|statusAdd|statusRemove|gearAdd|gearRemove)$/, 20);
 
     for (const [key, value] of fields) {
+        if (isInactiveCompactPlaceholderKey(fields, key)) continue;
         const actionUnit = key.match(/^ResolutionEngine\.actionUnits\[(0|[1-9]\d*)\]\.id$/);
         if (actionUnit && value !== `A${Number(actionUnit[1]) + 1}`) {
             throw new Error(`compact ledger field ${key} must equal A${Number(actionUnit[1]) + 1}`);
