@@ -15448,7 +15448,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.49');
+      assert.equal(manifest.version, '0.9.51');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -15927,7 +15927,10 @@ const tests = [
       assert.equal(deepSeekHighPayload.reasoning_effort, 'max');
       assert.equal(deepSeekHighPayload.max_tokens, 4096);
       for (const sourceName of ['deepseek', 'openai', 'azure_openai', 'claude', 'gemini', 'nanogpt', 'custom', 'openrouter']) {
-        assert.equal(buildSemanticToolChoice(sourceName), 'required');
+        assert.deepEqual(buildSemanticToolChoice(sourceName), {
+          type: 'function',
+          function: { name: 'submit_semantic_preflight' },
+        });
       }
 
       const nanoGptSemanticPayload = {

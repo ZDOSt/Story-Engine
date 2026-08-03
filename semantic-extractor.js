@@ -494,7 +494,10 @@ export function buildSemanticToolPrompt(prompt) {
 
 export function buildSemanticToolChoice(chatCompletionSource) {
     void chatCompletionSource;
-    return 'required';
+    return {
+        type: 'function',
+        function: { name: SEMANTIC_TOOL_NAME },
+    };
 }
 
 export function buildSemanticPreflightTool(chatCompletionSource) {
