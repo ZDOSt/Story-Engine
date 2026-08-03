@@ -15444,7 +15444,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.45');
+      assert.equal(manifest.version, '0.9.46');
       assert.match(source, /proseGuardStrictBehaviorismBannedPhrases:\s*DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES/);
       assert.match(source, /proseGuardAntiStockPhrasingBannedPhrases:\s*DEFAULT_PROSE_GUARD_ANTI_STOCK_PHRASING_BANNED_PHRASES/);
       assert.match(source, /proseGuardDenotativePhysicalityBannedPhrases:\s*DEFAULT_PROSE_GUARD_DENOTATIVE_PHYSICALITY_BANNED_PHRASES/);
@@ -15927,6 +15927,14 @@ const tests = [
         type: 'function',
         function: { name: 'submit_semantic_preflight' },
       });
+      assert.deepEqual(buildSemanticToolChoice('azure_openai'), {
+        type: 'function',
+        function: { name: 'submit_semantic_preflight' },
+      });
+      assert.equal(buildSemanticToolChoice('claude'), 'any');
+      assert.equal(buildSemanticToolChoice('nanogpt'), undefined);
+      assert.equal(buildSemanticToolChoice('custom'), undefined);
+      assert.equal(buildSemanticToolChoice('openrouter'), undefined);
 
       const nanoGptSemanticPayload = {
         chat_completion_source: 'nanogpt',

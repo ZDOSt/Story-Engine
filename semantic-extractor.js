@@ -552,18 +552,20 @@ export function buildSemanticToolPrompt(prompt) {
 }
 
 export function buildSemanticToolChoice(chatCompletionSource) {
-    if (String(chatCompletionSource || '').toLowerCase() === DEEPSEEK_CHAT_COMPLETION_SOURCE) {
-        return undefined;
-    }
+    const normalizedSource = String(chatCompletionSource || '').toLowerCase();
 
-    if (chatCompletionSource === 'claude') {
+    if (normalizedSource === 'claude') {
         return 'any';
     }
 
-    return {
-        type: 'function',
-        function: { name: SEMANTIC_TOOL_NAME },
-    };
+    if (['openai', 'azure_openai'].includes(normalizedSource)) {
+        return {
+            type: 'function',
+            function: { name: SEMANTIC_TOOL_NAME },
+        };
+    }
+
+    return undefined;
 }
 
 function buildSemanticPreflightTool(chatCompletionSource) {
