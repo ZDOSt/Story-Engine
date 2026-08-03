@@ -939,13 +939,6 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.pendingBoundary) {
         root.pendingBoundary = normalizePendingBoundaryState(trackerUpdate.pendingBoundary);
     }
-    if (trackerUpdate.rapportClock) {
-        const rapportClock = normalizeRapportClock(trackerUpdate.rapportClock);
-        root.rapportClock = {
-            activeMs: rapportClock.activeMs,
-            lastActivityAt: rapportClock.lastActivityAt,
-        };
-    }
     if (trackerUpdate.health) {
         root.health = normalizeHiddenHealth(trackerUpdate.health, { user: root.user, npcs: root.npcs });
     } else {
@@ -1103,10 +1096,6 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const trackerUpdate = {
         ...visibleTrackerUpdate,
         health: healthAfter,
-        rapportClock: {
-            activeMs: rapportClock.activeMs,
-            lastActivityAt: rapportClock.lastActivityAt,
-        },
         boundCompanion: boundCompanion.state,
         pendingBoundary: pendingBoundaryBefore,
         latentGrievances: powerActors.latentGrievances,
@@ -1185,8 +1174,23 @@ function runBoundCompanionEngine({ before = {}, semanticDelta = {}, resolutionPa
         return { state, handoff: null };
     }
 
-    const triggers = collectBoundCompanionTriggers({ resolutionPacket, worldState, relationships });
+    const directAddress = isBoundCompanionDirectAddress(state, resolutionPacket);
+    const triggers = directAddress
+        ? ['direct_address']
+        : collectBoundCompanionTriggers({ resolutionPacket, worldState, relationships });
     const activeMs = Math.max(0, Math.floor(Number(rapportClock?.activeMs || 0)));
+
+    if (directAddress) {
+        audit.push(`STEP 6.8 BOUND_COMPANION=direct_response triggers=${compact(triggers)}`);
+        return {
+            state,
+            handoff: buildBoundCompanionHandoff(state, {
+                mode: 'direct_response',
+                triggers,
+                reason: 'The latest user input directly addressed the established bound companion.',
+            }),
+        };
+    }
 
     if (!triggers.length) {
         audit.push('STEP 6.8 BOUND_COMPANION=silence reason=no_trigger');
@@ -1272,6 +1276,23 @@ function boundCompanionInterjectionThreshold(triggers = []) {
 function boundCompanionTriggerKey(triggers = [], context = {}) {
     const chatLength = Array.isArray(context?.chat) ? context.chat.length : 0;
     return `${chatLength}:${triggers.join('|')}`.slice(0, 120);
+}
+
+function isBoundCompanionDirectAddress(state = {}, resolutionPacket = {}) {
+    const source = boundCompanionSourceText(resolutionPacket);
+    if (!source) return false;
+    const name = String(state.name || '').trim();
+    if (name && new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(source)) {
+        return /\b(?:ask|asks|asked|say|says|said|tell|tells|told|speak|speaks|spoke|call|calls|called|answer|answers|answered|reply|replies|replied|whisper|whispers|whispered|think|thinks|thought)\b/i.test(source)
+            || /["']/.test(source);
+    }
+    const vessel = String(state.vessel || '').trim();
+    const vesselAddressed = vessel
+        && vessel.length <= 60
+        && !/\{\{user\}\}|user|body|mind|head/i.test(vessel)
+        && new RegExp(`\\b${escapeRegExp(vessel)}\\b`, 'i').test(source);
+    return (vesselAddressed || /\b(?:inner voice|voice in my head|voice inside|inside my head|inside my mind|in my mind|mentally)\b/i.test(source))
+        && /\b(?:ask|say|tell|speak|call|answer|reply|whisper|think)\b/i.test(source);
 }
 
 function collectBoundCompanionTriggers({ resolutionPacket = {}, relationships = [] } = {}) {
@@ -1403,7 +1424,8 @@ function advanceRapportClock(context, audit) {
         return clock;
     }
 
-    const previous = normalizeRapportClock(context.chatMetadata.structuredPreflightTracker?.rapportClock);
+    const root = context.chatMetadata.structuredPreflightTracker || { npcs: {}, user: {}, rapportClock: normalizeRapportClock() };
+    const previous = normalizeRapportClock(root.rapportClock);
     const now = Date.now();
     const elapsedMs = previous.lastActivityAt > 0 ? Math.max(0, now - previous.lastActivityAt) : 0;
     const activeDeltaMs = elapsedMs > 0 && elapsedMs <= RAPPORT_ACTIVE_IDLE_LIMIT_MS ? elapsedMs : 0;
@@ -1415,6 +1437,13 @@ function advanceRapportClock(context, audit) {
         idleGapIgnored,
     };
 
+    root.npcs = root.npcs || {};
+    root.user = root.user || {};
+    root.rapportClock = {
+        activeMs: clock.activeMs,
+        lastActivityAt: clock.lastActivityAt,
+    };
+    context.chatMetadata.structuredPreflightTracker = root;
     audit.push(`RAPPORT_CLOCK=${compact({ ...clock, elapsedMs, activeDeltaMs, idleGapIgnored })}`);
     return clock;
 }

@@ -339,14 +339,7 @@ room tastes
 place smells
 place tastes`;
 
-const DEFAULT_PROSE_RULES_PROMPT = String.raw`INPUT COMMUNICATION BOUNDARY:
-  - Text enclosed in double quotation marks ("...") is audible dialogue.
-  - Text enclosed in single asterisks (*...*) is private mental content.
-  - Italicized mental content is communication ONLY when explicitly directed to a recipient through an established telepathic, internal, or supernatural link. Otherwise, it is private inner thought.
-  - Unformatted text normally describes narration or action. It is NEVER audible dialogue.
-  - Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when {{user}} does not italicize them. Formatting is an explicit signal, not the sole privacy safeguard.
-
-function RenderControlEngine(response, input, context) {
+const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(response, input, context) {
   MANDATE:
     Your final response MUST STRICTLY follow the constraints below. Failure will render your response INVALID.
 
@@ -372,23 +365,21 @@ function RenderControlEngine(response, input, context) {
 
   function inputChronology(response, input, context): {
     MANDATE:
-      {{user}}'s input has already occurred. Your response MUST begin at the FIRST moment AFTER the final action, observation, line of audible dialogue, or private mental communication in {{user}}'s input.
+      {{user}}'s input has already occurred. Your response MUST begin at the FIRST moment AFTER the final action, observation, or line of dialogue in {{user}}'s input.
 
       Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development.
 
     FORBIDDEN:
       - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input.
       - DO NOT re-describe unchanged environments, objects, or characters already established in {{user}}'s input or previous narration.
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions or dialogue.
   }
 
   function dialogueTurn(response, context): {
     MANDATE:
       When a character/NPC responds to {{user}} or another present character/NPC, they may make ONLY ONE conversational contribution per response.
 
-      ONLY text enclosed in double quotation marks ("...") is audible dialogue. Text enclosed in single asterisks (*...*) is private mental content, NEVER audible dialogue.
-
-      That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them.
+      That contribution MUST account for the FULL input directed at them, including all questions and statements, rather than only the last sentence or question.
 
       Related points may be combined into one natural response. Do not answer them point by point.
 
@@ -397,7 +388,6 @@ function RenderControlEngine(response, input, context) {
       Once this contribution is complete, that character/NPC's turn ENDS.
 
     FORBIDDEN:
-      - DO NOT treat private thoughts, memories, observations, plans, conclusions, exposition, or other private information as something a character/NPC can answer. ONLY the intended recipient of explicit mental communication through an established link may respond to it.
       - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups.
       - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn.
   }
@@ -460,21 +450,9 @@ function RenderControlEngine(response, input, context) {
 
       Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established.
 
-      Text enclosed in double quotation marks ("...") is audible dialogue.
-
-      Text enclosed in single asterisks (*...*) is private mental content. It is communication ONLY when explicitly directed to a recipient through an established telepathic, internal, or supernatural link. Otherwise, it is private inner thought. ALL other unquoted text is unspoken.
-
-      Any permitted mental communication in your response MUST be enclosed in single asterisks, NEVER in double quotation marks.
-
-      Clearly internal thoughts, memories, intentions, plans, conclusions, and subjective observations remain private even when {{user}} does not italicize them.
-
-      Information may enter narration ONLY through DIRECT sensory evidence available to {{user}} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts.
-
-      A character/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them.
+      Information may enter narration ONLY through DIRECT sensory evidence available to {{user}} in the current scene, explicit dialogue, readable text, or previously established scene facts.
 
     FORBIDDEN:
-      - DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication.
-      - DO NOT let a character/NPC hear, know, answer, quote, paraphrase, confirm, or react to private thoughts, memories, observations, intentions, plans, conclusions, exposition, or other private information, even when {{user}} leaves it unformatted.
       - DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above.
   }
 
@@ -664,7 +642,6 @@ const state = {
 
     progressToasts: new Set(),
     lastStoryEngineModelCallEndedAt: 0,
-    modelRequestAbortControllers: new Set(),
     pendingRunCleanupTimer: null,
     playerSetupBusy: false,
     progressionBusy: false,
@@ -955,21 +932,6 @@ function assertStoryEngineModelRequestCurrent(options = {}) {
 async function withStoryEngineModelRequest(callback, options = {}) {
     await waitForStoryEngineModelCallSpacing('Story Engine model call');
     assertStoryEngineModelRequestCurrent(options);
-    const requestController = typeof AbortController === 'function' ? new AbortController() : null;
-    const parentSignal = options?.signal || null;
-    const abortFromParent = () => requestController?.abort(parentSignal?.reason);
-    if (requestController) {
-        state.modelRequestAbortControllers.add(requestController);
-        if (parentSignal?.aborted) {
-            abortFromParent();
-        } else {
-            parentSignal?.addEventListener?.('abort', abortFromParent, { once: true });
-        }
-    }
-    const scopedOptions = {
-        ...options,
-        signal: requestController?.signal || parentSignal,
-    };
     const requestToken = storyEngineModelRequestGate.acquire();
     const releaseRequestToken = () => {
         if (storyEngineModelRequestGate.release(requestToken)) {
@@ -980,30 +942,16 @@ async function withStoryEngineModelRequest(callback, options = {}) {
         ? options.registerCancellation(releaseRequestToken)
         : null;
     try {
-        scopedOptions.signal?.throwIfAborted?.();
-        const result = await callback(scopedOptions);
-        scopedOptions.signal?.throwIfAborted?.();
-        assertStoryEngineModelRequestCurrent(scopedOptions);
+        const result = await callback();
+        assertStoryEngineModelRequestCurrent(options);
         return result;
     } finally {
         unregisterCancellation?.();
-        parentSignal?.removeEventListener?.('abort', abortFromParent);
-        if (requestController) state.modelRequestAbortControllers.delete(requestController);
         releaseRequestToken();
     }
 }
 
-function abortStoryEngineModelRequests(reason = 'Story Engine pipeline invalidated.') {
-    const error = new Error(reason);
-    error.name = 'AbortError';
-    for (const controller of state.modelRequestAbortControllers) {
-        if (!controller.signal.aborted) controller.abort(error);
-    }
-    state.modelRequestAbortControllers.clear();
-}
-
 function clearThinkingDisableRuntimeState() {
-    abortStoryEngineModelRequests();
     storyEngineModelRequestGate.clear();
     state.startAdventureReasoningCleanupPending = false;
 }
@@ -2438,7 +2386,6 @@ function failNarratorGeneration(generation, error) {
     clearPendingRunCleanupTimer();
     setChatInputLocked(false);
     clearRuntimePrompts();
-    state.generationActive = false;
     state.pendingRun = null;
     state.lastNarratorHandoff = '';
     state.pendingGeneration = null;
@@ -4643,7 +4590,7 @@ function reconcileNamedNpcDuplicates(npcs, beforeNpcs = {}, delta = null, pendin
 }
 
 
-function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = [], latentFavors = [], hiddenState = {}) {
+function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, latentGrievances = [], latentFavors = [], worldMemory = {}) {
     const update = {
         npcs: normalizeDisplayTrackerNpcs(displaySnapshot?.npcs || {}),
         user: normalizeTrackerUserState(displaySnapshot?.user || {}),
@@ -4656,12 +4603,9 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, 
         economy: normalizeEconomyState(displaySnapshot?.economy || {}),
         boundCompanion: normalizeBoundCompanionState(displaySnapshot?.boundCompanion || {}),
         pendingBoundary: normalizePendingBoundaryState(displaySnapshot?.pendingBoundary || {}),
-        descriptiveArchive: normalizeDescriptiveArchive(hiddenState.descriptiveArchive || {}),
-        worldProgression: normalizeWorldProgression(hiddenState.worldProgression || {}),
+        descriptiveArchive: normalizeDescriptiveArchive(worldMemory.descriptiveArchive || {}),
+        worldProgression: normalizeWorldProgression(worldMemory.worldProgression || {}),
     };
-    if (hiddenState.rapportClock) {
-        update.rapportClock = normalizeRapportClockState(hiddenState.rapportClock);
-    }
     if (hiddenHealth) {
         update.health = normalizeHiddenHealth(hiddenHealth, { user: update.user, npcs: update.npcs });
     }
@@ -10314,15 +10258,11 @@ async function requestProgressionText(prompt, responseLength, overridePayload = 
     const requestIdentity = createStoryEngineEpochIdentity(context);
     const bypassToken = promptReadyBypassGate.acquire();
     try {
-        return await withStoryEngineModelRequest(async modelRequest => {
+        return await withStoryEngineModelRequest(async () => {
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, {
-                purpose: 'progression generation',
-                signal: modelRequest.signal,
-                beforeAbort: markInternalGenerationStop,
-            });
+            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'progression generation' });
         }, {
             isCurrent: () => isCurrentStoryEngineEpoch(requestIdentity, context),
             expiredMessage: 'Progression generation expired because the active chat changed.',
@@ -10919,15 +10859,11 @@ async function requestPlayerSetupText(prompt, responseLength, overridePayload = 
     const requestIdentity = createStoryEngineEpochIdentity(context);
     const bypassToken = promptReadyBypassGate.acquire();
     try {
-        return await withStoryEngineModelRequest(async modelRequest => {
+        return await withStoryEngineModelRequest(async () => {
             const textPrompt = Array.isArray(prompt)
                 ? prompt.map(message => `${String(message.role || 'user').toUpperCase()}:\n${String(message.content || '')}`).join('\n\n')
                 : String(prompt || '');
-            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, {
-                purpose: 'player setup',
-                signal: modelRequest.signal,
-                beforeAbort: markInternalGenerationStop,
-            });
+            return await generateRawData({ prompt: textPrompt, responseLength, ...overridePayload }, context, { purpose: 'player setup' });
         }, {
             isCurrent: () => isCurrentStoryEngineEpoch(requestIdentity, context),
             expiredMessage: 'Player setup generation expired because the active chat changed.',
@@ -10957,7 +10893,7 @@ async function requestPlayerSetupStructured(prompt, responseLength, generationOp
         const usesChatCompletion = String(context.mainApi || '').toLowerCase() === 'openai';
         if (usesChatCompletion) {
             try {
-                return await runStructuredModelRequest(async modelRequest => {
+                return await runStructuredModelRequest(async () => {
                     const raw = await sendDefaultChatCompletionToolRequest(
                         appendCharacterSheetOutputInstruction(prompt, 'tool'),
                         responseLength,
@@ -10967,7 +10903,6 @@ async function requestPlayerSetupStructured(prompt, responseLength, generationOp
                             buildTool: source => buildCharacterSheetTool(source, generationOptions),
                             buildToolChoice: buildCharacterSheetToolChoice,
                             preparePayload: applyStoryEngineThinkingDisabledPayload,
-                            signal: modelRequest.signal,
                         },
                     );
                     if (raw?.error) {
@@ -10986,18 +10921,14 @@ async function requestPlayerSetupStructured(prompt, responseLength, generationOp
         }
 
         try {
-            return await runStructuredModelRequest(async modelRequest => {
+            return await runStructuredModelRequest(async () => {
                 const jsonSchema = buildCharacterSheetJsonSchema(generationOptions);
                 const schemaPrompt = appendCharacterSheetOutputInstruction(prompt, 'json', usesChatCompletion ? null : jsonSchema.value);
                 const raw = await generateRawData({
                     prompt: schemaPrompt,
                     responseLength,
                     ...(usesChatCompletion ? { jsonSchema } : {}),
-                }, context, {
-                    purpose: 'structured character-sheet generation',
-                    signal: modelRequest.signal,
-                    beforeAbort: markInternalGenerationStop,
-                });
+                }, context, { purpose: 'structured character-sheet generation' });
                 const structuredPayload = usesChatCompletion ? raw : extractGeneratedText(raw);
                 return normalizeCharacterSheetPayload(parseCharacterSheetJsonPayload(structuredPayload), generationOptions);
             });
@@ -11570,7 +11501,7 @@ async function requestTargetedProseBanRepair(findings, rules, requestOptions = {
     const toolDefinition = buildPostNarrationToolDefinition(PROSE_GUARD_TOOL_NAME, { includeSentenceRepairs: true });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
-        return await withStoryEngineModelRequest(modelRequest => withProseGuardGenerationSettings(async settings => {
+        return await withStoryEngineModelRequest(() => withProseGuardGenerationSettings(async settings => {
             return await requestPostNarrationUtility({
                 settings,
                 prompt,
@@ -11578,13 +11509,9 @@ async function requestTargetedProseBanRepair(findings, rules, requestOptions = {
                 toolDefinition,
                 purpose: 'targeted Prose Guard repair',
                 validateStructured: raw => parseTargetedProseGuardResponse(raw),
-                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), {
-                    purpose: 'targeted Prose Guard repair',
-                    signal: modelRequest.signal,
-                    beforeAbort: markInternalGenerationStop,
-                }),
+                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'targeted Prose Guard repair' }),
                 fallbackAfterStructuredFailure: false,
-            }, modelRequest);
+            }, requestOptions);
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -12111,7 +12038,7 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
     });
     const bypassToken = requestOptions.bypassToken || promptReadyBypassGate.acquire();
     try {
-        return await withStoryEngineModelRequest(modelRequest => withTrackerGenerationSettings(async settings => {
+        return await withStoryEngineModelRequest(() => withTrackerGenerationSettings(async settings => {
             return await requestPostNarrationUtility({
                 settings,
                 prompt,
@@ -12122,12 +12049,8 @@ async function requestPostNarrationTrackerDelta({ pendingRun, messageKey, narrat
                     parsePostNarrationTrackerResponse(raw, narrationText);
                     parsePostNarrationWorldMemoryResponse(raw);
                 },
-                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), {
-                    purpose: 'post-narration tracker update',
-                    signal: modelRequest.signal,
-                    beforeAbort: markInternalGenerationStop,
-                }),
-            }, modelRequest);
+                generateFallback: () => generateRawData({ prompt, responseLength }, getContext(), { purpose: 'post-narration tracker update' }),
+            }, requestOptions);
         }), requestOptions);
     } finally {
         promptReadyBypassGate.release(bypassToken);
@@ -12489,7 +12412,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 {
                     descriptiveArchive: pendingRun.descriptiveArchiveAfter || pendingRun.descriptiveArchiveBefore || {},
                     worldProgression: pendingRun.worldProgressionAfter || pendingRun.worldProgressionBefore || {},
-                    rapportClock: pendingRun.rapportClockAfter,
                 },
             ), {
                 save: false,
@@ -13266,7 +13188,6 @@ async function handleChatCompletionPromptReady(eventData) {
             boundCompanionAfter: report.trackerUpdate?.boundCompanion || pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundaryBefore: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             pendingBoundaryAfter: report.trackerUpdate?.pendingBoundary || pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
-            rapportClockAfter: report.trackerUpdate?.rapportClock || null,
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,
             contextualInjuryCaps: collectContextualInjuryCaps(report),
@@ -13342,7 +13263,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             throw new Error('Story Engine semantic run expired before model generation.');
         }
 
-        const semanticLedger = await withStoryEngineModelRequest(modelRequest => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
+        const semanticLedger = await withStoryEngineModelRequest(() => withSemanticGenerationSettings(settings => extractSemanticLedger(context, assembledChat, type, trackerSnapshot, {
             assembledPrompt: true,
             playerTrackerSnapshot: pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
             powerActorSnapshot: pendingGeneration?.powerActorSnapshot || buildPowerActorSnapshot(context),
@@ -13362,8 +13283,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             latestUserText: pendingGeneration?.latestUserText || getLatestUserText(context?.chat),
             proxyUserAction: pendingGeneration?.mode === 'proxy' ? pendingGeneration?.latestUserText : '',
             inlineProxyInstructions: pendingGeneration?.inlineProxyInstructions || [],
-            signal: modelRequest.signal,
-            beforeRawAbort: markInternalGenerationStop,
         })), {
             isCurrent: () => isCurrentStoryEngineRun(runIdentity, context),
             expiredMessage: 'Story Engine semantic run expired before its model request completed.',

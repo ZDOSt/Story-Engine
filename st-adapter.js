@@ -199,57 +199,10 @@ export function canGenerateRawData(context = getContext()) {
     return typeof context?.generateRawData === 'function';
 }
 
-function getRequestAbortError(signal, message = 'Story Engine internal model request was cancelled.') {
-    if (signal?.reason instanceof Error) return signal.reason;
-    const error = new Error(message);
-    error.name = 'AbortError';
-    return error;
-}
-
-function throwIfRequestAborted(signal) {
-    if (!signal?.aborted) return;
-    if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
-    throw getRequestAbortError(signal);
-}
-
 export async function generateRawData(request = {}, context = getContext(), options = {}) {
     const fn = context?.generateRawData;
     if (typeof fn === 'function') {
-        const signal = options?.signal || null;
-        throwIfRequestAborted(signal);
-        if (!signal) return await fn.call(context, request);
-
-        let abortHandler = null;
-        const abortPromise = new Promise((_, reject) => {
-            abortHandler = () => {
-                const error = getRequestAbortError(signal);
-                try {
-                    options?.beforeAbort?.();
-                } catch {
-                    // Cancellation must still reach SillyTavern's raw-generation controller.
-                }
-                try {
-                    stopGeneration(context);
-                } catch {
-                    // Preserve the request cancellation if the host stop hook fails.
-                }
-                reject(error);
-            };
-            signal.addEventListener('abort', abortHandler, { once: true });
-        });
-
-        try {
-            throwIfRequestAborted(signal);
-            return await Promise.race([
-                Promise.resolve().then(() => {
-                    throwIfRequestAborted(signal);
-                    return fn.call(context, request);
-                }),
-                abortPromise,
-            ]);
-        } finally {
-            signal.removeEventListener('abort', abortHandler);
-        }
+        return await fn.call(context, request);
     }
     const purpose = String(options?.purpose || '').trim();
     throw new Error(`SillyTavern generateRawData API is unavailable${purpose ? ` for ${purpose}` : ''}.`);
@@ -531,17 +484,13 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     let generateData;
     const purpose = String(options?.purpose || 'semantic tool call').trim() || 'semantic tool call';
     const chatCompletionSettings = getChatCompletionSettings();
-    const signal = options?.signal || null;
-    throwIfRequestAborted(signal);
     try {
         const model = await getChatCompletionModel(chatCompletionSettings);
         const params = await createGenerationParameters(chatCompletionSettings, model, 'quiet', messages);
         generateData = params.generate_data;
     } catch (error) {
-        if (signal?.aborted) throw getRequestAbortError(signal);
         throw adapterTransportError(`Could not build SillyTavern chat-completion backend request for ${purpose}.`, { cause: error, stage: 'build' });
     }
-    throwIfRequestAborted(signal);
 
     const chatCompletionSource = generateData.chat_completion_source || chatCompletionSettings?.chat_completion_source;
     const tool = options?.buildTool?.(chatCompletionSource);
@@ -585,10 +534,8 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
             method: 'POST',
             headers: getRequestHeaders(),
             body: JSON.stringify(generateData),
-            signal,
         });
     } catch (error) {
-        if (signal?.aborted) throw getRequestAbortError(signal);
         throw adapterTransportError(`SillyTavern backend ${purpose} request failed before provider response.`, { cause: error, stage: 'fetch' });
     }
 

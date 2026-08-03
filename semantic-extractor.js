@@ -85,7 +85,6 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
             semanticProfile: options?.semanticProfileName || undefined,
         };
         } catch (error) {
-            options?.signal?.throwIfAborted?.();
             if (!isRecoverableSemanticToolCallError(error)) {
                 const message = error instanceof Error ? error.message : String(error);
                 throw new Error(`Semantic tool-call pass returned no valid ledger. Generation aborted before narration. ${message}`);
@@ -99,7 +98,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
             console.warn('[Structured Preflight Engines] semantic tool-call failed; falling back to compact ledger.', error);
             raw = options?.semanticProfileId
                 ? await generateSemanticRawWithProfile(prompt, responseLength, options)
-                : await generateSemanticRaw(context, prompt, responseLength, options);
+                : await generateSemanticRaw(context, prompt, responseLength);
             extractionMeta = {
                 source: options?.semanticProfileId
                     ? `SillyTavern direct connection profile compact preflight ledger fallback + local validation (${options.semanticProfileName || options.semanticProfileId})`
@@ -115,7 +114,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
     } else {
         raw = options?.semanticProfileId
             ? await generateSemanticRawWithProfile(prompt, responseLength, options)
-            : await generateSemanticRaw(context, prompt, responseLength, options);
+            : await generateSemanticRaw(context, prompt, responseLength);
         extractionMeta = {
             source: options?.semanticProfileId
                 ? `SillyTavern direct connection profile compact preflight ledger + local validation (${options.semanticProfileName || options.semanticProfileId})`
@@ -231,16 +230,12 @@ function extractRecentPromptText(promptContext, options = {}) {
     return texts.reverse().join('\n');
 }
 
-async function generateSemanticRaw(context, prompt, responseLength, requestOptions = {}) {
+async function generateSemanticRaw(context, prompt, responseLength) {
     const options = { prompt };
     if (Number.isFinite(responseLength) && responseLength > 0) {
         options.responseLength = responseLength;
     }
-    return await generateRawData(options, context, {
-        purpose: 'semantic preflight',
-        signal: requestOptions.signal,
-        beforeAbort: requestOptions.beforeRawAbort,
-    });
+    return await generateRawData(options, context, { purpose: 'semantic preflight' });
 }
 
 async function generateSemanticRawWithProfile(prompt, responseLength, options = {}) {
@@ -257,7 +252,6 @@ async function generateSemanticRawWithProfile(prompt, responseLength, options = 
         },
         extractData: true,
         preparePayload: applyStoryEngineThinkingDisabledPayload,
-        signal: options.signal,
     });
     return extractGeneratedText(result);
 }
@@ -290,11 +284,9 @@ async function generateSemanticToolCall(context, prompt, responseLength, options
     const toolPrompt = buildSemanticToolPrompt(prompt);
     try {
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
-            purpose: 'semantic preflight tool call',
             buildTool: buildSemanticPreflightTool,
             buildToolChoice: buildSemanticToolChoice,
             preparePayload: payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort),
-            signal: options.signal,
         });
         if (raw?.error) {
             throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
@@ -1085,47 +1077,15 @@ function buildSemanticPreflightSchema() {
         additionalProperties: false,
         required: ['reputationLocation', 'place', 'area', 'indoors', 'timeAdvance', 'timeAdvanceCount', 'timeOfDay', 'requiresSuccess', 'evidence'],
         properties: {
-            reputationLocation: {
-                type: 'string',
-                description: 'Use unchanged unless the latest user input explicitly changes the current settlement, route, region, or reputation jurisdiction. Never copy or infer the existing scene state.',
-            },
-            place: {
-                type: 'string',
-                description: 'Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different place. Never copy or infer the existing place from context.',
-            },
-            area: {
-                type: 'string',
-                description: 'Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different sub-area. Never copy or infer the existing area from context.',
-            },
-            indoors: {
-                type: 'string',
-                enum: ['unchanged', 'indoors', 'outdoors'],
-                description: 'Use unchanged unless the latest user input explicitly crosses between indoors and outdoors.',
-            },
-            timeAdvance: {
-                type: 'string',
-                enum: ['none', 'slot', 'overnight', 'day', 'explicit'],
-                description: 'Use none unless the latest user input explicitly waits, sleeps, travels through, or skips time.',
-            },
-            timeAdvanceCount: {
-                type: 'integer',
-                minimum: 1,
-                maximum: 3650,
-                description: 'Number of timeAdvance units explicitly established by the latest user input; use 1 when timeAdvance is none.',
-            },
-            timeOfDay: {
-                type: 'string',
-                enum: ['unchanged', 'morning', 'afternoon', 'evening', 'night'],
-                description: 'Use unchanged unless the latest user input explicitly establishes a new time of day.',
-            },
-            requiresSuccess: {
-                type: 'boolean',
-                description: 'True only when this explicit transition depends on the current stakes-bearing action succeeding.',
-            },
-            evidence: {
-                type: 'string',
-                description: 'Exact contiguous quote from the latest user input that establishes this transition, or (none) when every transition field is unchanged/none.',
-            },
+            reputationLocation: { type: 'string' },
+            place: { type: 'string' },
+            area: { type: 'string' },
+            indoors: { type: 'string', enum: ['unchanged', 'indoors', 'outdoors'] },
+            timeAdvance: { type: 'string', enum: ['none', 'slot', 'overnight', 'day', 'explicit'] },
+            timeAdvanceCount: { type: 'integer', minimum: 1, maximum: 3650 },
+            timeOfDay: { type: 'string', enum: ['unchanged', 'morning', 'afternoon', 'evening', 'night'] },
+            requiresSuccess: { type: 'boolean' },
+            evidence: { type: 'string' },
         },
     };
     const worldEvidenceSchema = {
@@ -5459,40 +5419,22 @@ function validateNormalizedLedger(ledger, raw) {
 }
 
 export function validateSemanticWorldProgression(ledger, options = {}, context = {}) {
-    let transition = normalizeWorldTransition(ledger?.worldTransition || {});
+    const transition = normalizeWorldTransition(ledger?.worldTransition || {});
     const beforeWorldState = normalizeWorldState(options?.worldStateSnapshot || {});
-    let assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
+    const assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
         assumeSuccess: true,
         seed: 'semantic-world-transition',
     });
     const transitionChangesState = JSON.stringify(beforeWorldState) !== JSON.stringify(assumedWorldState);
-    let rejectedUngroundedTransition = false;
     if (transitionChangesState && !semanticEvidenceAppearsInLatestInput(transition.evidence, options.latestUserText)) {
-        console.warn('[Story Engine] Rejected ungrounded WorldTransition; continuing without changing scene state.', transition);
-        transition = normalizeWorldTransition({});
-        ledger.worldTransition = transition;
-        assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
-            assumeSuccess: true,
-            seed: 'semantic-world-transition',
-        });
-        rejectedUngroundedTransition = true;
+        throw new Error('WorldTransition changed scene state without an exact quote grounded in the latest user input.');
     }
     const progression = normalizeWorldProgression(options?.worldProgressionSnapshot || {});
-    let coverage = validateWorldProgressionAdvancementCoverage(
+    const coverage = validateWorldProgressionAdvancementCoverage(
         progression,
         ledger?.worldProgression?.advancements || [],
         assumedWorldState,
     );
-    if (rejectedUngroundedTransition && coverage.unexpected.length) {
-        const duePlanIds = new Set(coverage.duePlanIds);
-        ledger.worldProgression.advancements = coverage.advancements
-            .filter(advancement => duePlanIds.has(advancement.planId));
-        coverage = validateWorldProgressionAdvancementCoverage(
-            progression,
-            ledger.worldProgression.advancements,
-            assumedWorldState,
-        );
-    }
     if (!coverage.valid) {
         const details = [
             coverage.missing.length ? `missing=${coverage.missing.join(',')}` : '',
