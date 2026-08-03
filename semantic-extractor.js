@@ -494,7 +494,7 @@ export function buildSemanticToolPrompt(prompt) {
 
 export function buildSemanticToolChoice(chatCompletionSource) {
     void chatCompletionSource;
-    return 'auto';
+    return 'required';
 }
 
 export function buildSemanticPreflightTool(chatCompletionSource) {
