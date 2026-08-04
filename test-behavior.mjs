@@ -15478,7 +15478,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.56');
+      assert.equal(manifest.version, '0.9.57');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -18165,6 +18165,22 @@ const tests = [
       assert.match(source, /function failPreflightDryRun[\s\S]*state\.generationActive = false[\s\S]*state\.pendingGeneration = null[\s\S]*state\.activeRunId = null/);
       assert.match(source, /function failNarratorGeneration[\s\S]*setChatInputLocked\(false\)[\s\S]*state\.generationActive = false[\s\S]*state\.pendingGeneration = null[\s\S]*state\.activeRunId = null/);
       assert.match(source, /Promise\.resolve\(generateSillyTavern\(generation\.type \|\| 'normal', generateOptions, false, narratorContext\)\)[\s\S]*\.catch\(error => failNarratorGeneration\(generation, error\)\)/);
+      assert.match(source, /const NARRATOR_PROMPT_MARKER_PREFIX = 'STORY_ENGINE_NARRATOR_HANDOFF'/);
+      assert.match(source, /function wrapNarratorDepthPrompt[\s\S]*markers\.start[\s\S]*text[\s\S]*markers\.end/);
+      assert.match(source, /function armNarratorGeneration[\s\S]*setNarratorDepthPrompt\(context, narratorModelContext, id\)[\s\S]*narratorPromptMarkers/);
+      const handoffRecoveryStart = source.indexOf('function ensureNarratorDepthPromptInChat(');
+      const handoffRecoveryEnd = source.indexOf('function clearNarratorGenerationTimer(', handoffRecoveryStart);
+      const handoffRecoverySource = source.slice(handoffRecoveryStart, handoffRecoveryEnd);
+      assert.ok(handoffRecoveryStart >= 0 && handoffRecoveryEnd > handoffRecoveryStart, 'Narrator handoff recovery should exist.');
+      assert.match(handoffRecoverySource, /if \(!hasNarratorDepthPrompt\(context\)\)[\s\S]*registerNarratorDepthPrompt\(context, narratorText\)/);
+      assert.match(handoffRecoverySource, /if \(!chatHasNarratorDepthPrompt\(chat\)\)[\s\S]*role: 'system'[\s\S]*resolveNarratorDepthPromptForFinalChat\(context, narratorText\)/);
+      assert.match(handoffRecoverySource, /if \(!hasNarratorDepthPrompt\(context\) \|\| !chatHasNarratorDepthPrompt\(chat\)\)[\s\S]*generation aborted before narration/);
+      const narratorPromptReadySource = source.slice(
+        source.indexOf('if (isNarratorGenerationPromptPass()) {', source.indexOf('async function handleChatCompletionPromptReady')),
+        source.indexOf('if (isBeginningAdventureIntroGeneration', source.indexOf('async function handleChatCompletionPromptReady')),
+      );
+      assert.ok(narratorPromptReadySource.indexOf('ensureNarratorDepthPromptInChat(context, eventData.chat)') < narratorPromptReadySource.indexOf('sanitizeFinalPromptHistory(eventData.chat)'));
+      assert.match(narratorPromptReadySource, /sanitizeFinalPromptHistory\(eventData\.chat\);[\s\S]*if \(!chatHasNarratorDepthPrompt\(eventData\.chat\)\)/);
       assert.match(source, /function handleMessageDeleted[\s\S]*invalidateStoryEnginePipeline\(\)/);
       assert.match(source, /function handleMessageSwiped[\s\S]*invalidateStoryEnginePipeline\(\)/);
       assert.match(source, /function handleMessageDeleted[\s\S]*operationIdentity[\s\S]*isCurrentStoryEngineEpoch\(operationIdentity, context\)/);
