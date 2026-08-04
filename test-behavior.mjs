@@ -15478,7 +15478,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.61');
+      assert.equal(manifest.version, '0.9.63');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -15914,12 +15914,21 @@ const tests = [
       assert.ok(resolveSource.indexOf('await restoreProseGuardDraftSnapshot(context, messageId)') < resolveSource.indexOf('await discardFailedProseGuardDraft(context, messageId)'));
       assert.match(resolveSource, /textElement\.textContent = ''/);
 
-      const withholdStart = source.indexOf('async function withholdPostNarrationForProseGuard(');
-      const withholdEnd = source.indexOf('function prependComputedDebug(', withholdStart);
-      const withholdSource = source.slice(withholdStart, withholdEnd);
-      assert.ok(withholdSource.indexOf('await resolveFailedProseGuardDraft(context, messageId)') < withholdSource.indexOf('releaseProseGuardDisplayIntercept'));
-      assert.doesNotMatch(withholdSource, /keepHidden/);
-      assert.match(withholdSource, /state\.pendingRun = null/);
+      assert.doesNotMatch(source, /withholdPostNarrationForProseGuard|narration withheld|narration blocked/);
+      assert.match(source, /function buildAutomaticProseGuardFailureState\(findings, error\)/);
+      assert.match(source, /automaticRepairFailed: true/);
+      assert.match(source, /attemptedReplacement/);
+      assert.match(source, /repairAttempts/);
+      assert.match(source, /sourceStart: finding\?\.start \?\? null/);
+      assert.match(source, /const positionedAttempts = sentenceAttempts\.filter/);
+      assert.match(source, /function summarizeAutomaticProseGuardFailure\(error\)/);
+      assert.match(source, /selected provider rejected the repair request/);
+      assert.match(source, /proseGuardState\.error \|\| 'No validated replacement was returned\.'/);
+      assert.match(source, /The original narration is shown/);
+      assert.match(source, /const originalNarrationText = narrationText/);
+      assert.match(source, /narrationText = originalNarrationText/);
+      assert.match(source, /automaticProseGuardState = buildAutomaticProseGuardFailureState/);
+      assert.match(source, /notifyInfo\([\s\S]*Automatic repair failed/);
 
       assert.match(source, /captureProseGuardDraftSnapshot\(context, normalizedType, state\.proseGuardExpectedMessageId\)/);
       assert.doesNotMatch(source, /keepHidden|proseGuardProtectionChatId|proseGuardProtectionChatRef|writeProseGuardMessageText|rollbackProseGuardTrackerCommit/);

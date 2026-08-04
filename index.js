@@ -105,7 +105,7 @@ const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
 const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
 const NARRATOR_HANDOFF_VERSION = 1;
 const PROSE_GUARD_EXTRA_KEY = 'structured_preflight_prose_guard';
-const PROSE_GUARD_EXTRA_VERSION = 2;
+const PROSE_GUARD_EXTRA_VERSION = 3;
 const PROSE_GUARD_RECONCILIATION_EXTRA_KEY = 'structured_preflight_prose_guard_reconciliation';
 const PROSE_GUARD_RECONCILIATION_EXTRA_VERSION = 1;
 const PROSE_GUARD_MODES = Object.freeze({
@@ -5685,6 +5685,8 @@ function sanitizeProseGuardFindingForStorage(finding) {
             : [],
         status: String(finding.status || 'pending'),
         replacementText: finding.replacementText ? String(finding.replacementText) : '',
+        attemptedReplacement: finding.attemptedReplacement ? String(finding.attemptedReplacement) : '',
+        failureReason: finding.failureReason ? String(finding.failureReason) : '',
     };
 }
 
@@ -5703,12 +5705,24 @@ function sanitizeProseGuardStateForStorage(value) {
             status: String(change?.status || 'applied'),
         })).filter(change => change.findingId && change.originalText && change.replacementText)
         : [];
+    const repairAttempts = Array.isArray(value.repairAttempts)
+        ? value.repairAttempts.map(attempt => ({
+            findingId: String(attempt?.findingId || ''),
+            sourceStart: normalizeProseGuardSpanOffset(attempt?.sourceStart),
+            originalText: String(attempt?.originalText || ''),
+            replacementText: String(attempt?.replacementText || ''),
+            reason: String(attempt?.reason || ''),
+            attempt: Number.isInteger(Number(attempt?.attempt)) ? Number(attempt.attempt) : 0,
+        })).filter(attempt => attempt.findingId || attempt.originalText || attempt.replacementText || attempt.reason)
+        : [];
     return {
         version: PROSE_GUARD_EXTRA_VERSION,
         mode: normalizeProseGuardMode(value.mode) || PROSE_GUARD_MODES.REVIEW,
         savedAt: Number(value.savedAt) || Date.now(),
         findings,
         changes,
+        repairAttempts,
+        automaticRepairFailed: value.automaticRepairFailed === true,
         error: value.error ? String(value.error) : '',
     };
 }
@@ -7915,6 +7929,15 @@ function ensureTrackerDisplayStyles() {
             font-weight: 750;
             overflow-wrap: anywhere;
         }
+        .structured-preflight-prose-guard-failure {
+            padding: 0.48rem 0.55rem;
+            border-left: 2px solid color-mix(in srgb, #f0c674 72%, transparent);
+            background: color-mix(in srgb, #f0c674 10%, transparent);
+            color: var(--SmartThemeBodyColor, #eee);
+            font-size: 0.75rem;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
         .structured-preflight-prose-guard-sentence {
             margin: 0;
             padding: 0.38rem 0.46rem;
@@ -8690,10 +8713,21 @@ function buildReviewProseGuardRows(proseGuardState, messageId) {
             .filter(Boolean));
         const rules = uniqueStrings(finding.ruleNames || []);
         const meta = [matched.length ? matched.join(', ') : 'Configured violation', rules.length ? rules.join(', ') : ''].filter(Boolean).join(' | ');
+        const attemptedReplacement = String(finding.attemptedReplacement || '');
+        const failureReason = String(finding.failureReason || '');
+        const failedRepairHtml = proseGuardState?.automaticRepairFailed
+            ? `
+                ${attemptedReplacement
+                    ? `<span class="structured-preflight-prose-guard-label">Attempted replacement</span>
+                       <p class="structured-preflight-prose-guard-sentence">${escapeHtml(attemptedReplacement)}</p>`
+                    : ''}
+                <div class="structured-preflight-prose-guard-meta">${escapeHtml(failureReason || 'No validated replacement was returned.')}</div>`
+            : '';
         return `
             <div class="structured-preflight-prose-guard-finding" data-spe-prose-guard-finding="${escapeHtml(finding.id)}">
                 <div class="structured-preflight-prose-guard-meta">${escapeHtml(meta)}</div>
                 <p class="structured-preflight-prose-guard-sentence">${escapeHtml(finding.sentence)}</p>
+                ${failedRepairHtml}
                 <div class="structured-preflight-prose-guard-actions">
                     <button class="menu_button" type="button" data-spe-prose-guard-review-action="fix" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Fix</button>
                     <button class="menu_button" type="button" data-spe-prose-guard-review-action="dismiss" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-check" aria-hidden="true"></i> Dismiss</button>
@@ -8761,6 +8795,9 @@ function renderProseGuardWidget(widget, context = getContext()) {
     const reportRows = reportMode === PROSE_GUARD_MODES.AUTOMATIC
         ? buildAutomaticProseGuardRows(proseGuardState, latest?.messageId ?? -1)
         : buildReviewProseGuardRows(proseGuardState, latest?.messageId ?? -1);
+    const failureNotice = proseGuardState?.automaticRepairFailed
+        ? `<div class="structured-preflight-prose-guard-failure"><strong>Automatic repair failed.</strong> ${escapeHtml(proseGuardState.error || 'No validated replacement was returned.')} Review, dismiss, or delete each reported violation below.</div>`
+        : '';
 
     strip.hidden = false;
     strip.innerHTML = `
@@ -8769,6 +8806,7 @@ function renderProseGuardWidget(widget, context = getContext()) {
             <span class="structured-preflight-prose-guard-count" aria-label="${count} violations">${count}</span>
         </button>
         <div class="structured-preflight-prose-guard-details" data-spe-prose-guard-details hidden>
+            ${failureNotice}
             ${reportRows}
             ${buildProseGuardManualRepairHtml(Boolean(latest))}
         </div>`;
@@ -12889,6 +12927,7 @@ class ProseGuardEnforcementError extends Error {
         this.findings = details.findings || [];
         this.remainingFindings = details.remainingFindings || [];
         this.rejectedRepairs = details.rejectedRepairs || [];
+        this.attemptedRepairs = details.attemptedRepairs || [];
         this.cause = details.cause;
     }
 }
@@ -12901,6 +12940,7 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
     let lastRemainingFindings = [];
     let lastRejectedRepairs = [];
     let lastError = null;
+    const attemptedRepairs = [];
 
     for (let attempt = 1; attempt <= PROSE_GUARD_MAX_REPAIR_ATTEMPTS; attempt += 1) {
         const rules = getTargetedProseBanRules();
@@ -12927,6 +12967,31 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
             const repaired = applyProseGuardSentenceRepairs(currentText, findings, repairPayload, { rules });
             const appliedFindingIds = new Set(repaired.appliedRepairs.map(repair => repair.findingId));
             const unresolvedFindings = findings.filter(finding => !appliedFindingIds.has(finding.id));
+            const rejectedByFindingId = new Map(repaired.rejectedRepairs.map(repair => [repair.findingId, repair]));
+            for (const repair of repairPayload.sentenceRepairs) {
+                const finding = findings.find(item => item.id === repair.findingId);
+                attemptedRepairs.push({
+                    findingId: repair.findingId,
+                    sourceStart: finding?.start ?? null,
+                    originalText: finding?.sentence || '',
+                    replacementText: repair.replacementSentence,
+                    reason: rejectedByFindingId.get(repair.findingId)?.reason || '',
+                    attempt,
+                });
+            }
+            for (const finding of unresolvedFindings) {
+                const supplied = repairPayload.sentenceRepairs.some(repair => repair.findingId === finding.id);
+                if (!supplied) {
+                    attemptedRepairs.push({
+                        findingId: finding.id,
+                        sourceStart: finding.start,
+                        originalText: finding.sentence,
+                        replacementText: '',
+                        reason: 'The repair response omitted this finding.',
+                        attempt,
+                    });
+                }
+            }
             currentText = repaired.narrationText;
             changed = changed || repaired.changed;
             appliedRepairs.push(...repaired.appliedRepairs);
@@ -12963,10 +13028,11 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
             findings: lastFindings,
             remainingFindings: lastRemainingFindings.length ? lastRemainingFindings : lastFindings,
             rejectedRepairs: lastRejectedRepairs,
+            attemptedRepairs,
             cause: lastError,
         },
     );
-    console.error(`[${EXTENSION_NAME}] targeted Prose Guard repair failed closed.`, enforcementError);
+    console.warn(`[${EXTENSION_NAME}] automatic Prose Guard repair failed; original narration will be shown.`, enforcementError);
     throw enforcementError;
 }
 
@@ -12977,6 +13043,51 @@ function buildReviewProseGuardState(findings) {
         savedAt: Date.now(),
         findings: (findings || []).map(finding => ({ ...finding, status: 'pending' })),
         changes: [],
+    };
+}
+
+function summarizeAutomaticProseGuardFailure(error) {
+    const causeMessage = error?.cause instanceof Error
+        ? error.cause.message
+        : String(error?.cause || '');
+    const normalized = causeMessage.trim();
+    if (!normalized) return 'No validated replacement was returned.';
+    if (/structured request returned an error:/i.test(normalized)) {
+        return 'The selected provider rejected the repair request.';
+    }
+    return normalized
+        .replace(/\s+RawPreview=[\s\S]*$/i, '')
+        .replace(/\s+Raw preview=[\s\S]*$/i, '')
+        .trim()
+        .slice(0, 300) || 'No validated replacement was returned.';
+}
+
+function buildAutomaticProseGuardFailureState(findings, error) {
+    const repairAttempts = Array.isArray(error?.attemptedRepairs) ? error.attemptedRepairs : [];
+    const failureSummary = summarizeAutomaticProseGuardFailure(error);
+    const pendingFindings = (findings || []).map(finding => {
+        const sentenceAttempts = repairAttempts.filter(attempt => attempt.originalText === finding.sentence);
+        const positionedAttempts = sentenceAttempts.filter(attempt => attempt.sourceStart === finding.start);
+        const matchingAttempts = positionedAttempts.length || sentenceAttempts.length === 1
+            ? (positionedAttempts.length ? positionedAttempts : sentenceAttempts)
+            : [];
+        const latestAttempt = matchingAttempts[matchingAttempts.length - 1] || null;
+        return {
+            ...finding,
+            status: 'pending',
+            attemptedReplacement: latestAttempt?.replacementText || '',
+            failureReason: latestAttempt?.reason || failureSummary,
+        };
+    });
+    return {
+        version: PROSE_GUARD_EXTRA_VERSION,
+        mode: PROSE_GUARD_MODES.REVIEW,
+        savedAt: Date.now(),
+        findings: pendingFindings,
+        changes: [],
+        repairAttempts,
+        automaticRepairFailed: true,
+        error: `Automatic repair failed after one retry. ${failureSummary} The original narration was preserved.`,
     };
 }
 
@@ -13451,33 +13562,6 @@ async function requestPostNarrationTrackerDeltaWithTimeout(args, requestOptions 
     }
 }
 
-async function withholdPostNarrationForProseGuard({ messageId, context, error }) {
-    const disposition = await resolveFailedProseGuardDraft(context, messageId);
-    releaseProseGuardDisplayIntercept({ messageId });
-    clearPendingRunCleanupTimer();
-    clearRuntimePrompts();
-    clearInternalGenerationStopState();
-    state.generationActive = false;
-    state.pendingGeneration = null;
-    state.pendingRun = null;
-    state.activeRunId = null;
-    state.lastNarratorHandoff = '';
-    state.lastNarratorHandoffKey = null;
-    clearAllProgress();
-    console.error(`[${EXTENSION_NAME}] narration withheld after an unresolved Prose Guard finding.`, {
-        findingCount: error?.findings?.length || 0,
-        remainingFindingCount: error?.remainingFindings?.length || 0,
-    });
-    notifyError(
-        'Narration was withheld because Prose Guard could not remove a configured banned phrase.',
-        `${EXTENSION_NAME}: narration blocked`,
-        { timeOut: 15000, extendedTimeOut: 15000 },
-    );
-    return { disposition };
-}
-
-
-
 function prependComputedDebug(messageId, type) {
     if (!isStoryEngineEnabled()) {
         releaseProseGuardDisplayIntercept({ messageId });
@@ -13586,6 +13670,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         const rawAssistantText = getProseGuardMessageText(message);
         const visibleText = stripComputedDebugPrefix(rawAssistantText);
         let narrationText = sanitizeAssistantNarration(visibleText);
+        const originalNarrationText = narrationText;
         const narratorHandoff = captured?.narratorHandoff ?? state.lastNarratorHandoff;
         const pendingRun = captured?.pendingRun ?? state.pendingRun;
         const proseGuardReconciliation = captured?.proseGuardReconciliation === true;
@@ -13629,9 +13714,12 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                         'Prose Guard could not produce validated narration.',
                         { cause: error },
                     );
-                await withholdPostNarrationForProseGuard({ messageId, context, error: enforcementError });
-                proseGuardFailureHandled = true;
-                return;
+                narrationText = originalNarrationText;
+                const originalFindings = collectProseGuardSentenceFindings(
+                    originalNarrationText,
+                    getTargetedProseBanRules(),
+                );
+                automaticProseGuardState = buildAutomaticProseGuardFailureState(originalFindings, enforcementError);
             }
         }
         publishableNarrationText = narrationText;
@@ -13914,6 +14002,13 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         }
         releaseProseGuardDisplayIntercept({ messageId });
         finalNarrationRendered = true;
+        if (automaticProseGuardState?.automaticRepairFailed) {
+            notifyInfo(
+                'Automatic repair failed. The original narration is shown; review the reported violation in Prose Guard.',
+                `${EXTENSION_NAME}: Prose Guard warning`,
+                { timeOut: 9000, extendedTimeOut: 9000 },
+            );
+        }
         renderNarratorHandoffBlockForMessage(messageId, null, context);
         renderTrackerDisplayBlockForMessage(messageId, null, context);
         renderTrackerWidget(context);
