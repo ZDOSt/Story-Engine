@@ -123,19 +123,19 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
 
     let ledger;
     try {
-        ledger = parseSemanticLedger(toolResult.ledgerText, trackerSnapshot);
-        validateRawLedgerContract(ledger, toolResult.ledgerText);
+        ledger = parseSemanticLedger(toolResult.ledger, trackerSnapshot);
+        validateRawLedgerContract(ledger, toolResult.ledger);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`);
     }
 
     if (!ledger || typeof ledger !== 'object') {
-        throw new Error(`Semantic tool-call pass returned an invalid ledger object: ${String(toolResult.ledgerText).slice(0, 200)}`);
+        throw new Error(`Semantic tool-call pass returned an invalid ledger object: ${previewRaw(toolResult.ledger)}`);
     }
 
     const normalized = normalizeLedger(ledger);
-    validateNormalizedLedger(normalized, toolResult.ledgerText);
+    validateNormalizedLedger(normalized, toolResult.ledger);
     validateSemanticWorldProgression(normalized, options, context);
     validateRelationshipCoverage(normalized.resolutionEngine, normalized.relationshipEngine);
     normalized.deterministicOverrides = {
@@ -144,7 +144,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
             source: options?.semanticProfileId
                 ? `SillyTavern Connection Manager profile tool + complete local validation (${options.semanticProfileName || options.semanticProfileId})`
                 : 'SillyTavern backend tool + complete local validation',
-            schema: 'submit_semantic_preflight_sections_v2',
+            schema: 'submit_semantic_preflight_structured_v3',
             strict: true,
             responseLength,
             toolName: SEMANTIC_TOOL_NAME,
@@ -262,8 +262,8 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
         if (raw?.error) {
             throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
         }
-        const ledgerText = extractSemanticToolLedger(raw);
-        return { raw, ledgerText };
+        const ledger = extractSemanticToolLedger(raw);
+        return { raw, ledger };
     } catch (error) {
         if (isSemanticToolTransportError(error)) throw error;
         throw new SemanticToolTransportError(error instanceof Error ? error.message : String(error), {
@@ -281,7 +281,7 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
     };
     const chatCompletionSource = route.source;
     const toolPrompt = buildSemanticToolPrompt(prompt);
-    const semanticTool = buildSemanticPreflightTool(chatCompletionSource);
+    const semanticTool = buildSemanticPreflightTool(chatCompletionSource, route);
     const preparePayload = payload => applyStoryEngineThinkingDisabledPayload(payload, route);
     const overridePayload = {
         temperature: 0,
@@ -318,8 +318,8 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
         throw new SemanticToolTransportError(`Provider returned an error for semantic profile tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
     }
 
-    const ledgerText = extractSemanticToolLedger(raw);
-    return { raw, ledgerText };
+    const ledger = extractSemanticToolLedger(raw);
+    return { raw, ledger };
 }
 
 export async function sendStructuredToolRequest(prompt, responseLength, options = {}, toolDefinition = {}) {
@@ -570,26 +570,16 @@ export function buildSemanticToolPrompt(prompt) {
             break;
         }
     }
-    const sectionOwnership = SEMANTIC_TOOL_SECTIONS
-        .map(section => `- ${section.name}: ${section.roots.join(', ')}`)
-        .join('\n');
     const toolContract = [
         `MANDATORY OUTPUT CONTRACT: Call the function tool ${SEMANTIC_TOOL_NAME} exactly once.`,
         'Do not output narration, prose, markdown, visible JSON, or ordinary assistant text.',
-        'Fill all eleven required string arguments. Do not omit a section when its count is zero.',
-        'Each argument must contain only newline-separated key=value ledger lines owned by that section, without BEGIN/END wrappers.',
-        'Fill every required static template line exactly once, preserving the exact key names. Indexed [0] rows in the complete template are placeholders when count=0; when count>0, output every required indexed row controlled by that count.',
-        'When a static indexed section count is 0, copy its template [0] placeholder lines exactly. Those rows are inert and must not be reinterpreted. Follow the separate dynamic-row rules for RelationshipEngine and InjuryEffectEngine.',
-        'WorldProgressionAdvancement.count must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one row per due plan.',
-        'When RelationshipEngine.count is greater than 0, every indexed relationship row must include every template field, including standingInfluence and standingBasis.',
-        'UserKnowledgeApplication[i] enums: type=personalKnowledge|reputationKnowledge; scope=private|local|route|faction|regional|legendary; valence=none|good|bad|fear; effect=none|priorUserGoodRep|userBadRep|userNonHuman|contextOnly.',
-        'Use a vertical bar (|) between list entries, or (none) for an empty list. Commas and semicolons are literal text inside one entry. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
-        'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. The tool is only a compact transport envelope; do not reduce or reinterpret the ledger.',
-        'SECTION OWNERSHIP:',
-        sectionOwnership,
-        compactDynamicRowGuidance(),
-        'COMPLETE REQUIRED LEDGER TEMPLATE:',
-        COMPACT_LEDGER_TEMPLATE,
+        'Fill the complete nested object defined by the tool schema. Every required property must be present.',
+        'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
+        'For enum fields, use exactly one value listed by the schema. Never invent a synonym or alternate label.',
+        'Use an empty array when a repeated section has no entries. Do not emit count fields, placeholder rows, or sentinel values in arrays.',
+        'Legacy shorthand in the semantic guidance maps to this schema as follows: Y/N means true/false; count=0, a list value of (none), or ["(none)"] means an empty array; [index] means one array entry; and references to lines or the template mean the corresponding schema properties. Apply the guidance semantically; never emit compact ledger keys.',
+        'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
+        'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. The tool schema changes only transport structure; do not reduce, reinterpret, or invent ledger content.',
     ].join('\n');
 
     if (contractIndex >= 0) {
@@ -624,33 +614,382 @@ export function buildSemanticToolChoice(chatCompletionSource, route = {}) {
     return buildStructuredToolChoice(SEMANTIC_TOOL_NAME, chatCompletionSource, route);
 }
 
-export function buildSemanticPreflightTool(chatCompletionSource) {
-    void chatCompletionSource;
+export function buildSemanticPreflightTool(chatCompletionSource, route = {}) {
+    const strictSchema = supportsExactNamedToolChoice(chatCompletionSource, route);
     const parameters = buildSemanticPreflightSchema();
-    return {
+    if (!strictSchema) removeStrictOnlySchemaKeywords(parameters);
+
+    const tool = {
         type: 'function',
         function: {
             name: SEMANTIC_TOOL_NAME,
-            description: 'Submit every required semantic preflight ledger line in eleven compact sections. This is data extraction only; do not narrate or roll dice.',
+            description: 'Submit the complete structured semantic preflight ledger. This is data extraction only; do not narrate or roll dice.',
             parameters,
         },
     };
+
+    if (strictSchema) tool.function.strict = true;
+    return tool;
+}
+
+function removeStrictOnlySchemaKeywords(schema) {
+    if (!schema || typeof schema !== 'object') return;
+    delete schema.additionalProperties;
+    if (schema.properties && typeof schema.properties === 'object') {
+        Object.values(schema.properties).forEach(removeStrictOnlySchemaKeywords);
+    }
+    if (schema.items) removeStrictOnlySchemaKeywords(schema.items);
 }
 
 function buildSemanticPreflightSchema() {
-    const properties = Object.fromEntries(SEMANTIC_TOOL_SECTIONS.map(section => [
-        section.name,
-        {
-            type: 'string',
-            description: `Complete newline-separated key=value lines for ${section.roots.join(', ')}. Preserve every required template key owned by this section.`,
-        },
-    ]));
-
-    return {
+    const string = () => ({ type: 'string' });
+    const boolean = () => ({ type: 'boolean' });
+    const integer = (minimum, maximum) => ({ type: 'integer', minimum, maximum });
+    const enumString = values => ({ type: 'string', enum: [...values] });
+    const object = properties => ({
         type: 'object',
-        required: SEMANTIC_TOOL_SECTIONS.map(section => section.name),
+        additionalProperties: false,
+        required: Object.keys(properties),
         properties,
-    };
+    });
+    const array = (items, maxItems, minItems) => ({
+        type: 'array',
+        ...(Number.isInteger(minItems) ? { minItems } : {}),
+        ...(Number.isInteger(maxItems) ? { maxItems } : {}),
+        items,
+    });
+    const stringList = maxItems => array(string(), maxItems);
+    const generatedStatsSeed = object({
+        CapabilityPool: enumString(['none', 'common', 'trained', 'elite', 'boss']),
+        MainStat: enumString(['none', 'PHY', 'MND', 'CHA', 'Balanced']),
+    });
+    const trackerNpcDelta = object({
+        NPC: string(),
+        revealedName: string(),
+        personalitySummary: string(),
+        condition: enumString(TRACKER_CONDITIONS),
+        woundsAdd: stringList(),
+        woundsRemove: stringList(),
+        statusAdd: stringList(),
+        statusRemove: stringList(),
+        gearAdd: stringList(),
+        gearRemove: stringList(),
+    });
+    const trackerUserDelta = object({
+        condition: enumString(TRACKER_CONDITIONS),
+        woundsAdd: stringList(),
+        woundsRemove: stringList(),
+        statusAdd: stringList(),
+        statusRemove: stringList(),
+        gearAdd: stringList(),
+        gearRemove: stringList(),
+        inventoryAdd: stringList(),
+        inventoryRemove: stringList(),
+        currencyAdd: stringList(),
+        currencyRemove: stringList(),
+        tasksAdd: stringList(),
+        tasksRemove: stringList(),
+        commitmentsAdd: stringList(),
+        commitmentsRemove: stringList(),
+    });
+    const boundCompanionDelta = object({
+        status: enumString(['unchanged', 'active', 'inactive']),
+        name: string(),
+        type: enumString(['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other']),
+        vessel: string(),
+        voice: string(),
+        evidence: string(),
+    });
+    const pendingBoundaryDelta = object({
+        status: enumString(['unchanged', 'set', 'clear']),
+        boundaryId: string(),
+        targetNPC: string(),
+        type: enumString(['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']),
+        objectOrAccess: string(),
+        evidence: string(),
+    });
+    const injuryEffect = object({
+        target: string(),
+        targetRole: enumString(['OppTarget', 'HarmedObserver', 'ActionTarget', 'User', 'Other']),
+        effectType: enumString(['none', 'physical_injury', 'burn', 'poison', 'paralysis', 'disease', 'blindness', 'stun', 'fear', 'restraint', 'curse', 'electrical', 'exhaustion', 'mental_status', 'other_status']),
+        bodyPart: string(),
+        description: string(),
+        severityFloor: enumString(['minor', 'moderate', 'severe', 'critical']),
+        persistence: enumString(['none', 'lasting']),
+        affectsAction: boolean(),
+    });
+    const powerActorAssessment = object({
+        actor: string(),
+        scope: enumString(POWER_ACTOR_ASSESSMENT_SCOPES),
+        isPowerActor: boolean(),
+        actorType: string(),
+        reach: stringList(),
+        evidence: string(),
+        assessmentReason: string(),
+    });
+    const powerActorEffect = object({
+        actor: string(),
+        actorType: string(),
+        sourceTarget: string(),
+        actionUnitId: enumString(['A1', 'A2', 'A3']),
+        explicitlyCompleted: boolean(),
+        hasReach: boolean(),
+        effect: enumString(POWER_ACTOR_EFFECT_TYPES),
+        severity: enumString(POWER_ACTOR_SEVERITIES),
+        reason: string(),
+        knownToActor: boolean(),
+    });
+    const latentGrievance = object({
+        target: string(),
+        actionUnitId: enumString(['A1', 'A2', 'A3']),
+        explicitlyCompleted: boolean(),
+        effect: enumString(POWER_ACTOR_EFFECT_TYPES),
+        severity: enumString(['meaningful', 'major']),
+        reason: string(),
+        evidence: string(),
+        attributionPath: string(),
+    });
+    const powerActorAffiliationLink = object({
+        grievanceId: string(),
+        target: string(),
+        powerActor: string(),
+        actorType: string(),
+        hasReach: boolean(),
+        affiliationEvidence: string(),
+        knownToActor: boolean(),
+        knowledgeEvidence: string(),
+    });
+    const latentFavor = object({
+        target: string(),
+        actionUnitId: enumString(['A1', 'A2', 'A3']),
+        explicitlyCompleted: boolean(),
+        benefit: enumString(POWER_ACTOR_FAVOR_TYPES),
+        severity: enumString(['meaningful', 'major']),
+        reason: string(),
+        evidence: string(),
+        uncompensated: boolean(),
+        beyondExpectedDuty: boolean(),
+        attributionPath: string(),
+    });
+    const powerActorFavorAffiliationLink = object({
+        favorId: string(),
+        target: string(),
+        powerActor: string(),
+        actorType: string(),
+        hasReach: boolean(),
+        affiliationEvidence: string(),
+        knownToActor: boolean(),
+        knowledgeEvidence: string(),
+        knownToUser: boolean(),
+        userKnowledgeEvidence: string(),
+        fit: enumString(POWER_ACTOR_FAVOR_FITS),
+        fitEvidence: string(),
+    });
+    const powerEvent = object({
+        eventId: string(),
+        actor: string(),
+        fit: enumString(POWER_EVENT_FITS),
+        visibleInstruction: string(),
+        contactName: string(),
+        contactGender: enumString(POWER_EVENT_CONTACT_GENDERS),
+        surfaceRole: string(),
+        deferReason: string(),
+    });
+    const stakeChange = object(Object.fromEntries(
+        STAKE_OUTCOME_KEYS.map(key => [key, enumString(['benefit', 'harm', 'none'])]),
+    ));
+    const itemUse = object({
+        attempted: boolean(),
+        available: boolean(),
+        item: string(),
+        source: enumString(ITEM_USE_SOURCES),
+        evidence: string(),
+        noEffectReason: string(),
+    });
+    const lootSearch = object({
+        attempted: boolean(),
+        target: string(),
+        targetKind: enumString(LOOT_TARGET_KINDS),
+        evidence: string(),
+    });
+    const claimCheck = object({
+        present: boolean(),
+        claim: string(),
+        targetNPC: string(),
+        truthStatus: enumString(CLAIM_TRUTH_STATUSES),
+        npcAccess: enumString(CLAIM_NPC_ACCESS_LEVELS),
+        stakesImpact: boolean(),
+        reason: string(),
+    });
+    const restraintControl = object({
+        present: boolean(),
+        targetNPC: string(),
+        evidence: string(),
+    });
+    const boundaryPressure = object({
+        present: boolean(),
+        type: enumString(BOUNDARY_PRESSURE_TYPES),
+        targetNPC: string(),
+        objectOrAccess: string(),
+        evidence: string(),
+    });
+    const boundaryBreak = object({
+        present: boolean(),
+        boundaryId: string(),
+        targetNPC: string(),
+        type: enumString(BOUNDARY_BREAK_TYPES),
+        response: enumString(BOUNDARY_BREAK_RESPONSES),
+        evidence: string(),
+    });
+    const userKnowledgeApplication = object({
+        target: string(),
+        entryIds: stringList(),
+        type: enumString(USER_KNOWLEDGE_TYPES),
+        knownBy: string(),
+        scope: enumString(USER_KNOWLEDGE_SCOPES),
+        valence: enumString(['none', ...USER_REPUTATION_VALENCES]),
+        effect: enumString(USER_KNOWLEDGE_APPLICATION_EFFECTS),
+        line: string(),
+        reason: string(),
+    });
+    const actionUnit = object({
+        id: enumString(['A1', 'A2', 'A3']),
+        action: string(),
+        evidence: string(),
+    });
+    const worldTransition = object({
+        reputationLocation: string(),
+        place: string(),
+        area: string(),
+        indoors: enumString(['unchanged', 'indoors', 'outdoors']),
+        timeAdvance: enumString(['none', 'slot', 'overnight', 'day', 'explicit']),
+        timeAdvanceCount: integer(1, 3650),
+        timeOfDay: enumString(['unchanged', 'morning', 'afternoon', 'evening', 'night']),
+        requiresSuccess: boolean(),
+        evidence: string(),
+    });
+    const worldEvidence = object({
+        topic: string(),
+        text: string(),
+        route: enumString(['location', 'actor', 'news', 'investigation']),
+        location: string(),
+        actor: string(),
+    });
+    const worldAdvancement = object({
+        planId: string(),
+        stageLabel: string(),
+        consequence: string(),
+        status: enumString(['active', 'completed']),
+        nextDelayDays: integer(0, 120),
+        nextDelaySlots: integer(0, 480),
+        evidence: array(worldEvidence, 4, 1),
+    });
+    const relationship = object({
+        NPC: string(),
+        initPreset: object({
+            romanticOpen: boolean(),
+            userBadRep: boolean(),
+            priorUserGoodRep: boolean(),
+            userNonHuman: boolean(),
+            fearImmunity: boolean(),
+        }),
+        auditInteraction: boolean(),
+        establishedRelationship: boolean(),
+        romanceStyle: enumString(['auto', 'nervous', 'flirt']),
+        slowBondEvidence: object({
+            respectfulContact: boolean(),
+            cooperation: boolean(),
+            comfortInProximity: boolean(),
+            boundaryRespect: boolean(),
+            sharedRoutine: boolean(),
+            playfulness: boolean(),
+            teamwork: boolean(),
+            personalAttention: boolean(),
+            blockers: stringList(),
+        }),
+        explicitIntimidationOrCoercion: boolean(),
+        standingInfluence: enumString(STANDING_INFLUENCES),
+        standingBasis: string(),
+        stakeChangeByOutcome: stakeChange,
+        overrideFlags: object({
+            CurrentInvitation: boolean(),
+            Exploitation: boolean(),
+            Hedonist: boolean(),
+            Transactional: boolean(),
+            Established: boolean(),
+            RomanticBuildup: boolean(),
+        }),
+        genStats: generatedStatsSeed,
+    });
+
+    return object({
+        engineContext: object({
+            trackerRelevantNPCs: array(object({ NPC: string() })),
+            userReputationContext: object({ location: string() }),
+        }),
+        worldTransition,
+        worldProgression: object({ advancements: array(worldAdvancement, 18) }),
+        resolutionEngine: object({
+            identifyGoal: string(),
+            identifyChallenge: string(),
+            explicitMeans: string(),
+            userAbilityUse: object({
+                used: boolean(),
+                attempted: boolean(),
+                available: boolean(),
+                abilityName: string(),
+                evidence: string(),
+                narrativeEffect: string(),
+                noEffectReason: string(),
+                mechanicalScope: enumString(['flavor_only_no_bonus']),
+            }),
+            itemUse,
+            lootSearch,
+            claimCheck,
+            identifyTargets: object({
+                hostilesInScene: object({ NPC: stringList() }),
+                ActionTargets: stringList(),
+                OppTargets: object({ NPC: stringList(), ENV: stringList() }),
+                BenefitedObservers: stringList(),
+                HarmedObservers: stringList(),
+                NPCAwareOfUser: stringList(),
+                PowerActors: stringList(),
+            }),
+            intimacyAdvanceExplicit: boolean(),
+            restraintControl,
+            boundaryPressure,
+            boundaryBreak,
+            harmMode: enumString(HARM_MODES),
+            rollNeeded: boolean(),
+            rollReason: string(),
+            challengeType: enumString(CHALLENGE_TYPES),
+            challengeTypeEvidence: string(),
+            socialTactic: enumString(SOCIAL_TACTICS),
+            actionUnits: array(actionUnit, 3),
+            environmentDifficultyTier: enumString(ENVIRONMENT_DIFFICULTY_TIERS),
+            activeHostileThreat: boolean(),
+            genStats: generatedStatsSeed,
+        }),
+        relationshipEngine: array(relationship, 20),
+        injuryEffectEngine: object({ effects: array(injuryEffect, 20) }),
+        userKnowledgeApplication: object({ applications: array(userKnowledgeApplication, 20) }),
+        powerActorEnmity: object({
+            assessments: array(powerActorAssessment, 20),
+            effects: array(powerActorEffect, 12),
+            latentGrievances: array(latentGrievance, 12),
+            affiliationLinks: array(powerActorAffiliationLink, 12),
+            latentFavors: array(latentFavor, 12),
+            favorAffiliationLinks: array(powerActorFavorAffiliationLink, 12),
+        }),
+        powerEventShape: object({ events: array(powerEvent, 4) }),
+        trackerUpdateEngine: object({
+            user: trackerUserDelta,
+            npcs: array(trackerNpcDelta, 20),
+            boundCompanion: boundCompanionDelta,
+            pendingBoundary: pendingBoundaryDelta,
+        }),
+        chaosSemantic: object({ sceneSummary: string() }),
+    });
 }
 
 function extractSemanticToolLedger(raw) {
@@ -661,11 +1000,72 @@ function extractSemanticToolLedger(raw) {
     }
 
     const args = getToolCallArguments(matching);
-    const sections = parseToolArguments(args);
-    if (!sections || typeof sections !== 'object' || Array.isArray(sections)) {
+    const ledger = parseToolArguments(args);
+    if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
         throw new Error(`semantic tool-call arguments were not an object. RawPreview=${previewRaw(raw)}`);
     }
-    return reconstructSemanticToolLedger(sections);
+    validateSemanticToolArguments(ledger);
+    return ledger;
+}
+
+export function validateSemanticToolArguments(ledger) {
+    validateSchemaValue(ledger, buildSemanticPreflightSchema(), '$');
+    return ledger;
+}
+
+function validateSchemaValue(value, schema, path) {
+    if (!schema || typeof schema !== 'object') return;
+
+    if (schema.type === 'object') {
+        if (!isRecord(value)) throw new Error(`${path} must be an object`);
+        const properties = schema.properties || {};
+        for (const name of schema.required || []) {
+            if (!Object.prototype.hasOwnProperty.call(value, name)) {
+                throw new Error(`${path}.${name} is required`);
+            }
+        }
+        if (schema.additionalProperties === false) {
+            const unknown = Object.keys(value).filter(name => !Object.prototype.hasOwnProperty.call(properties, name));
+            if (unknown.length) throw new Error(`${path} contains unknown properties: ${unknown.join(', ')}`);
+        }
+        for (const [name, childSchema] of Object.entries(properties)) {
+            if (Object.prototype.hasOwnProperty.call(value, name)) {
+                validateSchemaValue(value[name], childSchema, `${path}.${name}`);
+            }
+        }
+        return;
+    }
+
+    if (schema.type === 'array') {
+        if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
+        if (Number.isInteger(schema.minItems) && value.length < schema.minItems) {
+            throw new Error(`${path} must contain at least ${schema.minItems} item(s)`);
+        }
+        if (Number.isInteger(schema.maxItems) && value.length > schema.maxItems) {
+            throw new Error(`${path} must contain at most ${schema.maxItems} item(s)`);
+        }
+        value.forEach((item, index) => validateSchemaValue(item, schema.items, `${path}[${index}]`));
+        return;
+    }
+
+    if (schema.type === 'string' && typeof value !== 'string') {
+        throw new Error(`${path} must be a string`);
+    }
+    if (schema.type === 'boolean' && typeof value !== 'boolean') {
+        throw new Error(`${path} must be a boolean`);
+    }
+    if (schema.type === 'integer' && !Number.isInteger(value)) {
+        throw new Error(`${path} must be an integer`);
+    }
+    if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+        throw new Error(`${path} must be one of: ${schema.enum.join(', ')}; received ${JSON.stringify(value)}`);
+    }
+    if (typeof value === 'number' && Number.isFinite(schema.minimum) && value < schema.minimum) {
+        throw new Error(`${path} must be at least ${schema.minimum}`);
+    }
+    if (typeof value === 'number' && Number.isFinite(schema.maximum) && value > schema.maximum) {
+        throw new Error(`${path} must be at most ${schema.maximum}`);
+    }
 }
 
 export function reconstructSemanticToolLedger(sections) {

@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, reconstructSemanticToolLedger, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, reconstructSemanticToolLedger, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -15478,7 +15478,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.60');
+      assert.equal(manifest.version, '0.9.61');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16388,31 +16388,126 @@ const tests = [
         thinking: { type: 'disabled' },
       });
 
-      const expectedSections = [
+      const expectedLedgerProperties = [
         'engineContext',
         'worldTransition',
         'worldProgression',
-        'resolution',
-        'relationships',
-        'userKnowledge',
-        'injuries',
-        'tracker',
-        'powerActors',
-        'powerEvents',
-        'chaos',
+        'resolutionEngine',
+        'relationshipEngine',
+        'injuryEffectEngine',
+        'userKnowledgeApplication',
+        'powerActorEnmity',
+        'powerEventShape',
+        'trackerUpdateEngine',
+        'chaosSemantic',
       ];
-      const semanticTool = buildSemanticPreflightTool('nanogpt');
-      assert.equal(semanticTool.type, 'function');
-      assert.equal(semanticTool.function.name, 'submit_semantic_preflight');
-      assert.equal(semanticTool.function.strict, undefined);
-      assert.deepEqual(semanticTool.function.parameters.required, expectedSections);
-      assert.deepEqual(Object.keys(semanticTool.function.parameters.properties), expectedSections);
-      assert.equal('additionalProperties' in semanticTool.function.parameters, false);
-      for (const section of expectedSections) {
-        assert.equal(semanticTool.function.parameters.properties[section].type, 'string');
-        assert.equal('properties' in semanticTool.function.parameters.properties[section], false);
-        assert.equal('items' in semanticTool.function.parameters.properties[section], false);
-      }
+      const portableSemanticTool = buildSemanticPreflightTool('nanogpt');
+      assert.equal(portableSemanticTool.type, 'function');
+      assert.equal(portableSemanticTool.function.name, 'submit_semantic_preflight');
+      assert.equal(portableSemanticTool.function.strict, undefined);
+      assert.deepEqual(portableSemanticTool.function.parameters.required, expectedLedgerProperties);
+      assert.deepEqual(Object.keys(portableSemanticTool.function.parameters.properties), expectedLedgerProperties);
+      assert.equal('additionalProperties' in portableSemanticTool.function.parameters, false);
+      assert.equal(portableSemanticTool.function.parameters.properties.resolutionEngine.type, 'object');
+      assert.equal(portableSemanticTool.function.parameters.properties.relationshipEngine.type, 'array');
+      assert.equal(
+        'additionalProperties' in portableSemanticTool.function.parameters.properties.resolutionEngine,
+        false,
+        'Portable providers should receive the typed contract without strict-only additionalProperties keywords.',
+      );
+
+      const strictSemanticTool = buildSemanticPreflightTool('deepseek');
+      assert.equal(strictSemanticTool.function.strict, true);
+      assert.equal(strictSemanticTool.function.parameters.additionalProperties, false);
+      assert.equal(strictSemanticTool.function.parameters.properties.resolutionEngine.additionalProperties, false);
+      assert.deepEqual(
+        strictSemanticTool.function.parameters.properties.powerActorEnmity
+          .properties.assessments.items.properties.scope.enum,
+        ['individual', 'organization', 'institution', 'group', 'unknown'],
+      );
+      const schemaMetrics = { leaves: 0, objects: 0, arrays: 0, descriptions: 0, incompleteRequired: 0 };
+      const inspectSchema = schema => {
+        if (!schema || typeof schema !== 'object') return;
+        if (Object.prototype.hasOwnProperty.call(schema, 'description')) schemaMetrics.descriptions += 1;
+        if (schema.type === 'object') {
+          schemaMetrics.objects += 1;
+          const propertyNames = Object.keys(schema.properties || {});
+          if (JSON.stringify(propertyNames) !== JSON.stringify(schema.required || [])) schemaMetrics.incompleteRequired += 1;
+          Object.values(schema.properties || {}).forEach(inspectSchema);
+          return;
+        }
+        if (schema.type === 'array') {
+          schemaMetrics.arrays += 1;
+          inspectSchema(schema.items);
+          return;
+        }
+        schemaMetrics.leaves += 1;
+      };
+      inspectSchema(strictSemanticTool.function.parameters);
+      assert.deepEqual(schemaMetrics, {
+        leaves: 243,
+        objects: 46,
+        arrays: 46,
+        descriptions: 0,
+        incompleteRequired: 0,
+      });
+      assert.equal(strictSemanticTool.function.parameters.properties.worldProgression.properties.advancements.maxItems, 18);
+      assert.equal(strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.maxItems, 3);
+      assert.equal(strictSemanticTool.function.parameters.properties.relationshipEngine.maxItems, 20);
+      assert.equal(strictSemanticTool.function.parameters.properties.injuryEffectEngine.properties.effects.maxItems, 20);
+      assert.equal(strictSemanticTool.function.parameters.properties.userKnowledgeApplication.properties.applications.maxItems, 20);
+      assert.equal(strictSemanticTool.function.parameters.properties.powerActorEnmity.properties.assessments.maxItems, 20);
+      assert.equal(strictSemanticTool.function.parameters.properties.powerActorEnmity.properties.effects.maxItems, 12);
+      assert.equal(strictSemanticTool.function.parameters.properties.powerEventShape.properties.events.maxItems, 4);
+      assert.equal(strictSemanticTool.function.parameters.properties.trackerUpdateEngine.properties.npcs.maxItems, 20);
+      assert.equal(
+        buildSemanticPreflightTool('deepseek', { usesCustomUrl: true }).function.strict,
+        undefined,
+        'Custom DeepSeek-compatible routes should retain the portable schema path.',
+      );
+
+      const buildSchemaFixture = schema => {
+        if (schema.type === 'object') {
+          return Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, buildSchemaFixture(value)]));
+        }
+        if (schema.type === 'array') {
+          return Array.from({ length: schema.minItems || 0 }, () => buildSchemaFixture(schema.items));
+        }
+        if (schema.type === 'boolean') return false;
+        if (schema.type === 'integer') return schema.minimum ?? 0;
+        if (Array.isArray(schema.enum)) return schema.enum[0];
+        return '(none)';
+      };
+      const structuredLedger = buildSchemaFixture(strictSemanticTool.function.parameters);
+      assert.equal(validateSemanticToolArguments(structuredLedger), structuredLedger);
+      const assessmentSchema = strictSemanticTool.function.parameters.properties.powerActorEnmity
+        .properties.assessments.items;
+      const invalidScopeLedger = structuredClone(structuredLedger);
+      invalidScopeLedger.powerActorEnmity.assessments.push({
+        ...buildSchemaFixture(assessmentSchema),
+        scope: 'personal',
+      });
+      assert.throws(
+        () => validateSemanticToolArguments(invalidScopeLedger),
+        /\$\.powerActorEnmity\.assessments\[0\]\.scope must be one of:[^;]+; received "personal"/,
+      );
+      const missingStructuredProperty = structuredClone(structuredLedger);
+      delete missingStructuredProperty.resolutionEngine.rollReason;
+      assert.throws(
+        () => validateSemanticToolArguments(missingStructuredProperty),
+        /resolutionEngine\.rollReason is required/,
+      );
+      assert.throws(
+        () => validateSemanticToolArguments({ ...structuredLedger, inventedSection: {} }),
+        /contains unknown properties: inventedSection/,
+      );
+      const tooManyEvents = structuredClone(structuredLedger);
+      const eventSchema = strictSemanticTool.function.parameters.properties.powerEventShape.properties.events.items;
+      tooManyEvents.powerEventShape.events = Array.from({ length: 5 }, () => buildSchemaFixture(eventSchema));
+      assert.throws(
+        () => validateSemanticToolArguments(tooManyEvents),
+        /powerEventShape\.events must contain at most 4 item/,
+      );
 
       assert.match(semanticSource, /const COMPACT_LEDGER_OUTPUT_CONTRACT = \[/);
       assert.match(semanticSource, /const SEMANTIC_FIELD_GUIDANCE = \[/);
@@ -16428,25 +16523,18 @@ const tests = [
       assert.equal(toolPrompt.length, 2);
       assert.equal(toolPrompt[0].content, semanticEngineGuidance);
       assert.match(toolPrompt[1].content, /Call the function tool submit_semantic_preflight exactly once/);
-      assert.match(toolPrompt[1].content, /The tool is only a compact transport envelope; do not reduce or reinterpret the ledger/);
-      assert.match(toolPrompt[1].content, /When a static indexed section count is 0, copy its template \[0\] placeholder lines exactly/);
-      assert.match(toolPrompt[1].content, /When count=0, either emit no rows or copy exactly one complete unchanged \[0\] placeholder row/);
-      assert.match(toolPrompt[1].content, /valence=none\|good\|bad\|fear/);
-      assert.match(toolPrompt[1].content, /EngineContext\.userReputationContext\.location=\(none\)/);
-      assert.match(toolPrompt[1].content, /ResolutionEngine\.identifyGoal=Normal_Interaction/);
-      assert.match(toolPrompt[1].content, /RelationshipEngine\.count=0/);
-      assert.match(toolPrompt[1].content, /RelationshipEngine\[i\]\.NPC=\(none\)/);
-      assert.match(toolPrompt[1].content, /RelationshipEngine\[i\]\.stakeChangeByOutcome\.avoided=none/);
-      assert.match(toolPrompt[1].content, /InjuryEffectEngine\[i\]\.target=\(none\)/);
-      assert.match(toolPrompt[1].content, /InjuryEffectEngine\[i\]\.affectsAction=N/);
-      assert.match(toolPrompt[1].content, /TrackerUpdateEngine\.User\.condition=unchanged/);
-      assert.match(toolPrompt[1].content, /PowerActorEnmity\.count=0/);
-      assert.match(toolPrompt[1].content, /CHAOS_INTERRUPT\.sceneSummary=short scene summary/);
+      assert.match(toolPrompt[1].content, /Every required property must be present/);
+      assert.match(toolPrompt[1].content, /For enum fields, use exactly one value listed by the schema/);
+      assert.match(toolPrompt[1].content, /Do not emit count fields, placeholder rows, or sentinel values in arrays/);
+      assert.match(toolPrompt[1].content, /count=0, a list value of \(none\), or \["\(none\)"\] means an empty array/);
+      assert.match(toolPrompt[1].content, /references to lines or the template mean the corresponding schema properties/);
+      assert.match(toolPrompt[1].content, /tool schema changes only transport structure; do not reduce, reinterpret, or invent ledger content/);
       assert.doesNotMatch(toolPrompt[1].content, /ResolutionEngine\.identifyGoal: test/);
+      assert.doesNotMatch(toolPrompt[1].content, /BEGIN_SEMANTIC_PREFLIGHT|END_SEMANTIC_PREFLIGHT/);
       assert.doesNotMatch(toolPrompt[1].content, /SEMANTIC_PREFLIGHT_COMPLETE|stop sentinel/);
 
-      const templateMatch = toolPrompt[1].content.match(/BEGIN_SEMANTIC_PREFLIGHT[\s\S]*?END_SEMANTIC_PREFLIGHT/);
-      assert.ok(templateMatch, 'The tool prompt must retain the complete compact ledger template.');
+      const templateMatch = semanticSource.match(/const COMPACT_LEDGER_TEMPLATE = `(BEGIN_SEMANTIC_PREFLIGHT[\s\S]*?END_SEMANTIC_PREFLIGHT)`;/);
+      assert.ok(templateMatch, 'The compatibility parser must retain its complete compact ledger template.');
       const sectionRoots = {
         engineContext: ['EngineContext'],
         worldTransition: ['WorldTransition'],
@@ -16460,8 +16548,9 @@ const tests = [
         powerEvents: ['PowerEventShape'],
         chaos: ['CHAOS_INTERRUPT'],
       };
+      const expectedSections = Object.keys(sectionRoots);
       const sectionValues = Object.fromEntries(expectedSections.map(section => [section, []]));
-      const templateLines = templateMatch[0].split('\n').slice(1, -1);
+      const templateLines = templateMatch[1].split('\n').slice(1, -1);
       for (const line of templateLines) {
         const key = line.slice(0, line.indexOf('='));
         const owner = Object.entries(sectionRoots).find(([, roots]) =>
@@ -16473,7 +16562,7 @@ const tests = [
       const completeSections = Object.fromEntries(
         Object.entries(sectionValues).map(([section, lines]) => [section, lines.join('\n')]),
       );
-      assert.equal(reconstructSemanticToolLedger(completeSections), templateMatch[0]);
+      assert.equal(reconstructSemanticToolLedger(completeSections), templateMatch[1]);
       const replaceLedgerLine = (sections, section, key, value) => {
         let replaced = false;
         const lines = sections[section].split('\n').map(line => {
@@ -16500,10 +16589,39 @@ const tests = [
       assert.equal(validatedDefault.resolutionEngine.rollNeeded, false);
       assert.equal(validatedDefault.resolutionEngine.challengeType, 'none');
 
-      const relationshipSchemaMatch = toolPrompt[1].content.match(
-        /RelationshipEngine\[i\] required row:\n([\s\S]*?)\nInjuryEffectEngine\[i\] required row:/,
-      );
-      assert.ok(relationshipSchemaMatch, 'The provider-facing prompt must expose the complete relationship row schema.');
+      const relationshipRowDefaults = [
+        ['NPC', '(none)'],
+        ['initPreset.romanticOpen', 'N'],
+        ['initPreset.userBadRep', 'N'],
+        ['initPreset.priorUserGoodRep', 'N'],
+        ['initPreset.userNonHuman', 'N'],
+        ['initPreset.fearImmunity', 'N'],
+        ['establishedRelationship', 'N'],
+        ['romanceStyle', 'auto'],
+        ['slowBondEvidence.respectfulContact', 'N'],
+        ['slowBondEvidence.cooperation', 'N'],
+        ['slowBondEvidence.comfortInProximity', 'N'],
+        ['slowBondEvidence.boundaryRespect', 'N'],
+        ['slowBondEvidence.sharedRoutine', 'N'],
+        ['slowBondEvidence.playfulness', 'N'],
+        ['slowBondEvidence.teamwork', 'N'],
+        ['slowBondEvidence.personalAttention', 'N'],
+        ['slowBondEvidence.blockers', '(none)'],
+        ['auditInteraction', 'N'],
+        ['explicitIntimidationOrCoercion', 'N'],
+        ['standingInfluence', 'none'],
+        ['standingBasis', '(none)'],
+        ['checkThreshold.CurrentInvitation', 'N'],
+        ['checkThreshold.Exploitation', 'N'],
+        ['checkThreshold.Hedonist', 'N'],
+        ['checkThreshold.Transactional', 'N'],
+        ['checkThreshold.Established', 'N'],
+        ['checkThreshold.RomanticBuildup', 'N'],
+        ['genStats.CapabilityPool', 'none'],
+        ['genStats.MainStat', 'none'],
+        ...['no_roll', 'success', 'failure', 'dominant_impact', 'solid_impact', 'light_impact', 'struggle', 'checked', 'deflected', 'avoided']
+          .map(key => [`stakeChangeByOutcome.${key}`, 'none']),
+      ];
       const relationshipOverrides = new Map([
         ['RelationshipEngine[0].NPC', 'Alice'],
         ['RelationshipEngine[0].standingInfluence', 'aware'],
@@ -16513,8 +16631,8 @@ const tests = [
         ['RelationshipEngine[0].genStats.MainStat', 'CHA'],
         ['RelationshipEngine[0].stakeChangeByOutcome.no_roll', 'benefit'],
       ]);
-      const relationshipRows = relationshipSchemaMatch[1].split('\n').map(line => {
-        const numericLine = line.replaceAll('[i]', '[0]');
+      const relationshipRows = relationshipRowDefaults.map(([suffix, value]) => {
+        const numericLine = `RelationshipEngine[0].${suffix}=${value}`;
         const equals = numericLine.indexOf('=');
         const key = numericLine.slice(0, equals);
         return relationshipOverrides.has(key)
@@ -16554,8 +16672,8 @@ const tests = [
         /missing required lines: RelationshipEngine\[0\]\.standingBasis/,
       );
 
-      const relationshipPlaceholderRows = relationshipSchemaMatch[1].split('\n').map(line =>
-        line.replaceAll('[i]', '[0]'),
+      const relationshipPlaceholderRows = relationshipRowDefaults.map(
+        ([suffix, value]) => `RelationshipEngine[0].${suffix}=${value}`,
       );
       const zeroRelationshipPlaceholderSections = appendLedgerLines(
         completeSections,
