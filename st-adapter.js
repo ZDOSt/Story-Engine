@@ -626,22 +626,9 @@ export function getChatCompletionProfileRoute(profileId, profileName = '') {
     }
     return {
         source: String(chatCompletionSource),
-        model: String(profile?.model || ''),
         usesCustomUrl: hasRoutingValue(profile?.['api-url']),
         usesReverseProxy: hasRoutingValue(profile?.proxy),
-        customIncludeBody: getProfileCustomIncludeBody(profile, context),
     };
-}
-
-function getProfileCustomIncludeBody(profile, context = getContext()) {
-    const presetName = String(profile?.preset || '').trim();
-    if (!presetName) return '';
-    try {
-        const preset = context?.getPresetManager?.('openai')?.getCompletionPresetByName?.(presetName);
-        return String(preset?.custom_include_body || '');
-    } catch {
-        return '';
-    }
 }
 
 function hasRoutingValue(value) {

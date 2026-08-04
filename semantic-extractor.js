@@ -5,17 +5,13 @@ import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition
 import { buildWorldProgressionSemanticContext, normalizeWorldProgression, normalizeWorldProgressionAdvancements, validateWorldProgressionAdvancementCoverage } from './world-memory.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
 
-const yaml = typeof window === 'undefined'
-    ? (await import('yaml')).default
-    : (await import('../../../../lib.js')).yaml;
-
 export { TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES };
 
 const SEMANTIC_RESPONSE_LENGTH_MIN = 4096;
 const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
-const CUSTOM_CHAT_COMPLETION_SOURCE = 'custom';
+const DEEPSEEK_CHAT_COMPLETION_SOURCE = 'deepseek';
 const EXACT_NAMED_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
 const SEMANTIC_TOOL_SECTIONS = Object.freeze([
     { name: 'engineContext', roots: ['EngineContext'] },
@@ -40,6 +36,8 @@ const SEMANTIC_TOOL_SECTIONS = Object.freeze([
     { name: 'powerEvents', roots: ['PowerEventShape'] },
     { name: 'chaos', roots: ['CHAOS_INTERRUPT'] },
 ]);
+const SEMANTIC_REASONING_EFFORTS = Object.freeze(['low', 'medium', 'high']);
+const DEFAULT_SEMANTIC_REASONING_EFFORT = 'medium';
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_NARRATOR_NPC_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove']);
@@ -227,7 +225,7 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
             purpose: 'semantic preflight tool call',
             buildTool: buildSemanticPreflightTool,
             buildToolChoice: buildSemanticToolChoice,
-            preparePayload: applyStoryEngineThinkingDisabledPayload,
+            preparePayload: payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort),
             signal: options.signal,
         });
         if (raw?.error) {
@@ -250,7 +248,9 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
     const chatCompletionSource = route.source;
     const toolPrompt = buildSemanticToolPrompt(prompt);
     const semanticTool = buildSemanticPreflightTool(chatCompletionSource);
-    const preparePayload = payload => applyStoryEngineThinkingDisabledPayload(payload, route);
+    const preparePayload = isOfficialDeepSeekProfile(options)
+        ? payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort)
+        : applyStoryEngineThinkingDisabledPayload;
     const overridePayload = {
         temperature: 0,
         stream: false,
@@ -290,6 +290,14 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
     return { raw, ledgerText };
 }
 
+export function isOfficialDeepSeekProfile(options = {}) {
+    if (!options?.semanticProfileId) return false;
+    const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
+    return String(route.source || '').toLowerCase() === DEEPSEEK_CHAT_COMPLETION_SOURCE
+        && route.usesCustomUrl !== true
+        && route.usesReverseProxy !== true;
+}
+
 export async function sendStructuredToolRequest(prompt, responseLength, options = {}, toolDefinition = {}) {
     const toolName = String(toolDefinition.name || '').trim();
     if (!toolName || !toolDefinition.parameters || typeof toolDefinition.parameters !== 'object') {
@@ -315,7 +323,9 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
     let result;
     if (options.semanticProfileId) {
         const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
-        const preparePayload = payload => applyStoryEngineThinkingDisabledPayload(payload, route);
+        const preparePayload = isOfficialDeepSeekProfile(options)
+            ? payload => applySemanticThinkingPayload(payload, options.semanticReasoningEffort)
+            : applyStoryEngineThinkingDisabledPayload;
         result = await sendConnectionManagerProfileRequest({
             profileId: options.semanticProfileId,
             profileName: options.semanticProfileName,
@@ -370,61 +380,72 @@ export function extractGeneratedText(raw) {
     return candidates[0] || '';
 }
 
-export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
+export function normalizeSemanticReasoningEffort(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return SEMANTIC_REASONING_EFFORTS.includes(normalized)
+        ? normalized
+        : DEFAULT_SEMANTIC_REASONING_EFFORT;
+}
+
+export function applySemanticThinkingPayload(payload, reasoningEffort = DEFAULT_SEMANTIC_REASONING_EFFORT) {
+    if (!payload || typeof payload !== 'object') {
+        return payload;
+    }
+
+    removeCustomThinkingOverride(payload);
+    if (String(payload.chat_completion_source || '').toLowerCase() === DEEPSEEK_CHAT_COMPLETION_SOURCE) {
+        const normalizedEffort = normalizeSemanticReasoningEffort(reasoningEffort);
+        if (normalizedEffort === 'low') {
+            payload.include_reasoning = false;
+            delete payload.reasoning_effort;
+            return payload;
+        }
+
+        payload.include_reasoning = true;
+        payload.reasoning_effort = normalizedEffort === 'high' ? 'max' : 'high';
+        return payload;
+    }
+
+    payload.include_reasoning = false;
+    delete payload.reasoning_effort;
+    return payload;
+}
+
+export function applyStoryEngineThinkingDisabledPayload(payload) {
     if (!payload || typeof payload !== 'object') {
         return payload;
     }
 
     payload.include_reasoning = false;
-    const source = String(route.source || payload.chat_completion_source || '').trim().toLowerCase();
-    if (source === 'nanogpt') {
-        payload.reasoning_effort = 'min';
-    } else {
-        delete payload.reasoning_effort;
-    }
-
-    if (source !== CUSTOM_CHAT_COMPLETION_SOURCE) {
-        return payload;
-    }
-
-    const model = String(route.model || payload.model || '').trim();
-    const customIncludeBody = payload.custom_include_body ?? route.customIncludeBody;
-    const parsedCustomBody = parseCustomIncludeBody(customIncludeBody);
-    const hasThinkingOverride = Object.prototype.hasOwnProperty.call(parsedCustomBody, 'thinking');
-    if (!hasThinkingOverride && !/deepseek/i.test(model)) {
-        return payload;
-    }
-
-    parsedCustomBody.thinking = { type: 'disabled' };
-    payload.custom_include_body = yaml.stringify(parsedCustomBody).trim();
+    removeCustomThinkingOverride(payload);
+    delete payload.reasoning_effort;
     return payload;
 }
 
-function parseCustomIncludeBody(value) {
-    const source = String(value ?? '');
-    if (!source.trim()) return {};
-
-    let parsed;
-    try {
-        parsed = yaml.parse(source);
-    } catch (error) {
-        const detail = String(error?.message || error || 'Unknown YAML parse error').split(/\r?\n/, 1)[0];
-        throw new Error(`Story Engine could not prepare the custom provider request because custom_include_body is invalid YAML: ${detail}`, { cause: error });
+function removeCustomThinkingOverride(payload) {
+    const customIncludeBody = removeTopLevelYamlKey(payload.custom_include_body, 'thinking').trim();
+    if (customIncludeBody) {
+        payload.custom_include_body = customIncludeBody;
+    } else {
+        delete payload.custom_include_body;
     }
-
-    const merged = {};
-    if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-            if (isRecord(item)) Object.assign(merged, item);
-        }
-    } else if (isRecord(parsed)) {
-        Object.assign(merged, parsed);
-    }
-    return merged;
 }
 
-function isRecord(value) {
-    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+function removeTopLevelYamlKey(value, keyName) {
+    const lines = String(value || '').split(/\r?\n/);
+    const target = String(keyName || '').toLowerCase();
+    const kept = [];
+    let skipping = false;
+
+    for (const line of lines) {
+        const topLevelKey = line.match(/^([A-Za-z0-9_-]+)\s*:/);
+        if (topLevelKey) {
+            skipping = topLevelKey[1].toLowerCase() === target;
+        }
+        if (!skipping) kept.push(line);
+    }
+
+    return kept.join('\n').trim();
 }
 
 export function buildSemanticToolPrompt(prompt) {
