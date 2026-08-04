@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import yaml from 'yaml';
 import { consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import { ENGINE_PROMPT_TEXT, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, hasMagicStoneEntry, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
@@ -8,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applySemanticThinkingPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, reconstructSemanticToolLedger, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, reconstructSemanticToolLedger, sanitizeSemanticAssembledText, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -15477,7 +15478,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.54');
+      assert.equal(manifest.version, '0.9.56');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16019,49 +16020,151 @@ const tests = [
       assert.match(adapterSource, /secret_id:\s*profile\['secret-id'\]/);
       assert.match(adapterSource, /chat_completion_source:\s*chatCompletionSource/);
       assert.match(source, /using direct semantic connection profile request/);
-      assert.match(source, /semanticReasoningEffort: 'medium'/);
-      assert.match(source, /semanticReasoningEffort: normalizeSemanticReasoningEffort\(settings\.semanticReasoningEffort\)/);
+      assert.doesNotMatch(source, /semanticReasoningEffort:\s*|settings\.semanticReasoningEffort|structured_preflight_semantic_reasoning_effort|normalizeSemanticReasoningEffort/);
+      assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.semanticReasoningEffort/);
+      const getSettingsSource = source.slice(
+        source.indexOf('function getSettings()'),
+        source.indexOf('function migrateTrackerWidgetSettings'),
+      );
+      assert.match(getSettingsSource, /const hadRetiredSemanticSettings = \['disableSemanticThinking', 'semanticReasoningEffort'\]/);
+      assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| trackerSettingsChanged \|\| proseGuardSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
+      let settingsSaveCount = 0;
+      const retiredSettingsStore = {
+        storyEngine: {
+          disableSemanticThinking: false,
+          semanticReasoningEffort: 'high',
+        },
+      };
+      const getMigratedSettings = new Function(
+        'extension_settings',
+        'SETTINGS_KEY',
+        'DEFAULT_SETTINGS',
+        'PROSE_GUARD_MODES',
+        'migrateTrackerWidgetSettings',
+        'migrateProseGuardSettings',
+        'saveExtensionSettings',
+        `${getSettingsSource}; return getSettings;`,
+      )(
+        retiredSettingsStore,
+        'storyEngine',
+        {},
+        { OFF: 'off' },
+        () => false,
+        () => false,
+        () => { settingsSaveCount += 1; },
+      );
+      const migratedSettings = getMigratedSettings();
+      assert.equal('disableSemanticThinking' in migratedSettings, false);
+      assert.equal('semanticReasoningEffort' in migratedSettings, false);
+      assert.equal(settingsSaveCount, 1);
+      getMigratedSettings();
+      assert.equal(settingsSaveCount, 1);
       assert.doesNotMatch(source, /using direct tracker connection profile request/);
       assert.doesNotMatch(source, /using direct Prose Guard connection profile request/);
       assert.doesNotMatch(source, /using direct Progression connection profile request/);
-      const deepSeekSemanticPayload = {
+      const officialDeepSeekPayload = {
         chat_completion_source: 'deepseek',
-        include_reasoning: false,
-        reasoning_effort: 'min',
-        max_tokens: 4096,
-        custom_include_body: 'thinking:\n  type: disabled\nprovider_option: true',
-      };
-      applySemanticThinkingPayload(deepSeekSemanticPayload);
-      assert.equal(deepSeekSemanticPayload.include_reasoning, true);
-      assert.equal(deepSeekSemanticPayload.reasoning_effort, 'high');
-      assert.equal(deepSeekSemanticPayload.max_tokens, 4096);
-      assert.equal(deepSeekSemanticPayload.custom_include_body, 'provider_option: true');
-      assert.equal(normalizeSemanticReasoningEffort('LOW'), 'low');
-      assert.equal(normalizeSemanticReasoningEffort('medium'), 'medium');
-      assert.equal(normalizeSemanticReasoningEffort('HIGH'), 'high');
-      assert.equal(normalizeSemanticReasoningEffort('unsupported'), 'medium');
-
-      const deepSeekLowPayload = {
-        chat_completion_source: 'deepseek',
+        model: 'deepseek-v4-flash',
         include_reasoning: true,
-        reasoning_effort: 'max',
-        max_tokens: 4096,
-      };
-      applySemanticThinkingPayload(deepSeekLowPayload, 'low');
-      assert.equal(deepSeekLowPayload.include_reasoning, false);
-      assert.equal('reasoning_effort' in deepSeekLowPayload, false);
-      assert.equal(deepSeekLowPayload.max_tokens, 4096);
-
-      const deepSeekHighPayload = {
-        chat_completion_source: 'deepseek',
-        include_reasoning: false,
         reasoning_effort: 'high',
         max_tokens: 4096,
       };
-      applySemanticThinkingPayload(deepSeekHighPayload, 'high');
-      assert.equal(deepSeekHighPayload.include_reasoning, true);
-      assert.equal(deepSeekHighPayload.reasoning_effort, 'max');
-      assert.equal(deepSeekHighPayload.max_tokens, 4096);
+      applyStoryEngineThinkingDisabledPayload(officialDeepSeekPayload);
+      assert.equal(officialDeepSeekPayload.include_reasoning, false);
+      assert.equal('reasoning_effort' in officialDeepSeekPayload, false);
+      assert.equal('custom_include_body' in officialDeepSeekPayload, false);
+      assert.equal(officialDeepSeekPayload.max_tokens, 4096);
+
+      const customDeepSeekPayload = {
+        chat_completion_source: 'custom',
+        model: 'NG/deepseek/deepseek-v4-flash-0731',
+        include_reasoning: true,
+        reasoning_effort: 'high',
+        max_tokens: 4096,
+        custom_include_body: 'thinking:\n  type: enabled\nprovider_option: true',
+      };
+      applyStoryEngineThinkingDisabledPayload(customDeepSeekPayload);
+      assert.equal(customDeepSeekPayload.include_reasoning, false);
+      assert.equal('reasoning_effort' in customDeepSeekPayload, false);
+      assert.equal(customDeepSeekPayload.max_tokens, 4096);
+      assert.deepEqual(yaml.parse(customDeepSeekPayload.custom_include_body), {
+        thinking: { type: 'disabled' },
+        provider_option: true,
+      });
+
+      const customJsonDeepSeekPayload = {
+        chat_completion_source: 'custom',
+        model: 'deepseek-v4-flash',
+        custom_include_body: '{"thinking":{"type":"enabled"},"provider_option":true,"nested":{"kept":1}}',
+      };
+      applyStoryEngineThinkingDisabledPayload(customJsonDeepSeekPayload);
+      assert.deepEqual(yaml.parse(customJsonDeepSeekPayload.custom_include_body), {
+        thinking: { type: 'disabled' },
+        provider_option: true,
+        nested: { kept: 1 },
+      });
+
+      const customYamlSequencePayload = {
+        chat_completion_source: 'custom',
+        model: 'deepseek-v4-flash',
+        custom_include_body: '- "quoted-key": kept\n- provider_list:\n    - first\n    - second\n- thinking:\n    type: enabled',
+      };
+      applyStoryEngineThinkingDisabledPayload(customYamlSequencePayload);
+      assert.deepEqual(yaml.parse(customYamlSequencePayload.custom_include_body), {
+        'quoted-key': 'kept',
+        provider_list: ['first', 'second'],
+        thinking: { type: 'disabled' },
+      });
+
+      const customProfileDeepSeekPayload = {
+        chat_completion_source: 'custom',
+        model: 'preset-model-is-overridden-by-route',
+        max_tokens: 4096,
+      };
+      applyStoryEngineThinkingDisabledPayload(customProfileDeepSeekPayload, {
+        source: 'custom',
+        model: 'deepseek-v4-flash',
+        customIncludeBody: 'provider_option: true\nthinking:\n  type: enabled\nprovider_tail: kept',
+      });
+      assert.deepEqual(yaml.parse(customProfileDeepSeekPayload.custom_include_body), {
+        provider_option: true,
+        thinking: { type: 'disabled' },
+        provider_tail: 'kept',
+      });
+
+      const customNonDeepSeekPayload = {
+        chat_completion_source: 'custom',
+        model: 'DS/provider-model-alias',
+        include_reasoning: true,
+        reasoning_effort: 'high',
+        custom_include_body: 'provider_option: true\nthinking:\n  type: enabled',
+      };
+      applyStoryEngineThinkingDisabledPayload(customNonDeepSeekPayload);
+      assert.equal(customNonDeepSeekPayload.include_reasoning, false);
+      assert.equal('reasoning_effort' in customNonDeepSeekPayload, false);
+      assert.deepEqual(yaml.parse(customNonDeepSeekPayload.custom_include_body), {
+        provider_option: true,
+        thinking: { type: 'disabled' },
+      });
+
+      const untouchedCustomBody = 'provider_option: true\n"quoted-key": kept\nprovider_list:\n  - first\n  - second';
+      const customWithoutThinkingPayload = {
+        chat_completion_source: 'custom',
+        model: 'provider-model-alias',
+        custom_include_body: untouchedCustomBody,
+      };
+      applyStoryEngineThinkingDisabledPayload(customWithoutThinkingPayload);
+      assert.equal(customWithoutThinkingPayload.custom_include_body, untouchedCustomBody);
+      assert.throws(
+        () => applyStoryEngineThinkingDisabledPayload({
+          chat_completion_source: 'custom',
+          model: 'deepseek-v4-flash',
+          custom_include_body: 'provider_option: [unterminated',
+        }),
+        /custom_include_body is invalid YAML/,
+      );
       for (const sourceName of ['deepseek', 'openai']) {
         assert.deepEqual(buildSemanticToolChoice(sourceName), {
           type: 'function',
@@ -16081,13 +16184,15 @@ const tests = [
 
       const nanoGptSemanticPayload = {
         chat_completion_source: 'nanogpt',
+        model: 'deepseek/deepseek-v4-flash-0731',
         include_reasoning: true,
         reasoning_effort: 'max',
         max_tokens: 4096,
       };
-      applySemanticThinkingPayload(nanoGptSemanticPayload, 'high');
+      applyStoryEngineThinkingDisabledPayload(nanoGptSemanticPayload);
       assert.equal(nanoGptSemanticPayload.include_reasoning, false);
-      assert.equal('reasoning_effort' in nanoGptSemanticPayload, false);
+      assert.equal(nanoGptSemanticPayload.reasoning_effort, 'min');
+      assert.equal('custom_include_body' in nanoGptSemanticPayload, false);
       assert.equal(nanoGptSemanticPayload.max_tokens, 4096);
 
       const deepSeekNonSemanticPayload = {
@@ -16425,25 +16530,28 @@ const tests = [
         /line owned by another section/,
       );
 
-      assert.match(semanticSource, /removeTopLevelYamlKey\(payload\.custom_include_body, 'thinking'\)/);
-      assert.doesNotMatch(semanticSource, /DISABLE_THINKING_INCLUDE_BODY/);
+      assert.match(semanticSource, /const parsedCustomBody = parseCustomIncludeBody\(customIncludeBody\)/);
+      assert.match(semanticSource, /if \(!hasThinkingOverride && !\/deepseek\/i\.test\(model\)\)/);
+      assert.match(semanticSource, /parsedCustomBody\.thinking = \{ type: 'disabled' \}/);
+      assert.match(semanticSource, /payload\.reasoning_effort = 'min'/);
+      assert.match(semanticSource, /custom_include_body is invalid YAML/);
       assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateSemanticRawWithProfile|isRecoverableSemanticToolCallError|falling back to compact ledger|fallbackFrom:/);
       assert.match(semanticSource, /Semantic tool-call pass returned no valid complete ledger\. Generation aborted before narration/);
-      assert.match(semanticSource, /export function isOfficialDeepSeekProfile/);
       assert.match(adapterSource, /export function getChatCompletionProfileRoute/);
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
-      assert.match(semanticSource, /route\.usesCustomUrl !== true/);
-      assert.match(semanticSource, /route\.usesReverseProxy !== true/);
+      assert.match(adapterSource, /model:\s*String\(profile\?\.model \|\| ''\)/);
+      assert.match(adapterSource, /customIncludeBody:\s*getProfileCustomIncludeBody\(profile, context\)/);
       assert.match(semanticSource, /export async function sendStructuredToolRequest/);
       assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineThinkingDisabledPayload\(generateData\)/);
 
       const semanticProfileToolRequest = semanticSource.slice(
         semanticSource.indexOf('async function generateSemanticToolCallWithProfile'),
-        semanticSource.indexOf('export function isOfficialDeepSeekProfile'),
+        semanticSource.indexOf('export async function sendStructuredToolRequest'),
       );
       assert.match(semanticProfileToolRequest, /sendConnectionManagerProfileRequest/);
       assert.match(semanticProfileToolRequest, /tool_choice: buildSemanticToolChoice\(chatCompletionSource, route\)/);
+      assert.match(semanticProfileToolRequest, /applyStoryEngineThinkingDisabledPayload\(payload, route\)/);
       assert.doesNotMatch(semanticProfileToolRequest, /sendChatCompletionProfileRequest/);
 
       const structuredToolRequest = semanticSource.slice(
@@ -16984,7 +17092,6 @@ const tests = [
         'structured_preflight_story_engine_enabled',
         'structured_preflight_use_separate_semantic_settings',
         'structured_preflight_semantic_profile',
-        'structured_preflight_semantic_reasoning_effort',
         'structured_preflight_refresh_semantic_settings',
         'structured_preflight_post_tracker_enabled',
         'structured_preflight_prose_guard_mode',
@@ -17004,6 +17111,7 @@ const tests = [
         const count = renderSource.split(`id="${id}"`).length - 1;
         assert.equal(count, 1, `${id} should remain present exactly once in the settings markup.`);
       }
+      assert.doesNotMatch(renderSource, /structured_preflight_semantic_reasoning_effort|Reasoning effort|DeepSeek high effort|DeepSeek max effort/);
 
       assert.doesNotMatch(renderSource, /id="structured_preflight_tracker_profile"/);
       assert.doesNotMatch(renderSource, /id="structured_preflight_prose_guard_profile"/);
@@ -17022,10 +17130,6 @@ const tests = [
       assert.match(renderSource, /Injected after Prose Rules as sceneStyleProfile/);
       assert.match(renderSource, /Use private Story Engine connection profile/);
       assert.match(renderSource, /Story Engine profile/);
-      assert.match(renderSource, /<option value="low">Low<\/option>/);
-      assert.match(renderSource, /<option value="medium">Medium<\/option>/);
-      assert.match(renderSource, /<option value="high">High<\/option>/);
-      assert.match(renderSource, /Official direct DeepSeek only/);
       assert.match(renderSource, /Used for semantic preflight and post-narration Story Engine utility calls/);
       assert.match(renderSource, /Narration, adventure openings, character creation, and character progression use the current SillyTavern profile/);
       assert.doesNotMatch(renderSource, /id="structured_preflight_disable_semantic_thinking"/);

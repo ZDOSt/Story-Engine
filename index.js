@@ -33,7 +33,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeSemanticReasoningEffort, parseNarratorTrackerDelta, sendStructuredToolRequest } from './semantic-extractor.js';
+import { applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, parseNarratorTrackerDelta, sendStructuredToolRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -541,7 +541,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
-    semanticReasoningEffort: 'medium',
     modelCallDelayEnabled: false,
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
@@ -719,7 +718,10 @@ function getSettings() {
     const settings = extension_settings[SETTINGS_KEY];
     const hadExplicitProseGuardMode = settings.proseGuardMode !== undefined;
     const legacyProseGuardEnabled = settings.postNarrationProseGuardEnabled;
+    const hadRetiredSemanticSettings = ['disableSemanticThinking', 'semanticReasoningEffort']
+        .some(key => Object.prototype.hasOwnProperty.call(settings, key));
     delete extension_settings[SETTINGS_KEY].disableSemanticThinking;
+    delete extension_settings[SETTINGS_KEY].semanticReasoningEffort;
     delete extension_settings[SETTINGS_KEY].writingStylePrompt;
     delete extension_settings[SETTINGS_KEY].writingStyleDialoguePrompt;
     delete extension_settings[SETTINGS_KEY].writingStyleReminderPrompt;
@@ -736,15 +738,11 @@ function getSettings() {
     if (!hadExplicitProseGuardMode && legacyProseGuardEnabled === false) {
         settings.proseGuardMode = PROSE_GUARD_MODES.OFF;
     }
-    if (migrateTrackerWidgetSettings(settings)) {
+    const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
+    const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
+    if (hadRetiredSemanticSettings || trackerSettingsChanged || proseGuardSettingsChanged) {
         saveExtensionSettings();
     }
-    if (migrateProseGuardSettings(settings)) {
-        saveExtensionSettings();
-    }
-    settings.semanticReasoningEffort = normalizeSemanticReasoningEffort(
-        settings.semanticReasoningEffort,
-    );
     return settings;
 }
 
@@ -952,7 +950,6 @@ async function withSemanticGenerationSettings(callback) {
     return await callback({
         semanticProfileId: profile.id,
         semanticProfileName: profile.name,
-        semanticReasoningEffort: normalizeSemanticReasoningEffort(settings.semanticReasoningEffort),
     });
 }
 
@@ -1323,7 +1320,6 @@ function refreshSettingsControls() {
     const enabled = Boolean(settings.useSeparateSemanticSettings);
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
-    const reasoningEffortSelect = document.getElementById('structured_preflight_semantic_reasoning_effort');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardModeSelect = document.getElementById('structured_preflight_prose_guard_mode');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
@@ -1392,10 +1388,6 @@ function refreshSettingsControls() {
     );
 
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
-    if (reasoningEffortSelect) {
-        reasoningEffortSelect.value = normalizeSemanticReasoningEffort(settings.semanticReasoningEffort);
-        reasoningEffortSelect.disabled = !engineEnabled || !enabled;
-    }
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
     const proseGuardOff = getProseGuardMode(settings) === PROSE_GUARD_MODES.OFF;
     for (const { element } of proseGuardBanFields) {
@@ -1659,15 +1651,6 @@ function renderSettingsPanel() {
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                             </div>
                             <div class="spe-settings-row">
-                                <label for="structured_preflight_semantic_reasoning_effort">Reasoning effort</label>
-                                <select id="structured_preflight_semantic_reasoning_effort" class="text_pole flex1">
-                                    <option value="low">Low</option>
-                                    <option value="medium">Medium</option>
-                                    <option value="high">High</option>
-                                </select>
-                            </div>
-                            <small class="spe-settings-note">Official direct DeepSeek only. Low disables thinking; Medium uses DeepSeek high effort; High uses DeepSeek max effort.</small>
-                            <div class="spe-settings-row">
                                 <small class="spe-settings-note flex1">Used for semantic preflight and post-narration Story Engine utility calls. Narration, adventure openings, character creation, and character progression use the current SillyTavern profile.</small>
                                 <button id="structured_preflight_refresh_semantic_settings" class="menu_button">Refresh</button>
                             </div>
@@ -1859,11 +1842,6 @@ function renderSettingsPanel() {
 
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
         settings.semanticConnectionProfile = String(event.target?.value || '');
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_semantic_reasoning_effort')?.addEventListener('change', event => {
-        settings.semanticReasoningEffort = normalizeSemanticReasoningEffort(event.target?.value);
-        refreshSettingsControls();
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_model_call_delay_enabled')?.addEventListener('change', event => {
@@ -14521,7 +14499,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             pendingBoundarySnapshot: pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
-            semanticReasoningEffort: settings?.semanticReasoningEffort,
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',
             latestUserText: pendingGeneration?.latestUserText || getLatestUserText(context?.chat),
