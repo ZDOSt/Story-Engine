@@ -17,6 +17,33 @@ const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const CUSTOM_CHAT_COMPLETION_SOURCE = 'custom';
 const EXACT_NAMED_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
+export const STORY_ENGINE_THINKING_DISABLE_FORMATS = Object.freeze({
+    NONE: 'none',
+    OPENAI: 'openai',
+    OPENROUTER_NANOGPT: 'openrouter_nanogpt',
+    DEEPSEEK: 'deepseek',
+    GLM_ZAI: 'glm_zai',
+    KIMI_MOONSHOT: 'kimi_moonshot',
+    LONGCAT: 'longcat',
+});
+const STORY_ENGINE_THINKING_DISABLE_FORMAT_VALUES = Object.freeze(new Set(Object.values(STORY_ENGINE_THINKING_DISABLE_FORMATS)));
+const THINKING_TYPE_DISABLED_FORMATS = Object.freeze(new Set([
+    STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK,
+    STORY_ENGINE_THINKING_DISABLE_FORMATS.GLM_ZAI,
+    STORY_ENGINE_THINKING_DISABLE_FORMATS.KIMI_MOONSHOT,
+    STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT,
+]));
+const OPENAI_NONE_FORWARDABLE_MODELS = Object.freeze(new Set([
+    'gpt-5.4',
+    'gpt-5.4-2026-03-05',
+    'gpt-5.4-mini',
+    'gpt-5.4-mini-2026-03-17',
+    'gpt-5.4-nano',
+    'gpt-5.4-nano-2026-03-17',
+    'gpt-5.5',
+    'gpt-5.5-2026-04-23',
+]));
+const OPENAI_KNOWN_NON_REASONING_MODEL_PATTERN = /^(?:chatgpt-4o(?:-|$)|gpt-(?:3(?:\.5)?|4)(?:[.\-]|$))/i;
 const SEMANTIC_TOOL_SECTIONS = Object.freeze([
     { name: 'engineContext', roots: ['EngineContext'] },
     { name: 'worldTransition', roots: ['WorldTransition'] },
@@ -227,7 +254,9 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
             purpose: 'semantic preflight tool call',
             buildTool: buildSemanticPreflightTool,
             buildToolChoice: buildSemanticToolChoice,
-            preparePayload: applyStoryEngineThinkingDisabledPayload,
+            preparePayload: payload => applyStoryEngineThinkingDisabledPayload(payload, {
+                thinkingDisableFormat: options.semanticThinkingDisableFormat,
+            }),
             signal: options.signal,
         });
         if (raw?.error) {
@@ -246,7 +275,10 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
 }
 
 async function generateSemanticToolCallWithProfile(prompt, responseLength, options = {}) {
-    const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
+    const route = {
+        ...getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName),
+        thinkingDisableFormat: options.semanticThinkingDisableFormat,
+    };
     const chatCompletionSource = route.source;
     const toolPrompt = buildSemanticToolPrompt(prompt);
     const semanticTool = buildSemanticPreflightTool(chatCompletionSource);
@@ -314,7 +346,10 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
 
     let result;
     if (options.semanticProfileId) {
-        const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
+        const route = {
+            ...getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName),
+            thinkingDisableFormat: options.semanticThinkingDisableFormat,
+        };
         const preparePayload = payload => applyStoryEngineThinkingDisabledPayload(payload, route);
         result = await sendConnectionManagerProfileRequest({
             profileId: options.semanticProfileId,
@@ -345,7 +380,9 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
             temperature: 0,
             buildTool: (source, route) => buildTool(source, route),
             buildToolChoice: (source, route) => buildStructuredToolChoice(toolName, source, route),
-            preparePayload: applyStoryEngineThinkingDisabledPayload,
+            preparePayload: payload => applyStoryEngineThinkingDisabledPayload(payload, {
+                thinkingDisableFormat: options.semanticThinkingDisableFormat,
+            }),
             signal: options.signal,
         });
     }
@@ -370,7 +407,85 @@ export function extractGeneratedText(raw) {
     return candidates[0] || '';
 }
 
+export function normalizeStoryEngineThinkingDisableFormat(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return STORY_ENGINE_THINKING_DISABLE_FORMAT_VALUES.has(normalized)
+        ? normalized
+        : STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE;
+}
+
+export function resolveStoryEngineThinkingDisableFormat(source, requestedFormat = STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE) {
+    const normalizedSource = String(source || '').trim().toLowerCase();
+    switch (normalizedSource) {
+        case 'openai':
+        case 'azure_openai':
+            return STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI;
+        case 'openrouter':
+        case 'nanogpt':
+            return STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT;
+        case 'deepseek':
+            return STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK;
+        case 'zai':
+            return STORY_ENGINE_THINKING_DISABLE_FORMATS.GLM_ZAI;
+        case 'moonshot':
+            return STORY_ENGINE_THINKING_DISABLE_FORMATS.KIMI_MOONSHOT;
+        case CUSTOM_CHAT_COMPLETION_SOURCE:
+            return normalizeStoryEngineThinkingDisableFormat(requestedFormat);
+        default:
+            return STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE;
+    }
+}
+
 export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
+    if (!payload || typeof payload !== 'object') {
+        return payload;
+    }
+
+    payload.include_reasoning = false;
+    const source = String(route.source || payload.chat_completion_source || '').trim().toLowerCase();
+    const format = resolveStoryEngineThinkingDisableFormat(source, route.thinkingDisableFormat);
+    delete payload.reasoning_effort;
+
+    if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI) {
+        if (source === CUSTOM_CHAT_COMPLETION_SOURCE) {
+            payload.reasoning_effort = 'none';
+        } else {
+            applyOfficialOpenAiThinkingDisabledPayload(payload, route);
+        }
+    } else if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT) {
+        payload.reasoning_effort = source === 'nanogpt' ? 'min' : 'none';
+    }
+
+    console.info(`[Story Engine] thinking disable policy: ${format} (source: ${source || 'unknown'}).`);
+
+    if (source !== CUSTOM_CHAT_COMPLETION_SOURCE) {
+        return payload;
+    }
+
+    if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE) {
+        return payload;
+    }
+
+    const customIncludeBody = payload.custom_include_body ?? route.customIncludeBody;
+    const parsedCustomBody = parseCustomIncludeBody(customIncludeBody);
+    delete parsedCustomBody.include_reasoning;
+    delete parsedCustomBody.reasoning_effort;
+    delete parsedCustomBody.reasoning;
+    delete parsedCustomBody.thinking;
+
+    if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI) {
+        parsedCustomBody.reasoning_effort = 'none';
+    } else if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT) {
+        parsedCustomBody.reasoning = { effort: 'none' };
+    } else if (THINKING_TYPE_DISABLED_FORMATS.has(format)) {
+        parsedCustomBody.thinking = { type: 'disabled' };
+    }
+
+    payload.custom_include_body = yaml.stringify(parsedCustomBody).trim();
+    return payload;
+}
+
+export function applyStoryEngineBaselineThinkingDisabledPayload(payload, route = {}) {
     if (!payload || typeof payload !== 'object') {
         return payload;
     }
@@ -398,6 +513,22 @@ export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
     parsedCustomBody.thinking = { type: 'disabled' };
     payload.custom_include_body = yaml.stringify(parsedCustomBody).trim();
     return payload;
+}
+
+function applyOfficialOpenAiThinkingDisabledPayload(payload, route = {}) {
+    const model = String(route.model || payload.model || '').trim().toLowerCase();
+    if (OPENAI_NONE_FORWARDABLE_MODELS.has(model)) {
+        payload.reasoning_effort = 'none';
+        return;
+    }
+    if (OPENAI_KNOWN_NON_REASONING_MODEL_PATTERN.test(model)) {
+        return;
+    }
+
+    throw new Error(
+        `Story Engine cannot guarantee thinking is disabled for official OpenAI model "${model || '(unknown)'}" through this SillyTavern version. `
+        + 'Use a recognized non-reasoning model, update SillyTavern support, or use a Custom profile with the OpenAI thinking format.',
+    );
 }
 
 function parseCustomIncludeBody(value) {

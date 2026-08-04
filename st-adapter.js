@@ -85,6 +85,18 @@ export function getChatCompletionSettings() {
     return getContext()?.chatCompletionSettings || {};
 }
 
+export function getCurrentChatCompletionRoute() {
+    const settings = getChatCompletionSettings();
+    const source = String(settings?.chat_completion_source || '').trim();
+    return {
+        source,
+        model: source.toLowerCase() === 'custom' ? String(settings?.custom_model || '') : '',
+        usesCustomUrl: hasRoutingValue(settings?.custom_url),
+        usesReverseProxy: hasRoutingValue(settings?.reverse_proxy),
+        customIncludeBody: source.toLowerCase() === 'custom' ? String(settings?.custom_include_body || '') : '',
+    };
+}
+
 export function getUserName() {
     return getContext()?.name1 || '';
 }
