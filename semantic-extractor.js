@@ -447,8 +447,8 @@ export function buildSemanticToolPrompt(prompt) {
         'Do not output narration, prose, markdown, visible JSON, or ordinary assistant text.',
         'Fill all eleven required string arguments. Do not omit a section when its count is zero.',
         'Each argument must contain only newline-separated key=value ledger lines owned by that section, without BEGIN/END wrappers.',
-        'Fill every required template line exactly once, preserving the exact key names. Indexed [0] rows are placeholders when count=0; when count>0, output every required indexed row controlled by that count.',
-        'When an indexed section count is 0, copy its template [0] placeholder lines exactly. Those rows are inert and must not be reinterpreted.',
+        'Fill every required static template line exactly once, preserving the exact key names. Indexed [0] rows in the complete template are placeholders when count=0; when count>0, output every required indexed row controlled by that count.',
+        'When a static indexed section count is 0, copy its template [0] placeholder lines exactly. Those rows are inert and must not be reinterpreted. Follow the separate dynamic-row rules for RelationshipEngine and InjuryEffectEngine.',
         'WorldProgressionAdvancement.count must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one row per due plan.',
         'When RelationshipEngine.count is greater than 0, every indexed relationship row must include every template field, including standingInfluence and standingBasis.',
         'UserKnowledgeApplication[i] enums: type=personalKnowledge|reputationKnowledge; scope=private|local|route|faction|regional|legendary; valence=none|good|bad|fear; effect=none|priorUserGoodRep|userBadRep|userNonHuman|contextOnly.',
@@ -764,7 +764,7 @@ const COMPACT_LEDGER_OUTPUT_CONTRACT = [
     '- Begin with BEGIN_SEMANTIC_PREFLIGHT and end the ledger with END_SEMANTIC_PREFLIGHT.',
     '- Fill every required line exactly once. Keep the exact function/key names shown below.',
     '- WorldProgressionAdvancement.count must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one row per due plan.',
-    '- When RelationshipEngine.count is greater than 0, every indexed relationship row MUST include standingInfluence=none|aware|constrained and standingBasis; omit indexed relationship lines only when count=0.',
+    '- When RelationshipEngine.count is greater than 0, every indexed relationship row MUST include standingInfluence=none|aware|constrained and standingBasis. When count=0, there are no semantic relationship entries; an exact inert [0] transport placeholder is permitted only under the tool contract.',
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
     '- Use a vertical bar (|) between list entries, or (none) for an empty list. Commas and semicolons are literal text inside one entry. Use Y/N for booleans. Use benefit/harm/none for stakeChangeByOutcome values.',
 ].join('\n');
@@ -784,7 +784,7 @@ const SEMANTIC_FIELD_GUIDANCE = [
     '- ResolutionEngine.identifyTargets.NPCAwareOfUser is the individual-awareness list. Include only named or clearly individual living NPCs who are present and directly become aware of {{user}} by noticing, looking at, addressing, gesturing to, reacting to, or otherwise individually interacting with {{user}} in the current scene/context, even if {{user}} has not directly acted on them. Exclude groups, crowds, factions, unnamed plural background NPCs, inferred listeners, offscreen entities, and generic bystanders. Example: "the innkeeper looks at {{user}}" belongs in NPCAwareOfUser; "the patrons turn toward the newcomer" does not.',
     '- ResolutionEngine.identifyTargets.PowerActors is strategic-only: list organizations, factions, institutions, groups, and potential power figures with any credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. PowerActors never create rolls, NPCInScene, RelationshipEngine, B/F/H, injuries, or visible tracker entries by themselves.',
     '- RelationshipEngine entries must use RelationshipEngine[0], RelationshipEngine[1], etc. Include one entry for each living NPC in ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser. Do not create RelationshipEngine entries from hostilesInScene.NPC or PowerActors alone unless that NPC is also in one of those target/observer/awareness lists.',
-    '- If no living NPC is in those target/observer/awareness lists, output RelationshipEngine.count=0 and no RelationshipEngine[index] lines.',
+    '- If no living NPC is in those target/observer/awareness lists, output RelationshipEngine.count=0 and no semantic relationship entries. An exact [0] transport placeholder permitted by the output contract is inert and does not represent an entry.',
     '- Every actual RelationshipEngine[index] row MUST include standingInfluence and standingBasis. Assess {{user}}\'s standing as this NPC knows and recognizes it relative to themselves. standingInfluence=none when this NPC does not recognize a meaningful user-standing difference. Use aware when {{user}}\'s recognized title, authority, reputation, demonstrated power, backing, lineage, or affiliation changes etiquette, caution, risk, or openness without constraining the NPC. Use constrained only when {{user}}\'s recognized higher authority, status, power, backing, lineage, or affiliation limits what this NPC openly expresses or dares to do. A hierarchy in the opposite direction does not make the NPC constrained. Standing changes outward expression, never B/F/H itself. Affection may become restrained or formal, hostility may be concealed, neutral behavior may follow protocol, and friends may still recognize public authority. Unknown, concealed, unsupported, or unrecognized standing is none with standingBasis=(none); aware/constrained requires a concise real evidence basis.',
     '- EngineContext.userReputationContext.location is only the current settlement/community/route/region identifier for deterministic fame/infamy lookup. Use the hidden world state reputationLocation/place when it clearly applies to the current scene; otherwise use a concise known place/community name from context, or (none) if no current community is knowable. Do not decide fame/infamy effects here.',
     '- RelationshipEngine[index].initPreset is only "how this NPC initially feels toward {{user}}" when currentDisposition is missing. The semantic pass chooses only explicit authored/personal Y/N tags; deterministic code assigns B/F/H stats and separately applies hidden fame/infamy. romanticOpen=Y when prior character card/lore/scenario/pre-existing relationship/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward {{user}}. This can be stated directly or shown through clearly romantic behavior, gestures, plans, keepsakes, letters, gifts, jealousy, longing, attempts to be noticed, attempts to spend time alone, or other evidence that the NPC interest in {{user}} is romantic rather than merely friendly. Do not mark romanticOpen for generic friendliness, politeness, casual flirting, shallow physical attraction, ordinary embarrassment, first impressions, vague chemistry, gratitude, or non-romantic loyalty. Do not suppress romanticOpen solely because userNonHuman=Y; set both flags if both are explicit. userBadRep=Y only if explicit character card/lore/scenario/pre-existing relationship context says {{user}} is hated, distrusted, wanted, enemy-coded, or has a bad personal prior relationship with this NPC before the current first interaction. priorUserGoodRep=Y only if explicit character card/lore/scenario/pre-existing relationship context gives {{user}} safe familiarity, credible vouching, ordinary neighbor/customer/guild contact, cleared/cooperative status, prior help, trust, gratitude, friendship, or other authored prior context that makes {{user}} known as safe/cooperative to this NPC. Do not use broad public fame, public infamy, generic reputationKnowledge, first-encounter kindness, rescue, courtesy, friendliness, praise, or warm first impression for these flags. userNonHuman=Y only when {{user}} is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural and this NPC lacks prior familiarity, ordinary normalizing context, trusted introduction, or credible knowledge that makes {{user}} known rather than shocking; it can also be Y for explicit authored fear-coded relationship context with this NPC. Do not use broad public infamy as userNonHuman. fearImmunity=Y only if this NPC is the same kind/race category as that user form, a superior or peer supernatural/monstrous being, explicitly immune/naturally resistant to fear or mental fear, or card/lore/scenario explicitly portrays them as an ancient/powerful/non-ordinary being that has faced such horrors and is not meaningfully afraid of them. Title, rank, bravado, posturing, composure, courage, or pretending to be fearless do not count.',
@@ -1676,10 +1676,15 @@ const COMPACT_INJURY_FIELD_SUFFIXES = Object.freeze(
     COMPACT_INJURY_ROW_TEMPLATE.map(([suffix]) => suffix),
 );
 
+const COMPACT_DYNAMIC_ZERO_PLACEHOLDER_TEMPLATES = Object.freeze({
+    RelationshipEngine: COMPACT_RELATIONSHIP_ROW_TEMPLATE,
+    InjuryEffectEngine: COMPACT_INJURY_ROW_TEMPLATE,
+});
+
 function compactDynamicRowGuidance() {
     return [
         'DYNAMIC ROW SCHEMAS (documentation only; never output literal [i] keys):',
-        '- When RelationshipEngine.count or InjuryEffectEngine.count is greater than 0, emit one complete row for each numeric index from 0 through count-1 and replace every placeholder/default with the semantic result. When count=0, emit no rows for that engine.',
+        '- When RelationshipEngine.count or InjuryEffectEngine.count is greater than 0, emit one complete row for each numeric index from 0 through count-1 and replace every placeholder/default with the semantic result. When count=0, either emit no rows or copy exactly one complete unchanged [0] placeholder row from the applicable schema below; that exact row is inert.',
         'RelationshipEngine[i] required row:',
         ...COMPACT_RELATIONSHIP_ROW_TEMPLATE.map(([suffix, value]) => `RelationshipEngine[i].${suffix}=${value}`),
         'InjuryEffectEngine[i] required row:',
@@ -1706,9 +1711,9 @@ const COMPACT_COUNT_LIMITS = Object.freeze({
 const COMPACT_INDEXED_ROOTS = Object.freeze([
     ['WorldProgressionAdvancement', 'WorldProgressionAdvancement.count', true],
     ['ResolutionEngine.actionUnits', 'ResolutionEngine.actionUnits.count', true],
-    ['RelationshipEngine', 'RelationshipEngine.count', false],
+    ['RelationshipEngine', 'RelationshipEngine.count', true],
     ['UserKnowledgeApplication', 'UserKnowledgeApplication.count', true],
-    ['InjuryEffectEngine', 'InjuryEffectEngine.count', false],
+    ['InjuryEffectEngine', 'InjuryEffectEngine.count', true],
     ['TrackerUpdateEngine.NPC', 'TrackerUpdateEngine.NPC.count', true],
     ['PowerActorAssessment', 'PowerActorAssessment.count', true],
     ['PowerActorEnmity', 'PowerActorEnmity.count', true],
@@ -1788,6 +1793,29 @@ function readRequiredInteger(fields, key, minimum, maximum) {
         throw new Error(`compact ledger field ${key} must be an integer from ${minimum} to ${maximum}`);
     }
     return value;
+}
+
+function validateCompactDynamicZeroPlaceholders(fields) {
+    for (const [root, template] of Object.entries(COMPACT_DYNAMIC_ZERO_PLACEHOLDER_TEMPLATES)) {
+        const countKey = `${root}.count`;
+        const count = readRequiredInteger(fields, countKey, 0, COMPACT_COUNT_LIMITS[countKey]);
+        if (count !== 0) continue;
+
+        const prefix = `${root}[0].`;
+        const hasPlaceholder = [...fields.keys()].some(key => key.startsWith(prefix));
+        if (!hasPlaceholder) continue;
+
+        for (const [suffix, expectedValue] of template) {
+            const key = `${prefix}${suffix}`;
+            if (!fields.has(key)) {
+                throw new Error(`compact ledger zero-count placeholder ${root}[0] must include the exact inert row; missing ${key}`);
+            }
+            const receivedValue = String(fields.get(key));
+            if (receivedValue !== expectedValue) {
+                throw new Error(`compact ledger zero-count placeholder ${key} must equal ${JSON.stringify(expectedValue)}; received ${JSON.stringify(receivedValue)}`);
+            }
+        }
+    }
 }
 
 function validateCompactEnumFields(fields) {
@@ -1932,6 +1960,7 @@ function validateCompactLedgerLexicalContract(fields) {
     for (const [key, maximum] of Object.entries(COMPACT_COUNT_LIMITS)) {
         readRequiredInteger(fields, key, 0, maximum);
     }
+    validateCompactDynamicZeroPlaceholders(fields);
     readRequiredInteger(fields, 'WorldTransition.timeAdvanceCount', 1, 3650);
     for (const key of fields.keys()) {
         if (isInactiveCompactPlaceholderKey(fields, key)) continue;

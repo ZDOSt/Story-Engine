@@ -15478,7 +15478,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.57');
+      assert.equal(manifest.version, '0.9.58');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16247,7 +16247,8 @@ const tests = [
       assert.equal(toolPrompt[0].content, semanticEngineGuidance);
       assert.match(toolPrompt[1].content, /Call the function tool submit_semantic_preflight exactly once/);
       assert.match(toolPrompt[1].content, /The tool is only a compact transport envelope; do not reduce or reinterpret the ledger/);
-      assert.match(toolPrompt[1].content, /When an indexed section count is 0, copy its template \[0\] placeholder lines exactly/);
+      assert.match(toolPrompt[1].content, /When a static indexed section count is 0, copy its template \[0\] placeholder lines exactly/);
+      assert.match(toolPrompt[1].content, /When count=0, either emit no rows or copy exactly one complete unchanged \[0\] placeholder row/);
       assert.match(toolPrompt[1].content, /valence=none\|good\|bad\|fear/);
       assert.match(toolPrompt[1].content, /EngineContext\.userReputationContext\.location=\(none\)/);
       assert.match(toolPrompt[1].content, /ResolutionEngine\.identifyGoal=Normal_Interaction/);
@@ -16369,6 +16370,30 @@ const tests = [
           'RelationshipEngine[0].standingBasis',
         )),
         /missing required lines: RelationshipEngine\[0\]\.standingBasis/,
+      );
+
+      const relationshipPlaceholderRows = relationshipSchemaMatch[1].split('\n').map(line =>
+        line.replaceAll('[i]', '[0]'),
+      );
+      const zeroRelationshipPlaceholderSections = appendLedgerLines(
+        completeSections,
+        'relationships',
+        relationshipPlaceholderRows,
+      );
+      assert.equal(
+        parseAndValidateSemanticToolSections(zeroRelationshipPlaceholderSections).relationshipEngine.length,
+        0,
+        'An exact zero-count relationship placeholder row must remain inert.',
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(replaceLedgerLine(
+          zeroRelationshipPlaceholderSections,
+          'relationships',
+          'RelationshipEngine[0].NPC',
+          'Alice',
+        )),
+        /zero-count placeholder RelationshipEngine\[0\]\.NPC must equal "\(none\)"/,
+        'A zero-count relationship row containing semantic data must still be rejected.',
       );
 
       let commaListSections = replaceLedgerLine(
@@ -16495,6 +16520,49 @@ const tests = [
         persistence: 'lasting',
         affectsAction: true,
       });
+      const zeroInjuryPlaceholderSections = appendLedgerLines(completeSections, 'injuries', [
+        'InjuryEffectEngine[0].target=(none)',
+        'InjuryEffectEngine[0].targetRole=Other',
+        'InjuryEffectEngine[0].effectType=physical_injury',
+        'InjuryEffectEngine[0].bodyPart=body',
+        'InjuryEffectEngine[0].description=(none)',
+        'InjuryEffectEngine[0].severityFloor=minor',
+        'InjuryEffectEngine[0].persistence=lasting',
+        'InjuryEffectEngine[0].affectsAction=N',
+      ]);
+      assert.equal(
+        parseAndValidateSemanticToolSections(zeroInjuryPlaceholderSections).injuryEffectEngine.effects.length,
+        0,
+        'An exact zero-count injury placeholder row must remain inert.',
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(replaceLedgerLine(
+          zeroInjuryPlaceholderSections,
+          'injuries',
+          'InjuryEffectEngine[0].target',
+          'Bandit',
+        )),
+        /zero-count placeholder InjuryEffectEngine\[0\]\.target must equal "\(none\)"/,
+        'A zero-count injury row containing semantic data must still be rejected.',
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(removeLedgerLine(
+          zeroInjuryPlaceholderSections,
+          'injuries',
+          'InjuryEffectEngine[0].description',
+        )),
+        /zero-count placeholder InjuryEffectEngine\[0\] must include the exact inert row/,
+        'A partial zero-count injury placeholder must still be rejected.',
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(appendLedgerLines(
+          completeSections,
+          'injuries',
+          ['InjuryEffectEngine[1].target=(none)'],
+        )),
+        /InjuryEffectEngine\[1\] is outside declared count 0/,
+        'Only index zero may be accepted as an inert zero-count placeholder.',
+      );
       assert.throws(
         () => parseAndValidateSemanticToolSections(replaceLedgerLine(
           injurySections,
