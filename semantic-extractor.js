@@ -642,22 +642,23 @@ function removeStrictOnlySchemaKeywords(schema) {
 }
 
 function buildSemanticPreflightSchema() {
-    const string = () => ({ type: 'string' });
-    const boolean = () => ({ type: 'boolean' });
-    const integer = (minimum, maximum) => ({ type: 'integer', minimum, maximum });
-    const enumString = values => ({ type: 'string', enum: [...values] });
+    const describe = (schema, description) => description ? { ...schema, description } : schema;
+    const string = description => describe({ type: 'string' }, description);
+    const boolean = description => describe({ type: 'boolean' }, description);
+    const integer = (minimum, maximum, description) => describe({ type: 'integer', minimum, maximum }, description);
+    const enumString = (values, description) => describe({ type: 'string', enum: [...values] }, description);
     const object = properties => ({
         type: 'object',
         additionalProperties: false,
         required: Object.keys(properties),
         properties,
     });
-    const array = (items, maxItems, minItems) => ({
+    const array = (items, maxItems, minItems, description) => describe({
         type: 'array',
         ...(Number.isInteger(minItems) ? { minItems } : {}),
         ...(Number.isInteger(maxItems) ? { maxItems } : {}),
         items,
-    });
+    }, description);
     const stringList = maxItems => array(string(), maxItems);
     const generatedStatsSeed = object({
         CapabilityPool: enumString(['none', 'common', 'trained', 'elite', 'boss']),
@@ -693,7 +694,10 @@ function buildSemanticPreflightSchema() {
         commitmentsRemove: stringList(),
     });
     const boundCompanionDelta = object({
-        status: enumString(['unchanged', 'active', 'inactive']),
+        status: enumString(
+            ['unchanged', 'active', 'inactive'],
+            'active only when the assembled context explicitly establishes an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant as already active/completed/accepted. inactive only when an established companion is explicitly severed, dismissed, removed, silenced permanently, or destroyed. unchanged for offers, pending pacts, invitations, unclear voices, metaphors, rumors, or no change.',
+        ),
         name: string(),
         type: enumString(['none', 'possession', 'shared_vessel', 'intelligent_item', 'bound_spirit', 'artifact', 'implant', 'other']),
         vessel: string(),
@@ -701,7 +705,10 @@ function buildSemanticPreflightSchema() {
         evidence: string(),
     });
     const pendingBoundaryDelta = object({
-        status: enumString(['unchanged', 'set', 'clear']),
+        status: enumString(
+            ['unchanged', 'set', 'clear'],
+            'Preflight should use unchanged. Post-narration tracker deltas use set only when FINAL_NARRATION explicitly shows an NPC boundary and clear when that stored boundary is resolved.',
+        ),
         boundaryId: string(),
         targetNPC: string(),
         type: enumString(['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']),
@@ -709,7 +716,7 @@ function buildSemanticPreflightSchema() {
         evidence: string(),
     });
     const injuryEffect = object({
-        target: string(),
+        target: string('Exact current tracker key for the entity actually receiving the impairing effect when one exists. Do not add articles, death descriptors, possessives, body, corpse, or remains. HarmedObservers qualify only when directly affected by the injury or status effect.'),
         targetRole: enumString(['OppTarget', 'HarmedObserver', 'ActionTarget', 'User', 'Other']),
         effectType: enumString(['none', 'physical_injury', 'burn', 'poison', 'paralysis', 'disease', 'blindness', 'stun', 'fear', 'restraint', 'curse', 'electrical', 'exhaustion', 'mental_status', 'other_status']),
         bodyPart: string(),
@@ -721,7 +728,7 @@ function buildSemanticPreflightSchema() {
     const powerActorAssessment = object({
         actor: string(),
         scope: enumString(POWER_ACTOR_ASSESSMENT_SCOPES),
-        isPowerActor: boolean(),
+        isPowerActor: boolean('Y when context gives any credible means to affect the user beyond the entity acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institutional/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Assess semantically, not by title keyword.'),
         actorType: string(),
         reach: stringList(),
         evidence: string(),
@@ -730,66 +737,66 @@ function buildSemanticPreflightSchema() {
     const powerActorEffect = object({
         actor: string(),
         actorType: string(),
-        sourceTarget: string(),
-        actionUnitId: enumString(['A1', 'A2', 'A3']),
-        explicitlyCompleted: boolean(),
-        hasReach: boolean(),
+        sourceTarget: string('Exact person, organization, or other current target whose setback creates this effect. Use the Power Actor itself when directly affected.'),
+        actionUnitId: enumString(['A1', 'A2', 'A3'], 'Exact ResolutionEngine.actionUnits id that causes this effect.'),
+        explicitlyCompleted: boolean('For no-roll turns only: Y only when current input/context explicitly establishes the effect as already completed. Use N for attempts and all rolled actions.'),
+        hasReach: boolean('Y only for organizations or unusually influential individuals with resources, agents, authority, territory, money, magic, reputation, or information access.'),
         effect: enumString(POWER_ACTOR_EFFECT_TYPES),
         severity: enumString(POWER_ACTOR_SEVERITIES),
         reason: string(),
-        knownToActor: boolean(),
+        knownToActor: boolean('Y only if the actor plausibly knows, observes, is informed of, or can discover the user action through ordinary reach.'),
     });
     const latentGrievance = object({
-        target: string(),
-        actionUnitId: enumString(['A1', 'A2', 'A3']),
-        explicitlyCompleted: boolean(),
+        target: string('Exact current living target label. This target is presently assessed as ordinary and has no established Power Actor affiliation.'),
+        actionUnitId: enumString(['A1', 'A2', 'A3'], 'Exact ResolutionEngine.actionUnits id that causes this grievance.'),
+        explicitlyCompleted: boolean('For no-roll turns only: Y only when current input/context explicitly establishes the setback as already completed. Use N for attempts and all rolled actions.'),
         effect: enumString(POWER_ACTOR_EFFECT_TYPES),
-        severity: enumString(['meaningful', 'major']),
+        severity: enumString(['meaningful', 'major'], 'Only substantial durable setbacks qualify. Ordinary friction and minor insults do not.'),
         reason: string(),
         evidence: string(),
         attributionPath: string(),
     });
     const powerActorAffiliationLink = object({
-        grievanceId: string(),
-        target: string(),
+        grievanceId: string('Exact id copied from the hidden latent grievance snapshot.'),
+        target: string('Exact target copied from the referenced latent grievance.'),
         powerActor: string(),
         actorType: string(),
         hasReach: boolean(),
-        affiliationEvidence: string(),
-        knownToActor: boolean(),
+        affiliationEvidence: string('Explicit established context linking the grievance target to this Power Actor. Never infer or invent an affiliation.'),
+        knownToActor: boolean('Y only when the Power Actor knows or has a concrete ordinary discovery/reporting path for the stored grievance.'),
         knowledgeEvidence: string(),
     });
     const latentFavor = object({
-        target: string(),
-        actionUnitId: enumString(['A1', 'A2', 'A3']),
-        explicitlyCompleted: boolean(),
+        target: string('Exact current living beneficiary label. This target is presently assessed as ordinary and has no established Power Actor affiliation.'),
+        actionUnitId: enumString(['A1', 'A2', 'A3'], 'Exact ResolutionEngine.actionUnits id that causes this favor.'),
+        explicitlyCompleted: boolean('For no-roll turns only: Y only when current input/context explicitly establishes the aid as already completed. Use N for attempts and all rolled actions.'),
         benefit: enumString(POWER_ACTOR_FAVOR_TYPES),
-        severity: enumString(['meaningful', 'major']),
+        severity: enumString(['meaningful', 'major'], 'Only substantial help qualifies. Courtesy, small gifts, and ordinary assistance do not.'),
         reason: string(),
         evidence: string(),
-        uncompensated: boolean(),
-        beyondExpectedDuty: boolean(),
+        uncompensated: boolean('Y only when no payment, contracted reward, exchange, or promised compensation already covers the help. N when unclear.'),
+        beyondExpectedDuty: boolean('Y only when the help exceeds the user normal job, contract, role, obligation, or routine professional conduct. N when unclear.'),
         attributionPath: string(),
     });
     const powerActorFavorAffiliationLink = object({
-        favorId: string(),
-        target: string(),
+        favorId: string('Exact id copied from the hidden latent favor snapshot.'),
+        target: string('Exact target copied from the referenced latent favor.'),
         powerActor: string(),
         actorType: string(),
         hasReach: boolean(),
-        affiliationEvidence: string(),
-        knownToActor: boolean(),
+        affiliationEvidence: string('Explicit established context linking the favor target to this Power Actor. Never infer or invent an affiliation.'),
+        knownToActor: boolean('Y only when the Power Actor knows or has a concrete ordinary discovery/reporting path for the stored favor.'),
         knowledgeEvidence: string(),
-        knownToUser: boolean(),
-        userKnowledgeEvidence: string(),
-        fit: enumString(POWER_ACTOR_FAVOR_FITS),
-        fitEvidence: string(),
+        knownToUser: boolean('Y only when visible or previously established user-facing context already reveals this beneficiary affiliation and Power Actor identity. Hidden semantic knowledge is insufficient.'),
+        userKnowledgeEvidence: string('Direct user-facing dialogue, readable text, recognition, or established scene fact proving knownToUser=Y; otherwise (none).'),
+        fit: enumString(POWER_ACTOR_FAVOR_FITS, 'use_now only when one favorable approach can naturally enter the current scene without interrupting combat, crisis, active intimacy, urgent action, or the current dramatic beat; otherwise defer.'),
+        fitEvidence: string('Concise current-scene reason for use_now or defer.'),
     });
     const powerEvent = object({
         eventId: string(),
         actor: string(),
         fit: enumString(POWER_EVENT_FITS),
-        visibleInstruction: string(),
+        visibleInstruction: string('Narrator-safe surface scene instruction only. No hidden motive, allegiance, sponsor, spy, agent, infiltration, betrayal, or metadata language.'),
         contactName: string(),
         contactGender: enumString(POWER_EVENT_CONTACT_GENDERS),
         surfaceRole: string(),
@@ -799,74 +806,74 @@ function buildSemanticPreflightSchema() {
         STAKE_OUTCOME_KEYS.map(key => [key, enumString(['benefit', 'harm', 'none'])]),
     ));
     const itemUse = object({
-        attempted: boolean(),
-        available: boolean(),
+        attempted: boolean('Y only when the latest user input claims use of an existing personal gear/inventory item already carried by the user, such as drawing, producing, retrieving, spending, consuming, presenting, unlocking with, attacking with, or defending with personal equipment. Grabbing, taking, picking up, receiving, or using scene/environment/NPC-offered objects is not itemUse. Natural weapons and body parts are not itemUse.'),
+        available: boolean('Y only when the attempted personal item is already listed in user gear or inventory before the latest user input; body facts and natural weapons do not need gear/inventory availability.'),
         item: string(),
-        source: enumString(ITEM_USE_SOURCES),
+        source: enumString(ITEM_USE_SOURCES, 'Availability source: gear, inventory, unavailable, or none.'),
         evidence: string(),
         noEffectReason: string(),
     });
     const lootSearch = object({
-        attempted: boolean(),
+        attempted: boolean('Y only when the latest user input explicitly searches, loots, rummages through, checks, or examines a specific body, corpse, remains, or defeated target for carried or recoverable possessions. Do not decide death, loot contents, value, or prior-search state.'),
         target: string(),
-        targetKind: enumString(LOOT_TARGET_KINDS),
+        targetKind: enumString(LOOT_TARGET_KINDS, 'humanoid for personlike/civilized equipment-bearing remains, monster for creature/monster remains expected to yield a magic stone, otherwise other.'),
         evidence: string(),
     });
     const claimCheck = object({
-        present: boolean(),
+        present: boolean('Y only when the latest user input makes a factual claim that could affect a specific NPC choice or stakes.'),
         claim: string(),
         targetNPC: string(),
-        truthStatus: enumString(CLAIM_TRUTH_STATUSES),
-        npcAccess: enumString(CLAIM_NPC_ACCESS_LEVELS),
-        stakesImpact: boolean(),
+        truthStatus: enumString(CLAIM_TRUTH_STATUSES, 'known_true=explicitly supported; known_false=explicitly contradicted; unsupported=material claim not established; unknown=insufficient context; none=no relevant claim.'),
+        npcAccess: enumString(CLAIM_NPC_ACCESS_LEVELS, 'How much the target NPC can naturally verify or know the claim: direct, partial, none, or unknown.'),
+        stakesImpact: boolean('Y only if belief/disbelief could materially affect the NPC choice, trust, access, resources, authority, safety, emotional vulnerability, or immediate stakes.'),
         reason: string(),
     });
     const restraintControl = object({
-        present: boolean(),
+        present: boolean('Y only when the latest user input explicitly holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a specific living NPC.'),
         targetNPC: string(),
         evidence: string(),
     });
     const boundaryPressure = object({
-        present: boolean(),
+        present: boolean('Y for non-restraint pressure on an NPC-controlled possession, object, space, route, doorway, access point, or departure.'),
         type: enumString(BOUNDARY_PRESSURE_TYPES),
         targetNPC: string(),
         objectOrAccess: string(),
         evidence: string(),
     });
     const boundaryBreak = object({
-        present: boolean(),
-        boundaryId: string(),
+        present: boolean('Y only when hidden tracker pendingBoundary exists and the latest user input continues, escalates, ignores, or refuses to release/return/stop that same boundary behavior.'),
+        boundaryId: string('Copy the exact active boundaryId from hidden pendingBoundary when Present=Y; otherwise (none). Never invent an ID.'),
         targetNPC: string(),
         type: enumString(BOUNDARY_BREAK_TYPES),
         response: enumString(BOUNDARY_BREAK_RESPONSES),
         evidence: string(),
     });
     const userKnowledgeApplication = object({
-        target: string(),
+        target: string('The present NPC/group this knowledge plausibly applies to, or (none).'),
         entryIds: stringList(),
         type: enumString(USER_KNOWLEDGE_TYPES),
         knownBy: string(),
         scope: enumString(USER_KNOWLEDGE_SCOPES),
         valence: enumString(['none', ...USER_REPUTATION_VALENCES]),
-        effect: enumString(USER_KNOWLEDGE_APPLICATION_EFFECTS),
+        effect: enumString(USER_KNOWLEDGE_APPLICATION_EFFECTS, 'How this knowledge should affect init/context: priorUserGoodRep, userBadRep, userNonHuman, contextOnly, or none.'),
         line: string(),
         reason: string(),
     });
     const actionUnit = object({
-        id: enumString(['A1', 'A2', 'A3']),
-        action: string(),
-        evidence: string(),
+        id: enumString(['A1', 'A2', 'A3'], 'A1, A2, or A3. actionUnits is the only semantic source for mechanically counted actions.'),
+        action: string('Short clean description of this mechanically counted user action.'),
+        evidence: string('Brief latest-user-text evidence for this action unit. Audit only; not narration.'),
     });
     const worldTransition = object({
-        reputationLocation: string(),
-        place: string(),
-        area: string(),
-        indoors: enumString(['unchanged', 'indoors', 'outdoors']),
-        timeAdvance: enumString(['none', 'slot', 'overnight', 'day', 'explicit']),
-        timeAdvanceCount: integer(1, 3650),
-        timeOfDay: enumString(['unchanged', 'morning', 'afternoon', 'evening', 'night']),
-        requiresSuccess: boolean(),
-        evidence: string(),
+        reputationLocation: string('Use unchanged unless the latest user input explicitly changes the current settlement, route, region, or reputation jurisdiction. Never copy or infer the existing scene state.'),
+        place: string('Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different place. Never copy or infer the existing place from context.'),
+        area: string('Use unchanged unless the latest user input explicitly enters, leaves, or moves to a different sub-area. Never copy or infer the existing area from context.'),
+        indoors: enumString(['unchanged', 'indoors', 'outdoors'], 'Use unchanged unless the latest user input explicitly crosses between indoors and outdoors.'),
+        timeAdvance: enumString(['none', 'slot', 'overnight', 'day', 'explicit'], 'Use none unless the latest user input explicitly waits, sleeps, travels through, or skips time.'),
+        timeAdvanceCount: integer(1, 3650, 'Number of timeAdvance units explicitly established by the latest user input; use 1 when timeAdvance is none.'),
+        timeOfDay: enumString(['unchanged', 'morning', 'afternoon', 'evening', 'night'], 'Use unchanged unless the latest user input explicitly establishes a new time of day.'),
+        requiresSuccess: boolean('True only when this explicit transition depends on the current stakes-bearing action succeeding.'),
+        evidence: string('Exact contiguous quote from the latest user input that establishes this transition, or (none) when every transition field is unchanged/none.'),
     });
     const worldEvidence = object({
         topic: string(),
@@ -887,11 +894,11 @@ function buildSemanticPreflightSchema() {
     const relationship = object({
         NPC: string(),
         initPreset: object({
-            romanticOpen: boolean(),
-            userBadRep: boolean(),
-            priorUserGoodRep: boolean(),
-            userNonHuman: boolean(),
-            fearImmunity: boolean(),
+            romanticOpen: boolean('Y when prior card/lore/scenario/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward user; not generic friendliness, politeness, casual flirting, shallow physical attraction, vague chemistry, ordinary embarrassment, or first impressions.'),
+            userBadRep: boolean('Y only for explicit authored prior hate, distrust, enemy status, pursuit, betrayal, harm, or negative relationship with this NPC from character card, lore, scenario, or pre-existing relationship context; not current-scene conflict or broad public infamy.'),
+            priorUserGoodRep: boolean('Y only for explicit authored established favorable or trust-normalizing prior history, trust, gratitude, safe familiarity, vouching, friendship, or relationship with this NPC from character card, lore, scenario, or pre-existing relationship context; not kindness, good impressions, or broad public fame.'),
+            userNonHuman: boolean('Y for visibly demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural user form when this is a fresh or unnormalized exposure, or explicit authored fear-coded relationship context with this NPC. Do not use broad public infamy here; deterministic fame/infamy handles that.'),
+            fearImmunity: boolean('Y only for the same kind/race category as the user form, a superior or peer supernatural/monstrous being, explicit immunity or natural resistance to fear, or an explicitly nonordinary ancient/powerful being established as experienced with such horrors and not meaningfully afraid. Title, rank, bravado, posturing, composure, courage, ordinary guards/soldiers, or normal combat experience do not qualify.'),
         }),
         auditInteraction: boolean(),
         establishedRelationship: boolean(),
@@ -908,16 +915,16 @@ function buildSemanticPreflightSchema() {
             blockers: stringList(),
         }),
         explicitIntimidationOrCoercion: boolean(),
-        standingInfluence: enumString(STANDING_INFLUENCES),
-        standingBasis: string(),
+        standingInfluence: enumString(STANDING_INFLUENCES, 'How this specific NPC\'s knowledge of user standing relative to themselves affects their outward conduct. none=no recognized meaningful user-standing difference; aware=user standing changes etiquette, caution, risk, or openness without constraining the NPC; constrained=user\'s recognized higher authority, status, power, backing, lineage, or affiliation limits what the NPC openly expresses or dares to do. This changes expression only and never changes B/F/H.'),
+        standingBasis: string('Concise evidence for the assessment from user standing this NPC actually knows and recognizes relative to themselves: title, authority, reputation, demonstrated power, backing, lineage, or affiliation. Use (none) when standingInfluence=none. Unknown, concealed, or unsupported status must remain none/(none).'),
         stakeChangeByOutcome: stakeChange,
         overrideFlags: object({
-            CurrentInvitation: boolean(),
-            Exploitation: boolean(),
-            Hedonist: boolean(),
-            Transactional: boolean(),
-            Established: boolean(),
-            RomanticBuildup: boolean(),
+            CurrentInvitation: boolean('Y only when this NPC has clearly offered, requested, invited, strongly implied, accepted, agreed to, arranged, or physically initiated sexual/intimate escalation with the user in the current or immediately recent scene, and has not withdrawn, refused, panicked, or been interrupted by danger. This includes accepting the user\'s explicit proposal, agreeing to join, inviting or calling another willing participant, saying yes to coming over for intimacy, and irrefutable sexual invitation hints framed as questions. Ordinary flirting, suggestive banter, compliments, attraction, embarrassment, vague innuendo without an invitation, or an unaccepted user proposal do not qualify.'),
+            Exploitation: boolean('Y only when card/lore/context explicitly makes this NPC exploitable by user or situation: naive, easily led/persuaded, follows user lead without question, dependent, trapped, coerced, powerless, or unsafely sheltered. Not mere innocence, shyness, kindness, flirting, or low confidence.'),
+            Hedonist: boolean('Y only for explicitly sexually open, pleasure-seeking, casual, promiscuous, or eager intimacy context.'),
+            Transactional: boolean('Y only for explicit willingness to exchange intimacy for money, goods, favors, protection, status, or services.'),
+            Established: boolean('Y only for explicit prior/current intimate access with current or recent receptivity toward user, separate from establishedRelationship. Prior intimacy alone is not enough if current receptivity is absent, stale, unclear, refused, fearful, hostile, coerced, or boundary-limited.'),
+            RomanticBuildup: boolean('Y only for a B4 close-bond scene where the current and recent interaction has consistently and mutually built toward romantic/intimate escalation with receptive NPC behavior, making the user latest intimate advance a natural continuation. N for ordinary friendliness, tenderness, gratitude, warmth, single smiles, casual flirting, vague chemistry, or user-only escalation. N if refusal, withdrawal, fear, hostility, coercion, danger, public/social interruption, or a boundary limit is active.'),
         }),
         genStats: generatedStatsSeed,
     });
@@ -925,7 +932,9 @@ function buildSemanticPreflightSchema() {
     return object({
         engineContext: object({
             trackerRelevantNPCs: array(object({ NPC: string() })),
-            userReputationContext: object({ location: string() }),
+            userReputationContext: object({
+                location: string('Current settlement/community/route/region for deterministic fame/infamy lookup, or (none). Do not decide reputation effects here.'),
+            }),
         }),
         worldTransition,
         worldProgression: object({ advancements: array(worldAdvancement, 18) }),
@@ -934,14 +943,14 @@ function buildSemanticPreflightSchema() {
             identifyChallenge: string(),
             explicitMeans: string(),
             userAbilityUse: object({
-                used: boolean(),
-                attempted: boolean(),
-                available: boolean(),
+                used: boolean('Y only when the latest user input attempts an ability/spell and that ability/spell exists in active user/persona abilities or spells.'),
+                attempted: boolean('Y when the latest user input explicitly names or implicitly describes an attempted ability/spell/supernatural effect through trigger, delivery method, or desired effect.'),
+                available: boolean('Y only when the attempted ability/spell exists in active user/persona abilities or spells from context.'),
                 abilityName: string(),
                 evidence: string(),
                 narrativeEffect: string(),
                 noEffectReason: string(),
-                mechanicalScope: enumString(['flavor_only_no_bonus']),
+                mechanicalScope: enumString(['flavor_only_no_bonus'], 'Always flavor_only_no_bonus. Ability use is fictional permission/method only and never changes dice, stats, stakes, or outcomes.'),
             }),
             itemUse,
             lootSearch,
@@ -959,14 +968,14 @@ function buildSemanticPreflightSchema() {
             restraintControl,
             boundaryPressure,
             boundaryBreak,
-            harmMode: enumString(HARM_MODES),
-            rollNeeded: boolean(),
-            rollReason: string(),
-            challengeType: enumString(CHALLENGE_TYPES),
-            challengeTypeEvidence: string(),
-            socialTactic: enumString(SOCIAL_TACTICS),
-            actionUnits: array(actionUnit, 3),
-            environmentDifficultyTier: enumString(ENVIRONMENT_DIFFICULTY_TIERS),
+            harmMode: enumString(HARM_MODES, 'Downstream damage/death gate only. lethal for weapon/improvised/natural weapon, dangerous tool, projectile, destructive magic, poison, fire/electricity, or any method that could reasonably kill/maim if it lands decisively. nonlethal for ordinary unarmed attacks, brawling, sparring/training, pulled blows, pommel/flat strikes, practice weapons, or clearly controlled force; it can deal HP damage but HP 0 means incapacitated, not dead. restraint_control for holding, pinning, grabbing, dragging, blocking, binding, immobilizing, carrying, forced positioning, or preventing movement without a separate injuring attack; no HP damage and bruised at most. none for no bodily attack/harm/control. If mixed, choose lethal > nonlethal > restraint_control > none. This must not decide rollNeeded, challengeType, boundary pressure, hostility, or relationship harm.'),
+            rollNeeded: boolean('The sole semantic roll gate. Y for fresh unresolved DEF.STAKES items. N only for DEF.NO_STAKES exclusions when no positive stake is present or when that exact positive stake is already resolved/suppressed. Positive stakes win over ordinary continuity.'),
+            rollReason: string('Concise explanation that agrees with rollNeeded. If rollNeeded=true, describe the fresh unresolved stakes. If rollNeeded=false, describe why no fresh unresolved stakes exist.'),
+            challengeType: enumString(CHALLENGE_TYPES, 'none, social, mundane_combat, supernatural_combat, restraint, stealth, or environment. Use none when rollNeeded=false unless deterministic restraint policy overrides later.'),
+            challengeTypeEvidence: string('Brief evidence phrase for the selected challengeType, or (none).'),
+            socialTactic: enumString(SOCIAL_TACTICS, 'diplomacy, bluff, or intimidate only when challengeType=social; otherwise none.'),
+            actionUnits: array(actionUnit, 3, undefined, 'Only semantic source for mechanically counted actions. Non-combat returns exactly one A1 unit. Combat returns one unit per explicit discrete attack/effect, capped at three.'),
+            environmentDifficultyTier: enumString(ENVIRONMENT_DIFFICULTY_TIERS, 'Semantic environmental opposition tier only when challengeType=environment and OppTargets.ENV has a non-living obstacle or condition that makes the goal fail-able. Use easy/trivial, average, hard, or extreme; set none otherwise.'),
             activeHostileThreat: boolean(),
             genStats: generatedStatsSeed,
         }),

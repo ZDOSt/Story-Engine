@@ -15478,7 +15478,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.63');
+      assert.equal(manifest.version, '0.9.64');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16457,9 +16457,52 @@ const tests = [
         leaves: 243,
         objects: 46,
         arrays: 46,
-        descriptions: 0,
+        descriptions: 85,
         incompleteRequired: 0,
       });
+      assert.match(
+        strictSemanticTool.function.parameters.properties.resolutionEngine.properties.rollNeeded.description,
+        /sole semantic roll gate/,
+      );
+      assert.match(
+        strictSemanticTool.function.parameters.properties.worldTransition.properties.place.description,
+        /explicitly enters, leaves, or moves/,
+      );
+      assert.match(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items.properties.initPreset
+          .properties.romanticOpen.description,
+        /clear user-directed romantic interest/,
+      );
+      assert.match(
+        strictSemanticTool.function.parameters.properties.injuryEffectEngine.properties.effects.items
+          .properties.target.description,
+        /entity actually receiving the impairing effect/,
+      );
+      assert.doesNotMatch(
+        strictSemanticTool.function.parameters.properties.injuryEffectEngine.properties.effects.items
+          .properties.target.description,
+        /searched NPC\/body/,
+      );
+      assert.match(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items.properties.initPreset
+          .properties.fearImmunity.description,
+        /established as experienced with such horrors and not meaningfully afraid/,
+      );
+      assert.match(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items.properties.overrideFlags
+          .properties.CurrentInvitation.description,
+        /accepted, agreed to, arranged/,
+      );
+      assert.match(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items.properties.overrideFlags
+          .properties.CurrentInvitation.description,
+        /unaccepted user proposal do not qualify/,
+      );
+      assert.match(
+        portableSemanticTool.function.parameters.properties.resolutionEngine.properties.rollNeeded.description,
+        /sole semantic roll gate/,
+        'Portable providers should retain field-level interpretation guidance.',
+      );
       assert.equal(strictSemanticTool.function.parameters.properties.worldProgression.properties.advancements.maxItems, 18);
       assert.equal(strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.maxItems, 3);
       assert.equal(strictSemanticTool.function.parameters.properties.relationshipEngine.maxItems, 20);
