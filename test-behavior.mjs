@@ -19,6 +19,21 @@ import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, bui
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 import { generateRawData as generateRawDataAdapter } from './st-adapter.js';
+import {
+  BOUNDARY_BREAK_RESPONSES,
+  BOUNDARY_BREAK_TYPES,
+  BOUNDARY_PRESSURE_TYPES,
+  CHALLENGE_TYPES,
+  HARM_MODES,
+  ROMANCE_STYLES,
+  SLOW_BOND_CATEGORY_DESCRIPTIONS,
+  SLOW_BOND_DISTINCT_CATEGORY_THRESHOLD,
+  SLOW_BOND_KEYS,
+  SOCIAL_TACTICS,
+  STANDING_INFLUENCES,
+} from './semantic-contract.js';
+import { SEMANTIC_GOLDEN_FIXTURES } from './semantic-golden-fixtures.mjs';
+import { evaluateSemanticGoldenOutputs } from './semantic-golden-evaluator.mjs';
 
 const stakeKeys = [
   'no_roll',
@@ -15478,7 +15493,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.64');
+      assert.equal(manifest.version, '0.9.65');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16457,7 +16472,7 @@ const tests = [
         leaves: 243,
         objects: 46,
         arrays: 46,
-        descriptions: 85,
+        descriptions: 98,
         incompleteRequired: 0,
       });
       assert.match(
@@ -16498,6 +16513,15 @@ const tests = [
           .properties.CurrentInvitation.description,
         /unaccepted user proposal do not qualify/,
       );
+      const relationshipSchema = strictSemanticTool.function.parameters.properties.relationshipEngine.items.properties;
+      assert.match(relationshipSchema.auditInteraction.description, /concretely improves this NPC's stakes/);
+      assert.match(relationshipSchema.establishedRelationship.description, /accepted by both sides/);
+      assert.match(relationshipSchema.romanceStyle.description, /pre-relationship initiative style/);
+      assert.match(relationshipSchema.slowBondEvidence.properties.cooperation.description, /Ordinary safe collaboration/);
+      assert.match(relationshipSchema.slowBondEvidence.properties.teamwork.description, /meaningful pressure/);
+      assert.match(relationshipSchema.slowBondEvidence.properties.boundaryRespect.description, /Mere absence of a violation is false/);
+      assert.match(relationshipSchema.slowBondEvidence.properties.blockers.description, /make closeness unsafe to count/);
+      assert.match(relationshipSchema.explicitIntimidationOrCoercion.description, /forced submission/);
       assert.match(
         portableSemanticTool.function.parameters.properties.resolutionEngine.properties.rollNeeded.description,
         /sole semantic roll gate/,
@@ -16735,6 +16759,112 @@ const tests = [
         MainStat: 'CHA',
       });
       assert.equal(relationshipLedger.relationshipEngine[0].stakeChangeByOutcome.no_roll, 'benefit');
+      const canonicalRelationshipLedger = parseAndValidateSemanticToolSections(replaceLedgerLine(
+        relationshipSections,
+        'relationships',
+        'RelationshipEngine[0].NPC',
+        'alice',
+      ));
+      assert.equal(canonicalRelationshipLedger.relationshipEngine[0].NPC, 'Alice');
+      assert.deepEqual(
+        canonicalRelationshipLedger.deterministicOverrides.semanticLedgerRepair.canonicalizedNPCs,
+        [{ from: 'alice', to: 'Alice' }],
+      );
+
+      let blockedPositiveSections = replaceLedgerLine(
+        relationshipSections,
+        'relationships',
+        'RelationshipEngine[0].slowBondEvidence.cooperation',
+        'Y',
+      );
+      blockedPositiveSections = replaceLedgerLine(
+        blockedPositiveSections,
+        'relationships',
+        'RelationshipEngine[0].slowBondEvidence.blockers',
+        'active fear',
+      );
+      const blockedPositiveLedger = parseAndValidateSemanticToolSections(blockedPositiveSections);
+      assert.equal(blockedPositiveLedger.relationshipEngine[0].slowBondEvidence.cooperation, false);
+      assert.deepEqual(blockedPositiveLedger.relationshipEngine[0].slowBondEvidence.blockers, ['active fear']);
+      assert.deepEqual(
+        blockedPositiveLedger.deterministicOverrides.semanticLedgerRepair.slowBondEvidenceRepairs[0].clearedPositiveCategories,
+        ['cooperation'],
+      );
+
+      let coercionSections = replaceLedgerLine(
+        relationshipSections,
+        'relationships',
+        'RelationshipEngine[0].slowBondEvidence.personalAttention',
+        'Y',
+      );
+      coercionSections = replaceLedgerLine(
+        coercionSections,
+        'relationships',
+        'RelationshipEngine[0].explicitIntimidationOrCoercion',
+        'Y',
+      );
+      const coercionLedger = parseAndValidateSemanticToolSections(coercionSections);
+      assert.equal(coercionLedger.relationshipEngine[0].slowBondEvidence.personalAttention, false);
+      assert.deepEqual(coercionLedger.relationshipEngine[0].slowBondEvidence.blockers, ['intimidation or coercion']);
+
+      let boundaryViolationSections = replaceLedgerLine(
+        relationshipSections,
+        'relationships',
+        'RelationshipEngine[0].slowBondEvidence.boundaryRespect',
+        'Y',
+      );
+      for (const [key, value] of [
+        ['ResolutionEngine.boundaryBreak.Present', 'Y'],
+        ['ResolutionEngine.boundaryBreak.BoundaryId', 'pb_alice_test'],
+        ['ResolutionEngine.boundaryBreak.TargetNPC', 'Alice'],
+        ['ResolutionEngine.boundaryBreak.Type', 'intimacy'],
+        ['ResolutionEngine.boundaryBreak.Response', 'continued'],
+        ['ResolutionEngine.boundaryBreak.Evidence', 'continued after refusal'],
+      ]) {
+        boundaryViolationSections = replaceLedgerLine(boundaryViolationSections, 'resolution', key, value);
+      }
+      const boundaryViolationLedger = parseAndValidateSemanticToolSections(boundaryViolationSections, {}, {
+        pendingBoundarySnapshot: {
+          active: true,
+          boundaryId: 'pb_alice_test',
+          targetNPC: 'Alice',
+          type: 'intimacy',
+          evidence: 'Alice refused',
+          warnings: 1,
+        },
+      });
+      assert.equal(boundaryViolationLedger.relationshipEngine[0].slowBondEvidence.boundaryRespect, false);
+      assert.deepEqual(boundaryViolationLedger.relationshipEngine[0].slowBondEvidence.blockers, ['boundary violation']);
+      const mismatchedBoundaryLedger = parseAndValidateSemanticToolSections(boundaryViolationSections, {}, {
+        pendingBoundarySnapshot: {
+          active: true,
+          boundaryId: 'pb_other_boundary',
+          targetNPC: 'Alice',
+          type: 'intimacy',
+          evidence: 'Alice refused',
+          warnings: 1,
+        },
+      });
+      assert.equal(mismatchedBoundaryLedger.relationshipEngine[0].slowBondEvidence.boundaryRespect, true);
+      assert.deepEqual(mismatchedBoundaryLedger.relationshipEngine[0].slowBondEvidence.blockers, []);
+
+      let duplicateRelationshipSections = replaceLedgerLine(
+        relationshipSections,
+        'relationships',
+        'RelationshipEngine.count',
+        '2',
+      );
+      const duplicateRelationshipRows = relationshipRowDefaults.map(([suffix, value]) =>
+        `RelationshipEngine[1].${suffix}=${suffix === 'NPC' ? 'alice' : value}`);
+      duplicateRelationshipSections = appendLedgerLines(
+        duplicateRelationshipSections,
+        'relationships',
+        duplicateRelationshipRows,
+      );
+      assert.throws(
+        () => parseAndValidateSemanticToolSections(duplicateRelationshipSections),
+        /duplicate RelationshipEngine rows after normalized NPC matching: Alice and Alice/,
+      );
       assert.throws(
         () => parseAndValidateSemanticToolSections(removeLedgerLine(
           relationshipSections,
@@ -18969,6 +19099,101 @@ const tests = [
       assert.match(engineSource, /inventory: normalizeTrackerStringList\(value\?\.inventory\)/);
       assert.match(engineSource, /currency: normalizeCurrencyList\(value\?\.currency\)/);
       assert.match(engineSource, /lootSearchCompleted: value\?\.lootSearchCompleted === true \|\| value\?\.lootSearchCompleted === 'Y'/);
+    },
+  },
+  {
+    name: '70 semantic reliability contract constants and golden evaluator remain coherent',
+    run() {
+      assert.equal(SLOW_BOND_DISTINCT_CATEGORY_THRESHOLD, 2);
+      assert.equal(SLOW_BOND_KEYS.length, 8);
+      assert.equal(Object.isFrozen(SLOW_BOND_KEYS), true);
+      assert.equal(Object.isFrozen(SLOW_BOND_CATEGORY_DESCRIPTIONS), true);
+      assert.deepEqual(CHALLENGE_TYPES, ['none', 'social', 'mundane_combat', 'supernatural_combat', 'restraint', 'stealth', 'environment']);
+      assert.deepEqual(SOCIAL_TACTICS, ['none', 'diplomacy', 'bluff', 'intimidate']);
+      assert.deepEqual(HARM_MODES, ['lethal', 'nonlethal', 'restraint_control', 'none']);
+      assert.deepEqual(BOUNDARY_PRESSURE_TYPES, ['none', 'object_access', 'space_access', 'departure']);
+      assert.deepEqual(BOUNDARY_BREAK_TYPES, ['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']);
+      assert.deepEqual(BOUNDARY_BREAK_RESPONSES, ['none', 'released', 'continued', 'escalated', 'unrelated', 'unclear']);
+      assert.deepEqual(STANDING_INFLUENCES, ['none', 'aware', 'constrained']);
+      assert.deepEqual(ROMANCE_STYLES, ['auto', 'nervous', 'flirt']);
+      assert.match(ENGINE_PROMPT_TEXT, /at least 2 distinct positive evidence categories/);
+      assert.doesNotMatch(ENGINE_PROMPT_TEXT, /at least 3 distinct positive evidence categories/);
+
+      assert.equal(SEMANTIC_GOLDEN_FIXTURES.length, 18);
+      assert.equal(new Set(SEMANTIC_GOLDEN_FIXTURES.map(fixture => fixture.id)).size, SEMANTIC_GOLDEN_FIXTURES.length);
+      for (const fixture of SEMANTIC_GOLDEN_FIXTURES) {
+        assert.equal(typeof fixture.id, 'string');
+        assert.equal(typeof fixture.boundaryUnderTest, 'string');
+        assert.equal(typeof fixture.scene, 'string');
+        assert.equal(typeof fixture.expectedResolutionSubset, 'object');
+        assert.equal(Array.isArray(fixture.expectedRelationshipSubset), true);
+        assert.equal(Array.isArray(fixture.forbiddenOutputs), true);
+      }
+
+      const report = evaluateSemanticGoldenOutputs([
+        {
+          fixtureId: 'safe_cooperation_not_teamwork',
+          provider: 'fixture',
+          model: 'correct-output',
+          ledger: {
+            resolutionEngine: {
+              activeHostileThreat: false,
+              identifyTargets: {
+                ActionTargets: ['Mira'],
+                OppTargets: { NPC: [], ENV: [] },
+                BenefitedObservers: [],
+                HarmedObservers: [],
+                NPCAwareOfUser: [],
+              },
+            },
+            relationshipEngine: [{
+              NPC: 'Mira',
+              slowBondEvidence: {
+                cooperation: true,
+                teamwork: false,
+                blockers: [],
+              },
+            }],
+          },
+        },
+        {
+          fixtureId: 'forced_proximity_not_comfort',
+          provider: 'fixture',
+          model: 'contradictory-output',
+          ledger: {
+            resolutionEngine: {
+              identifyTargets: {
+                ActionTargets: ['Mira'],
+                OppTargets: { NPC: [], ENV: [] },
+                BenefitedObservers: [],
+                HarmedObservers: [],
+                NPCAwareOfUser: [],
+              },
+            },
+            relationshipEngine: [
+              {
+                NPC: 'Mira',
+                slowBondEvidence: { comfortInProximity: true, blockers: ['trapped'] },
+              },
+              {
+                NPC: 'mira',
+                slowBondEvidence: { comfortInProximity: false, blockers: ['trapped'] },
+              },
+            ],
+          },
+        },
+      ]);
+      assert.equal(report.summary.captures, 2);
+      assert.equal(report.summary.relationshipCoverage.recall, 1);
+      assert.equal(report.summary.relationshipCoverage.duplicate, 1);
+      assert.equal(report.confusionMatrix.falsePositive, 1);
+      assert.equal(report.summary.contradictions, 2);
+      assert.equal(report.results[0].errors.length, 0);
+      assert.equal(report.results[1].contradictions.some(item => item.type === 'duplicate_relationship_row'), true);
+      assert.throws(
+        () => evaluateSemanticGoldenOutputs([{ fixtureId: 'unknown_fixture', ledger: {} }]),
+        /Unknown semantic golden fixture/,
+      );
     },
   },
 ];

@@ -4,6 +4,20 @@ import { getChatCompletionProfileRoute, sendConnectionManagerProfileRequest, sen
 import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
 import { buildWorldProgressionSemanticContext, normalizeWorldProgression, normalizeWorldProgressionAdvancements, validateWorldProgressionAdvancementCoverage } from './world-memory.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
+import {
+    BOUNDARY_BREAK_RESPONSES,
+    BOUNDARY_BREAK_TYPES,
+    BOUNDARY_PRESSURE_TYPES,
+    CHALLENGE_TYPES,
+    HARM_MODES,
+    RELATIONSHIP_FIELD_DESCRIPTIONS,
+    ROMANCE_STYLES,
+    SLOW_BOND_BLOCKERS_DESCRIPTION,
+    SLOW_BOND_CATEGORY_DESCRIPTIONS,
+    SLOW_BOND_KEYS,
+    SOCIAL_TACTICS,
+    STANDING_INFLUENCES,
+} from './semantic-contract.js';
 
 const yaml = typeof window === 'undefined'
     ? (await import('yaml')).default
@@ -86,13 +100,6 @@ const LOOT_TARGET_KINDS = Object.freeze(['humanoid', 'monster', 'other']);
 const USER_KNOWLEDGE_TYPES = Object.freeze(['personalKnowledge', 'reputationKnowledge']);
 const USER_KNOWLEDGE_APPLICATION_EFFECTS = Object.freeze(['none', 'priorUserGoodRep', 'userBadRep', 'userNonHuman', 'contextOnly']);
 const ENVIRONMENT_DIFFICULTY_TIERS = Object.freeze(['none', 'easy', 'average', 'hard', 'extreme']);
-const CHALLENGE_TYPES = Object.freeze(['none', 'social', 'mundane_combat', 'supernatural_combat', 'restraint', 'stealth', 'environment']);
-const SOCIAL_TACTICS = Object.freeze(['none', 'diplomacy', 'bluff', 'intimidate']);
-const HARM_MODES = Object.freeze(['lethal', 'nonlethal', 'restraint_control', 'none']);
-const BOUNDARY_PRESSURE_TYPES = Object.freeze(['none', 'object_access', 'space_access', 'departure']);
-const BOUNDARY_BREAK_TYPES = Object.freeze(['none', 'restraint', 'object_access', 'space_access', 'departure', 'intimacy']);
-const BOUNDARY_BREAK_RESPONSES = Object.freeze(['none', 'released', 'continued', 'escalated', 'unrelated', 'unclear']);
-const STANDING_INFLUENCES = Object.freeze(['none', 'aware', 'constrained']);
 const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
     'RenderControlEngine',
     'sceneStyleProfile',
@@ -134,7 +141,7 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
         throw new Error(`Semantic tool-call pass returned an invalid ledger object: ${previewRaw(toolResult.ledger)}`);
     }
 
-    const normalized = normalizeLedger(ledger);
+    const normalized = normalizeLedger(ledger, options);
     validateNormalizedLedger(normalized, toolResult.ledger);
     validateSemanticWorldProgression(normalized, options, context);
     validateRelationshipCoverage(normalized.resolutionEngine, normalized.relationshipEngine);
@@ -659,7 +666,7 @@ function buildSemanticPreflightSchema() {
         ...(Number.isInteger(maxItems) ? { maxItems } : {}),
         items,
     }, description);
-    const stringList = maxItems => array(string(), maxItems);
+    const stringList = (maxItems, description) => array(string(), maxItems, undefined, description);
     const generatedStatsSeed = object({
         CapabilityPool: enumString(['none', 'common', 'trained', 'elite', 'boss']),
         MainStat: enumString(['none', 'PHY', 'MND', 'CHA', 'Balanced']),
@@ -900,21 +907,21 @@ function buildSemanticPreflightSchema() {
             userNonHuman: boolean('Y for visibly demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural user form when this is a fresh or unnormalized exposure, or explicit authored fear-coded relationship context with this NPC. Do not use broad public infamy here; deterministic fame/infamy handles that.'),
             fearImmunity: boolean('Y only for the same kind/race category as the user form, a superior or peer supernatural/monstrous being, explicit immunity or natural resistance to fear, or an explicitly nonordinary ancient/powerful being established as experienced with such horrors and not meaningfully afraid. Title, rank, bravado, posturing, composure, courage, ordinary guards/soldiers, or normal combat experience do not qualify.'),
         }),
-        auditInteraction: boolean(),
-        establishedRelationship: boolean(),
-        romanceStyle: enumString(['auto', 'nervous', 'flirt']),
+        auditInteraction: boolean(RELATIONSHIP_FIELD_DESCRIPTIONS.auditInteraction),
+        establishedRelationship: boolean(RELATIONSHIP_FIELD_DESCRIPTIONS.establishedRelationship),
+        romanceStyle: enumString(ROMANCE_STYLES, RELATIONSHIP_FIELD_DESCRIPTIONS.romanceStyle),
         slowBondEvidence: object({
-            respectfulContact: boolean(),
-            cooperation: boolean(),
-            comfortInProximity: boolean(),
-            boundaryRespect: boolean(),
-            sharedRoutine: boolean(),
-            playfulness: boolean(),
-            teamwork: boolean(),
-            personalAttention: boolean(),
-            blockers: stringList(),
+            respectfulContact: boolean(SLOW_BOND_CATEGORY_DESCRIPTIONS.respectfulContact),
+            cooperation: boolean(SLOW_BOND_CATEGORY_DESCRIPTIONS.cooperation),
+            comfortInProximity: boolean(SLOW_BOND_CATEGORY_DESCRIPTIONS.comfortInProximity),
+            boundaryRespect: boolean(SLOW_BOND_CATEGORY_DESCRIPTIONS.boundaryRespect),
+            sharedRoutine: boolean(SLOW_BOND_CATEGORY_DESCRIPTIONS.sharedRoutine),
+            playfulness: boolean(SLOW_BOND_CATEGORY_DESCRIPTIONS.playfulness),
+            teamwork: boolean(SLOW_BOND_CATEGORY_DESCRIPTIONS.teamwork),
+            personalAttention: boolean(SLOW_BOND_CATEGORY_DESCRIPTIONS.personalAttention),
+            blockers: stringList(12, SLOW_BOND_BLOCKERS_DESCRIPTION),
         }),
-        explicitIntimidationOrCoercion: boolean(),
+        explicitIntimidationOrCoercion: boolean(RELATIONSHIP_FIELD_DESCRIPTIONS.explicitIntimidationOrCoercion),
         standingInfluence: enumString(STANDING_INFLUENCES, 'How this specific NPC\'s knowledge of user standing relative to themselves affects their outward conduct. none=no recognized meaningful user-standing difference; aware=user standing changes etiquette, caution, risk, or openness without constraining the NPC; constrained=user\'s recognized higher authority, status, power, backing, lineage, or affiliation limits what the NPC openly expresses or dares to do. This changes expression only and never changes B/F/H.'),
         standingBasis: string('Concise evidence for the assessment from user standing this NPC actually knows and recognizes relative to themselves: title, authority, reputation, demonstrated power, backing, lineage, or affiliation. Use (none) when standingInfluence=none. Unknown, concealed, or unsupported status must remain none/(none).'),
         stakeChangeByOutcome: stakeChange,
@@ -1120,11 +1127,11 @@ export function reconstructSemanticToolLedger(sections) {
     return `BEGIN_SEMANTIC_PREFLIGHT\n${ledgerLines.join('\n')}\nEND_SEMANTIC_PREFLIGHT`;
 }
 
-export function parseAndValidateSemanticToolSections(sections, trackerSnapshot = {}) {
+export function parseAndValidateSemanticToolSections(sections, trackerSnapshot = {}, options = {}) {
     const ledgerText = reconstructSemanticToolLedger(sections);
     const ledger = parseSemanticLedger(ledgerText, trackerSnapshot);
     validateRawLedgerContract(ledger, ledgerText);
-    const normalized = normalizeLedger(ledger);
+    const normalized = normalizeLedger(ledger, options);
     validateNormalizedLedger(normalized, ledgerText);
     return normalized;
 }
@@ -2437,7 +2444,7 @@ function validateCompactEnumFields(fields) {
         ['ResolutionEngine.environmentDifficultyTier', ENVIRONMENT_DIFFICULTY_TIERS],
         [/^(?:ResolutionEngine|RelationshipEngine\[(?:0|[1-9]\d*)\])\.genStats\.CapabilityPool$/, ['none', 'common', 'trained', 'elite', 'boss']],
         [/^(?:ResolutionEngine|RelationshipEngine\[(?:0|[1-9]\d*)\])\.genStats\.MainStat$/, ['none', 'PHY', 'MND', 'CHA', 'Balanced']],
-        [/^RelationshipEngine\[(?:0|[1-9]\d*)\]\.romanceStyle$/, ['auto', 'nervous', 'flirt']],
+        [/^RelationshipEngine\[(?:0|[1-9]\d*)\]\.romanceStyle$/, ROMANCE_STYLES],
         [/^RelationshipEngine\[(?:0|[1-9]\d*)\]\.standingInfluence$/, STANDING_INFLUENCES],
         [/^RelationshipEngine\[(?:0|[1-9]\d*)\]\.stakeChangeByOutcome\./, ['benefit', 'harm', 'none']],
         [/^UserKnowledgeApplication\[(?:0|[1-9]\d*)\]\.type$/, USER_KNOWLEDGE_TYPES],
@@ -4013,18 +4020,52 @@ function dispositionContinuityLine(NPC, entry = {}) {
 }
 
 function validateRelationshipCoverage(resolutionEngine, relationshipEngine) {
-    const requiredNames = [
-        ...resolutionEngine.identifyTargets.ActionTargets,
-        ...resolutionEngine.identifyTargets.OppTargets.NPC,
-        ...resolutionEngine.identifyTargets.BenefitedObservers,
-        ...resolutionEngine.identifyTargets.HarmedObservers,
-        ...resolutionEngine.identifyTargets.NPCAwareOfUser,
-    ].filter(name => name && !isNoneValue(name));
+    const requiredNames = requiredRelationshipCoverageNames(resolutionEngine);
     const relationshipNames = new Set(relationshipEngine.map(item => normalizeNameKey(item.NPC)));
     const missing = requiredNames.filter(name => !relationshipNames.has(normalizeNameKey(name)));
     if (missing.length) {
         throw new Error(`compact ledger missing RelationshipEngine entry for target/observer/awareness names: ${missing.join(', ')}`);
     }
+}
+
+function requiredRelationshipCoverageNames(resolutionEngine) {
+    return uniquePlainNames([
+        ...(resolutionEngine?.identifyTargets?.ActionTargets || []),
+        ...(resolutionEngine?.identifyTargets?.OppTargets?.NPC || []),
+        ...(resolutionEngine?.identifyTargets?.BenefitedObservers || []),
+        ...(resolutionEngine?.identifyTargets?.HarmedObservers || []),
+        ...(resolutionEngine?.identifyTargets?.NPCAwareOfUser || []),
+    ]);
+}
+
+function canonicalizeRelationshipNPCs(resolutionEngine, relationshipEngine, source = 'semantic_ledger') {
+    const canonicalNames = new Map(
+        requiredRelationshipCoverageNames(resolutionEngine).map(name => [normalizeNameKey(name), name]),
+    );
+    const seen = new Map();
+    const canonicalizedNPCs = [];
+
+    for (const item of relationshipEngine || []) {
+        const original = cleanScalar(item?.NPC);
+        const normalized = normalizeNameKey(original);
+        const canonical = canonicalNames.get(normalized) || original;
+        if (item && canonical) {
+            item.NPC = canonical;
+            if (canonical !== original) canonicalizedNPCs.push({ from: original, to: canonical });
+        }
+        if (!normalized) continue;
+        if (seen.has(normalized)) {
+            throw new Error(`duplicate RelationshipEngine rows after normalized NPC matching: ${seen.get(normalized)} and ${canonical || original}`);
+        }
+        seen.set(normalized, canonical || original);
+    }
+
+    if (!canonicalizedNPCs.length) return null;
+    return {
+        source,
+        reason: 'canonicalized RelationshipEngine NPC identity to the matching resolution target name',
+        canonicalizedNPCs,
+    };
 }
 
 function repairRelationshipCoverage(resolutionEngine, relationshipEngine, source = 'semantic_ledger') {
@@ -4045,15 +4086,102 @@ function repairRelationshipCoverage(resolutionEngine, relationshipEngine, source
 }
 
 function missingRelationshipCoverageNames(resolutionEngine, relationshipEngine) {
-    const requiredNames = uniquePlainNames([
-        ...(resolutionEngine?.identifyTargets?.ActionTargets || []),
-        ...(resolutionEngine?.identifyTargets?.OppTargets?.NPC || []),
-        ...(resolutionEngine?.identifyTargets?.BenefitedObservers || []),
-        ...(resolutionEngine?.identifyTargets?.HarmedObservers || []),
-        ...(resolutionEngine?.identifyTargets?.NPCAwareOfUser || []),
-    ]);
+    const requiredNames = requiredRelationshipCoverageNames(resolutionEngine);
     const relationshipNames = new Set((relationshipEngine || []).map(item => normalizeNameKey(item?.NPC)).filter(Boolean));
     return requiredNames.filter(name => !relationshipNames.has(normalizeNameKey(name)));
+}
+
+const INTIMIDATION_OR_COERCION_BLOCKER_KEYS = Object.freeze(new Set([
+    'intimidation',
+    'coercion',
+    'intimidation or coercion',
+]));
+const BOUNDARY_VIOLATION_BLOCKER_KEYS = Object.freeze(new Set([
+    'boundary violation',
+]));
+
+function normalizeBlockerKey(value) {
+    return cleanScalar(value)
+        .toLowerCase()
+        .replace(/[_/]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function ensureCanonicalBlocker(blockers, acceptedKeys, canonicalLabel) {
+    if (blockers.some(blocker => acceptedKeys.has(normalizeBlockerKey(blocker)))) return false;
+    blockers.push(canonicalLabel);
+    return true;
+}
+
+function boundaryBreakMatchesPendingBoundary(boundaryBreak, pendingBoundarySnapshot) {
+    if (boundaryBreak?.present !== true) return false;
+    const pending = normalizePendingBoundaryState(pendingBoundarySnapshot || {});
+    return pending.active
+        && boundaryBreak.boundaryId === pending.boundaryId
+        && normalizeNameKey(boundaryBreak.targetNPC) === normalizeNameKey(pending.targetNPC)
+        && normalizeBoundaryBreakType(boundaryBreak.type) === normalizeBoundaryBreakType(pending.type);
+}
+
+function repairContradictorySlowBondEvidence(
+    resolutionEngine,
+    relationshipEngine,
+    pendingBoundarySnapshot = {},
+    source = 'semantic_ledger',
+) {
+    const repairs = [];
+    const boundaryBreak = resolutionEngine?.boundaryBreak || {};
+    const validBoundaryBreak = boundaryBreakMatchesPendingBoundary(boundaryBreak, pendingBoundarySnapshot);
+
+    for (const item of relationshipEngine || []) {
+        const evidence = item?.slowBondEvidence;
+        if (!item || !evidence) continue;
+
+        const blockers = readPlainArray(evidence.blockers);
+        const blockersAdded = [];
+        const reasons = [];
+        if (item.explicitIntimidationOrCoercion === true) {
+            if (ensureCanonicalBlocker(blockers, INTIMIDATION_OR_COERCION_BLOCKER_KEYS, 'intimidation or coercion')) {
+                blockersAdded.push('intimidation or coercion');
+            }
+            reasons.push('explicit_intimidation_or_coercion');
+        }
+        if (validBoundaryBreak
+            && normalizeNameKey(boundaryBreak.targetNPC) === normalizeNameKey(item.NPC)) {
+            if (ensureCanonicalBlocker(blockers, BOUNDARY_VIOLATION_BLOCKER_KEYS, 'boundary violation')) {
+                blockersAdded.push('boundary violation');
+            }
+            reasons.push('boundary_violation');
+        }
+
+        const clearedPositiveCategories = [];
+        if (blockers.length) {
+            for (const key of SLOW_BOND_KEYS) {
+                if (evidence[key] === true) {
+                    evidence[key] = false;
+                    clearedPositiveCategories.push(key);
+                }
+            }
+            if (clearedPositiveCategories.length && !reasons.length) reasons.push('explicit_blocker_conflict');
+        }
+        evidence.blockers = blockers;
+
+        if (blockersAdded.length || clearedPositiveCategories.length) {
+            repairs.push({
+                NPC: item.NPC,
+                reasons,
+                blockersAdded,
+                clearedPositiveCategories,
+            });
+        }
+    }
+
+    if (!repairs.length) return null;
+    return {
+        source,
+        reason: 'repaired objectively contradictory slow-bond evidence',
+        slowBondEvidenceRepairs: repairs,
+    };
 }
 
 function createFallbackRelationshipEntry(NPC, genStats) {
@@ -4110,13 +4238,27 @@ function fallbackRelationshipCoreStats(genStats) {
 
 function mergeSemanticLedgerRepair(previous, next) {
     if (!previous) return next;
+    if (!next) return previous;
+    const mergeRecords = (left, right) => {
+        const records = [...(left || []), ...(right || [])];
+        const seen = new Set();
+        return records.filter(record => {
+            const key = JSON.stringify(record);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    };
     return {
         ...previous,
         ...next,
+        reason: [...new Set([previous.reason, next.reason].filter(Boolean))].join('; '),
         repairedNPCs: uniquePlainNames([
             ...(previous.repairedNPCs || []),
             ...(next.repairedNPCs || []),
         ]),
+        canonicalizedNPCs: mergeRecords(previous.canonicalizedNPCs, next.canonicalizedNPCs),
+        slowBondEvidenceRepairs: mergeRecords(previous.slowBondEvidenceRepairs, next.slowBondEvidenceRepairs),
     };
 }
 
@@ -4378,7 +4520,7 @@ function normalizeStakeChangeValue(value) {
 
 function normalizeRomanceStyle(value) {
     const text = cleanScalar(value).toLowerCase();
-    return ['auto', 'nervous', 'flirt'].includes(text) ? text : 'auto';
+    return ROMANCE_STYLES.includes(text) ? text : 'auto';
 }
 
 function normalizeDetectMode(value) {
@@ -4511,7 +4653,7 @@ function clampNumber(value, min, max) {
     return Math.max(min, Math.min(max, number));
 }
 
-function normalizeLedger(ledger) {
+function normalizeLedger(ledger, options = {}) {
     ledger.engineContext = ledger.engineContext || {};
     ledger.engineContext.userCoreStats = normalizeCore(ledger.engineContext.userCoreStats);
     ledger.engineContext.trackerRelevantNPCs = normalizeTrackerRelevantNPCs(ledger.engineContext.trackerRelevantNPCs);
@@ -4574,6 +4716,11 @@ function normalizeLedger(ledger) {
     delete ledger.resolutionEngine.primaryOpposition;
     ledger.resolutionEngine.genStats = normalizeGeneratedStatsSeed(ledger.resolutionEngine.genStats);
     ledger.relationshipEngine = Array.isArray(ledger.relationshipEngine) ? ledger.relationshipEngine : [];
+    let relationshipRepair = canonicalizeRelationshipNPCs(
+        ledger.resolutionEngine,
+        ledger.relationshipEngine,
+        'normalized_ledger',
+    );
     ledger.relationshipEngine.forEach(item => {
         const standing = normalizeStandingAssessment(item.standingInfluence, item.standingBasis);
         item.standingInfluence = standing.standingInfluence;
@@ -4600,7 +4747,19 @@ function normalizeLedger(ledger) {
         item.slowBondEvidence.blockers = readPlainArray(item.slowBondEvidence.blockers);
         item.genStats = normalizeGeneratedStatsSeed(item.genStats);
     });
-    const relationshipRepair = repairRelationshipCoverage(ledger.resolutionEngine, ledger.relationshipEngine, 'normalized_ledger');
+    relationshipRepair = mergeSemanticLedgerRepair(
+        relationshipRepair,
+        repairRelationshipCoverage(ledger.resolutionEngine, ledger.relationshipEngine, 'normalized_ledger'),
+    );
+    relationshipRepair = mergeSemanticLedgerRepair(
+        relationshipRepair,
+        repairContradictorySlowBondEvidence(
+            ledger.resolutionEngine,
+            ledger.relationshipEngine,
+            options.pendingBoundarySnapshot,
+            'normalized_ledger',
+        ),
+    );
     if (relationshipRepair) {
         ledger.deterministicOverrides = {
             ...(ledger.deterministicOverrides || {}),

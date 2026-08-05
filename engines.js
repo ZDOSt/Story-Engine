@@ -8,6 +8,13 @@ import {
     normalizeEquipmentTierAssignments,
 } from './economy.js';
 import { stripPersonalityMannerismFields } from './tracker-delta-contract.js';
+import {
+    SLOW_BOND_CATEGORY_DESCRIPTIONS,
+    SLOW_BOND_DISTINCT_CATEGORY_THRESHOLD,
+    SLOW_BOND_KEYS,
+} from './semantic-contract.js';
+
+export { SLOW_BOND_DISTINCT_CATEGORY_THRESHOLD, SLOW_BOND_KEYS } from './semantic-contract.js';
 
 export const ENGINE_PROMPT_TEXT = String.raw`[STRUCTURED_PREFLIGHT_ENGINE_EXTENSION v0.1 - SOURCE: EXTENSION ONLY]
 
@@ -515,20 +522,20 @@ function RelationshipEngine(npc, resolutionPacket) {
   checkSlowBondEvidence(npc, resolutionPacket, context):
     policy: LOCKED, EXPLICIT-ONLY
     rule: identify only positive relationship evidence shown by the latest scene or explicit ongoing scene context. Do not infer from silence, friendliness, attractiveness, intimacy, or B score.
-    rule: respectfulContact = consensual or clearly welcome physical contact, careful non-invasive touch, or physical help performed with respect for the NPC's comfort and agency
-    rule: cooperation = ordinary constructive cooperation toward a shared immediate purpose
-    rule: comfortInProximity = NPC remains/settles close to {{user}} without tension, avoidance, coercion, duty pressure, or forced circumstance
-    rule: boundaryRespect = {{user}} explicitly respects refusal, hesitation, privacy, space, limits, consent, or a stated boundary
-    rule: sharedRoutine = repeated or mundane togetherness such as eating, traveling, working, resting, training, tending camp, or recurring rituals
-    rule: playfulness = mutual light teasing, joking, banter, gamefulness, or relaxed warmth without cruelty or pressure
-    rule: teamwork = coordinated effort under pressure, danger, conflict, crisis, or meaningful difficulty
-    rule: personalAttention = specific attention to the NPC's needs, preferences, wellbeing, vulnerability, history, comfort, or expressed concerns
+    rule: respectfulContact = ${SLOW_BOND_CATEGORY_DESCRIPTIONS.respectfulContact}
+    rule: cooperation = ${SLOW_BOND_CATEGORY_DESCRIPTIONS.cooperation}
+    rule: comfortInProximity = ${SLOW_BOND_CATEGORY_DESCRIPTIONS.comfortInProximity}
+    rule: boundaryRespect = ${SLOW_BOND_CATEGORY_DESCRIPTIONS.boundaryRespect}
+    rule: sharedRoutine = ${SLOW_BOND_CATEGORY_DESCRIPTIONS.sharedRoutine}
+    rule: playfulness = ${SLOW_BOND_CATEGORY_DESCRIPTIONS.playfulness}
+    rule: teamwork = ${SLOW_BOND_CATEGORY_DESCRIPTIONS.teamwork}
+    rule: personalAttention = ${SLOW_BOND_CATEGORY_DESCRIPTIONS.personalAttention}
     rule: blockers include recent coercion, intimidation, betrayal, humiliation, unwanted intimacy pressure, boundary violation, unresolved harm, exploitation, active fear, active hostility, or NPC being trapped/dependent/powerless in a way that makes closeness unsafe to count
     rule: return only categories with explicit evidence in this scene; leave all others 0. Return blocker labels only when explicitly present.
 
   slowBondEligible(currentDisposition, currentRapport, slowBondEvidence):
     policy: LOCKED, DETERMINISTIC
-    rule: return Y only if currentDisposition.B=3, currentDisposition.F<3, currentDisposition.H<3, currentRapport>=5, blockers empty, and at least 3 distinct positive evidence categories have count > 0
+    rule: return Y only if currentDisposition.B=3, currentDisposition.F<3, currentDisposition.H<3, currentRapport>=5, blockers empty, and at least ${SLOW_BOND_DISTINCT_CATEGORY_THRESHOLD} distinct positive evidence categories have count > 0
     else -> N
 
   execution:
@@ -1707,16 +1714,6 @@ export function trackerSummary(trackerUpdate) {
 }
 
 const TRACKER_CONDITIONS = Object.freeze(['healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
-export const SLOW_BOND_KEYS = Object.freeze([
-    'respectfulContact',
-    'cooperation',
-    'comfortInProximity',
-    'boundaryRespect',
-    'sharedRoutine',
-    'playfulness',
-    'teamwork',
-    'personalAttention',
-]);
 
 export function normalizeSlowBondEvidence(value) {
     const result = {};
@@ -1771,7 +1768,7 @@ export function isSlowBondEligible(disposition, rapport, evidence) {
         && disposition.H < 3
         && Number(rapport || 0) >= 5
         && normalized.blockers.length === 0
-        && slowBondEvidenceCount(normalized) >= 2;
+        && slowBondEvidenceCount(normalized) >= SLOW_BOND_DISTINCT_CATEGORY_THRESHOLD;
 }
 
 export function normalizeTrackerEntry(value) {

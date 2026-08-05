@@ -96,6 +96,7 @@ import { normalizeWorldState, projectWorldStateTransition } from './world-state.
 import { advanceDueWorldPlans, normalizeDescriptiveArchive, normalizeWorldProgression, prepareWorldMemoryNarration, progressionHasActivePlanForActor } from './world-memory.js';
 import { buildDeterministicLootEnvelope, getNpcLootRankProfile, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
+import { ROMANCE_STYLES } from './semantic-contract.js';
 
 const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
@@ -108,7 +109,6 @@ const ENVIRONMENT_DIFFICULTY_BONUSES = Object.freeze({
     hard: 8,
     extreme: 12,
 });
-const HARM_MODES = Object.freeze(['lethal', 'nonlethal', 'restraint_control', 'none']);
 const GENERATED_CORE_RANGES = Object.freeze({
     Weak: [1, 2],
     Average: [2, 5],
@@ -8463,7 +8463,7 @@ function trackerAliasTerms(handoff) {
 
 function normalizeRomanceStyle(value) {
     const text = String(value || '').trim().toLowerCase();
-    return ['nervous', 'flirt', 'auto'].includes(text) ? text : 'auto';
+    return ROMANCE_STYLES.includes(text) ? text : 'auto';
 }
 
 function normalizeProactivityTarget(value, refereeContext = null) {
