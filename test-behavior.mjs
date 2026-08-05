@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, reconstructSemanticToolLedger, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -16509,6 +16509,26 @@ const tests = [
       assert.throws(
         () => validateSemanticToolArguments({ ...structuredLedger, inventedSection: {} }),
         /contains unknown properties: inventedSection/,
+      );
+      assert.deepEqual(
+        parseSemanticToolArgumentJson('{"items":["Mira" "Dalen"]}'),
+        { items: ['Mira', 'Dalen'] },
+        'Unambiguous missing commas between string array elements should be repaired locally.',
+      );
+      assert.deepEqual(
+        parseSemanticToolArgumentJson('{"items":[{"name":"Mira"} {"name":"Dalen"}]}'),
+        { items: [{ name: 'Mira' }, { name: 'Dalen' }] },
+        'Unambiguous missing commas between object array elements should be repaired locally.',
+      );
+      assert.deepEqual(
+        parseSemanticToolArgumentJson('{"items":[["Mira"] ["Dalen"]]}'),
+        { items: [['Mira'], ['Dalen']] },
+        'Unambiguous missing commas between nested array elements should be repaired locally.',
+      );
+      assert.throws(
+        () => parseSemanticToolArgumentJson('{"items":["Mira" "Dalen]'),
+        /JSON|position|Unexpected|unterminated/i,
+        'Truncated array content must remain invalid.',
       );
       const tooManyEvents = structuredClone(structuredLedger);
       const eventSchema = strictSemanticTool.function.parameters.properties.powerEventShape.properties.events.items;

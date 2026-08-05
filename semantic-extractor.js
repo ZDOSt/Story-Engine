@@ -1186,10 +1186,10 @@ function parseToolArguments(args) {
     if (!text) {
         throw new Error('semantic tool-call arguments were empty');
     }
-    return parseToolArgumentJson(text);
+    return parseSemanticToolArgumentJson(text);
 }
 
-function parseToolArgumentJson(text) {
+export function parseSemanticToolArgumentJson(text) {
     const jsonText = extractJsonObject(text);
     try {
         return JSON.parse(jsonText);
@@ -1218,6 +1218,7 @@ function repairToolArgumentJson(text) {
         .replace(/([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/g, '$1"$2"$3')
         .replace(/:\s*'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_match, value) => `: "${value.replace(/"/g, '\\"')}"`);
     repaired = insertMissingCommasBetweenProperties(repaired);
+    repaired = insertMissingCommasBetweenArrayElements(repaired);
     repaired = balanceJsonDelimiters(repaired);
     return repaired;
 }
@@ -1257,6 +1258,63 @@ function insertMissingCommasBetweenProperties(text) {
 function previousNonWhitespace(text) {
     const match = String(text || '').match(/\S(?=\s*$)/);
     return match ? match[0] : '';
+}
+
+function insertMissingCommasBetweenArrayElements(text) {
+    const source = String(text || '');
+    const stack = [];
+    let output = '';
+    let inString = false;
+    let escaped = false;
+
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        output += char;
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\' && inString) {
+            escaped = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            if (!inString && stack[stack.length - 1] === '[') {
+                const next = nextNonWhitespace(source, index + 1);
+                if (isStructuredArrayElementStart(next)) output += ',';
+            }
+            continue;
+        }
+        if (inString) continue;
+
+        if (char === '{' || char === '[') {
+            stack.push(char);
+            continue;
+        }
+        if (char === '}' || char === ']') {
+            const expectedOpen = char === '}' ? '{' : '[';
+            if (stack[stack.length - 1] === expectedOpen) stack.pop();
+            if (stack[stack.length - 1] === '[') {
+                const next = nextNonWhitespace(source, index + 1);
+                if (isStructuredArrayElementStart(next)) output += ',';
+            }
+        }
+    }
+
+    return output;
+}
+
+function nextNonWhitespace(text, startIndex) {
+    for (let index = startIndex; index < text.length; index += 1) {
+        if (!/\s/.test(text[index])) return text[index];
+    }
+    return '';
+}
+
+function isStructuredArrayElementStart(char) {
+    return char === '"' || char === '{' || char === '[';
 }
 
 function balanceJsonDelimiters(text) {
