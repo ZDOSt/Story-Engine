@@ -1335,6 +1335,7 @@ function buildHiddenHealthNpcRefs(trackerSnapshot = {}, ledger = {}, context = n
     };
 
     for (const name of toRealArray(targets.hostilesInScene?.NPC)) markAdventuringScale(name);
+    for (const name of toRealArray(targets.StealthTargets)) markAdventuringScale(name);
     for (const name of toRealArray(targets.OppTargets?.NPC)) markAdventuringScale(name);
 
     const combatOrHostilePhysical = isCombatChallengeType(normalizeChallengeType(semantic.challengeType, semantic.rollNeeded ?? 'Y'))
@@ -1867,6 +1868,7 @@ function currentPowerActorCandidates(ledger) {
     const currentNames = unique([
         ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.PowerActors),
         ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.ActionTargets),
+        ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.StealthTargets),
         ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.OppTargets?.NPC),
         ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.BenefitedObservers),
         ...toRealArray(ledger?.resolutionEngine?.identifyTargets?.HarmedObservers),
@@ -2084,6 +2086,7 @@ function powerActorLatestActionSource(ledger, context, effect = null, playerTrac
         itemUse.NoEffectReason,
         ...toRealArray(semantic.identifyTargets?.PowerActors),
         ...toRealArray(semantic.identifyTargets?.ActionTargets),
+        ...toRealArray(semantic.identifyTargets?.StealthTargets),
         ...toRealArray(semantic.identifyTargets?.HarmedObservers),
         ...toRealArray(semantic.identifyTargets?.NPCAwareOfUser),
         effect?.actor,
@@ -4125,6 +4128,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
             : null,
         hostilesInScene: { NPC: showNone(targets.hostilesInScene?.NPC) },
         ActionTargets: showNone(targets.ActionTargets),
+        StealthTargets: showNone(targets.StealthTargets),
         OppTargets: { NPC: showNone(targets.OppTargets.NPC), ENV: showNone(targets.OppTargets.ENV) },
         EnvironmentDifficultyTier: resolvedOppStat === 'ENV' ? (semantic.environmentDifficultyTier || 'none') : 'none',
         EnvironmentDifficulty: resolvedOppStat === 'ENV' ? environmentDifficulty : 0,
@@ -5990,6 +5994,7 @@ function repairLivingOppositionTargets(targets, classifier, options = {}, audit)
             NPC: toRealArray(targets.hostilesInScene?.NPC),
         },
         ActionTargets: toRealArray(targets.ActionTargets),
+        StealthTargets: toRealArray(targets.StealthTargets),
         OppTargets: {
             NPC: toRealArray(targets.OppTargets?.NPC),
             ENV: toRealArray(targets.OppTargets?.ENV),
@@ -6034,6 +6039,7 @@ function repairStealthTargets(targets, classifier, semantic, options = {}, audit
             NPC: toRealArray(targets.hostilesInScene?.NPC),
         },
         ActionTargets: toRealArray(targets.ActionTargets),
+        StealthTargets: toRealArray(targets.StealthTargets),
         OppTargets: {
             NPC: toRealArray(targets.OppTargets?.NPC),
             ENV: toRealArray(targets.OppTargets?.ENV),
@@ -6043,17 +6049,27 @@ function repairStealthTargets(targets, classifier, semantic, options = {}, audit
         NPCAwareOfUser: toRealArray(targets.NPCAwareOfUser),
         PowerActors: toRealArray(targets.PowerActors),
     };
-    if (normalizeChallengeType(semantic?.challengeType, options.rollNeeded || 'Y') !== 'stealth') return { targets: repaired };
+    const semanticStealthTargets = toRealArray(repaired.StealthTargets);
+    const semanticDeclaredStealth = semanticStealthTargets.length > 0;
+    const compatibilityStealth = normalizeChallengeType(semantic?.challengeType, options.rollNeeded || 'Y') === 'stealth';
+    if (!semanticDeclaredStealth && !compatibilityStealth) return { targets: repaired };
 
     const before = targetSummary(repaired);
-    const target = firstReal(unique([
-        ...toRealArray(repaired.OppTargets.NPC),
-        ...toRealArray(repaired.ActionTargets),
-    ]).filter(name => classifier.isLiving(name)));
+    const validSemanticTargets = unique(semanticStealthTargets.filter(name => classifier.isLiving(name)));
+    const legacyOppTargets = unique(toRealArray(repaired.OppTargets.NPC).filter(name => classifier.isLiving(name)));
+    const legacyActionTargets = unique(toRealArray(repaired.ActionTargets).filter(name => classifier.isLiving(name)));
+    const sharedLegacyTargets = legacyOppTargets.filter(name => legacyActionTargets.some(candidate => sameName(candidate, name)));
+    const compatibilityTargets = sharedLegacyTargets.length
+        ? sharedLegacyTargets
+        : legacyOppTargets.length
+            ? legacyOppTargets
+            : legacyActionTargets;
+    const detectors = semanticDeclaredStealth ? validSemanticTargets : compatibilityTargets;
 
-    if (!target) {
+    if (!detectors.length) {
         repaired.OppTargets.NPC = [];
         repaired.OppTargets.ENV = [];
+        repaired.StealthTargets = [];
         audit?.push(`2.4f.2 deterministicStealthNoVisibleDetectorNoRoll=${compact({
             hardRule: 'stealth requires a specific established living detector/opponent from semantic targets; terrain, darkness, cover, crowds, weather, distance, and noise are not stealth opposition',
             from: before,
@@ -6069,25 +6085,23 @@ function repairStealthTargets(targets, classifier, semantic, options = {}, audit
         };
     }
 
-    let changed = false;
-    if (!repaired.ActionTargets.some(name => sameName(name, target))) {
-        repaired.ActionTargets.push(target);
-        changed = true;
-    }
-    if (!repaired.OppTargets.NPC.some(name => sameName(name, target))) {
-        repaired.OppTargets.NPC.push(target);
-        changed = true;
-    }
-    if (repaired.OppTargets.ENV.length) {
-        repaired.OppTargets.ENV = [];
-        changed = true;
-    }
-    repaired.BenefitedObservers = repaired.BenefitedObservers.filter(name => !sameName(name, target));
-    repaired.HarmedObservers = repaired.HarmedObservers.filter(name => !sameName(name, target));
+    const detectorKeys = new Set(detectors.map(normalizeNameKey));
+    const nextActionTargets = repaired.ActionTargets.filter(name => !detectorKeys.has(normalizeNameKey(name)));
+    const remainingOppTargets = repaired.OppTargets.NPC.filter(name => classifier.isLiving(name)
+        && !detectorKeys.has(normalizeNameKey(name)));
+    const nextOppTargets = unique([...detectors, ...remainingOppTargets]);
+    const changed = JSON.stringify(nextActionTargets) !== JSON.stringify(repaired.ActionTargets)
+        || JSON.stringify(detectors) !== JSON.stringify(repaired.StealthTargets)
+        || JSON.stringify(nextOppTargets) !== JSON.stringify(repaired.OppTargets.NPC)
+        || repaired.OppTargets.ENV.length > 0;
+    repaired.ActionTargets = nextActionTargets;
+    repaired.StealthTargets = detectors;
+    repaired.OppTargets.NPC = nextOppTargets;
+    repaired.OppTargets.ENV = [];
     if (changed || options.rollNeeded !== 'Y' || options.challengeType !== 'stealth') {
         audit?.push(`2.4f.2 deterministicStealthRepair=${compact({
-            hardRule: 'stealth resolves against the specific living detector/opponent, not ENV',
-            target,
+            hardRule: 'StealthTargets is authoritative and mutually exclusive with ActionTargets; stealth resolves against those exact living detectors, not ENV',
+            targets: detectors,
             rollNeeded: `${options.rollNeeded || 'N'}->Y`,
             challengeType: `${options.challengeType || 'none'}->stealth`,
             from: before,
@@ -6112,6 +6126,7 @@ function repairStakeBearingClaimTargets(targets, classifier, semantic, options =
             NPC: toRealArray(targets.hostilesInScene?.NPC),
         },
         ActionTargets: toRealArray(targets.ActionTargets),
+        StealthTargets: toRealArray(targets.StealthTargets),
         OppTargets: {
             NPC: toRealArray(targets.OppTargets?.NPC),
             ENV: toRealArray(targets.OppTargets?.ENV),
@@ -6266,6 +6281,7 @@ function normalizeDirectedCompanionCommandTargets(targets, classifier, semantic,
     const normalized = {
         hostilesInScene: { NPC: unique([...hostilesInScene, ...commandMentionedHostiles]) },
         ActionTargets: companionTargets,
+        StealthTargets: toRealArray(targets?.StealthTargets),
         OppTargets: { NPC: [], ENV: toRealArray(targets?.OppTargets?.ENV) },
         BenefitedObservers: [],
         HarmedObservers: [],
@@ -6286,6 +6302,7 @@ function repairDirectedCompanionAttackHostilePool(targets, ledger, trackerSnapsh
             NPC: toRealArray(targets.hostilesInScene?.NPC),
         },
         ActionTargets: toRealArray(targets.ActionTargets),
+        StealthTargets: toRealArray(targets.StealthTargets),
         OppTargets: {
             NPC: toRealArray(targets.OppTargets?.NPC),
             ENV: toRealArray(targets.OppTargets?.ENV),
@@ -9152,6 +9169,7 @@ function removeUserReferencesFromTargets(targets, refereeContext = null) {
             NPC: withoutUser(targets?.hostilesInScene?.NPC),
         },
         ActionTargets: withoutUser(targets?.ActionTargets),
+        StealthTargets: withoutUser(targets?.StealthTargets),
         OppTargets: {
             NPC: withoutUser(targets?.OppTargets?.NPC),
             ENV: toRealArray(targets?.OppTargets?.ENV),
@@ -9314,6 +9332,7 @@ function buildTargetClassifier(ledger, trackerSnapshot, context, hiddenHealthSna
     for (const name of Object.keys(trackerSnapshot || {})) addLivingName(livingNames, name);
     for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.hostilesInScene?.NPC)) addLivingName(livingNames, name);
     for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.ActionTargets)) addLivingName(livingNames, name);
+    for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.StealthTargets)) addLivingName(livingNames, name);
     for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.OppTargets?.NPC)) addLivingName(livingNames, name);
     for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.BenefitedObservers)) addLivingName(livingNames, name);
     for (const name of toRealArray(ledger?.resolutionEngine?.identifyTargets?.HarmedObservers)) addLivingName(livingNames, name);

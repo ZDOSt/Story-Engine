@@ -223,6 +223,7 @@ function baseLedger(overrides = {}) {
       identifyTargets: {
         hostilesInScene: { NPC: [] },
         ActionTargets: [],
+        StealthTargets: [],
         OppTargets: { NPC: [], ENV: [] },
         BenefitedObservers: [],
         HarmedObservers: [],
@@ -3708,7 +3709,8 @@ const tests = [
             identifyChallenge: 'follow Phoebe quietly through the woods',
             explicitMeans: 'follow Phoebe quietly through the woods',
             identifyTargets: {
-              ActionTargets: ['Phoebe'],
+              StealthTargets: ['Phoebe'],
+              ActionTargets: [],
               OppTargets: { NPC: [], ENV: ['woods'] },
               BenefitedObservers: [],
               HarmedObservers: [],
@@ -3724,7 +3726,8 @@ const tests = [
         }),
       });
       const packet = report.finalNarrativeHandoff.resolutionPacket;
-      assert.deepEqual(packet.ActionTargets, ['Phoebe']);
+      assert.deepEqual(packet.ActionTargets, ['(none)']);
+      assert.deepEqual(packet.StealthTargets, ['Phoebe']);
       assert.deepEqual(packet.OppTargets.NPC, ['Phoebe']);
       assert.deepEqual(packet.OppTargets.ENV, ['(none)']);
       assert.equal(packet.EnvironmentDifficulty, 0);
@@ -3732,6 +3735,80 @@ const tests = [
       assert.equal(auditIncludes(report, 'deterministicStealthRepair'), true);
       assert.equal(auditIncludes(report, 'stealthStats=PHY vs MND'), true);
       assert.doesNotMatch(prompt(report), /Environment branch:/);
+    },
+  },
+  {
+    name: '12i.4a ordinary following is not a stealth contest or direct interaction target',
+    run() {
+      const report = runCase({
+        userText: 'I follow Phoebe through the woods.',
+        tracker: {
+          Phoebe: trackerEntry({ currentCoreStats: { Rank: 'Trained', MainStat: 'MND', PHY: 4, MND: 8, CHA: 5 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'FollowPhoebe',
+            identifyChallenge: 'follow Phoebe through the woods',
+            explicitMeans: 'follow Phoebe through the woods',
+            identifyTargets: {
+              StealthTargets: [],
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: false,
+            challengeType: 'none',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+        }),
+      });
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(packet.RollNeeded, 'N');
+      assert.equal(packet.challengeType, 'none');
+      assert.deepEqual(packet.ActionTargets, ['(none)']);
+      assert.deepEqual(packet.StealthTargets, ['(none)']);
+      assert.deepEqual(packet.OppTargets.NPC, ['(none)']);
+      assert.deepEqual(packet.OppTargets.ENV, ['(none)']);
+      assert.equal(auditIncludes(report, 'deterministicStealthRepair'), false);
+    },
+  },
+  {
+    name: '12i.4b quiet movement beside an NPC is not stealth without avoidance intent',
+    run() {
+      const report = runCase({
+        userText: 'I walk quietly beside Phoebe.',
+        tracker: {
+          Phoebe: trackerEntry({ currentCoreStats: { Rank: 'Trained', MainStat: 'MND', PHY: 4, MND: 8, CHA: 5 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'WalkBesidePhoebe',
+            identifyChallenge: 'walk quietly beside Phoebe',
+            explicitMeans: 'walk quietly beside Phoebe',
+            identifyTargets: {
+              StealthTargets: [],
+              ActionTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: false,
+            challengeType: 'none',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+        }),
+      });
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(packet.RollNeeded, 'N');
+      assert.equal(packet.challengeType, 'none');
+      assert.deepEqual(packet.ActionTargets, ['(none)']);
+      assert.deepEqual(packet.StealthTargets, ['(none)']);
+      assert.deepEqual(packet.OppTargets.NPC, ['(none)']);
+      assert.deepEqual(packet.OppTargets.ENV, ['(none)']);
+      assert.equal(auditIncludes(report, 'deterministicStealthRepair'), false);
     },
   },
   {
@@ -3749,6 +3826,7 @@ const tests = [
             identifyChallenge: 'follow Phoebe quietly through the woods',
             explicitMeans: 'follow Phoebe quietly through the woods',
             identifyTargets: {
+              StealthTargets: [],
               ActionTargets: [],
               OppTargets: { NPC: [], ENV: ['woods'] },
               BenefitedObservers: [],
@@ -3776,6 +3854,84 @@ const tests = [
     },
   },
   {
+    name: '12i.5b explicit stealth detector preserves unrelated opposed NPC separately',
+    run() {
+      const report = runCase({
+        userText: 'I move quietly behind Phoebe while Guard blocks the exit.',
+        dice: [12, 7, 1, 1, 1, 1],
+        tracker: {
+          Phoebe: trackerEntry({ currentCoreStats: { Rank: 'Trained', MainStat: 'MND', PHY: 4, MND: 8, CHA: 5 } }),
+          Guard: trackerEntry({ currentCoreStats: { Rank: 'Trained', MainStat: 'PHY', PHY: 6, MND: 4, CHA: 4 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'MoveBehindPhoebe',
+            identifyChallenge: 'move quietly behind Phoebe while Guard blocks the exit',
+            explicitMeans: 'move quietly behind Phoebe while Guard blocks the exit',
+            identifyTargets: {
+              StealthTargets: ['Phoebe'],
+              ActionTargets: [],
+              OppTargets: { NPC: ['Phoebe', 'Guard'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            rollReason: 'Phoebe may detect the covert movement.',
+            challengeType: 'stealth',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Phoebe'), relationship('Guard')],
+        }),
+      });
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.deepEqual(packet.ActionTargets, ['(none)']);
+      assert.deepEqual(packet.StealthTargets, ['Phoebe']);
+      assert.deepEqual(packet.OppTargets.NPC, ['Phoebe', 'Guard']);
+      assert.equal(packet.StealthTargets.includes('Guard'), false);
+      assert.match(report.finalNarrativeHandoff.resultLine, /vs 1d20\(7\) \+ MND\(8\) = 15/);
+    },
+  },
+  {
+    name: '12i.5c legacy stealth fallback keeps unrelated ActionTarget separate',
+    run() {
+      const report = runCase({
+        userText: 'I move quietly behind Phoebe and wave to Guard.',
+        dice: [12, 7, 1, 1, 1, 1],
+        tracker: {
+          Phoebe: trackerEntry({ currentCoreStats: { Rank: 'Trained', MainStat: 'MND', PHY: 4, MND: 8, CHA: 5 } }),
+          Guard: trackerEntry({ currentCoreStats: { Rank: 'Trained', MainStat: 'PHY', PHY: 6, MND: 4, CHA: 4 } }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'MoveBehindPhoebe',
+            identifyChallenge: 'move quietly behind Phoebe and wave to Guard',
+            explicitMeans: 'move quietly behind Phoebe and wave to Guard',
+            identifyTargets: {
+              StealthTargets: [],
+              ActionTargets: ['Phoebe', 'Guard'],
+              OppTargets: { NPC: ['Phoebe'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            rollReason: 'Phoebe may detect the covert movement.',
+            challengeType: 'stealth',
+            challengeTypeEvidence: 'legacy test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Phoebe'), relationship('Guard')],
+        }),
+      });
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.deepEqual(packet.ActionTargets, ['Guard']);
+      assert.deepEqual(packet.StealthTargets, ['Phoebe']);
+      assert.deepEqual(packet.OppTargets.NPC, ['Phoebe']);
+      assert.equal(packet.StealthTargets.includes('Guard'), false);
+      assert.match(report.finalNarrativeHandoff.resultLine, /vs 1d20\(7\) \+ MND\(8\) = 15/);
+    },
+  },
+  {
     name: '12i.5a semantic stealth contest target repairs to NPC awareness',
     run() {
       const report = runCase({
@@ -3790,6 +3946,7 @@ const tests = [
             identifyChallenge: 'move quietly behind Phoebe through the woods',
             explicitMeans: 'move quietly behind Phoebe through the woods',
             identifyTargets: {
+              StealthTargets: ['Phoebe'],
               ActionTargets: ['Phoebe'],
               OppTargets: { NPC: [], ENV: ['woods'] },
               BenefitedObservers: [],
@@ -3806,7 +3963,8 @@ const tests = [
         }),
       });
       const packet = report.finalNarrativeHandoff.resolutionPacket;
-      assert.deepEqual(packet.ActionTargets, ['Phoebe']);
+      assert.deepEqual(packet.ActionTargets, ['(none)']);
+      assert.deepEqual(packet.StealthTargets, ['Phoebe']);
       assert.deepEqual(packet.OppTargets.NPC, ['Phoebe']);
       assert.deepEqual(packet.OppTargets.ENV, ['(none)']);
       assert.match(report.finalNarrativeHandoff.resultLine, /vs 1d20\(7\) \+ MND\(8\) = 15/);
@@ -3825,6 +3983,7 @@ const tests = [
             identifyChallenge: 'sneak through the dark woods',
             explicitMeans: 'sneak through the dark woods',
             identifyTargets: {
+              StealthTargets: [],
               ActionTargets: [],
               OppTargets: { NPC: [], ENV: ['dark woods'] },
               BenefitedObservers: [],
@@ -12613,7 +12772,8 @@ const tests = [
       assert.match(semanticSource, /ResolutionEngine\.identifyTargets\.NPCAwareOfUser=\(none\)/);
       assert.match(semanticSource, /ResolutionEngine\.identifyTargets\.NPCAwareOfUser is the individual-awareness list/);
       assert.match(semanticSource, /NPCAwareOfUser is individual-only/);
-      assert.match(semanticSource, /ActionTargets, OppTargets\.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser/);
+      assert.match(semanticSource, /ActionTargets, StealthTargets, OppTargets\.NPC, BenefitedObservers, HarmedObservers, or NPCAwareOfUser/);
+      assert.doesNotMatch(semanticSource, /challengeType=stealth requires a specific established living detector\/opponent in ActionTargets and OppTargets\.NPC/);
       assert.match(semanticSource, /ResolutionEngine\.identifyTargets\.PowerActors=\(none\)/);
       assert.match(semanticSource, /ResolutionEngine\.identifyTargets\.PowerActors is strategic-only/);
       assert.match(semanticSource, /Identify ResolutionEngine\.identifyTargets\.PowerActors during target discovery/);
@@ -12929,7 +13089,7 @@ const tests = [
       assert.match(enginesSource, /challengeType\(input, finalGoal, challenge, rollNeeded, context\)/);
       assert.match(enginesSource, /specific established living detector/);
       assert.match(enginesSource, /STAKES wins unless that exact stake is already resolved\/suppressed/);
-      assert.match(enginesSource, /if challengeType=stealth, the specific living detector must be in ActionTargets and OppTargets\.NPC/);
+      assert.match(enginesSource, /StealthTargets are the exact established living entities/);
       assert.match(enginesSource, /stealth-style action requires a specific established living detector; without one, return N unless a separate non-stealth obstacle creates stakes/);
       assert.match(enginesSource, /rule: apply DEF\.STAKES and DEF\.NO_STAKES/);
 
@@ -15493,7 +15653,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.65');
+      assert.equal(manifest.version, '0.9.67');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16469,10 +16629,10 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 243,
+        leaves: 244,
         objects: 46,
-        arrays: 46,
-        descriptions: 98,
+        arrays: 47,
+        descriptions: 100,
         incompleteRequired: 0,
       });
       assert.match(

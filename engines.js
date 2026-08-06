@@ -31,7 +31,7 @@ function ResolutionEngine(input) {
     CHALLENGE_TYPES:
 'none = no roll. social = fresh unresolved living NPC-facing persuasion, bargaining, deception, intimidation, coercion, negotiation, request, command, seduction, reassurance, or social pressure. mundane_combat = direct bodily, weapon, natural-weapon, tool, projectile, thrown object, or ordinary physical attack that can injure a living target; restraint/control alone is not combat. supernatural_combat = spell, curse, psychic, elemental, magical, divine, demonic, or supernatural harmful effect against a living target; magical restraint/control alone is handled by restraintControl unless it also harms. restraint = deterministic non-hostile physical restraint contest against a living target. stealth = avoiding detection/perception by a specific established living detector. environment = physical/environmental obstacle, escape, chase, lock, trap, terrain, weather, barrier, hazard, non-living opposition, or object/access/boundary contest not handled by boundaryPressure.',
     TARGETS:
-'ActionTargets are living entities directly involved in the latest user action or dialogue. OppTargets.NPC are living entities directly opposing, resisting, defending against, detecting, or being attacked/challenged by the current action. OppTargets.ENV is only non-living opposition. hostilesInScene is a broad scene pool and does not create rolls, relationships, or OppTargets by itself.'
+'ActionTargets are living entities directly involved in the latest {{user}} action or dialogue. StealthTargets are the exact established living entities whose detection {{user}} is explicitly trying to avoid during a covert attempt. OppTargets.NPC are living entities directly opposing, resisting, defending against, acting as the detector/opponent for stealth, or being attacked/challenged by the current action. OppTargets.ENV is only non-living opposition. hostilesInScene is a broad scene pool and does not create rolls, relationships, or OppTargets by itself.'
   });
 
   identifyGoal(input):
@@ -149,7 +149,8 @@ function ResolutionEngine(input) {
   identifyTargets(input, challenge, finalGoal, rollNeeded, challengeType, context):
     policy: LOCKED, EXPLICIT-ONLY
     hostilesInScene.NPC = all established present living hostile entities in scene
-    ActionTargets = living entities {{user}} directly tries to affect, address, follow, help, harm, restrain, deceive, negotiate with, or otherwise directly interact with
+    ActionTargets = living entities {{user}} directly tries to affect, address, help, harm, restrain, deceive, negotiate with, or otherwise directly interact with
+    StealthTargets = exact established living entities whose detection {{user}} is explicitly trying to avoid while moving past, following, trailing, tailing, shadowing, hiding from, sneaking around, infiltrating, or observing them without detection
     OppTargets.NPC = living entities directly opposing, resisting, defending against, detecting, or being attacked/challenged by {{user}}'s current action
     OppTargets.ENV = non-living obstacle/condition that makes the current goal fail-able
     BenefitedObservers = third-party living entities whose stakes materially improve from {{user}}'s action
@@ -159,13 +160,15 @@ function ResolutionEngine(input) {
     rule: apply DEF.TARGETS
     rule: hostilesInScene must be established by narration, tracker, character/scenario/lore context, or initial test setup; do not create hostile entities from the latest input alone
     rule: if rollNeeded=N, OppTargets.NPC=(none) and OppTargets.ENV=(none), but ActionTargets and NPCAwareOfUser may still list direct living interaction/awareness
-    rule: if challengeType=stealth, the specific living detector must be in ActionTargets and OppTargets.NPC; OppTargets.ENV=(none)
+    rule: StealthTargets requires both an explicit attempt to remain undetected and a specific established living detector; ordinary following, movement, observation, concealment, or quietness without that intent does not qualify
+    rule: if StealthTargets is non-empty, it is the authoritative stealth detector list; force rollNeeded=Y and challengeType=stealth, copy every StealthTarget into OppTargets.NPC, and set OppTargets.ENV=(none)
+    rule: stealth does not imply hostility, active resistance, or NPCAwareOfUser; the detector remains absent from NPCAwareOfUser until the scene establishes that {{user}} was noticed
     rule: if challengeType=social, the social target/opponent must be in ActionTargets and usually OppTargets.NPC
     rule: if challengeType=mundane_combat or supernatural_combat, attacked/challenged living targets must be in ActionTargets and OppTargets.NPC
     rule: if challengeType=restraint or restraintControl.Present=Y, the restrained living NPC must be in ActionTargets and may be in OppTargets.NPC only when deterministic code requires a roll
     rule: if challengeType=environment, put non-living opposition in OppTargets.ENV when present; include living opposition in OppTargets.NPC only when a specific living NPC directly resists, guards, blocks, controls access, or is the boundary-pressure target
-    rule: target/observer categories are mutually exclusive except a direct ActionTarget may also be OppTargets.NPC when they are the resisting party
-    return {hostilesInScene, ActionTargets, OppTargets, BenefitedObservers, HarmedObservers, NPCAwareOfUser, PowerActors}
+    rule: target/observer categories are mutually exclusive except a direct ActionTarget may also be OppTargets.NPC when they are the resisting party, and a StealthTarget is intentionally mirrored in OppTargets.NPC as the detector
+    return {hostilesInScene, ActionTargets, StealthTargets, OppTargets, BenefitedObservers, HarmedObservers, NPCAwareOfUser, PowerActors}
 
   activeHostileThreat(input, finalGoal, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
@@ -246,8 +249,8 @@ function ResolutionEngine(input) {
     if first OppTargets.NPC currentCoreStats missing:
       generatedStatsSeed = genStats(first OppTargets.NPC, context)
     deterministic code may override restraintControl/boundaryPressure/boundaryBreak roll policy from B/F/H, pending boundaries, and active-opposed/crisis context; then resolves stats, dice, margins, landed actions, counter potential, injuries, relationships, and outcome from challengeType/socialTactic
-    NPCInScene = unique living NPCs from ActionTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, NPCAwareOfUser, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
-    return {GOAL:finalGoal, challenge:challenge, rollNeeded:rollNeeded, rollReason:rollReason, challengeType:challengeType.type, challengeTypeEvidence:challengeType.evidence, socialTactic:socialTactic, userAbilityUse:userAbilityUse, itemUse:itemUse, lootSearch:lootSearch, claimCheck:claimCheck, intimacyAdvanceExplicit:intimacyAdvanceExplicit, restraintControl:restraintControl, boundaryPressure:boundaryPressure, boundaryBreak:boundaryBreak, harmMode:harmMode, actions:actions, actionUnits:actionUnits, EnvironmentDifficultyTier:envDifficultyTier, activeHostileThreat:activeHostileThreat, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCAwareOfUser:targets.NPCAwareOfUser, PowerActors:targets.PowerActors, NPCInScene:NPCInScene}
+    NPCInScene = unique living NPCs from ActionTargets, StealthTargets, OppTargets.NPC, BenefitedObservers, HarmedObservers, NPCAwareOfUser, plus a single pending-offer NPC only when the user gives a clear generic accept/refuse response to that pending offer
+    return {GOAL:finalGoal, challenge:challenge, rollNeeded:rollNeeded, rollReason:rollReason, challengeType:challengeType.type, challengeTypeEvidence:challengeType.evidence, socialTactic:socialTactic, userAbilityUse:userAbilityUse, itemUse:itemUse, lootSearch:lootSearch, claimCheck:claimCheck, intimacyAdvanceExplicit:intimacyAdvanceExplicit, restraintControl:restraintControl, boundaryPressure:boundaryPressure, boundaryBreak:boundaryBreak, harmMode:harmMode, actions:actions, actionUnits:actionUnits, EnvironmentDifficultyTier:envDifficultyTier, activeHostileThreat:activeHostileThreat, hostilesInScene:targets.hostilesInScene, ActionTargets:targets.ActionTargets, StealthTargets:targets.StealthTargets, OppTargets:targets.OppTargets, BenefitedObservers:targets.BenefitedObservers, HarmedObservers:targets.HarmedObservers, NPCAwareOfUser:targets.NPCAwareOfUser, PowerActors:targets.PowerActors, NPCInScene:NPCInScene}
 }
 ---------------------------
 function RelationshipEngine(npc, resolutionPacket) {
@@ -257,7 +260,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     FYW:
 'FIRST-YES-WINS. In ordered rule ladders, the first matching explicit rule becomes final.',
     UNIVERSAL:
-'Use resolutionPacket as final for GOAL, intimacyAdvanceExplicit, restraintControl, boundaryPressure, boundaryBreak, LandedActions, OutcomeTier, Outcome, ActionTargets, OppTargets, BenefitedObservers, and HarmedObservers.',
+'Use resolutionPacket as final for GOAL, intimacyAdvanceExplicit, restraintControl, boundaryPressure, boundaryBreak, LandedActions, OutcomeTier, Outcome, ActionTargets, StealthTargets, OppTargets, BenefitedObservers, and HarmedObservers.',
     BANDS:
 'BOND(B): 1 Low trust/Avoidant (keeps distance, avoids vulnerability and private closeness, cautious or transactional if engagement is necessary). 2 Neutral/Transactional (polite, practical, reserved, curious, formal, situationally cooperative, no default vulnerability or personal closeness). 3 Friendly/Comfortable (cooperative, relaxed, warm, ordinary closeness acceptable when context supports it; not automatic romance or intimacy). 4 Close/Trusting (confides, seeks closeness, shows loyalty, support, vulnerability, and deep personal investment; still not automatic romance or intimacy). FEAR(F): 1 Unshaken (steady, not intimidated). 2 Alert/Wary (cautious, watchful). 3 Afraid/Self-protective (wants distance, safety, witnesses, or an exit; staying, answering, or complying is defensive appeasement/caution, not comfort, attraction, trust, or willingness). 4 Terrified/Panic (escape, surrender, help-seeking, freezing, pleading, or desperate self-protection; compliance is fear management, not consent, comfort, or trust). HOSTILITY(H): 1 Warm/Loyal (supportive, protective). 2 Neutral (no active ill will). 3 Hostile/Obstructive (argues, refuses, obstructs, challenges, mocks, threatens, or interferes). 4 Hatred/Violent (wants harm, removal, exposure, humiliation, sabotage, defeat, or driving away).',
     LOCK:
@@ -2470,6 +2473,7 @@ export function normalizeTargets(value) {
             NPC: toRealArray(value?.hostilesInScene?.NPC),
         },
         ActionTargets: toRealArray(value?.ActionTargets),
+        StealthTargets: toRealArray(value?.StealthTargets),
         OppTargets: {
             NPC: toRealArray(value?.OppTargets?.NPC),
             ENV: toRealArray(value?.OppTargets?.ENV),
@@ -2484,6 +2488,7 @@ export function normalizeTargets(value) {
 export function sanitizeTargets(targets, classifier, options = {}) {
     const hostilesNpc = [];
     const actionTargets = [];
+    const stealthTargets = [];
     const oppNpc = [];
     const oppEnv = [...targets.OppTargets.ENV];
     const benefitedCandidates = [];
@@ -2495,6 +2500,10 @@ export function sanitizeTargets(targets, classifier, options = {}) {
     }
     for (const name of targets.ActionTargets) {
         if (classifier.isLiving(name)) actionTargets.push(name);
+        else oppEnv.push(name);
+    }
+    for (const name of targets.StealthTargets) {
+        if (classifier.isLiving(name)) stealthTargets.push(name);
         else oppEnv.push(name);
     }
     for (const name of targets.OppTargets.NPC) {
@@ -2517,19 +2526,25 @@ export function sanitizeTargets(targets, classifier, options = {}) {
         else oppEnv.push(name);
     }
 
-    const directOrOpposed = new Set([...actionTargets, ...oppNpc].map(normalizeNameKey));
-    const benefited = benefitedCandidates.filter(name => !directOrOpposed.has(normalizeNameKey(name)));
-    const harmed = harmedCandidates.filter(name => !directOrOpposed.has(normalizeNameKey(name)));
-    const alreadyRouted = new Set([...actionTargets, ...oppNpc, ...benefited, ...harmed].map(normalizeNameKey));
+    const stealthKeys = new Set(stealthTargets.map(normalizeNameKey));
+    const disjointActionTargets = actionTargets.filter(name => !stealthKeys.has(normalizeNameKey(name)));
+    const disjointOppNpc = oppNpc.filter(name => !stealthKeys.has(normalizeNameKey(name)) || options.rollNeeded === 'Y');
+    const routedActionTargets = [...disjointActionTargets, ...(options.rollNeeded === 'N' ? disjointOppNpc : [])];
+    const routedOppNpc = options.rollNeeded === 'N' ? [] : disjointOppNpc;
+    const routedDirectOrOpposed = new Set([...routedActionTargets, ...routedOppNpc, ...stealthTargets].map(normalizeNameKey));
+    const benefited = benefitedCandidates.filter(name => !routedDirectOrOpposed.has(normalizeNameKey(name)));
+    const harmed = harmedCandidates.filter(name => !routedDirectOrOpposed.has(normalizeNameKey(name)));
+    const alreadyRouted = new Set([...routedActionTargets, ...routedOppNpc, ...benefited, ...harmed].map(normalizeNameKey));
     const aware = awareCandidates.filter(name => !alreadyRouted.has(normalizeNameKey(name)));
 
     return {
         hostilesInScene: {
             NPC: unique(hostilesNpc),
         },
-        ActionTargets: unique(actionTargets),
+        ActionTargets: unique(routedActionTargets),
+        StealthTargets: unique(stealthTargets),
         OppTargets: {
-            NPC: unique(oppNpc),
+            NPC: unique(routedOppNpc),
             ENV: unique(oppEnv.filter(isReal)),
         },
         BenefitedObservers: unique(benefited),
@@ -2549,6 +2564,7 @@ export function targetSummary(targets) {
             NPC: showNone(targets.hostilesInScene?.NPC),
         },
         ActionTargets: showNone(targets.ActionTargets),
+        StealthTargets: showNone(targets.StealthTargets),
         OppTargets: {
             NPC: showNone(targets.OppTargets?.NPC),
             ENV: showNone(targets.OppTargets?.ENV),
@@ -2783,6 +2799,7 @@ export function formatTargets(targets) {
     return compact({
         hostilesInScene: { NPC: showNone(targets.hostilesInScene?.NPC) },
         ActionTargets: showNone(targets.ActionTargets),
+        StealthTargets: showNone(targets.StealthTargets),
         OppTargets: { NPC: showNone(targets.OppTargets.NPC), ENV: showNone(targets.OppTargets.ENV) },
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
