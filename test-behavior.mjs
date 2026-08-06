@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -15653,7 +15653,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.68');
+      assert.equal(manifest.version, '0.9.70');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16764,10 +16764,25 @@ const tests = [
         ...buildSchemaFixture(assessmentSchema),
         scope: 'personal',
       });
+      let invalidScopeError;
       assert.throws(
-        () => validateSemanticToolArguments(invalidScopeLedger),
+        () => {
+          try {
+            validateSemanticToolArguments(invalidScopeLedger);
+          } catch (error) {
+            invalidScopeError = error;
+            throw error;
+          }
+        },
         /\$\.powerActorEnmity\.assessments\[0\]\.scope must be one of:[^;]+; received "personal"/,
       );
+      const schemaDiagnostic = formatSemanticDiagnostic(invalidScopeError, { profile: 'Diagnostic Test' });
+      assert.match(schemaDiagnostic, /Code: SE-SCHEMA-VALIDATION/);
+      assert.match(schemaDiagnostic, /Stage: Schema validation/);
+      assert.match(schemaDiagnostic, /Profile: Diagnostic Test/);
+      assert.match(schemaDiagnostic, /Field: \$\.powerActorEnmity\.assessments\[0\]\.scope/);
+      assert.match(schemaDiagnostic, /Received: "personal"/);
+      assert.match(schemaDiagnostic, /Allowed: individual \| organization \| institution \| group \| unknown/);
       const missingStructuredProperty = structuredClone(structuredLedger);
       delete missingStructuredProperty.resolutionEngine.rollReason;
       assert.throws(
@@ -16798,6 +16813,62 @@ const tests = [
         /JSON|position|Unexpected|unterminated/i,
         'Truncated array content must remain invalid.',
       );
+      let malformedJsonError;
+      assert.throws(
+        () => {
+          try {
+            parseSemanticToolArgumentJson('{"items":["Mira" true]}');
+          } catch (error) {
+            malformedJsonError = error;
+            throw error;
+          }
+        },
+        /JSON|position|Unexpected|array element/i,
+      );
+      const jsonDiagnostic = formatSemanticDiagnostic(malformedJsonError, { profile: 'Diagnostic Test' });
+      assert.match(jsonDiagnostic, /Code: SE-JSON-PARSE/);
+      assert.match(jsonDiagnostic, /Stage: JSON parsing/);
+      assert.match(jsonDiagnostic, /Location: line 1, column \d+/);
+      assert.match(jsonDiagnostic, /Raw excerpt: .*"Mira" <<<ERROR>>>true/);
+      assert.match(jsonDiagnostic, /Repair attempted: no/);
+      assert.match(jsonDiagnostic, /Repair result: No unambiguous local repair matched/);
+      assert.match(jsonDiagnostic, /Action: Generation aborted before narration/);
+
+      const secretDiagnosticError = annotateSemanticDiagnosticError(
+        new Error('Authorization: Bearer test-secret-token api_key=sk-sensitive123456 GET https://example.invalid/v1?key=google-sensitive-key'),
+        { code: 'SE-TRANSPORT', stage: 'Transport' },
+      );
+      const secretDiagnostic = formatSemanticDiagnostic(secretDiagnosticError);
+      assert.doesNotMatch(secretDiagnostic, /test-secret-token|sk-sensitive123456|google-sensitive-key/);
+      assert.match(secretDiagnostic, /Authorization: \[REDACTED\]/);
+      assert.match(secretDiagnostic, /api_key=\[REDACTED\]/);
+      assert.match(secretDiagnostic, /\?key=\[REDACTED\]/);
+
+      const capturedDiagnostics = [];
+      const originalConsoleError = console.error;
+      console.error = value => capturedDiagnostics.push(String(value));
+      try {
+        reportSemanticDiagnostic(malformedJsonError, { profile: 'Diagnostic Test' });
+        reportSemanticDiagnostic(malformedJsonError, { profile: 'Diagnostic Test' });
+      } finally {
+        console.error = originalConsoleError;
+      }
+      assert.equal(capturedDiagnostics.length, 1, 'Each semantic failure should print one diagnostic block.');
+      assert.match(capturedDiagnostics[0], /\[Story Engine Semantic Diagnostic\]/);
+
+      const frozenDiagnosticError = Object.freeze(new Error('Frozen provider error'));
+      assert.doesNotThrow(() => annotateSemanticDiagnosticError(frozenDiagnosticError, {
+        code: 'SE-TRANSPORT',
+        stage: 'Transport',
+      }));
+      console.error = () => {
+        throw new Error('Console unavailable');
+      };
+      try {
+        assert.doesNotThrow(() => reportSemanticDiagnostic(new Error('Original semantic failure')));
+      } finally {
+        console.error = originalConsoleError;
+      }
       const tooManyEvents = structuredClone(structuredLedger);
       const eventSchema = strictSemanticTool.function.parameters.properties.powerEventShape.properties.events.items;
       tooManyEvents.powerEventShape.events = Array.from({ length: 5 }, () => buildSchemaFixture(eventSchema));
@@ -17380,6 +17451,16 @@ const tests = [
       );
       assert.match(source, /async function withTrackerGenerationSettings\(callback\)[\s\S]*return await withSemanticGenerationSettings\(callback\);/);
       assert.match(source, /async function withProseGuardGenerationSettings\(callback\)[\s\S]*return await withSemanticGenerationSettings\(callback\);/);
+      assert.match(semanticSource, /export function reportSemanticDiagnostic\(error, context = \{\}\)/);
+      assert.match(semanticSource, /\[Story Engine Semantic Diagnostic\]/);
+      assert.match(semanticSource, /Raw excerpt/);
+      assert.match(source, /code: 'SE-DETERMINISTIC-HANDOFF'/);
+      assert.match(source, /stage: 'Deterministic handoff'/);
+      assert.match(source, /code: 'SE-ORCHESTRATION'/);
+      assert.match(source, /function reportSemanticPipelineFailure\(error, details = \{\}\)/);
+      assert.match(semanticSource, /status: semanticErrorDetail\(error, \['status', 'statusCode'\]\)/);
+      assert.match(semanticSource, /body: semanticErrorDetail\(error, \['body', 'responseBody'\]\)/);
+      assert.match(semanticSource, /requestId: semanticErrorDetail\(error, \['requestId', 'request_id'\]\)/);
     },
   },
   {

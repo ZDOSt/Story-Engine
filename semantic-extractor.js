@@ -29,6 +29,9 @@ const SEMANTIC_RESPONSE_LENGTH_MIN = 4096;
 const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
+const SEMANTIC_DIAGNOSTIC_DETAILS = Symbol('storyEngineSemanticDiagnosticDetails');
+const SEMANTIC_DIAGNOSTIC_REPORTED = Symbol('storyEngineSemanticDiagnosticReported');
+const SEMANTIC_DIAGNOSTIC_EXCERPT_RADIUS = 160;
 const CUSTOM_CHAT_COMPLETION_SOURCE = 'custom';
 const EXACT_NAMED_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
 export const STORY_ENGINE_THINKING_DISABLE_FORMATS = Object.freeze({
@@ -109,6 +112,19 @@ const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
 ]);
 
 export async function extractSemanticLedger(context, promptContext, type, trackerSnapshot, options = {}) {
+    try {
+        return await extractSemanticLedgerInternal(context, promptContext, type, trackerSnapshot, options);
+    } catch (error) {
+        if (!isSemanticCancellation(error, options?.signal)) {
+            reportSemanticDiagnostic(error, {
+                profile: options?.semanticProfileName || options?.semanticProfileId || 'active SillyTavern connection',
+            });
+        }
+        throw error;
+    }
+}
+
+async function extractSemanticLedgerInternal(context, promptContext, type, trackerSnapshot, options = {}) {
     const playerTrackerSnapshot = options?.playerTrackerSnapshot || {};
     const prompt = options?.assembledPrompt
         ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, options)
@@ -125,7 +141,11 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
     } catch (error) {
         options?.signal?.throwIfAborted?.();
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`);
+        throw wrapSemanticDiagnosticError(
+            error,
+            `Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`,
+            { code: 'SE-TOOL-CALL', stage: 'Tool-call request' },
+        );
     }
 
     let ledger;
@@ -134,17 +154,39 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
         validateRawLedgerContract(ledger, toolResult.ledger);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`);
+        throw wrapSemanticDiagnosticError(
+            error,
+            `Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`,
+            { code: 'SE-CONTRACT-VALIDATION', stage: 'Ledger contract validation' },
+        );
     }
 
     if (!ledger || typeof ledger !== 'object') {
-        throw new Error(`Semantic tool-call pass returned an invalid ledger object: ${previewRaw(toolResult.ledger)}`);
+        throw annotateSemanticDiagnosticError(
+            new Error(`Semantic tool-call pass returned an invalid ledger object: ${previewRaw(toolResult.ledger)}`),
+            { code: 'SE-CONTRACT-VALIDATION', stage: 'Ledger contract validation' },
+        );
     }
 
-    const normalized = normalizeLedger(ledger, options);
-    validateNormalizedLedger(normalized, toolResult.ledger);
-    validateSemanticWorldProgression(normalized, options, context);
-    validateRelationshipCoverage(normalized.resolutionEngine, normalized.relationshipEngine);
+    let normalized;
+    try {
+        normalized = normalizeLedger(ledger, options);
+        validateNormalizedLedger(normalized, toolResult.ledger);
+    } catch (error) {
+        throw annotateSemanticDiagnosticError(error, {
+            code: 'SE-CONTRACT-VALIDATION',
+            stage: 'Normalized ledger validation',
+        });
+    }
+    try {
+        validateSemanticWorldProgression(normalized, options, context);
+        validateRelationshipCoverage(normalized.resolutionEngine, normalized.relationshipEngine);
+    } catch (error) {
+        throw annotateSemanticDiagnosticError(error, {
+            code: 'SE-SEMANTIC-VALIDATION',
+            stage: 'Semantic consistency validation',
+        });
+    }
     normalized.deterministicOverrides = {
         ...(normalized.deterministicOverrides || {}),
         semanticLedgerExtraction: {
@@ -174,6 +216,183 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
     }
 
     return normalized;
+}
+
+export function annotateSemanticDiagnosticError(error, details = {}) {
+    const target = error instanceof Error ? error : new Error(String(error));
+    const inherited = findSemanticDiagnosticDetails(target.cause);
+    const current = target[SEMANTIC_DIAGNOSTIC_DETAILS];
+    const merged = compactDiagnosticDetails({
+        ...details,
+        ...(inherited || {}),
+        ...(current || {}),
+    });
+    try {
+        Object.defineProperty(target, SEMANTIC_DIAGNOSTIC_DETAILS, {
+            configurable: true,
+            value: merged,
+            writable: true,
+        });
+    } catch {
+        try {
+            target[SEMANTIC_DIAGNOSTIC_DETAILS] = merged;
+        } catch {
+            // Diagnostics must never replace the original pipeline failure.
+        }
+    }
+    return target;
+}
+
+export function formatSemanticDiagnostic(error, context = {}) {
+    const target = error instanceof Error ? error : new Error(String(error));
+    const details = compactDiagnosticDetails({
+        ...inferSemanticDiagnosticDetails(target),
+        ...(findSemanticDiagnosticDetails(target) || {}),
+        ...context,
+    });
+    const lines = ['[Story Engine Semantic Diagnostic]'];
+    appendDiagnosticLine(lines, 'Code', details.code || 'SE-UNKNOWN');
+    appendDiagnosticLine(lines, 'Stage', details.stage || 'Semantic pipeline');
+    appendDiagnosticLine(lines, 'Profile', details.profile);
+    appendDiagnosticLine(lines, 'Provider', details.provider);
+    appendDiagnosticLine(lines, 'Model', details.model);
+    appendDiagnosticLine(lines, 'HTTP status', details.status);
+    appendDiagnosticLine(lines, 'Request ID', details.requestId);
+    appendDiagnosticLine(lines, 'Expected tool', details.expectedTool);
+    appendDiagnosticLine(lines, 'Returned tools', formatDiagnosticList(details.returnedTools));
+    appendDiagnosticLine(lines, 'Response shape', details.responseShape);
+    appendDiagnosticLine(lines, 'Field', details.field);
+    appendDiagnosticLine(lines, 'Received', details.received);
+    appendDiagnosticLine(lines, 'Allowed', formatDiagnosticList(details.allowed));
+    appendDiagnosticLine(lines, 'Error', diagnosticErrorMessage(target));
+    if (details.line || details.column) {
+        appendDiagnosticLine(lines, 'Location', [
+            details.line ? `line ${details.line}` : '',
+            details.column ? `column ${details.column}` : '',
+        ].filter(Boolean).join(', '));
+    }
+    appendDiagnosticLine(lines, 'Raw excerpt', details.excerpt);
+    if (details.repairAttempted !== undefined) {
+        appendDiagnosticLine(lines, 'Repair attempted', details.repairAttempted ? 'yes' : 'no');
+    }
+    appendDiagnosticLine(lines, 'Repair result', details.repairResult);
+    appendDiagnosticLine(lines, 'Action', 'Generation aborted before narration');
+    return lines.join('\n');
+}
+
+export function reportSemanticDiagnostic(error, context = {}) {
+    const target = error instanceof Error ? error : new Error(String(error));
+    try {
+        if (semanticDiagnosticWasReported(target)) return formatSemanticDiagnostic(target, context);
+        markSemanticDiagnosticReported(target);
+        const diagnostic = formatSemanticDiagnostic(target, context);
+        console.error(diagnostic);
+        return diagnostic;
+    } catch {
+        return '';
+    }
+}
+
+function wrapSemanticDiagnosticError(error, message, details) {
+    const wrapped = new Error(message);
+    wrapped.cause = error;
+    return annotateSemanticDiagnosticError(wrapped, details);
+}
+
+function findSemanticDiagnosticDetails(error) {
+    let current = error;
+    const seen = new Set();
+    while (current && typeof current === 'object' && !seen.has(current)) {
+        seen.add(current);
+        if (current[SEMANTIC_DIAGNOSTIC_DETAILS]) return current[SEMANTIC_DIAGNOSTIC_DETAILS];
+        current = current.cause;
+    }
+    return null;
+}
+
+function compactDiagnosticDetails(details) {
+    return Object.fromEntries(Object.entries(details || {}).filter(([_key, value]) => value !== undefined && value !== null && value !== ''));
+}
+
+function appendDiagnosticLine(lines, label, value) {
+    if (value === undefined || value === null || value === '') return;
+    lines.push(`${label}: ${sanitizeDiagnosticText(value)}`);
+}
+
+function formatDiagnosticList(value) {
+    if (!Array.isArray(value)) return value;
+    return value.length ? value.join(' | ') : '(none)';
+}
+
+function sanitizeDiagnosticText(value) {
+    const text = typeof value === 'string' ? value : diagnosticValuePreview(value);
+    return String(text || '')
+        .replace(/([?&]key=)[^&#\s,;}]+/gi, '$1[REDACTED]')
+        .replace(/\b((?:api[-_ ]?key|authorization|token|secret)\s*[:=]\s*)(?:Bearer\s+)?[^\s,;}]+/gi, '$1[REDACTED]')
+        .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer [REDACTED]')
+        .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_KEY]')
+        .slice(0, 900);
+}
+
+function diagnosticValuePreview(value) {
+    if (value === undefined) return 'missing';
+    try {
+        return JSON.stringify(value).slice(0, 320);
+    } catch {
+        return String(value).slice(0, 320);
+    }
+}
+
+function diagnosticErrorMessage(error) {
+    return String(error?.message || error || 'Unknown semantic failure')
+        .replace(/\s+RawPreview=[\s\S]*$/i, '')
+        .trim()
+        .slice(0, 700);
+}
+
+function inferSemanticDiagnosticDetails(error) {
+    if (isSemanticToolTransportError(error)) {
+        return {
+            code: 'SE-TRANSPORT',
+            stage: 'Transport',
+            status: error.status,
+        };
+    }
+    const message = String(error?.message || '');
+    if (/JSON\.parse|JSON at position|after array element|unterminated JSON|Unexpected token/i.test(message)) {
+        return { code: 'SE-JSON-PARSE', stage: 'JSON parsing' };
+    }
+    if (/must be (?:one of|an? |a boolean|a string|an integer)|is required|unknown properties/i.test(message)) {
+        return { code: 'SE-SCHEMA-VALIDATION', stage: 'Schema validation' };
+    }
+    return { code: 'SE-UNKNOWN', stage: 'Semantic pipeline' };
+}
+
+function semanticDiagnosticWasReported(error) {
+    let current = error;
+    const seen = new Set();
+    while (current && typeof current === 'object' && !seen.has(current)) {
+        seen.add(current);
+        if (current[SEMANTIC_DIAGNOSTIC_REPORTED]) return true;
+        current = current.cause;
+    }
+    return false;
+}
+
+function markSemanticDiagnosticReported(error) {
+    try {
+        Object.defineProperty(error, SEMANTIC_DIAGNOSTIC_REPORTED, { configurable: true, value: true });
+    } catch {
+        try {
+            error[SEMANTIC_DIAGNOSTIC_REPORTED] = true;
+        } catch {
+            // A non-extensible provider error can still propagate unchanged.
+        }
+    }
+}
+
+function isSemanticCancellation(error, signal) {
+    return signal?.aborted === true || error?.name === 'AbortError';
 }
 
 export function parseNarratorTrackerDelta(text, narration = '') {
@@ -247,6 +466,16 @@ class SemanticToolTransportError extends Error {
         this.status = details.status;
         this.body = details.body;
         this.cause = details.cause;
+        annotateSemanticDiagnosticError(this, {
+            code: 'SE-TRANSPORT',
+            stage: 'Transport',
+            status: details.status,
+            provider: details.provider,
+            model: details.model,
+            profile: details.profile,
+            requestId: details.requestId,
+            excerpt: details.body,
+        });
     }
 }
 
@@ -267,16 +496,21 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
             signal: options.signal,
         });
         if (raw?.error) {
-            throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
+            throw new SemanticToolTransportError(`Provider returned an error for semantic tool-call request: ${previewRaw(raw)}`, {
+                body: previewRaw(raw),
+                status: semanticResponseStatus(raw),
+                requestId: semanticResponseRequestId(raw),
+            });
         }
         const ledger = extractSemanticToolLedger(raw);
         return { raw, ledger };
     } catch (error) {
-        if (isSemanticToolTransportError(error)) throw error;
+        if (isSemanticToolTransportError(error) || findSemanticDiagnosticDetails(error)) throw error;
         throw new SemanticToolTransportError(error instanceof Error ? error.message : String(error), {
             status: error?.status,
             body: error?.body,
             cause: error,
+            requestId: error?.requestId || error?.request_id,
         });
     }
 }
@@ -318,14 +552,33 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
             signal: options.signal,
         });
     } catch (error) {
-        throw new SemanticToolTransportError(`Connection Manager semantic profile tool-call request failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        throw new SemanticToolTransportError(`Connection Manager semantic profile tool-call request failed: ${error instanceof Error ? error.message : String(error)}`, {
+            cause: error,
+            provider: route.source,
+            model: route.model,
+            profile: options.semanticProfileName || options.semanticProfileId,
+            status: semanticErrorDetail(error, ['status', 'statusCode']),
+            body: semanticErrorDetail(error, ['body', 'responseBody']),
+            requestId: semanticErrorDetail(error, ['requestId', 'request_id']),
+        });
     }
 
     if (raw?.error) {
-        throw new SemanticToolTransportError(`Provider returned an error for semantic profile tool-call request: ${previewRaw(raw)}`, { body: previewRaw(raw) });
+        throw new SemanticToolTransportError(`Provider returned an error for semantic profile tool-call request: ${previewRaw(raw)}`, {
+            body: previewRaw(raw),
+            provider: route.source,
+            model: route.model,
+            profile: options.semanticProfileName || options.semanticProfileId,
+            status: semanticResponseStatus(raw),
+            requestId: semanticResponseRequestId(raw),
+        });
     }
 
-    const ledger = extractSemanticToolLedger(raw);
+    const ledger = extractSemanticToolLedger(raw, {
+        provider: route.source,
+        model: route.model,
+        profile: options.semanticProfileName || options.semanticProfileId,
+    });
     return { raw, ledger };
 }
 
@@ -1009,26 +1262,62 @@ function buildSemanticPreflightSchema() {
     });
 }
 
-function extractSemanticToolLedger(raw) {
+function extractSemanticToolLedger(raw, diagnosticContext = {}) {
     const calls = collectToolCalls(raw);
+    const responseDiagnosticContext = {
+        requestId: semanticResponseRequestId(raw),
+        ...diagnosticContext,
+    };
     const matching = calls.find(call => getToolCallName(call) === SEMANTIC_TOOL_NAME);
     if (!matching) {
-        throw new Error(`semantic tool-call response did not contain ${SEMANTIC_TOOL_NAME}. RawPreview=${previewRaw(raw)}`);
+        throw annotateSemanticDiagnosticError(
+            new Error(`semantic tool-call response did not contain ${SEMANTIC_TOOL_NAME}. RawPreview=${previewRaw(raw)}`),
+            {
+                code: 'SE-TOOL-MISSING',
+                stage: 'Tool-call extraction',
+                expectedTool: SEMANTIC_TOOL_NAME,
+                returnedTools: calls.map(getToolCallName).filter(Boolean),
+                responseShape: describeSemanticResponseShape(raw),
+                ...responseDiagnosticContext,
+            },
+        );
     }
 
     const args = getToolCallArguments(matching);
-    const ledger = parseToolArguments(args);
+    let ledger;
+    try {
+        ledger = parseToolArguments(args);
+    } catch (error) {
+        throw annotateSemanticDiagnosticError(error, responseDiagnosticContext);
+    }
     if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
-        throw new Error(`semantic tool-call arguments were not an object. RawPreview=${previewRaw(raw)}`);
+        throw annotateSemanticDiagnosticError(
+            new Error(`semantic tool-call arguments were not an object. RawPreview=${previewRaw(raw)}`),
+            {
+                code: 'SE-TOOL-ARGUMENTS',
+                stage: 'Tool-call argument extraction',
+                expectedTool: SEMANTIC_TOOL_NAME,
+                responseShape: describeSemanticResponseShape(raw),
+                ...responseDiagnosticContext,
+            },
+        );
     }
     const normalizedLedger = normalizeSemanticToolArgumentTypes(ledger);
-    validateSemanticToolArguments(normalizedLedger);
+    try {
+        validateSemanticToolArguments(normalizedLedger);
+    } catch (error) {
+        throw annotateSemanticDiagnosticError(error, responseDiagnosticContext);
+    }
     return normalizedLedger;
 }
 
 export function validateSemanticToolArguments(ledger) {
-    validateSchemaValue(ledger, buildSemanticPreflightSchema(), '$');
-    return ledger;
+    try {
+        validateSchemaValue(ledger, buildSemanticPreflightSchema(), '$');
+        return ledger;
+    } catch (error) {
+        throw annotateSemanticDiagnosticError(error, schemaDiagnosticDetails(error, ledger));
+    }
 }
 
 export function normalizeSemanticToolArgumentTypes(ledger, schema = buildSemanticPreflightSchema(), path = '$') {
@@ -1241,32 +1530,198 @@ function parseToolArguments(args) {
         return args;
     }
     if (typeof args !== 'string') {
-        throw new Error('semantic tool-call arguments were missing');
+        throw annotateSemanticDiagnosticError(
+            new Error('semantic tool-call arguments were missing'),
+            { code: 'SE-TOOL-ARGUMENTS', stage: 'Tool-call argument extraction', expectedTool: SEMANTIC_TOOL_NAME },
+        );
     }
     const text = args.trim();
     if (!text) {
-        throw new Error('semantic tool-call arguments were empty');
+        throw annotateSemanticDiagnosticError(
+            new Error('semantic tool-call arguments were empty'),
+            { code: 'SE-TOOL-ARGUMENTS', stage: 'Tool-call argument extraction', expectedTool: SEMANTIC_TOOL_NAME },
+        );
     }
     return parseSemanticToolArgumentJson(text);
 }
 
 export function parseSemanticToolArgumentJson(text) {
-    const jsonText = extractJsonObject(text);
+    const sourceText = String(text || '');
+    let jsonText;
+    try {
+        jsonText = extractJsonObject(sourceText);
+    } catch (error) {
+        throw annotateSemanticDiagnosticError(error, {
+            code: 'SE-JSON-PARSE',
+            stage: 'JSON extraction',
+            excerpt: buildSemanticJsonDiagnosticExcerpt(sourceText, 0),
+            repairAttempted: false,
+            repairResult: 'No complete JSON object was available to repair',
+        });
+    }
     try {
         return JSON.parse(jsonText);
     } catch (error) {
+        const location = locateJsonParseFailure(error, jsonText);
         const repaired = repairToolArgumentJson(jsonText);
+        let repairError = null;
         if (repaired && repaired !== jsonText) {
             try {
                 const parsed = JSON.parse(repaired);
                 console.warn('[Structured Preflight Engines] repaired malformed semantic tool-call JSON locally before validation.');
                 return parsed;
-            } catch {
+            } catch (candidateError) {
+                repairError = candidateError;
                 // Throw the original parse error below; it points to the provider payload.
             }
         }
-        throw error;
+        throw annotateSemanticDiagnosticError(error, {
+            code: 'SE-JSON-PARSE',
+            stage: 'JSON parsing',
+            line: location.line,
+            column: location.column,
+            excerpt: buildSemanticJsonDiagnosticExcerpt(jsonText, location.index),
+            repairAttempted: repaired !== jsonText,
+            repairResult: repaired !== jsonText
+                ? `Still invalid${repairError?.message ? ` (${String(repairError.message).slice(0, 180)})` : ''}`
+                : 'No unambiguous local repair matched',
+        });
     }
+}
+
+function locateJsonParseFailure(error, text) {
+    const message = String(error?.message || '');
+    const lineColumn = message.match(/line\s+(\d+)\s+column\s+(\d+)/i);
+    if (lineColumn) {
+        const line = Math.max(1, Number(lineColumn[1]) || 1);
+        const column = Math.max(1, Number(lineColumn[2]) || 1);
+        return {
+            line,
+            column,
+            index: jsonLineColumnToIndex(text, line, column),
+        };
+    }
+    const position = message.match(/position\s+(\d+)/i);
+    if (position) {
+        const index = Math.max(0, Number(position[1]) || 0);
+        const prefix = String(text || '').slice(0, index);
+        const rows = prefix.split('\n');
+        return {
+            line: rows.length,
+            column: (rows[rows.length - 1]?.length || 0) + 1,
+            index,
+        };
+    }
+    return { line: undefined, column: undefined, index: 0 };
+}
+
+function jsonLineColumnToIndex(text, line, column) {
+    const rows = String(text || '').split('\n');
+    let index = 0;
+    for (let row = 1; row < line && row <= rows.length; row += 1) {
+        index += rows[row - 1].length + 1;
+    }
+    return Math.max(0, Math.min(String(text || '').length, index + column - 1));
+}
+
+function buildSemanticJsonDiagnosticExcerpt(text, errorIndex) {
+    const source = String(text || '');
+    if (!source) return '(empty)';
+    const index = Math.max(0, Math.min(source.length, Number(errorIndex) || 0));
+    const start = Math.max(0, index - SEMANTIC_DIAGNOSTIC_EXCERPT_RADIUS);
+    const end = Math.min(source.length, index + SEMANTIC_DIAGNOSTIC_EXCERPT_RADIUS);
+    const before = escapeDiagnosticExcerpt(source.slice(start, index));
+    const after = escapeDiagnosticExcerpt(source.slice(index, end));
+    return `${start > 0 ? '...' : ''}${before}<<<ERROR>>>${after}${end < source.length ? '...' : ''}`;
+}
+
+function escapeDiagnosticExcerpt(value) {
+    return String(value || '')
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n')
+        .replace(/\t/g, '\\t');
+}
+
+function schemaDiagnosticDetails(error, ledger) {
+    const message = String(error?.message || '');
+    const pathMatch = message.match(/^(\$(?:\.[^\s.\[\]]+|\[\d+\])*)/);
+    const field = pathMatch?.[1];
+    const enumMatch = message.match(/must be one of:\s*([^;]+)(?:;\s*received|$)/i);
+    const typeMatch = message.match(/must be (?:an? |a )?(boolean|string|integer|array|object)/i);
+    const unknownMatch = message.match(/contains unknown properties:\s*(.+)$/i);
+    let received;
+    if (/\bis required\b/i.test(message)) {
+        received = 'missing';
+    } else if (unknownMatch) {
+        received = unknownMatch[1].trim();
+    } else if (field) {
+        received = diagnosticValuePreview(readSemanticDiagnosticPath(ledger, field));
+    }
+    return {
+        code: 'SE-SCHEMA-VALIDATION',
+        stage: 'Schema validation',
+        field,
+        received,
+        allowed: enumMatch
+            ? enumMatch[1].split(',').map(value => value.trim()).filter(Boolean)
+            : (typeMatch ? [typeMatch[1].toLowerCase()] : undefined),
+    };
+}
+
+function readSemanticDiagnosticPath(root, path) {
+    if (!path || path === '$') return root;
+    let value = root;
+    const pattern = /\.([^.[\]]+)|\[(\d+)\]/g;
+    let match;
+    while ((match = pattern.exec(path))) {
+        const key = match[1] ?? Number(match[2]);
+        if (value == null || !Object.prototype.hasOwnProperty.call(Object(value), key)) return undefined;
+        value = value[key];
+    }
+    return value;
+}
+
+function describeSemanticResponseShape(raw) {
+    if (raw == null) return String(raw);
+    if (Array.isArray(raw)) return `array(length=${raw.length})`;
+    if (typeof raw !== 'object') return typeof raw;
+    const topLevelKeys = Object.keys(raw).slice(0, 12);
+    const choice = Array.isArray(raw.choices) ? raw.choices[0] : undefined;
+    const messageKeys = choice?.message && typeof choice.message === 'object'
+        ? Object.keys(choice.message).slice(0, 12)
+        : [];
+    const parts = [`object(keys=${topLevelKeys.join(',') || '(none)'})`];
+    if (Array.isArray(raw.choices)) parts.push(`choices=${raw.choices.length}`);
+    if (messageKeys.length) parts.push(`choice[0].message keys=${messageKeys.join(',')}`);
+    return parts.join('; ');
+}
+
+function semanticResponseRequestId(raw) {
+    const value = raw?.request_id
+        ?? raw?.requestId
+        ?? raw?.id
+        ?? raw?.error?.request_id
+        ?? raw?.error?.requestId;
+    return value == null ? undefined : String(value).slice(0, 180);
+}
+
+function semanticResponseStatus(raw) {
+    const value = raw?.status ?? raw?.statusCode ?? raw?.error?.status ?? raw?.error?.statusCode;
+    if (Number.isInteger(Number(value)) && Number(value) >= 100 && Number(value) <= 599) return Number(value);
+    return undefined;
+}
+
+function semanticErrorDetail(error, keys) {
+    let current = error;
+    const seen = new Set();
+    while (current && typeof current === 'object' && !seen.has(current)) {
+        seen.add(current);
+        for (const key of keys) {
+            if (current[key] !== undefined && current[key] !== null && current[key] !== '') return current[key];
+        }
+        current = current.cause;
+    }
+    return undefined;
 }
 
 function repairToolArgumentJson(text) {

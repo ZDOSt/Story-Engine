@@ -35,7 +35,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseNarratorTrackerDelta, sendStructuredToolRequest, STORY_ENGINE_THINKING_DISABLE_FORMATS } from './semantic-extractor.js';
+import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest, STORY_ENGINE_THINKING_DISABLE_FORMATS } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -1060,6 +1060,25 @@ async function withSemanticGenerationSettings(callback) {
         semanticProfileName: profile.name,
         semanticThinkingDisableFormat,
     });
+}
+
+function semanticDiagnosticProfileLabel() {
+    try {
+        const settings = getSettings();
+        return settings.useSeparateSemanticSettings
+            ? (settings.semanticConnectionProfile || 'configured semantic profile')
+            : (getActiveConnectionProfileName() || 'active SillyTavern connection');
+    } catch {
+        return 'active SillyTavern connection';
+    }
+}
+
+function reportSemanticPipelineFailure(error, details = {}) {
+    const diagnosticError = annotateSemanticDiagnosticError(error, details);
+    reportSemanticDiagnostic(diagnosticError, {
+        profile: semanticDiagnosticProfileLabel(),
+    });
+    return diagnosticError;
 }
 
 
@@ -14632,11 +14651,17 @@ async function handleChatCompletionPromptReady(eventData) {
         }
 
         if (!ownedPreflightDryRun) {
-            throw new Error('Story Engine semantic preflight reached a real narrator request instead of its owned local dry run.');
+            throw reportSemanticPipelineFailure(
+                new Error('Story Engine semantic preflight reached a real narrator request instead of its owned local dry run.'),
+                { code: 'SE-ORCHESTRATION', stage: 'Semantic orchestration' },
+            );
         }
         const dryRun = state.preflightDryRun;
         if (!dryRun || !stripPreflightDryRunMarkerFromChat(eventData.chat, dryRun.marker)) {
-            throw new Error('Story Engine could not claim its local preflight dry run; generation aborted before narration.');
+            throw reportSemanticPipelineFailure(
+                new Error('Story Engine could not claim its local preflight dry run; generation aborted before narration.'),
+                { code: 'SE-ORCHESTRATION', stage: 'Semantic orchestration' },
+            );
         }
         dryRun.phase = 'processing';
         state.runningSemanticPass = true;
@@ -14662,20 +14687,29 @@ async function handleChatCompletionPromptReady(eventData) {
 
         context.structuredPreflightSettings = getSettings();
 
-        const report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, pendingGeneration.type, {
-            playerTrackerSnapshot: pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
-            latentGrievanceSnapshot: pendingGeneration.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
-            latentFavorSnapshot: pendingGeneration.latentFavorSnapshot || buildLatentFavorSnapshot(context),
-            worldStateSnapshot: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
-            descriptiveArchiveSnapshot: pendingGeneration.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context),
-            worldProgressionSnapshot: pendingGeneration.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
-            boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
-            pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
-            adventureGenre: pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
-            latestUserText: pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
-            sceneNames: getConfirmedSceneNpcNames(context),
-            worldProgressionProjectionKey: pendingGeneration.runId || runIdentity.runId,
-        });
+        let report;
+        try {
+            report = runDeterministicEngines(semanticLedger, trackerSnapshot, context, pendingGeneration.type, {
+                playerTrackerSnapshot: pendingGeneration.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context),
+                latentGrievanceSnapshot: pendingGeneration.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
+                latentFavorSnapshot: pendingGeneration.latentFavorSnapshot || buildLatentFavorSnapshot(context),
+                worldStateSnapshot: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+                descriptiveArchiveSnapshot: pendingGeneration.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context),
+                worldProgressionSnapshot: pendingGeneration.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
+                boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
+                pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+                adventureGenre: pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
+                latestUserText: pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
+                sceneNames: getConfirmedSceneNpcNames(context),
+                worldProgressionProjectionKey: pendingGeneration.runId || runIdentity.runId,
+            });
+        } catch (error) {
+            const diagnosticError = reportSemanticPipelineFailure(error, {
+                code: 'SE-DETERMINISTIC-HANDOFF',
+                stage: 'Deterministic handoff',
+            });
+            throw diagnosticError;
+        }
 
 
         const narratorContext = formatNarratorPromptContext(report, pendingGeneration);
@@ -14826,6 +14860,12 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             throw new Error('Story Engine semantic run expired during model generation.');
         }
         return semanticLedger;
+    } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        throw reportSemanticPipelineFailure(error, {
+            code: 'SE-ORCHESTRATION',
+            stage: 'Semantic orchestration',
+        });
     } finally {
 
         promptReadyBypassGate.release(bypassToken);
