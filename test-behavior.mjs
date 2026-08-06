@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -15653,7 +15653,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.67');
+      assert.equal(manifest.version, '0.9.68');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16716,6 +16716,47 @@ const tests = [
       };
       const structuredLedger = buildSchemaFixture(strictSemanticTool.function.parameters);
       assert.equal(validateSemanticToolArguments(structuredLedger), structuredLedger);
+      const transportVariantLedger = structuredClone(structuredLedger);
+      transportVariantLedger.worldTransition.indoors = true;
+      transportVariantLedger.worldTransition.requiresSuccess = 'YES';
+      transportVariantLedger.resolutionEngine.rollNeeded = 'N';
+      transportVariantLedger.resolutionEngine.activeHostileThreat = 'false';
+      transportVariantLedger.resolutionEngine.intimacyAdvanceExplicit = 'y';
+      transportVariantLedger.relationshipEngine.push(buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items,
+      ));
+      transportVariantLedger.relationshipEngine[0].initPreset.romanticOpen = 'no';
+      transportVariantLedger.relationshipEngine[0].slowBondEvidence.teamwork = 'TRUE';
+      transportVariantLedger.relationshipEngine[0].overrideFlags.CurrentInvitation = 'n';
+      const normalizedTransportVariant = normalizeSemanticToolArgumentTypes(transportVariantLedger);
+      assert.equal(normalizedTransportVariant.worldTransition.indoors, 'indoors');
+      assert.equal(normalizedTransportVariant.worldTransition.requiresSuccess, true);
+      assert.equal(normalizedTransportVariant.resolutionEngine.rollNeeded, false);
+      assert.equal(normalizedTransportVariant.resolutionEngine.activeHostileThreat, false);
+      assert.equal(normalizedTransportVariant.resolutionEngine.intimacyAdvanceExplicit, true);
+      assert.equal(normalizedTransportVariant.relationshipEngine[0].initPreset.romanticOpen, false);
+      assert.equal(normalizedTransportVariant.relationshipEngine[0].slowBondEvidence.teamwork, true);
+      assert.equal(normalizedTransportVariant.relationshipEngine[0].overrideFlags.CurrentInvitation, false);
+      assert.equal(validateSemanticToolArguments(normalizedTransportVariant), normalizedTransportVariant);
+      assert.equal(structuredLedger.worldTransition.indoors, 'unchanged');
+      const falseIndoorsLedger = structuredClone(structuredLedger);
+      falseIndoorsLedger.worldTransition.indoors = 'NO';
+      assert.equal(normalizeSemanticToolArgumentTypes(falseIndoorsLedger).worldTransition.indoors, 'outdoors');
+      const unchangedIndoorsLedger = structuredClone(structuredLedger);
+      unchangedIndoorsLedger.worldTransition.indoors = 'unchanged';
+      assert.equal(normalizeSemanticToolArgumentTypes(unchangedIndoorsLedger).worldTransition.indoors, 'unchanged');
+      const invalidTransportVariant = structuredClone(structuredLedger);
+      invalidTransportVariant.resolutionEngine.rollNeeded = 'maybe';
+      assert.throws(
+        () => validateSemanticToolArguments(normalizeSemanticToolArgumentTypes(invalidTransportVariant)),
+        /resolutionEngine\.rollNeeded must be a boolean/,
+      );
+      const invalidIndoorsVariant = structuredClone(structuredLedger);
+      invalidIndoorsVariant.worldTransition.indoors = 'inside';
+      assert.throws(
+        () => validateSemanticToolArguments(normalizeSemanticToolArgumentTypes(invalidIndoorsVariant)),
+        /worldTransition\.indoors must be one of:/,
+      );
       const assessmentSchema = strictSemanticTool.function.parameters.properties.powerActorEnmity
         .properties.assessments.items;
       const invalidScopeLedger = structuredClone(structuredLedger);

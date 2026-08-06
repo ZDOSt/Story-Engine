@@ -1021,13 +1021,57 @@ function extractSemanticToolLedger(raw) {
     if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
         throw new Error(`semantic tool-call arguments were not an object. RawPreview=${previewRaw(raw)}`);
     }
-    validateSemanticToolArguments(ledger);
-    return ledger;
+    const normalizedLedger = normalizeSemanticToolArgumentTypes(ledger);
+    validateSemanticToolArguments(normalizedLedger);
+    return normalizedLedger;
 }
 
 export function validateSemanticToolArguments(ledger) {
     validateSchemaValue(ledger, buildSemanticPreflightSchema(), '$');
     return ledger;
+}
+
+export function normalizeSemanticToolArgumentTypes(ledger, schema = buildSemanticPreflightSchema(), path = '$') {
+    if (!schema || typeof schema !== 'object') return ledger;
+
+    if (schema.type === 'object') {
+        if (!isRecord(ledger)) return ledger;
+        const normalized = { ...ledger };
+        for (const [name, childSchema] of Object.entries(schema.properties || {})) {
+            if (Object.prototype.hasOwnProperty.call(normalized, name)) {
+                normalized[name] = normalizeSemanticToolArgumentTypes(normalized[name], childSchema, `${path}.${name}`);
+            }
+        }
+        return normalized;
+    }
+
+    if (schema.type === 'array') {
+        if (!Array.isArray(ledger)) return ledger;
+        return ledger.map((item, index) => normalizeSemanticToolArgumentTypes(item, schema.items, `${path}[${index}]`));
+    }
+
+    if (schema.type === 'boolean') return normalizeSemanticBooleanToken(ledger);
+    if (path === '$.worldTransition.indoors') return normalizeSemanticIndoorsValue(ledger);
+    return ledger;
+}
+
+function normalizeSemanticBooleanToken(value) {
+    if (typeof value !== 'string') return value;
+    const token = value.trim().toLowerCase();
+    if (['true', 'yes', 'y'].includes(token)) return true;
+    if (['false', 'no', 'n'].includes(token)) return false;
+    return value;
+}
+
+function normalizeSemanticIndoorsValue(value) {
+    if (value === true) return 'indoors';
+    if (value === false) return 'outdoors';
+    if (typeof value !== 'string') return value;
+
+    const token = value.trim().toLowerCase();
+    if (['true', 'yes', 'y', 'indoors'].includes(token)) return 'indoors';
+    if (['false', 'no', 'n', 'outdoors'].includes(token)) return 'outdoors';
+    return value;
 }
 
 function validateSchemaValue(value, schema, path) {
