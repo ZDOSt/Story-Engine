@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildStructuredToolChoice, estimateSemanticResponseLength, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -15653,7 +15653,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.70');
+      assert.equal(manifest.version, '0.9.71');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16573,6 +16573,7 @@ const tests = [
       });
 
       const expectedLedgerProperties = [
+        'turnBinding',
         'engineContext',
         'worldTransition',
         'worldProgression',
@@ -16629,10 +16630,10 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 244,
-        objects: 46,
+        leaves: 245,
+        objects: 47,
         arrays: 47,
-        descriptions: 100,
+        descriptions: 101,
         incompleteRequired: 0,
       });
       assert.match(
@@ -19475,6 +19476,150 @@ const tests = [
       assert.throws(
         () => evaluateSemanticGoldenOutputs([{ fixtureId: 'unknown_fixture', ledger: {} }]),
         /Unknown semantic golden fixture/,
+      );
+    },
+  },
+  {
+    name: 'semantic preflight is mechanically bound to the effective current user turn',
+    run() {
+      const normalOptions = {
+        latestUserText: 'I grab her hand, and pin her against the wall.',
+        semanticTurnKey: 'run-normal-1',
+        userInputMode: 'normal',
+      };
+      const normalBinding = createSemanticTurnBinding(normalOptions, 'normal');
+      assert.match(normalBinding.turnId, /^se-turn-[0-9a-f]{16}$/);
+      assert.deepEqual(createSemanticTurnBinding(normalOptions, 'normal'), normalBinding);
+
+      const regenerateBinding = createSemanticTurnBinding(normalOptions, 'regenerate');
+      const swipeBinding = createSemanticTurnBinding(normalOptions, 'swipe');
+      assert.notEqual(regenerateBinding.turnId, normalBinding.turnId);
+      assert.notEqual(swipeBinding.turnId, normalBinding.turnId);
+      assert.notEqual(swipeBinding.turnId, regenerateBinding.turnId);
+
+      const proxyBinding = createSemanticTurnBinding({
+        latestUserText: 'I take a step forward and ask her about herself.',
+        semanticTurnKey: 'run-proxy-1',
+        userInputMode: 'proxy',
+      }, 'normal');
+      const proxyBlock = buildSemanticTurnBindingBlock(proxyBinding);
+      assert.match(proxyBlock, /STORY ENGINE CURRENT TURN BINDING/);
+      assert.match(proxyBlock, /I take a step forward and ask her about herself\./);
+      assert.doesNotMatch(proxyBlock, /\[\[/);
+
+      const groundedLedger = (binding, evidence) => ({
+        turnBinding: { turnId: binding.turnId },
+        resolutionEngine: {
+          actionUnits: evidence.map((quote, index) => ({
+            id: `A${index + 1}`,
+            action: `action ${index + 1}`,
+            evidence: quote,
+          })),
+        },
+      });
+
+      assert.equal(
+        validateSemanticTurnGrounding(
+          groundedLedger(normalBinding, ['I grab her hand, and pin her against the wall.']),
+          normalBinding,
+        ).turnBinding.turnId,
+        normalBinding.turnId,
+      );
+
+      const multiActionBinding = createSemanticTurnBinding({
+        latestUserText: 'I slash at Val. Then I kick the dagger from her hand.',
+        semanticTurnKey: 'run-multiple-1',
+      }, 'normal');
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(
+        groundedLedger(multiActionBinding, ['I slash at Val.', 'I kick the dagger from her hand.']),
+        multiActionBinding,
+      ));
+
+      const dialogueBinding = createSemanticTurnBinding({
+        latestUserText: '"Hello there."',
+        semanticTurnKey: 'run-dialogue-1',
+      }, 'normal');
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(
+        groundedLedger(dialogueBinding, ['"Hello there."']),
+        dialogueBinding,
+      ));
+
+      const whitespaceBinding = createSemanticTurnBinding({
+        latestUserText: 'I grab her hand,\n\tand pin her against the wall.',
+        semanticTurnKey: 'run-whitespace-1',
+      }, 'normal');
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(
+        groundedLedger(whitespaceBinding, ['I grab her hand, and pin her against the wall.']),
+        whitespaceBinding,
+      ));
+      assert.throws(
+        () => validateSemanticTurnGrounding(
+          groundedLedger(whitespaceBinding, ['I seize her hand, and pin her against the wall.']),
+          whitespaceBinding,
+        ),
+        /not grounded by an exact quote/,
+      );
+      assert.throws(
+        () => validateSemanticTurnGrounding(
+          groundedLedger(whitespaceBinding, ['i grab her hand, and pin her against the wall.']),
+          whitespaceBinding,
+        ),
+        /not grounded by an exact quote/,
+      );
+
+      const wrongTurnLedger = groundedLedger(normalBinding, ['I grab her hand, and pin her against the wall.']);
+      wrongTurnLedger.turnBinding.turnId = 'se-turn-wrong';
+      let wrongTurnError;
+      assert.throws(() => {
+        try {
+          validateSemanticTurnGrounding(wrongTurnLedger, normalBinding);
+        } catch (error) {
+          wrongTurnError = error;
+          throw error;
+        }
+      }, /did not echo the current turn ID exactly/);
+      assert.match(formatSemanticDiagnostic(wrongTurnError), /Code: SE-TURN-GROUNDING/);
+
+      assert.throws(
+        () => validateSemanticTurnGrounding(
+          groundedLedger(normalBinding, ['User wakes and receives care from guardian NPC']),
+          normalBinding,
+        ),
+        /not grounded by an exact quote/,
+        'The Haiku prior-assistant-narration regression must fail closed.',
+      );
+      assert.throws(
+        () => validateSemanticTurnGrounding(
+          groundedLedger(normalBinding, ['Phoebe told him to rest.']),
+          normalBinding,
+        ),
+        /not grounded by an exact quote/,
+        'Evidence copied from prior assistant narration must fail closed.',
+      );
+
+      const engineReference = 'Engine reference: FULL ENGINE GUIDANCE';
+      const cardContext = 'Full card, persona, lore, history, and tracker context';
+      const compactContract = 'STRICT COMPACT PREFLIGHT LEDGER CONTRACT:\nBEGIN_SEMANTIC_PREFLIGHT\nEND_SEMANTIC_PREFLIGHT';
+      const semanticPrompt = [
+        { role: 'system', content: engineReference },
+        { role: 'system', content: cardContext },
+        { role: 'assistant', content: 'Earlier assistant narration remains context.' },
+        { role: 'user', content: compactContract },
+        { role: 'user', content: buildSemanticTurnBindingBlock(normalBinding) },
+      ];
+      const toolPrompt = buildSemanticToolPrompt(semanticPrompt);
+      assert.equal(toolPrompt.length, semanticPrompt.length);
+      assert.equal(toolPrompt[0].content, engineReference);
+      assert.equal(toolPrompt[1].content, cardContext);
+      assert.equal(toolPrompt[2].content, semanticPrompt[2].content);
+      assert.match(toolPrompt[3].content, /Call the function tool submit_semantic_preflight exactly once/);
+      assert.match(toolPrompt[3].content, /Echo the exact authoritative current turn ID/);
+      assert.equal(toolPrompt[4].content, buildSemanticTurnBindingBlock(normalBinding));
+      assert.equal(toolPrompt[4].role, 'user');
+
+      assert.throws(
+        () => createSemanticTurnBinding({ latestUserText: '   ' }, 'normal'),
+        /no effective current user input/,
       );
     },
   },

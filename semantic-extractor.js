@@ -29,6 +29,7 @@ const SEMANTIC_RESPONSE_LENGTH_MIN = 4096;
 const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
+const SEMANTIC_TURN_BINDING_BLOCK_HEADER = 'STORY ENGINE CURRENT TURN BINDING';
 const SEMANTIC_DIAGNOSTIC_DETAILS = Symbol('storyEngineSemanticDiagnosticDetails');
 const SEMANTIC_DIAGNOSTIC_REPORTED = Symbol('storyEngineSemanticDiagnosticReported');
 const SEMANTIC_DIAGNOSTIC_EXCERPT_RADIUS = 160;
@@ -125,19 +126,22 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
 }
 
 async function extractSemanticLedgerInternal(context, promptContext, type, trackerSnapshot, options = {}) {
-    const playerTrackerSnapshot = options?.playerTrackerSnapshot || {};
-    const prompt = options?.assembledPrompt
-        ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, options)
-        : buildSemanticPrompt(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, options);
-    const responseLength = Number.isFinite(options?.responseLength) && options.responseLength > 0
-        ? options.responseLength
-        : estimateSemanticResponseLength(trackerSnapshot, promptContext, options);
+    const turnBinding = createSemanticTurnBinding(options, type);
+    const semanticOptions = { ...options, semanticTurnBinding: turnBinding };
+    const playerTrackerSnapshot = semanticOptions?.playerTrackerSnapshot || {};
+    const prompt = semanticOptions?.assembledPrompt
+        ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, semanticOptions)
+        : buildSemanticPrompt(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, semanticOptions);
+    validateSemanticPromptTurnBinding(prompt, turnBinding);
+    const responseLength = Number.isFinite(semanticOptions?.responseLength) && semanticOptions.responseLength > 0
+        ? semanticOptions.responseLength
+        : estimateSemanticResponseLength(trackerSnapshot, promptContext, semanticOptions);
 
     let toolResult;
     try {
-        toolResult = options?.semanticProfileId
-            ? await generateSemanticToolCallWithProfile(prompt, responseLength, options)
-            : await generateSemanticToolCall(prompt, responseLength, options);
+        toolResult = semanticOptions?.semanticProfileId
+            ? await generateSemanticToolCallWithProfile(prompt, responseLength, semanticOptions)
+            : await generateSemanticToolCall(prompt, responseLength, semanticOptions);
     } catch (error) {
         options?.signal?.throwIfAborted?.();
         const message = error instanceof Error ? error.message : String(error);
@@ -168,9 +172,19 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
         );
     }
 
+    try {
+        validateSemanticTurnGrounding(ledger, turnBinding);
+        delete ledger.turnBinding;
+    } catch (error) {
+        throw annotateSemanticDiagnosticError(error, {
+            code: 'SE-TURN-GROUNDING',
+            stage: 'Current-turn grounding',
+        });
+    }
+
     let normalized;
     try {
-        normalized = normalizeLedger(ledger, options);
+        normalized = normalizeLedger(ledger, semanticOptions);
         validateNormalizedLedger(normalized, toolResult.ledger);
     } catch (error) {
         throw annotateSemanticDiagnosticError(error, {
@@ -179,7 +193,7 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
         });
     }
     try {
-        validateSemanticWorldProgression(normalized, options, context);
+        validateSemanticWorldProgression(normalized, semanticOptions, context);
         validateRelationshipCoverage(normalized.resolutionEngine, normalized.relationshipEngine);
     } catch (error) {
         throw annotateSemanticDiagnosticError(error, {
@@ -190,14 +204,14 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
     normalized.deterministicOverrides = {
         ...(normalized.deterministicOverrides || {}),
         semanticLedgerExtraction: {
-            source: options?.semanticProfileId
-                ? `SillyTavern Connection Manager profile tool + complete local validation (${options.semanticProfileName || options.semanticProfileId})`
+            source: semanticOptions?.semanticProfileId
+                ? `SillyTavern Connection Manager profile tool + complete local validation (${semanticOptions.semanticProfileName || semanticOptions.semanticProfileId})`
                 : 'SillyTavern backend tool + complete local validation',
-            schema: 'submit_semantic_preflight_structured_v3',
+            schema: 'submit_semantic_preflight_structured_v4',
             strict: true,
             responseLength,
             toolName: SEMANTIC_TOOL_NAME,
-            semanticProfile: options?.semanticProfileName || undefined,
+            semanticProfile: semanticOptions?.semanticProfileName || undefined,
         },
     };
     const personaCoreStats = extractPersonaCoreStats(context);
@@ -485,6 +499,7 @@ function isSemanticToolTransportError(error) {
 
 async function generateSemanticToolCall(prompt, responseLength, options = {}) {
     const toolPrompt = buildSemanticToolPrompt(prompt);
+    validateSemanticPromptTurnBinding(toolPrompt, options.semanticTurnBinding);
     try {
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
             purpose: 'semantic preflight tool call',
@@ -502,7 +517,7 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
                 requestId: semanticResponseRequestId(raw),
             });
         }
-        const ledger = extractSemanticToolLedger(raw);
+        const ledger = extractSemanticToolLedger(raw, {}, options.semanticTurnBinding);
         return { raw, ledger };
     } catch (error) {
         if (isSemanticToolTransportError(error) || findSemanticDiagnosticDetails(error)) throw error;
@@ -522,6 +537,7 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
     };
     const chatCompletionSource = route.source;
     const toolPrompt = buildSemanticToolPrompt(prompt);
+    validateSemanticPromptTurnBinding(toolPrompt, options.semanticTurnBinding);
     const semanticTool = buildSemanticPreflightTool(chatCompletionSource, route);
     const preparePayload = payload => applyStoryEngineThinkingDisabledPayload(payload, route);
     const overridePayload = {
@@ -578,7 +594,7 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
         provider: route.source,
         model: route.model,
         profile: options.semanticProfileName || options.semanticProfileId,
-    });
+    }, options.semanticTurnBinding);
     return { raw, ledger };
 }
 
@@ -818,6 +834,118 @@ function isRecord(value) {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function opaqueSemanticTurnHash(value, seed) {
+    let hash = seed >>> 0;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, '0');
+}
+
+export function createSemanticTurnBinding(options = {}, type = 'normal') {
+    const effectiveUserInput = String(options?.latestUserText || '').trim();
+    if (!effectiveUserInput) {
+        throw annotateSemanticDiagnosticError(
+            new Error('Semantic preflight has no effective current user input to bind.'),
+            { code: 'SE-TURN-GROUNDING', stage: 'Current-turn grounding' },
+        );
+    }
+    const seed = JSON.stringify({
+        run: String(options?.semanticTurnKey || ''),
+        type: String(type || 'normal'),
+        mode: String(options?.userInputMode || 'normal'),
+        input: effectiveUserInput,
+    });
+    return {
+        turnId: `se-turn-${opaqueSemanticTurnHash(seed, 0x811c9dc5)}${opaqueSemanticTurnHash(seed, 0x9e3779b9)}`,
+        effectiveUserInput,
+    };
+}
+
+export function buildSemanticTurnBindingBlock(turnBinding) {
+    const turnId = String(turnBinding?.turnId || '').trim();
+    const effectiveUserInput = String(turnBinding?.effectiveUserInput || '');
+    if (!turnId || !effectiveUserInput) {
+        throw annotateSemanticDiagnosticError(
+            new Error('Semantic current-turn binding is incomplete.'),
+            { code: 'SE-TURN-GROUNDING', stage: 'Current-turn grounding' },
+        );
+    }
+    const payload = JSON.stringify({ turnId, effectiveUserInput });
+    return [
+        SEMANTIC_TURN_BINDING_BLOCK_HEADER,
+        'The JSON object below is authoritative data for this semantic pass. Analyze effectiveUserInput as the current user turn; use all earlier messages only as context.',
+        payload,
+        'Echo turnId exactly in turnBinding.turnId.',
+        'For every resolutionEngine.actionUnits entry, copy evidence as an exact contiguous quote from effectiveUserInput. Whitespace and line breaks may be normalized, but wording, punctuation, and letter case must not be changed. Never use assistant narration or an earlier user turn as action-unit evidence.',
+    ].join('\n');
+}
+
+function validateSemanticPromptTurnBinding(prompt, turnBinding) {
+    const messages = Array.isArray(prompt) ? prompt : [];
+    const finalMessage = messages.at(-1);
+    const expectedBlock = buildSemanticTurnBindingBlock(turnBinding);
+    if (finalMessage?.role !== 'user' || finalMessage?.content !== expectedBlock) {
+        throw annotateSemanticDiagnosticError(
+            new Error('Semantic request did not preserve the authoritative current-turn block as its final message.'),
+            { code: 'SE-TURN-GROUNDING', stage: 'Current-turn grounding' },
+        );
+    }
+    return true;
+}
+
+function normalizeTurnGroundingQuote(value) {
+    return String(value ?? '')
+        .normalize('NFC')
+        .trim()
+        .replace(/\s+/gu, ' ');
+}
+
+function validateSemanticTurnIdentity(ledger, turnBinding) {
+    const expectedTurnId = String(turnBinding?.turnId || '').trim();
+    const returnedTurnId = String(ledger?.turnBinding?.turnId || '').trim();
+    if (!expectedTurnId || returnedTurnId !== expectedTurnId) {
+        throw annotateSemanticDiagnosticError(
+            new Error('Semantic tool result did not echo the current turn ID exactly.'),
+            { code: 'SE-TURN-GROUNDING', stage: 'Current-turn grounding', field: '$.turnBinding.turnId' },
+        );
+    }
+    return true;
+}
+
+export function validateSemanticTurnGrounding(ledger, turnBinding) {
+    validateSemanticTurnIdentity(ledger, turnBinding);
+    const effectiveUserInput = normalizeTurnGroundingQuote(turnBinding?.effectiveUserInput);
+    if (!effectiveUserInput) {
+        throw annotateSemanticDiagnosticError(
+            new Error('Semantic current-turn input is empty after normalization.'),
+            { code: 'SE-TURN-GROUNDING', stage: 'Current-turn grounding' },
+        );
+    }
+    const actionUnits = ledger?.resolutionEngine?.actionUnits;
+    if (!Array.isArray(actionUnits) || actionUnits.length === 0) {
+        throw annotateSemanticDiagnosticError(
+            new Error('Semantic tool result has no action-unit evidence bound to the current turn.'),
+            { code: 'SE-TURN-GROUNDING', stage: 'Current-turn grounding', field: '$.resolutionEngine.actionUnits' },
+        );
+    }
+    for (const [index, unit] of actionUnits.entries()) {
+        const evidence = normalizeTurnGroundingQuote(unit?.evidence);
+        if (!evidence || isNoneValue(evidence) || !effectiveUserInput.includes(evidence)) {
+            throw annotateSemanticDiagnosticError(
+                new Error(`Semantic action unit A${index + 1} is not grounded by an exact quote from the current user input.`),
+                {
+                    code: 'SE-TURN-GROUNDING',
+                    stage: 'Current-turn grounding',
+                    field: `$.resolutionEngine.actionUnits[${index}].evidence`,
+                },
+            );
+        }
+    }
+    return ledger;
+}
+
 export function buildSemanticToolPrompt(prompt) {
     const messages = Array.isArray(prompt)
         ? prompt.map(message => ({ ...message }))
@@ -837,6 +965,7 @@ export function buildSemanticToolPrompt(prompt) {
         'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
         'For enum fields, use exactly one value listed by the schema. Never invent a synonym or alternate label.',
         'Use an empty array when a repeated section has no entries. Do not emit count fields, placeholder rows, or sentinel values in arrays.',
+        'Echo the exact authoritative current turn ID in turnBinding.turnId, and ground every resolutionEngine.actionUnits evidence value with an exact contiguous quote from the supplied effectiveUserInput.',
         'Legacy shorthand in the semantic guidance maps to this schema as follows: Y/N means true/false; count=0, a list value of (none), or ["(none)"] means an empty array; [index] means one array entry; and references to lines or the template mean the corresponding schema properties. Apply the guidance semantically; never emit compact ledger keys.',
         'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
         'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. The tool schema changes only transport structure; do not reduce, reinterpret, or invent ledger content.',
@@ -1122,7 +1251,7 @@ function buildSemanticPreflightSchema() {
     const actionUnit = object({
         id: enumString(['A1', 'A2', 'A3'], 'A1, A2, or A3. actionUnits is the only semantic source for mechanically counted actions.'),
         action: string('Short clean description of this mechanically counted user action.'),
-        evidence: string('Brief latest-user-text evidence for this action unit. Audit only; not narration.'),
+        evidence: string('Exact contiguous quote copied from the authoritative effective current user input for this action unit. Whitespace/line breaks may be normalized; wording, punctuation, and letter case may not. Audit only; not narration.'),
     });
     const worldTransition = object({
         reputationLocation: string('Use unchanged unless the latest user input explicitly changes the current settlement, route, region, or reputation jurisdiction. Never copy or infer the existing scene state.'),
@@ -1190,6 +1319,9 @@ function buildSemanticPreflightSchema() {
     });
 
     return object({
+        turnBinding: object({
+            turnId: string('Echo the exact opaque turnId supplied in the final STORY ENGINE CURRENT TURN BINDING block. Audit only; never infer or alter it.'),
+        }),
         engineContext: object({
             trackerRelevantNPCs: array(object({ NPC: string() })),
             userReputationContext: object({
@@ -1262,7 +1394,7 @@ function buildSemanticPreflightSchema() {
     });
 }
 
-function extractSemanticToolLedger(raw, diagnosticContext = {}) {
+function extractSemanticToolLedger(raw, diagnosticContext = {}, turnBinding = null) {
     const calls = collectToolCalls(raw);
     const responseDiagnosticContext = {
         requestId: semanticResponseRequestId(raw),
@@ -1302,6 +1434,7 @@ function extractSemanticToolLedger(raw, diagnosticContext = {}) {
             },
         );
     }
+    if (turnBinding) validateSemanticTurnIdentity(ledger, turnBinding);
     const normalizedLedger = normalizeSemanticToolArgumentTypes(ledger);
     try {
         validateSemanticToolArguments(normalizedLedger);
@@ -2221,6 +2354,10 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTra
                 `${compactDynamicRowGuidance()}\n` +
                 compactTemplate,
         },
+        {
+            role: 'user',
+            content: buildSemanticTurnBindingBlock(options.semanticTurnBinding),
+        },
     ];
 }
 
@@ -2253,6 +2390,10 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
                 `${COMPACT_LEDGER_OUTPUT_CONTRACT}\n` +
                 `${compactDynamicRowGuidance()}\n` +
                 compactTemplate,
+        },
+        {
+            role: 'user',
+            content: buildSemanticTurnBindingBlock(options.semanticTurnBinding),
         },
     ];
 }

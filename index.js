@@ -14848,6 +14848,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',
             latestUserText: pendingGeneration?.latestUserText || getLatestUserText(context?.chat),
+            semanticTurnKey: pendingGeneration?.runId || '',
             proxyUserAction: pendingGeneration?.mode === 'proxy' ? pendingGeneration?.latestUserText : '',
             inlineProxyInstructions: pendingGeneration?.inlineProxyInstructions || [],
             signal: modelRequest.signal,
