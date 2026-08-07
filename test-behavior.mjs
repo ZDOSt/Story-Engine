@@ -15653,7 +15653,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.71');
+      assert.equal(manifest.version, '0.9.72');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -17941,6 +17941,17 @@ const tests = [
       assert.ok(renderSource.includes('ensureSettingsPanelStyles();'));
       assert.ok(renderSource.includes('spe-settings-shell'));
       assert.ok(renderSource.includes('spe-settings-section'));
+      assert.match(source, /function renderSettingsInfo\(id, text, label = 'More information'\)/);
+      assert.match(source, /class="spe-settings-help-button"[^>]*aria-label="\$\{escapeHtml\(label\)\}"[^>]*aria-describedby="\$\{escapeHtml\(id\)\}"/);
+      assert.match(source, /class="spe-settings-tooltip"[^>]*id="\$\{escapeHtml\(id\)\}"[^>]*role="tooltip"/);
+      assert.match(source, /\.spe-settings-help:hover \.spe-settings-tooltip/);
+      assert.match(source, /\.spe-settings-help:focus-within \.spe-settings-tooltip/);
+      assert.match(source, /--spe-settings-accent: #73d0ff/);
+      assert.match(source, /--spe-settings-accent: #8bd49c/);
+      assert.match(source, /--spe-settings-accent: #f3a6c8/);
+      assert.match(source, /--spe-settings-accent: #f0c674/);
+      assert.match(source, /--spe-settings-accent: #c6a0f6/);
+      assert.doesNotMatch(renderSource, /spe-settings-description|spe-settings-note/);
 
       const sections = [
         ['data-spe-settings-step="master"', 'Master switch', 'Story Engine'],
