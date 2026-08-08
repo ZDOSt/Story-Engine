@@ -13319,9 +13319,12 @@ const tests = [
         latestUserText: 'I walk to Mira and ask her a few questions about herself.',
         coAuthorModeEnabled: true,
       });
-      assert.match(coAuthorText, /Co-author proxy mode for \{\{user\}\} is active for this response only/);
-      assert.match(coAuthorText, /observable physical actions and audible dialogue/);
-      assert.match(coAuthorText, /never invent or state \{\{user\}\}'s thoughts, feelings, beliefs, motivations, intentions, decisions/);
+      assert.match(coAuthorText, /ACTIVE CO-AUTHOR SCOPE for \{\{user\}\} is valid for this response only/);
+      assert.match(coAuthorText, /observable physical actions, exact audible dialogue/);
+      assert.match(coAuthorText, /Render those actions as vivid, specific in-scene prose integrated with the surrounding narration/);
+      assert.match(coAuthorText, /Do not output a bare paraphrase, instruction echo, action label, or mechanical recap/);
+      assert.match(coAuthorText, /render an actual concise back-and-forth with \{\{user\}\}'s spoken contributions and the NPC's responses/);
+      assert.match(coAuthorText, /never invent or state \{\{user\}\}'s thoughts, feelings, beliefs, motivations, memories/);
       assert.match(coAuthorText, /Do not introduce a new goal, consequential choice, stakes-bearing action, or mechanically meaningful effect/);
       assert.match(coAuthorText, /Resolved mechanics determine which attempts occur, land, succeed, fail, or remain incomplete/);
 
@@ -13342,6 +13345,9 @@ const tests = [
         coAuthorModeEnabled: true,
       });
       assert.match(inlineCoAuthorText, /Inline co-author proxy scope for \{\{user\}\} is active for this response only/);
+      assert.match(inlineCoAuthorText, /Render authorized actions as natural in-scene prose integrated with surrounding narration/);
+      assert.match(inlineCoAuthorText, /Do not output a bare paraphrase, instruction echo, action label, or mechanical recap/);
+      assert.match(inlineCoAuthorText, /render an actual concise back-and-forth with \{\{user\}\}'s spoken contributions and the NPC's responses/);
       assert.match(inlineCoAuthorText, /Unbracketed user input remains governed by strict agency separation and input chronology/);
       assert.match(inlineCoAuthorText, /Conditional instructions resolve only when their stated condition actually occurs and the resolved mechanics support the action/);
       assert.match(inlineCoAuthorText, /select no branch merely for dramatic convenience/);
@@ -15155,17 +15161,20 @@ const tests = [
       assert.match(mainRulesSource, /Related points may be combined into one natural response\. Do not answer them point by point/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
       assert.match(mainRulesSource, /Once this contribution is complete, that character\/NPC's turn ENDS/);
-      assert.match(mainRulesSource, /DO NOT allow a character\/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups/);
-      assert.match(mainRulesSource, /DO NOT allow ANY character\/NPC to make multiple response-seeking questions or statements in one turn/);
+      assert.match(mainRulesSource, /DO NOT allow a character\/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE/);
+      assert.match(mainRulesSource, /DO NOT allow ANY character\/NPC to make multiple response-seeking questions or statements in one turn outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE/);
+      assert.match(mainRulesSource, /SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts\(input\) declares an ACTIVE CO-AUTHOR SCOPE that explicitly requests a conversation/);
+      assert.match(mainRulesSource, /Render a concise, actual exchange with the necessary audible contributions from \{\{user\}\} and the NPC/);
       assert.doesNotMatch(mainRulesSource, /The contribution MUST leave the current exchange active|ONE brief continuation tied to the SAME exchange|response-seeking continuation/);
       assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
       assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Your response MUST begin at the FIRST moment AFTER the final action, observation, line of audible dialogue, or private mental communication in \{\{user\}\}'s input/);
       assert.match(mainRulesSource, /Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development/);
-      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s input/);
+      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s input outside an ACTIVE CO-AUTHOR SCOPE/);
       assert.match(mainRulesSource, /DO NOT re-describe unchanged environments, objects, or characters already established in \{\{user\}\}'s input or previous narration/);
-      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication/);
+      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication except for the authorized bracketed composition required to fulfill an ACTIVE CO-AUTHOR SCOPE/);
+      assert.match(mainRulesSource, /SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts\(input\) declares an ACTIVE CO-AUTHOR SCOPE, the authorized double-square-bracket direction is a pending composition brief/);
 
       assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
       assert.match(mainRulesSource, /You MUST describe actions, sensations, objects, and events DIRECTLY by stating what they are, what they do, or what concrete effects they produce/);
@@ -15178,7 +15187,8 @@ const tests = [
       assert.match(mainRulesSource, /The human player EXCLUSIVELY controls \{\{user\}\}/);
       assert.match(mainRulesSource, /You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects/);
       assert.match(mainRulesSource, /Any action that can be voluntarily chosen is EXCLUSIVELY controlled by \{\{user\}\}/);
-      assert.match(mainRulesSource, /DO NOT narrate \{\{user\}\}'s thoughts, feelings, choices, decisions, voluntary actions, or dialogue/);
+      assert.match(mainRulesSource, /SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts\(input\) declares an ACTIVE CO-AUTHOR SCOPE, the human has explicitly authorized the narrator to choose and narrate \{\{user\}\}'s observable voluntary actions/);
+      assert.match(mainRulesSource, /DO NOT narrate \{\{user\}\}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states, including within an ACTIVE CO-AUTHOR SCOPE/);
 
       assert.match(mainRulesSource, /function strictBehaviorism\(response, context\):/);
       assert.match(mainRulesSource, /When conveying character\/NPC state or emotion, you MUST show it ONLY through directly observable behavior, action, or dialogue/);
@@ -15697,7 +15707,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.74');
+      assert.equal(manifest.version, '0.9.75');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);

@@ -390,10 +390,12 @@ function RenderControlEngine(response, input, context) {
 
       Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development.
 
+      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE, the authorized double-square-bracket direction is a pending composition brief, not a completed event. Within that bracketed scope only, render the authorized {{user}} actions and audible dialogue before continuing with what happens next. Do not re-stage unbracketed input.
+
     FORBIDDEN:
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input outside an ACTIVE CO-AUTHOR SCOPE.
       - DO NOT re-describe unchanged environments, objects, or characters already established in {{user}}'s input or previous narration.
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication except for the authorized bracketed composition required to fulfill an ACTIVE CO-AUTHOR SCOPE.
   }
 
   function dialogueTurn(response, context): {
@@ -408,12 +410,14 @@ function RenderControlEngine(response, input, context) {
 
       Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly shown through dialogue or observable behavior rather than accidental omission.
 
+      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE that explicitly requests a conversation, exchange, dialogue, questions, or similar interaction, suspend the one-contribution limit only within that bounded authorized interaction. Render a concise, actual exchange with the necessary audible contributions from {{user}} and the NPC. Do not extend the exchange into unrelated topics or additional turns.
+
       Once this contribution is complete, that character/NPC's turn ENDS.
 
     FORBIDDEN:
       - ONLY the intended recipient of private mental communication through an established link may respond to it.
-      - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups.
-      - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn.
+      - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE.
   }
 
   function antiRhetoricalNegation(response, context): {
@@ -462,10 +466,12 @@ function RenderControlEngine(response, input, context) {
 
       Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
 
+      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE, the human has explicitly authorized the narrator to choose and narrate {{user}}'s observable voluntary actions, exact audible dialogue, local gestures, and necessary conversational turn-taking required to fulfill only that bracketed direction for this response. Render the authorized actions as vivid, specific in-scene prose integrated with the surrounding narration, expanding concrete movement, contact, sound, and supported immediate visible consequence. Do not output a bare paraphrase, instruction echo, action label, or mechanical recap. This does not authorize {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states.
+
     FORBIDDEN:
-      - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
-      - DO NOT narrate {{user}}'s thoughts, feelings, choices, decisions, voluntary actions, or dialogue.
-      - DO NOT interpret, assume, or complete {{user}}'s intent.
+      - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen, except for observable choices and dialogue required to fulfill an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT narrate {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states, including within an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT interpret, assume, or complete {{user}}'s intent outside an ACTIVE CO-AUTHOR SCOPE.
   }
 
   function strictEpistemology(response, context): {
@@ -2120,7 +2126,7 @@ function renderSettingsPanel() {
                                     <input id="structured_preflight_co_author_mode_enabled" type="checkbox">
                                     <span>Enable Co-Author Mode</span>
                                 </label>
-                                ${renderSettingsInfo('spe-settings-help-co-author', 'When enabled, double-square-bracket instructions authorize the narrator to naturally expand observable {{user}} actions and audible dialogue within those brackets for one response only. Unbracketed agency and all private internal states remain protected.', 'About Co-Author Mode')}
+                                ${renderSettingsInfo('spe-settings-help-co-author', 'When enabled, double-square-bracket instructions authorize the narrator to choose {{user}}\'s observable actions, spoken dialogue, and bounded conversational turn-taking for one response only. Thoughts, feelings, private mental states, and anything outside the brackets remain protected.', 'About Co-Author Mode')}
                             </div>
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">

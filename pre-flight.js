@@ -1511,8 +1511,11 @@ function RenderControlEngine(response, input, context) {
 
       Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
 
+      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE, the human has explicitly authorized the narrator to choose and narrate {{user}}'s observable voluntary actions, exact audible dialogue, local gestures, and necessary conversational turn-taking required to fulfill only that bracketed direction for this response. Render the authorized actions as vivid, specific in-scene prose integrated with the surrounding narration, expanding concrete movement, contact, sound, and supported immediate visible consequence. Do not output a bare paraphrase, instruction echo, action label, or mechanical recap. This does not authorize {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states.
+
     FORBIDDEN:
-      - DO NOT invent undeclared {{user}} thoughts, feelings, choices, decisions, voluntary actions, dialogue, or intent.
+      - DO NOT invent undeclared {{user}} thoughts, feelings, choices, decisions, voluntary actions, dialogue, or intent outside an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT narrate {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states, including within an ACTIVE CO-AUTHOR SCOPE.
   }
 
   function antiStockPhrasing(response, context): {
@@ -1565,12 +1568,14 @@ function RenderControlEngine(response, input, context) {
 
       Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly shown through dialogue or observable behavior rather than accidental omission.
 
+      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE that explicitly requests a conversation, exchange, dialogue, questions, or similar interaction, suspend the one-contribution limit only within that bounded authorized interaction. Render a concise, actual exchange with the necessary audible contributions from {{user}} and the NPC. Do not extend the exchange into unrelated topics or additional turns.
+
       Once this contribution is complete, that character/NPC's turn ENDS.
 
     FORBIDDEN:
       - ONLY the intended recipient of private mental communication through an established link may respond to it.
-      - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups.
-      - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn.
+      - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE.
   }
 
   function inputChronology(response, input, context): {
@@ -1579,10 +1584,12 @@ function RenderControlEngine(response, input, context) {
 
       Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development.
 
+      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE, the authorized double-square-bracket direction is a pending composition brief, not a completed event. Within that bracketed scope only, render the authorized {{user}} actions and audible dialogue before continuing with what happens next. Do not re-stage unbracketed input.
+
     FORBIDDEN:
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input outside an ACTIVE CO-AUTHOR SCOPE.
       - DO NOT re-describe unchanged environments, objects, or characters already established in {{user}}'s input or previous narration.
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication except for the authorized bracketed composition required to fulfill an ACTIVE CO-AUTHOR SCOPE.
   }
 
   function activeHandoff(response, context): {
@@ -2422,7 +2429,7 @@ function narrativeProxyUserActionFact(options = {}) {
     if (options?.mode === 'proxy') {
         const action = narratorUserMacroText(options?.latestUserText || options?.proxyUserAction);
         if (coAuthorModeEnabled) {
-            return `Co-author proxy mode for {{user}} is active for this response only because Co-Author Mode is enabled and the latest instruction was entirely wrapped in double square brackets. The human has authorized the narrator to naturally expand this direction into {{user}}'s observable physical actions and audible dialogue: ${action}. This is a one-response exception to normal agency separation and input chronology only within the authorized direction. Use established observable behavior and speaking style when available, but never invent or state {{user}}'s thoughts, feelings, beliefs, motivations, intentions, decisions, private mental communication, or other internal state. Do not introduce a new goal, consequential choice, stakes-bearing action, or mechanically meaningful effect beyond the authorized direction and authoritative narrative facts. Resolved mechanics determine which attempts occur, land, succeed, fail, or remain incomplete. Do not continue controlling {{user}} after the authorized direction has been fulfilled.`;
+            return `ACTIVE CO-AUTHOR SCOPE for {{user}} is valid for this response only because Co-Author Mode is enabled and the latest instruction was entirely wrapped in double square brackets. Treat the bracketed text as a pending composition brief, not as already-completed narration. The human has authorized the narrator to choose and render {{user}}'s observable physical actions, exact audible dialogue, gestures, and necessary conversational turn-taking needed to fulfill this direction: ${action}. Render those actions as vivid, specific in-scene prose integrated with the surrounding narration, expanding concrete movement, contact, sound, and supported immediate visible consequence. Do not output a bare paraphrase, instruction echo, action label, or mechanical recap. If it requests a conversation, exchange, dialogue, questions, or similar interaction, render an actual concise back-and-forth with {{user}}'s spoken contributions and the NPC's responses; do not summarize the conversation or replace it with only NPC dialogue. This is a one-response exception to normal agency separation, input chronology, and the one-contribution dialogue limit only within the bounded authorized direction. Use established observable behavior, speaking style, knowledge, and scene facts when available, but never invent or state {{user}}'s thoughts, feelings, beliefs, motivations, memories, private mental communication, or other internal state. Do not introduce a new goal, unrelated topic, consequential choice, stakes-bearing action, or mechanically meaningful effect beyond the authorized direction and authoritative narrative facts. Resolved mechanics determine which attempts occur, land, succeed, fail, or remain incomplete. Do not continue controlling {{user}} after the authorized direction has been fulfilled.`;
         }
         return `Proxy action mode for {{user}} is active for this response only because the latest instruction used double square brackets. The human has asked narration to cover this exact action by {{user}}: ${action}. This is the only exception to normal agency separation. Do not add extra dialogue, thoughts, feelings, decisions, follow-up actions, reactions, silence, or choices for {{user}} beyond that instruction and the listed narrative facts.`;
     }
@@ -2430,7 +2437,7 @@ function narrativeProxyUserActionFact(options = {}) {
     if (!instructions.length) return '';
     const instructionText = instructions.map((instruction, index) => `${index + 1}. ${narratorUserMacroText(instruction)}`).join(' ');
     if (coAuthorModeEnabled) {
-        return `Inline co-author proxy scope for {{user}} is active for this response only because Co-Author Mode is enabled. The human has authorized the narrator to naturally expand only these double-square-bracket directions into {{user}}'s observable physical actions and audible dialogue: ${instructionText}. Unbracketed user input remains governed by strict agency separation and input chronology; do not add behavior for {{user}} outside the bracketed scope. Use established observable behavior and speaking style when available, but never invent or state {{user}}'s thoughts, feelings, beliefs, motivations, intentions, decisions, private mental communication, or other internal state. Do not introduce a new goal, consequential choice, stakes-bearing action, or mechanically meaningful effect beyond the authorized directions and authoritative narrative facts. Conditional instructions resolve only when their stated condition actually occurs and the resolved mechanics support the action; select no branch merely for dramatic convenience. Resolved mechanics determine which attempts occur, land, succeed, fail, or remain incomplete. The authorization expires after this response.`;
+        return `ACTIVE INLINE CO-AUTHOR SCOPE for {{user}} is valid for this response only because Co-Author Mode is enabled. The human has authorized the narrator to naturally expand only these double-square-bracket directions into {{user}}'s observable physical actions, exact audible dialogue, gestures, and necessary conversational turn-taking: ${instructionText}. Render authorized actions as vivid, specific in-scene prose integrated with surrounding narration, expanding concrete movement, contact, sound, and supported immediate visible consequence. Do not output a bare paraphrase, instruction echo, action label, or mechanical recap. If a bracketed direction requests a conversation, exchange, dialogue, questions, or similar interaction, render an actual concise back-and-forth with {{user}}'s spoken contributions and the NPC's responses; do not summarize it or replace it with only NPC dialogue. Unbracketed user input remains governed by strict agency separation and input chronology; do not add behavior for {{user}} outside the bracketed scope. Use established observable behavior, speaking style, knowledge, and scene facts when available, but never invent or state {{user}}'s thoughts, feelings, beliefs, motivations, memories, private mental communication, or other internal state. Do not introduce a new goal, unrelated topic, consequential choice, stakes-bearing action, or mechanically meaningful effect beyond the authorized directions and authoritative narrative facts. Conditional instructions resolve only when their stated condition actually occurs and the resolved mechanics support the action; select no branch merely for dramatic convenience. Resolved mechanics determine which attempts occur, land, succeed, fail, or remain incomplete. The authorization expires after this response.`;
     }
     return `Inline proxy instructions from double square brackets are active for this response alongside the ordinary user input: ${instructionText}. Treat them as explicit {{user}}-declared action detail, intent, or conditional reaction text. Non-conditional instructions may be rendered only as declared {{user}} behavior compatible with the resolved scene facts. Conditional instructions resolve only if their condition actually occurs in this turn's narrative facts and the resolved mechanics support the action; otherwise show only preparation or readiness already supported by the visible input. Do not add extra dialogue, thoughts, feelings, decisions, follow-up actions, reactions, silence, or choices for {{user}} beyond the ordinary input, these inline instructions, and the listed narrative facts.`;
 }
