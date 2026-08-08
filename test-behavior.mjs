@@ -96,7 +96,10 @@ function structuredCharacterSheetPayload(overrides = {}) {
       priorRoleOrTraining: 'Courier training',
       ...(overrides.basicInfo || {}),
     },
-    appearance: [{ label: 'Build', detail: 'Broad-shouldered and athletic' }],
+    appearance: [
+      { label: 'Height', detail: '5 ft 8 in (173 cm)' },
+      { label: 'Build', detail: 'Broad-shouldered and athletic' },
+    ],
     naturalWeapons: [],
     abilities: [{ name: 'Wayfold', description: 'Opens a temporary passage between two visible doorways.' }],
     spells: [{ name: 'Mend Flesh', description: 'Closes a fresh wound beneath the caster\'s hand.' }],
@@ -15694,7 +15697,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.73');
+      assert.equal(manifest.version, '0.9.74');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -17678,7 +17681,9 @@ const tests = [
       assert.match(source, /You generate a SillyTavern user persona character sheet for roleplay/);
       assert.match(source, /This is a playable user character shell, not an authored protagonist/);
       assert.match(source, /Do not decide future choices, personality, habits, emotional reactions/);
-      assert.match(source, /Generate flavorful, concrete details with enough specificity to use as a full persona sheet/);
+      assert.match(source, /Generate concrete details with enough specificity to use as a full persona sheet/);
+      assert.match(source, /Keep ordinary background, appearance, inventory, currency, and gear concise, factual/);
+      assert.match(source, /reserve richer creative description for ability and spell concepts/);
       assert.match(source, /Abilities and spells must follow the selected genre power direction/);
       assert.match(source, /Produce the complete character-sheet data through the required structured output/);
       assert.match(source, /deterministic code owns the final headings, order, labels, name, and locked stats/);
@@ -18589,6 +18594,13 @@ const tests = [
       assert.equal(schema.properties.characterAnchors.minItems, 0);
       assert.equal(schema.properties.characterAnchors.maxItems, 3);
       assert.match(schema.properties.appearance.description, /Do not include scars, tattoos, birthmarks, brands, or other permanent marks/);
+      assert.match(schema.properties.appearance.description, /exactly one Height entry with a numeric measurement/);
+      assert.match(schema.properties.appearance.description, /Build must be compact and physical/);
+      assert.match(schema.properties.appearance.description, /Eyes must not imply a habitual gaze or personality/);
+      assert.match(schema.properties.appearance.description, /Skin must not assert marks or their absence unless supplied/);
+      assert.match(schema.properties.appearance.description, /Face must avoid beauty judgments/);
+      assert.match(schema.properties.appearance.description, /Hands must not infer strength, history, skill, or behavior/);
+      assert.match(schema.properties.basicInfo.properties.priorRoleOrTraining.description, /Preserve an explicit user-supplied role faithfully without broadening it/);
       assert.equal(buildCharacterSheetJsonSchema(options).strict, true);
 
       const deepSeekTool = buildCharacterSheetTool('deepseek', options);
@@ -18669,6 +18681,7 @@ const tests = [
       assert.equal((rendered.match(/^# /gm) || []).length, CHARACTER_SHEET_HEADINGS.length);
       assert.match(rendered, /^# BASIC INFO\n\*\*Name:\*\* \{\{user\}\}/);
       assert.match(rendered, /\*\*Race:\*\* Half-Elf/);
+      assert.match(rendered, /\*\*Height:\*\* 5 ft 8 in \(173 cm\)/);
       assert.match(rendered, /\*\*PHY:\*\* 9/);
       assert.match(rendered, /The character died on Earth and was reincarnated in another world\./);
       assert.equal(assertValidCharacterSheet(rendered, { stats, expectedRace: 'Half-Elf', genre: 'Isekai', requireNumericAge: true }), rendered);
@@ -18700,16 +18713,65 @@ const tests = [
 
       const unrequestedScarPayload = structuredCharacterSheetPayload({
         appearance: [
+          { label: 'Height', detail: '5 ft 8 in (173 cm)' },
           { label: 'Build', detail: 'Broad-shouldered and athletic' },
           { label: 'Scar', detail: 'A pale scar crosses the left cheek' },
         ],
       });
       assert.deepEqual(normalizeCharacterSheetPayload(unrequestedScarPayload, options).appearance, [
+        { label: 'Height', detail: '5 ft 8 in (173 cm)' },
         { label: 'Build', detail: 'Broad-shouldered and athletic' },
       ]);
       const requestedScarOptions = { ...options, explicitAppearanceSource: 'A pale scar crosses the left cheek.' };
       assert.match(buildCharacterSheetSchema(requestedScarOptions).properties.appearance.description, /Preserve only scars or other permanent marks explicitly supplied by the user/);
-      assert.equal(normalizeCharacterSheetPayload(unrequestedScarPayload, requestedScarOptions).appearance.length, 2);
+      assert.equal(normalizeCharacterSheetPayload(unrequestedScarPayload, requestedScarOptions).appearance.length, 3);
+
+      const withHeight = detail => structuredCharacterSheetPayload({
+        appearance: [
+          { label: 'Height', detail },
+          { label: 'Build', detail: 'Broad-shouldered and athletic' },
+        ],
+      });
+      assert.throws(
+        () => normalizeCharacterSheetPayload(withHeight('Slightly above average height for his age, standing with a full, grounded frame'), options),
+        /must contain a numeric measurement/,
+      );
+      assert.throws(
+        () => normalizeCharacterSheetPayload(structuredCharacterSheetPayload({ appearance: [{ label: 'Build', detail: 'Athletic' }] }), options),
+        /exactly one Height entry.*received 0/,
+      );
+      assert.throws(
+        () => normalizeCharacterSheetPayload(structuredCharacterSheetPayload({
+          appearance: [
+            { label: 'Height', detail: '178 cm' },
+            { label: 'height', detail: '5 ft 10 in' },
+          ],
+        }), options),
+        /exactly one Height entry.*received 2/,
+      );
+      assert.equal(normalizeCharacterSheetPayload(withHeight('178 cm'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight('1.78 m'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight('1 m 78 cm'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight('1 m, 78 cm'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight(`5'10"`), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight('5 feet, 10 inches'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight('5 ft. 10 in.'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight('5’10”'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight('70 inches'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.equal(normalizeCharacterSheetPayload(withHeight('5 ft 10 in (178 cm)'), options).appearance[0].detail, '5 ft 10 in (178 cm)');
+      assert.throws(
+        () => normalizeCharacterSheetPayload(withHeight('-178 cm'), options),
+        /must be positive numbers/,
+      );
+      assert.throws(
+        () => normalizeCharacterSheetPayload(withHeight('5 ft 12 in'), options),
+        /inches must be less than 12/,
+      );
+      assert.throws(
+        () => normalizeCharacterSheetPayload(withHeight('5 ft 10 in (165 cm)'), options),
+        /inconsistent metric and imperial measurements/,
+      );
+      assert.match(renderCharacterSheet(withHeight('1.78 m'), options), /\*\*Height:\*\* 5 ft 10 in \(178 cm\)/);
 
       const randomOptions = { mode: 'new', stats, fixedRace: '', fixedUserNonHuman: '', genre: 'Fantasy' };
       assert.deepEqual(buildCharacterSheetSchema(randomOptions).properties.basicInfo.properties.userNonHuman.enum, ['Y', 'N']);
@@ -18732,6 +18794,10 @@ const tests = [
 
       const existingPayload = structuredCharacterSheetPayload({
         basicInfo: { age: 'Several centuries', race: 'Vampire' },
+        appearance: [
+          { label: 'Height', detail: 'Slightly taller than most people in the region' },
+          { label: 'Build', detail: 'Broad-shouldered and athletic' },
+        ],
         abilities: [
           { name: 'Mist Form', description: 'Turns the body into mist.' },
           { name: 'Night Step', description: 'Crosses one patch of darkness instantly.' },
@@ -18741,6 +18807,7 @@ const tests = [
       const existing = normalizeCharacterSheetPayload(existingPayload, { mode: 'existing', stats });
       assert.equal(existing.abilities.length, 2);
       assert.equal(existing.spells.length, 5);
+      assert.equal(existing.appearance[0].detail, 'Slightly taller than most people in the region');
       const existingSchema = buildCharacterSheetSchema({ mode: 'existing', stats });
       assert.deepEqual(existingSchema.properties.basicInfo.properties.userNonHuman.enum, ['Y', 'N', 'Not specified']);
       assert.equal(existingSchema.properties.characterAnchors.maxItems, 48);
@@ -18764,6 +18831,13 @@ const tests = [
       );
       assert.match(source, /sendDefaultChatCompletionToolRequest/);
       assert.match(source, /String\(context\.mainApi \|\| ''\)\.toLowerCase\(\) === 'openai'/);
+      assert.match(source, /Include exactly one Height entry containing a numeric measurement/);
+      assert.match(source, /Preserve any explicit user-supplied role faithfully without broadening it into extra expertise, mastery, or unrelated knowledge/);
+      assert.match(source, /Build must be one compact physical description without subjective commentary/);
+      assert.match(source, /Eyes may state color and fixed physical traits but not a habitual gaze or implied personality/);
+      assert.match(source, /Skin may state tone and visible physical qualities but must not assert scars, marks, or their absence unless explicitly supplied/);
+      assert.match(source, /Face must use concrete physical features without beauty judgments/);
+      assert.match(source, /Hands must use physical characteristics only and must not infer strength, history, skill, or behavior/);
       assert.match(source, /buildTool: source => buildCharacterSheetTool\(source, generationOptions\)/);
       assert.match(source, /buildToolChoice: buildCharacterSheetToolChoice/);
       assert.match(source, /preparePayload: applyStoryEngineBaselineThinkingDisabledPayload/);

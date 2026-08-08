@@ -220,8 +220,10 @@ export function buildCharacterSheetSchema(options = {}) {
         additionalProperties: false,
         required: ['label', 'detail'],
         properties: {
-            label: { type: 'string' },
-            detail: { type: 'string' },
+            label: { type: 'string', description: 'A concise physical-fact label such as Height, Build, Hair, Eyes, Skin, Face, Hands, or Clothing.' },
+            detail: { type: 'string', description: mode === 'new'
+                ? 'One concise, objective physical phrase. For Height, supply a numeric measurement in feet/inches, centimeters, or both; never use relative or decorative height prose. Do not describe habits, personality, inferred skill, subjective attractiveness, or unrequested marks.'
+                : 'One concise explicit physical fact preserved from the persona.' },
         },
     };
     const raceSchema = fixedRace
@@ -254,13 +256,15 @@ export function buildCharacterSheetSchema(options = {}) {
                         : { type: 'string', description: 'The explicit age as written, or Not specified.' },
                     bloodline: { type: 'string', description: 'A relevant explicit bloodline, or an empty string.' },
                     origin: { type: 'string', description: 'A fixed origin fact, or an empty string.' },
-                    priorRoleOrTraining: { type: 'string', description: 'A fixed prior role or training fact, or an empty string.' },
+                    priorRoleOrTraining: { type: 'string', description: mode === 'new'
+                        ? 'One concise fixed prior role or training fact, or an empty string. Preserve an explicit user-supplied role faithfully without broadening it into extra expertise, mastery, or unrelated knowledge.'
+                        : 'The explicit prior role or training fact preserved from the persona, or an empty string.' },
                 },
             },
             appearance: {
                 type: 'array',
                 description: mode === 'new'
-                    ? `Visible physical facts as concise label/detail entries. Do not include internal state or behavioral habits. ${allowNewAppearanceMarks ? 'Preserve only scars or other permanent marks explicitly supplied by the user.' : 'Do not include scars, tattoos, birthmarks, brands, or other permanent marks.'}`
+                    ? `Visible physical facts as concise label/detail entries. Include exactly one Height entry with a numeric measurement; code will render it in feet/inches and centimeters. Use objective physical facts only: Build must be compact and physical; Eyes must not imply a habitual gaze or personality; Skin must not assert marks or their absence unless supplied; Face must avoid beauty judgments; Hands must not infer strength, history, skill, or behavior. Do not include internal state or behavioral habits. ${allowNewAppearanceMarks ? 'Preserve only scars or other permanent marks explicitly supplied by the user.' : 'Do not include scars, tattoos, birthmarks, brands, or other permanent marks.'}`
                     : 'Explicit visible physical facts as concise label/detail entries. Do not include internal state or behavioral habits.',
                 minItems: mode === 'new' ? 1 : 0,
                 maxItems: 32,
@@ -408,12 +412,13 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
             detail: requireText(entry.detail, 'appearance.detail'),
         };
     });
-    const appearance = mode === 'new'
+    let appearance = mode === 'new'
         ? submittedAppearance.filter(entry => appearanceMarksAreExplicit(`${entry.label} ${entry.detail}`, explicitAppearanceSource))
         : submittedAppearance;
     if (mode === 'new' && appearance.length === 0) {
         throw structureError('appearance must contain at least one visible fact for a new character.');
     }
+    if (mode === 'new') appearance = normalizeNewCharacterHeight(appearance);
 
     const abilities = normalizeObjectArray(source.abilities, 'abilities', mode === 'new' ? 1 : 24, normalizeNamedEntry);
     if (mode === 'new' && abilities.length !== 1) {
@@ -657,6 +662,79 @@ function cleanSourceText(value) {
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function normalizeNewCharacterHeight(appearance) {
+    const heightIndexes = [];
+    for (let index = 0; index < appearance.length; index += 1) {
+        if (appearance[index].label.trim().toLowerCase() === 'height') heightIndexes.push(index);
+    }
+    if (heightIndexes.length !== 1) {
+        throw structureError(`appearance must contain exactly one Height entry for a new character; received ${heightIndexes.length}.`);
+    }
+    const heightIndex = heightIndexes[0];
+    const height = appearance[heightIndex];
+    const normalizedHeight = normalizeHeightMeasurement(height.detail);
+    return appearance.map((entry, index) => index === heightIndex
+        ? { label: 'Height', detail: normalizedHeight }
+        : entry);
+}
+
+function normalizeHeightMeasurement(value) {
+    const text = cleanInline(value);
+    const metricCentimeters = parseMetricHeightCentimeters(text);
+    const imperialInches = parseImperialHeightInches(text);
+    if (metricCentimeters == null && imperialInches == null) {
+        throw structureError('appearance Height must contain a numeric measurement in feet/inches, centimeters, or meters; relative or decorative prose is not a height.');
+    }
+    if (metricCentimeters != null && imperialInches != null
+        && Math.abs(metricCentimeters - (imperialInches * 2.54)) > 2.6) {
+        throw structureError('appearance Height contains inconsistent metric and imperial measurements.');
+    }
+
+    const totalInches = imperialInches != null
+        ? Math.round(imperialInches)
+        : Math.round(metricCentimeters / 2.54);
+    if (!Number.isFinite(totalInches) || totalInches <= 0) {
+        throw structureError('appearance Height must be greater than zero.');
+    }
+    const centimeters = imperialInches != null
+        ? Math.round(totalInches * 2.54)
+        : Math.round(metricCentimeters);
+    const feet = Math.floor(totalInches / 12);
+    const inches = totalInches % 12;
+    return `${feet} ft ${inches} in (${centimeters} cm)`;
+}
+
+function parseMetricHeightCentimeters(text) {
+    const compound = text.match(/(?<![\w.])([+-]?\d+(?:\.\d+)?)\s*(?:meters?|metres?|m)\s*[,.;]?\s*([+-]?\d+(?:\.\d+)?)\s*(?:centimeters?|centimetres?|cm)\b/i);
+    if (compound) return positiveMeasurement(compound[1], 100) + positiveMeasurement(compound[2]);
+
+    const centimeters = text.match(/(?<![\w.])([+-]?\d+(?:\.\d+)?)\s*(?:centimeters?|centimetres?|cm)\b/i);
+    if (centimeters) return positiveMeasurement(centimeters[1]);
+
+    const meters = text.match(/(?<![\w.])([+-]?\d+(?:\.\d+)?)\s*(?:meters?|metres?|m)\b/i);
+    if (meters) return positiveMeasurement(meters[1], 100);
+    return null;
+}
+
+function parseImperialHeightInches(text) {
+    const feet = text.match(/(?<![\w.])([+-]?\d+(?:\.\d+)?)\s*(?:feet|foot|ft|['’′])(?:\s*[,.;]?\s*([+-]?\d+(?:\.\d+)?)\s*(?:inches?|in|["”″])?)?/i);
+    if (feet) {
+        const feetValue = positiveMeasurement(feet[1]);
+        const inchesValue = feet[2] === undefined ? 0 : positiveMeasurement(feet[2]);
+        if (inchesValue >= 12) throw structureError('appearance Height inches must be less than 12 when feet are supplied.');
+        return (feetValue * 12) + inchesValue;
+    }
+
+    const inches = text.match(/(?<![\w.])([+-]?\d+(?:\.\d+)?)\s*(?:(?:inches?|in)\b|["”″](?=$|[^\w]))/i);
+    return inches ? positiveMeasurement(inches[1]) : null;
+}
+
+function positiveMeasurement(value, multiplier = 1) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) throw structureError('appearance Height measurements must be positive numbers.');
+    return parsed * multiplier;
 }
 
 function appearanceMarksAreExplicit(appearanceText, explicitSource) {
