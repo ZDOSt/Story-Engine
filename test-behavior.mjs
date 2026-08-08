@@ -13246,8 +13246,9 @@ const tests = [
       const indexSource = fs.readFileSync(extensionFile('index.js'), 'utf8');
       const runnerSource = fs.readFileSync(extensionFile('deterministic-runner.js'), 'utf8');
       const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
-      assert.match(indexSource, /startsWith\('\[\['\) && trimmed\.endsWith\('\]\]'\)/);
-      assert.match(indexSource, /return \{ mode: 'proxy', innerText: trimmed\.slice\(2, -2\)\.trim\(\) \}/);
+      assert.match(indexSource, /const completeProxyInstruction = extractCompleteProxyInstruction\(trimmed\)/);
+      assert.match(indexSource, /return \{ mode: 'proxy', innerText: completeProxyInstruction \}/);
+      assert.match(indexSource, /if \(!inner \|\| inner\.includes\('\[\['\) \|\| inner\.includes\('\]\]'\)\) return null/);
       assert.match(indexSource, /startsWith\('\(\('\) && trimmed\.endsWith\('\)\)'\)/);
       assert.ok(indexSource.includes('/^ooc\\s*:?\\s*$/i.test(trimmed)'));
       assert.ok(indexSource.includes("trimmed.match(/^ooc(?:\\s*:\\s*|\\s+)([\\s\\S]*)$/i)"));
@@ -13255,6 +13256,10 @@ const tests = [
       assert.match(indexSource, /inlineProxyInstructions: extractInlineProxyInstructions\(trimmed\)/);
       assert.match(indexSource, /inlineProxyInstructions: userInputMode\.inlineProxyInstructions \|\| \[\]/);
       assert.match(indexSource, /inlineProxyInstructions: pendingGeneration\?\.inlineProxyInstructions \|\| \[\]/);
+      assert.match(indexSource, /coAuthorModeEnabled: false/);
+      assert.match(indexSource, /id="structured_preflight_co_author_mode_enabled"/);
+      assert.match(indexSource, /settings\.coAuthorModeEnabled = Boolean\(event\.target\?\.checked\)/);
+      assert.match(indexSource, /coAuthorModeEnabled: getSettings\(\)\.coAuthorModeEnabled === true/);
       assert.doesNotMatch(indexSource, /mode: 'proxy'[\s\S]{0,120}startsWith\('\(\(\('\)/);
       assert.match(indexSource, /userInputMode\.mode === 'ooc'[\s\S]*runSemanticPassWithPromptReadyBypass/);
       assert.match(indexSource, /\[STRUCTURED_PREFLIGHT_OOC\]/);
@@ -13272,7 +13277,8 @@ const tests = [
       const oocPromptReadyBranch = indexSource.slice(oocPromptReadyStart, oocPromptReadyEnd);
       assert.match(oocPromptReadyBranch, /buildOocResponsePrompt/);
       assert.doesNotMatch(oocPromptReadyBranch, /clearPromptOptionPrompts/);
-      assert.match(runnerSource, /startsWith\('\[\['\) && trimmed\.endsWith\('\]\]'\)/);
+      assert.match(runnerSource, /const completeProxyInstruction = extractCompleteProxyInstructionText\(trimmed\)/);
+      assert.match(runnerSource, /if \(!inner \|\| inner\.includes\('\[\['\) \|\| inner\.includes\('\]\]'\)\) return null/);
       assert.match(runnerSource, /\.replace\(/);
       assert.match(runnerSource, /\\\[\\\[\(\[\\s\\S\]\*\?\)\\\]\\\]/);
       assert.match(semanticSource, /double square brackets for proxy action mode/);
@@ -13303,6 +13309,18 @@ const tests = [
       assert.match(text, /double square brackets/);
       assert.match(text, /narrativeFacts\(input\)/);
       assert.match(text, /sealed letter/);
+      assert.doesNotMatch(text, /Co-author proxy mode/);
+
+      const coAuthorText = formatNarratorModelPromptContext(report, {
+        mode: 'proxy',
+        latestUserText: 'I walk to Mira and ask her a few questions about herself.',
+        coAuthorModeEnabled: true,
+      });
+      assert.match(coAuthorText, /Co-author proxy mode for \{\{user\}\} is active for this response only/);
+      assert.match(coAuthorText, /observable physical actions and audible dialogue/);
+      assert.match(coAuthorText, /never invent or state \{\{user\}\}'s thoughts, feelings, beliefs, motivations, intentions, decisions/);
+      assert.match(coAuthorText, /Do not introduce a new goal, consequential choice, stakes-bearing action, or mechanically meaningful effect/);
+      assert.match(coAuthorText, /Resolved mechanics determine which attempts occur, land, succeed, fail, or remain incomplete/);
 
       const inlineText = formatNarratorModelPromptContext(report, {
         mode: 'normal',
@@ -13312,6 +13330,29 @@ const tests = [
       assert.match(inlineText, /Inline proxy instructions from double square brackets are active/);
       assert.match(inlineText, /Conditional instructions resolve only if their condition actually occurs/);
       assert.match(inlineText, /unleash the spell immediately after/);
+      assert.doesNotMatch(inlineText, /Inline co-author proxy scope/);
+
+      const inlineCoAuthorText = formatNarratorModelPromptContext(report, {
+        mode: 'normal',
+        latestUserText: "I swing my sword at the goblin's head. [[If I succeed, I follow up with a knee strike; if I fail, I pull back and reposition.]]",
+        inlineProxyInstructions: ['If I succeed, I follow up with a knee strike; if I fail, I pull back and reposition.'],
+        coAuthorModeEnabled: true,
+      });
+      assert.match(inlineCoAuthorText, /Inline co-author proxy scope for \{\{user\}\} is active for this response only/);
+      assert.match(inlineCoAuthorText, /Unbracketed user input remains governed by strict agency separation and input chronology/);
+      assert.match(inlineCoAuthorText, /Conditional instructions resolve only when their stated condition actually occurs and the resolved mechanics support the action/);
+      assert.match(inlineCoAuthorText, /select no branch merely for dramatic convenience/);
+      assert.match(inlineCoAuthorText, /The authorization expires after this response/);
+
+      const multipleInlineCoAuthorText = formatNarratorModelPromptContext(report, {
+        mode: 'normal',
+        latestUserText: '[[If Mira advances, I raise my shield.]] I keep watching the doorway. [[If she retreats, I lower it.]]',
+        inlineProxyInstructions: ['If Mira advances, I raise my shield.', 'If she retreats, I lower it.'],
+        coAuthorModeEnabled: true,
+      });
+      assert.match(multipleInlineCoAuthorText, /1\. If Mira advances, I raise my shield\./);
+      assert.match(multipleInlineCoAuthorText, /2\. If she retreats, I lower it\./);
+      assert.match(multipleInlineCoAuthorText, /Unbracketed user input remains governed by strict agency separation/);
     },
   },
   {
@@ -15653,7 +15694,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.72');
+      assert.equal(manifest.version, '0.9.73');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);

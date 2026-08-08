@@ -5218,8 +5218,9 @@ function getLatestUserTextFromContext(context) {
 
 function unwrapStructuredUserInputText(text) {
     const trimmed = String(text ?? '').trim();
-    if (trimmed.length >= 4 && trimmed.startsWith('[[') && trimmed.endsWith(']]')) {
-        return trimmed.slice(2, -2).trim();
+    const completeProxyInstruction = extractCompleteProxyInstructionText(trimmed);
+    if (completeProxyInstruction !== null) {
+        return completeProxyInstruction;
     }
     if (trimmed.length >= 4 && trimmed.startsWith('((') && trimmed.endsWith('))')) {
         return trimmed.slice(2, -2).trim();
@@ -5228,6 +5229,14 @@ function unwrapStructuredUserInputText(text) {
         .replace(/\[\[([\s\S]*?)\]\]/g, (_match, inner) => ` ${String(inner ?? '').trim()} `)
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function extractCompleteProxyInstructionText(text) {
+    const trimmed = String(text ?? '').trim();
+    if (trimmed.length < 4 || !trimmed.startsWith('[[') || !trimmed.endsWith(']]')) return null;
+    const inner = trimmed.slice(2, -2).trim();
+    if (!inner || inner.includes('[[') || inner.includes(']]')) return null;
+    return inner;
 }
 
 function normalizeNameSeed(seed) {

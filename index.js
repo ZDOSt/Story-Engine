@@ -556,6 +556,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     proseGuardEmbodiedPerceptionBannedPhrases: DEFAULT_PROSE_GUARD_EMBODIED_PERCEPTION_BANNED_PHRASES,
     proseGuardCustomBannedPhrases: '',
     characterProgressionEnabled: true,
+    coAuthorModeEnabled: false,
     writingStyleEnabled: true,
     writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT,
     writingStyleActionPrompt: DEFAULT_ACTION_STYLE_PROMPT,
@@ -1458,6 +1459,7 @@ function refreshSettingsControls() {
     const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
     const modelCallDelayEnabledCheckbox = document.getElementById('structured_preflight_model_call_delay_enabled');
     const modelCallDelaySecondsInput = document.getElementById('structured_preflight_model_call_delay_seconds');
+    const coAuthorModeCheckbox = document.getElementById('structured_preflight_co_author_mode_enabled');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
     const writingStyleDrawer = document.getElementById('structured_preflight_writing_style_drawer');
     const writingStyleFields = getWritingStyleFieldControls();
@@ -1481,6 +1483,7 @@ function refreshSettingsControls() {
     if (progressionEnabledCheckbox) progressionEnabledCheckbox.checked = settings.characterProgressionEnabled !== false;
     if (modelCallDelayEnabledCheckbox) modelCallDelayEnabledCheckbox.checked = settings.modelCallDelayEnabled === true;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.value = String(normalizeModelCallDelaySeconds(settings.modelCallDelaySeconds));
+    if (coAuthorModeCheckbox) coAuthorModeCheckbox.checked = settings.coAuthorModeEnabled === true;
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
     for (const { element, key, defaultValue } of writingStyleFields) {
         const value = String(settings[key] ?? defaultValue);
@@ -1550,6 +1553,7 @@ function refreshSettingsControls() {
         progressionEnabledCheckbox,
         enabledCheckbox,
         modelCallDelayEnabledCheckbox,
+        coAuthorModeCheckbox,
         writingStyleEnabled,
         nameStyleSelect,
         refreshSemanticButton,
@@ -2113,6 +2117,13 @@ function renderSettingsPanel() {
                             </div>
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">
+                                    <input id="structured_preflight_co_author_mode_enabled" type="checkbox">
+                                    <span>Enable Co-Author Mode</span>
+                                </label>
+                                ${renderSettingsInfo('spe-settings-help-co-author', 'When enabled, double-square-bracket instructions authorize the narrator to naturally expand observable {{user}} actions and audible dialogue within those brackets for one response only. Unbracketed agency and all private internal states remain protected.', 'About Co-Author Mode')}
+                            </div>
+                            <div class="spe-settings-toggle-row">
+                                <label class="checkbox_label flexNoGap">
                                     <input id="structured_preflight_writing_style_enabled" type="checkbox">
                                     <span>Enable Writing Style</span>
                                 </label>
@@ -2371,6 +2382,12 @@ function renderSettingsPanel() {
 
         saveExtensionSettings();
 
+    });
+
+    document.getElementById('structured_preflight_co_author_mode_enabled')?.addEventListener('change', event => {
+        settings.coAuthorModeEnabled = Boolean(event.target?.checked);
+        refreshSettingsControls();
+        saveExtensionSettings();
     });
 
     document.getElementById('structured_preflight_writing_style_enabled')?.addEventListener('change', event => {
@@ -12788,8 +12805,9 @@ function detectStructuredUserInputMode(text) {
     const trimmed = String(text ?? '').trim();
     if (!trimmed) return { mode: 'normal', innerText: '' };
 
-    if (trimmed.length >= 4 && trimmed.startsWith('[[') && trimmed.endsWith(']]')) {
-        return { mode: 'proxy', innerText: trimmed.slice(2, -2).trim() };
+    const completeProxyInstruction = extractCompleteProxyInstruction(trimmed);
+    if (completeProxyInstruction !== null) {
+        return { mode: 'proxy', innerText: completeProxyInstruction };
     }
 
 
@@ -12816,6 +12834,15 @@ function detectStructuredUserInputMode(text) {
 
     return { mode: 'normal', innerText: trimmed, inlineProxyInstructions: extractInlineProxyInstructions(trimmed) };
 
+}
+
+
+function extractCompleteProxyInstruction(text) {
+    const trimmed = String(text ?? '').trim();
+    if (trimmed.length < 4 || !trimmed.startsWith('[[') || !trimmed.endsWith(']]')) return null;
+    const inner = trimmed.slice(2, -2).trim();
+    if (!inner || inner.includes('[[') || inner.includes(']]')) return null;
+    return inner;
 }
 
 
@@ -14832,6 +14859,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
 
         latestUserText: userInputMode.innerText || latestUserText,
         inlineProxyInstructions: userInputMode.inlineProxyInstructions || [],
+        coAuthorModeEnabled: getSettings().coAuthorModeEnabled === true,
 
         trackerSnapshot: buildTrackerSnapshot(context),
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
