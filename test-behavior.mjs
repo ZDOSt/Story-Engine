@@ -11333,7 +11333,9 @@ const tests = [
       assert.match(styleSource, /grid-template-columns: 50px minmax\(0, 1fr\)/);
       assert.match(styleSource, /#\$\{TRACKER_WIDGET_BUTTON_ID\}[\s\S]*width: \$\{TRACKER_WIDGET_BUTTON_SIZE\}px/);
       assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\}[\s\S]*position: absolute[\s\S]*left: 0[\s\S]*top: 0/);
-      assert.match(styleSource, /z-index: 1900/);
+      assert.match(styleSource, /#\$\{TRACKER_WIDGET_ID\}[\s\S]*z-index: 3006/);
+      assert.match(styleSource, /#structured_preflight_narrator_handoff_widget[\s\S]*z-index: 3006/);
+      assert.doesNotMatch(styleSource, /z-index: 1900|z-index: 1899/);
       assert.match(styleSource, /\.structured-preflight-tracker-widget-title \{[\s\S]*cursor: grab;[\s\S]*touch-action: none/);
       assert.match(styleSource, /\.structured-preflight-tracker-tabs \{[\s\S]*flex-direction: column/);
       assert.match(styleSource, /\.structured-preflight-tracker-scroll-region \{[\s\S]*overflow-y: auto/);
@@ -15711,7 +15713,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.77');
+      assert.equal(manifest.version, '0.9.78');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -19849,7 +19851,7 @@ const tests = [
         { innerWidth: 1200 },
       );
 
-      assert.equal(manifest.version, '0.9.77');
+      assert.equal(manifest.version, '0.9.78');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

@@ -7503,7 +7503,7 @@ function ensureTrackerDisplayStyles() {
 
             height: 0;
 
-            z-index: 1900;
+            z-index: 3006;
 
             overflow: visible;
 
@@ -8678,7 +8678,7 @@ function ensureTrackerDisplayStyles() {
             top: 120px;
             width: 0;
             height: 0;
-            z-index: 1899;
+            z-index: 3006;
             overflow: visible;
             color: var(--SmartThemeBodyColor, #eee);
             font-size: 0.88rem;
