@@ -104,6 +104,13 @@ const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
 const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
 const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
 const NARRATOR_HANDOFF_VERSION = 1;
+const NARRATOR_HANDOFF_DISPLAY_MODES = Object.freeze({
+    IN_CHAT: 'in_chat',
+    SIDE_PANEL: 'side_panel',
+});
+const NARRATOR_HANDOFF_WIDGET_ID = 'structured_preflight_narrator_handoff_widget';
+const NARRATOR_HANDOFF_WIDGET_BUTTON_ID = 'structured_preflight_narrator_handoff_toggle';
+const NARRATOR_HANDOFF_WIDGET_PANEL_ID = 'structured_preflight_narrator_handoff_panel';
 const PROSE_GUARD_EXTRA_KEY = 'structured_preflight_prose_guard';
 const PROSE_GUARD_EXTRA_VERSION = 3;
 const PROSE_GUARD_RECONCILIATION_EXTRA_KEY = 'structured_preflight_prose_guard_reconciliation';
@@ -580,6 +587,20 @@ const DEFAULT_SETTINGS = Object.freeze({
 
     trackerWidgetHeight: TRACKER_WIDGET_DEFAULT_HEIGHT,
 
+    narratorHandoffEnabled: false,
+
+    narratorHandoffDisplayMode: NARRATOR_HANDOFF_DISPLAY_MODES.SIDE_PANEL,
+
+    narratorHandoffWidgetCollapsed: true,
+
+    narratorHandoffWidgetX: null,
+
+    narratorHandoffWidgetY: 120,
+
+    narratorHandoffWidgetWidth: TRACKER_WIDGET_DEFAULT_WIDTH,
+
+    narratorHandoffWidgetHeight: TRACKER_WIDGET_DEFAULT_HEIGHT,
+
 });
 
 const SEMANTIC_THINKING_DISABLE_FORMAT_OPTIONS = Object.freeze([
@@ -720,6 +741,7 @@ const state = {
     trackerWidgetEditingUserItems: false,
     trackerWidgetSelectedNpc: '',
     trackerWidgetViewportHandler: null,
+    narratorHandoffWidgetViewportHandler: null,
 };
 
 const promptReadyBypassGate = createAsyncTokenGate();
@@ -775,11 +797,50 @@ function getSettings() {
         settings.proseGuardMode = PROSE_GUARD_MODES.OFF;
     }
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
+    const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || semanticThinkingSettingsChanged || trackerSettingsChanged || proseGuardSettingsChanged) {
+    if (hadRetiredSemanticSettings || semanticThinkingSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
+}
+
+function normalizeNarratorHandoffDisplayMode(value) {
+    const mode = String(value ?? '').trim().toLocaleLowerCase();
+    return Object.values(NARRATOR_HANDOFF_DISPLAY_MODES).includes(mode)
+        ? mode
+        : NARRATOR_HANDOFF_DISPLAY_MODES.SIDE_PANEL;
+}
+
+function migrateNarratorHandoffSettings(settings) {
+    let changed = false;
+    const setValue = (key, value) => {
+        if (settings[key] === value) return;
+        settings[key] = value;
+        changed = true;
+    };
+    if (typeof settings.narratorHandoffEnabled !== 'boolean') {
+        setValue('narratorHandoffEnabled', false);
+    }
+    setValue('narratorHandoffDisplayMode', normalizeNarratorHandoffDisplayMode(settings.narratorHandoffDisplayMode));
+    if (typeof settings.narratorHandoffWidgetCollapsed !== 'boolean') {
+        setValue('narratorHandoffWidgetCollapsed', true);
+    }
+    const numericDefaults = [
+        ['narratorHandoffWidgetY', 120],
+        ['narratorHandoffWidgetWidth', TRACKER_WIDGET_DEFAULT_WIDTH],
+        ['narratorHandoffWidgetHeight', TRACKER_WIDGET_DEFAULT_HEIGHT],
+    ];
+    for (const [key, fallback] of numericDefaults) {
+        if (!Number.isFinite(Number(settings[key])) || Number(settings[key]) <= 0) {
+            setValue(key, fallback);
+        }
+    }
+    if (settings.narratorHandoffWidgetX !== null && settings.narratorHandoffWidgetX !== undefined
+        && (!Number.isFinite(Number(settings.narratorHandoffWidgetX)) || Number(settings.narratorHandoffWidgetX) < 0)) {
+        setValue('narratorHandoffWidgetX', null);
+    }
+    return changed;
 }
 
 function migrateTrackerWidgetSettings(settings) {
@@ -1466,6 +1527,8 @@ function refreshSettingsControls() {
     const modelCallDelayEnabledCheckbox = document.getElementById('structured_preflight_model_call_delay_enabled');
     const modelCallDelaySecondsInput = document.getElementById('structured_preflight_model_call_delay_seconds');
     const coAuthorModeCheckbox = document.getElementById('structured_preflight_co_author_mode_enabled');
+    const narratorHandoffEnabledCheckbox = document.getElementById('structured_preflight_narrator_handoff_enabled');
+    const narratorHandoffDisplayModeSelect = document.getElementById('structured_preflight_narrator_handoff_display_mode');
     const writingStyleEnabled = document.getElementById('structured_preflight_writing_style_enabled');
     const writingStyleDrawer = document.getElementById('structured_preflight_writing_style_drawer');
     const writingStyleFields = getWritingStyleFieldControls();
@@ -1490,6 +1553,11 @@ function refreshSettingsControls() {
     if (modelCallDelayEnabledCheckbox) modelCallDelayEnabledCheckbox.checked = settings.modelCallDelayEnabled === true;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.value = String(normalizeModelCallDelaySeconds(settings.modelCallDelaySeconds));
     if (coAuthorModeCheckbox) coAuthorModeCheckbox.checked = settings.coAuthorModeEnabled === true;
+    if (narratorHandoffEnabledCheckbox) narratorHandoffEnabledCheckbox.checked = settings.narratorHandoffEnabled === true;
+    if (narratorHandoffDisplayModeSelect) {
+        narratorHandoffDisplayModeSelect.value = normalizeNarratorHandoffDisplayMode(settings.narratorHandoffDisplayMode);
+        narratorHandoffDisplayModeSelect.disabled = !engineEnabled || settings.narratorHandoffEnabled !== true;
+    }
     if (writingStyleEnabled) writingStyleEnabled.checked = settings.writingStyleEnabled !== false;
     for (const { element, key, defaultValue } of writingStyleFields) {
         const value = String(settings[key] ?? defaultValue);
@@ -1560,6 +1628,7 @@ function refreshSettingsControls() {
         enabledCheckbox,
         modelCallDelayEnabledCheckbox,
         coAuthorModeCheckbox,
+        narratorHandoffEnabledCheckbox,
         writingStyleEnabled,
         nameStyleSelect,
         refreshSemanticButton,
@@ -1568,6 +1637,9 @@ function refreshSettingsControls() {
     ].forEach(control => {
         if (control) control.disabled = !engineEnabled;
     });
+    if (narratorHandoffDisplayModeSelect) {
+        narratorHandoffDisplayModeSelect.disabled = !engineEnabled || settings.narratorHandoffEnabled !== true;
+    }
     const playerStatus = document.getElementById('structured_preflight_player_setup_status');
     if (playerStatus) {
         const status = !engineEnabled
@@ -2241,6 +2313,34 @@ function renderSettingsPanel() {
                         </div>
                     </section>
 
+                    <section class="spe-settings-section" data-spe-settings-step="narration-handoff">
+                        <div class="spe-settings-section-head">
+                            <span class="spe-settings-section-icon"><i class="fa-solid fa-scroll" aria-hidden="true"></i></span>
+                            <div class="spe-settings-section-copy">
+                                <span class="spe-settings-kicker">4b. Diagnostics</span>
+                                <h4 class="spe-settings-title">Narration Handoff</h4>
+                            </div>
+                            ${renderSettingsInfo('spe-settings-help-narration-handoff', 'Shows the completed Story Engine audit and narrator handoff for inspection. This display does not change what the narrator model receives.', 'About the Narration Handoff')}
+                        </div>
+                        <div class="spe-settings-body">
+                            <div class="spe-settings-toggle-row">
+                                <label class="checkbox_label flexNoGap">
+                                    <input id="structured_preflight_narrator_handoff_enabled" type="checkbox">
+                                    <span>Show Narration Handoff</span>
+                                </label>
+                                ${renderSettingsInfo('spe-settings-help-narration-handoff-visible', 'When enabled, show the latest handoff either beneath each assistant message or in the side panel.', 'What Show Narration Handoff controls')}
+                            </div>
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_narrator_handoff_display_mode">Display location</label>
+                                <select id="structured_preflight_narrator_handoff_display_mode" class="text_pole flex1">
+                                    <option value="side_panel">Side Panel</option>
+                                    <option value="in_chat">In-Chat</option>
+                                </select>
+                                ${renderSettingsInfo('spe-settings-help-narration-handoff-location', 'Choose where the visible handoff appears. Side Panel shows the latest handoff in a collapsible tracker-style window; In-Chat keeps one block on each assistant response.', 'About handoff display location')}
+                            </div>
+                        </div>
+                    </section>
+
                     <section class="spe-settings-section" data-spe-settings-step="progression">
                         <div class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i></span>
@@ -2343,6 +2443,20 @@ function renderSettingsPanel() {
         refreshSettingsControls();
         saveExtensionSettings();
 
+    });
+
+    document.getElementById('structured_preflight_narrator_handoff_enabled')?.addEventListener('change', event => {
+        settings.narratorHandoffEnabled = Boolean(event.target?.checked);
+        renderAllTrackerDisplayBlocks(getContext());
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+
+    document.getElementById('structured_preflight_narrator_handoff_display_mode')?.addEventListener('change', event => {
+        settings.narratorHandoffDisplayMode = normalizeNarratorHandoffDisplayMode(event.target?.value);
+        renderAllTrackerDisplayBlocks(getContext());
+        refreshSettingsControls();
+        saveExtensionSettings();
     });
 
     document.getElementById('structured_preflight_prose_guard_mode')?.addEventListener('change', event => {
@@ -3273,9 +3387,11 @@ function disableStoryEngineRuntime() {
         state.proseGuardChatObserver = null;
     }
     clearTrackerWidgetViewportHandler();
+    clearNarratorHandoffWidgetViewportHandler();
     removeStreamingArtifactRegex();
     document.querySelectorAll?.(`.${TRACKER_DISPLAY_BLOCK_CLASS}, .${NARRATOR_HANDOFF_BLOCK_CLASS}`)?.forEach(element => element.remove());
     document.getElementById(TRACKER_WIDGET_ID)?.remove();
+    document.getElementById(NARRATOR_HANDOFF_WIDGET_ID)?.remove();
     document.getElementById(PLAYER_SETUP_CARD_ID)?.remove();
     document.getElementById(PROGRESSION_CARD_ID)?.remove();
 }
@@ -8495,6 +8611,107 @@ function ensureTrackerDisplayStyles() {
 
         }
 
+        #structured_preflight_narrator_handoff_widget {
+            position: fixed;
+            left: 24px;
+            top: 120px;
+            width: 0;
+            height: 0;
+            z-index: 1899;
+            overflow: visible;
+            color: var(--SmartThemeBodyColor, #eee);
+            font-size: 0.88rem;
+        }
+        #structured_preflight_narrator_handoff_toggle {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            border: 1px solid #c6a0f6;
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 72%, transparent);
+            color: #c6a0f6;
+            box-shadow: 0 10px 26px rgba(0,0,0,0.28);
+            cursor: grab;
+            touch-action: none;
+            user-select: none;
+            backdrop-filter: blur(8px);
+        }
+        #structured_preflight_narrator_handoff_toggle:active {
+            cursor: grabbing;
+        }
+        #structured_preflight_narrator_handoff_toggle[hidden],
+        #structured_preflight_narrator_handoff_panel[hidden] {
+            display: none;
+        }
+        #structured_preflight_narrator_handoff_panel {
+            position: absolute;
+            left: 0;
+            top: 0;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            width: 450px;
+            min-width: 1px;
+            max-width: max(1px, calc(100vw - 16px));
+            max-width: max(1px, calc(100dvw - 16px));
+            height: 550px;
+            min-height: 1px;
+            max-height: min(900px, calc(100vh - 16px));
+            max-height: min(900px, calc(100dvh - 16px));
+            margin: 0;
+            padding: 0;
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2));
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 84%, transparent);
+            box-shadow: 0 14px 36px rgba(0,0,0,0.35);
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+            box-sizing: border-box;
+        }
+        #structured_preflight_narrator_handoff_panel > .structured-preflight-tracker-widget-title {
+            cursor: grab;
+        }
+        #structured_preflight_narrator_handoff_widget.spe-narrator-handoff-dragging,
+        #structured_preflight_narrator_handoff_widget.spe-narrator-handoff-panel-dragging,
+        #structured_preflight_narrator_handoff_widget.spe-narrator-handoff-panel-dragging * {
+            user-select: none;
+        }
+        #structured_preflight_narrator_handoff_widget.spe-narrator-handoff-panel-dragging * {
+            cursor: grabbing !important;
+            user-select: none !important;
+        }
+        #structured_preflight_narrator_handoff_widget.spe-narrator-handoff-resizing,
+        #structured_preflight_narrator_handoff_widget.spe-narrator-handoff-resizing * {
+            cursor: nwse-resize !important;
+            user-select: none !important;
+        }
+        .structured-preflight-narrator-handoff-widget-body {
+            min-width: 0;
+            min-height: 0;
+            overflow: auto;
+            padding: 0.72rem;
+            scrollbar-gutter: stable;
+        }
+        .structured-preflight-narrator-handoff-widget-content {
+            min-width: 0;
+        }
+        .structured-preflight-narrator-handoff-widget-meta {
+            margin-bottom: 0.55rem;
+            color: color-mix(in srgb, #c6a0f6 82%, var(--SmartThemeBodyColor, #eee));
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .structured-preflight-narrator-handoff-widget-content pre {
+            margin: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            line-height: 1.38;
+        }
+
     `;
 
     document.head.append(style);
@@ -8876,7 +9093,9 @@ function renderNarratorHandoffBlockForMessage(messageId, payload = null, context
 
     messageElement.querySelector(`.${NARRATOR_HANDOFF_BLOCK_CLASS}`)?.remove();
 
-    if (!handoff?.text) return;
+    const settings = getSettings();
+    if (!handoff?.text || settings.narratorHandoffEnabled !== true
+        || normalizeNarratorHandoffDisplayMode(settings.narratorHandoffDisplayMode) !== NARRATOR_HANDOFF_DISPLAY_MODES.IN_CHAT) return;
 
 
 
@@ -8918,6 +9137,7 @@ function renderAllTrackerDisplayBlocks(context = getContext()) {
     if (!isStoryEngineEnabled()) {
         if (typeof document !== 'undefined') {
             document.getElementById(TRACKER_WIDGET_ID)?.remove();
+            document.getElementById(NARRATOR_HANDOFF_WIDGET_ID)?.remove();
         }
         return;
     }
@@ -8935,9 +9155,337 @@ function renderAllTrackerDisplayBlocks(context = getContext()) {
     });
 
     renderTrackerWidget(context);
+    renderNarratorHandoffWidget(context);
 
 }
 
+
+
+function getLatestNarratorHandoffEntry(context = getContext()) {
+    if (!Array.isArray(context?.chat)) return null;
+    for (let messageId = context.chat.length - 1; messageId >= 0; messageId -= 1) {
+        const message = context.chat[messageId];
+        if (!isAssistantNarrationMessage(message)) continue;
+        const handoff = getMessageNarratorHandoff(message);
+        if (handoff?.text) return { messageId, message, handoff };
+    }
+    return null;
+}
+
+function getNarratorHandoffWidgetLayout(settings = getSettings()) {
+    const collapsed = settings.narratorHandoffWidgetCollapsed !== false;
+    const storedWidth = Number(settings.narratorHandoffWidgetWidth);
+    const storedHeight = Number(settings.narratorHandoffWidgetHeight);
+    const width = collapsed
+        ? TRACKER_WIDGET_BUTTON_SIZE
+        : clampTrackerWidgetWidth(Number.isFinite(storedWidth) && storedWidth > 0 ? storedWidth : TRACKER_WIDGET_DEFAULT_WIDTH);
+    const height = collapsed
+        ? TRACKER_WIDGET_BUTTON_SIZE
+        : clampTrackerWidgetHeight(Number.isFinite(storedHeight) && storedHeight > 0 ? storedHeight : TRACKER_WIDGET_DEFAULT_HEIGHT);
+    const viewportWidth = Math.max(1, Number(globalThis.innerWidth) || 1200);
+    const storedX = Number(settings.narratorHandoffWidgetX);
+    const defaultX = Math.max(8, viewportWidth - width - 24);
+    const x = settings.narratorHandoffWidgetX === null || settings.narratorHandoffWidgetX === undefined
+        ? defaultX
+        : storedX;
+    const storedY = Number(settings.narratorHandoffWidgetY);
+    const position = clampTrackerWidgetPosition(
+        Number.isFinite(x) ? x : defaultX,
+        Number.isFinite(storedY) ? storedY : 120,
+        width,
+        height,
+    );
+    return { collapsed, x: position.x, y: position.y, width, height };
+}
+
+function applyNarratorHandoffWidgetLayout(widget, settings = getSettings()) {
+    if (!widget) return null;
+    const layout = getNarratorHandoffWidgetLayout(settings);
+    widget.style.left = `${layout.x}px`;
+    widget.style.top = `${layout.y}px`;
+    const button = widget.querySelector(`#${NARRATOR_HANDOFF_WIDGET_BUTTON_ID}`);
+    const panel = widget.querySelector(`#${NARRATOR_HANDOFF_WIDGET_PANEL_ID}`);
+    if (button) button.hidden = !layout.collapsed;
+    if (panel) {
+        panel.hidden = layout.collapsed;
+        panel.style.width = `${layout.width}px`;
+        panel.style.height = `${layout.height}px`;
+        panel.style.left = '0px';
+        panel.style.top = '0px';
+    }
+    return layout;
+}
+
+function syncNarratorHandoffWidgetViewport() {
+    if (typeof document === 'undefined') return;
+    const widget = document.getElementById(NARRATOR_HANDOFF_WIDGET_ID);
+    if (!widget) return;
+    const settings = getSettings();
+    const layout = applyNarratorHandoffWidgetLayout(widget, settings);
+    if (!layout) return;
+    let changed = false;
+    const nextValues = {
+        narratorHandoffWidgetX: layout.x,
+        narratorHandoffWidgetY: layout.y,
+    };
+    if (!layout.collapsed) {
+        nextValues.narratorHandoffWidgetWidth = layout.width;
+        nextValues.narratorHandoffWidgetHeight = layout.height;
+    }
+    for (const [key, value] of Object.entries(nextValues)) {
+        if (Number(settings[key]) !== Number(value)) {
+            settings[key] = value;
+            changed = true;
+        }
+    }
+    if (changed) saveExtensionSettings();
+}
+
+function ensureNarratorHandoffWidgetViewportHandler() {
+    if (!state.narratorHandoffWidgetViewportHandler && typeof globalThis.addEventListener === 'function') {
+        state.narratorHandoffWidgetViewportHandler = () => syncNarratorHandoffWidgetViewport();
+        globalThis.addEventListener('resize', state.narratorHandoffWidgetViewportHandler);
+    }
+}
+
+function clearNarratorHandoffWidgetViewportHandler() {
+    if (state.narratorHandoffWidgetViewportHandler && typeof globalThis.removeEventListener === 'function') {
+        globalThis.removeEventListener('resize', state.narratorHandoffWidgetViewportHandler);
+        state.narratorHandoffWidgetViewportHandler = null;
+    }
+}
+
+function attachNarratorHandoffWidgetHandlers(widget) {
+    const button = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_BUTTON_ID);
+    const minimize = widget.querySelector('.structured-preflight-tracker-widget-minimize');
+    const title = widget.querySelector('.structured-preflight-tracker-widget-title');
+    const resizeHandle = widget.querySelector('[data-spe-narrator-handoff-resize-handle]');
+    let drag = null;
+    let resize = null;
+
+    const cancelButtonDrag = () => {
+        if (!drag) return;
+        drag = null;
+        widget.classList.remove('spe-narrator-handoff-dragging');
+        syncNarratorHandoffWidgetViewport();
+    };
+
+    button?.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        const rect = widget.getBoundingClientRect();
+        drag = {
+            startX: event.clientX,
+            startY: event.clientY,
+            offsetX: event.clientX - rect.left,
+            offsetY: event.clientY - rect.top,
+            moved: false,
+        };
+        widget.classList.add('spe-narrator-handoff-dragging');
+        button.setPointerCapture?.(event.pointerId);
+    });
+
+    button?.addEventListener('pointermove', event => {
+        if (!drag) return;
+        const x = event.clientX - drag.offsetX;
+        const y = event.clientY - drag.offsetY;
+        if (Math.abs(event.clientX - drag.startX) > 3 || Math.abs(event.clientY - drag.startY) > 3) drag.moved = true;
+        const pos = clampTrackerWidgetPosition(x, y);
+        widget.style.left = String(pos.x) + 'px';
+        widget.style.top = String(pos.y) + 'px';
+    });
+
+    button?.addEventListener('pointerup', event => {
+        if (!drag) return;
+        const moved = drag.moved;
+        const settings = getSettings();
+        const rect = widget.getBoundingClientRect();
+        const pos = clampTrackerWidgetPosition(rect.left, rect.top, TRACKER_WIDGET_BUTTON_SIZE, TRACKER_WIDGET_BUTTON_SIZE);
+        drag = null;
+        widget.classList.remove('spe-narrator-handoff-dragging');
+        if (button.hasPointerCapture?.(event.pointerId)) button.releasePointerCapture(event.pointerId);
+        settings.narratorHandoffWidgetX = pos.x;
+        settings.narratorHandoffWidgetY = pos.y;
+        if (!moved) settings.narratorHandoffWidgetCollapsed = settings.narratorHandoffWidgetCollapsed === false;
+        saveExtensionSettings();
+        renderNarratorHandoffWidget();
+    });
+
+    button?.addEventListener('pointercancel', cancelButtonDrag);
+    button?.addEventListener('lostpointercapture', cancelButtonDrag);
+
+    minimize?.addEventListener('click', event => {
+        event.preventDefault();
+        const settings = getSettings();
+        settings.narratorHandoffWidgetCollapsed = true;
+        saveExtensionSettings();
+        renderNarratorHandoffWidget();
+    });
+
+    title?.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || event.target?.closest?.('button')) return;
+        const panel = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID);
+        if (!panel || panel.hidden) return;
+        const rect = panel.getBoundingClientRect();
+        const widgetRect = widget.getBoundingClientRect();
+        widget._speNarratorHandoffPanelDrag = {
+            startX: event.clientX,
+            startY: event.clientY,
+            startLeft: widgetRect.left,
+            startTop: widgetRect.top,
+            width: rect.width,
+            height: rect.height,
+        };
+        widget.classList.add('spe-narrator-handoff-panel-dragging');
+        title.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+    });
+
+    title?.addEventListener('pointermove', event => {
+        const panelDrag = widget._speNarratorHandoffPanelDrag;
+        if (!panelDrag) return;
+        const pos = clampTrackerWidgetPosition(
+            panelDrag.startLeft + event.clientX - panelDrag.startX,
+            panelDrag.startTop + event.clientY - panelDrag.startY,
+            panelDrag.width,
+            panelDrag.height,
+        );
+        widget.style.left = String(pos.x) + 'px';
+        widget.style.top = String(pos.y) + 'px';
+    });
+
+    const finishPanelDrag = (event, canceled = false) => {
+        const panelDrag = widget._speNarratorHandoffPanelDrag;
+        if (!panelDrag) return;
+        widget._speNarratorHandoffPanelDrag = null;
+        widget.classList.remove('spe-narrator-handoff-panel-dragging');
+        if (title?.hasPointerCapture?.(event?.pointerId)) title.releasePointerCapture(event.pointerId);
+        if (canceled) {
+            syncNarratorHandoffWidgetViewport();
+            return;
+        }
+        const settings = getSettings();
+        const rect = widget.getBoundingClientRect();
+        const pos = clampTrackerWidgetPosition(rect.left, rect.top, panelDrag.width, panelDrag.height);
+        settings.narratorHandoffWidgetX = pos.x;
+        settings.narratorHandoffWidgetY = pos.y;
+        saveExtensionSettings();
+        syncNarratorHandoffWidgetViewport();
+    };
+
+    title?.addEventListener('pointerup', finishPanelDrag);
+    title?.addEventListener('pointercancel', event => finishPanelDrag(event, true));
+    title?.addEventListener('lostpointercapture', event => finishPanelDrag(event, true));
+
+    resizeHandle?.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        const panel = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID);
+        if (!panel || panel.hidden) return;
+        const rect = panel.getBoundingClientRect();
+        resize = {
+            startX: event.clientX,
+            startY: event.clientY,
+            startWidth: rect.width,
+            startHeight: rect.height,
+        };
+        widget.classList.add('spe-narrator-handoff-resizing');
+        resizeHandle.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+    });
+
+    resizeHandle?.addEventListener('pointermove', event => {
+        if (!resize) return;
+        const panel = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID);
+        if (!panel || panel.hidden) return;
+        const nextWidth = clampTrackerWidgetWidth(resize.startWidth + event.clientX - resize.startX);
+        const nextHeight = clampTrackerWidgetHeight(resize.startHeight + event.clientY - resize.startY);
+        panel.style.width = String(nextWidth) + 'px';
+        panel.style.height = String(nextHeight) + 'px';
+        const widgetRect = widget.getBoundingClientRect();
+        const pos = clampTrackerWidgetPosition(widgetRect.left, widgetRect.top, nextWidth, nextHeight);
+        widget.style.left = String(pos.x) + 'px';
+        widget.style.top = String(pos.y) + 'px';
+    });
+
+    const finishResize = (event, canceled = false) => {
+        if (!resize) return;
+        const panel = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID);
+        resize = null;
+        widget.classList.remove('spe-narrator-handoff-resizing');
+        if (resizeHandle?.hasPointerCapture?.(event?.pointerId)) resizeHandle.releasePointerCapture(event.pointerId);
+        if (canceled) {
+            syncNarratorHandoffWidgetViewport();
+            return;
+        }
+        if (!panel || panel.hidden) return;
+        const settings = getSettings();
+        const widgetRect = widget.getBoundingClientRect();
+        const panelRect = panel.getBoundingClientRect();
+        settings.narratorHandoffWidgetWidth = clampTrackerWidgetWidth(panelRect.width);
+        settings.narratorHandoffWidgetHeight = clampTrackerWidgetHeight(panelRect.height);
+        const pos = clampTrackerWidgetPosition(
+            widgetRect.left,
+            widgetRect.top,
+            settings.narratorHandoffWidgetWidth,
+            settings.narratorHandoffWidgetHeight,
+        );
+        settings.narratorHandoffWidgetX = pos.x;
+        settings.narratorHandoffWidgetY = pos.y;
+        saveExtensionSettings();
+        syncNarratorHandoffWidgetViewport();
+    };
+
+    resizeHandle?.addEventListener('pointerup', finishResize);
+    resizeHandle?.addEventListener('pointercancel', event => finishResize(event, true));
+    resizeHandle?.addEventListener('lostpointercapture', event => finishResize(event, true));
+}
+
+function renderNarratorHandoffWidget(context = getContext()) {
+    if (typeof document === 'undefined') return;
+    ensureTrackerDisplayStyles();
+    const settings = getSettings();
+    const latest = getLatestNarratorHandoffEntry(context);
+    const visible = isStoryEngineEnabled()
+        && settings.narratorHandoffEnabled === true
+        && normalizeNarratorHandoffDisplayMode(settings.narratorHandoffDisplayMode) === NARRATOR_HANDOFF_DISPLAY_MODES.SIDE_PANEL
+        && Boolean(latest?.handoff?.text);
+    if (!visible) {
+        clearNarratorHandoffWidgetViewportHandler();
+        document.getElementById(NARRATOR_HANDOFF_WIDGET_ID)?.remove();
+        return;
+    }
+    let widget = document.getElementById(NARRATOR_HANDOFF_WIDGET_ID);
+    if (!widget) {
+        widget = document.createElement('div');
+        widget.id = NARRATOR_HANDOFF_WIDGET_ID;
+        widget.innerHTML = [
+            '<button id="', NARRATOR_HANDOFF_WIDGET_BUTTON_ID, '" type="button" title="Narration Handoff" aria-label="Narration Handoff">',
+            '<i class="fa-solid fa-scroll" aria-hidden="true"></i>',
+            '</button>',
+            '<div id="', NARRATOR_HANDOFF_WIDGET_PANEL_ID, '" hidden>',
+            '<div class="structured-preflight-tracker-widget-title">',
+            '<button class="structured-preflight-tracker-widget-minimize" type="button" title="Minimize narration handoff" aria-label="Minimize narration handoff"><i class="fa-solid fa-scroll" aria-hidden="true"></i></button>',
+            '<span class="structured-preflight-tracker-widget-name"><span>Narration Handoff</span></span>',
+            '</div>',
+            '<div class="structured-preflight-narrator-handoff-widget-body" data-spe-narrator-handoff-body></div>',
+            '<div class="structured-preflight-tracker-resize-handle" data-spe-narrator-handoff-resize-handle title="Resize narration handoff" aria-label="Resize narration handoff">',
+            '<span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span>',
+            '</div>',
+            '</div>',
+        ].join('');
+        document.body.append(widget);
+        attachNarratorHandoffWidgetHandlers(widget);
+    }
+    ensureNarratorHandoffWidgetViewportHandler();
+    syncNarratorHandoffWidgetViewport();
+    const body = widget.querySelector('[data-spe-narrator-handoff-body]');
+    if (!body) return;
+    body.innerHTML = [
+        '<div class="structured-preflight-narrator-handoff-widget-content">',
+        '<div class="structured-preflight-narrator-handoff-widget-meta">Latest completed handoff</div>',
+        '<pre>', escapeHtml(latest.handoff.text), '</pre>',
+        '</div>',
+    ].join('');
+}
 
 
 function buildCurrentTrackerWidgetSnapshot(context = getContext()) {
@@ -14379,6 +14927,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
         renderNarratorHandoffBlockForMessage(messageId, null, context);
         renderTrackerDisplayBlockForMessage(messageId, null, context);
         renderTrackerWidget(context);
+        renderNarratorHandoffWidget(context);
         renderProgressionCard(context);
 
         if (!isPostNarrationFinalizerCurrent(context, messageId, messageKey, captured)) return;

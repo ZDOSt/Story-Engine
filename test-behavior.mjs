@@ -15707,7 +15707,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.75');
+      assert.equal(manifest.version, '0.9.76');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16262,11 +16262,11 @@ const tests = [
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.semanticReasoningEffort/);
       const getSettingsSource = source.slice(
         source.indexOf('function getSettings()'),
-        source.indexOf('function migrateTrackerWidgetSettings'),
+        source.indexOf('function normalizeNarratorHandoffDisplayMode'),
       );
       assert.match(getSettingsSource, /const hadRetiredSemanticSettings = \['disableSemanticThinking', 'semanticReasoningEffort'\]/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticThinkingSettingsChanged \|\| trackerSettingsChanged \|\| proseGuardSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticThinkingSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
@@ -16281,6 +16281,7 @@ const tests = [
         'DEFAULT_SETTINGS',
         'PROSE_GUARD_MODES',
         'migrateTrackerWidgetSettings',
+        'migrateNarratorHandoffSettings',
         'migrateProseGuardSettings',
         'normalizeSemanticThinkingDisableFormatMap',
         'semanticThinkingDisableFormatMapsEqual',
@@ -16294,6 +16295,7 @@ const tests = [
         'storyEngine',
         {},
         { OFF: 'off' },
+        () => false,
         () => false,
         () => false,
         value => value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {},
@@ -19757,6 +19759,158 @@ const tests = [
         () => createSemanticTurnBinding({ latestUserText: '   ' }, 'normal'),
         /no effective current user input/,
       );
+    },
+  },
+  {
+    name: 'narration handoff display is optional routed and independently persistent',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
+      const normalizerSource = source.slice(
+        source.indexOf('function normalizeNarratorHandoffDisplayMode'),
+        source.indexOf('function migrateNarratorHandoffSettings'),
+      );
+      const migrationSource = source.slice(
+        source.indexOf('function migrateNarratorHandoffSettings'),
+        source.indexOf('function migrateTrackerWidgetSettings'),
+      );
+      const latestSource = source.slice(
+        source.indexOf('function getLatestNarratorHandoffEntry'),
+        source.indexOf('function getNarratorHandoffWidgetLayout'),
+      );
+      const layoutSource = source.slice(
+        source.indexOf('function getNarratorHandoffWidgetLayout'),
+        source.indexOf('function applyNarratorHandoffWidgetLayout'),
+      );
+      const inChatSource = source.slice(
+        source.indexOf('function renderNarratorHandoffBlockForMessage'),
+        source.indexOf('function renderTrackerDisplayBlockForMessage'),
+      );
+      const sidePanelSource = source.slice(
+        source.indexOf('function renderNarratorHandoffWidget'),
+        source.indexOf('function buildCurrentTrackerWidgetSnapshot'),
+      );
+      const settingsStyleSource = source.slice(
+        source.indexOf('function ensureSettingsPanelStyles'),
+        source.indexOf('function collapsePromptOptionDrawers'),
+      );
+      const displayStyleSource = source.slice(
+        source.indexOf('function ensureTrackerDisplayStyles'),
+        source.indexOf('function getMessageElement'),
+      );
+
+      const modes = { IN_CHAT: 'in_chat', SIDE_PANEL: 'side_panel' };
+      const normalizeMode = new Function(
+        'NARRATOR_HANDOFF_DISPLAY_MODES',
+        normalizerSource + '; return normalizeNarratorHandoffDisplayMode;',
+      )(modes);
+      const migrate = new Function(
+        'normalizeNarratorHandoffDisplayMode',
+        'TRACKER_WIDGET_DEFAULT_WIDTH',
+        'TRACKER_WIDGET_DEFAULT_HEIGHT',
+        migrationSource + '; return migrateNarratorHandoffSettings;',
+      )(normalizeMode, 450, 550);
+      const getLatest = new Function(
+        'isAssistantNarrationMessage',
+        'getMessageNarratorHandoff',
+        latestSource + '; return getLatestNarratorHandoffEntry;',
+      )(
+        message => Boolean(message && !message.is_user && !message.is_system),
+        message => message?.handoff || null,
+      );
+      const getLayout = new Function(
+        'getSettings',
+        'TRACKER_WIDGET_BUTTON_SIZE',
+        'TRACKER_WIDGET_DEFAULT_WIDTH',
+        'TRACKER_WIDGET_DEFAULT_HEIGHT',
+        'clampTrackerWidgetWidth',
+        'clampTrackerWidgetHeight',
+        'clampTrackerWidgetPosition',
+        'globalThis',
+        layoutSource + '; return getNarratorHandoffWidgetLayout;',
+      )(
+        () => ({}),
+        36,
+        450,
+        550,
+        value => Number(value),
+        value => Number(value),
+        (x, y) => ({ x, y }),
+        { innerWidth: 1200 },
+      );
+
+      assert.equal(manifest.version, '0.9.76');
+      assert.match(source, /narratorHandoffEnabled:\s*false/);
+      assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
+      assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);
+      assert.equal(normalizeMode('in_chat'), 'in_chat');
+      assert.equal(normalizeMode('SIDE_PANEL'), 'side_panel');
+      assert.equal(normalizeMode('unknown'), 'side_panel');
+      assert.deepEqual(getLayout({
+        narratorHandoffWidgetCollapsed: true,
+        narratorHandoffWidgetX: null,
+        narratorHandoffWidgetY: 120,
+        narratorHandoffWidgetWidth: 510,
+        narratorHandoffWidgetHeight: 620,
+      }), { collapsed: true, x: 1140, y: 120, width: 36, height: 36 });
+      assert.deepEqual(getLayout({
+        narratorHandoffWidgetCollapsed: false,
+        narratorHandoffWidgetX: null,
+        narratorHandoffWidgetY: 140,
+        narratorHandoffWidgetWidth: 510,
+        narratorHandoffWidgetHeight: 620,
+      }), { collapsed: false, x: 666, y: 140, width: 510, height: 620 });
+
+      const malformed = {
+        narratorHandoffEnabled: 'yes',
+        narratorHandoffDisplayMode: 'unknown',
+        narratorHandoffWidgetCollapsed: 'no',
+        narratorHandoffWidgetX: -1,
+        narratorHandoffWidgetY: 0,
+        narratorHandoffWidgetWidth: '',
+        narratorHandoffWidgetHeight: Number.NaN,
+      };
+      assert.equal(migrate(malformed), true);
+      assert.deepEqual(malformed, {
+        narratorHandoffEnabled: false,
+        narratorHandoffDisplayMode: 'side_panel',
+        narratorHandoffWidgetCollapsed: true,
+        narratorHandoffWidgetX: null,
+        narratorHandoffWidgetY: 120,
+        narratorHandoffWidgetWidth: 450,
+        narratorHandoffWidgetHeight: 550,
+      });
+
+      const latest = getLatest({
+        chat: [
+          { is_user: true, handoff: { text: 'user' } },
+          { handoff: { text: 'older' } },
+          { is_system: true, handoff: { text: 'system' } },
+          { handoff: { text: 'newest' } },
+        ],
+      });
+      assert.equal(latest.messageId, 3);
+      assert.equal(latest.handoff.text, 'newest');
+
+      assert.match(inChatSource, /settings\.narratorHandoffEnabled !== true/);
+      assert.match(inChatSource, /NARRATOR_HANDOFF_DISPLAY_MODES\.IN_CHAT/);
+      assert.match(sidePanelSource, /NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
+      assert.match(sidePanelSource, /getLatestNarratorHandoffEntry\(context\)/);
+      assert.match(sidePanelSource, /escapeHtml\(latest\.handoff\.text\)/);
+      assert.match(source, /settings\.narratorHandoffWidgetWidth = clampTrackerWidgetWidth/);
+      assert.match(source, /settings\.narratorHandoffWidgetHeight = clampTrackerWidgetHeight/);
+      assert.match(source, /const finishPanelDrag = \(event, canceled = false\)/);
+      assert.match(source, /const finishResize = \(event, canceled = false\)/);
+      assert.match(source, /pointercancel', event => finishPanelDrag\(event, true\)/);
+      assert.match(source, /pointercancel', event => finishResize\(event, true\)/);
+      assert.match(source, /settings\.trackerWidgetWidth = clampTrackerWidgetWidth/);
+      assert.match(source, /settings\.trackerWidgetHeight = clampTrackerWidgetHeight/);
+      assert.match(source, /clearNarratorHandoffWidgetViewportHandler\(\)/);
+      assert.match(source, /document\.getElementById\(NARRATOR_HANDOFF_WIDGET_ID\)\?\.remove\(\)/);
+      assert.match(source, /renderTrackerWidget\(context\);\s*renderNarratorHandoffWidget\(context\);\s*renderProgressionCard\(context\)/);
+      assert.doesNotMatch(settingsStyleSource, /structured_preflight_narrator_handoff_widget/);
+      assert.match(displayStyleSource, /structured_preflight_narrator_handoff_widget/);
+      assert.match(displayStyleSource, /structured-preflight-narrator-handoff-widget-content pre[\s\S]*white-space: pre-wrap/);
     },
   },
 ];
