@@ -11217,8 +11217,8 @@ const tests = [
       assert.match(source, /function clampTrackerWidgetWidth/);
       assert.match(source, /function clampTrackerWidgetPosition/);
       assert.match(source, /function applyTrackerWidgetLayout/);
-      assert.match(trackerLayoutSource, /function getTrackerWidgetPanelPlacement\(anchorX, anchorY, width, height\)/);
-      assert.match(trackerLayoutSource, /function getTrackerWidgetAnchorForPanel\(panelLeft, panelTop, width, height\)/);
+      assert.match(trackerLayoutSource, /function getTrackerWidgetPanelPlacement\(anchorX, anchorY, width, height, preferredSide = 'auto'\)/);
+      assert.match(trackerLayoutSource, /function getTrackerWidgetAnchorForPanel\(panelLeft, panelTop, width, height, preferredSide = 'auto', protectedCorner = ''\)/);
       assert.match(trackerLayoutSource, /function resizeTrackerWidgetFromCorner\(start, corner, deltaX, deltaY\)/);
       assert.match(trackerLayoutSource, /function attachTrackerWidgetCornerResizeHandlers\(widget, options = \{\}\)/);
       assert.doesNotMatch(trackerLayoutSource, /clampTrackerWidget(?:Width|Height)\([^)]*,\s*[xy]\)/);
@@ -11243,7 +11243,8 @@ const tests = [
       assert.equal(repairedCurrent.trackerWidgetHeight, 550);
       assert.equal(repairedCurrent.trackerWidgetWidth, 450);
       assert.equal(repairedCurrent.trackerWidgetLayoutMigrationVersion, 2);
-      assert.doesNotMatch(source, /function getTrackerChatColumnRect|#sheld|#form_sheld|#chat_col/);
+      assert.match(source, /function getTrackerWidgetChatColumnBounds\(\)/);
+      assert.match(source, /document\.querySelector\('#sheld'\)/);
       assert.doesNotMatch(source, /rightCandidate|leftCandidate|belowCandidate|aboveCandidate/);
       assert.doesNotMatch(source, /trackerWidgetPanelPosition/);
       assert.match(source, /title\?\.addEventListener\('pointerdown'/);
@@ -11259,7 +11260,9 @@ const tests = [
       assert.match(source, /settings\.postNarrationTrackerEnabled = Boolean\(event\.target\?\.checked\);\s*renderTrackerWidget\(getContext\(\)\)/);
       assert.match(source, /settings\[settingsKeys\.width\] = width/);
       assert.match(source, /settings\[settingsKeys\.height\] = height/);
-      assert.doesNotMatch(source, /data-spe-resize-corner="top-left"/);
+      assert.match(source, /function syncTrackerWidgetResizeHandles\(widget, placement, handleSelector\)/);
+      assert.match(source, /handle\.hidden = isProtected/);
+      assert.match(source, /data-spe-resize-corner="top-left"/);
       assert.match(source, /body\.onchange = event =>/);
       assert.match(source, /event\.target\?\.closest\?\.\('\[data-spe-tracker-select-npc\]'\)/);
       assert.match(source, /\['ArrowUp', 'ArrowDown', 'Home', 'End'\]/);
@@ -15713,7 +15716,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.79');
+      assert.equal(manifest.version, '0.9.80');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -19810,13 +19813,23 @@ const tests = [
         'NARRATOR_HANDOFF_DISPLAY_MODES',
         normalizerSource + '; return normalizeNarratorHandoffDisplayMode;',
       )(modes);
+      const normalizeSavedDimension = new Function(
+        source.slice(
+          source.indexOf('function normalizeTrackerWidgetSavedDimension'),
+          source.indexOf('function getNarratorHandoffWidgetLayout'),
+        ) + '; return normalizeTrackerWidgetSavedDimension;',
+      )();
+      assert.equal(normalizeSavedDimension(450, 450, 280), 450);
+      assert.equal(normalizeSavedDimension(1, 450, 280), 280);
       const migrate = new Function(
         'normalizeNarratorHandoffDisplayMode',
         'NARRATOR_HANDOFF_WIDGET_LAYOUT_MIGRATION_VERSION',
         'TRACKER_WIDGET_DEFAULT_WIDTH',
         'TRACKER_WIDGET_DEFAULT_HEIGHT',
+        'TRACKER_WIDGET_PANEL_PREFERRED_SIDES',
+        'getTrackerWidgetAnchorForPanel',
         migrationSource + '; return migrateNarratorHandoffSettings;',
-      )(normalizeMode, 1, 450, 550);
+      )(normalizeMode, 1, 450, 550, { TRACKER: 'left', NARRATOR_HANDOFF: 'right' }, (x, y) => ({ x, y }));
       const getLatest = new Function(
         'isAssistantNarrationMessage',
         'getMessageNarratorHandoff',
@@ -19830,28 +19843,39 @@ const tests = [
         'TRACKER_WIDGET_BUTTON_SIZE',
         'TRACKER_WIDGET_DEFAULT_WIDTH',
         'TRACKER_WIDGET_DEFAULT_HEIGHT',
+        'TRACKER_WIDGET_MIN_WIDTH',
+        'TRACKER_WIDGET_MIN_HEIGHT',
+        'normalizeTrackerWidgetSavedDimension',
         'clampTrackerWidgetWidth',
         'clampTrackerWidgetHeight',
-        'clampTrackerWidgetPosition',
+        'clampTrackerWidgetAnchorPosition',
         'getTrackerWidgetPanelPlacement',
         'globalThis',
+        'TRACKER_WIDGET_PANEL_PREFERRED_SIDES',
         layoutSource + '; return getNarratorHandoffWidgetLayout;',
       )(
         () => ({}),
         36,
         450,
         550,
+        280,
+        420,
+        (value, fallback, minimum) => Math.round(Math.max(1, Number(minimum) || 1, Number(value) > 0 ? Number(value) : fallback)),
         value => Number(value),
         value => Number(value),
         (x, y) => ({ x, y }),
         (anchorX, anchorY, width, height) => ({
-          left: anchorX + 18 > 600 ? 36 - width : 0,
+          left: anchorX + 18 > 600 ? -width : 36,
           top: anchorY + 18 > 400 ? 36 - height : 0,
+          panelWidth: width,
+          panelHeight: height,
+          protectedResizeCorner: anchorX + 18 > 600 ? 'top-right' : 'top-left',
         }),
         { innerWidth: 1200 },
+        { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.79');
+      assert.equal(manifest.version, '0.9.80');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);
@@ -19871,7 +19895,18 @@ const tests = [
         narratorHandoffWidgetY: 140,
         narratorHandoffWidgetWidth: 510,
         narratorHandoffWidgetHeight: 620,
-      }), { collapsed: false, x: 1140, y: 140, width: 510, height: 620, panelLeft: -474, panelTop: 0 });
+      }), {
+        collapsed: false,
+        x: 1140,
+        y: 140,
+        width: 510,
+        height: 620,
+        panelWidth: 510,
+        panelHeight: 620,
+        panelLeft: -510,
+        panelTop: 0,
+        protectedResizeCorner: 'top-right',
+      });
 
       const malformed = {
         narratorHandoffEnabled: 'yes',
@@ -19912,13 +19947,16 @@ const tests = [
       assert.match(sidePanelSource, /escapeHtml\(latest\.handoff\.text\)/);
       assert.match(source, /settings\[settingsKeys\.width\] = width/);
       assert.match(source, /settings\[settingsKeys\.height\] = height/);
+      assert.match(layoutSource, /const position = clampTrackerWidgetAnchorPosition\(/);
       assert.match(source, /const finishPanelDrag = \(event, canceled = false\)/);
       assert.match(source, /function attachTrackerWidgetCornerResizeHandlers\(widget, options = \{\}\)/);
       assert.match(source, /pointercancel', event => finishPanelDrag\(event, true\)/);
       assert.match(source, /data-spe-resize-corner="top-right"/);
       assert.match(source, /data-spe-resize-corner="bottom-left"/);
       assert.match(source, /data-spe-resize-corner="bottom-right"/);
-      assert.doesNotMatch(source, /data-spe-resize-corner="top-left"/);
+      assert.match(source, /data-spe-resize-corner="top-left"/);
+      assert.match(source, /button\.hidden = false/);
+      assert.match(source, /syncTrackerWidgetResizeHandles\(widget, layout, '\[data-spe-narrator-handoff-resize-handle\]'\)/);
       assert.match(source, /clearNarratorHandoffWidgetViewportHandler\(\)/);
       assert.match(source, /document\.getElementById\(NARRATOR_HANDOFF_WIDGET_ID\)\?\.remove\(\)/);
       assert.match(source, /renderTrackerWidget\(context\);\s*renderNarratorHandoffWidget\(context\);\s*renderProgressionCard\(context\)/);
@@ -19936,7 +19974,7 @@ const tests = [
     },
   },
   {
-    name: 'tracker widgets use edge-aware expansion and three-corner viewport-bounded resizing',
+    name: 'tracker widgets stay in their chat-side margins with anchored three-corner resizing',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const geometrySource = source.slice(
@@ -19950,8 +19988,10 @@ const tests = [
         'TRACKER_WIDGET_MIN_WIDTH',
         'TRACKER_WIDGET_MIN_HEIGHT',
         'globalThis',
+        'document',
         `${geometrySource}; return {
           clampTrackerWidgetHeight,
+          clampTrackerWidgetAnchorPosition,
           getTrackerWidgetPanelPlacement,
           getTrackerWidgetAnchorForPanel,
           resizeTrackerWidgetFromCorner,
@@ -19963,24 +20003,121 @@ const tests = [
         280,
         420,
         { innerWidth: 1920, innerHeight: 1400 },
+        {
+          querySelector(selector) {
+            if (selector !== '#sheld') return null;
+            return { getBoundingClientRect: () => ({ left: 480, right: 1440, width: 960 }) };
+          },
+        },
       );
 
       assert.equal(geometry.clampTrackerWidgetHeight(1200), 1200);
       assert.equal(geometry.clampTrackerWidgetHeight(2000), 1384);
+      assert.deepEqual(geometry.clampTrackerWidgetAnchorPosition(700, 50, 'left'), { x: 436, y: 50 });
+      assert.deepEqual(geometry.clampTrackerWidgetAnchorPosition(700, 50, 'right'), { x: 1448, y: 50 });
       assert.deepEqual(
         geometry.getTrackerWidgetPanelPlacement(40, 50, 500, 600),
-        { opensLeft: false, opensUp: false, left: 0, top: 0 },
+        {
+          opensLeft: false,
+          opensUp: false,
+          panelWidth: 500,
+          panelHeight: 600,
+          left: 36,
+          top: 0,
+          protectedResizeCorner: 'top-left',
+        },
       );
       assert.deepEqual(
         geometry.getTrackerWidgetPanelPlacement(1840, 1320, 500, 600),
-        { opensLeft: true, opensUp: true, left: -464, top: -564 },
+        {
+          opensLeft: true,
+          opensUp: true,
+          panelWidth: 500,
+          panelHeight: 600,
+          left: -500,
+          top: -564,
+          protectedResizeCorner: 'bottom-right',
+        },
       );
-      assert.deepEqual(geometry.getTrackerWidgetAnchorForPanel(40, 50, 500, 600), { x: 40, y: 50 });
-      assert.deepEqual(geometry.getTrackerWidgetAnchorForPanel(1370, 700, 500, 600), { x: 1834, y: 1264 });
+      assert.deepEqual(
+        geometry.getTrackerWidgetPanelPlacement(24, 50, 500, 600, 'left'),
+        {
+          opensLeft: false,
+          opensUp: false,
+          panelWidth: 412,
+          panelHeight: 600,
+          left: 36,
+          top: 0,
+          protectedResizeCorner: 'top-left',
+        },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetPanelPlacement(436, 50, 500, 600, 'left'),
+        {
+          opensLeft: true,
+          opensUp: false,
+          panelWidth: 428,
+          panelHeight: 600,
+          left: -428,
+          top: 0,
+          protectedResizeCorner: 'top-right',
+        },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetPanelPlacement(1448, 50, 500, 600, 'right'),
+        {
+          opensLeft: false,
+          opensUp: false,
+          panelWidth: 428,
+          panelHeight: 600,
+          left: 36,
+          top: 0,
+          protectedResizeCorner: 'top-left',
+        },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetPanelPlacement(1860, 50, 500, 600, 'right'),
+        {
+          opensLeft: true,
+          opensUp: false,
+          panelWidth: 412,
+          panelHeight: 600,
+          left: -412,
+          top: 0,
+          protectedResizeCorner: 'top-right',
+        },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetPanelPlacement(1840, 1320, 500, 600, 'right'),
+        {
+          opensLeft: true,
+          opensUp: true,
+          panelWidth: 392,
+          panelHeight: 600,
+          left: -392,
+          top: -564,
+          protectedResizeCorner: 'bottom-right',
+        },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetAnchorForPanel(60, 50, 412, 600, 'left', 'top-left'),
+        { x: 24, y: 50 },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetAnchorForPanel(1448, 50, 412, 600, 'right', 'top-right'),
+        { x: 1860, y: 50 },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetAnchorForPanel(1448, 756, 392, 600, 'right', 'bottom-right'),
+        { x: 1840, y: 1320 },
+      );
 
       const start = { left: 100, top: 100, width: 500, height: 600 };
       assert.deepEqual(geometry.resizeTrackerWidgetFromCorner(start, 'top-right', 100, 50), {
         left: 100, top: 150, width: 600, height: 550,
+      });
+      assert.deepEqual(geometry.resizeTrackerWidgetFromCorner(start, 'top-left', 50, 50), {
+        left: 150, top: 150, width: 450, height: 550,
       });
       assert.deepEqual(geometry.resizeTrackerWidgetFromCorner(start, 'bottom-left', 50, 50), {
         left: 150, top: 100, width: 450, height: 650,
@@ -19992,9 +20129,10 @@ const tests = [
       assert.doesNotMatch(source, /TRACKER_WIDGET_MAX_HEIGHT|900px/);
       const trackerCorners = Array.from(source.matchAll(/data-spe-tracker-resize-handle data-spe-resize-corner="([^"]+)"/g), match => match[1]);
       const narratorHandoffCorners = Array.from(source.matchAll(/data-spe-narrator-handoff-resize-handle data-spe-resize-corner="([^"]+)"/g), match => match[1]);
-      assert.deepEqual(trackerCorners, ['top-right', 'bottom-left', 'bottom-right']);
-      assert.deepEqual(narratorHandoffCorners, ['top-right', 'bottom-left', 'bottom-right']);
-      assert.doesNotMatch(source, /data-spe-resize-corner="top-left"/);
+      assert.deepEqual(trackerCorners, ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+      assert.deepEqual(narratorHandoffCorners, ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+      assert.match(source, /protectedResizeCorner/);
+      assert.match(source, /handle\.hidden = isProtected/);
     },
   },
 ];
