@@ -99,8 +99,7 @@ const TRACKER_WIDGET_DEFAULT_WIDTH = 450;
 const TRACKER_WIDGET_MIN_WIDTH = 280;
 const TRACKER_WIDGET_DEFAULT_HEIGHT = 550;
 const TRACKER_WIDGET_MIN_HEIGHT = 420;
-const TRACKER_WIDGET_MAX_HEIGHT = 900;
-const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
+const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 2;
 const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
 const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
 const NARRATOR_HANDOFF_VERSION = 1;
@@ -111,6 +110,7 @@ const NARRATOR_HANDOFF_DISPLAY_MODES = Object.freeze({
 const NARRATOR_HANDOFF_WIDGET_ID = 'structured_preflight_narrator_handoff_widget';
 const NARRATOR_HANDOFF_WIDGET_BUTTON_ID = 'structured_preflight_narrator_handoff_toggle';
 const NARRATOR_HANDOFF_WIDGET_PANEL_ID = 'structured_preflight_narrator_handoff_panel';
+const NARRATOR_HANDOFF_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
 const PROSE_GUARD_EXTRA_KEY = 'structured_preflight_prose_guard';
 const PROSE_GUARD_EXTRA_VERSION = 3;
 const PROSE_GUARD_RECONCILIATION_EXTRA_KEY = 'structured_preflight_prose_guard_reconciliation';
@@ -813,6 +813,9 @@ function normalizeNarratorHandoffDisplayMode(value) {
 }
 
 function migrateNarratorHandoffSettings(settings) {
+    const currentLayoutVersion = Number(settings?.narratorHandoffWidgetLayoutMigrationVersion || 0);
+    const layoutVersionReady = Number.isFinite(currentLayoutVersion)
+        && currentLayoutVersion >= NARRATOR_HANDOFF_WIDGET_LAYOUT_MIGRATION_VERSION;
     let changed = false;
     const setValue = (key, value) => {
         if (settings[key] === value) return;
@@ -840,6 +843,18 @@ function migrateNarratorHandoffSettings(settings) {
         && (!Number.isFinite(Number(settings.narratorHandoffWidgetX)) || Number(settings.narratorHandoffWidgetX) < 0)) {
         setValue('narratorHandoffWidgetX', null);
     }
+    if (!layoutVersionReady && settings.narratorHandoffWidgetCollapsed === false
+        && settings.narratorHandoffWidgetX !== null && settings.narratorHandoffWidgetX !== undefined) {
+        const anchor = getTrackerWidgetAnchorForPanel(
+            Number(settings.narratorHandoffWidgetX),
+            Number(settings.narratorHandoffWidgetY),
+            Number(settings.narratorHandoffWidgetWidth),
+            Number(settings.narratorHandoffWidgetHeight),
+        );
+        setValue('narratorHandoffWidgetX', anchor.x);
+        setValue('narratorHandoffWidgetY', anchor.y);
+    }
+    setValue('narratorHandoffWidgetLayoutMigrationVersion', NARRATOR_HANDOFF_WIDGET_LAYOUT_MIGRATION_VERSION);
     return changed;
 }
 
@@ -859,6 +874,20 @@ function migrateTrackerWidgetSettings(settings) {
     const storedWidth = Number(settings.trackerWidgetWidth);
     if (!Number.isFinite(storedWidth) || storedWidth <= 0) {
         setNumericDefault('trackerWidgetWidth', TRACKER_WIDGET_DEFAULT_WIDTH);
+    }
+    if (!versionReady && settings.trackerWidgetCollapsed === false) {
+        const storedX = Number(settings.trackerWidgetX);
+        const storedY = Number(settings.trackerWidgetY);
+        if (Number.isFinite(storedX) && Number.isFinite(storedY)) {
+            const anchor = getTrackerWidgetAnchorForPanel(
+                storedX,
+                storedY,
+                Number(settings.trackerWidgetWidth),
+                Number(settings.trackerWidgetHeight),
+            );
+            setNumericDefault('trackerWidgetX', anchor.x);
+            setNumericDefault('trackerWidgetY', anchor.y);
+        }
     }
     if (!versionReady) {
         settings.trackerWidgetLayoutMigrationVersion = TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION;
@@ -7552,8 +7581,8 @@ function ensureTrackerDisplayStyles() {
             max-width: max(1px, calc(100dvw - 16px));
             height: ${TRACKER_WIDGET_DEFAULT_HEIGHT}px;
             min-height: 1px;
-            max-height: min(${TRACKER_WIDGET_MAX_HEIGHT}px, calc(100vh - 16px));
-            max-height: min(${TRACKER_WIDGET_MAX_HEIGHT}px, calc(100dvh - 16px));
+            max-height: calc(100vh - 16px);
+            max-height: calc(100dvh - 16px);
             margin: 0;
             padding: 0;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2));
@@ -8462,28 +8491,60 @@ function ensureTrackerDisplayStyles() {
         }
         .structured-preflight-tracker-resize-handle {
             position: absolute;
-            right: 0;
-            bottom: 0;
             z-index: 2;
-            width: 20px;
-            height: 20px;
-            cursor: nwse-resize;
+            width: 18px;
+            height: 18px;
             touch-action: none;
             background: transparent;
         }
+        .structured-preflight-tracker-resize-handle[data-spe-resize-corner="top-right"] {
+            right: 0;
+            top: 0;
+            cursor: nesw-resize;
+        }
+        .structured-preflight-tracker-resize-handle[data-spe-resize-corner="bottom-left"] {
+            left: 0;
+            bottom: 0;
+            cursor: nesw-resize;
+        }
+        .structured-preflight-tracker-resize-handle[data-spe-resize-corner="bottom-right"] {
+            right: 0;
+            bottom: 0;
+            cursor: nwse-resize;
+        }
         .structured-preflight-tracker-resize-grip {
             position: absolute;
-            right: 4px;
-            bottom: 4px;
             width: 10px;
             height: 10px;
-            border-right: 2px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 48%, transparent);
-            border-bottom: 2px solid color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 48%, transparent);
+            border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 48%, transparent);
+            border-style: solid;
+            border-width: 0;
+        }
+        .structured-preflight-tracker-resize-handle[data-spe-resize-corner="top-right"] .structured-preflight-tracker-resize-grip {
+            right: 4px;
+            top: 4px;
+            border-right-width: 2px;
+            border-top-width: 2px;
+        }
+        .structured-preflight-tracker-resize-handle[data-spe-resize-corner="bottom-left"] .structured-preflight-tracker-resize-grip {
+            left: 4px;
+            bottom: 4px;
+            border-left-width: 2px;
+            border-bottom-width: 2px;
+        }
+        .structured-preflight-tracker-resize-handle[data-spe-resize-corner="bottom-right"] .structured-preflight-tracker-resize-grip {
+            right: 4px;
+            bottom: 4px;
+            border-right-width: 2px;
+            border-bottom-width: 2px;
         }
         #${TRACKER_WIDGET_ID}.spe-tracker-resizing,
         #${TRACKER_WIDGET_ID}.spe-tracker-resizing * {
-            cursor: nwse-resize !important;
             user-select: none !important;
+        }
+        .structured-preflight-tracker-widget-minimize {
+            position: relative;
+            z-index: 3;
         }
         .structured-preflight-tracker-edit-actions {
             display: flex;
@@ -8659,8 +8720,8 @@ function ensureTrackerDisplayStyles() {
             max-width: max(1px, calc(100dvw - 16px));
             height: 550px;
             min-height: 1px;
-            max-height: min(900px, calc(100vh - 16px));
-            max-height: min(900px, calc(100dvh - 16px));
+            max-height: calc(100vh - 16px);
+            max-height: calc(100dvh - 16px);
             margin: 0;
             padding: 0;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2));
@@ -8685,7 +8746,6 @@ function ensureTrackerDisplayStyles() {
         }
         #structured_preflight_narrator_handoff_widget.spe-narrator-handoff-resizing,
         #structured_preflight_narrator_handoff_widget.spe-narrator-handoff-resizing * {
-            cursor: nwse-resize !important;
             user-select: none !important;
         }
         .structured-preflight-narrator-handoff-widget-body {
@@ -9184,18 +9244,29 @@ function getNarratorHandoffWidgetLayout(settings = getSettings()) {
         : clampTrackerWidgetHeight(Number.isFinite(storedHeight) && storedHeight > 0 ? storedHeight : TRACKER_WIDGET_DEFAULT_HEIGHT);
     const viewportWidth = Math.max(1, Number(globalThis.innerWidth) || 1200);
     const storedX = Number(settings.narratorHandoffWidgetX);
-    const defaultX = Math.max(8, viewportWidth - width - 24);
+    const defaultX = Math.max(8, viewportWidth - TRACKER_WIDGET_BUTTON_SIZE - 24);
     const x = settings.narratorHandoffWidgetX === null || settings.narratorHandoffWidgetX === undefined
         ? defaultX
         : storedX;
     const storedY = Number(settings.narratorHandoffWidgetY);
-    const position = clampTrackerWidgetPosition(
+    const anchor = clampTrackerWidgetPosition(
         Number.isFinite(x) ? x : defaultX,
         Number.isFinite(storedY) ? storedY : 120,
+    );
+    if (collapsed) {
+        return { collapsed, x: anchor.x, y: anchor.y, width, height, panelLeft: 0, panelTop: 0 };
+    }
+    const placement = getTrackerWidgetPanelPlacement(anchor.x, anchor.y, width, height);
+    const position = clampTrackerWidgetPosition(anchor.x, anchor.y, width, height, placement.left, placement.top);
+    return {
+        collapsed,
+        x: position.x,
+        y: position.y,
         width,
         height,
-    );
-    return { collapsed, x: position.x, y: position.y, width, height };
+        panelLeft: placement.left,
+        panelTop: placement.top,
+    };
 }
 
 function applyNarratorHandoffWidgetLayout(widget, settings = getSettings()) {
@@ -9210,8 +9281,8 @@ function applyNarratorHandoffWidgetLayout(widget, settings = getSettings()) {
         panel.hidden = layout.collapsed;
         panel.style.width = `${layout.width}px`;
         panel.style.height = `${layout.height}px`;
-        panel.style.left = '0px';
-        panel.style.top = '0px';
+        panel.style.left = `${layout.panelLeft}px`;
+        panel.style.top = `${layout.panelTop}px`;
     }
     return layout;
 }
@@ -9259,9 +9330,7 @@ function attachNarratorHandoffWidgetHandlers(widget) {
     const button = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_BUTTON_ID);
     const minimize = widget.querySelector('.structured-preflight-tracker-widget-minimize');
     const title = widget.querySelector('.structured-preflight-tracker-widget-title');
-    const resizeHandle = widget.querySelector('[data-spe-narrator-handoff-resize-handle]');
     let drag = null;
-    let resize = null;
 
     const cancelButtonDrag = () => {
         if (!drag) return;
@@ -9332,6 +9401,8 @@ function attachNarratorHandoffWidgetHandlers(widget) {
             startY: event.clientY,
             startLeft: widgetRect.left,
             startTop: widgetRect.top,
+            panelLeft: rect.left - widgetRect.left,
+            panelTop: rect.top - widgetRect.top,
             width: rect.width,
             height: rect.height,
         };
@@ -9348,6 +9419,8 @@ function attachNarratorHandoffWidgetHandlers(widget) {
             panelDrag.startTop + event.clientY - panelDrag.startY,
             panelDrag.width,
             panelDrag.height,
+            panelDrag.panelLeft,
+            panelDrag.panelTop,
         );
         widget.style.left = String(pos.x) + 'px';
         widget.style.top = String(pos.y) + 'px';
@@ -9364,10 +9437,12 @@ function attachNarratorHandoffWidgetHandlers(widget) {
             return;
         }
         const settings = getSettings();
-        const rect = widget.getBoundingClientRect();
-        const pos = clampTrackerWidgetPosition(rect.left, rect.top, panelDrag.width, panelDrag.height);
-        settings.narratorHandoffWidgetX = pos.x;
-        settings.narratorHandoffWidgetY = pos.y;
+        const panel = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID);
+        const rect = panel?.getBoundingClientRect?.();
+        if (!rect) return;
+        const anchor = getTrackerWidgetAnchorForPanel(rect.left, rect.top, rect.width, rect.height);
+        settings.narratorHandoffWidgetX = anchor.x;
+        settings.narratorHandoffWidgetY = anchor.y;
         saveExtensionSettings();
         syncNarratorHandoffWidgetViewport();
     };
@@ -9376,67 +9451,18 @@ function attachNarratorHandoffWidgetHandlers(widget) {
     title?.addEventListener('pointercancel', event => finishPanelDrag(event, true));
     title?.addEventListener('lostpointercapture', event => finishPanelDrag(event, true));
 
-    resizeHandle?.addEventListener('pointerdown', event => {
-        if (event.button !== 0) return;
-        const panel = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID);
-        if (!panel || panel.hidden) return;
-        const rect = panel.getBoundingClientRect();
-        resize = {
-            startX: event.clientX,
-            startY: event.clientY,
-            startWidth: rect.width,
-            startHeight: rect.height,
-        };
-        widget.classList.add('spe-narrator-handoff-resizing');
-        resizeHandle.setPointerCapture?.(event.pointerId);
-        event.preventDefault();
+    attachTrackerWidgetCornerResizeHandlers(widget, {
+        panelSelector: '#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID,
+        handleSelector: '[data-spe-narrator-handoff-resize-handle]',
+        resizingClass: 'spe-narrator-handoff-resizing',
+        settingsKeys: {
+            x: 'narratorHandoffWidgetX',
+            y: 'narratorHandoffWidgetY',
+            width: 'narratorHandoffWidgetWidth',
+            height: 'narratorHandoffWidgetHeight',
+        },
+        syncViewport: syncNarratorHandoffWidgetViewport,
     });
-
-    resizeHandle?.addEventListener('pointermove', event => {
-        if (!resize) return;
-        const panel = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID);
-        if (!panel || panel.hidden) return;
-        const nextWidth = clampTrackerWidgetWidth(resize.startWidth + event.clientX - resize.startX);
-        const nextHeight = clampTrackerWidgetHeight(resize.startHeight + event.clientY - resize.startY);
-        panel.style.width = String(nextWidth) + 'px';
-        panel.style.height = String(nextHeight) + 'px';
-        const widgetRect = widget.getBoundingClientRect();
-        const pos = clampTrackerWidgetPosition(widgetRect.left, widgetRect.top, nextWidth, nextHeight);
-        widget.style.left = String(pos.x) + 'px';
-        widget.style.top = String(pos.y) + 'px';
-    });
-
-    const finishResize = (event, canceled = false) => {
-        if (!resize) return;
-        const panel = widget.querySelector('#' + NARRATOR_HANDOFF_WIDGET_PANEL_ID);
-        resize = null;
-        widget.classList.remove('spe-narrator-handoff-resizing');
-        if (resizeHandle?.hasPointerCapture?.(event?.pointerId)) resizeHandle.releasePointerCapture(event.pointerId);
-        if (canceled) {
-            syncNarratorHandoffWidgetViewport();
-            return;
-        }
-        if (!panel || panel.hidden) return;
-        const settings = getSettings();
-        const widgetRect = widget.getBoundingClientRect();
-        const panelRect = panel.getBoundingClientRect();
-        settings.narratorHandoffWidgetWidth = clampTrackerWidgetWidth(panelRect.width);
-        settings.narratorHandoffWidgetHeight = clampTrackerWidgetHeight(panelRect.height);
-        const pos = clampTrackerWidgetPosition(
-            widgetRect.left,
-            widgetRect.top,
-            settings.narratorHandoffWidgetWidth,
-            settings.narratorHandoffWidgetHeight,
-        );
-        settings.narratorHandoffWidgetX = pos.x;
-        settings.narratorHandoffWidgetY = pos.y;
-        saveExtensionSettings();
-        syncNarratorHandoffWidgetViewport();
-    };
-
-    resizeHandle?.addEventListener('pointerup', finishResize);
-    resizeHandle?.addEventListener('pointercancel', event => finishResize(event, true));
-    resizeHandle?.addEventListener('lostpointercapture', event => finishResize(event, true));
 }
 
 function renderNarratorHandoffWidget(context = getContext()) {
@@ -9467,9 +9493,9 @@ function renderNarratorHandoffWidget(context = getContext()) {
             '<span class="structured-preflight-tracker-widget-name"><span>Narration Handoff</span></span>',
             '</div>',
             '<div class="structured-preflight-narrator-handoff-widget-body" data-spe-narrator-handoff-body></div>',
-            '<div class="structured-preflight-tracker-resize-handle" data-spe-narrator-handoff-resize-handle title="Resize narration handoff" aria-label="Resize narration handoff">',
-            '<span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span>',
-            '</div>',
+            '<div class="structured-preflight-tracker-resize-handle" data-spe-narrator-handoff-resize-handle data-spe-resize-corner="top-right" title="Resize narration handoff from top right" aria-label="Resize narration handoff from top right"><span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span></div>',
+            '<div class="structured-preflight-tracker-resize-handle" data-spe-narrator-handoff-resize-handle data-spe-resize-corner="bottom-left" title="Resize narration handoff from bottom left" aria-label="Resize narration handoff from bottom left"><span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span></div>',
+            '<div class="structured-preflight-tracker-resize-handle" data-spe-narrator-handoff-resize-handle data-spe-resize-corner="bottom-right" title="Resize narration handoff from bottom right" aria-label="Resize narration handoff from bottom right"><span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span></div>',
             '</div>',
         ].join('');
         document.body.append(widget);
@@ -9550,9 +9576,9 @@ function renderTrackerWidget(context = getContext()) {
                 </div>
                 <div data-structured-preflight-tracker-widget-body></div>
                 <div class="structured-preflight-prose-guard-strip" data-spe-prose-guard-strip hidden></div>
-                <div class="structured-preflight-tracker-resize-handle" data-spe-tracker-resize-handle title="Resize tracker" aria-label="Resize tracker">
-                    <span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span>
-                </div>
+                <div class="structured-preflight-tracker-resize-handle" data-spe-tracker-resize-handle data-spe-resize-corner="top-right" title="Resize tracker from top right" aria-label="Resize tracker from top right"><span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span></div>
+                <div class="structured-preflight-tracker-resize-handle" data-spe-tracker-resize-handle data-spe-resize-corner="bottom-left" title="Resize tracker from bottom left" aria-label="Resize tracker from bottom left"><span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span></div>
+                <div class="structured-preflight-tracker-resize-handle" data-spe-tracker-resize-handle data-spe-resize-corner="bottom-right" title="Resize tracker from bottom right" aria-label="Resize tracker from bottom right"><span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span></div>
             </div>`;
         document.body.append(widget);
 
@@ -10394,7 +10420,7 @@ function attachTrackerWidgetEditorHandlers(body, context = getContext()) {
 function clampTrackerWidgetHeight(value) {
     const viewportHeight = Math.max(1, Number(globalThis.innerHeight) || 800);
     const availableHeight = Math.max(1, viewportHeight - 16);
-    const maximum = Math.min(TRACKER_WIDGET_MAX_HEIGHT, availableHeight);
+    const maximum = availableHeight;
     const minimum = Math.min(TRACKER_WIDGET_MIN_HEIGHT, maximum);
     const numeric = Number(value);
     const desired = Number.isFinite(numeric) ? numeric : TRACKER_WIDGET_DEFAULT_HEIGHT;
@@ -10411,7 +10437,14 @@ function clampTrackerWidgetWidth(value) {
     return Math.round(Math.max(minimum, Math.min(desired, maximum)));
 }
 
-function clampTrackerWidgetPosition(x, y, width = TRACKER_WIDGET_BUTTON_SIZE, height = TRACKER_WIDGET_BUTTON_SIZE) {
+function clampTrackerWidgetPosition(
+    x,
+    y,
+    width = TRACKER_WIDGET_BUTTON_SIZE,
+    height = TRACKER_WIDGET_BUTTON_SIZE,
+    panelLeft = 0,
+    panelTop = 0,
+) {
     const viewportWidth = Math.max(1, Number(globalThis.innerWidth) || 1200);
     const viewportHeight = Math.max(1, Number(globalThis.innerHeight) || 800);
     const horizontalInset = Math.min(8, viewportWidth / 2);
@@ -10422,44 +10455,220 @@ function clampTrackerWidgetPosition(x, y, width = TRACKER_WIDGET_BUTTON_SIZE, he
     const numericHeight = Number(height);
     const safeWidth = Math.min(Math.max(1, Number.isFinite(numericWidth) ? numericWidth : TRACKER_WIDGET_BUTTON_SIZE), maximumWidth);
     const safeHeight = Math.min(Math.max(1, Number.isFinite(numericHeight) ? numericHeight : TRACKER_WIDGET_BUTTON_SIZE), maximumHeight);
-    const maxX = Math.max(horizontalInset, viewportWidth - safeWidth - horizontalInset);
-    const maxY = Math.max(verticalInset, viewportHeight - safeHeight - verticalInset);
+    const safePanelLeft = Number.isFinite(Number(panelLeft)) ? Number(panelLeft) : 0;
+    const safePanelTop = Number.isFinite(Number(panelTop)) ? Number(panelTop) : 0;
+    const minX = horizontalInset - safePanelLeft;
+    const minY = verticalInset - safePanelTop;
+    const maxX = Math.max(minX, viewportWidth - safeWidth - horizontalInset - safePanelLeft);
+    const maxY = Math.max(minY, viewportHeight - safeHeight - verticalInset - safePanelTop);
     const rawX = Number(x);
     const rawY = Number(y);
     return {
-        x: Math.round(Math.max(horizontalInset, Math.min(Number.isFinite(rawX) ? rawX : 24, maxX))),
-        y: Math.round(Math.max(verticalInset, Math.min(Number.isFinite(rawY) ? rawY : 120, maxY))),
+        x: Math.round(Math.max(minX, Math.min(Number.isFinite(rawX) ? rawX : 24, maxX))),
+        y: Math.round(Math.max(minY, Math.min(Number.isFinite(rawY) ? rawY : 120, maxY))),
+    };
+}
+
+function getTrackerWidgetPanelPlacement(anchorX, anchorY, width, height) {
+    const viewportWidth = Math.max(1, Number(globalThis.innerWidth) || 1200);
+    const viewportHeight = Math.max(1, Number(globalThis.innerHeight) || 800);
+    const rightSpace = Math.max(0, viewportWidth - (Number(anchorX) + TRACKER_WIDGET_BUTTON_SIZE));
+    const leftSpace = Math.max(0, Number(anchorX));
+    const bottomSpace = Math.max(0, viewportHeight - (Number(anchorY) + TRACKER_WIDGET_BUTTON_SIZE));
+    const topSpace = Math.max(0, Number(anchorY));
+    const opensLeft = rightSpace < leftSpace;
+    const opensUp = bottomSpace < topSpace;
+    return {
+        opensLeft,
+        opensUp,
+        left: opensLeft ? TRACKER_WIDGET_BUTTON_SIZE - Number(width) : 0,
+        top: opensUp ? TRACKER_WIDGET_BUTTON_SIZE - Number(height) : 0,
+    };
+}
+
+function getTrackerWidgetAnchorForPanel(panelLeft, panelTop, width, height) {
+    const viewportWidth = Math.max(1, Number(globalThis.innerWidth) || 1200);
+    const viewportHeight = Math.max(1, Number(globalThis.innerHeight) || 800);
+    const numericWidth = Number(width);
+    const numericHeight = Number(height);
+    const safeWidth = Number.isFinite(numericWidth) ? numericWidth : TRACKER_WIDGET_DEFAULT_WIDTH;
+    const safeHeight = Number.isFinite(numericHeight) ? numericHeight : TRACKER_WIDGET_DEFAULT_HEIGHT;
+    const left = Number(panelLeft);
+    const top = Number(panelTop);
+    const right = left + safeWidth;
+    const bottom = top + safeHeight;
+    const opensFromRight = viewportWidth - right < left;
+    const opensFromBottom = viewportHeight - bottom < top;
+    const anchorX = opensFromRight ? right - TRACKER_WIDGET_BUTTON_SIZE : left;
+    const anchorY = opensFromBottom ? bottom - TRACKER_WIDGET_BUTTON_SIZE : top;
+    return clampTrackerWidgetPosition(anchorX, anchorY);
+}
+
+function resizeTrackerWidgetFromCorner(start, corner, deltaX, deltaY) {
+    const viewportWidth = Math.max(1, Number(globalThis.innerWidth) || 1200);
+    const viewportHeight = Math.max(1, Number(globalThis.innerHeight) || 800);
+    const inset = 8;
+    const maximumWidth = Math.max(1, viewportWidth - (inset * 2));
+    const maximumHeight = Math.max(1, viewportHeight - (inset * 2));
+    const minimumWidth = Math.min(TRACKER_WIDGET_MIN_WIDTH, maximumWidth);
+    const minimumHeight = Math.min(TRACKER_WIDGET_MIN_HEIGHT, maximumHeight);
+    const startLeft = Number(start.left);
+    const startTop = Number(start.top);
+    const startRight = startLeft + Number(start.width);
+    const startBottom = startTop + Number(start.height);
+    const includesLeft = corner === 'top-left' || corner === 'bottom-left';
+    const includesTop = corner === 'top-left' || corner === 'top-right';
+    let left = startLeft;
+    let right = startRight;
+    let top = startTop;
+    let bottom = startBottom;
+
+    if (includesLeft) {
+        const minimumLeft = Math.max(inset, startRight - maximumWidth);
+        const maximumLeft = startRight - minimumWidth;
+        left = Math.max(minimumLeft, Math.min(startLeft + Number(deltaX), maximumLeft));
+    } else {
+        const minimumRight = startLeft + minimumWidth;
+        const maximumRight = Math.min(viewportWidth - inset, startLeft + maximumWidth);
+        right = Math.max(minimumRight, Math.min(startRight + Number(deltaX), maximumRight));
+    }
+
+    if (includesTop) {
+        const minimumTop = Math.max(inset, startBottom - maximumHeight);
+        const maximumTop = startBottom - minimumHeight;
+        top = Math.max(minimumTop, Math.min(startTop + Number(deltaY), maximumTop));
+    } else {
+        const minimumBottom = startTop + minimumHeight;
+        const maximumBottom = Math.min(viewportHeight - inset, startTop + maximumHeight);
+        bottom = Math.max(minimumBottom, Math.min(startBottom + Number(deltaY), maximumBottom));
+    }
+
+    return {
+        left: Math.round(left),
+        top: Math.round(top),
+        width: Math.round(right - left),
+        height: Math.round(bottom - top),
+    };
+}
+
+function attachTrackerWidgetCornerResizeHandlers(widget, options = {}) {
+    if (!widget) return;
+    const panel = widget.querySelector(options.panelSelector);
+    const handles = Array.from(widget.querySelectorAll(options.handleSelector));
+    if (!panel || !handles.length) return;
+    const settingsKeys = options.settingsKeys || {};
+    let resize = null;
+
+    const applyResizePreview = next => {
+        const anchor = getTrackerWidgetAnchorForPanel(next.left, next.top, next.width, next.height);
+        const placement = getTrackerWidgetPanelPlacement(anchor.x, anchor.y, next.width, next.height);
+        const position = clampTrackerWidgetPosition(anchor.x, anchor.y, next.width, next.height, placement.left, placement.top);
+        widget.style.left = `${position.x}px`;
+        widget.style.top = `${position.y}px`;
+        panel.style.width = `${next.width}px`;
+        panel.style.height = `${next.height}px`;
+        panel.style.left = `${placement.left}px`;
+        panel.style.top = `${placement.top}px`;
+    };
+
+    const finishResize = (event, canceled = false) => {
+        if (!resize) return;
+        const activeHandle = resize.handle;
+        resize = null;
+        widget.classList.remove(options.resizingClass || '');
+        widget.removeAttribute('data-spe-resize-corner');
+        if (activeHandle?.hasPointerCapture?.(event?.pointerId)) activeHandle.releasePointerCapture(event.pointerId);
+        if (canceled) {
+            options.syncViewport?.();
+            return;
+        }
+        const panelRect = panel.getBoundingClientRect();
+        const width = clampTrackerWidgetWidth(panelRect.width);
+        const height = clampTrackerWidgetHeight(panelRect.height);
+        const anchor = getTrackerWidgetAnchorForPanel(panelRect.left, panelRect.top, width, height);
+        const settings = getSettings();
+        settings[settingsKeys.x] = anchor.x;
+        settings[settingsKeys.y] = anchor.y;
+        settings[settingsKeys.width] = width;
+        settings[settingsKeys.height] = height;
+        saveExtensionSettings();
+        options.syncViewport?.();
+    };
+
+    handles.forEach(handle => {
+        handle.addEventListener('pointerdown', event => {
+            if (event.button !== 0) return;
+            const panelRect = panel.getBoundingClientRect();
+            resize = {
+                corner: handle.getAttribute('data-spe-resize-corner') || 'bottom-right',
+                handle,
+                startX: event.clientX,
+                startY: event.clientY,
+                start: {
+                    left: panelRect.left,
+                    top: panelRect.top,
+                    width: panelRect.width,
+                    height: panelRect.height,
+                },
+            };
+            widget.classList.add(options.resizingClass || '');
+            widget.setAttribute('data-spe-resize-corner', resize.corner);
+            handle.setPointerCapture?.(event.pointerId);
+            event.preventDefault();
+            event.stopPropagation();
+        });
+
+        handle.addEventListener('pointermove', event => {
+            if (!resize || resize.handle !== handle) return;
+            const next = resizeTrackerWidgetFromCorner(
+                resize.start,
+                resize.corner,
+                event.clientX - resize.startX,
+                event.clientY - resize.startY,
+            );
+            applyResizePreview(next);
+        });
+
+        handle.addEventListener('pointerup', event => finishResize(event));
+        handle.addEventListener('pointercancel', event => finishResize(event, true));
+        handle.addEventListener('lostpointercapture', event => finishResize(event, true));
+    });
+}
+
+function getTrackerWidgetLayoutFromAnchor(settings, defaultX) {
+    const collapsed = settings.trackerWidgetCollapsed !== false;
+    const storedWidth = Number(settings.trackerWidgetWidth);
+    const storedHeight = Number(settings.trackerWidgetHeight);
+    const width = collapsed
+        ? TRACKER_WIDGET_BUTTON_SIZE
+        : clampTrackerWidgetWidth(Number.isFinite(storedWidth) && storedWidth > 0 ? storedWidth : TRACKER_WIDGET_DEFAULT_WIDTH);
+    const height = collapsed
+        ? TRACKER_WIDGET_BUTTON_SIZE
+        : clampTrackerWidgetHeight(Number.isFinite(storedHeight) && storedHeight > 0 ? storedHeight : TRACKER_WIDGET_DEFAULT_HEIGHT);
+    const storedX = Number(settings.trackerWidgetX);
+    const storedY = Number(settings.trackerWidgetY);
+    const anchor = clampTrackerWidgetPosition(
+        Number.isFinite(storedX) ? storedX : defaultX,
+        Number.isFinite(storedY) ? storedY : 120,
+    );
+    if (collapsed) {
+        return { collapsed, x: anchor.x, y: anchor.y, width, height, panelLeft: 0, panelTop: 0 };
+    }
+    const placement = getTrackerWidgetPanelPlacement(anchor.x, anchor.y, width, height);
+    const position = clampTrackerWidgetPosition(anchor.x, anchor.y, width, height, placement.left, placement.top);
+    return {
+        collapsed,
+        x: position.x,
+        y: position.y,
+        width,
+        height,
+        panelLeft: placement.left,
+        panelTop: placement.top,
     };
 }
 
 function getTrackerWidgetLayout(settings = getSettings()) {
-    const collapsed = settings.trackerWidgetCollapsed !== false;
-    let x = Number(settings.trackerWidgetX);
-    let y = Number(settings.trackerWidgetY);
-    x = Number.isFinite(x) ? x : 24;
-    y = Number.isFinite(y) ? y : 120;
-    const storedWidth = Number(settings.trackerWidgetWidth);
-    const storedHeight = Number(settings.trackerWidgetHeight);
-    let width = collapsed ? TRACKER_WIDGET_BUTTON_SIZE : storedWidth;
-    let height = collapsed ? TRACKER_WIDGET_BUTTON_SIZE : storedHeight;
-    width = Number.isFinite(width) && width > 0 ? width : TRACKER_WIDGET_DEFAULT_WIDTH;
-    height = Number.isFinite(height) && height > 0 ? height : TRACKER_WIDGET_DEFAULT_HEIGHT;
-
-    if (!collapsed) {
-        width = clampTrackerWidgetWidth(width);
-        height = clampTrackerWidgetHeight(height);
-    }
-    const position = clampTrackerWidgetPosition(x, y, width, height);
-    x = position.x;
-    y = position.y;
-
-    return {
-        collapsed,
-        x,
-        y,
-        width: collapsed ? TRACKER_WIDGET_BUTTON_SIZE : width,
-        height: collapsed ? TRACKER_WIDGET_BUTTON_SIZE : height,
-    };
+    return getTrackerWidgetLayoutFromAnchor(settings, 24);
 }
 
 function applyTrackerWidgetLayout(widget, settings = getSettings()) {
@@ -10475,8 +10684,8 @@ function applyTrackerWidgetLayout(widget, settings = getSettings()) {
         panel.hidden = layout.collapsed;
         panel.style.width = `${layout.width}px`;
         panel.style.height = `${layout.height}px`;
-        panel.style.left = '0px';
-        panel.style.top = '0px';
+        panel.style.left = `${layout.panelLeft}px`;
+        panel.style.top = `${layout.panelTop}px`;
     }
     return layout;
 }
@@ -10530,11 +10739,7 @@ function attachTrackerWidgetHandlers(widget) {
 
     const title = widget.querySelector('.structured-preflight-tracker-widget-title');
 
-    const resizeHandle = widget.querySelector('[data-spe-tracker-resize-handle]');
-
     let drag = null;
-
-    let resize = null;
 
     const cancelButtonDrag = () => {
 
@@ -10657,6 +10862,8 @@ function attachTrackerWidgetHandlers(widget) {
             startY: event.clientY,
             startLeft: widgetRect.left,
             startTop: widgetRect.top,
+            panelLeft: rect.left - widgetRect.left,
+            panelTop: rect.top - widgetRect.top,
             width: rect.width,
             height: rect.height,
             moved: false,
@@ -10677,11 +10884,11 @@ function attachTrackerWidgetHandlers(widget) {
             panelDrag.startTop + event.clientY - panelDrag.startY,
             panelDrag.width,
             panelDrag.height,
+            panelDrag.panelLeft,
+            panelDrag.panelTop,
         );
         widget.style.left = `${pos.x}px`;
         widget.style.top = `${pos.y}px`;
-        panel.style.left = '0px';
-        panel.style.top = '0px';
     });
 
     const finishPanelDrag = (event, canceled = false) => {
@@ -10697,10 +10904,10 @@ function attachTrackerWidgetHandlers(widget) {
         const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
         if (!panel || panel.hidden) return;
         const settings = getSettings();
-        const rect = widget.getBoundingClientRect();
-        const pos = clampTrackerWidgetPosition(rect.left, rect.top, panelDrag.width, panelDrag.height);
-        settings.trackerWidgetX = pos.x;
-        settings.trackerWidgetY = pos.y;
+        const rect = panel.getBoundingClientRect();
+        const anchor = getTrackerWidgetAnchorForPanel(rect.left, rect.top, rect.width, rect.height);
+        settings.trackerWidgetX = anchor.x;
+        settings.trackerWidgetY = anchor.y;
         saveExtensionSettings();
         if (panelDrag.moved) renderTrackerWidget();
     };
@@ -10710,72 +10917,18 @@ function attachTrackerWidgetHandlers(widget) {
 
     title?.addEventListener('lostpointercapture', event => finishPanelDrag(event, true));
 
-    resizeHandle?.addEventListener('pointerdown', event => {
-        if (event.button !== 0) return;
-        const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
-        if (!panel || panel.hidden) return;
-        const rect = panel.getBoundingClientRect();
-        resize = {
-            startX: event.clientX,
-            startY: event.clientY,
-            startWidth: rect.width,
-            startHeight: rect.height,
-        };
-        widget.classList.add('spe-tracker-resizing');
-        resizeHandle.setPointerCapture?.(event.pointerId);
-        event.preventDefault();
+    attachTrackerWidgetCornerResizeHandlers(widget, {
+        panelSelector: '#' + TRACKER_WIDGET_PANEL_ID,
+        handleSelector: '[data-spe-tracker-resize-handle]',
+        resizingClass: 'spe-tracker-resizing',
+        settingsKeys: {
+            x: 'trackerWidgetX',
+            y: 'trackerWidgetY',
+            width: 'trackerWidgetWidth',
+            height: 'trackerWidgetHeight',
+        },
+        syncViewport: syncTrackerWidgetViewport,
     });
-
-    resizeHandle?.addEventListener('pointermove', event => {
-        if (!resize) return;
-        const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
-        if (!panel || panel.hidden) return;
-        const nextWidth = clampTrackerWidgetWidth(
-            resize.startWidth + event.clientX - resize.startX,
-        );
-        const nextHeight = clampTrackerWidgetHeight(
-            resize.startHeight + event.clientY - resize.startY,
-        );
-        panel.style.width = `${nextWidth}px`;
-        panel.style.height = `${nextHeight}px`;
-        const widgetRect = widget.getBoundingClientRect();
-        const pos = clampTrackerWidgetPosition(widgetRect.left, widgetRect.top, nextWidth, nextHeight);
-        widget.style.left = `${pos.x}px`;
-        widget.style.top = `${pos.y}px`;
-    });
-
-    const finishResize = (event, canceled = false) => {
-        if (!resize) return;
-        const panel = widget.querySelector(`#${TRACKER_WIDGET_PANEL_ID}`);
-        resize = null;
-        widget.classList.remove('spe-tracker-resizing');
-        if (resizeHandle?.hasPointerCapture?.(event?.pointerId)) resizeHandle.releasePointerCapture(event.pointerId);
-        if (canceled) {
-            syncTrackerWidgetViewport();
-            return;
-        }
-        if (!panel || panel.hidden) return;
-        const settings = getSettings();
-        const widgetRect = widget.getBoundingClientRect();
-        const panelRect = panel?.getBoundingClientRect?.();
-        settings.trackerWidgetWidth = clampTrackerWidgetWidth(panelRect?.width);
-        settings.trackerWidgetHeight = clampTrackerWidgetHeight(panelRect?.height);
-        const pos = clampTrackerWidgetPosition(
-            widgetRect.left,
-            widgetRect.top,
-            settings.trackerWidgetWidth,
-            settings.trackerWidgetHeight,
-        );
-        settings.trackerWidgetX = pos.x;
-        settings.trackerWidgetY = pos.y;
-        saveExtensionSettings();
-        syncTrackerWidgetViewport();
-    };
-
-    resizeHandle?.addEventListener('pointerup', finishResize);
-    resizeHandle?.addEventListener('pointercancel', event => finishResize(event, true));
-
-    resizeHandle?.addEventListener('lostpointercapture', event => finishResize(event, true));
 
 }
 

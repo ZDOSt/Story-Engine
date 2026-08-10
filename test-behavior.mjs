@@ -11186,14 +11186,13 @@ const tests = [
          const TRACKER_WIDGET_MIN_WIDTH = 280;
          const TRACKER_WIDGET_DEFAULT_HEIGHT = 550;
          const TRACKER_WIDGET_MIN_HEIGHT = 420;
-         const TRACKER_WIDGET_MAX_HEIGHT = 900;
          ${trackerLayoutSource}
          return { clampTrackerWidgetHeight, clampTrackerWidgetWidth, clampTrackerWidgetPosition };`,
       );
       const trackerMigration = new Function(
         `const TRACKER_WIDGET_DEFAULT_WIDTH = 450;
          const TRACKER_WIDGET_DEFAULT_HEIGHT = 550;
-         const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
+         const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 2;
          ${trackerMigrationSource}
          return migrateTrackerWidgetSettings;`,
       )();
@@ -11207,10 +11206,10 @@ const tests = [
       assert.match(source, /const TRACKER_WIDGET_MIN_WIDTH = 280/);
       assert.match(source, /const TRACKER_WIDGET_DEFAULT_HEIGHT = 550/);
       assert.match(source, /const TRACKER_WIDGET_MIN_HEIGHT = 420/);
-      assert.match(source, /const TRACKER_WIDGET_MAX_HEIGHT = 900/);
+      assert.doesNotMatch(source, /const TRACKER_WIDGET_MAX_HEIGHT = 900/);
       assert.match(source, /trackerWidgetWidth: TRACKER_WIDGET_DEFAULT_WIDTH/);
       assert.match(source, /trackerWidgetHeight: TRACKER_WIDGET_DEFAULT_HEIGHT/);
-      assert.match(source, /const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 1/);
+      assert.match(source, /const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 2/);
       assert.match(source, /const TRACKER_WIDGET_TABS = Object\.freeze\(\['overview', 'character', 'npcs', 'inventory', 'threads'\]\)/);
       assert.match(source, /function formatTrackerItemDisplayName/);
       assert.match(source, /function formatTrackerItemQuality/);
@@ -11218,7 +11217,10 @@ const tests = [
       assert.match(source, /function clampTrackerWidgetWidth/);
       assert.match(source, /function clampTrackerWidgetPosition/);
       assert.match(source, /function applyTrackerWidgetLayout/);
-      assert.match(trackerLayoutSource, /width = clampTrackerWidgetWidth\(width\);\s*height = clampTrackerWidgetHeight\(height\);\s*}\s*const position = clampTrackerWidgetPosition\(x, y, width, height\)/);
+      assert.match(trackerLayoutSource, /function getTrackerWidgetPanelPlacement\(anchorX, anchorY, width, height\)/);
+      assert.match(trackerLayoutSource, /function getTrackerWidgetAnchorForPanel\(panelLeft, panelTop, width, height\)/);
+      assert.match(trackerLayoutSource, /function resizeTrackerWidgetFromCorner\(start, corner, deltaX, deltaY\)/);
+      assert.match(trackerLayoutSource, /function attachTrackerWidgetCornerResizeHandlers\(widget, options = \{\}\)/);
       assert.doesNotMatch(trackerLayoutSource, /clampTrackerWidget(?:Width|Height)\([^)]*,\s*[xy]\)/);
       assert.doesNotMatch(source, /trackerWidgetHostObserver|trackerWidgetHostSyncTimer|trackerWidgetOverlayObservers/);
       assert.doesNotMatch(source, /hasVisibleTrackerWidgetOverlay|ensureTrackerWidgetHostObserver|spe-tracker-host-suppressed/);
@@ -11230,17 +11232,17 @@ const tests = [
       assert.deepEqual(migrated, {
         trackerWidgetHeight: 550,
         trackerWidgetWidth: 450,
-        trackerWidgetLayoutMigrationVersion: 1,
+        trackerWidgetLayoutMigrationVersion: 2,
       });
       const malformed = { trackerWidgetHeight: -10, trackerWidgetWidth: Number.NaN, trackerWidgetLayoutMigrationVersion: 0 };
       trackerMigration(malformed);
       assert.equal(malformed.trackerWidgetHeight, 550);
       assert.equal(malformed.trackerWidgetWidth, 450);
-      const repairedCurrent = { trackerWidgetHeight: 0, trackerWidgetWidth: null, trackerWidgetLayoutMigrationVersion: 1 };
+      const repairedCurrent = { trackerWidgetHeight: 0, trackerWidgetWidth: null, trackerWidgetLayoutMigrationVersion: 2 };
       assert.equal(trackerMigration(repairedCurrent), true);
       assert.equal(repairedCurrent.trackerWidgetHeight, 550);
       assert.equal(repairedCurrent.trackerWidgetWidth, 450);
-      assert.equal(repairedCurrent.trackerWidgetLayoutMigrationVersion, 1);
+      assert.equal(repairedCurrent.trackerWidgetLayoutMigrationVersion, 2);
       assert.doesNotMatch(source, /function getTrackerChatColumnRect|#sheld|#form_sheld|#chat_col/);
       assert.doesNotMatch(source, /rightCandidate|leftCandidate|belowCandidate|aboveCandidate/);
       assert.doesNotMatch(source, /trackerWidgetPanelPosition/);
@@ -11250,12 +11252,14 @@ const tests = [
       assert.match(source, /#\$\{TRACKER_WIDGET_BUTTON_ID\}[\s\S]*touch-action: none/);
       assert.match(source, /button\?\.addEventListener\('lostpointercapture', cancelButtonDrag\)/);
       assert.match(source, /title\?\.addEventListener\('pointercancel', event => finishPanelDrag\(event, true\)\)/);
-      assert.match(source, /resizeHandle\?\.addEventListener\('pointercancel', event => finishResize\(event, true\)\)/);
+      assert.match(source, /function attachTrackerWidgetCornerResizeHandlers\(widget, options = \{\}\)/);
+      assert.match(source, /pointercancel', event => finishResize\(event, true\)/);
       assert.match(source, /const finishPanelDrag = \(event, canceled = false\)/);
       assert.match(source, /const finishResize = \(event, canceled = false\)/);
       assert.match(source, /settings\.postNarrationTrackerEnabled = Boolean\(event\.target\?\.checked\);\s*renderTrackerWidget\(getContext\(\)\)/);
-      assert.match(source, /settings\.trackerWidgetWidth = clampTrackerWidgetWidth/);
-      assert.match(source, /settings\.trackerWidgetHeight = clampTrackerWidgetHeight/);
+      assert.match(source, /settings\[settingsKeys\.width\] = width/);
+      assert.match(source, /settings\[settingsKeys\.height\] = height/);
+      assert.doesNotMatch(source, /data-spe-resize-corner="top-left"/);
       assert.match(source, /body\.onchange = event =>/);
       assert.match(source, /event\.target\?\.closest\?\.\('\[data-spe-tracker-select-npc\]'\)/);
       assert.match(source, /\['ArrowUp', 'ArrowDown', 'Home', 'End'\]/);
@@ -13325,7 +13329,7 @@ const tests = [
       assert.match(coAuthorText, /Do not output a bare paraphrase, instruction echo, action label, or mechanical recap/);
       assert.match(coAuthorText, /render an actual concise back-and-forth with \{\{user\}\}'s spoken contributions and the NPC's responses/);
       assert.match(coAuthorText, /never invent or state \{\{user\}\}'s thoughts, feelings, beliefs, motivations, memories/);
-      assert.match(coAuthorText, /Do not introduce a new goal, consequential choice, stakes-bearing action, or mechanically meaningful effect/);
+      assert.match(coAuthorText, /Do not introduce a new goal, unrelated topic, consequential choice, stakes-bearing action, or mechanically meaningful effect/);
       assert.match(coAuthorText, /Resolved mechanics determine which attempts occur, land, succeed, fail, or remain incomplete/);
 
       const inlineText = formatNarratorModelPromptContext(report, {
@@ -13344,8 +13348,8 @@ const tests = [
         inlineProxyInstructions: ['If I succeed, I follow up with a knee strike; if I fail, I pull back and reposition.'],
         coAuthorModeEnabled: true,
       });
-      assert.match(inlineCoAuthorText, /Inline co-author proxy scope for \{\{user\}\} is active for this response only/);
-      assert.match(inlineCoAuthorText, /Render authorized actions as natural in-scene prose integrated with surrounding narration/);
+      assert.match(inlineCoAuthorText, /ACTIVE INLINE CO-AUTHOR SCOPE for \{\{user\}\} is valid for this response only/);
+      assert.match(inlineCoAuthorText, /Render authorized actions as vivid, specific in-scene prose integrated with surrounding narration/);
       assert.match(inlineCoAuthorText, /Do not output a bare paraphrase, instruction echo, action label, or mechanical recap/);
       assert.match(inlineCoAuthorText, /render an actual concise back-and-forth with \{\{user\}\}'s spoken contributions and the NPC's responses/);
       assert.match(inlineCoAuthorText, /Unbracketed user input remains governed by strict agency separation and input chronology/);
@@ -15707,7 +15711,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.76');
+      assert.equal(manifest.version, '0.9.77');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -19806,10 +19810,11 @@ const tests = [
       )(modes);
       const migrate = new Function(
         'normalizeNarratorHandoffDisplayMode',
+        'NARRATOR_HANDOFF_WIDGET_LAYOUT_MIGRATION_VERSION',
         'TRACKER_WIDGET_DEFAULT_WIDTH',
         'TRACKER_WIDGET_DEFAULT_HEIGHT',
         migrationSource + '; return migrateNarratorHandoffSettings;',
-      )(normalizeMode, 450, 550);
+      )(normalizeMode, 1, 450, 550);
       const getLatest = new Function(
         'isAssistantNarrationMessage',
         'getMessageNarratorHandoff',
@@ -19826,6 +19831,7 @@ const tests = [
         'clampTrackerWidgetWidth',
         'clampTrackerWidgetHeight',
         'clampTrackerWidgetPosition',
+        'getTrackerWidgetPanelPlacement',
         'globalThis',
         layoutSource + '; return getNarratorHandoffWidgetLayout;',
       )(
@@ -19836,10 +19842,14 @@ const tests = [
         value => Number(value),
         value => Number(value),
         (x, y) => ({ x, y }),
+        (anchorX, anchorY, width, height) => ({
+          left: anchorX + 18 > 600 ? 36 - width : 0,
+          top: anchorY + 18 > 400 ? 36 - height : 0,
+        }),
         { innerWidth: 1200 },
       );
 
-      assert.equal(manifest.version, '0.9.76');
+      assert.equal(manifest.version, '0.9.77');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);
@@ -19852,14 +19862,14 @@ const tests = [
         narratorHandoffWidgetY: 120,
         narratorHandoffWidgetWidth: 510,
         narratorHandoffWidgetHeight: 620,
-      }), { collapsed: true, x: 1140, y: 120, width: 36, height: 36 });
+      }), { collapsed: true, x: 1140, y: 120, width: 36, height: 36, panelLeft: 0, panelTop: 0 });
       assert.deepEqual(getLayout({
         narratorHandoffWidgetCollapsed: false,
         narratorHandoffWidgetX: null,
         narratorHandoffWidgetY: 140,
         narratorHandoffWidgetWidth: 510,
         narratorHandoffWidgetHeight: 620,
-      }), { collapsed: false, x: 666, y: 140, width: 510, height: 620 });
+      }), { collapsed: false, x: 1140, y: 140, width: 510, height: 620, panelLeft: -474, panelTop: 0 });
 
       const malformed = {
         narratorHandoffEnabled: 'yes',
@@ -19879,6 +19889,7 @@ const tests = [
         narratorHandoffWidgetY: 120,
         narratorHandoffWidgetWidth: 450,
         narratorHandoffWidgetHeight: 550,
+        narratorHandoffWidgetLayoutMigrationVersion: 1,
       });
 
       const latest = getLatest({
@@ -19897,20 +19908,83 @@ const tests = [
       assert.match(sidePanelSource, /NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(sidePanelSource, /getLatestNarratorHandoffEntry\(context\)/);
       assert.match(sidePanelSource, /escapeHtml\(latest\.handoff\.text\)/);
-      assert.match(source, /settings\.narratorHandoffWidgetWidth = clampTrackerWidgetWidth/);
-      assert.match(source, /settings\.narratorHandoffWidgetHeight = clampTrackerWidgetHeight/);
+      assert.match(source, /settings\[settingsKeys\.width\] = width/);
+      assert.match(source, /settings\[settingsKeys\.height\] = height/);
       assert.match(source, /const finishPanelDrag = \(event, canceled = false\)/);
-      assert.match(source, /const finishResize = \(event, canceled = false\)/);
+      assert.match(source, /function attachTrackerWidgetCornerResizeHandlers\(widget, options = \{\}\)/);
       assert.match(source, /pointercancel', event => finishPanelDrag\(event, true\)/);
-      assert.match(source, /pointercancel', event => finishResize\(event, true\)/);
-      assert.match(source, /settings\.trackerWidgetWidth = clampTrackerWidgetWidth/);
-      assert.match(source, /settings\.trackerWidgetHeight = clampTrackerWidgetHeight/);
+      assert.match(source, /data-spe-resize-corner="top-right"/);
+      assert.match(source, /data-spe-resize-corner="bottom-left"/);
+      assert.match(source, /data-spe-resize-corner="bottom-right"/);
+      assert.doesNotMatch(source, /data-spe-resize-corner="top-left"/);
       assert.match(source, /clearNarratorHandoffWidgetViewportHandler\(\)/);
       assert.match(source, /document\.getElementById\(NARRATOR_HANDOFF_WIDGET_ID\)\?\.remove\(\)/);
       assert.match(source, /renderTrackerWidget\(context\);\s*renderNarratorHandoffWidget\(context\);\s*renderProgressionCard\(context\)/);
       assert.doesNotMatch(settingsStyleSource, /structured_preflight_narrator_handoff_widget/);
       assert.match(displayStyleSource, /structured_preflight_narrator_handoff_widget/);
       assert.match(displayStyleSource, /structured-preflight-narrator-handoff-widget-content pre[\s\S]*white-space: pre-wrap/);
+    },
+  },
+  {
+    name: 'tracker widgets use edge-aware expansion and three-corner viewport-bounded resizing',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const geometrySource = source.slice(
+        source.indexOf('function clampTrackerWidgetHeight'),
+        source.indexOf('function getTrackerWidgetLayoutFromAnchor'),
+      );
+      const geometry = new Function(
+        'TRACKER_WIDGET_BUTTON_SIZE',
+        'TRACKER_WIDGET_DEFAULT_WIDTH',
+        'TRACKER_WIDGET_DEFAULT_HEIGHT',
+        'TRACKER_WIDGET_MIN_WIDTH',
+        'TRACKER_WIDGET_MIN_HEIGHT',
+        'globalThis',
+        `${geometrySource}; return {
+          clampTrackerWidgetHeight,
+          getTrackerWidgetPanelPlacement,
+          getTrackerWidgetAnchorForPanel,
+          resizeTrackerWidgetFromCorner,
+        };`,
+      )(
+        36,
+        450,
+        550,
+        280,
+        420,
+        { innerWidth: 1920, innerHeight: 1400 },
+      );
+
+      assert.equal(geometry.clampTrackerWidgetHeight(1200), 1200);
+      assert.equal(geometry.clampTrackerWidgetHeight(2000), 1384);
+      assert.deepEqual(
+        geometry.getTrackerWidgetPanelPlacement(40, 50, 500, 600),
+        { opensLeft: false, opensUp: false, left: 0, top: 0 },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetPanelPlacement(1840, 1320, 500, 600),
+        { opensLeft: true, opensUp: true, left: -464, top: -564 },
+      );
+      assert.deepEqual(geometry.getTrackerWidgetAnchorForPanel(40, 50, 500, 600), { x: 40, y: 50 });
+      assert.deepEqual(geometry.getTrackerWidgetAnchorForPanel(1370, 700, 500, 600), { x: 1834, y: 1264 });
+
+      const start = { left: 100, top: 100, width: 500, height: 600 };
+      assert.deepEqual(geometry.resizeTrackerWidgetFromCorner(start, 'top-right', 100, 50), {
+        left: 100, top: 150, width: 600, height: 550,
+      });
+      assert.deepEqual(geometry.resizeTrackerWidgetFromCorner(start, 'bottom-left', 50, 50), {
+        left: 150, top: 100, width: 450, height: 650,
+      });
+      assert.deepEqual(geometry.resizeTrackerWidgetFromCorner(start, 'bottom-right', 100, 50), {
+        left: 100, top: 100, width: 600, height: 650,
+      });
+      assert.match(source, /max-height: calc\(100dvh - 16px\)/);
+      assert.doesNotMatch(source, /TRACKER_WIDGET_MAX_HEIGHT|900px/);
+      const trackerCorners = Array.from(source.matchAll(/data-spe-tracker-resize-handle data-spe-resize-corner="([^"]+)"/g), match => match[1]);
+      const narratorHandoffCorners = Array.from(source.matchAll(/data-spe-narrator-handoff-resize-handle data-spe-resize-corner="([^"]+)"/g), match => match[1]);
+      assert.deepEqual(trackerCorners, ['top-right', 'bottom-left', 'bottom-right']);
+      assert.deepEqual(narratorHandoffCorners, ['top-right', 'bottom-left', 'bottom-right']);
+      assert.doesNotMatch(source, /data-spe-resize-corner="top-left"/);
     },
   },
 ];
