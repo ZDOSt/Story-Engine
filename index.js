@@ -100,6 +100,19 @@ const TRACKER_WIDGET_MIN_WIDTH = 280;
 const TRACKER_WIDGET_DEFAULT_HEIGHT = 550;
 const TRACKER_WIDGET_MIN_HEIGHT = 420;
 const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 2;
+const STORY_ENGINE_TOP_BAR_SCREEN_SELECTORS = Object.freeze([
+    '.drawer-content.openDrawer',
+    '.drawer-content.open',
+    '.fillLeft.openDrawer',
+    '.fillRight.openDrawer',
+    '#character_popup',
+    '#shadow_character_popup',
+    '#options',
+    '#extensionsMenu',
+    '.popup .popper-modal',
+    '#WorldInfo',
+    '#floatingPrompt',
+]);
 const NARRATOR_HANDOFF_EXTRA_KEY = 'structured_preflight_narrator_handoff';
 const NARRATOR_HANDOFF_BLOCK_CLASS = 'structured-preflight-narrator-handoff-block';
 const NARRATOR_HANDOFF_VERSION = 1;
@@ -742,6 +755,7 @@ const state = {
     trackerWidgetSelectedNpc: '',
     trackerWidgetViewportHandler: null,
     narratorHandoffWidgetViewportHandler: null,
+    widgetScreenObserver: null,
 };
 
 const promptReadyBypassGate = createAsyncTokenGate();
@@ -3417,6 +3431,7 @@ function disableStoryEngineRuntime() {
     }
     clearTrackerWidgetViewportHandler();
     clearNarratorHandoffWidgetViewportHandler();
+    clearStoryEngineWidgetScreenObserver();
     removeStreamingArtifactRegex();
     document.querySelectorAll?.(`.${TRACKER_DISPLAY_BLOCK_CLASS}, .${NARRATOR_HANDOFF_BLOCK_CLASS}`)?.forEach(element => element.remove());
     document.getElementById(TRACKER_WIDGET_ID)?.remove();
@@ -7480,8 +7495,58 @@ function escapeHtml(value) {
 }
 
 
+function isVisibleStoryEngineTopBarScreen(element) {
+    if (!element || element.hidden) return false;
+    const style = globalThis.getComputedStyle?.(element);
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) === 0)) return false;
+    return Boolean(element.getClientRects?.().length || element.offsetWidth || element.offsetHeight);
+}
+
+
+function isStoryEngineTopBarScreenOpen() {
+    if (typeof document === 'undefined') return false;
+    return STORY_ENGINE_TOP_BAR_SCREEN_SELECTORS.some(selector => Array.from(document.querySelectorAll(selector)).some(isVisibleStoryEngineTopBarScreen));
+}
+
+
+function syncStoryEngineWidgetScreenLayer() {
+    if (typeof document === 'undefined') return;
+    const screenOpen = isStoryEngineTopBarScreenOpen();
+    [TRACKER_WIDGET_ID, NARRATOR_HANDOFF_WIDGET_ID].forEach(widgetId => {
+        document.getElementById(widgetId)?.classList.toggle('spe-story-engine-top-bar-screen-open', screenOpen);
+    });
+}
+
+
+function ensureStoryEngineWidgetScreenObserver() {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    if (state.widgetScreenObserver) {
+        syncStoryEngineWidgetScreenLayer();
+        return;
+    }
+    const body = document.body;
+    if (!body) return;
+    state.widgetScreenObserver = new MutationObserver(() => syncStoryEngineWidgetScreenLayer());
+    state.widgetScreenObserver.observe(body, {
+        attributes: true,
+        attributeFilter: ['aria-hidden', 'class', 'hidden', 'style'],
+        childList: true,
+        subtree: true,
+    });
+    syncStoryEngineWidgetScreenLayer();
+}
+
+
+function clearStoryEngineWidgetScreenObserver() {
+    state.widgetScreenObserver?.disconnect?.();
+    state.widgetScreenObserver = null;
+}
+
+
 
 function ensureTrackerDisplayStyles() {
+
+    ensureStoryEngineWidgetScreenObserver();
 
     if (document.getElementById('structured_preflight_tracker_display_styles')) return;
 
@@ -8683,6 +8748,11 @@ function ensureTrackerDisplayStyles() {
             color: var(--SmartThemeBodyColor, #eee);
             font-size: 0.88rem;
         }
+        #${TRACKER_WIDGET_ID}.spe-story-engine-top-bar-screen-open,
+        #${NARRATOR_HANDOFF_WIDGET_ID}.spe-story-engine-top-bar-screen-open {
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
         #structured_preflight_narrator_handoff_toggle {
             position: absolute;
             left: 0;
@@ -9511,6 +9581,7 @@ function renderNarratorHandoffWidget(context = getContext()) {
         '<pre>', escapeHtml(latest.handoff.text), '</pre>',
         '</div>',
     ].join('');
+    syncStoryEngineWidgetScreenLayer();
 }
 
 
@@ -9604,6 +9675,7 @@ function renderTrackerWidget(context = getContext()) {
         : '<div class="structured-preflight-tracker-empty">No tracker data yet.</div>';
     attachTrackerWidgetEditorHandlers(body, context);
     renderProseGuardWidget(widget, context);
+    syncStoryEngineWidgetScreenLayer();
 
 }
 

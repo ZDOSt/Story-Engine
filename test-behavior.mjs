@@ -15713,7 +15713,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.78');
+      assert.equal(manifest.version, '0.9.79');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -19851,7 +19851,7 @@ const tests = [
         { innerWidth: 1200 },
       );
 
-      assert.equal(manifest.version, '0.9.78');
+      assert.equal(manifest.version, '0.9.79');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);
@@ -19925,6 +19925,14 @@ const tests = [
       assert.doesNotMatch(settingsStyleSource, /structured_preflight_narrator_handoff_widget/);
       assert.match(displayStyleSource, /structured_preflight_narrator_handoff_widget/);
       assert.match(displayStyleSource, /structured-preflight-narrator-handoff-widget-content pre[\s\S]*white-space: pre-wrap/);
+      assert.match(source, /STORY_ENGINE_TOP_BAR_SCREEN_SELECTORS = Object\.freeze/);
+      assert.match(source, /\.drawer-content\.openDrawer/);
+      assert.match(source, /#character_popup/);
+      assert.match(source, /function isStoryEngineTopBarScreenOpen/);
+      assert.match(source, /function ensureStoryEngineWidgetScreenObserver/);
+      assert.match(source, /function clearStoryEngineWidgetScreenObserver/);
+      assert.match(displayStyleSource, /spe-story-engine-top-bar-screen-open[\s\S]*visibility: hidden !important/);
+      assert.match(displayStyleSource, /spe-story-engine-top-bar-screen-open[\s\S]*pointer-events: none !important/);
     },
   },
   {
