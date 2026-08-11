@@ -13400,9 +13400,8 @@ const tests = [
       assert.match(semanticSource, /userAbilityUse:\s*normalizeUserAbilityUse/);
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /When an ability, spell, power, trait, or supernatural effect is used, narrate ONLY its OBSERVABLE effects and consequences\./i);
-      assert.match(preflightSource, /DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration\. A name may appear ONLY when explicitly spoken in dialogue\./i);
-      assert.match(preflightSource, /DO NOT explain activation, casting, or system mechanics\./i);
+      assert.match(preflightSource, /When an ability, spell, power, trait, or supernatural effect is used, narrate its OBSERVABLE effects and consequences within the scene\./i);
+      assert.match(preflightSource, /\[VISIBLE EFFECT\] reaches \[TARGET\] and produces \[OBSERVABLE CONSEQUENCE\]\./i);
 
       const report = runCase({
         userText: 'I whisper under my breath, meant only for Alice: "Leave him alone."',
@@ -15652,7 +15651,8 @@ const tests = [
       assert.match(mainRulesSource, /Silence DOES NOT stretch/);
 
       assert.match(mainRulesSource, /function cohesiveSceneBeats\(response, context\):/);
-      assert.match(mainRulesSource, /Closely related physical events MUST be narrated as one clear, connected sequence/);
+      assert.match(mainRulesSource, /Combine closely related actions, gestures, dialogue, and immediate consequences when they belong to the same event into one fluid, readable scene beat/);
+      assert.match(mainRulesSource, /Use natural connective prose and clear temporal flow so each event leads naturally into the next/);
       assert.match(mainRulesSource, /DO NOT invent movement, gestures, object handling, or reactions merely to make prose feel active/);
       assert.match(mainRulesSource, /DO NOT split one physical event into staccato sentences, micro-reaction loops, or body-cue pileups/);
 
@@ -15666,7 +15666,7 @@ const tests = [
     },
   },
   {
-    name: '46a narrator reminder mirrors mandates in reverse execution order',
+    name: '46a narrator reminder is a positive, fact-anchored contract in reverse execution order',
     run() {
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
@@ -15710,34 +15710,12 @@ const tests = [
         assert.ok(end > start, name + ' should have a closing block.');
         return source.slice(start, end + 4);
       };
-      const extractMandate = (source, name) => {
-        const block = extractRuleBlock(source, name);
-        const start = block.indexOf('MANDATE:');
-        const end = block.indexOf('FORBIDDEN:', start);
-        assert.ok(start >= 0 && end > start, name + ' should contain MANDATE before FORBIDDEN.');
-        return block
-          .slice(start + 'MANDATE:'.length, end)
-          .replace(/\r/g, '')
-          .split('\n')
-          .map(line => line.trim())
-          .join('\n')
-          .replace(/\n{3,}/g, '\n\n')
-          .trim();
-      };
-      const extractInputBoundary = source => {
-        const start = source.indexOf('INPUT FORMAT:');
-        const end = source.indexOf('\n\nfunction RenderControlEngine', start);
-        assert.ok(start >= 0 && end > start, 'Input format should precede RenderControlEngine.');
-        return source.slice(start, end).replace(/\r/g, '');
-      };
-
       assertRuleOrder(mainRulesSource, mainRuleOrder, 'the full prose rules');
       assertRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator reminder');
-      assert.equal(
-        extractInputBoundary(handoffRulesSource),
-        extractInputBoundary(mainRulesSource),
-        'The narrator reminder must mirror the full input format exactly.',
-      );
+      assert.match(handoffRulesSource, /INPUT FORMAT:/);
+      assert.match(handoffRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) represents audible dialogue/);
+      assert.match(handoffRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) represents private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
+      assert.match(handoffRulesSource, /Unformatted text represents narration or action/);
 
       for (const name of mainRuleOrder) {
         assert.equal(
@@ -15750,23 +15728,21 @@ const tests = [
           1,
           name + ' should appear exactly once in the narrator reminder.',
         );
-        assert.equal(
-          extractMandate(handoffRulesSource, name),
-          extractMandate(mainRulesSource, name),
-          name + ' MANDATE must mirror the full rule exactly.',
-        );
-      }
-
-      for (const name of ['activeHandoff', 'dialogueTurn', 'inputChronology', 'antiRhetoricalNegation', 'strictBehaviorism', 'antiStockPhrasing', 'strictEpistemology', 'diegeticPhysicality', 'embodiedPerception', 'denotativePhysicality', 'cohesiveSceneBeats']) {
-        assert.equal(
-          extractRuleBlock(handoffRulesSource, name).replace(/\r/g, ''),
-          extractRuleBlock(mainRulesSource, name).replace(/\r/g, ''),
-          name + ' must mirror the full rule exactly in the narrator reminder.',
-        );
+        const handoffRule = extractRuleBlock(handoffRulesSource, name);
+        assert.match(handoffRule, /MANDATE:/, name + ' should retain a positive mandate.');
+        assert.match(handoffRule, /PATTERN EXAMPLE:/, name + ' should include a pattern example.');
       }
 
       assert.match(handoffRulesSource, /EXECUTE RenderControlEngine\(response, input, context\) PRIVATELY BEFORE PRODUCING THE FINAL RESPONSE/);
-      assert.match(handoffRulesSource, /DO NOT output function names, validation notes, rule summaries, analysis, or intermediate drafts/);
+      assert.match(handoffRulesSource, /Your final response MUST STRICTLY follow every positive directive below/);
+      assert.match(handoffRulesSource, /Use each PATTERN EXAMPLE only as structural guidance\. Let the current scene and authoritative narrativeFacts\(input\) supply every entity, object, action, setting, sensory detail, and line of dialogue; the examples remain outside the scene's factual state\./);
+      assert.doesNotMatch(handoffRulesSource, /FORBIDDEN:/);
+      assert.doesNotMatch(handoffRulesSource, /REMEMBER:/);
+      assert.doesNotMatch(handoffRulesSource, /EXCEPTIONS TO THE .* BAN/);
+      assert.doesNotMatch(handoffRulesSource, /barely above a murmur|barely above a whisper|barely above a breath|knuckle whitening|Rooms DO NOT breathe|Words DO NOT hang|Silence DOES NOT stretch/);
+      assert.doesNotMatch(handoffRulesSource, /negative anaphora|category rejection|micro-reaction loops|body-cue pileups/);
+      assert.match(handoffRulesSource, /function strictEpistemology[\s\S]*PATTERN EXAMPLE:[\s\S]*function agencySeparation/);
+      assert.match(handoffRulesSource, /function agencySeparation[\s\S]*PATTERN EXAMPLE:[\s\S]*function antiStockPhrasing/);
       assert.doesNotMatch(handoffRulesSource, /function linearChronology\(/);
       assert.doesNotMatch(handoffRulesSource, /function inanimateObjectivity\(/);
       assert.doesNotMatch(handoffRulesSource, /function realisticConversation|function npcRambleGuard|characterTurnPacing|DIALOGUE-TURN-LIMITS/);
@@ -16127,7 +16103,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.84');
+      assert.equal(manifest.version, '0.9.85');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -20300,7 +20276,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.84');
+      assert.equal(manifest.version, '0.9.85');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

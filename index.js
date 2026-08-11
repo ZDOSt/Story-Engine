@@ -564,7 +564,9 @@ function RenderControlEngine(response, input, context) {
 
   function cohesiveSceneBeats(response, context): {
     MANDATE:
-      Closely related physical events MUST be narrated as one clear, connected sequence.
+      Combine closely related actions, gestures, dialogue, and immediate consequences when they belong to the same event into one fluid, readable scene beat.
+
+      Use natural connective prose and clear temporal flow so each event leads naturally into the next.
 
     FORBIDDEN:
       - DO NOT invent movement, gestures, object handling, or reactions merely to make prose feel active.
