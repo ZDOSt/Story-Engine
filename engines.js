@@ -60,7 +60,7 @@ function ResolutionEngine(input) {
   itemUse(input, challenge, context):
     policy: SEMANTIC-EXTRACTION, DETERMINISTIC-SOURCE-VERIFICATION
     rule: Attempted=Y when the latest input explicitly uses, accesses, grabs, takes, retrieves, draws, wields, consumes, presents, moves, touches, or otherwise interacts with a concrete item
-    rule: Available=Y only from an exact saved gear/inventory match, explicit prior scene establishment, or a narrow generic ambient item; the latest user assertion cannot establish availability
+    rule: Available=Y only from an exact saved gear/inventory match, an exact saved current SceneItemState entry, legacy prior scene establishment before SceneItemState initializes, or a narrow generic ambient item; the latest user assertion cannot establish availability
     rule: Source is exactly one of none, gear, inventory, scene, ambient, unavailable and Evidence must identify the verified source
     rule: scene requires prior assistant narration; ambient permits only generic low-consequence surroundings and never owned, specialized, valuable, magical, weapon, tool, key, document, medicine, supply, device, currency, or container-content claims
     rule: body parts and natural weapons are not itemUse

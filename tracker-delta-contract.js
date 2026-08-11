@@ -116,6 +116,10 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Remove inventoryRemove when FINAL_NARRATION explicitly establishes that an item leaves {{user}} possession/control or is no longer usable/available to them, including being dropped, left behind, handed away, given away, spent, consumed, lost, destroyed, discarded, seized, or broken beyond use.',
     '- Do not add inventory merely because an item is visible, nearby, mentioned, reachable, desired, attempted, requested, or offered. Add it only when FINAL_NARRATION confirms possession/control. Do not remove inventory merely because an item is drawn, held, inspected, used, shown, referenced, or briefly handled unless FINAL_NARRATION confirms it no longer remains with {{user}}.',
     '- Preserve the exact item phrase from FINAL_NARRATION when possible, and output only the changed item names. Do not duplicate existing inventory. Use User.gearAdd/gearRemove for visible worn/equipped gear changes when that is the more accurate tracker field.',
+    '- CURRENT SCENE ITEM DELTA: SceneItemState is hidden, ephemeral object availability for the current place/area only. Use SceneItemState.add and SceneItemState.remove; never put these objects in user or NPC gear/inventory unless FINAL_NARRATION separately establishes possession.',
+    '- Add SceneItemState.add only when FINAL_NARRATION physically establishes a concrete loose or placed object as present in the current scene. Exclude dialogue claims, hypotheticals, wishes, negated/absent items, latest-user-only assertions, body parts, natural weapons, and items currently carried or worn by an NPC.',
+    '- Remove SceneItemState.remove when FINAL_NARRATION establishes that a saved current-scene item was taken, transferred, consumed, destroyed, removed, or otherwise ceased to be present. A completed pickup should remove the scene item and add the same item to the acquiring actor in one delta. A completed drop or leave-behind should remove it from the actor and add it to SceneItemState.',
+    '- SceneItemState is not permanent location memory. Deterministic code owns the scene key and clears items on a place/area transition. Never output or invent a scene key or location ID.',
     '- USER CURRENCY DELTA: update TrackerUpdateEngine.User.currencyAdd and currencyRemove from completed money/currency changes in FINAL_NARRATION. A stored ECONOMY_CONTEXT.pendingPrice may also supply the amount for a payment that FINAL_NARRATION confirms but does not restate.',
     '- Add currencyAdd when FINAL_NARRATION explicitly establishes that {{user}} receives, earns, is paid, loots, finds, pockets, wins, or otherwise gains currency. Remove currencyRemove when FINAL_NARRATION explicitly establishes that {{user}} pays, spends, gives, loses, is robbed of, has seized, or otherwise loses currency.',
     '- Price quote only: when FINAL_NARRATION establishes a concrete cost, fee, wage, price, fare, bribe amount, contract pay, or other quoted amount but no completed payment/exchange happens yet, do not change currency. Instead set EconomyState.pendingPriceAmount, pendingPriceItem, pendingPricePayee, and pendingPriceEvidence for the most immediate actionable price.',
@@ -203,6 +207,8 @@ TrackerUpdateEngine.User.gearAdd=(none)
 TrackerUpdateEngine.User.gearRemove=(none)
 TrackerUpdateEngine.User.inventoryAdd=(none)
 TrackerUpdateEngine.User.inventoryRemove=(none)
+SceneItemState.add=(none)
+SceneItemState.remove=(none)
 TrackerUpdateEngine.User.currencyAdd=(none)
 TrackerUpdateEngine.User.currencyRemove=(none)
 EconomyState.payPendingPrice=N

@@ -19,6 +19,7 @@ import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, bui
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 import { generateRawData as generateRawDataAdapter } from './st-adapter.js';
+import { buildSceneItemStateKey, normalizeSceneItemState, reconcilePostNarrationPossessionDelta } from './scene-item-state.js';
 import {
   BOUNDARY_BREAK_RESPONSES,
   BOUNDARY_BREAK_TYPES,
@@ -483,6 +484,7 @@ function context(latestUserText = '', tracker = {}, user = {}, persona = 'PHY: 6
         snapshots: {},
         userReputation: cardFields.userReputation || {},
         worldState: cardFields.worldState || {},
+        sceneItems: cardFields.sceneItems || {},
         descriptiveArchive: cardFields.descriptiveArchive || {},
         worldProgression: cardFields.worldProgression || {},
       },
@@ -13513,7 +13515,7 @@ const tests = [
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.Available=N/);
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.NoEffectReason=\(none\)/);
       assert.match(semanticSource, /detects every explicit latest-user interaction with a concrete item/i);
-      assert.match(semanticSource, /scene requires explicit establishment in prior assistant narration/i);
+      assert.match(semanticSource, /scene requires an exact saved current SceneItemState entry/i);
       assert.match(semanticSource, /ambient never permits "my X", instruments, tools, weapons, keys/i);
       assert.match(semanticSource, /Every Attempted=Y entry requires concise Evidence/i);
       assert.match(semanticSource, /Evidence cannot create availability/i);
@@ -13525,7 +13527,7 @@ const tests = [
       assert.match(runnerSource, /priorAssistantSceneItemMatch/);
       assert.match(runnerSource, /permittedAmbientItemMatch/);
       assert.match(runnerSource, /extractLatestUserItemInteraction/);
-      assert.match(runnerSource, /const itemUse = normalizeItemUseForHandoff\(semantic\.itemUse,\s*context,\s*itemUseAudit,\s*playerTrackerSnapshot\)/);
+      assert.match(runnerSource, /const itemUse = normalizeItemUseForHandoff\(semantic\.itemUse,\s*context,\s*itemUseAudit,\s*playerTrackerSnapshot,\s*sceneItemStateSnapshot,\s*ledger\?\.worldTransition\)/);
       assert.match(runnerSource, /getUnavailableItemNoRollEvidence\(itemUse\)/);
       assert.match(runnerSource, /item availability\/evidence must be mechanically verified/i);
       assert.doesNotMatch(runnerSource, /ItemUse[\s\S]{0,240}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
@@ -13571,8 +13573,8 @@ const tests = [
         Available: 'N',
         Item: 'sword',
         Source: 'unavailable',
-        Evidence: 'no valid source found in saved gear, saved inventory, prior assistant scene, or permitted ambient items',
-        NoEffectReason: 'no valid source in saved gear, saved inventory, prior scene, or permitted ambient items',
+        Evidence: 'no valid source found in saved gear, saved inventory, current scene items, legacy prior assistant scene, or permitted ambient items',
+        NoEffectReason: 'no valid source in saved gear, saved inventory, current scene items, legacy prior scene, or permitted ambient items',
       });
       assert.equal(unavailablePacket.RollNeeded, 'N');
       const unavailablePrompt = prompt(unavailableReport);
@@ -13664,8 +13666,8 @@ const tests = [
         Available: 'N',
         Item: 'sword',
         Source: 'unavailable',
-        Evidence: 'no valid source found in saved gear, saved inventory, prior assistant scene, or permitted ambient items',
-        NoEffectReason: 'no valid source in saved gear, saved inventory, prior scene, or permitted ambient items',
+        Evidence: 'no valid source found in saved gear, saved inventory, current scene items, legacy prior assistant scene, or permitted ambient items',
+        NoEffectReason: 'no valid source in saved gear, saved inventory, current scene items, legacy prior scene, or permitted ambient items',
       });
       assert.match(prompt(falseWornReport), /Availability: unavailable/i);
       assert.match(falseWornReport.auditLines.join('\n'), /deterministicItemSourceEvidenceRepair/);
@@ -13702,8 +13704,8 @@ const tests = [
         Available: 'N',
         Item: 'waterskin',
         Source: 'unavailable',
-        Evidence: 'no valid source found in saved gear, saved inventory, prior assistant scene, or permitted ambient items',
-        NoEffectReason: 'no valid source in saved gear, saved inventory, prior scene, or permitted ambient items',
+        Evidence: 'no valid source found in saved gear, saved inventory, current scene items, legacy prior assistant scene, or permitted ambient items',
+        NoEffectReason: 'no valid source in saved gear, saved inventory, current scene items, legacy prior scene, or permitted ambient items',
       });
       assert.match(prompt(falseCarriedReport), /Availability: unavailable/i);
 
@@ -13982,7 +13984,91 @@ const tests = [
       });
       assert.equal(sceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
       assert.equal(sceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'scene');
-      assert.match(sceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /prior assistant scene: "A polished guitar rests against the bedframe/i);
+      assert.match(sceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /legacy prior assistant scene: "A polished guitar rests against the bedframe/i);
+
+      const cottageWorldState = {
+        reputationLocation: 'Valewick',
+        place: 'Cottage',
+        area: 'bedroom',
+        indoors: true,
+        positionEstablished: true,
+      };
+      const savedSceneGuitarReport = runCase({
+        userText: sceneGuitarText,
+        cardFields: {
+          worldState: cottageWorldState,
+          sceneItems: {
+            sceneKey: buildSceneItemStateKey(cottageWorldState),
+            initialized: true,
+            items: [{ name: 'polished guitar', evidence: 'A polished guitar rests against the bedframe.' }],
+          },
+        },
+        ledger: itemLedger({
+          attempted: true,
+          available: false,
+          item: 'guitar',
+          source: 'unavailable',
+          evidence: '(none)',
+          noEffectReason: 'unknown',
+        }),
+      });
+      assert.equal(savedSceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(savedSceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'scene');
+      assert.equal(savedSceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.SavedItem, 'polished guitar');
+      assert.match(savedSceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /saved current-scene item: polished guitar/i);
+
+      const staleTransitionLedger = itemLedger({
+        attempted: true,
+        available: true,
+        item: 'guitar',
+        source: 'scene',
+        evidence: 'saved scene guitar',
+      });
+      staleTransitionLedger.worldTransition = {
+        reputationLocation: 'unchanged',
+        place: 'Workshop',
+        area: 'unchanged',
+        indoors: 'unchanged',
+        timeAdvance: 'none',
+        timeAdvanceCount: 1,
+        timeOfDay: 'unchanged',
+        requiresSuccess: false,
+        evidence: 'I leave the cottage and enter the workshop',
+      };
+      const staleTransitionReport = runCase({
+        userText: 'I leave the cottage and enter the workshop, then grab the guitar.',
+        cardFields: {
+          worldState: cottageWorldState,
+          sceneItems: {
+            sceneKey: buildSceneItemStateKey(cottageWorldState),
+            initialized: true,
+            items: [{ name: 'polished guitar', evidence: 'A polished guitar rests against the bedframe.' }],
+          },
+        },
+        ledger: staleTransitionLedger,
+      });
+      assert.equal(staleTransitionReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert(auditIncludes(staleTransitionReport, 'staleSceneItemRejected'));
+
+      const initializedSceneBlocksHistoryReport = runCase({
+        userText: sceneGuitarText,
+        chat: [
+          { is_user: true, mes: 'I enter the cottage.' },
+          { is_user: false, mes: 'A polished guitar rests against the bedframe.' },
+          { is_user: true, mes: sceneGuitarText },
+        ],
+        cardFields: {
+          worldState: cottageWorldState,
+          sceneItems: {
+            sceneKey: buildSceneItemStateKey(cottageWorldState),
+            initialized: true,
+            items: [],
+          },
+        },
+        ledger: itemLedger({ ...omittedItemUse, attempted: true, item: 'guitar', source: 'scene' }),
+      });
+      assert.equal(initializedSceneBlocksHistoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert.equal(initializedSceneBlocksHistoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
 
       const ambientRockReport = runCase({
         userText: 'I pick up a small rock.',
@@ -14092,6 +14178,278 @@ const tests = [
       assert.equal(repairedEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
       assert.equal(repairedEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, 'saved gear entry: sword');
       assert(auditIncludes(repairedEvidenceReport, 'deterministicItemSourceEvidenceRepair'));
+    },
+  },
+  {
+    name: '34c3 ephemeral scene items and post-narration possession deltas reconcile deterministically',
+    run() {
+      const bakery = {
+        reputationLocation: 'Valewick',
+        place: "Maria's Bakery",
+        area: 'storefront',
+        indoors: true,
+        positionEstablished: true,
+      };
+      const forest = {
+        reputationLocation: 'Valewick outskirts',
+        place: 'Northwood',
+        area: 'forest path',
+        indoors: false,
+        positionEstablished: true,
+      };
+      const actorDelta = overrides => ({
+        inventoryAdd: [],
+        inventoryRemove: [],
+        gearAdd: [],
+        gearRemove: [],
+        ...overrides,
+      });
+      const emptyScene = normalizeSceneItemState({}, bakery);
+      const introduced = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: {
+          user: actorDelta(),
+          npcs: [],
+          sceneItems: { add: ['guitar'], remove: [] },
+        },
+        narration: 'A polished guitar rests beside the counter.',
+        worldState: bakery,
+      });
+      assert.equal(introduced.sceneItems.initialized, true);
+      assert.deepEqual(introduced.sceneItems.items.map(item => item.name), ['guitar']);
+      assert.match(introduced.sceneItems.items[0].evidence, /polished guitar rests beside the counter/i);
+
+      const moved = normalizeSceneItemState(introduced.sceneItems, forest);
+      assert.equal(moved.sceneKey, buildSceneItemStateKey(forest));
+      assert.equal(moved.initialized, false);
+      assert.deepEqual(moved.items, []);
+
+      const dialogueOnly = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: { user: actorDelta(), npcs: [], sceneItems: { add: ['guitar'], remove: [] } },
+        narration: 'Maria says, "A guitar rests beside the counter."',
+        worldState: bakery,
+      });
+      assert.deepEqual(dialogueOnly.sceneItems.items, []);
+      assert(dialogueOnly.audit.some(line => /rejected add=guitar/i.test(line)));
+
+      const pickedUp = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: introduced.sceneItems, worldState: bakery },
+        delta: {
+          user: actorDelta({ inventoryAdd: ['guitar'] }),
+          npcs: [],
+          sceneItems: { add: [], remove: ['guitar'] },
+        },
+        narration: 'You pick up the guitar and hold it in your hands.',
+        itemUse: { Attempted: 'Y', Available: 'Y', Item: 'guitar', Source: 'scene' },
+        worldState: bakery,
+      });
+      assert.deepEqual(pickedUp.delta.user.inventoryAdd, ['guitar']);
+      assert.deepEqual(pickedUp.delta.sceneItems.remove, ['guitar']);
+      assert.deepEqual(pickedUp.sceneItems.items, []);
+
+      const unavailable = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: {
+          user: actorDelta({ inventoryAdd: ['guitar'] }),
+          npcs: [],
+          sceneItems: { add: ['guitar'], remove: [] },
+        },
+        narration: 'You pick up the guitar.',
+        itemUse: { Attempted: 'Y', Available: 'N', Item: 'guitar', Source: 'unavailable' },
+        worldState: bakery,
+      });
+      assert.deepEqual(unavailable.delta.user.inventoryAdd, []);
+      assert.deepEqual(unavailable.sceneItems.items, []);
+
+      const dropped = reconcilePostNarrationPossessionDelta({
+        snapshot: {
+          user: { inventory: ['Iron sword (chipped)'], gear: [] },
+          npcs: {},
+          sceneItems: emptyScene,
+          worldState: bakery,
+        },
+        delta: {
+          user: actorDelta({ inventoryRemove: ['sword'] }),
+          npcs: [],
+          sceneItems: { add: ['sword'], remove: [] },
+        },
+        narration: 'You leave the iron sword on the counter.',
+        worldState: bakery,
+      });
+      assert.deepEqual(dropped.delta.user.inventoryRemove, ['Iron sword (chipped)']);
+      assert.deepEqual(dropped.delta.sceneItems.add, ['Iron sword (chipped)']);
+      assert.deepEqual(dropped.sceneItems.items.map(item => item.name), ['Iron sword (chipped)']);
+
+      const ambiguous = reconcilePostNarrationPossessionDelta({
+        snapshot: {
+          user: { inventory: ['Iron sword', 'Silver sword'], gear: [] },
+          npcs: {},
+          sceneItems: emptyScene,
+          worldState: bakery,
+        },
+        delta: { user: actorDelta({ inventoryRemove: ['sword'] }), npcs: [], sceneItems: {} },
+        narration: 'You leave the sword on the counter.',
+        worldState: bakery,
+      });
+      assert.deepEqual(ambiguous.delta.user.inventoryRemove, []);
+      assert(ambiguous.audit.some(line => /no unique saved inventory entry/i.test(line)));
+
+      const equipped = reconcilePostNarrationPossessionDelta({
+        snapshot: {
+          user: { inventory: ['Iron sword'], gear: [] },
+          npcs: {},
+          sceneItems: emptyScene,
+          worldState: bakery,
+        },
+        delta: { user: actorDelta({ gearAdd: ['sword'] }), npcs: [], sceneItems: {} },
+        narration: 'You equip the iron sword at your belt.',
+        worldState: bakery,
+      });
+      assert.deepEqual(equipped.delta.user.inventoryRemove, ['Iron sword']);
+      assert.deepEqual(equipped.delta.user.gearAdd, ['Iron sword']);
+
+      const npcTransfer = reconcilePostNarrationPossessionDelta({
+        snapshot: {
+          user: { inventory: [], gear: [] },
+          npcs: { Maria: trackerEntry({ inventory: ['guitar'] }) },
+          sceneItems: emptyScene,
+          worldState: bakery,
+        },
+        delta: { user: actorDelta({ inventoryAdd: ['guitar'] }), npcs: [], sceneItems: {} },
+        narration: 'Maria hands you the guitar.',
+        worldState: bakery,
+      });
+      assert.deepEqual(npcTransfer.delta.user.inventoryAdd, ['guitar']);
+      assert.deepEqual(npcTransfer.delta.npcs[0].inventoryRemove, ['guitar']);
+
+      const offeredOnly = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: { user: actorDelta({ inventoryAdd: ['guitar'] }), npcs: [], sceneItems: {} },
+        narration: 'Maria offers the guitar to you.',
+        worldState: bakery,
+      });
+      assert.deepEqual(offeredOnly.delta.user.inventoryAdd, []);
+
+      const observedUser = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: { user: actorDelta({ inventoryAdd: ['guitar'] }), npcs: [], sceneItems: {} },
+        narration: 'You watch as Maria takes the guitar.',
+        worldState: bakery,
+      });
+      assert.deepEqual(observedUser.delta.user.inventoryAdd, []);
+
+      const observedNpc = reconcilePostNarrationPossessionDelta({
+        snapshot: {
+          user: { inventory: [], gear: [] },
+          npcs: { Maria: trackerEntry(), John: trackerEntry() },
+          sceneItems: emptyScene,
+          worldState: bakery,
+        },
+        delta: { user: actorDelta(), npcs: [{ NPC: 'Maria', ...actorDelta({ inventoryAdd: ['guitar'] }) }], sceneItems: {} },
+        narration: 'Maria watches as John takes the guitar.',
+        worldState: bakery,
+      });
+      assert.deepEqual(observedNpc.delta.npcs[0].inventoryAdd, []);
+
+      const directEquip = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: {
+          user: actorDelta({ inventoryAdd: ['guitar'], gearAdd: ['guitar'] }),
+          npcs: [],
+          sceneItems: {},
+        },
+        narration: 'Maria hands you the guitar, and you equip the guitar across your back.',
+        worldState: bakery,
+      });
+      assert.deepEqual(directEquip.delta.user.inventoryAdd, []);
+      assert.deepEqual(directEquip.delta.user.gearAdd, ['guitar']);
+
+      const npcEquip = reconcilePostNarrationPossessionDelta({
+        snapshot: {
+          user: { inventory: [], gear: [] },
+          npcs: { Maria: trackerEntry({ inventory: ['guitar'], gear: [] }) },
+          sceneItems: emptyScene,
+          worldState: bakery,
+        },
+        delta: { user: actorDelta(), npcs: [{ NPC: 'Maria', ...actorDelta({ gearAdd: ['guitar'] }) }], sceneItems: {} },
+        narration: 'Maria equips the guitar across her back.',
+        worldState: bakery,
+      });
+      assert.deepEqual(npcEquip.delta.npcs[0].inventoryRemove, ['guitar']);
+      assert.deepEqual(npcEquip.delta.npcs[0].gearAdd, ['guitar']);
+
+      const carriedIsNotLoose = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: {
+          user: actorDelta({ inventoryAdd: ['guitar'] }),
+          npcs: [],
+          sceneItems: { add: ['guitar'], remove: [] },
+        },
+        narration: 'Maria hands you the guitar, and it settles into your bag.',
+        worldState: bakery,
+      });
+      assert.deepEqual(carriedIsNotLoose.delta.user.inventoryAdd, ['guitar']);
+      assert.deepEqual(carriedIsNotLoose.sceneItems.items, []);
+
+      const retainedByUser = reconcilePostNarrationPossessionDelta({
+        snapshot: {
+          user: { inventory: ['guitar'], gear: [] },
+          npcs: {},
+          sceneItems: emptyScene,
+          worldState: bakery,
+        },
+        delta: { user: actorDelta({ inventoryRemove: ['guitar'] }), npcs: [], sceneItems: {} },
+        narration: 'You leave the guitar in your bag.',
+        worldState: bakery,
+      });
+      assert.deepEqual(retainedByUser.delta.user.inventoryRemove, []);
+
+      const retainedByNpc = reconcilePostNarrationPossessionDelta({
+        snapshot: {
+          user: { inventory: [], gear: [] },
+          npcs: { Maria: trackerEntry({ inventory: ['guitar'] }) },
+          sceneItems: emptyScene,
+          worldState: bakery,
+        },
+        delta: { user: actorDelta(), npcs: [{ NPC: 'Maria', ...actorDelta({ inventoryRemove: ['guitar'] }) }], sceneItems: {} },
+        narration: 'Maria leaves the guitar in her bag.',
+        worldState: bakery,
+      });
+      assert.deepEqual(retainedByNpc.delta.npcs[0].inventoryRemove, []);
+
+      const unrelatedClause = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: introduced.sceneItems, worldState: bakery },
+        delta: {
+          user: actorDelta({ inventoryAdd: ['guitar'] }),
+          npcs: [],
+          sceneItems: { add: [], remove: ['guitar'] },
+        },
+        narration: 'You carry a canvas bag while the guitar remains beside the counter.',
+        worldState: bakery,
+      });
+      assert.deepEqual(unrelatedClause.delta.user.inventoryAdd, []);
+      assert.deepEqual(unrelatedClause.delta.sceneItems.remove, []);
+      assert.deepEqual(unrelatedClause.sceneItems.items.map(item => item.name), ['guitar']);
+
+      const optionalSceneLines = parseNarratorTrackerDelta(
+        TRACKER_DELTA_TEMPLATE
+          .replace(/^SceneItemState\.add=.*\r?\n/m, '')
+          .replace(/^SceneItemState\.remove=.*\r?\n/m, ''),
+      );
+      assert.deepEqual(optionalSceneLines.sceneItems, { add: [], remove: [], provided: false });
+      assert.equal(parseNarratorTrackerDelta(TRACKER_DELTA_TEMPLATE).sceneItems.provided, true);
+      const omittedSceneDelta = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: { user: actorDelta(), npcs: [], sceneItems: optionalSceneLines.sceneItems },
+        narration: 'Maria wipes down the counter.',
+        worldState: bakery,
+      });
+      assert.equal(omittedSceneDelta.sceneItems.initialized, false);
+
+      assert.match(TRACKER_DELTA_CONTRACT, /SceneItemState is hidden, ephemeral object availability/i);
+      assert.match(TRACKER_DELTA_TEMPLATE, /SceneItemState\.add=\(none\)/);
+      assert.match(TRACKER_DELTA_TEMPLATE, /SceneItemState\.remove=\(none\)/);
     },
   },
   {
@@ -15769,7 +16127,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.83');
+      assert.equal(manifest.version, '0.9.84');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -19942,7 +20300,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.83');
+      assert.equal(manifest.version, '0.9.84');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

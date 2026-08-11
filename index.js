@@ -36,7 +36,7 @@ import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
 import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest, STORY_ENGINE_THINKING_DISABLE_FORMATS } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -57,6 +57,7 @@ import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, pars
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, getNpcLootRankProfile, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, normalizeEquipmentTierAssignments, renderEconomyTrackerContext } from './economy.js';
+import { normalizeSceneItemState, reconcilePostNarrationPossessionDelta, sceneItemStateForModel } from './scene-item-state.js';
 
 
 const EXTENSION_NAME = 'Story Engine';
@@ -3586,6 +3587,7 @@ function getTrackerRoot(context = getContext()) {
     root.userKnowledge = mergeUserKnowledgeLedger(root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(root.userReputation || {}, {});
     root.worldState = normalizeWorldState(root.worldState || {});
+    root.sceneItems = normalizeSceneItemState(root.sceneItems || {}, root.worldState);
     root.descriptiveArchive = normalizeDescriptiveArchive(root.descriptiveArchive || {});
     root.worldProgression = normalizeWorldProgression(root.worldProgression || {});
     if (!root.worldMemoryBase || typeof root.worldMemoryBase !== 'object') {
@@ -5093,6 +5095,10 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     const userKnowledge = mergeUserKnowledgeLedger(pendingRun?.userKnowledgeBefore || {}, pendingRun?.userKnowledgeAfter || {});
     const userReputation = mergeUserReputationLedger(pendingRun?.userReputationBefore || {}, pendingRun?.userReputationAfter || {});
     const worldState = normalizeWorldState(pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {});
+    const sceneItems = normalizeSceneItemState(
+        pendingRun?.sceneItemsAfter || pendingRun?.sceneItemsBefore || {},
+        worldState,
+    );
     const economy = normalizeEconomyState(pendingRun?.economyAfter || pendingRun?.economyBefore || {});
     const boundCompanion = normalizeBoundCompanionState(pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {});
     const pendingBoundary = normalizePendingBoundaryState(pendingRun?.pendingBoundaryAfter || pendingRun?.pendingBoundaryBefore || {});
@@ -5130,6 +5136,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         userKnowledge,
         userReputation,
         worldState,
+        sceneItems,
         economy,
         boundCompanion,
         pendingBoundary,
@@ -5155,6 +5162,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const userKnowledgeSnapshot = pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context);
     const userReputationSnapshot = pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context);
     const worldStateSnapshot = pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context);
+    const sceneItemStateSnapshot = pendingGeneration?.sceneItemStateSnapshot || buildSceneItemStateSnapshot(context);
     const descriptiveArchiveSnapshot = pendingGeneration?.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context);
     const worldProgressionSnapshot = pendingGeneration?.worldProgressionSnapshot || buildWorldProgressionSnapshot(context);
     const economySnapshot = pendingGeneration?.economySnapshot || buildEconomySnapshot(context);
@@ -5206,6 +5214,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             userKnowledge: {},
             userReputation: {},
             worldState: worldStateSnapshot,
+            sceneItems: sceneItemStateSnapshot,
             descriptiveArchive: descriptiveArchiveSnapshot,
             worldProgression: worldProgressionSnapshot,
             economy: economySnapshot,
@@ -5237,6 +5246,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         userReputationAfter: {},
         worldStateBefore: worldStateSnapshot,
         worldStateAfter: worldStateSnapshot,
+        sceneItemsBefore: sceneItemStateSnapshot,
+        sceneItemsAfter: sceneItemStateSnapshot,
         descriptiveArchiveBefore: descriptiveArchiveSnapshot,
         descriptiveArchiveAfter: descriptiveArchiveSnapshot,
         worldProgressionBefore: worldProgressionSnapshot,
@@ -5487,6 +5498,7 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, 
         userKnowledge: mergeUserKnowledgeLedger(displaySnapshot?.userKnowledge || {}, {}),
         userReputation: mergeUserReputationLedger(displaySnapshot?.userReputation || {}, {}),
         worldState: normalizeWorldState(displaySnapshot?.worldState || {}),
+        sceneItems: normalizeSceneItemState(displaySnapshot?.sceneItems || {}, displaySnapshot?.worldState || {}),
         economy: normalizeEconomyState(displaySnapshot?.economy || {}),
         boundCompanion: normalizeBoundCompanionState(displaySnapshot?.boundCompanion || {}),
         pendingBoundary: normalizePendingBoundaryState(displaySnapshot?.pendingBoundary || {}),
@@ -5538,6 +5550,10 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         adventureIntro: options.pendingRun?.adventureIntro === true,
         allowExplicitWeather: options.pendingRun?.adventureIntro === true,
     });
+    merged.sceneItems = normalizeSceneItemState(
+        delta.sceneItemState || merged.sceneItems || {},
+        merged.worldState,
+    );
     merged.economy = applyEconomyDelta(economyBefore, economyDelta, {
         messageKey: options.messageKey || '',
     });
@@ -5607,6 +5623,8 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         npcChanged: (delta.npcs || []).some(item => trackerDeltaHasChanges(item, false)),
         userKnowledgeChanged: userKnowledgeDeltaHasChanges(delta.userKnowledge),
         worldStateChanged: worldStateDeltaHasChanges(postNarrationWorldStateDelta),
+        sceneItemsChanged: JSON.stringify(normalizeSceneItemState(snapshot?.sceneItems || {}, snapshot?.worldState || {}))
+            !== JSON.stringify(merged.sceneItems),
         economyChanged: economyDeltaHasChanges(economyDelta),
         boundCompanionChanged: boundCompanionDeltaHasChanges(delta.boundCompanion),
         pendingBoundaryChanged: pendingBoundaryDeltaHasChanges(delta.pendingBoundary),
@@ -6541,6 +6559,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
+    root.sceneItems = normalizeSceneItemState(snapshot.sceneItems || {}, root.worldState);
     rebuildWorldMemoryFromSelectedSwipes(context);
     root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
@@ -6578,6 +6597,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.userKnowledge || root.userKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.userReputation || root.userReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.worldState || root.worldState || {});
+    root.sceneItems = normalizeSceneItemState(snapshot.sceneItems || {}, root.worldState);
     rebuildWorldMemoryFromSelectedSwipes(context);
     root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
@@ -10081,6 +10101,7 @@ function restoreTrackerBeforeProseGuardEdit(context, messageId, messageKey) {
     root.userKnowledge = mergeUserKnowledgeLedger(snapshot.beforeUserKnowledge || {}, {});
     root.userReputation = mergeUserReputationLedger(snapshot.beforeUserReputation || {}, {});
     root.worldState = normalizeWorldState(snapshot.beforeWorldState || root.worldState || {});
+    root.sceneItems = normalizeSceneItemState(snapshot.beforeSceneItems || {}, root.worldState);
     root.economy = normalizeEconomyState(snapshot.beforeEconomy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.beforeBoundCompanion || root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(snapshot.beforePendingBoundary || root.pendingBoundary || {});
@@ -14142,6 +14163,7 @@ function restoreTrackerForRegeneration(type) {
         root.userKnowledge = mergeUserKnowledgeLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserKnowledge || root.userKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeUserReputation || root.userReputation || {}, {});
         root.worldState = normalizeWorldState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeWorldState || root.worldState || {});
+        root.sceneItems = normalizeSceneItemState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeSceneItems || {}, root.worldState);
         rebuildWorldMemoryFromSelectedSwipes(context, { beforeMessageId: targetMessageId });
         root.economy = normalizeEconomyState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeEconomy || root.economy || {});
         root.boundCompanion = normalizeBoundCompanionState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeBoundCompanion || root.boundCompanion || {});
@@ -14680,6 +14702,10 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         npcs: pendingRun?.trackerBefore || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateBefore || {},
+        sceneItems: sceneItemStateForModel(
+            pendingRun?.sceneItemsBefore || {},
+            pendingRun?.worldStateBefore || {},
+        ),
         economy: pendingRun?.economyBefore || {},
         boundCompanion: pendingRun?.boundCompanionBefore || {},
         pendingBoundary: pendingRun?.pendingBoundaryBefore || {},
@@ -14689,6 +14715,10 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
         npcs: pendingRun?.trackerAfter || {},
         userKnowledge: pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
+        sceneItems: sceneItemStateForModel(
+            pendingRun?.sceneItemsAfter || pendingRun?.sceneItemsBefore || {},
+            pendingRun?.worldStateAfter || pendingRun?.worldStateBefore || {},
+        ),
         economy: pendingRun?.economyAfter || pendingRun?.economyBefore || {},
         boundCompanion: pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {},
         pendingBoundary: pendingRun?.pendingBoundaryAfter || pendingRun?.pendingBoundaryBefore || {},
@@ -14748,6 +14778,8 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
             lootSearch: resolution.LootSearch,
 
             lootDiscovery: resolution.LootDiscovery,
+
+            itemUse: resolution.ItemUse,
 
         },
 
@@ -15158,7 +15190,22 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 );
 
                 const clampedTrackerDelta = applyContextualInjuryCapsToTrackerDelta(postNarrationDelta, pendingRun.contextualInjuryCaps);
-                const reconciledTrackerDelta = reconcileLootPossessionTransfers(trackerDisplaySnapshot, clampedTrackerDelta);
+                const lootReconciledTrackerDelta = reconcileLootPossessionTransfers(trackerDisplaySnapshot, clampedTrackerDelta);
+                const possessionReconciliation = reconcilePostNarrationPossessionDelta({
+                    snapshot: trackerDisplaySnapshot,
+                    delta: lootReconciledTrackerDelta,
+                    narration: narrationText,
+                    itemUse: pendingRun?.resolutionPacket?.ItemUse || {},
+                    worldState: trackerDisplaySnapshot?.worldState || pendingRun?.worldStateAfter || {},
+                    userNames: getPersonaIdentityHints(context),
+                });
+                if (Array.isArray(pendingRun.report?.auditLines) && possessionReconciliation.audit.length) {
+                    pendingRun.report.auditLines.push(...possessionReconciliation.audit.map(line => `POST_NARRATION ${line}`));
+                }
+                const reconciledTrackerDelta = {
+                    ...possessionReconciliation.delta,
+                    sceneItemState: possessionReconciliation.sceneItems,
+                };
                 const mergedTrackerDisplaySnapshot = mergePostNarrationTrackerDelta(trackerDisplaySnapshot, reconciledTrackerDelta, {
                     messageKey,
                     latestUserText: pendingRun.latestUserText,
@@ -15289,6 +15336,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforeUserKnowledge: clone(pendingRun.userKnowledgeBefore || {}),
                 beforeUserReputation: clone(pendingRun.userReputationBefore || {}),
                 beforeWorldState: clone(pendingRun.worldStateBefore || {}),
+                beforeSceneItems: clone(pendingRun.sceneItemsBefore || {}),
                 beforeEconomy: clone(pendingRun.economyBefore || {}),
                 beforeBoundCompanion: clone(pendingRun.boundCompanionBefore || {}),
                 beforePendingBoundary: clone(pendingRun.pendingBoundaryBefore || {}),
@@ -15301,6 +15349,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterUserKnowledge: clone(trackerDisplaySnapshot.userKnowledge || {}),
                 afterUserReputation: clone(trackerDisplaySnapshot.userReputation || {}),
                 afterWorldState: clone(trackerDisplaySnapshot.worldState || {}),
+                afterSceneItems: clone(trackerDisplaySnapshot.sceneItems || {}),
                 afterEconomy: clone(trackerDisplaySnapshot.economy || {}),
                 afterBoundCompanion: clone(trackerDisplaySnapshot.boundCompanion || {}),
                 afterPendingBoundary: clone(trackerDisplaySnapshot.pendingBoundary || {}),
@@ -15494,7 +15543,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= firstAffectedMessageId) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeLatentGrievanceIds: snapshot.beforeLatentGrievanceIds, beforeLatentFavorIds: snapshot.beforeLatentFavorIds, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeLatentGrievanceIds: snapshot.beforeLatentGrievanceIds, beforeLatentFavorIds: snapshot.beforeLatentFavorIds, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeSceneItems: snapshot.beforeSceneItems, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
             }
             delete root.snapshots[key];
         }
@@ -15522,6 +15571,7 @@ async function handleMessageDeleted(newLength) {
         root.userKnowledge = mergeUserKnowledgeLedger(restoreCandidate.beforeUserKnowledge || {}, {});
         root.userReputation = mergeUserReputationLedger(restoreCandidate.beforeUserReputation || {}, {});
         root.worldState = normalizeWorldState(restoreCandidate.beforeWorldState || root.worldState || {});
+        root.sceneItems = normalizeSceneItemState(restoreCandidate.beforeSceneItems || {}, root.worldState);
         rebuildWorldMemoryFromSelectedSwipes(context);
         root.economy = normalizeEconomyState(restoreCandidate.beforeEconomy || root.economy || {});
         root.boundCompanion = normalizeBoundCompanionState(restoreCandidate.beforeBoundCompanion || root.boundCompanion || {});
@@ -15898,6 +15948,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         userKnowledgeSnapshot: buildUserKnowledgeSnapshot(context),
         userReputationSnapshot: buildUserReputationSnapshot(context),
         worldStateSnapshot: buildWorldStateSnapshot(context),
+        sceneItemStateSnapshot: buildSceneItemStateSnapshot(context),
         descriptiveArchiveSnapshot: buildDescriptiveArchiveSnapshot(context),
         worldProgressionSnapshot: buildWorldProgressionSnapshot(context),
         economySnapshot: buildEconomySnapshot(context),
@@ -16066,6 +16117,7 @@ async function handleChatCompletionPromptReady(eventData) {
                 latentGrievanceSnapshot: pendingGeneration.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context),
                 latentFavorSnapshot: pendingGeneration.latentFavorSnapshot || buildLatentFavorSnapshot(context),
                 worldStateSnapshot: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+                sceneItemStateSnapshot: pendingGeneration.sceneItemStateSnapshot || buildSceneItemStateSnapshot(context),
                 descriptiveArchiveSnapshot: pendingGeneration.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context),
                 worldProgressionSnapshot: pendingGeneration.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
                 boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
@@ -16119,6 +16171,8 @@ async function handleChatCompletionPromptReady(eventData) {
             userReputationAfter: report.trackerUpdate?.userReputation || {},
             worldStateBefore: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
             worldStateAfter: report.trackerUpdate?.worldState || pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
+            sceneItemsBefore: pendingGeneration.sceneItemStateSnapshot || buildSceneItemStateSnapshot(context),
+            sceneItemsAfter: report.trackerUpdate?.sceneItems || pendingGeneration.sceneItemStateSnapshot || buildSceneItemStateSnapshot(context),
             descriptiveArchiveBefore: pendingGeneration.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context),
             descriptiveArchiveAfter: report.trackerUpdate?.descriptiveArchive || pendingGeneration.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context),
             worldProgressionBefore: pendingGeneration.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
@@ -16211,6 +16265,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             userKnowledgeSnapshot: pendingGeneration?.userKnowledgeSnapshot || buildUserKnowledgeSnapshot(context),
             userReputationSnapshot: pendingGeneration?.userReputationSnapshot || buildUserReputationSnapshot(context),
             worldStateSnapshot: pendingGeneration?.worldStateSnapshot || buildWorldStateSnapshot(context),
+            sceneItemStateSnapshot: pendingGeneration?.sceneItemStateSnapshot || buildSceneItemStateSnapshot(context),
             worldProgressionSnapshot: pendingGeneration?.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
             boundCompanionSnapshot: pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundarySnapshot: pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),

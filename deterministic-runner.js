@@ -92,11 +92,12 @@ import {
     normalizeHiddenHealth,
     safeSceneHealingAmount,
 } from './health-state.js';
-import { normalizeWorldState, projectWorldStateTransition } from './world-state.js';
+import { normalizeWorldState, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
 import { advanceDueWorldPlans, normalizeDescriptiveArchive, normalizeWorldProgression, prepareWorldMemoryNarration, progressionHasActivePlanForActor } from './world-memory.js';
 import { buildDeterministicLootEnvelope, getNpcLootRankProfile, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
 import { ROMANCE_STYLES } from './semantic-contract.js';
+import { findSceneItemMatch, normalizeSceneItemState } from './scene-item-state.js';
 
 const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
@@ -394,7 +395,7 @@ const POWER_ACTOR_EVENT_COOLDOWN_MS = Object.freeze({
 const USER_OWNED_ITEM_SOURCES = Object.freeze(['gear', 'inventory']);
 const AVAILABLE_ITEM_SOURCES = Object.freeze([...USER_OWNED_ITEM_SOURCES, 'scene', 'ambient']);
 const ITEM_USE_SOURCES = Object.freeze(['none', ...AVAILABLE_ITEM_SOURCES, 'unavailable']);
-const USER_ITEM_UNAVAILABLE_REASON = 'no valid source in saved gear, saved inventory, prior scene, or permitted ambient items';
+const USER_ITEM_UNAVAILABLE_REASON = 'no valid source in saved gear, saved inventory, current scene items, legacy prior scene, or permitted ambient items';
 const AMBIENT_ITEM_NOUNS = Object.freeze(new Set(['rock', 'rocks', 'stone', 'stones', 'pebble', 'pebbles', 'branch', 'branches', 'stick', 'sticks', 'twig', 'twigs', 'dirt', 'soil', 'sand', 'mud', 'leaf', 'leaves', 'snow', 'grass', 'gravel']));
 const AMBIENT_ITEM_MODIFIERS = Object.freeze(new Set(['small', 'little', 'loose', 'nearby', 'ordinary', 'plain', 'flat', 'smooth', 'rough', 'jagged', 'dry', 'fallen', 'dead', 'broken', 'single', 'handful', 'of']));
 
@@ -670,6 +671,14 @@ export function buildWorldStateSnapshot(context) {
     return normalizeWorldState(context?.chatMetadata?.structuredPreflightTracker?.worldState || {});
 }
 
+export function buildSceneItemStateSnapshot(context) {
+    const worldState = buildWorldStateSnapshot(context);
+    return normalizeSceneItemState(
+        context?.chatMetadata?.structuredPreflightTracker?.sceneItems || {},
+        worldState,
+    );
+}
+
 export function buildDescriptiveArchiveSnapshot(context) {
     return normalizeDescriptiveArchive(context?.chatMetadata?.structuredPreflightTracker?.descriptiveArchive || {});
 }
@@ -885,6 +894,7 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.userKnowledge = normalizeUserKnowledgeLedger(root.userKnowledge || {});
     root.userReputation = normalizeUserReputation(root.userReputation || {});
     root.worldState = normalizeWorldState(root.worldState || {});
+    root.sceneItems = normalizeSceneItemState(root.sceneItems || {}, root.worldState);
     root.descriptiveArchive = normalizeDescriptiveArchive(root.descriptiveArchive || {});
     root.worldProgression = normalizeWorldProgression(root.worldProgression || {});
     root.economy = normalizeEconomyState(root.economy || {});
@@ -927,6 +937,11 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     }
     if (trackerUpdate.worldState) {
         root.worldState = normalizeWorldState(trackerUpdate.worldState);
+    }
+    if (trackerUpdate.sceneItems) {
+        root.sceneItems = normalizeSceneItemState(trackerUpdate.sceneItems, root.worldState);
+    } else {
+        root.sceneItems = normalizeSceneItemState(root.sceneItems, root.worldState);
     }
     if (trackerUpdate.descriptiveArchive) {
         root.descriptiveArchive = normalizeDescriptiveArchive(trackerUpdate.descriptiveArchive);
@@ -980,6 +995,10 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const refereeContext = buildRefereeContext(context);
     const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
     const worldStateBefore = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
+    const sceneItemsBefore = normalizeSceneItemState(
+        options?.sceneItemStateSnapshot || buildSceneItemStateSnapshot(context),
+        worldStateBefore,
+    );
     const descriptiveArchive = normalizeDescriptiveArchive(options?.descriptiveArchiveSnapshot || buildDescriptiveArchiveSnapshot(context));
     const worldProgressionBefore = normalizeWorldProgression(options?.worldProgressionSnapshot || buildWorldProgressionSnapshot(context));
     const boundCompanionBefore = normalizeBoundCompanionState(options?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context));
@@ -992,11 +1011,12 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         npcs: healthNpcRefsBefore,
     });
     const rapportClock = advanceRapportClock(context, audit);
-    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot, healthBefore, pendingBoundaryBefore);
+    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot, healthBefore, pendingBoundaryBefore, sceneItemsBefore);
     const worldState = projectWorldStateTransition(worldStateBefore, ledger?.worldTransition || {}, {
         resolutionPacket: resolution.packet,
         seed: options?.latestUserText || resolution.packet?.GOAL || '',
     });
+    const sceneItems = normalizeSceneItemState(sceneItemsBefore, worldState);
     if (JSON.stringify(worldState) !== JSON.stringify(worldStateBefore)) {
         audit.push(`WORLD_TRANSITION=${JSON.stringify(worldState)}`);
     }
@@ -1114,6 +1134,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         },
         boundCompanion: boundCompanion.state,
         pendingBoundary: pendingBoundaryBefore,
+        sceneItems,
         latentGrievances: powerActors.latentGrievances,
         latentFavors: powerActors.latentFavors,
         descriptiveArchive,
@@ -3222,7 +3243,7 @@ function normalizeUserAbilityUseForHandoff(value = {}) {
     };
 }
 
-function normalizeItemUseForHandoff(value = {}, context = null, audit = null, playerTrackerSnapshot = null) {
+function normalizeItemUseForHandoff(value = {}, context = null, audit = null, playerTrackerSnapshot = null, sceneItemStateSnapshot = null, worldTransition = null) {
     const source = value && typeof value === 'object' ? value : {};
     const latestUserText = getLatestUserTextFromContext(context);
     const semanticAttempted = bool(source.attempted ?? source.Attempted);
@@ -3265,14 +3286,28 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
     }
 
     const savedItemMatch = playerTrackerItemMatch(context, item, playerTrackerSnapshot);
+    const currentSceneState = sceneItemStateSnapshot
+        ? normalizeSceneItemState(sceneItemStateSnapshot)
+        : buildSceneItemStateSnapshot(context);
     const ownershipClaimed = latestUserInputClaimsItemPossession(item, latestUserText, context);
-    const sceneMatch = !savedItemMatch && !ownershipClaimed ? priorAssistantSceneItemMatch(context, item) : null;
-    const ambientMatch = !savedItemMatch && !ownershipClaimed && !sceneMatch
+    const oldScenePrecedesItem = explicitSceneTransitionPrecedesItem(worldTransition, latestUserText, item);
+    const savedSceneMatch = !savedItemMatch && !oldScenePrecedesItem ? findSceneItemMatch(currentSceneState, item) : null;
+    if (!savedItemMatch && oldScenePrecedesItem && findSceneItemMatch(currentSceneState, item)) {
+        audit?.push(`2.7s.0a staleSceneItemRejected=${compact({
+            hardRule: 'a saved scene item cannot cross an explicit place/area transition that occurs before the item interaction',
+            item,
+            transitionEvidence: normalizeWorldTransition(worldTransition || {}).evidence || NONE,
+        })}`);
+    }
+    const legacySceneMatch = !savedItemMatch && !savedSceneMatch && !currentSceneState.initialized && !ownershipClaimed
+        ? priorAssistantSceneItemMatch(context, item)
+        : null;
+    const ambientMatch = !savedItemMatch && !savedSceneMatch && !legacySceneMatch && !ownershipClaimed
         ? permittedAmbientItemMatch(item, latestUserText)
         : null;
     let itemSource = 'unavailable';
     let available = false;
-    let evidence = 'no valid source found in saved gear, saved inventory, prior assistant scene, or permitted ambient items';
+    let evidence = 'no valid source found in saved gear, saved inventory, current scene items, legacy prior assistant scene, or permitted ambient items';
     let noEffectReason = USER_ITEM_UNAVAILABLE_REASON;
 
     if (savedItemMatch) {
@@ -3280,10 +3315,15 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
         available = true;
         evidence = `saved ${savedItemMatch.source} entry: ${savedItemMatch.item}`;
         noEffectReason = NONE;
-    } else if (sceneMatch) {
+    } else if (savedSceneMatch) {
         itemSource = 'scene';
         available = true;
-        evidence = `prior assistant scene: ${sceneMatch.evidence}`;
+        evidence = `saved current-scene item: ${savedSceneMatch.name}${savedSceneMatch.evidence ? ` (${savedSceneMatch.evidence})` : ''}`;
+        noEffectReason = NONE;
+    } else if (legacySceneMatch) {
+        itemSource = 'scene';
+        available = true;
+        evidence = `legacy prior assistant scene: ${legacySceneMatch.evidence}`;
         noEffectReason = NONE;
     } else if (ambientMatch) {
         itemSource = 'ambient';
@@ -3321,10 +3361,38 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
         Evidence: evidence,
         NoEffectReason: !available ? noEffectReason : NONE,
     };
-    if (available && savedItemMatch?.item && savedItemMatch.item !== item) {
-        packet.SavedItem = savedItemMatch.item;
+    const canonicalItem = savedItemMatch?.item || savedSceneMatch?.name;
+    if (available && canonicalItem && canonicalItem !== item) {
+        packet.SavedItem = canonicalItem;
     }
     return packet;
+}
+
+function explicitSceneTransitionPrecedesItem(value, latestUserText, item) {
+    const transition = normalizeWorldTransition(value || {});
+    const changesScene = Boolean(
+        transition.reputationLocation
+        || transition.place
+        || transition.area
+        || transition.indoors !== null,
+    );
+    const evidence = normalizeItemPossessionClaimText(transition.evidence);
+    const text = normalizeItemPossessionClaimText(latestUserText);
+    if (!changesScene || !isReal(evidence) || !text) return false;
+    const transitionIndex = text.indexOf(evidence);
+    if (transitionIndex < 0) return false;
+    const itemIndex = earliestItemTextIndex(text, item);
+    return itemIndex >= 0 && transitionIndex + evidence.length <= itemIndex;
+}
+
+function earliestItemTextIndex(text, item) {
+    let earliest = -1;
+    const variants = itemMatchTextVariants(item);
+    for (const variant of [...variants, ...variants.map(value => value.split(/\s+/).at(-1)).filter(Boolean)]) {
+        const index = text.indexOf(variant);
+        if (index >= 0 && (earliest < 0 || index < earliest)) earliest = index;
+    }
+    return earliest;
 }
 
 function normalizeLootSearchForHandoff(value = {}) {
@@ -3827,7 +3895,7 @@ function getNegativeSocialRepeatNoRollEvidence({ rollNeeded, challengeType, soci
     };
 }
 
-function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot = null, hiddenHealthSnapshot = null, pendingBoundarySnapshot = {}) {
+function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot = null, hiddenHealthSnapshot = null, pendingBoundarySnapshot = {}, sceneItemStateSnapshot = null) {
     const semantic = ledger.resolutionEngine || {};
     const targetClassifier = buildTargetClassifier(ledger, trackerSnapshot, context, hiddenHealthSnapshot);
     const rawTargets = normalizeTargets(semantic.identifyTargets);
@@ -3838,7 +3906,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let socialTactic = normalizeSocialTactic(semantic.socialTactic, challengeType);
     let rollReason = normalizeRollReason(semantic.rollReason);
     const itemUseAudit = [];
-    const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, itemUseAudit, playerTrackerSnapshot);
+    const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, itemUseAudit, playerTrackerSnapshot, sceneItemStateSnapshot, ledger?.worldTransition);
     const lootSearch = normalizeLootSearchForHandoff(semantic.lootSearch);
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
     let restraintControl = normalizeBoundaryObject(semantic.restraintControl);
@@ -3907,7 +3975,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     if (unavailableItemEvidence) {
         rollNeeded = unavailableItemEvidence.rollNeeded;
         stakesRule = unavailableItemEvidence.rule;
-        rollReason = `unavailable item: ${itemUse.Item} has no verified gear, inventory, prior-scene, or ambient source; the item-dependent action cannot resolve`;
+        rollReason = `unavailable item: ${itemUse.Item} has no verified gear, inventory, current-scene, legacy prior-scene, or ambient source; the item-dependent action cannot resolve`;
     }
     if (healingAttempt.isHealing && healingHasActiveStakes && rollNeeded !== 'Y') {
         rollNeeded = 'Y';
