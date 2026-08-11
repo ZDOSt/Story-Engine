@@ -2082,13 +2082,14 @@ function narrativeAbilityFact(value = {}) {
 
 function narrativeItemFact(value = {}) {
     const item = normalizeItemUseObject(value);
-    if (!item.attempted) return 'No personal gear/inventory item branch is active; ordinary scene objects remain governed by attemptedActions, attemptedActionResults, and environment facts.';
-    const attemptedItem = `{{user}} attempts to use/draw/produce/consume: ${item.item}.`;
+    if (!item.attempted) return 'No concrete item interaction is active.';
+    const attemptedItem = `{{user}} explicitly attempts to interact with this item: ${item.item}.`;
     if (item.available) {
         const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}. Preserve the saved item state exactly: if it limits use, the limitation must affect the scene.` : '';
-        return `${attemptedItem} Availability: available from ${item.source}.${state} Narrate the attempt and its immediate result. Do not skip, gloss over, or replace the attempt. Item availability is not automatic success, extra impact, or bypassed consequence.`;
+        const ownership = ['scene', 'ambient'].includes(item.source) ? ' Scene or ambient availability does not grant ownership or add the item to inventory.' : '';
+        return `${attemptedItem} Availability: available from ${item.source}. Evidence: ${item.evidence}.${state}${ownership} Narrate the attempted interaction and its immediate result. Do not skip, gloss over, or replace it. Item availability is not automatic success, extra impact, or bypassed consequence.`;
     }
-    return `${attemptedItem} Availability: unavailable. No item effect occurs. Narrate the attempt and its immediate result: the item is absent, unreachable, or not in the claimed place. Do not skip, gloss over, or replace the attempt. The item must not appear, be drawn, be wielded, be consumed, unlock anything, or enter {{user}} possession. Visible reactions may follow naturally.`;
+    return `${attemptedItem} Availability: unavailable. Evidence: ${item.evidence}. No item-dependent effect occurs. Preserve the visible attempt: narrate reaching, searching, grasping empty space, or otherwise finding that the item is absent or inaccessible. Do not skip, gloss over, or replace the attempt. The item must not appear, work, be drawn, be wielded, be consumed, unlock anything, or enter {{user}} possession. Natural visible reactions may follow, but do not add automatic humiliation or an item-specific mechanical penalty.`;
 }
 
 function narrativeLootDiscoveryFact(value = null) {
@@ -3042,7 +3043,7 @@ function normalizeItemUseObject(value = {}) {
     const noEffectReason = valueOrNone(source.NoEffectReason ?? source.noEffectReason);
     const savedItem = valueOrNone(source.SavedItem ?? source.savedItem);
     const rawSource = String(source.Source ?? source.source ?? 'none').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    const allowed = ['none', 'gear', 'inventory', 'unavailable'];
+    const allowed = ['none', 'gear', 'inventory', 'scene', 'ambient', 'unavailable'];
     let itemSource = allowed.includes(rawSource) ? rawSource : 'unavailable';
     if (!attempted) itemSource = 'none';
     const available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
@@ -3059,14 +3060,14 @@ function normalizeItemUseObject(value = {}) {
 }
 
 function itemUseSourceIsAvailable(source) {
-    return ['gear', 'inventory'].includes(String(source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
+    return ['gear', 'inventory', 'scene', 'ambient'].includes(String(source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
 }
 
 function itemUseSummary(value = {}) {
     const item = normalizeItemUseObject(value);
     if (!item.attempted) return 'none';
     if (!item.available) {
-        return `unavailable personal item attempt: ${item.item}; source:${item.source}; evidence:${item.evidence}; noEffectReason:${item.noEffectReason}`;
+        return `unavailable item interaction: ${item.item}; source:${item.source}; evidence:${item.evidence}; noEffectReason:${item.noEffectReason}`;
     }
     const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? `; savedItem:${item.savedItem}` : '';
     return `${item.item}; source:${item.source}; evidence:${item.evidence}${state}`;
@@ -3077,9 +3078,10 @@ function itemUseGuide(value = {}) {
     if (!item.attempted) return 'none';
     if (item.available) {
         const state = !isNoneText(item.savedItem) && item.savedItem !== item.item ? ` Saved item state: ${item.savedItem}; preserve concrete limitations in that saved state.` : '';
-        return `Personal item branch: ${item.item} is available from user ${item.source}.${state} Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes from item use.`;
+        const ownership = ['scene', 'ambient'].includes(item.source) ? ' This source does not grant ownership or add inventory.' : '';
+        return `Item interaction branch: ${item.item} is available from ${item.source}; evidence=${item.evidence}.${state}${ownership} Preserve access as scene fact only; do not add bonuses, automatic success, extra landed actions, or bypassed stakes from item use.`;
     }
-    return `Unavailable personal item branch: ${item.item} is not in user gear/inventory. No item effect occurs. After the attempted access point, narrate immediate absence or failed access: empty belt/sheath/pack/pocket, no item under the hand, or no item effect. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, or entering {{user}} possession. Visible reactions may follow from the failed access.`;
+    return `Unavailable item branch: ${item.item} has no verified source; evidence=${item.evidence}. No item-dependent effect occurs. Narrate the visible attempt and immediate absence or failed access: empty belt/sheath/pack/pocket, empty reach or grasp, no item under the hand, or no item effect. Do not narrate the item appearing, being drawn, wielded, used, consumed, spent, presented, unlocking anything, working, or entering {{user}} possession. Natural visible reactions may follow, but do not add automatic humiliation or an item-specific mechanical penalty.`;
 }
 
 function normalizeClaimCheckObject(value = {}) {

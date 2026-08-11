@@ -7192,6 +7192,7 @@ const tests = [
       const report = runCase({
         userText: 'I attack the guard with my blade.',
         tracker,
+        userState: { gear: ['blade'], inventory: [] },
         ledger: baseLedger({
           resolutionEngine: {
             identifyGoal: 'AttackGuard',
@@ -13501,7 +13502,7 @@ const tests = [
     },
   },
   {
-    name: '34c2 item use availability is semantic-only and carried into narrator handoff',
+    name: '34c2 item interactions are extracted semantically and source-verified deterministically',
     run() {
       const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
       const runnerSource = fs.readFileSync(extensionFile('deterministic-runner.js'), 'utf8');
@@ -13511,22 +13512,27 @@ const tests = [
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.Attempted=N/);
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.Available=N/);
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.NoEffectReason=\(none\)/);
-      assert.match(semanticSource, /strict semantic-only personal gear\/inventory verification/i);
-      assert.match(semanticSource, /Mark Attempted=N for ordinary interaction with environmental, scene, or NPC-offered objects/i);
-      assert.match(semanticSource, /The latest user input cannot create possession, carried state, equipment, inventory, or evidence of availability/i);
-      assert.match(semanticSource, /Personal carried-item signals include "my X", "from my belt"/i);
+      assert.match(semanticSource, /detects every explicit latest-user interaction with a concrete item/i);
+      assert.match(semanticSource, /scene requires explicit establishment in prior assistant narration/i);
+      assert.match(semanticSource, /ambient never permits "my X", instruments, tools, weapons, keys/i);
+      assert.match(semanticSource, /Every Attempted=Y entry requires concise Evidence/i);
+      assert.match(semanticSource, /Evidence cannot create availability/i);
+      assert.match(semanticSource, /latest user input cannot create possession, carried state, equipment, inventory, scene establishment, or proof of availability/i);
       assert.doesNotMatch(semanticSource, /setting_affordance/);
       assert.doesNotMatch(semanticSource, /consequence_affordance/);
       assert.match(runnerSource, /USER_OWNED_ITEM_SOURCES/);
-      assert.match(runnerSource, /user-owned item sources require saved user gear\/inventory/i);
-      assert.match(runnerSource, /scene, environmental, or NPC-offered objects are not personal gear\/inventory itemUse/i);
+      assert.match(runnerSource, /deterministicItemSourceEvidenceRepair/);
+      assert.match(runnerSource, /priorAssistantSceneItemMatch/);
+      assert.match(runnerSource, /permittedAmbientItemMatch/);
+      assert.match(runnerSource, /extractLatestUserItemInteraction/);
       assert.match(runnerSource, /const itemUse = normalizeItemUseForHandoff\(semantic\.itemUse,\s*context,\s*itemUseAudit,\s*playerTrackerSnapshot\)/);
-      assert.match(runnerSource, /getUnavailablePersonalItemNoRollEvidence\(itemUse\)/);
-      assert.match(runnerSource, /saved user gear\/inventory overrides semantic false unavailable result/i);
+      assert.match(runnerSource, /getUnavailableItemNoRollEvidence\(itemUse\)/);
+      assert.match(runnerSource, /item availability\/evidence must be mechanically verified/i);
       assert.doesNotMatch(runnerSource, /ItemUse[\s\S]{0,240}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
       assert.doesNotMatch(preflightSource, /itemAvailability:/i);
       assert.match(preflightSource, /\['itemUse', narrativeItemFact\(resolution\.ItemUse\)\]/);
-      assert.match(preflightSource, /The item must not appear, be drawn, be wielded, be consumed, unlock anything, or enter \{\{user\}\} possession\./i);
+      assert.match(preflightSource, /The item must not appear, work, be drawn, be wielded, be consumed, unlock anything, or enter \{\{user\}\} possession\./i);
+      assert.match(preflightSource, /do not add automatic humiliation or an item-specific mechanical penalty/i);
       assert.doesNotMatch(preflightSource, /setting_affordance|consequence_affordance|Contested item branch/);
 
       const unavailableReport = runCase({
@@ -13565,14 +13571,14 @@ const tests = [
         Available: 'N',
         Item: 'sword',
         Source: 'unavailable',
-        Evidence: 'draw my sword',
-        NoEffectReason: 'not in saved user gear/inventory',
+        Evidence: 'no valid source found in saved gear, saved inventory, prior assistant scene, or permitted ambient items',
+        NoEffectReason: 'no valid source in saved gear, saved inventory, prior scene, or permitted ambient items',
       });
       assert.equal(unavailablePacket.RollNeeded, 'N');
       const unavailablePrompt = prompt(unavailableReport);
-      assert.match(unavailablePrompt, /\{\{user\}\} attempts to use\/draw\/produce\/consume: sword/i);
+      assert.match(unavailablePrompt, /\{\{user\}\} explicitly attempts to interact with this item: sword/i);
       assert.match(unavailablePrompt, /Availability: unavailable/i);
-      assert.match(unavailablePrompt, /The item must not appear, be drawn, be wielded, be consumed/i);
+      assert.match(unavailablePrompt, /The item must not appear, work, be drawn, be wielded, be consumed/i);
       assert.match(unavailablePrompt, /Do not skip, gloss over, or replace the attempt/i);
       assert.doesNotMatch(unavailablePrompt, /sword is available to the user in the scene from gear/i);
       assert.doesNotMatch(unavailablePrompt, /ItemUse:/);
@@ -13624,7 +13630,7 @@ const tests = [
       assert.equal(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.challengeType, 'none');
       assert.equal(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.LandedActions, '(none)');
       assert.deepEqual(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.InflictedInjuries, []);
-      assert.match(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.RollReason, /unavailable personal item: longsword/i);
+      assert.match(unavailableCombatReport.finalNarrativeHandoff.resolutionPacket.RollReason, /unavailable item: longsword/i);
       assert.match(unavailableCombatReport.auditLines.join('\n'), /deterministicUnavailableItem/);
 
       const falseWornReport = runCase({
@@ -13658,12 +13664,12 @@ const tests = [
         Available: 'N',
         Item: 'sword',
         Source: 'unavailable',
-        Evidence: 'at my belt',
-        NoEffectReason: 'not in saved user gear/inventory',
+        Evidence: 'no valid source found in saved gear, saved inventory, prior assistant scene, or permitted ambient items',
+        NoEffectReason: 'no valid source in saved gear, saved inventory, prior scene, or permitted ambient items',
       });
       assert.match(prompt(falseWornReport), /Availability: unavailable/i);
-      assert.match(falseWornReport.auditLines.join('\n'), /deterministicItemAvailability/);
-      assert.match(falseWornReport.auditLines.join('\n'), /latest user wording cannot create possession/);
+      assert.match(falseWornReport.auditLines.join('\n'), /deterministicItemSourceEvidenceRepair/);
+      assert.match(falseWornReport.auditLines.join('\n'), /mechanically verified/);
 
       const falseCarriedReport = runCase({
         userText: 'I pull the waterskin from my pack and drink.',
@@ -13696,8 +13702,8 @@ const tests = [
         Available: 'N',
         Item: 'waterskin',
         Source: 'unavailable',
-        Evidence: 'from my pack',
-        NoEffectReason: 'not in saved user gear/inventory',
+        Evidence: 'no valid source found in saved gear, saved inventory, prior assistant scene, or permitted ambient items',
+        NoEffectReason: 'no valid source in saved gear, saved inventory, prior scene, or permitted ambient items',
       });
       assert.match(prompt(falseCarriedReport), /Availability: unavailable/i);
 
@@ -13734,11 +13740,11 @@ const tests = [
         Available: 'Y',
         Item: 'waterskin',
         Source: 'inventory',
-        Evidence: 'take a swig off of my waterskin',
+        Evidence: 'saved inventory entry: waterskin',
         NoEffectReason: '(none)',
       });
       assert.match(prompt(repairedInventoryReport), /Availability: available from inventory/i);
-      assert.match(repairedInventoryReport.auditLines.join('\n'), /deterministicItemAvailabilityRepair/);
+      assert.match(repairedInventoryReport.auditLines.join('\n'), /deterministicItemSourceEvidenceRepair/);
 
       const describedInventoryReport = withDice([10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(
         baseLedger({
@@ -13773,7 +13779,7 @@ const tests = [
       assert.equal(describedInventoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.SavedItem, 'Waterskin (empty)');
       assert.match(prompt(describedInventoryReport), /Saved item state: Waterskin \(empty\)/i);
       assert.match(prompt(describedInventoryReport), /if it limits use, the limitation must affect the scene/i);
-      assert.match(prompt(describedInventoryReport), /Narrate the attempt and its immediate result/i);
+      assert.match(prompt(describedInventoryReport), /Narrate the attempted interaction and its immediate result/i);
 
       const gearReport = runCase({
         userText: 'I draw the sword from my belt.',
@@ -13903,142 +13909,189 @@ const tests = [
       assert.equal(tooSpecificReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
       assert.match(prompt(tooSpecificReport), /Availability: unavailable/i);
 
-      const environmentalReport = runCase({
-        userText: 'I grab a bottle from the tavern table.',
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Grab_Object',
-            identifyChallenge: 'grab a bottle from the tavern table',
-            explicitMeans: 'grab a bottle from the tavern table',
-            itemUse: {
-              attempted: false,
-              available: false,
-              item: '(none)',
-              source: 'none',
-              evidence: '(none)',
-              noEffectReason: '(none)',
-            },
-            identifyTargets: {
-              ActionTargets: [],
-              OppTargets: { NPC: [], ENV: [] },
-              BenefitedObservers: [],
-              HarmedObservers: [],
-            },
-            rollNeeded: false,
+      const itemLedger = itemUse => baseLedger({
+        resolutionEngine: {
+          identifyGoal: 'Interact_With_Item',
+          identifyChallenge: 'interact with a concrete item',
+          explicitMeans: 'item interaction',
+          itemUse,
+          identifyTargets: {
+            ActionTargets: [],
+            OppTargets: { NPC: [], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
           },
+          rollNeeded: false,
+        },
+      });
+      const omittedItemUse = {
+        attempted: false,
+        available: false,
+        item: '(none)',
+        source: 'none',
+        evidence: '(none)',
+        noEffectReason: '(none)',
+      };
+
+      const omittedGuitarReport = runCase({
+        userText: 'I reach back toward the bed and grab my guitar.',
+        ledger: itemLedger(omittedItemUse),
+      });
+      assert.equal(omittedGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'Y');
+      assert.equal(omittedGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Item, 'guitar');
+      assert.equal(omittedGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+      assert.match(omittedGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /no valid source found/i);
+      assert(auditIncludes(omittedGuitarReport, 'deterministicItemSourceEvidenceRepair'));
+      assert.match(prompt(omittedGuitarReport), /Preserve the visible attempt: narrate reaching, searching, grasping empty space/i);
+      assert.match(prompt(omittedGuitarReport), /The item must not appear, work/i);
+
+      const gearGuitarReport = runCase({
+        userText: 'I reach back and grab my guitar.',
+        userState: { gear: ['travel guitar'], inventory: [] },
+        ledger: itemLedger(omittedItemUse),
+      });
+      assert.equal(gearGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(gearGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'gear');
+      assert.match(gearGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /saved gear entry: travel guitar/i);
+
+      const inventoryGuitarReport = runCase({
+        userText: 'I retrieve my guitar.',
+        userState: { gear: [], inventory: ['guitar'] },
+        ledger: itemLedger(omittedItemUse),
+      });
+      assert.equal(inventoryGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(inventoryGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'inventory');
+      assert.match(inventoryGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /saved inventory entry: guitar/i);
+
+      const sceneGuitarText = 'I reach toward the bed and grab the guitar.';
+      const sceneGuitarReport = runCase({
+        userText: sceneGuitarText,
+        chat: [
+          { is_user: true, mes: 'I enter the cottage.' },
+          { is_user: false, mes: 'A polished guitar rests against the bedframe.' },
+          { is_user: true, mes: sceneGuitarText },
+        ],
+        ledger: itemLedger({
+          attempted: true,
+          available: false,
+          item: 'guitar',
+          source: 'unavailable',
+          evidence: '(none)',
+          noEffectReason: 'unknown',
         }),
       });
-      assert.deepEqual(environmentalReport.finalNarrativeHandoff.resolutionPacket.ItemUse, {
-        Attempted: 'N',
-        Available: 'N',
-        Item: '(none)',
-        Source: 'none',
-        Evidence: '(none)',
-        NoEffectReason: '(none)',
-      });
-      assert.doesNotMatch(prompt(environmentalReport), /bottle is available to the user/i);
+      assert.equal(sceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(sceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'scene');
+      assert.match(sceneGuitarReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /prior assistant scene: "A polished guitar rests against the bedframe/i);
 
-      const consequenceObjectReport = runCase({
-        userText: 'I grab the fallen bandit\'s sword.',
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Grab_Object',
-            identifyChallenge: 'grab the fallen bandit\'s sword',
-            explicitMeans: 'grab the fallen bandit\'s sword',
-            itemUse: {
-              attempted: false,
-              available: false,
-              item: '(none)',
-              source: 'none',
-              evidence: '(none)',
-              noEffectReason: '(none)',
-            },
-            identifyTargets: {
-              ActionTargets: [],
-              OppTargets: { NPC: [], ENV: [] },
-              BenefitedObservers: [],
-              HarmedObservers: [],
-            },
-            rollNeeded: false,
-          },
-        }),
+      const ambientRockReport = runCase({
+        userText: 'I pick up a small rock.',
+        ledger: itemLedger({ ...omittedItemUse, attempted: true, available: true, item: 'small rock', source: 'scene', evidence: 'the user said it was there' }),
       });
-      assert.equal(consequenceObjectReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'N');
-      assert.doesNotMatch(prompt(consequenceObjectReport), /fallen bandit sword is available to the user/i);
+      assert.equal(ambientRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'ambient');
+      assert.equal(ambientRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.match(ambientRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /permitted ambient object\/material: small rock/i);
+      assert.deepEqual(ambientRockReport.trackerUpdate.user.inventory, []);
 
-      const misclassifiedTablePickupReport = runCase({
+      const ambientBranchReport = runCase({
+        userText: 'I grab a fallen branch.',
+        ledger: itemLedger(omittedItemUse),
+      });
+      assert.equal(ambientBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'ambient');
+      assert.equal(ambientBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+
+      const ownedRockReport = runCase({
+        userText: 'I pick up my rock.',
+        ledger: itemLedger({ ...omittedItemUse, attempted: true, available: true, item: 'rock', source: 'ambient', evidence: 'ordinary rock' }),
+      });
+      assert.equal(ownedRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert.equal(ownedRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+
+      for (const item of ['guitar', 'iron key', 'healing potion', 'sword', 'hammer']) {
+        const forbiddenAmbientReport = runCase({
+          userText: `I grab a ${item}.`,
+          ledger: itemLedger({
+            attempted: true,
+            available: true,
+            item,
+            source: 'ambient',
+            evidence: `${item} is ambient`,
+            noEffectReason: '(none)',
+          }),
+        });
+        assert.equal(forbiddenAmbientReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N', `${item} must not be ambient`);
+        assert.equal(forbiddenAmbientReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable', `${item} source must fail closed`);
+      }
+
+      const fabricatedSceneReport = runCase({
         userText: 'I grab the phone from the nearby table.',
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Grab_Object',
-            identifyChallenge: 'grab the phone from the nearby table',
-            explicitMeans: 'grab the phone from the nearby table',
-            itemUse: {
-              attempted: true,
-              available: false,
-              item: 'phone',
-              source: 'unavailable',
-              evidence: 'grab the phone from the nearby table',
-              noEffectReason: 'not in saved user gear/inventory',
-            },
-            identifyTargets: {
-              ActionTargets: [],
-              OppTargets: { NPC: [], ENV: [] },
-              BenefitedObservers: [],
-              HarmedObservers: [],
-            },
-            rollNeeded: false,
-          },
+        ledger: itemLedger({
+          attempted: true,
+          available: true,
+          item: 'phone',
+          source: 'scene',
+          evidence: 'a phone was on the table',
+          noEffectReason: '(none)',
         }),
       });
-      assert.deepEqual(misclassifiedTablePickupReport.finalNarrativeHandoff.resolutionPacket.ItemUse, {
-        Attempted: 'N',
-        Available: 'N',
-        Item: '(none)',
-        Source: 'none',
-        Evidence: '(none)',
-        NoEffectReason: '(none)',
-      });
-      assert(auditIncludes(misclassifiedTablePickupReport, 'deterministicSceneObjectItemUseRepair'));
-      assert.doesNotMatch(prompt(misclassifiedTablePickupReport), /Availability: unavailable/i);
-      assert.doesNotMatch(prompt(misclassifiedTablePickupReport), /The item must not appear/i);
+      assert.equal(fabricatedSceneReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert.equal(fabricatedSceneReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+      assert.match(fabricatedSceneReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /no valid source found/i);
 
-      const misclassifiedNpcTransferReport = runCase({
-        userText: 'Alice hands me a key and I take it.',
-        ledger: baseLedger({
-          resolutionEngine: {
-            identifyGoal: 'Receive_Object',
-            identifyChallenge: 'take the key Alice hands me',
-            explicitMeans: 'Alice hands me a key and I take it',
-            itemUse: {
-              attempted: true,
-              available: false,
-              item: 'key',
-              source: 'unavailable',
-              evidence: 'Alice hands me a key and I take it',
-              noEffectReason: 'not in saved user gear/inventory',
-            },
-            identifyTargets: {
-              ActionTargets: ['Alice'],
-              OppTargets: { NPC: [], ENV: [] },
-              BenefitedObservers: [],
-              HarmedObservers: [],
-            },
-            rollNeeded: false,
-          },
-          relationshipEngine: [relationship('Alice')],
+      const quotedCommandReport = runCase({
+        userText: 'I tell Alice, "Grab the sword."',
+        ledger: itemLedger({ ...omittedItemUse, attempted: true, item: 'sword', source: 'ambient', evidence: 'semantic hallucination' }),
+      });
+      assert.equal(quotedCommandReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'N');
+
+      const observedNpcActionReport = runCase({
+        userText: 'I watch Alice grab the sword.',
+        ledger: itemLedger({ ...omittedItemUse, attempted: true, item: 'sword', source: 'scene', evidence: 'semantic hallucination' }),
+      });
+      assert.equal(observedNpcActionReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'N');
+
+      const nonlocalHallucinationReport = runCase({
+        userText: 'I grab Alice\'s hand and mention my guitar.',
+        ledger: itemLedger({ ...omittedItemUse, attempted: true, item: 'guitar', source: 'ambient', evidence: 'semantic hallucination' }),
+      });
+      assert.equal(nonlocalHallucinationReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'N');
+
+      const groundedEquivalentVerbReport = runCase({
+        userText: 'I swing my sword.',
+        userState: { gear: ['sword'], inventory: [] },
+        ledger: itemLedger({ ...omittedItemUse, attempted: true, available: true, item: 'sword', source: 'gear', evidence: 'sword in gear' }),
+      });
+      assert.equal(groundedEquivalentVerbReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'Y');
+      assert.equal(groundedEquivalentVerbReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(groundedEquivalentVerbReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'gear');
+
+      const dialogueClaimDoesNotEstablishReport = runCase({
+        userText: 'I grab the guitar.',
+        chat: [
+          { is_user: true, mes: 'I look around.' },
+          { is_user: false, mes: 'Alice claims, "The guitar rests against the bed."' },
+          { is_user: true, mes: 'I grab the guitar.' },
+        ],
+        ledger: itemLedger({ ...omittedItemUse, attempted: true, available: true, item: 'guitar', source: 'scene', evidence: 'Alice claimed a guitar was present' }),
+      });
+      assert.equal(dialogueClaimDoesNotEstablishReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert.equal(dialogueClaimDoesNotEstablishReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+
+      const repairedEvidenceReport = runCase({
+        userText: 'I draw my sword.',
+        userState: { gear: ['sword'], inventory: [] },
+        ledger: itemLedger({
+          attempted: true,
+          available: true,
+          item: 'sword',
+          source: 'gear',
+          evidence: 'fabricated evidence unrelated to the saved tracker',
+          noEffectReason: '(none)',
         }),
       });
-      assert.deepEqual(misclassifiedNpcTransferReport.finalNarrativeHandoff.resolutionPacket.ItemUse, {
-        Attempted: 'N',
-        Available: 'N',
-        Item: '(none)',
-        Source: 'none',
-        Evidence: '(none)',
-        NoEffectReason: '(none)',
-      });
-      assert(auditIncludes(misclassifiedNpcTransferReport, 'deterministicSceneObjectItemUseRepair'));
-      assert.doesNotMatch(prompt(misclassifiedNpcTransferReport), /Availability: unavailable/i);
+      assert.equal(repairedEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(repairedEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, 'saved gear entry: sword');
+      assert(auditIncludes(repairedEvidenceReport, 'deterministicItemSourceEvidenceRepair'));
     },
   },
   {
@@ -15716,7 +15769,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.82');
+      assert.equal(manifest.version, '0.9.83');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16698,7 +16751,7 @@ const tests = [
         leaves: 245,
         objects: 47,
         arrays: 47,
-        descriptions: 101,
+        descriptions: 104,
         incompleteRequired: 0,
       });
       assert.match(
@@ -19889,7 +19942,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.82');
+      assert.equal(manifest.version, '0.9.83');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

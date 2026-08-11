@@ -392,7 +392,11 @@ const POWER_ACTOR_EVENT_COOLDOWN_MS = Object.freeze({
     agent_sabotage: 4 * 60 * 60 * 1000,
 });
 const USER_OWNED_ITEM_SOURCES = Object.freeze(['gear', 'inventory']);
-const USER_ITEM_UNAVAILABLE_REASON = 'not in saved user gear/inventory';
+const AVAILABLE_ITEM_SOURCES = Object.freeze([...USER_OWNED_ITEM_SOURCES, 'scene', 'ambient']);
+const ITEM_USE_SOURCES = Object.freeze(['none', ...AVAILABLE_ITEM_SOURCES, 'unavailable']);
+const USER_ITEM_UNAVAILABLE_REASON = 'no valid source in saved gear, saved inventory, prior scene, or permitted ambient items';
+const AMBIENT_ITEM_NOUNS = Object.freeze(new Set(['rock', 'rocks', 'stone', 'stones', 'pebble', 'pebbles', 'branch', 'branches', 'stick', 'sticks', 'twig', 'twigs', 'dirt', 'soil', 'sand', 'mud', 'leaf', 'leaves', 'snow', 'grass', 'gravel']));
+const AMBIENT_ITEM_MODIFIERS = Object.freeze(new Set(['small', 'little', 'loose', 'nearby', 'ordinary', 'plain', 'flat', 'smooth', 'rough', 'jagged', 'dry', 'fallen', 'dead', 'broken', 'single', 'handful', 'of']));
 
 function normalizeEnvironmentDifficultyForRoll(value) {
     const tier = String(value ?? '').trim().toLowerCase();
@@ -3220,74 +3224,104 @@ function normalizeUserAbilityUseForHandoff(value = {}) {
 
 function normalizeItemUseForHandoff(value = {}, context = null, audit = null, playerTrackerSnapshot = null) {
     const source = value && typeof value === 'object' ? value : {};
-    let attempted = bool(source.attempted ?? source.Attempted);
-    const rawAvailable = bool(source.available ?? source.Available);
-    const item = String(source.item ?? source.Item ?? '').trim();
-    const rawSource = String(source.source ?? source.Source ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    let itemSource = normalizeItemUseSource(rawSource);
-    const evidence = String(source.evidence ?? source.Evidence ?? '').trim();
-    let noEffectReason = String(source.noEffectReason ?? source.NoEffectReason ?? '').trim();
-    if (!attempted) itemSource = 'none';
-    let available = attempted && rawAvailable && itemUseSourceIsAvailable(itemSource);
-    if (attempted && itemUseLooksLikeSceneObjectAccess(item, evidence, context)) {
-        audit?.push(`2.7s.0b deterministicSceneObjectItemUseRepair=${compact({
-            hardRule: 'scene, environmental, or NPC-offered objects are not personal gear/inventory itemUse',
-            item,
-            evidence,
-            correctedTo: 'not itemUse',
-        })}`);
+    const latestUserText = getLatestUserTextFromContext(context);
+    const semanticAttempted = bool(source.attempted ?? source.Attempted);
+    const semanticAvailable = bool(source.available ?? source.Available);
+    const semanticItem = String(source.item ?? source.Item ?? '').trim();
+    const semanticSource = normalizeItemUseSource(source.source ?? source.Source);
+    const semanticEvidence = String(source.evidence ?? source.Evidence ?? '').trim();
+    const detected = extractLatestUserItemInteraction(latestUserText);
+    const semanticGrounded = semanticAttempted
+        && isReal(semanticItem)
+        && latestUserExplicitlyInteractsWithItem(latestUserText, semanticItem);
+    let attempted = Boolean(detected || semanticGrounded);
+    let item = detected?.item || (semanticGrounded ? semanticItem : '');
+
+    if (detected && semanticGrounded && itemNamesOverlap(semanticItem, detected.item)) {
+        item = semanticItem;
+    }
+    if (attempted && itemUseIsBodyPartOrNaturalWeapon(item)) {
         attempted = false;
-        available = false;
-        itemSource = 'none';
-        noEffectReason = NONE;
+        item = '';
     }
-    const savedItemMatch = attempted ? playerTrackerItemMatch(context, item, playerTrackerSnapshot) : null;
-    const savedItemSource = savedItemMatch?.source || null;
-    if (attempted && !available && savedItemSource) {
-        audit?.push(`2.7s.0 deterministicItemAvailabilityRepair=${compact({
-            hardRule: 'saved user gear/inventory overrides semantic false unavailable result',
-            item,
-            semanticSource: itemSource,
-            correctedTo: savedItemSource,
-        })}`);
+    if (!attempted || !isReal(item)) {
+        if (semanticAttempted || detected) {
+            audit?.push(`2.7s.0 deterministicItemAttemptRepair=${compact({
+                hardRule: 'itemUse requires an explicit latest-user interaction with a concrete non-anatomical item',
+                semanticAttempted,
+                semanticItem,
+                detectedItem: detected?.item || NONE,
+                correctedTo: 'not attempted',
+            })}`);
+        }
+        return {
+            Attempted: 'N',
+            Available: 'N',
+            Item: NONE,
+            Source: 'none',
+            Evidence: NONE,
+            NoEffectReason: NONE,
+        };
+    }
+
+    const savedItemMatch = playerTrackerItemMatch(context, item, playerTrackerSnapshot);
+    const ownershipClaimed = latestUserInputClaimsItemPossession(item, latestUserText, context);
+    const sceneMatch = !savedItemMatch && !ownershipClaimed ? priorAssistantSceneItemMatch(context, item) : null;
+    const ambientMatch = !savedItemMatch && !ownershipClaimed && !sceneMatch
+        ? permittedAmbientItemMatch(item, latestUserText)
+        : null;
+    let itemSource = 'unavailable';
+    let available = false;
+    let evidence = 'no valid source found in saved gear, saved inventory, prior assistant scene, or permitted ambient items';
+    let noEffectReason = USER_ITEM_UNAVAILABLE_REASON;
+
+    if (savedItemMatch) {
+        itemSource = savedItemMatch.source;
         available = true;
-        itemSource = savedItemSource;
+        evidence = `saved ${savedItemMatch.source} entry: ${savedItemMatch.item}`;
+        noEffectReason = NONE;
+    } else if (sceneMatch) {
+        itemSource = 'scene';
+        available = true;
+        evidence = `prior assistant scene: ${sceneMatch.evidence}`;
+        noEffectReason = NONE;
+    } else if (ambientMatch) {
+        itemSource = 'ambient';
+        available = true;
+        evidence = `permitted ambient object/material: ${ambientMatch}`;
         noEffectReason = NONE;
     }
-    if (available && savedItemSource && USER_OWNED_ITEM_SOURCES.includes(itemSource) && itemSource !== savedItemSource) {
-        audit?.push(`2.7s.0a deterministicItemSourceRepair=${compact({
-            hardRule: 'item source must match saved user gear/inventory',
-            item,
-            semanticSource: itemSource,
-            correctedTo: savedItemSource,
+
+    const semanticState = {
+        Attempted: semanticAttempted ? 'Y' : 'N',
+        Available: semanticAvailable ? 'Y' : 'N',
+        Item: isReal(semanticItem) ? semanticItem : NONE,
+        Source: semanticAttempted ? semanticSource : 'none',
+        Evidence: semanticAttempted && isReal(semanticEvidence) ? semanticEvidence : NONE,
+    };
+    const deterministicState = {
+        Attempted: 'Y',
+        Available: available ? 'Y' : 'N',
+        Item: item,
+        Source: itemSource,
+        Evidence: evidence,
+    };
+    if (stableStringify(semanticState) !== stableStringify(deterministicState)) {
+        audit?.push(`2.7s.1 deterministicItemSourceEvidenceRepair=${compact({
+            hardRule: 'latest-user interaction is required and item availability/evidence must be mechanically verified',
+            semantic: semanticState,
+            correctedTo: deterministicState,
         })}`);
-        itemSource = savedItemSource;
-    }
-    if (available && itemUseRequiresPlayerTrackerItem(itemSource, item, evidence, context) && !playerTrackerHasItem(context, item, playerTrackerSnapshot)) {
-        audit?.push(`2.7s.1 deterministicItemAvailability=${compact({
-            hardRule: 'user-owned item sources require saved user gear/inventory; latest user wording cannot create possession',
-            item,
-            source: itemSource,
-            evidence,
-            correctedTo: 'unavailable',
-        })}`);
-        available = false;
-        itemSource = 'unavailable';
-        noEffectReason = USER_ITEM_UNAVAILABLE_REASON;
-    }
-    if (attempted && !available) itemSource = 'unavailable';
-    if (attempted && !available && latestUserInputClaimsItemPossession(item, evidence, context)) {
-        noEffectReason = USER_ITEM_UNAVAILABLE_REASON;
     }
     const packet = {
-        Attempted: attempted ? 'Y' : 'N',
+        Attempted: 'Y',
         Available: available ? 'Y' : 'N',
-        Item: attempted && isReal(item) ? item : NONE,
+        Item: item,
         Source: itemSource,
-        Evidence: attempted && isReal(evidence) ? evidence : NONE,
-        NoEffectReason: attempted && !available && isReal(noEffectReason) ? noEffectReason : NONE,
+        Evidence: evidence,
+        NoEffectReason: !available ? noEffectReason : NONE,
     };
-    if (attempted && available && savedItemMatch?.item && savedItemMatch.item !== item) {
+    if (available && savedItemMatch?.item && savedItemMatch.item !== item) {
         packet.SavedItem = savedItemMatch.item;
     }
     return packet;
@@ -3307,30 +3341,6 @@ function normalizeLootSearchForHandoff(value = {}) {
         TargetKind: validAttempt ? targetKind : 'other',
         Evidence: validAttempt && isReal(evidence) ? evidence : NONE,
     };
-}
-
-function itemUseRequiresPlayerTrackerItem(source, item, evidence, context) {
-    return USER_OWNED_ITEM_SOURCES.includes(source)
-        || latestUserInputClaimsItemPossession(item, evidence, context);
-}
-
-function itemUseLooksLikeSceneObjectAccess(item, evidence, context) {
-    const itemText = normalizeItemMatchText(item);
-    if (!itemText) return false;
-    const source = normalizeItemPossessionClaimText([
-        evidence,
-        getLatestUserTextFromContext(context),
-    ].filter(Boolean).join(' '));
-    if (!source || latestUserInputClaimsCarriedItemSource(item, evidence, context)) return false;
-    const itemPattern = itemText.split(/\s+/).filter(Boolean).map(escapeRegex).join('\\s+');
-    const sceneSource = '(?:table|desk|counter|shelf|floor|ground|road|street|path|trail|dirt|sand|snow|grass|bed|chair|bench|couch|sofa|wall|rack|crate|barrel|box|chest|corpse|body|display|case|window|altar|pedestal|bar|stool|cart|wagon|doorstep)';
-    const scenePrep = '(?:from|off|off\\s+of|on|in|inside|at|under|beneath|beside|by|near|nearby|next\\s+to|behind|against)';
-    const sceneAction = '(?:grab|grabs|take|takes|pick\\s+up|picks\\s+up|lift|lifts|snatch|snatches|collect|collects|retrieve|retrieves)';
-    const transferVerb = '(?:hand|hands|handed|offer|offers|offered|give|gives|gave|pass|passes|passed)';
-    return new RegExp(`\\b${itemPattern}\\b.{0,80}\\b${scenePrep}\\b.{0,30}\\b${sceneSource}\\b`).test(source)
-        || new RegExp(`\\b${sceneAction}\\b.{0,80}\\b${itemPattern}\\b.{0,80}\\b${scenePrep}\\b.{0,30}\\b${sceneSource}\\b`).test(source)
-        || new RegExp(`\\b${transferVerb}\\b.{0,80}\\b(?:me|to\\s+me|toward\\s+me|over)\\b.{0,80}\\b${itemPattern}\\b`).test(source)
-        || new RegExp(`\\b${itemPattern}\\b.{0,80}\\b${transferVerb}\\b.{0,80}\\b(?:me|to\\s+me|toward\\s+me|over)\\b`).test(source);
 }
 
 function latestUserInputClaimsItemPossession(item, evidence, context) {
@@ -3353,31 +3363,137 @@ function latestUserInputClaimsItemPossession(item, evidence, context) {
         || new RegExp(`\\b${tail ? escapeRegex(tail) : itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source);
 }
 
-function latestUserInputClaimsCarriedItemSource(item, evidence, context) {
+function latestUserExplicitlyInteractsWithItem(text, item) {
+    const source = normalizeItemPossessionClaimText(stripQuotedItemDialogue(text));
     const itemText = normalizeItemMatchText(item);
-    if (!itemText) return false;
-    const source = normalizeItemPossessionClaimText([
-        evidence,
-        getLatestUserTextFromContext(context),
-    ].filter(Boolean).join(' '));
-    if (!source) return false;
-    const words = itemText.split(/\s+/).filter(Boolean);
-    const tail = words[words.length - 1];
-    const itemPattern = words.length > 1
-        ? words.map(escapeRegex).join('\\s+')
-        : escapeRegex(tail);
-    const carriedPlaces = '(?:belt|hip|waist|hand|hands|pocket|bag|pack|pouch|sheath|holster|back|shoulder|side)';
-    return new RegExp(`\\b${itemPattern}\\s+(?:at|on|in|from)\\s+my\\s+${carriedPlaces}\\b`).test(source)
-        || new RegExp(`\\b(?:draw|pull|take|retrieve|produce|unsheathe)\\b.{0,60}\\b${itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source)
-        || new RegExp(`\\b${tail ? escapeRegex(tail) : itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source);
+    if (!source || !itemText) return false;
+    const itemPattern = itemText.split(/\s+/).map(escapeRegex).join('\\s+');
+    const itemMatches = Array.from(source.matchAll(new RegExp(`\\b${itemPattern}\\b`, 'g')));
+    if (!itemMatches.length) return false;
+    const verbPattern = /\b(?:use|access|grab|take|retrieve|draw|wield|consume|present|move|touch|pick\s+up|produce|equip|spend|activate|throw|give|show|pull|reach\s+for|drink\s+from|eat|snatch|lift|collect|unlock|open|attack|strike|hit|defend|block|cut|play|swing|brandish|unsheathe|sheathe|holster|load|fire|shoot|aim|read)\b/g;
+    return Array.from(source.matchAll(verbPattern)).some(verbMatch => {
+        if (!firstPersonControlsItemAction(source, verbMatch.index)) return false;
+        return itemMatches.some(itemMatch => itemInteractionTermsAreLocal(source, verbMatch, itemMatch));
+    });
 }
 
-function playerTrackerHasItem(context, item, playerTrackerSnapshot = null) {
-    return Boolean(playerTrackerItemMatch(context, item, playerTrackerSnapshot));
+function itemInteractionTermsAreLocal(source, verbMatch, itemMatch) {
+    const verbStart = verbMatch.index;
+    const verbEnd = verbStart + verbMatch[0].length;
+    const itemStart = itemMatch.index;
+    const itemEnd = itemStart + itemMatch[0].length;
+    const gapStart = Math.min(verbEnd, itemEnd);
+    const gapEnd = Math.max(verbStart, itemStart);
+    if (gapEnd - gapStart > 90) return false;
+    const gap = source.slice(gapStart, gapEnd);
+    return !/\b(?:and|then|but|while|although|because)\b/.test(gap);
 }
 
-function playerTrackerItemSource(context, item, playerTrackerSnapshot = null) {
-    return playerTrackerItemMatch(context, item, playerTrackerSnapshot)?.source || null;
+function extractLatestUserItemInteraction(text) {
+    const source = stripQuotedItemDialogue(text).replace(/[\r\n]+/g, ' ');
+    if (!source.trim()) return null;
+    const action = '(?:use|access|grab|take|retrieve|draw|wield|consume|present|move|touch|pick\\s+up|produce|equip|spend|activate|throw|give|show|pull|reach\\s+for|drink\\s+from|eat|snatch|lift|collect)';
+    const determiner = '(?:my|a|an|the|this|that|his|her|their|our)';
+    const end = '(?=\\s+(?:from|off|on|at|with|against|into|onto|toward|and|then|so|but|while|before|after|to)\\b|[,.!?;]|$)';
+    const patterns = [
+        new RegExp(`\\b${action}\\s+${determiner}\\s+([a-z0-9][a-z0-9'\\u2019 -]{0,70}?)${end}`, 'gi'),
+        new RegExp(`\\b(?:unlock|open|attack|strike|hit|defend|block|cut|play)\\b[^.!?;]{0,70}?\\bwith\\s+${determiner}\\s+([a-z0-9][a-z0-9'\\u2019 -]{0,70}?)${end}`, 'gi'),
+    ];
+    for (const pattern of patterns) {
+        for (const match of source.matchAll(pattern)) {
+            if (!firstPersonControlsItemAction(source, match.index)) continue;
+            const item = cleanDetectedItemLabel(match[1]);
+            if (!item || itemUseIsBodyPartOrNaturalWeapon(item) || itemUseIsNonItemPhrase(item)) continue;
+            return { item, evidence: match[0].trim() };
+        }
+    }
+    return null;
+}
+
+function stripQuotedItemDialogue(value) {
+    return String(value ?? '').replace(/"[^"\r\n]*"|'[^'\r\n]*'/g, match => ' '.repeat(match.length));
+}
+
+function firstPersonControlsItemAction(source, actionIndex) {
+    const sentenceStart = Math.max(source.lastIndexOf('.', actionIndex), source.lastIndexOf('!', actionIndex), source.lastIndexOf('?', actionIndex), source.lastIndexOf(';', actionIndex)) + 1;
+    const prefix = source.slice(sentenceStart, actionIndex);
+    const firstPerson = Array.from(prefix.matchAll(/\bi\b/gi)).at(-1);
+    if (!firstPerson) return false;
+    const controlledPrefix = prefix.slice(firstPerson.index).toLowerCase();
+    if (/\b(?:and|then)\s*$/.test(controlledPrefix)) return true;
+    return !/\b(?:ask|tell|order|command|instruct|want|watch|see|hear|notice|let|make|have|help)\b/.test(controlledPrefix);
+}
+
+function cleanDetectedItemLabel(value) {
+    return String(value ?? '')
+        .trim()
+        .replace(/^["']+|["']+$/g, '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 80);
+}
+
+function itemUseIsBodyPartOrNaturalWeapon(item) {
+    const text = normalizeItemMatchText(item);
+    if (!text) return false;
+    const terms = ['hand', 'hands', 'fist', 'fists', 'claw', 'claws', 'fang', 'fangs', 'tooth', 'teeth', 'horn', 'horns', 'talon', 'talons', 'tusk', 'tusks', 'tail', 'tails', 'stinger', 'stingers', 'barb', 'barbs', 'jaw', 'jaws', 'foot', 'feet', 'knee', 'knees', 'elbow', 'elbows', 'head', 'leg', 'legs', 'arm', 'arms', 'body', 'voice', 'breath'];
+    return terms.some(term => text === term || text.endsWith(` ${term}`));
+}
+
+function itemUseIsNonItemPhrase(item) {
+    const text = normalizeItemMatchText(item);
+    return ['step', 'seat', 'look', 'glance', 'breath', 'stance', 'position', 'closer look', 'swig', 'sip', 'drink', 'bite'].includes(text);
+}
+
+function itemNamesOverlap(left, right) {
+    const leftText = normalizeItemMatchText(left);
+    const rightText = normalizeItemMatchText(right);
+    return Boolean(leftText && rightText && (leftText === rightText || itemPhraseEndsWith(leftText, rightText) || itemPhraseEndsWith(rightText, leftText)));
+}
+
+function priorAssistantSceneItemMatch(context, item) {
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    let latestUserIndex = chat.length;
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        if (isUserMessage(chat[index])) {
+            latestUserIndex = index;
+            break;
+        }
+    }
+    const itemText = normalizeItemMatchText(item);
+    if (!itemText) return null;
+    const itemPattern = itemText.split(/\s+/).map(escapeRegex).join('\\s+');
+    for (let index = latestUserIndex - 1; index >= 0; index -= 1) {
+        const message = chat[index];
+        if (isUserMessage(message) || message?.is_system || message?.role === 'system') continue;
+        const sentences = messageText(message).split(/(?<=[.!?])\s+|[\r\n]+/).filter(Boolean);
+        for (let sentenceIndex = sentences.length - 1; sentenceIndex >= 0; sentenceIndex -= 1) {
+            const sentence = sentences[sentenceIndex].trim();
+            if (!new RegExp(`\\b${itemPattern}\\b`, 'i').test(normalizeItemPossessionClaimText(sentence))) continue;
+            if (!assistantSentenceEstablishesSceneItem(sentence, itemPattern)) continue;
+            return { evidence: `"${sentence.replace(/\s+/g, ' ').slice(0, 180)}"` };
+        }
+    }
+    return null;
+}
+
+function assistantSentenceEstablishesSceneItem(sentence, itemPattern) {
+    const text = normalizeItemPossessionClaimText(stripQuotedItemDialogue(sentence));
+    if (!text) return false;
+    const absent = `(?:no|not|never|without|missing|absent|cannot|cant|doesnt|didnt|dont\\s+have)`;
+    if (new RegExp(`\\b${absent}\\b.{0,50}\\b${itemPattern}\\b|\\b${itemPattern}\\b.{0,50}\\b(?:missing|absent|doesnt\\s+exist|isnt\\s+there)\\b`).test(text)) return false;
+    if (/\b(?:wish|want|need|hope|imagine|pretend|rumor|rumour|suppose|hypothetical|if only)\b/.test(text)) return false;
+    const physicalVerb = '(?:is|are|was|were|rests|rested|sits|sat|lies|lay|leans|leaned|stands|stood|hangs|hung|waits|waited|remains|remained|holds|held|carries|carried|offers|offered|hands|handed|gives|gave|places|placed|sets|set|puts|put|drops|dropped|left|keeps|kept|wears|wore|uses|used|plays|played|grips|gripped|clutches|clutched|appears|appeared|gleams|gleamed|glints|glinted|visible|seen|spotted)';
+    return new RegExp(`\\b${itemPattern}\\b.{0,70}\\b${physicalVerb}\\b|\\b${physicalVerb}\\b.{0,70}\\b${itemPattern}\\b`).test(text);
+}
+
+function permittedAmbientItemMatch(item, latestUserText) {
+    if (/\bmy\b/i.test(String(latestUserText ?? '')) && latestUserInputClaimsItemPossession(item, latestUserText, null)) return null;
+    const words = normalizeItemMatchText(item).split(/\s+/).filter(Boolean);
+    if (!words.length) return null;
+    const noun = words[words.length - 1];
+    if (!AMBIENT_ITEM_NOUNS.has(noun)) return null;
+    if (words.slice(0, -1).some(word => !AMBIENT_ITEM_MODIFIERS.has(word))) return null;
+    return item;
 }
 
 function playerTrackerItemMatch(context, item, playerTrackerSnapshot = null) {
@@ -3450,12 +3566,7 @@ function escapeRegex(value) {
 
 function normalizeItemUseSource(value) {
     const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    const allowed = ['none', 'gear', 'inventory', 'unavailable'];
-    return allowed.includes(text) ? text : 'unavailable';
-}
-
-function itemUseSourceIsAvailable(source) {
-    return ['gear', 'inventory'].includes(source);
+    return ITEM_USE_SOURCES.includes(text) ? text : 'unavailable';
 }
 
 function normalizeClaimCheckForHandoff(value = {}) {
@@ -3647,13 +3758,13 @@ function getStakeBearingClaimStakesEvidence(semantic, semanticRollNeeded) {
     };
 }
 
-function getUnavailablePersonalItemNoRollEvidence(itemUse) {
+function getUnavailableItemNoRollEvidence(itemUse) {
     if (itemUse?.Attempted !== 'Y' || itemUse?.Available !== 'N') return null;
     return {
         rollNeeded: 'N',
-        rule: 'deterministic_unavailable_personal_item_no_effect',
+        rule: 'deterministic_unavailable_item_no_effect',
         evidence: {
-            hardRule: 'Unavailable personal gear/inventory cannot produce item-dependent success, hits, injuries, access, consumption, or effects',
+            hardRule: 'An unavailable item cannot produce item-dependent success, hits, injuries, access, consumption, possession, or effects',
             item: itemUse.Item,
             source: itemUse.Source,
             noEffectReason: itemUse.NoEffectReason,
@@ -3792,11 +3903,11 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         socialTactic = 'bluff';
         rollReason = normalizeRollReason(rollReason, 'stakes-bearing factual claim');
     }
-    const unavailableItemEvidence = getUnavailablePersonalItemNoRollEvidence(itemUse);
+    const unavailableItemEvidence = getUnavailableItemNoRollEvidence(itemUse);
     if (unavailableItemEvidence) {
         rollNeeded = unavailableItemEvidence.rollNeeded;
         stakesRule = unavailableItemEvidence.rule;
-        rollReason = `unavailable personal item: ${itemUse.Item} is not in saved user gear/inventory; the item-dependent action cannot resolve`;
+        rollReason = `unavailable item: ${itemUse.Item} has no verified gear, inventory, prior-scene, or ambient source; the item-dependent action cannot resolve`;
     }
     if (healingAttempt.isHealing && healingHasActiveStakes && rollNeeded !== 'Y') {
         rollNeeded = 'Y';

@@ -58,11 +58,14 @@ function ResolutionEngine(input) {
     return {Attempted, Available, Used, AbilityName, Evidence, NarrativeEffect, NoEffectReason, MechanicalScope:flavor_only_no_bonus}
 
   itemUse(input, challenge, context):
-    policy: SEMANTIC-ONLY, INVENTORY-LOCKED
-    rule: Attempted=Y when input uses, consumes, equips, spends, gives, throws, activates, or relies on a personal gear/inventory/currency item
-    rule: Available=Y only if the item exists in saved user gear/inventory/currency or is explicitly present in-scene
+    policy: SEMANTIC-EXTRACTION, DETERMINISTIC-SOURCE-VERIFICATION
+    rule: Attempted=Y when the latest input explicitly uses, accesses, grabs, takes, retrieves, draws, wields, consumes, presents, moves, touches, or otherwise interacts with a concrete item
+    rule: Available=Y only from an exact saved gear/inventory match, explicit prior scene establishment, or a narrow generic ambient item; the latest user assertion cannot establish availability
+    rule: Source is exactly one of none, gear, inventory, scene, ambient, unavailable and Evidence must identify the verified source
+    rule: scene requires prior assistant narration; ambient permits only generic low-consequence surroundings and never owned, specialized, valuable, magical, weapon, tool, key, document, medicine, supply, device, currency, or container-content claims
     rule: body parts and natural weapons are not itemUse
     rule: unavailable item attempts cannot produce the item-dependent effect
+    rule: item interaction never grants ownership or updates inventory by itself
     return {Attempted, Available, Item, Source, Evidence, NoEffectReason}
 
   lootSearch(input, context):
