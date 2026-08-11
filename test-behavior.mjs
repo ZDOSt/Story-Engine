@@ -15716,7 +15716,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.80');
+      assert.equal(manifest.version, '0.9.81');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -19865,7 +19865,7 @@ const tests = [
         value => Number(value),
         (x, y) => ({ x, y }),
         (anchorX, anchorY, width, height) => ({
-          left: anchorX + 18 > 600 ? -width : 36,
+          left: anchorX + 18 > 600 ? 36 - width : 0,
           top: anchorY + 18 > 400 ? 36 - height : 0,
           panelWidth: width,
           panelHeight: height,
@@ -19875,7 +19875,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.80');
+      assert.equal(manifest.version, '0.9.81');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);
@@ -19903,7 +19903,7 @@ const tests = [
         height: 620,
         panelWidth: 510,
         panelHeight: 620,
-        panelLeft: -510,
+        panelLeft: -474,
         panelTop: 0,
         protectedResizeCorner: 'top-right',
       });
@@ -19963,6 +19963,11 @@ const tests = [
       assert.doesNotMatch(settingsStyleSource, /structured_preflight_narrator_handoff_widget/);
       assert.match(displayStyleSource, /structured_preflight_narrator_handoff_widget/);
       assert.match(displayStyleSource, /structured-preflight-narrator-handoff-widget-content pre[\s\S]*white-space: pre-wrap/);
+      assert.match(displayStyleSource, /--spe-widget-accent: #73d0ff/);
+      assert.match(displayStyleSource, /--spe-widget-accent: #c6a0f6/);
+      assert.match(displayStyleSource, /background: color-mix\(in srgb, var\(--spe-widget-accent\) 14%/);
+      assert.match(displayStyleSource, /data-spe-widget-control-corner="top-left"/);
+      assert.match(source, /button\.setAttribute\('aria-expanded', String\(!layout\.collapsed\)\)/);
       assert.match(source, /STORY_ENGINE_TOP_BAR_SCREEN_SELECTORS = Object\.freeze/);
       assert.match(source, /\.drawer-content\.openDrawer/);
       assert.match(source, /#character_popup/);
@@ -20022,7 +20027,7 @@ const tests = [
           opensUp: false,
           panelWidth: 500,
           panelHeight: 600,
-          left: 36,
+          left: 0,
           top: 0,
           protectedResizeCorner: 'top-left',
         },
@@ -20034,7 +20039,7 @@ const tests = [
           opensUp: true,
           panelWidth: 500,
           panelHeight: 600,
-          left: -500,
+          left: -464,
           top: -564,
           protectedResizeCorner: 'bottom-right',
         },
@@ -20044,9 +20049,9 @@ const tests = [
         {
           opensLeft: false,
           opensUp: false,
-          panelWidth: 412,
+          panelWidth: 448,
           panelHeight: 600,
-          left: 36,
+          left: 0,
           top: 0,
           protectedResizeCorner: 'top-left',
         },
@@ -20056,7 +20061,7 @@ const tests = [
         {
           opensLeft: true,
           opensUp: false,
-          panelWidth: 428,
+          panelWidth: 464,
           panelHeight: 600,
           left: -428,
           top: 0,
@@ -20068,9 +20073,9 @@ const tests = [
         {
           opensLeft: false,
           opensUp: false,
-          panelWidth: 428,
+          panelWidth: 464,
           panelHeight: 600,
-          left: 36,
+          left: 0,
           top: 0,
           protectedResizeCorner: 'top-left',
         },
@@ -20080,7 +20085,7 @@ const tests = [
         {
           opensLeft: true,
           opensUp: false,
-          panelWidth: 412,
+          panelWidth: 448,
           panelHeight: 600,
           left: -412,
           top: 0,
@@ -20092,7 +20097,7 @@ const tests = [
         {
           opensLeft: true,
           opensUp: true,
-          panelWidth: 392,
+          panelWidth: 428,
           panelHeight: 600,
           left: -392,
           top: -564,
@@ -20100,16 +20105,26 @@ const tests = [
         },
       );
       assert.deepEqual(
-        geometry.getTrackerWidgetAnchorForPanel(60, 50, 412, 600, 'left', 'top-left'),
+        geometry.getTrackerWidgetAnchorForPanel(24, 50, 448, 600, 'left', 'top-left'),
         { x: 24, y: 50 },
       );
       assert.deepEqual(
-        geometry.getTrackerWidgetAnchorForPanel(1448, 50, 412, 600, 'right', 'top-right'),
+        geometry.getTrackerWidgetAnchorForPanel(1448, 50, 448, 600, 'right', 'top-right'),
         { x: 1860, y: 50 },
       );
       assert.deepEqual(
-        geometry.getTrackerWidgetAnchorForPanel(1448, 756, 392, 600, 'right', 'bottom-right'),
+        geometry.getTrackerWidgetAnchorForPanel(1448, 756, 428, 600, 'right', 'bottom-right'),
         { x: 1840, y: 1320 },
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetAnchorForPanel(60, 50, 412, 600, 'left'),
+        { x: 24, y: 50 },
+        'Legacy adjacent left-side panels must retain their saved launcher position during migration.',
+      );
+      assert.deepEqual(
+        geometry.getTrackerWidgetAnchorForPanel(1448, 50, 412, 600, 'right'),
+        { x: 1860, y: 50 },
+        'Legacy adjacent right-side panels must retain their saved launcher position during migration.',
       );
 
       const start = { left: 100, top: 100, width: 500, height: 600 };
@@ -20133,6 +20148,7 @@ const tests = [
       assert.deepEqual(narratorHandoffCorners, ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
       assert.match(source, /protectedResizeCorner/);
       assert.match(source, /handle\.hidden = isProtected/);
+      assert.match(source, /left: opensLeft \? TRACKER_WIDGET_BUTTON_SIZE - panelWidth : 0/);
     },
   },
 ];

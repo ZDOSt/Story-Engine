@@ -7564,6 +7564,8 @@ function ensureTrackerDisplayStyles() {
 
         #${TRACKER_WIDGET_ID} {
 
+            --spe-widget-accent: #73d0ff;
+
             position: fixed;
 
             left: 24px;
@@ -7606,13 +7608,13 @@ function ensureTrackerDisplayStyles() {
 
             place-items: center;
 
-            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.24));
+            border: 1px solid color-mix(in srgb, var(--spe-widget-accent) 78%, var(--SmartThemeBorderColor, rgba(255,255,255,0.24)));
 
             border-radius: 8px;
 
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 72%, transparent);
+            background: color-mix(in srgb, var(--spe-widget-accent) 14%, var(--SmartThemeBlurTintColor, #000));
 
-            color: inherit;
+            color: var(--spe-widget-accent);
 
             box-shadow: 0 10px 26px rgba(0,0,0,0.28);
 
@@ -7666,6 +7668,8 @@ function ensureTrackerDisplayStyles() {
             backdrop-filter: blur(10px);
             box-sizing: border-box;
 
+            z-index: 2;
+
         }
 
         #${TRACKER_WIDGET_PANEL_ID}[hidden] {
@@ -7701,6 +7705,39 @@ function ensureTrackerDisplayStyles() {
 
         .structured-preflight-tracker-widget-name i {
             color: #73d0ff;
+        }
+
+        #${TRACKER_WIDGET_ID}[data-spe-widget-control-corner="top-left"] #${TRACKER_WIDGET_PANEL_ID} > .structured-preflight-tracker-widget-title,
+        #${NARRATOR_HANDOFF_WIDGET_ID}[data-spe-widget-control-corner="top-left"] #${NARRATOR_HANDOFF_WIDGET_PANEL_ID} > .structured-preflight-tracker-widget-title {
+            padding-left: calc(0.7rem + ${TRACKER_WIDGET_BUTTON_SIZE}px);
+        }
+        #${TRACKER_WIDGET_ID}[data-spe-widget-control-corner="top-right"] #${TRACKER_WIDGET_PANEL_ID} > .structured-preflight-tracker-widget-title,
+        #${NARRATOR_HANDOFF_WIDGET_ID}[data-spe-widget-control-corner="top-right"] #${NARRATOR_HANDOFF_WIDGET_PANEL_ID} > .structured-preflight-tracker-widget-title {
+            padding-right: calc(0.55rem + ${TRACKER_WIDGET_BUTTON_SIZE}px);
+        }
+        #${TRACKER_WIDGET_ID}[data-spe-widget-control-corner^="bottom-"] #${TRACKER_WIDGET_PANEL_ID},
+        #${NARRATOR_HANDOFF_WIDGET_ID}[data-spe-widget-control-corner^="bottom-"] #${NARRATOR_HANDOFF_WIDGET_PANEL_ID} {
+            padding-bottom: ${TRACKER_WIDGET_BUTTON_SIZE}px;
+        }
+        #${TRACKER_WIDGET_ID}[data-spe-widget-control-corner] #${TRACKER_WIDGET_BUTTON_ID},
+        #${NARRATOR_HANDOFF_WIDGET_ID}[data-spe-widget-control-corner] #${NARRATOR_HANDOFF_WIDGET_BUTTON_ID} {
+            box-shadow: none;
+        }
+        #${TRACKER_WIDGET_ID}[data-spe-widget-control-corner="top-left"] #${TRACKER_WIDGET_BUTTON_ID},
+        #${NARRATOR_HANDOFF_WIDGET_ID}[data-spe-widget-control-corner="top-left"] #${NARRATOR_HANDOFF_WIDGET_BUTTON_ID} {
+            border-radius: 7px 0 6px 0;
+        }
+        #${TRACKER_WIDGET_ID}[data-spe-widget-control-corner="top-right"] #${TRACKER_WIDGET_BUTTON_ID},
+        #${NARRATOR_HANDOFF_WIDGET_ID}[data-spe-widget-control-corner="top-right"] #${NARRATOR_HANDOFF_WIDGET_BUTTON_ID} {
+            border-radius: 0 7px 0 6px;
+        }
+        #${TRACKER_WIDGET_ID}[data-spe-widget-control-corner="bottom-left"] #${TRACKER_WIDGET_BUTTON_ID},
+        #${NARRATOR_HANDOFF_WIDGET_ID}[data-spe-widget-control-corner="bottom-left"] #${NARRATOR_HANDOFF_WIDGET_BUTTON_ID} {
+            border-radius: 0 6px 0 7px;
+        }
+        #${TRACKER_WIDGET_ID}[data-spe-widget-control-corner="bottom-right"] #${TRACKER_WIDGET_BUTTON_ID},
+        #${NARRATOR_HANDOFF_WIDGET_ID}[data-spe-widget-control-corner="bottom-right"] #${NARRATOR_HANDOFF_WIDGET_BUTTON_ID} {
+            border-radius: 6px 0 7px 0;
         }
 
         .structured-preflight-tracker-widget-minimize {
@@ -8757,6 +8794,7 @@ function ensureTrackerDisplayStyles() {
         }
 
         #structured_preflight_narrator_handoff_widget {
+            --spe-widget-accent: #c6a0f6;
             position: fixed;
             left: 24px;
             top: 120px;
@@ -8780,10 +8818,10 @@ function ensureTrackerDisplayStyles() {
             height: 36px;
             display: grid;
             place-items: center;
-            border: 1px solid #c6a0f6;
+            border: 1px solid color-mix(in srgb, var(--spe-widget-accent) 78%, var(--SmartThemeBorderColor, rgba(255,255,255,0.24)));
             border-radius: 8px;
-            background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 72%, transparent);
-            color: #c6a0f6;
+            background: color-mix(in srgb, var(--spe-widget-accent) 14%, var(--SmartThemeBlurTintColor, #000));
+            color: var(--spe-widget-accent);
             box-shadow: 0 10px 26px rgba(0,0,0,0.28);
             cursor: grab;
             touch-action: none;
@@ -8821,6 +8859,7 @@ function ensureTrackerDisplayStyles() {
             overflow: hidden;
             backdrop-filter: blur(10px);
             box-sizing: border-box;
+            z-index: 2;
         }
         #structured_preflight_narrator_handoff_panel > .structured-preflight-tracker-widget-title {
             cursor: grab;
@@ -9390,7 +9429,10 @@ function applyNarratorHandoffWidgetLayout(widget, settings = getSettings()) {
         button.hidden = false;
         button.title = layout.collapsed ? 'Open Narration Handoff' : 'Collapse Narration Handoff';
         button.setAttribute('aria-label', button.title);
+        button.setAttribute('aria-expanded', String(!layout.collapsed));
     }
+    if (layout.collapsed) widget.removeAttribute('data-spe-widget-control-corner');
+    else widget.setAttribute('data-spe-widget-control-corner', layout.protectedResizeCorner || 'top-left');
     if (panel) {
         panel.hidden = layout.collapsed;
         panel.style.width = `${layout.panelWidth ?? layout.width}px`;
@@ -9610,7 +9652,7 @@ function renderNarratorHandoffWidget(context = getContext()) {
             '</button>',
             '<div id="', NARRATOR_HANDOFF_WIDGET_PANEL_ID, '" hidden>',
             '<div class="structured-preflight-tracker-widget-title">',
-            '<span class="structured-preflight-tracker-widget-name"><i class="fa-solid fa-scroll" aria-hidden="true"></i><span>Narration Handoff</span></span>',
+            '<span class="structured-preflight-tracker-widget-name"><span>Narration Handoff</span></span>',
             '</div>',
             '<div class="structured-preflight-narrator-handoff-widget-body" data-spe-narrator-handoff-body></div>',
             '<div class="structured-preflight-tracker-resize-handle" data-spe-narrator-handoff-resize-handle data-spe-resize-corner="top-left" title="Resize narration handoff from top left" aria-label="Resize narration handoff from top left"><span class="structured-preflight-tracker-resize-grip" aria-hidden="true"></span></div>',
@@ -9693,7 +9735,7 @@ function renderTrackerWidget(context = getContext()) {
 
             <div id="${TRACKER_WIDGET_PANEL_ID}" hidden>
                 <div class="structured-preflight-tracker-widget-title">
-                    <span class="structured-preflight-tracker-widget-name"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Tracker</span></span>
+                    <span class="structured-preflight-tracker-widget-name"><span>Tracker</span></span>
                 </div>
                 <div data-structured-preflight-tracker-widget-body></div>
                 <div class="structured-preflight-prose-guard-strip" data-spe-prose-guard-strip hidden></div>
@@ -10655,8 +10697,8 @@ function getTrackerWidgetPanelPlacement(anchorX, anchorY, width, height, preferr
     const numericAnchorY = Number(anchorY);
     const safeAnchorX = Number.isFinite(numericAnchorX) ? numericAnchorX : sideBounds.left;
     const safeAnchorY = Number.isFinite(numericAnchorY) ? numericAnchorY : 120;
-    const rightSpace = Math.max(0, sideBounds.right - (safeAnchorX + TRACKER_WIDGET_BUTTON_SIZE));
-    const leftSpace = Math.max(0, safeAnchorX - sideBounds.left);
+    const rightSpace = Math.max(0, sideBounds.right - safeAnchorX);
+    const leftSpace = Math.max(0, safeAnchorX + TRACKER_WIDGET_BUTTON_SIZE - sideBounds.left);
     const bottomSpace = Math.max(0, viewportHeight - verticalInset - safeAnchorY);
     const topSpace = Math.max(0, safeAnchorY + TRACKER_WIDGET_BUTTON_SIZE - verticalInset);
     const hasPreferredSide = preferredSide === 'left' || preferredSide === 'right';
@@ -10689,7 +10731,7 @@ function getTrackerWidgetPanelPlacement(anchorX, anchorY, width, height, preferr
         opensUp,
         panelWidth,
         panelHeight,
-        left: opensLeft ? -panelWidth : TRACKER_WIDGET_BUTTON_SIZE,
+        left: opensLeft ? TRACKER_WIDGET_BUTTON_SIZE - panelWidth : 0,
         top: opensUp ? TRACKER_WIDGET_BUTTON_SIZE - panelHeight : 0,
         protectedResizeCorner: `${verticalProtectedCorner}-${horizontalProtectedCorner}`,
     };
@@ -10716,7 +10758,9 @@ function getTrackerWidgetAnchorForPanel(panelLeft, panelTop, width, height, pref
     const opensUp = protectedCorner
         ? protectedCorner.startsWith('bottom-')
         : viewportHeight - bottom < top;
-    const anchorX = opensLeft ? right : left - TRACKER_WIDGET_BUTTON_SIZE;
+    const anchorX = protectedCorner
+        ? (opensLeft ? right - TRACKER_WIDGET_BUTTON_SIZE : left)
+        : (opensLeft ? right : left - TRACKER_WIDGET_BUTTON_SIZE);
     const anchorY = opensUp ? bottom - TRACKER_WIDGET_BUTTON_SIZE : top;
     return clampTrackerWidgetAnchorPosition(anchorX, anchorY, preferredSide);
 }
@@ -10735,6 +10779,7 @@ function syncTrackerWidgetResizeHandles(widget, placement, handleSelector) {
         }
     });
     widget.setAttribute('data-spe-protected-resize-corner', protectedCorner);
+    widget.setAttribute('data-spe-widget-control-corner', protectedCorner);
 }
 
 function resizeTrackerWidgetFromCorner(start, corner, deltaX, deltaY) {
@@ -10953,7 +10998,10 @@ function applyTrackerWidgetLayout(widget, settings = getSettings()) {
         button.hidden = false;
         button.title = layout.collapsed ? 'Open Tracker' : 'Collapse Tracker';
         button.setAttribute('aria-label', button.title);
+        button.setAttribute('aria-expanded', String(!layout.collapsed));
     }
+    if (layout.collapsed) widget.removeAttribute('data-spe-widget-control-corner');
+    else widget.setAttribute('data-spe-widget-control-corner', layout.protectedResizeCorner || 'top-left');
     if (panel) {
         panel.hidden = layout.collapsed;
         panel.style.width = `${layout.panelWidth ?? layout.width}px`;
