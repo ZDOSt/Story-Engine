@@ -15716,7 +15716,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.81');
+      assert.equal(manifest.version, '0.9.82');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16873,6 +16873,20 @@ const tests = [
         parseSemanticToolArgumentJson('{"items":[["Mira"] ["Dalen"]]}'),
         { items: [['Mira'], ['Dalen']] },
         'Unambiguous missing commas between nested array elements should be repaired locally.',
+      );
+      const serializedStructuredLedger = JSON.stringify(structuredLedger);
+      const turnBindingFragment = `"turnBinding":${JSON.stringify(structuredLedger.turnBinding)}`;
+      const prematureRootClosure = serializedStructuredLedger.replace(
+        `{${turnBindingFragment},`,
+        `{${turnBindingFragment}},`,
+      );
+      const repairedPrematureRootClosure = parseSemanticToolArgumentJson(prematureRootClosure);
+      assert.deepEqual(repairedPrematureRootClosure, structuredLedger);
+      assert.equal(validateSemanticToolArguments(repairedPrematureRootClosure), repairedPrematureRootClosure);
+      assert.throws(
+        () => parseSemanticToolArgumentJson(`{${turnBindingFragment}},"engineContext":{}}`),
+        /JSON|position|Unexpected|non-whitespace/i,
+        'Premature root closure must not be repaired unless the complete required top-level schema is present.',
       );
       assert.throws(
         () => parseSemanticToolArgumentJson('{"items":["Mira" "Dalen]'),
@@ -19875,7 +19889,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.81');
+      assert.equal(manifest.version, '0.9.82');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

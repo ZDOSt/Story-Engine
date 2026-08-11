@@ -1869,7 +1869,73 @@ function repairToolArgumentJson(text) {
     repaired = insertMissingCommasBetweenProperties(repaired);
     repaired = insertMissingCommasBetweenArrayElements(repaired);
     repaired = balanceJsonDelimiters(repaired);
+    repaired = repairPrematureSemanticRootClosure(repaired);
     return repaired;
+}
+
+function repairPrematureSemanticRootClosure(text) {
+    const source = String(text || '');
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\' && inString) {
+            escaped = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (char === '{') {
+            depth += 1;
+            continue;
+        }
+        if (char !== '}') continue;
+        depth -= 1;
+        if (depth !== 0) continue;
+
+        const continuation = source.slice(index + 1).match(/^\s*,\s*"([^"]+)"\s*:/);
+        if (continuation?.[1] !== 'engineContext') return source;
+
+        let prefix;
+        try {
+            prefix = JSON.parse(source.slice(0, index + 1));
+        } catch {
+            return source;
+        }
+        if (!prefix || typeof prefix !== 'object' || Array.isArray(prefix)
+            || Object.keys(prefix).length !== 1 || !Object.prototype.hasOwnProperty.call(prefix, 'turnBinding')) return source;
+        const turnBinding = prefix.turnBinding;
+        if (!turnBinding || typeof turnBinding !== 'object' || Array.isArray(turnBinding)
+            || Object.keys(turnBinding).length !== 1 || typeof turnBinding.turnId !== 'string' || !turnBinding.turnId.trim()) return source;
+
+        const candidate = source.slice(0, index) + source.slice(index + 1);
+        let parsed;
+        try {
+            parsed = JSON.parse(candidate);
+        } catch {
+            return source;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return source;
+
+        const schema = buildSemanticPreflightSchema();
+        const allowed = new Set(Object.keys(schema.properties || {}));
+        const required = Array.isArray(schema.required) ? schema.required : [];
+        const returnedKeys = Object.keys(parsed);
+        if (returnedKeys.some(key => !allowed.has(key))
+            || required.some(key => !Object.prototype.hasOwnProperty.call(parsed, key))) return source;
+        return candidate;
+    }
+
+    return source;
 }
 
 function insertMissingCommasBetweenProperties(text) {
