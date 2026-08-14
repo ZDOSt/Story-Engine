@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticPlainTextLedger, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticOutputTransport, normalizeSemanticToolArgumentTypes, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticPlainTextLedger, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, SEMANTIC_OUTPUT_TRANSPORTS, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -16245,7 +16245,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.85');
+      assert.equal(manifest.version, '0.9.86');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -16804,7 +16804,7 @@ const tests = [
       );
       assert.match(getSettingsSource, /const hadRetiredSemanticSettings = \['disableSemanticThinking', 'semanticReasoningEffort'\]/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticThinkingSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticThinkingSettingsChanged \|\| semanticOutputTransportSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
@@ -16821,12 +16821,14 @@ const tests = [
         'migrateTrackerWidgetSettings',
         'migrateNarratorHandoffSettings',
         'migrateProseGuardSettings',
-        'normalizeSemanticThinkingDisableFormatMap',
-        'semanticThinkingDisableFormatMapsEqual',
-        'resolveSemanticThinkingDisableTarget',
-        'normalizeStoryEngineThinkingDisableFormat',
-        'STORY_ENGINE_THINKING_DISABLE_FORMATS',
-        'saveExtensionSettings',
+         'normalizeSemanticThinkingDisableFormatMap',
+         'semanticThinkingDisableFormatMapsEqual',
+         'normalizeSemanticOutputTransportMap',
+         'semanticOutputTransportMapsEqual',
+         'resolveSemanticThinkingDisableTarget',
+         'normalizeStoryEngineThinkingDisableFormat',
+         'STORY_ENGINE_THINKING_DISABLE_FORMATS',
+         'saveExtensionSettings',
         `${getSettingsSource}; return getSettings;`,
       )(
         retiredSettingsStore,
@@ -16836,9 +16838,11 @@ const tests = [
         () => false,
         () => false,
         () => false,
-        value => value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {},
-        (left, right) => JSON.stringify(left || {}) === JSON.stringify(right),
-        () => ({ key: 'current', isCustom: false }),
+         value => value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {},
+         (left, right) => JSON.stringify(left || {}) === JSON.stringify(right),
+         value => value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {},
+         (left, right) => JSON.stringify(left || {}) === JSON.stringify(right),
+         () => ({ key: 'current', isCustom: false }),
         normalizeStoryEngineThinkingDisableFormat,
         STORY_ENGINE_THINKING_DISABLE_FORMATS,
         () => { settingsSaveCount += 1; },
@@ -16862,14 +16866,18 @@ const tests = [
       const thinkingSettingsHelpers = new Function(
         'normalizeStoryEngineThinkingDisableFormat',
         'STORY_ENGINE_THINKING_DISABLE_FORMATS',
+        'normalizeSemanticOutputTransport',
+        'SEMANTIC_OUTPUT_TRANSPORTS',
         'getConnectionProfileByName',
         'getChatCompletionProfileRoute',
         'getCurrentChatCompletionRoute',
         'getActiveConnectionProfileName',
-        `${thinkingSettingsSource}; return { resolveSemanticThinkingDisableTarget, getSemanticThinkingDisableFormat, setSemanticThinkingDisableFormat };`,
+         `${thinkingSettingsSource}; return { resolveSemanticThinkingDisableTarget, getSemanticThinkingDisableFormat, setSemanticThinkingDisableFormat, resolveSemanticOutputTransportTarget, getSemanticOutputTransport, setSemanticOutputTransport };`,
       )(
         normalizeStoryEngineThinkingDisableFormat,
         STORY_ENGINE_THINKING_DISABLE_FORMATS,
+        normalizeSemanticOutputTransport,
+         SEMANTIC_OUTPUT_TRANSPORTS,
         name => profiles.find(profile => profile.name.toLowerCase() === String(name).toLowerCase()) || null,
         () => ({ source: 'custom' }),
         () => currentRoute,
@@ -16879,17 +16887,26 @@ const tests = [
         useSeparateSemanticSettings: true,
         semanticConnectionProfile: 'Deep Custom',
         semanticThinkingDisableFormats: {},
+        semanticOutputTransports: {},
       };
       let thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
       assert.equal(thinkingTarget.key, 'profile:deep-profile');
-      thinkingSettingsHelpers.setSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget, STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK);
-      perProfileSettings.semanticConnectionProfile = 'Nano Custom';
-      thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
-      assert.equal(thinkingSettingsHelpers.getSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget), STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE);
-      thinkingSettingsHelpers.setSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget, STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT);
-      perProfileSettings.semanticConnectionProfile = 'Deep Custom';
-      thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
-      assert.equal(thinkingSettingsHelpers.getSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget), STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK);
+       thinkingSettingsHelpers.setSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget, STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK);
+       let transportTarget = thinkingSettingsHelpers.resolveSemanticOutputTransportTarget(perProfileSettings);
+       assert.equal(thinkingSettingsHelpers.getSemanticOutputTransport(perProfileSettings, transportTarget), SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL);
+       thinkingSettingsHelpers.setSemanticOutputTransport(perProfileSettings, transportTarget, SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
+       perProfileSettings.semanticConnectionProfile = 'Nano Custom';
+       thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
+       transportTarget = thinkingSettingsHelpers.resolveSemanticOutputTransportTarget(perProfileSettings);
+       assert.equal(thinkingSettingsHelpers.getSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget), STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE);
+       assert.equal(thinkingSettingsHelpers.getSemanticOutputTransport(perProfileSettings, transportTarget), SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL);
+       thinkingSettingsHelpers.setSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget, STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT);
+       thinkingSettingsHelpers.setSemanticOutputTransport(perProfileSettings, transportTarget, SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
+       perProfileSettings.semanticConnectionProfile = 'Deep Custom';
+       thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
+       transportTarget = thinkingSettingsHelpers.resolveSemanticOutputTransportTarget(perProfileSettings);
+       assert.equal(thinkingSettingsHelpers.getSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget), STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK);
+       assert.equal(thinkingSettingsHelpers.getSemanticOutputTransport(perProfileSettings, transportTarget), SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
       perProfileSettings.useSeparateSemanticSettings = false;
       activeProfileName = 'Nano Custom';
       thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
@@ -18001,16 +18018,19 @@ const tests = [
       assert.match(semanticSource, /payload\.reasoning_effort = 'none'/);
       assert.match(semanticSource, /custom_include_body is invalid YAML/);
       assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateSemanticRawWithProfile|isRecoverableSemanticToolCallError|falling back to compact ledger|fallbackFrom:/);
-      assert.match(semanticSource, /Semantic tool-call pass returned no valid complete ledger\. Generation aborted before narration/);
+      assert.match(semanticSource, /Semantic \$\{transportLabel\} pass returned no valid complete ledger\. Generation aborted before narration/);
       assert.match(adapterSource, /export function getChatCompletionProfileRoute/);
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
       assert.match(adapterSource, /model:\s*String\(profile\?\.model \|\| ''\)/);
       assert.match(adapterSource, /customIncludeBody:\s*getProfileCustomIncludeBody\(profile, context\)/);
       assert.match(source, /semanticThinkingDisableFormats:\s*Object\.freeze\(\{\}\)/);
+      assert.match(source, /semanticOutputTransports:\s*Object\.freeze\(\{\}\)/);
       assert.match(source, /structured_preflight_semantic_thinking_disable_format/);
+      assert.match(source, /structured_preflight_semantic_output_transport/);
       assert.match(source, /customSemanticProfileSelected/);
       assert.match(source, /semanticThinkingDisableFormat:\s*settings\?\.semanticThinkingDisableFormat/);
-      assert.match(source, /return await callback\(\{ semanticThinkingDisableFormat \}\)/);
+      assert.match(source, /semanticOutputTransport:\s*settings\?\.semanticOutputTransport/);
+      assert.match(source, /return await callback\(\{ semanticThinkingDisableFormat, semanticOutputTransport \}\)/);
       assert.match(semanticSource, /export async function sendStructuredToolRequest/);
       assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineBaselineThinkingDisabledPayload\(generateData\)/);
@@ -20314,6 +20334,99 @@ const tests = [
     },
   },
   {
+    name: 'plain-text semantic ledger remains complete, bounded, and provider-neutral',
+    run() {
+      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
+      const templateMatch = semanticSource.match(/const COMPACT_LEDGER_TEMPLATE = `(BEGIN_SEMANTIC_PREFLIGHT[\s\S]*?END_SEMANTIC_PREFLIGHT)`;/);
+      assert.ok(templateMatch, 'The plain-text transport must retain the complete compact ledger contract.');
+
+      const binding = createSemanticTurnBinding({
+        latestUserText: 'I follow Phoebe quietly through the market.',
+        semanticTurnKey: 'plain-text-ledger-test',
+      }, 'normal');
+      const plainLedger = templateMatch[1].replace(
+        'BEGIN_SEMANTIC_PREFLIGHT\n',
+        `BEGIN_SEMANTIC_PREFLIGHT\nTurnBinding.turnId=${binding.turnId}\n`,
+      );
+      const parsed = parseSemanticPlainTextLedger(plainLedger, {});
+      assert.equal(parsed.turnBinding.turnId, binding.turnId);
+      assert.equal(parsed.resolutionEngine.rollNeeded, false);
+
+      assert.throws(
+        () => parseSemanticPlainTextLedger(plainLedger.replace(`TurnBinding.turnId=${binding.turnId}\n`, ''), {}),
+        /TurnBinding\.turnId/,
+        'A plain-text ledger without the exact per-turn binding must fail closed.',
+      );
+      assert.throws(
+        () => parseSemanticPlainTextLedger(plainLedger.replace('END_SEMANTIC_PREFLIGHT', 'ResolutionEngine.unknownField=Y\nEND_SEMANTIC_PREFLIGHT'), {}),
+        /unknown lines/,
+        'Unknown text-ledger fields must fail closed.',
+      );
+      assert.throws(
+        () => parseSemanticPlainTextLedger(plainLedger.replace('END_SEMANTIC_PREFLIGHT', 'ResolutionEngine.rollNeeded=N\nEND_SEMANTIC_PREFLIGHT'), {}),
+        /duplicate compact ledger line/,
+        'Duplicate text-ledger fields must fail closed.',
+      );
+      assert.throws(
+        () => parseSemanticPlainTextLedger(plainLedger.replace('ResolutionEngine.challengeType=none', 'ResolutionEngine.challengeType=improvised'), {}),
+        /challengeType must be one of/,
+        'Invalid text-ledger enums must fail closed.',
+      );
+      assert.throws(
+        () => parseSemanticPlainTextLedger(`Narration first\n${plainLedger}`, {}),
+        /content outside the mandatory ledger block/,
+        'Narration outside the ledger must not be accepted.',
+      );
+      assert.throws(
+        () => parseSemanticPlainTextLedger(`\`\`\`text\n${plainLedger}\n\`\`\``, {}),
+        /markdown fences are not permitted/,
+        'Markdown fences must not be accepted as a ledger transport.',
+      );
+      assert.throws(
+        () => extractSemanticPlainTextLedger({
+          choices: [{ message: { reasoning: plainLedger, content: 'I will now fill the ledger.' } }],
+        }),
+        /exactly one complete ledger block/,
+        'A ledger present only in hidden reasoning must not be accepted as the final semantic result.',
+      );
+
+      const plainBindingBlock = buildSemanticTurnBindingBlock(binding, SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
+      assert.match(plainBindingBlock, /Echo turnId exactly in TurnBinding\.turnId\./);
+      assert.match(buildSemanticTurnBindingBlock(binding), /Echo turnId exactly in turnBinding\.turnId\./);
+      assert.equal(normalizeSemanticOutputTransport(undefined), SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL);
+      assert.equal(normalizeSemanticOutputTransport('plain_text'), SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
+      assert.equal(normalizeSemanticOutputTransport('unsupported'), SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL);
+
+      const plainTextRoute = semanticSource.slice(
+        semanticSource.indexOf('async function generateSemanticTextLedger('),
+        semanticSource.indexOf('export async function sendStructuredToolRequest('),
+      );
+      assert.match(plainTextRoute, /sendDefaultChatCompletionTextRequest\(prompt, responseLength/);
+      assert.match(plainTextRoute, /tools:\s*undefined/);
+      assert.match(plainTextRoute, /tool_choice:\s*undefined/);
+      assert.match(plainTextRoute, /json_schema:\s*undefined/);
+      assert.match(plainTextRoute, /applySemanticPlainTextPayload\(payload, route\)/);
+      assert.match(plainTextRoute, /delete payload\.tools;/);
+      assert.match(plainTextRoute, /delete payload\.tool_choice;/);
+      assert.match(plainTextRoute, /delete payload\.json_schema;/);
+      assert.doesNotMatch(plainTextRoute, /buildSemanticPreflightTool|buildSemanticToolChoice|fallback/i);
+      assert.match(semanticSource, /toolName: plainTextTransport \? undefined : SEMANTIC_TOOL_NAME/);
+
+      const defaultTextRequest = adapterSource.slice(
+        adapterSource.indexOf('export async function sendDefaultChatCompletionTextRequest'),
+        adapterSource.indexOf('export function getChatCompletionSourceForProfile'),
+      );
+      assert.match(defaultTextRequest, /delete generateData\.tools;/);
+      assert.match(defaultTextRequest, /delete generateData\.tool_choice;/);
+      assert.match(defaultTextRequest, /delete generateData\.json_schema;/);
+      assert.match(defaultTextRequest, /generateData\.stream = false;/);
+      assert.match(defaultTextRequest, /options\?\.preparePayload\?\.\(generateData\);/);
+      assert.doesNotMatch(defaultTextRequest, /buildTool|buildToolChoice/);
+      assert.doesNotMatch(semanticSource, /falling back to plain-text|fallbackFrom:/i);
+    },
+  },
+  {
     name: 'narration handoff display is optional routed and independently persistent',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
@@ -20418,7 +20531,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.85');
+      assert.equal(manifest.version, '0.9.86');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

@@ -1,6 +1,6 @@
 import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizeNpcCapabilityField, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
-import { getChatCompletionProfileRoute, sendConnectionManagerProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
+import { getChatCompletionProfileRoute, sendConnectionManagerProfileRequest, sendDefaultChatCompletionTextRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
 import { buildWorldProgressionSemanticContext, normalizeWorldProgression, normalizeWorldProgressionAdvancements, validateWorldProgressionAdvancementCoverage } from './world-memory.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
@@ -30,6 +30,11 @@ const SEMANTIC_RESPONSE_LENGTH_MIN = 4096;
 const SEMANTIC_RESPONSE_LENGTH_MAX = 8192;
 const SEMANTIC_RESPONSE_LENGTH_PER_TRACKED_NPC = 768;
 const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
+export const SEMANTIC_OUTPUT_TRANSPORTS = Object.freeze({
+    STRICT_TOOL: 'strict_tool',
+    PLAIN_TEXT: 'plain_text',
+});
+const SEMANTIC_OUTPUT_TRANSPORT_VALUES = Object.freeze(new Set(Object.values(SEMANTIC_OUTPUT_TRANSPORTS)));
 const SEMANTIC_TURN_BINDING_BLOCK_HEADER = 'STORY ENGINE CURRENT TURN BINDING';
 const SEMANTIC_DIAGNOSTIC_DETAILS = Symbol('storyEngineSemanticDiagnosticDetails');
 const SEMANTIC_DIAGNOSTIC_REPORTED = Symbol('storyEngineSemanticDiagnosticReported');
@@ -129,47 +134,65 @@ export async function extractSemanticLedger(context, promptContext, type, tracke
 
 async function extractSemanticLedgerInternal(context, promptContext, type, trackerSnapshot, options = {}) {
     const turnBinding = createSemanticTurnBinding(options, type);
-    const semanticOptions = { ...options, semanticTurnBinding: turnBinding };
+    const semanticOptions = {
+        ...options,
+        semanticTurnBinding: turnBinding,
+        semanticOutputTransport: normalizeSemanticOutputTransport(options.semanticOutputTransport),
+    };
     const playerTrackerSnapshot = semanticOptions?.playerTrackerSnapshot || {};
     const prompt = semanticOptions?.assembledPrompt
         ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, semanticOptions)
         : buildSemanticPrompt(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, semanticOptions);
-    validateSemanticPromptTurnBinding(prompt, turnBinding);
+    validateSemanticPromptTurnBinding(prompt, turnBinding, semanticOptions.semanticOutputTransport);
     const responseLength = Number.isFinite(semanticOptions?.responseLength) && semanticOptions.responseLength > 0
         ? semanticOptions.responseLength
         : estimateSemanticResponseLength(trackerSnapshot, promptContext, semanticOptions);
 
-    let toolResult;
+    const plainTextTransport = semanticOptions.semanticOutputTransport === SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT;
+    let semanticResult;
     try {
-        toolResult = semanticOptions?.semanticProfileId
-            ? await generateSemanticToolCallWithProfile(prompt, responseLength, semanticOptions)
-            : await generateSemanticToolCall(prompt, responseLength, semanticOptions);
+        if (plainTextTransport) {
+            semanticResult = semanticOptions?.semanticProfileId
+                ? await generateSemanticTextLedgerWithProfile(prompt, responseLength, semanticOptions)
+                : await generateSemanticTextLedger(prompt, responseLength, semanticOptions);
+        } else {
+            semanticResult = semanticOptions?.semanticProfileId
+                ? await generateSemanticToolCallWithProfile(prompt, responseLength, semanticOptions)
+                : await generateSemanticToolCall(prompt, responseLength, semanticOptions);
+        }
     } catch (error) {
         options?.signal?.throwIfAborted?.();
         const message = error instanceof Error ? error.message : String(error);
+        const transportLabel = plainTextTransport ? 'plain-text ledger' : 'tool-call';
         throw wrapSemanticDiagnosticError(
             error,
-            `Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`,
-            { code: 'SE-TOOL-CALL', stage: 'Tool-call request' },
+            `Semantic ${transportLabel} pass returned no valid complete ledger. Generation aborted before narration. ${message}`,
+            {
+                code: plainTextTransport ? 'SE-TEXT-LEDGER' : 'SE-TOOL-CALL',
+                stage: plainTextTransport ? 'Plain-text ledger request' : 'Tool-call request',
+            },
         );
     }
 
     let ledger;
     try {
-        ledger = parseSemanticLedger(toolResult.ledger, trackerSnapshot);
-        validateRawLedgerContract(ledger, toolResult.ledger);
+        ledger = plainTextTransport
+            ? parseSemanticPlainTextLedger(semanticResult.ledger, trackerSnapshot)
+            : parseSemanticLedger(semanticResult.ledger, trackerSnapshot);
+        validateRawLedgerContract(ledger, semanticResult.ledger);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const transportLabel = plainTextTransport ? 'plain-text ledger' : 'tool-call';
         throw wrapSemanticDiagnosticError(
             error,
-            `Semantic tool-call pass returned no valid complete ledger. Generation aborted before narration. ${message}`,
+            `Semantic ${transportLabel} pass returned no valid complete ledger. Generation aborted before narration. ${message}`,
             { code: 'SE-CONTRACT-VALIDATION', stage: 'Ledger contract validation' },
         );
     }
 
     if (!ledger || typeof ledger !== 'object') {
         throw annotateSemanticDiagnosticError(
-            new Error(`Semantic tool-call pass returned an invalid ledger object: ${previewRaw(toolResult.ledger)}`),
+            new Error(`Semantic ${plainTextTransport ? 'plain-text ledger' : 'tool-call'} pass returned an invalid ledger object: ${previewRaw(semanticResult.ledger)}`),
             { code: 'SE-CONTRACT-VALIDATION', stage: 'Ledger contract validation' },
         );
     }
@@ -187,7 +210,7 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
     let normalized;
     try {
         normalized = normalizeLedger(ledger, semanticOptions);
-        validateNormalizedLedger(normalized, toolResult.ledger);
+        validateNormalizedLedger(normalized, semanticResult.ledger);
     } catch (error) {
         throw annotateSemanticDiagnosticError(error, {
             code: 'SE-CONTRACT-VALIDATION',
@@ -206,13 +229,18 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
     normalized.deterministicOverrides = {
         ...(normalized.deterministicOverrides || {}),
         semanticLedgerExtraction: {
-            source: semanticOptions?.semanticProfileId
-                ? `SillyTavern Connection Manager profile tool + complete local validation (${semanticOptions.semanticProfileName || semanticOptions.semanticProfileId})`
-                : 'SillyTavern backend tool + complete local validation',
-            schema: 'submit_semantic_preflight_structured_v4',
+            source: plainTextTransport
+                ? (semanticOptions?.semanticProfileId
+                    ? `SillyTavern Connection Manager profile plain-text ledger + complete local validation (${semanticOptions.semanticProfileName || semanticOptions.semanticProfileId})`
+                    : 'SillyTavern backend plain-text ledger + complete local validation')
+                : (semanticOptions?.semanticProfileId
+                    ? `SillyTavern Connection Manager profile tool + complete local validation (${semanticOptions.semanticProfileName || semanticOptions.semanticProfileId})`
+                    : 'SillyTavern backend tool + complete local validation'),
+            schema: plainTextTransport ? 'semantic_compact_ledger_v1' : 'submit_semantic_preflight_structured_v4',
             strict: true,
             responseLength,
-            toolName: SEMANTIC_TOOL_NAME,
+            toolName: plainTextTransport ? undefined : SEMANTIC_TOOL_NAME,
+            transport: semanticOptions.semanticOutputTransport,
             semanticProfile: semanticOptions?.semanticProfileName || undefined,
         },
     };
@@ -600,6 +628,154 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
     return { raw, ledger };
 }
 
+async function generateSemanticTextLedger(prompt, responseLength, options = {}) {
+    validateSemanticPromptTurnBinding(prompt, options.semanticTurnBinding, SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
+    try {
+        const raw = await sendDefaultChatCompletionTextRequest(prompt, responseLength, {
+            purpose: 'semantic plain-text ledger request',
+            preparePayload: payload => applySemanticPlainTextPayload(payload, {
+                thinkingDisableFormat: options.semanticThinkingDisableFormat,
+            }),
+            signal: options.signal,
+        });
+        if (raw?.error) {
+            throw new SemanticToolTransportError(`Provider returned an error for semantic plain-text ledger request: ${previewRaw(raw)}`, {
+                body: previewRaw(raw),
+                status: semanticResponseStatus(raw),
+                requestId: semanticResponseRequestId(raw),
+            });
+        }
+        return {
+            raw,
+            ledger: extractSemanticPlainTextLedger(raw),
+        };
+    } catch (error) {
+        if (isSemanticToolTransportError(error) || findSemanticDiagnosticDetails(error)) throw error;
+        throw new SemanticToolTransportError(error instanceof Error ? error.message : String(error), {
+            status: error?.status,
+            body: error?.body,
+            cause: error,
+            requestId: error?.requestId || error?.request_id,
+        });
+    }
+}
+
+async function generateSemanticTextLedgerWithProfile(prompt, responseLength, options = {}) {
+    const route = {
+        ...getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName),
+        thinkingDisableFormat: options.semanticThinkingDisableFormat,
+    };
+    validateSemanticPromptTurnBinding(prompt, options.semanticTurnBinding, SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
+    const preparePayload = payload => applySemanticPlainTextPayload(payload, route);
+    const overridePayload = {
+        temperature: 0,
+        stream: false,
+        messages: prompt,
+        tools: undefined,
+        tool_choice: undefined,
+        enable_web_search: false,
+        request_images: undefined,
+        request_image_resolution: undefined,
+        request_image_aspect_ratio: undefined,
+        json_schema: undefined,
+        stop: undefined,
+        ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
+    };
+
+    let raw;
+    try {
+        raw = await sendConnectionManagerProfileRequest({
+            profileId: options.semanticProfileId,
+            profileName: options.semanticProfileName,
+            prompt,
+            responseLength,
+            overridePayload,
+            extractData: false,
+            preparePayload,
+            signal: options.signal,
+        });
+    } catch (error) {
+        throw new SemanticToolTransportError(`Connection Manager semantic profile plain-text ledger request failed: ${error instanceof Error ? error.message : String(error)}`, {
+            cause: error,
+            provider: route.source,
+            model: route.model,
+            profile: options.semanticProfileName || options.semanticProfileId,
+            status: semanticErrorDetail(error, ['status', 'statusCode']),
+            body: semanticErrorDetail(error, ['body', 'responseBody']),
+            requestId: semanticErrorDetail(error, ['requestId', 'request_id']),
+        });
+    }
+
+    if (raw?.error) {
+        throw new SemanticToolTransportError(`Provider returned an error for semantic profile plain-text ledger request: ${previewRaw(raw)}`, {
+            body: previewRaw(raw),
+            provider: route.source,
+            model: route.model,
+            profile: options.semanticProfileName || options.semanticProfileId,
+            status: semanticResponseStatus(raw),
+            requestId: semanticResponseRequestId(raw),
+        });
+    }
+
+    return {
+        raw,
+        ledger: extractSemanticPlainTextLedger(raw, {
+            provider: route.source,
+            model: route.model,
+            profile: options.semanticProfileName || options.semanticProfileId,
+        }),
+    };
+}
+
+function applySemanticPlainTextPayload(payload, route = {}) {
+    applyStoryEngineThinkingDisabledPayload(payload, route);
+    delete payload.tools;
+    delete payload.tool_choice;
+    delete payload.json_schema;
+    return payload;
+}
+
+export function extractSemanticPlainTextLedger(raw, diagnosticContext = {}) {
+    // A ledger must be the model's final answer, never hidden reasoning content.
+    const candidates = extractTextCandidates(raw, { includeReasoning: false });
+    const ledgers = [];
+    const errors = [];
+    for (const candidate of candidates) {
+        try {
+            ledgers.push(validateSemanticPlainTextLedgerEnvelope(candidate));
+        } catch (error) {
+            errors.push(error instanceof Error ? error.message : String(error));
+        }
+    }
+    if (ledgers.length !== 1) {
+        throw annotateSemanticDiagnosticError(
+            new Error(`Semantic plain-text response must contain exactly one complete ledger block; found ${ledgers.length}. ${errors.slice(0, 3).join(' | ')} RawPreview=${previewRaw(raw)}`),
+            {
+                code: 'SE-TEXT-LEDGER',
+                stage: 'Plain-text ledger extraction',
+                responseShape: describeSemanticResponseShape(raw),
+                ...diagnosticContext,
+            },
+        );
+    }
+    return ledgers[0];
+}
+
+function validateSemanticPlainTextLedgerEnvelope(value) {
+    const source = String(value ?? '').trim();
+    if (!source) throw new Error('semantic plain-text response was empty');
+    if (/```/.test(source)) throw new Error('markdown fences are not permitted in the semantic plain-text ledger');
+    const starts = source.match(/BEGIN_SEMANTIC_PREFLIGHT/gi) || [];
+    const ends = source.match(/END_SEMANTIC_PREFLIGHT/gi) || [];
+    if (starts.length !== 1 || ends.length !== 1) {
+        throw new Error(`semantic plain-text ledger requires exactly one begin/end pair; received ${starts.length}/${ends.length}`);
+    }
+    if (!/^BEGIN_SEMANTIC_PREFLIGHT[\s\S]*END_SEMANTIC_PREFLIGHT$/i.test(source)) {
+        throw new Error('semantic plain-text response contains content outside the mandatory ledger block');
+    }
+    return source;
+}
+
 export async function sendStructuredToolRequest(prompt, responseLength, options = {}, toolDefinition = {}) {
     const toolName = String(toolDefinition.name || '').trim();
     if (!toolName || !toolDefinition.parameters || typeof toolDefinition.parameters !== 'object') {
@@ -865,7 +1041,14 @@ export function createSemanticTurnBinding(options = {}, type = 'normal') {
     };
 }
 
-export function buildSemanticTurnBindingBlock(turnBinding) {
+export function normalizeSemanticOutputTransport(value) {
+    const transport = String(value ?? '').trim().toLocaleLowerCase();
+    return SEMANTIC_OUTPUT_TRANSPORT_VALUES.has(transport)
+        ? transport
+        : SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL;
+}
+
+export function buildSemanticTurnBindingBlock(turnBinding, transport = SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL) {
     const turnId = String(turnBinding?.turnId || '').trim();
     const effectiveUserInput = String(turnBinding?.effectiveUserInput || '');
     if (!turnId || !effectiveUserInput) {
@@ -875,19 +1058,23 @@ export function buildSemanticTurnBindingBlock(turnBinding) {
         );
     }
     const payload = JSON.stringify({ turnId, effectiveUserInput });
+    const normalizedTransport = normalizeSemanticOutputTransport(transport);
+    const transportTurnIdField = normalizedTransport === SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT
+        ? 'TurnBinding.turnId'
+        : 'turnBinding.turnId';
     return [
         SEMANTIC_TURN_BINDING_BLOCK_HEADER,
         'The JSON object below is authoritative data for this semantic pass. Analyze effectiveUserInput as the current user turn; use all earlier messages only as context.',
         payload,
-        'Echo turnId exactly in turnBinding.turnId.',
+        `Echo turnId exactly in ${transportTurnIdField}.`,
         'For every resolutionEngine.actionUnits entry, copy evidence as an exact contiguous quote from effectiveUserInput. Whitespace and line breaks may be normalized, but wording, punctuation, and letter case must not be changed. Never use assistant narration or an earlier user turn as action-unit evidence.',
     ].join('\n');
 }
 
-function validateSemanticPromptTurnBinding(prompt, turnBinding) {
+function validateSemanticPromptTurnBinding(prompt, turnBinding, transport = SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL) {
     const messages = Array.isArray(prompt) ? prompt : [];
     const finalMessage = messages.at(-1);
-    const expectedBlock = buildSemanticTurnBindingBlock(turnBinding);
+    const expectedBlock = buildSemanticTurnBindingBlock(turnBinding, transport);
     if (finalMessage?.role !== 'user' || finalMessage?.content !== expectedBlock) {
         throw annotateSemanticDiagnosticError(
             new Error('Semantic request did not preserve the authoritative current-turn block as its final message.'),
@@ -2072,6 +2259,7 @@ const COMPACT_LEDGER_OUTPUT_CONTRACT = [
     '- Output only the ledger block. No markdown. No prose. No JSON. No comments. No explanations.',
     '- Begin with BEGIN_SEMANTIC_PREFLIGHT and end the ledger with END_SEMANTIC_PREFLIGHT.',
     '- Fill every required line exactly once. Keep the exact function/key names shown below.',
+    '- Echo the exact current turn ID from STORY ENGINE CURRENT TURN BINDING in TurnBinding.turnId. Every ResolutionEngine.actionUnits[index].evidence must be an exact contiguous quote from that binding\'s effectiveUserInput.',
     '- WorldProgressionAdvancement.count must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one row per due plan.',
     '- When RelationshipEngine.count is greater than 0, every indexed relationship row MUST include standingInfluence=none|aware|constrained and standingBasis. When count=0, there are no semantic relationship entries; an exact inert [0] transport placeholder is permitted only under the tool contract.',
     '- The ledger is only a form. The Engine reference is the rule source. Read and execute the semantic/contextual engine functions first, then fill the lines from those outputs.',
@@ -2431,7 +2619,7 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTra
         },
         {
             role: 'user',
-            content: buildSemanticTurnBindingBlock(options.semanticTurnBinding),
+            content: buildSemanticTurnBindingBlock(options.semanticTurnBinding, options.semanticOutputTransport),
         },
     ];
 }
@@ -2468,13 +2656,19 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
         },
         {
             role: 'user',
-            content: buildSemanticTurnBindingBlock(options.semanticTurnBinding),
+            content: buildSemanticTurnBindingBlock(options.semanticTurnBinding, options.semanticOutputTransport),
         },
     ];
 }
 
 function semanticCompactTemplateForOptions(options = {}) {
-    return COMPACT_LEDGER_TEMPLATE;
+    if (normalizeSemanticOutputTransport(options?.semanticOutputTransport) !== SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT) {
+        return COMPACT_LEDGER_TEMPLATE;
+    }
+    return COMPACT_LEDGER_TEMPLATE.replace(
+        'BEGIN_SEMANTIC_PREFLIGHT\n',
+        'BEGIN_SEMANTIC_PREFLIGHT\nTurnBinding.turnId=(none)\n',
+    );
 }
 
 function buildSemanticContractText(userName, charName, type, trackerSnapshot, playerTrackerSnapshot = {}, options = {}) {
@@ -2763,14 +2957,14 @@ function stripStructuredDebug(text) {
         .replace(/<narrator_prompt_context_echo>[\s\S]*?<\/narrator_prompt_context_echo>\s*/g, '');
 }
 
-function parseSemanticLedger(raw, trackerSnapshot) {
+function parseSemanticLedger(raw, trackerSnapshot, options = {}) {
     if (raw && typeof raw === 'object' && hasLedgerShape(raw)) return raw;
     const candidates = extractTextCandidates(raw);
     const errors = [];
 
     for (const text of candidates) {
         try {
-            return parseLedgerText(text, trackerSnapshot);
+            return parseLedgerText(text, trackerSnapshot, options);
         } catch (error) {
             errors.push(error instanceof Error ? error.message : String(error));
         }
@@ -2779,14 +2973,14 @@ function parseSemanticLedger(raw, trackerSnapshot) {
     throw new Error(`Semantic pass did not return a valid mandatory compact ledger. Candidates=${candidates.length}. Errors=${errors.slice(0, 4).join(' | ')}. RawPreview=${previewRaw(raw)}`);
 }
 
-function parseLedgerText(text, trackerSnapshot) {
+function parseLedgerText(text, trackerSnapshot, options = {}) {
     const sourceText = String(text ?? '').trim();
     if (!sourceText) throw new Error('empty response text');
     if (/```/.test(sourceText)) {
         throw new Error('markdown fences in semantic ledger are invalid');
     }
     if (/BEGIN_SEMANTIC_PREFLIGHT/i.test(sourceText)) {
-        return parseCompactLedger(sourceText, trackerSnapshot);
+        return parseCompactLedger(sourceText, trackerSnapshot, options);
     }
     if (sourceText.startsWith('{')) {
         return JSON.parse(extractJsonObject(sourceText));
@@ -2798,7 +2992,13 @@ function parseLedgerText(text, trackerSnapshot) {
     throw new Error('missing mandatory compact ledger block');
 }
 
-function extractTextCandidates(raw) {
+export function parseSemanticPlainTextLedger(raw, trackerSnapshot = {}) {
+    const source = validateSemanticPlainTextLedgerEnvelope(raw);
+    return parseSemanticLedger(source, trackerSnapshot, { requireTurnBinding: true });
+}
+
+function extractTextCandidates(raw, options = {}) {
+    const includeReasoning = options?.includeReasoning !== false;
     const values = [];
     const seen = new Set();
     const add = value => {
@@ -2818,9 +3018,9 @@ function extractTextCandidates(raw) {
         if (typeof value === 'object') {
             if (typeof value.text === 'string') add(value.text);
             if (typeof value.content === 'string') add(value.content);
-            if (typeof value.reasoning === 'string') add(value.reasoning);
-            if (typeof value.reasoning_content === 'string') add(value.reasoning_content);
-            if (typeof value.reasoning_details === 'string') add(value.reasoning_details);
+            if (includeReasoning && typeof value.reasoning === 'string') add(value.reasoning);
+            if (includeReasoning && typeof value.reasoning_content === 'string') add(value.reasoning_content);
+            if (includeReasoning && typeof value.reasoning_details === 'string') add(value.reasoning_details);
             if (typeof value.message === 'string') add(value.message);
             if (value.message && typeof value.message === 'object') add(value.message);
             if (value.delta && typeof value.delta === 'object') add(value.delta);
@@ -3081,6 +3281,7 @@ function compactKnownKeyPatterns() {
     if (compactKnownKeyPatternsCache) return compactKnownKeyPatternsCache;
     const keys = [
         ...compactTemplateFieldEntries().map(([key]) => key),
+        'TurnBinding.turnId',
         ...COMPACT_RELATIONSHIP_FIELD_SUFFIXES.map(suffix => `RelationshipEngine[0].${suffix}`),
         ...COMPACT_INJURY_FIELD_SUFFIXES.map(suffix => `InjuryEffectEngine[0].${suffix}`),
     ];
@@ -3335,7 +3536,7 @@ function validateCompactLedgerLexicalContract(fields) {
     }
 }
 
-function parseCompactLedger(text, trackerSnapshot) {
+function parseCompactLedger(text, trackerSnapshot, options = {}) {
     const match = String(text).match(/BEGIN_SEMANTIC_PREFLIGHT([\s\S]*?)END_SEMANTIC_PREFLIGHT/i);
     if (!match) throw new Error('missing BEGIN_SEMANTIC_PREFLIGHT/END_SEMANTIC_PREFLIGHT block');
 
@@ -3355,6 +3556,7 @@ function parseCompactLedger(text, trackerSnapshot) {
     }
 
     const required = [
+        ...(options?.requireTurnBinding ? ['TurnBinding.turnId'] : []),
         'EngineContext.userReputationContext.location',
         'WorldTransition.reputationLocation',
         'WorldTransition.place',
@@ -4163,6 +4365,11 @@ function parseCompactLedger(text, trackerSnapshot) {
     assertCompactParsedCount('PowerEventShape', powerEventShapeCount, powerEventShape.events.length);
 
     return {
+        ...(fields.has('TurnBinding.turnId') ? {
+            turnBinding: {
+                turnId: fields.get('TurnBinding.turnId'),
+            },
+        } : {}),
         engineContext: {
             userCoreStats: { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 },
             trackerRelevantNPCs: trackerSnapshotToLedgerEntries(trackerSnapshot),

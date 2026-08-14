@@ -35,7 +35,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest, STORY_ENGINE_THINKING_DISABLE_FORMATS } from './semantic-extractor.js';
+import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeSemanticOutputTransport, normalizeStoryEngineThinkingDisableFormat, parseNarratorTrackerDelta, reportSemanticDiagnostic, SEMANTIC_OUTPUT_TRANSPORTS, sendStructuredToolRequest, STORY_ENGINE_THINKING_DISABLE_FORMATS } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -578,6 +578,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
     semanticThinkingDisableFormats: Object.freeze({}),
+    semanticOutputTransports: Object.freeze({}),
     modelCallDelayEnabled: false,
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
@@ -631,6 +632,11 @@ const SEMANTIC_THINKING_DISABLE_FORMAT_OPTIONS = Object.freeze([
     { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.GLM_ZAI, label: 'GLM / Z.AI' },
     { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.KIMI_MOONSHOT, label: 'Kimi / Moonshot' },
     { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT, label: 'LongCat' },
+]);
+
+const SEMANTIC_OUTPUT_TRANSPORT_OPTIONS = Object.freeze([
+    { value: SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL, label: 'Strict tool schema' },
+    { value: SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT, label: 'Plain-text ledger' },
 ]);
 
 const PROSE_GUARD_TARGETED_BAN_FIELDS = Object.freeze([
@@ -804,9 +810,13 @@ function getSettings() {
     }
     const previousThinkingDisableFormats = settings.semanticThinkingDisableFormats;
     const thinkingDisableFormats = normalizeSemanticThinkingDisableFormatMap(previousThinkingDisableFormats);
-    let semanticThinkingSettingsChanged = hadLegacySemanticThinkingDisableFormat
+    const previousOutputTransports = settings.semanticOutputTransports;
+    const outputTransports = normalizeSemanticOutputTransportMap(previousOutputTransports);
+    const semanticThinkingSettingsChanged = hadLegacySemanticThinkingDisableFormat
         || !semanticThinkingDisableFormatMapsEqual(previousThinkingDisableFormats, thinkingDisableFormats);
+    const semanticOutputTransportSettingsChanged = !semanticOutputTransportMapsEqual(previousOutputTransports, outputTransports);
     settings.semanticThinkingDisableFormats = thinkingDisableFormats;
+    settings.semanticOutputTransports = outputTransports;
     if (hadLegacySemanticThinkingDisableFormat) {
         const legacyFormat = normalizeStoryEngineThinkingDisableFormat(legacySemanticThinkingDisableFormat);
         const target = resolveSemanticThinkingDisableTarget(settings);
@@ -820,7 +830,7 @@ function getSettings() {
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || semanticThinkingSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged) {
+    if (hadRetiredSemanticSettings || semanticThinkingSettingsChanged || semanticOutputTransportSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
@@ -987,11 +997,54 @@ function semanticThinkingDisableFormatMapsEqual(left, right) {
         && rightKeys.every(key => normalizedLeft[key] === right[key]);
 }
 
+function normalizeSemanticOutputTransportMap(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const normalized = {};
+    for (const [rawKey, rawTransport] of Object.entries(value)) {
+        const key = String(rawKey || '').trim();
+        const transport = normalizeSemanticOutputTransport(rawTransport);
+        if (key && transport !== SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL) {
+            normalized[key] = transport;
+        }
+    }
+    return normalized;
+}
+
+function semanticOutputTransportMapsEqual(left, right) {
+    const normalizedLeft = left && typeof left === 'object' && !Array.isArray(left) ? left : {};
+    const leftKeys = Object.keys(normalizedLeft);
+    const rightKeys = Object.keys(right);
+    return leftKeys.length === rightKeys.length
+        && rightKeys.every(key => normalizedLeft[key] === right[key]);
+}
+
 function getSemanticThinkingProfileKey(profile, fallback = 'current') {
     const profileId = String(profile?.id || '').trim();
     if (profileId) return `profile:${profileId}`;
     const profileName = String(profile?.name || '').trim().toLocaleLowerCase();
     return profileName ? `profile-name:${profileName}` : fallback;
+}
+
+function resolveSemanticOutputTransportTarget(settings) {
+    return resolveSemanticThinkingDisableTarget(settings);
+}
+
+function getSemanticOutputTransport(settings, target = resolveSemanticOutputTransportTarget(settings)) {
+    const transports = normalizeSemanticOutputTransportMap(settings?.semanticOutputTransports);
+    return normalizeSemanticOutputTransport(transports[target?.key]);
+}
+
+function setSemanticOutputTransport(settings, target, value) {
+    if (!target?.key) return SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL;
+    const transport = normalizeSemanticOutputTransport(value);
+    const transports = normalizeSemanticOutputTransportMap(settings?.semanticOutputTransports);
+    if (transport === SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL) {
+        delete transports[target.key];
+    } else {
+        transports[target.key] = transport;
+    }
+    settings.semanticOutputTransports = transports;
+    return transport;
 }
 
 function resolveSemanticThinkingDisableTarget(settings) {
@@ -1159,9 +1212,11 @@ async function withSemanticGenerationSettings(callback) {
     const semanticProfile = String(settings.semanticConnectionProfile || '').trim();
     const thinkingTarget = resolveSemanticThinkingDisableTarget(settings);
     const semanticThinkingDisableFormat = getSemanticThinkingDisableFormat(settings, thinkingTarget);
+    const outputTransportTarget = resolveSemanticOutputTransportTarget(settings);
+    const semanticOutputTransport = getSemanticOutputTransport(settings, outputTransportTarget);
 
     if (!useSeparateSettings || !semanticProfile) {
-        return await callback({ semanticThinkingDisableFormat });
+        return await callback({ semanticThinkingDisableFormat, semanticOutputTransport });
     }
 
 
@@ -1179,6 +1234,7 @@ async function withSemanticGenerationSettings(callback) {
         semanticProfileId: profile.id,
         semanticProfileName: profile.name,
         semanticThinkingDisableFormat,
+        semanticOutputTransport,
     });
 }
 
@@ -1568,6 +1624,7 @@ function refreshSettingsControls() {
     const enabled = Boolean(settings.useSeparateSemanticSettings);
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
+    const outputTransportSelect = document.getElementById('structured_preflight_semantic_output_transport');
     const thinkingDisableFormatRow = document.getElementById('structured_preflight_semantic_thinking_disable_format_row');
     const thinkingDisableFormatSelect = document.getElementById('structured_preflight_semantic_thinking_disable_format');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
@@ -1647,6 +1704,11 @@ function refreshSettingsControls() {
     );
 
     const thinkingDisableTarget = resolveSemanticThinkingDisableTarget(settings);
+    const outputTransportTarget = resolveSemanticOutputTransportTarget(settings);
+    if (outputTransportSelect) {
+        outputTransportSelect.value = getSemanticOutputTransport(settings, outputTransportTarget);
+        outputTransportSelect.disabled = !engineEnabled;
+    }
     const customSemanticProfileSelected = thinkingDisableTarget.isCustom;
     if (thinkingDisableFormatSelect) {
         thinkingDisableFormatSelect.value = getSemanticThinkingDisableFormat(settings, thinkingDisableTarget);
@@ -2191,6 +2253,13 @@ function renderSettingsPanel() {
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-profile', 'Select the SillyTavern connection profile used for semantic preflight and post-narration Story Engine utility calls.', 'About Story Engine profile selection')}
                             </div>
+                            <div class="spe-settings-row">
+                                <label for="structured_preflight_semantic_output_transport">Semantic output</label>
+                                <select id="structured_preflight_semantic_output_transport" class="text_pole flex1">
+                                    ${SEMANTIC_OUTPUT_TRANSPORT_OPTIONS.map(option => `<option value="${option.value}">${option.label}</option>`).join('')}
+                                </select>
+                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Strict tool schema preserves the current provider function call. Plain-text ledger uses a normal completion and requires one complete, unfenced ledger block. The selected connection profile remembers its own choice.', 'About semantic output')}
+                            </div>
                             <div id="structured_preflight_semantic_thinking_disable_format_row" class="spe-settings-row" hidden>
                                 <label for="structured_preflight_semantic_thinking_disable_format">Thinking disable format</label>
                                 <select id="structured_preflight_semantic_thinking_disable_format" class="text_pole flex1">
@@ -2472,6 +2541,12 @@ function renderSettingsPanel() {
 
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
         settings.semanticConnectionProfile = String(event.target?.value || '');
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_semantic_output_transport')?.addEventListener('change', event => {
+        const target = resolveSemanticOutputTransportTarget(settings);
+        setSemanticOutputTransport(settings, target, event.target?.value);
         refreshSettingsControls();
         saveExtensionSettings();
     });
@@ -16287,6 +16362,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             semanticThinkingDisableFormat: settings?.semanticThinkingDisableFormat,
+            semanticOutputTransport: settings?.semanticOutputTransport,
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',
             latestUserText: pendingGeneration?.latestUserText || getLatestUserText(context?.chat),
