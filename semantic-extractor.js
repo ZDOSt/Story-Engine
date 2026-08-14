@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
+import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizeNpcCapabilityField, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import { getChatCompletionProfileRoute, sendConnectionManagerProfileRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
@@ -88,7 +88,8 @@ const SEMANTIC_TOOL_SECTIONS = Object.freeze([
 ]);
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
-const TRACKER_NARRATOR_NPC_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove']);
+const TRACKER_NPC_PROFILE_FIELDS = Object.freeze(['background', 'knowledge', 'practicedSkills']);
+const TRACKER_NARRATOR_NPC_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, ...TRACKER_NPC_PROFILE_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove']);
 const TRACKER_USER_DELTA_FIELDS = Object.freeze([...TRACKER_NPC_DELTA_FIELDS, 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']);
 const POWER_ACTOR_EFFECT_TYPES = Object.freeze(['none', 'thwart', 'expose', 'harm_assets', 'steal', 'humiliate', 'help_enemy', 'disrupt_operation', 'kill_or_capture_people', 'damage_reputation_or_income']);
 const POWER_ACTOR_FAVOR_TYPES = Object.freeze(['none', 'rescue_or_protect', 'valuable_information', 'recover_property', 'prevent_major_loss', 'exceptional_aid']);
@@ -1058,6 +1059,9 @@ function buildSemanticPreflightSchema() {
         NPC: string(),
         revealedName: string(),
         personalitySummary: string(),
+        background: string('Stable NPC background, role, or life experience. Use only explicit or durable established evidence; use unchanged when none is newly established.'),
+        knowledge: string('Stable domains or facts this NPC plausibly knows from established context. Do not infer expertise from intelligence, role title, or one successful observation.'),
+        practicedSkills: string('Concrete learned or practiced skills supported by established background or durable evidence. Do not invent techniques from a single current action.'),
         condition: enumString(TRACKER_CONDITIONS),
         woundsAdd: stringList(),
         woundsRemove: stringList(),
@@ -2112,18 +2116,19 @@ const SEMANTIC_FIELD_GUIDANCE = [
     '- All genStats groups must include only CapabilityPool and MainStat. Use genStats only when the relevant NPC currentCoreStats are missing in the tracker snapshot. CapabilityPool classifies this specific NPC population/role context using occupation, location, species, established actions, card/lore facts, and reputation together: common for ordinary civilians/residents/incidental people, unknown capability, or no practiced-capability evidence; trained when role or portrayal clearly implies practiced professional, martial, magical, intellectual, investigative, or social capability; elite only for explicitly exceptional champions, masters, veterans, rare predators, renowned experts, or similarly uncommon individuals; boss only for an explicitly singular major threat, legendary being, supreme master, or central overwhelming antagonist. Title, location, hostility, or dramatic importance alone never makes boss. If stats are missing and uncertain, use common; use none only when no NPC needs stats. MainStat uses explicit specialization PHY/MND/CHA; unclear or broadly capable is Balanced. Deterministic code rolls final Rank from the pool percentiles, assigns numeric PHY/MND/CHA, and saves the result once.',
     '- InjuryEffectEngine is semantic-only candidate extraction for effects the user action would cause if deterministic mechanics say the action lands. It does not roll and does not decide success. Include physical injuries and impairing magical/status effects regardless of source: burns, poison, paralysis, sickness, blindness, fear/panic, restraint, curses, lightning/electrical effects, exhaustion, mental effects, or other ongoing impairing states. Exclude purely emotional/social harm, mere witnessing, momentary pain, intended/requested future injuries, or effects that would not persist or impair later action.',
     '- InjuryEffectEngine target must be the entity actually receiving the impairing effect. HarmedObservers may appear only if they are directly affected by the injury/status effect, not merely emotionally harmed by seeing or caring about another target. Use persistence=lasting and affectsAction=Y only for effects that should impair later action if applied.',
-    '- TrackerUpdateEngine is explicit-only visual state tracking. Output deltas only from the latest user input and immediate visible context. Use condition=unchanged, personalitySummary=unchanged, and (none) lists unless a change is explicitly stated.',
+    '- TrackerUpdateEngine is explicit-only visual state tracking. Output deltas only from the latest user input and immediate visible context. Use condition=unchanged, personalitySummary=unchanged, background=unchanged, knowledge=unchanged, practicedSkills=unchanged, and (none) lists unless a change is explicitly stated or durable context establishes a missing NPC foundation.',
     '- TrackerUpdateEngine must never rewrite full inventories, gear, wounds, status, tasks, or commitments from silence. Add only explicit new items/effects/tasks. Remove only explicit dropped/spent/used-up/lost/completed/canceled/failed/abandoned entries. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing.',
     '- TrackerUpdateEngine must not treat a requested, intended, commanded, allowed, promised, predicted, pending attempted action, remembered event, metaphor, internal sensation, hypothetical, uncertainty, self-question, or subjective self-description as an established wound/status/condition change. "I tell him to hit my arm hard enough to bruise it", "I stab him", "I let the blow land", "I remember being gutted", or "my brain tries to breathe" is not woundsAdd/statusAdd/condition by itself. "My arm is already bruised", "his arm is bleeding", or "I am poisoned" is.',
     '- TrackerUpdateEngine must track only current lasting injuries/status. Do not track momentary pain, impact, a hit landing, being knocked back/down, being winded, losing breath, flinching, staggering, or temporary shock unless the text explicitly establishes an ongoing bruise, cut, bleeding, sprain, break, fracture, poison, sickness, restraint, exhaustion, unconsciousness, or similar continuing state.',
     '- TrackerUpdateEngine NPC revealedName is identity tracking only. If final narration explicitly reveals that an already tracked generic NPC/person/role is actually named something, set NPC to the existing tracker label and revealedName to the revealed proper name. Example: tracked NPC "bystander" says "Torvinash." as an introduction -> NPC=bystander and revealedName=Torvinash. Use revealedName only when the narration semantically identifies which tracked generic NPC received the name; if multiple possible generic NPCs exist and identity is unclear, use (none).',
     '- TrackerUpdateEngine NPC personalitySummary is optional stable personality memory. If this is the first meaningful tracking of an NPC or the existing personalitySummary is empty, assign a compact natural-language personality seed when card/lore/scenario/context or visible behavior supports one. Use internal glossary patterns only as behavior guidance; never output raw internal labels such as deredere, tsundere, yandere, kuudere, dandere, himedere, oujidere, kamidere, mayadere, sadodere, hiyakasudere, hajidere, bakadere, erodere, dorodere, shundere, undere, goudere, kanedere, or byoukidere. Preferred format: temperament: ...; speech: ...; interaction: ...; intensity:low|medium|high. Speech and interaction should carry most uniqueness. If personalitySummary already exists, use unchanged unless durable context clearly contradicts or refines it. Do not write mood, temporary emotion, injuries, relationship state, attraction, fear/hostility level, or what happened this turn.',
+    '- TrackerUpdateEngine NPC background, knowledge, and practicedSkills are hidden stable grounding memory. Background records established role, upbringing, work, training history, or life experience; knowledge records established subjects or facts the NPC plausibly knows; practicedSkills records concrete learned techniques supported by that background. Populate a field only when character card, lore, scenario, explicit setup, existing tracker state, or durable visible evidence supports it. Keep each field concise and natural-language. Do not infer survival expertise, professional technique, specialized knowledge, or unusual confidence from intelligence, rank, age, occupation title, one successful observation, or a single current action. Existing values remain unchanged unless durable evidence clearly refines them. These fields guide narration only and never alter stats, rolls, bonuses, relationships, injuries, or outcomes.',
     'PERSONALITY_ARCHETYPE_GLOSSARY:',
     PERSONALITY_ARCHETYPE_GLOSSARY,
     '- TrackerUpdateEngine.BoundCompanionState is hidden user state. It may read the entire assembled context: active SillyTavern prompt stack, character card, persona/sheet, abilities, scenario, lore/world info, tracker snapshot, bound companion snapshot, and chat history. Set status=active only when context explicitly establishes an inner companion, possession, shared vessel, intelligent item/weapon, bound spirit/artifact, or implant as already active/completed/accepted and able to communicate with {{user}} internally or through the carried item. Set status=inactive only when an established companion is explicitly severed, dismissed, removed, permanently silenced, or destroyed. Set status=unchanged when the bound companion snapshot is already active and the current context does not explicitly change it. Also set status=unchanged for pending offers, invitations, unaccepted bargains, incomplete rituals, "do you accept?" proposals, unclear voices, metaphors, rumors, dreams, hallucination ambiguity, or no change. Do not invent an inner entity. If active, fill name/type/vessel/voice/evidence from explicit context when known; otherwise use (none) for unknown optional fields. Evidence must cite the explicit context fact that makes it established, not a guess.',
     '- TrackerUpdateEngine.PendingBoundaryState is post-narration-owned. In semantic preflight, output status=unchanged with placeholder fields. The post-narration tracker delta sets or clears pending boundaries after FINAL_NARRATION exists.',
-    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
-    '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, or stable personalitySummary changes in this turn. NPC inventory and currency are post-narration-owned and do not appear in this semantic ledger. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
+    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, background, knowledge, practicedSkills, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, and gearRemove.',
+    '- TrackerUpdateEngine NPC entries are only for NPCs with explicit condition, wound, status, visible gear, stable personalitySummary, or stable background/knowledge/practicedSkills changes in this turn. NPC inventory and currency are post-narration-owned and do not appear in this semantic ledger. If none, output TrackerUpdateEngine.NPC.count=0 and no NPC[index] lines.',
     '- PowerActorEnmity is hidden power-actor memory. First assess power candidates semantically, not by keyword/title. A power actor is any entity with credible means to affect {{user}} beyond acting alone in the moment: money, influence, authority, status, agents, staff, hired help, resources, institution/faction access, reputation, information, territory, magic, command, leverage, social reach, ownership, public prominence, or recurring access. Explicit prominence, wealth, rank, office, ownership, command, fame, backing, network access, unusual resources, or a role that plausibly controls access/services/people is enough for a Y assessment unless context clearly limits them to ordinary personal reaction. Ordinary people with only personal reaction are not power actors even if they have a job title.',
     '- PowerActorEnmity.assessments is audit-only diagnosis. Include one assessment for each meaningful ResolutionEngine.identifyTargets.PowerActors entry and for every current-scene or active-card candidate whose possible reach should be auditable: the active character/card actor, named scene NPCs, target/observer NPCs, and any affected organization/group when context gives credible reach beyond personal action. Do this even when PowerActorEnmity.effects count is 0. Assessment never creates enmity by itself and never replaces RelationshipEngine. If a living NPC appears in a normal target/observer list, still create the required RelationshipEngine entry even when isPowerActor=Y.',
     '- PowerActorEnmity effects are candidate strategic consequences of the latest user input and immediate visible context. Add an entry when the attempted action would, if completed, meaningfully thwart, expose, harm assets of, steal from, publicly humiliate, help an enemy of, disrupt an operation of, kill/capture people of, or damage reputation/income of a power actor AND the actor is present, witnesses it, is informed, or has a concrete ordinary discovery/attribution path to {{user}}. actionUnitId MUST copy the exact A1/A2/A3 unit causing the effect. sourceTarget names the directly affected current target; use actor when the Power Actor itself is directly affected. For rolled actions set explicitlyCompleted=N and do not decide success; deterministic code applies only effects whose action unit lands. For no-roll actions set explicitlyCompleted=Y only when the effect is explicitly already completed, never for an attempt. Offscreen asset harm with no witness, report, evidence, confession, attribution, or discovery path creates no enmity this turn. If the affected party lacks reach, hasReach=N and severity=none. If the actor cannot plausibly know or discover it, knownToActor=N and deterministic code will not increase enmity.',
@@ -2259,6 +2264,9 @@ TrackerUpdateEngine.NPC.count=0
 TrackerUpdateEngine.NPC[0].NPC=(none)
 TrackerUpdateEngine.NPC[0].revealedName=(none)
 TrackerUpdateEngine.NPC[0].personalitySummary=unchanged
+TrackerUpdateEngine.NPC[0].background=unchanged
+TrackerUpdateEngine.NPC[0].knowledge=unchanged
+TrackerUpdateEngine.NPC[0].practicedSkills=unchanged
 TrackerUpdateEngine.NPC[0].condition=unchanged
 TrackerUpdateEngine.NPC[0].woundsAdd=(none)
 TrackerUpdateEngine.NPC[0].woundsRemove=(none)
@@ -3519,6 +3527,9 @@ function parseCompactLedger(text, trackerSnapshot) {
             `${prefix}.NPC`,
             `${prefix}.revealedName`,
             `${prefix}.personalitySummary`,
+            `${prefix}.background`,
+            `${prefix}.knowledge`,
+            `${prefix}.practicedSkills`,
             `${prefix}.condition`,
             `${prefix}.woundsAdd`,
             `${prefix}.woundsRemove`,
@@ -4120,6 +4131,9 @@ function parseCompactLedger(text, trackerSnapshot) {
             NPC: npc,
             revealedName: normalizeRevealedName(fields.get(`${prefix}.revealedName`)),
             personalitySummary: normalizePersonalitySummary(fields.get(`${prefix}.personalitySummary`)),
+            background: normalizeNpcCapabilityField(fields.get(`${prefix}.background`)),
+            knowledge: normalizeNpcCapabilityField(fields.get(`${prefix}.knowledge`)),
+            practicedSkills: normalizeNpcCapabilityField(fields.get(`${prefix}.practicedSkills`)),
             condition: normalizeTrackerDeltaCondition(fields.get(`${prefix}.condition`)),
             woundsAdd: readList(fields, `${prefix}.woundsAdd`),
             woundsRemove: readList(fields, `${prefix}.woundsRemove`),
@@ -4246,7 +4260,7 @@ function parseNarratorTrackerDeltaText(text) {
     ];
     for (let index = 0; index < trackerNpcCount; index += 1) {
         const prefix = `TrackerUpdateEngine.NPC[${index}]`;
-        required.push(...['NPC', 'revealedName', 'personalitySummary', 'condition', ...TRACKER_NARRATOR_NPC_DELTA_FIELDS]
+        required.push(...['NPC', 'revealedName', 'personalitySummary', ...TRACKER_NPC_PROFILE_FIELDS, 'condition', ...TRACKER_NARRATOR_NPC_DELTA_FIELDS]
             .map(field => `${prefix}.${field}`));
     }
     for (let index = 0; index < personalCount; index += 1) {
@@ -4309,6 +4323,9 @@ function parseNarratorTrackerDeltaText(text) {
             NPC: npc,
             revealedName: normalizeRevealedName(fields.get(`${prefix}.revealedName`)),
             personalitySummary: normalizePersonalitySummary(fields.get(`${prefix}.personalitySummary`)),
+            background: normalizeNpcCapabilityField(fields.get(`${prefix}.background`)),
+            knowledge: normalizeNpcCapabilityField(fields.get(`${prefix}.knowledge`)),
+            practicedSkills: normalizeNpcCapabilityField(fields.get(`${prefix}.practicedSkills`)),
             condition: normalizeTrackerDeltaCondition(fields.get(`${prefix}.condition`)),
             woundsAdd: readTrackerList(fields, `${prefix}.woundsAdd`),
             woundsRemove: readTrackerList(fields, `${prefix}.woundsRemove`),
@@ -4431,6 +4448,7 @@ function sanitizeNarratorTrackerDelta(delta, narration) {
             || normalizeRevealedName(item.revealedName)
             || TRACKER_NARRATOR_NPC_DELTA_FIELDS.some(field => Array.isArray(item[field]) && item[field].length)
             || normalizePersonalitySummary(item.personalitySummary)
+            || TRACKER_NPC_PROFILE_FIELDS.some(field => normalizeNpcCapabilityField(item[field]))
         ));
     return cleanDelta;
 }
@@ -4459,6 +4477,9 @@ function sanitizeNarratorTrackerActorDelta(delta, narration, actorName = '') {
         ...source,
         revealedName: normalizeRevealedName(source.revealedName),
         personalitySummary: normalizePersonalitySummary(source.personalitySummary),
+        background: normalizeNpcCapabilityField(source.background),
+        knowledge: normalizeNpcCapabilityField(source.knowledge),
+        practicedSkills: normalizeNpcCapabilityField(source.practicedSkills),
         condition: sanitizedCondition,
         woundsAdd: sanitizedWoundsAdd,
         statusAdd: sanitizedStatusAdd,
@@ -5328,12 +5349,17 @@ function normalizeRevealedName(value) {
 
 function normalizeTrackerDelta(value, fields) {
     const source = value && typeof value === 'object' ? value : {};
-    return {
+    const normalized = {
         condition: normalizeTrackerDeltaCondition(source.condition),
         revealedName: normalizeRevealedName(source.revealedName),
         personalitySummary: normalizePersonalitySummary(source.personalitySummary),
-        ...Object.fromEntries(fields.map(field => [field, normalizeTrackerDeltaList(source[field])])),
     };
+    for (const field of fields) {
+        normalized[field] = TRACKER_NPC_PROFILE_FIELDS.includes(field)
+            ? normalizeNpcCapabilityField(source[field])
+            : normalizeTrackerDeltaList(source[field]);
+    }
+    return normalized;
 }
 
 function normalizeFameInfamyDelta(value = {}) {
@@ -5554,7 +5580,7 @@ function normalizeLedger(ledger, options = {}) {
             if (!npc || isNoneValue(npc)) return null;
         return {
             NPC: npc,
-            ...normalizeTrackerDelta(item, TRACKER_NPC_DELTA_FIELDS),
+            ...normalizeTrackerDelta(item, [...TRACKER_NPC_DELTA_FIELDS, ...TRACKER_NPC_PROFILE_FIELDS]),
         };
         }).filter(Boolean)
         : [];

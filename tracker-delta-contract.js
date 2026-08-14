@@ -137,8 +137,9 @@ export const TRACKER_DELTA_CONTRACT = [
     '- Never rewrite full tracker lists. Return deltas only.',
     '- LIST FORMAT: For every Add/Remove list field, output (none) or separate multiple complete entries with " | ". A comma is part of one entry and MUST NOT separate entries. Example: woundsAdd=deep cut, left forearm | bruised ribs.',
     '- Use condition=unchanged unless the narration explicitly changes overall condition.',
-    '- NPC entries are only for named or currently tracked NPCs with explicit condition, wound, status, visible gear, revealed inventory/currency, possession transfer, or stable personalitySummary changes.',
-    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, gearRemove, inventoryAdd, inventoryRemove, currencyAdd, and currencyRemove.',
+    '- NPC entries are only for named or currently tracked NPCs with explicit condition, wound, status, visible gear, revealed inventory/currency, possession transfer, stable personalitySummary changes, or stable background/knowledge/practicedSkills changes.',
+    '- NPC background, knowledge, and practicedSkills are hidden grounding memory. Record only durable facts established by the character card, lore, scenario, explicit setup, or persistent visible evidence. Keep them concise. Do not infer specialized expertise from intelligence, occupation title, age, composure, or one successful current action. These fields guide narration only and never alter mechanics.',
+    '- If TrackerUpdateEngine.NPC.count > 0, every NPC[index] entry must include NPC, revealedName, personalitySummary, background, knowledge, practicedSkills, condition, woundsAdd, woundsRemove, statusAdd, statusRemove, gearAdd, gearRemove, inventoryAdd, inventoryRemove, currencyAdd, and currencyRemove.',
     '- If uncertain, output (none).',
     '- Inside the fenced tracker block, output exactly the compact tracker lines. No prose. No JSON. No extra labels.',
     '',
@@ -225,6 +226,9 @@ TrackerUpdateEngine.NPC.count=0
 TrackerUpdateEngine.NPC[0].NPC=(none)
 TrackerUpdateEngine.NPC[0].revealedName=(none)
 TrackerUpdateEngine.NPC[0].personalitySummary=unchanged
+TrackerUpdateEngine.NPC[0].background=unchanged
+TrackerUpdateEngine.NPC[0].knowledge=unchanged
+TrackerUpdateEngine.NPC[0].practicedSkills=unchanged
 TrackerUpdateEngine.NPC[0].condition=unchanged
 TrackerUpdateEngine.NPC[0].woundsAdd=(none)
 TrackerUpdateEngine.NPC[0].woundsRemove=(none)

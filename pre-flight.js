@@ -1802,8 +1802,18 @@ function narrativeNpcEquipmentQualityFact(profiles = []) {
 function narrativeNpcDispositionAndStyleEntry(npc = {}) {
     const name = valueOrNone(npc.NPC);
     const personality = npcPersonalityNarrativeGuide(npc);
+    const grounding = npcGroundingNarrativeGuide(npc);
     const behavior = npcDispositionBehaviorGuide(npc);
-    return `${name}:\nPersonality: ${personality}\nBehavior toward {{user}}: ${behavior}`;
+    return `${name}:\nPersonality: ${personality}\nGrounding: ${grounding}\nBehavior toward {{user}}: ${behavior}`;
+}
+
+function npcGroundingNarrativeGuide(npc = {}) {
+    const background = valueOrNone(npc?.Background);
+    const knowledge = valueOrNone(npc?.Knowledge);
+    const practicedSkills = valueOrNone(npc?.PracticedSkills);
+    const hasGrounding = [background, knowledge, practicedSkills].some(value => !isNoneText(value));
+    if (!hasGrounding) return 'No additional background, knowledge, or practiced-skill profile is established; calibrate behavior to visible role and scene evidence.';
+    return `Background: ${background}; Knowledge: ${knowledge}; Practiced skills: ${practicedSkills}. Calibrate what this NPC notices, understands, attempts, says, and how they respond under pressure to these established foundations.`;
 }
 
 function npcPersonalityNarrativeGuide(npc = {}) {

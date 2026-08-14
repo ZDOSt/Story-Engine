@@ -9641,6 +9641,130 @@ const tests = [
     },
   },
   {
+    name: '30a hidden NPC capability fields persist without changing mechanics and reach narrator grounding',
+    run() {
+      const report = runCase({
+        userText: 'I ask Mira about the old road.',
+        tracker: {
+          Mira: trackerEntry({
+            currentDisposition: { B: 3, F: 1, H: 1 },
+            currentRapport: 5,
+            background: 'Former caravan scout.',
+            knowledge: 'Local roads and common trail hazards.',
+            practicedSkills: 'Route reading and camp setup.',
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Normal_Interaction',
+            identifyChallenge: 'ask Mira about the old road',
+            explicitMeans: 'ask Mira about the old road',
+            identifyTargets: {
+              ActionTargets: ['Mira'],
+              StealthTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+              NPCAwareOfUser: ['Mira'],
+            },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Mira')],
+          trackerUpdateEngine: {
+            user: emptyUserDelta(),
+            npcs: [{
+              NPC: 'Mira',
+              personalitySummary: 'Patient, diplomatic, and quietly protective.',
+              background: 'Former caravan scout.',
+              knowledge: 'Local roads and common trail hazards.',
+              practicedSkills: 'Route reading and camp setup.',
+              condition: 'unchanged',
+              woundsAdd: [],
+              woundsRemove: [],
+              statusAdd: [],
+              statusRemove: [],
+              gearAdd: [],
+              gearRemove: [],
+            }],
+          },
+        }),
+      });
+      const npc = report.trackerUpdate.npcs.Mira;
+      const handoff = report.finalNarrativeHandoff.npcHandoffs.find(item => item.NPC === 'Mira');
+
+      assert.equal(npc.background, 'Former caravan scout.');
+      assert.equal(npc.knowledge, 'Local roads and common trail hazards.');
+      assert.equal(npc.practicedSkills, 'Route reading and camp setup.');
+      assert.equal(npc.personalitySummary, 'Patient, diplomatic, and quietly protective.');
+      assert.deepEqual(npc.currentDisposition, { B: 3, F: 1, H: 1 });
+      assert.equal(npc.currentRapport, 5);
+      assert.equal(npc.condition, 'healthy');
+      assert.deepEqual(npc.wounds, []);
+      assert.equal(handoff.Background, 'Former caravan scout.');
+      assert.equal(handoff.Knowledge, 'Local roads and common trail hazards.');
+      assert.equal(handoff.PracticedSkills, 'Route reading and camp setup.');
+      assert.match(prompt(report), /Background: Former caravan scout\.; Knowledge: Local roads and common trail hazards\.; Practiced skills: Route reading and camp setup\./);
+      assert.match(prompt(report), /Calibrate what this NPC notices, understands, attempts, says/);
+    },
+  },
+  {
+    name: '30b unchanged or empty NPC capability deltas preserve existing hidden grounding',
+    run() {
+      const report = runCase({
+        userText: 'I greet Mira.',
+        tracker: {
+          Mira: trackerEntry({
+            background: 'Former caravan scout.',
+            knowledge: 'Local roads and common trail hazards.',
+            practicedSkills: 'Route reading and camp setup.',
+          }),
+        },
+        ledger: baseLedger({
+          trackerUpdateEngine: {
+            user: emptyUserDelta(),
+            npcs: [{
+              NPC: 'Mira',
+              personalitySummary: 'unchanged',
+              background: 'unchanged',
+              knowledge: '',
+              practicedSkills: '(none)',
+              condition: 'unchanged',
+              woundsAdd: [],
+              woundsRemove: [],
+              statusAdd: [],
+              statusRemove: [],
+              gearAdd: [],
+              gearRemove: [],
+            }],
+          },
+        }),
+      });
+      assert.equal(report.trackerUpdate.npcs.Mira.background, 'Former caravan scout.');
+      assert.equal(report.trackerUpdate.npcs.Mira.knowledge, 'Local roads and common trail hazards.');
+      assert.equal(report.trackerUpdate.npcs.Mira.practicedSkills, 'Route reading and camp setup.');
+    },
+  },
+  {
+    name: '30c hidden NPC capability fields stay out of visible tracker rendering',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const displaySource = source.slice(
+        source.indexOf('function buildTrackerDisplayHtml'),
+        source.indexOf('function cleanTrackerDisplayName'),
+      );
+      const mergeSource = source.slice(
+        source.indexOf('function applyTrackerDeltaToNpcState'),
+        source.indexOf('function normalizeTrackerDeltaCondition'),
+      );
+      assert.doesNotMatch(displaySource, /background|knowledge|practicedSkills/);
+      assert.match(mergeSource, /background: source\.background \|\| ''/);
+      assert.match(mergeSource, /knowledge: source\.knowledge \|\| ''/);
+      assert.match(mergeSource, /practicedSkills: source\.practicedSkills \|\| ''/);
+      assert.match(mergeSource, /normalizeNpcCapabilityField\(delta\?\.\[field\]\)/);
+      assert.match(source, /\['background', 'knowledge', 'practicedSkills'\]\.some\(field => normalizeNpcCapabilityField\(delta\[field\]\)\)/);
+    },
+  },
+  {
     name: '31 relationship engine entry alone does not make NPC in scene',
     run() {
       const report = runCase({
@@ -17082,10 +17206,10 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 245,
+        leaves: 248,
         objects: 47,
         arrays: 47,
-        descriptions: 104,
+        descriptions: 107,
         incompleteRequired: 0,
       });
       assert.match(

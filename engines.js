@@ -1661,7 +1661,7 @@ export function buildNarrationGuidance(resolution, handoffs, chaos, proactivity,
 export function buildPersistencePolicy() {
     return {
         staticUntilExplicitChange: ['currentCoreStats.Rank', 'currentCoreStats.MainStat', 'currentCoreStats.PHY', 'currentCoreStats.MND', 'currentCoreStats.CHA'],
-        npcPersistentRuleMutated: ['aliases', 'currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'socialResolutionMemory', 'slowBondEvidence', 'proactivityMemory', 'currentCoreStats', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'currency', 'lootSearchCompleted'],
+        npcPersistentRuleMutated: ['aliases', 'currentDisposition', 'currentRapport', 'lastRapportGainActiveMs', 'establishedRelationship', 'intimacyState', 'userHistory', 'raceProfile', 'personalitySummary', 'background', 'knowledge', 'practicedSkills', 'socialResolutionMemory', 'slowBondEvidence', 'proactivityMemory', 'currentCoreStats', 'hostilePressure', 'hostileLandedPressure', 'dominantLock', 'pressureMode', 'lifecycle', 'condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'currency', 'lootSearchCompleted'],
         playerPersistentRuleMutated: ['condition', 'wounds', 'statusEffects', 'gear', 'inventory', 'equipmentTiers', 'currency', 'tasks', 'commitments'],
         hiddenPowerActorPersistentRuleMutated: ['powerActors.name', 'powerActors.type', 'powerActors.enmity', 'powerActors.tier', 'powerActors.reasons', 'powerActors.responseHistory', 'powerActors.lastEffect'],
         perTurn: ['GOAL', 'hostilesInScene', 'ActionTargets', 'OppTargets', 'RollNeeded', 'harmMode', 'OutcomeTier', 'Outcome', 'LandedActions', 'CounterPotential', 'restraintControl', 'boundaryPressure', 'boundaryBreak', 'activeHostileThreat', 'CHAOS', 'proactivityResults', 'aggressionResults'],
@@ -1790,6 +1790,9 @@ export function normalizeTrackerEntry(value) {
         userHistory: normalizeUserHistory(value?.userHistory),
         raceProfile: normalizeNpcRaceProfile(value?.raceProfile),
         personalitySummary: normalizePersonalitySummary(value?.personalitySummary),
+        background: normalizeNpcCapabilityField(value?.background),
+        knowledge: normalizeNpcCapabilityField(value?.knowledge),
+        practicedSkills: normalizeNpcCapabilityField(value?.practicedSkills),
         socialResolutionMemory: normalizeSocialResolutionMemory(value?.socialResolutionMemory),
         slowBondEvidence: normalizeSlowBondEvidence(value?.slowBondEvidence),
         proactivityMemory: normalizeProactivityMemory(value?.proactivityMemory),
@@ -2449,6 +2452,16 @@ export function normalizePersonalitySummary(value) {
         .replace(/\s+/g, ' ')
         .replace(/^["']|["']$/g, '')
         .trim());
+    if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
+    return text.slice(0, 320);
+}
+
+export function normalizeNpcCapabilityField(value) {
+    const text = String(value ?? '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/^['"]|['"]$/g, '')
+        .trim();
     if (!text || ['(none)', 'none', 'null', 'n/a', 'unknown', 'unchanged'].includes(text.toLowerCase())) return '';
     return text.slice(0, 320);
 }

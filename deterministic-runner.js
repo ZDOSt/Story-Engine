@@ -36,6 +36,7 @@ import {
     buildPersistencePolicy,
     trackerSummary,
     normalizeTrackerEntry,
+    normalizeNpcCapabilityField,
     normalizeNpcRaceProfile,
     normalizeProactivityMemory,
     normalizeTrackerUserState,
@@ -4375,6 +4376,9 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
                 NPC_STAKES: 'N',
                 StandingInfluence: 'none',
                 StandingBasis: NONE,
+                Background: normalizeNpcCapabilityField(trackerSnapshot?.[npc]?.background) || 'none',
+                Knowledge: normalizeNpcCapabilityField(trackerSnapshot?.[npc]?.knowledge) || 'none',
+                PracticedSkills: normalizeNpcCapabilityField(trackerSnapshot?.[npc]?.practicedSkills) || 'none',
                 Override: 'NONE',
                 EstablishedRelationship: 'N',
                 IntimacyBoundary: 'SKIP',
@@ -4623,6 +4627,9 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             NPC_STAKES: npcStakes,
             StandingInfluence: standing.StandingInfluence,
             StandingBasis: standing.StandingBasis,
+            Background: state.background || 'none',
+            Knowledge: state.knowledge || 'none',
+            PracticedSkills: state.practicedSkills || 'none',
             Override: threshold.Override,
             EstablishedRelationship: establishedRelationship,
             IntimacyBoundary: intimacyBoundary.boundary,
@@ -7688,7 +7695,12 @@ function applyTrackerDeltaToState(before, delta, includePlayerFields) {
         ? normalizeTrackerUserState(before)
         : normalizeTrackerEntry(before);
     const result = {
-        ...(!includePlayerFields ? { personalitySummary: source.personalitySummary || '' } : {}),
+        ...(!includePlayerFields ? {
+            personalitySummary: source.personalitySummary || '',
+            background: source.background || '',
+            knowledge: source.knowledge || '',
+            practicedSkills: source.practicedSkills || '',
+        } : {}),
         condition: source.condition,
         wounds: [...source.wounds],
         statusEffects: [...source.statusEffects],
@@ -7714,6 +7726,10 @@ function applyTrackerDeltaToState(before, delta, includePlayerFields) {
         const personalitySummary = cleanPersonalitySummary(delta?.personalitySummary);
         if (personalitySummary) {
             result.personalitySummary = personalitySummary;
+        }
+        for (const field of ['background', 'knowledge', 'practicedSkills']) {
+            const value = normalizeNpcCapabilityField(delta?.[field]);
+            if (value) result[field] = value;
         }
     }
     if (includePlayerFields) {

@@ -1,4 +1,4 @@
-import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, applyPendingBoundaryDelta, boundCompanionDeltaHasChanges, classifyDisposition, finalizeLootSearchCompletion, findTrackerEntryName, normalizeBoundCompanionState, normalizePendingBoundaryState, normalizeTrackerEntry, normalizeTrackerUserState, pendingBoundaryDeltaHasChanges, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel } from './engines.js';
+import { ENGINE_PROMPT_TEXT, applyBoundCompanionDelta, applyPendingBoundaryDelta, boundCompanionDeltaHasChanges, classifyDisposition, finalizeLootSearchCompletion, findTrackerEntryName, normalizeBoundCompanionState, normalizeNpcCapabilityField, normalizePendingBoundaryState, normalizeTrackerEntry, normalizeTrackerUserState, pendingBoundaryDeltaHasChanges, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel } from './engines.js';
 
 import {
     applyConnectionProfileName,
@@ -5706,6 +5706,8 @@ function trackerDeltaHasChanges(delta, includePlayerFields) {
 
     if (!includePlayerFields && cleanPersonalitySummary(delta.personalitySummary)) return true;
 
+    if (!includePlayerFields && ['background', 'knowledge', 'practicedSkills'].some(field => normalizeNpcCapabilityField(delta[field]))) return true;
+
     const fields = includePlayerFields
 
         ? ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'currencyAdd', 'currencyRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']
@@ -5780,6 +5782,12 @@ function applyTrackerDeltaToNpcState(before, delta) {
 
         personalitySummary: source.personalitySummary || '',
 
+        background: source.background || '',
+
+        knowledge: source.knowledge || '',
+
+        practicedSkills: source.practicedSkills || '',
+
         condition: source.condition,
 
         wounds: [...source.wounds],
@@ -5797,6 +5805,11 @@ function applyTrackerDeltaToNpcState(before, delta) {
     const personalitySummary = cleanPersonalitySummary(delta?.personalitySummary);
 
     if (personalitySummary) result.personalitySummary = personalitySummary;
+
+    for (const field of ['background', 'knowledge', 'practicedSkills']) {
+        const value = normalizeNpcCapabilityField(delta?.[field]);
+        if (value) result[field] = value;
+    }
 
     const condition = normalizeTrackerDeltaCondition(delta?.condition);
 
