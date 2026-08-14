@@ -2586,6 +2586,7 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTra
     const charName = context.name2 || 'Assistant';
     const cardContext = formatCardContext(context);
     const compactTemplate = semanticCompactTemplateForOptions(options);
+    const compactConstraintGuidance = compactPlainTextConstraintGuidance(options);
 
     return [
         {
@@ -2615,6 +2616,7 @@ function buildSemanticPrompt(context, coreChat, type, trackerSnapshot, playerTra
             content:
                 `${COMPACT_LEDGER_OUTPUT_CONTRACT}\n` +
                 `${compactDynamicRowGuidance()}\n` +
+                `${compactConstraintGuidance ? `${compactConstraintGuidance}\n` : ''}` +
                 compactTemplate,
         },
         {
@@ -2629,6 +2631,7 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
     const charName = context.name2 || 'Assistant';
     const assembledMessages = normalizeAssembledPromptMessages(assembledChat);
     const compactTemplate = semanticCompactTemplateForOptions(options);
+    const compactConstraintGuidance = compactPlainTextConstraintGuidance(options);
 
     return [
         {
@@ -2652,6 +2655,7 @@ function buildSemanticPromptFromAssembledChat(context, assembledChat, type, trac
             content:
                 `${COMPACT_LEDGER_OUTPUT_CONTRACT}\n` +
                 `${compactDynamicRowGuidance()}\n` +
+                `${compactConstraintGuidance ? `${compactConstraintGuidance}\n` : ''}` +
                 compactTemplate,
         },
         {
@@ -3218,6 +3222,34 @@ function compactDynamicRowGuidance() {
         ...COMPACT_RELATIONSHIP_ROW_TEMPLATE.map(([suffix, value]) => `RelationshipEngine[i].${suffix}=${value}`),
         'InjuryEffectEngine[i] required row:',
         ...COMPACT_INJURY_ROW_TEMPLATE.map(([suffix, value]) => `InjuryEffectEngine[i].${suffix}=${value}`),
+        '- InjuryEffectEngine[i].targetRole MUST be exactly one of OppTarget|HarmedObserver|ActionTarget|User|Other. Use OppTarget only for the entity directly opposing or contesting the current action; HarmedObserver only for a separately and directly injured observer; ActionTarget for a directly affected non-opponent; User when {{user}} receives the effect; Other only when none of those roles apply. Never substitute natural-language labels such as Opponent.',
+    ].join('\n');
+}
+
+function compactPlainTextConstraintGuidance(options = {}) {
+    if (normalizeSemanticOutputTransport(options?.semanticOutputTransport) !== SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT) {
+        return '';
+    }
+
+    const allowed = values => values.join('|');
+    return [
+        'PLAIN-TEXT FIELD DECISION GUIDE:',
+        '- Every constrained value below is an exact contract token, not prose. Select it only when the Engine rule and supplied evidence satisfy its definition. When no definition is supported, use the stated conservative default; never choose a plausible-sounding synonym.',
+        '- Every Y/N field: use Y only when its own Engine rule is affirmatively supported by current authoritative context; otherwise use N. Every list field: use (none) when empty, otherwise use exact entries separated only by |. Count fields must be canonical integers: WorldProgressionAdvancement.count=0..18; ResolutionEngine.actionUnits.count=0..3; RelationshipEngine.count=0..20; UserKnowledgeApplication.count=0..20; InjuryEffectEngine.count=0..20; TrackerUpdateEngine.NPC.count=0..20; PowerActorAssessment.count=0..20; PowerActorEnmity.count=0..12; LatentGrievance.count=0..12; PowerActorAffiliationLink.count=0..12; LatentFavor.count=0..12; PowerActorFavorAffiliationLink.count=0..12; PowerEventShape.count=0..4. Include every required indexed row from 0 through count-1 and use 0 only when no qualifying entries exist.',
+        '- WorldTransition.indoors: exactly unchanged|indoors|outdoors. Use unchanged without an explicit current-turn indoor/outdoor crossing; use indoors or outdoors only for that explicit destination state. WorldTransition.timeAdvance: exactly none|slot|overnight|day|explicit; use none without an explicit wait, sleep, travel, or time skip. WorldTransition.timeOfDay: exactly unchanged|morning|afternoon|evening|night; use unchanged without an explicit new time of day.',
+        '- WorldTransition.timeAdvanceCount: canonical integer 1..3650; use 1 when timeAdvance=none. WorldProgressionAdvancement[i].status: exactly active|completed. Use completed only when the supplied plan has actually completed under the current supported transition; otherwise use active. Its nextDelayDays is a canonical integer 0..120, nextDelaySlots is a canonical integer 0..480, and evidence.count is a canonical integer 1..4 for each declared advancement. WorldProgressionAdvancement[i].evidence[j].route: exactly location|actor|news|investigation, matching where that specific advancement evidence comes from.',
+        '- ResolutionEngine.actionUnits.count is a canonical integer 0..3. Use one A1 unit for ordinary external action, one unit for each discrete mechanically relevant action when multiple are explicit, and no more than three. Each actionUnits[i].id MUST be exactly A1, A2, or A3 matching index 0, 1, or 2 respectively.',
+        '- ResolutionEngine.userAbilityUse.MechanicalScope: exactly flavor_only_no_bonus, always. ResolutionEngine.itemUse.Source: exactly ' + allowed(ITEM_USE_SOURCES) + '. Use gear/inventory only for an exact saved user entry, scene only for an exact saved scene item, ambient only for a narrow generic low-consequence object, unavailable only for an attempted item with no valid source, and none only when Attempted=N.',
+        '- ResolutionEngine.lootSearch.TargetKind: exactly ' + allowed(LOOT_TARGET_KINDS) + '. Choose humanoid for personlike equipment-bearing remains, monster for monster remains, and other only for a qualifying remainder outside those categories. ResolutionEngine.claimCheck.TruthStatus: exactly ' + allowed(CLAIM_TRUTH_STATUSES) + '; choose known_true or known_false only from explicit support or contradiction, unsupported for a material unestablished claim, unknown when context cannot judge, and none when no qualifying claim exists. ResolutionEngine.claimCheck.NPCAccess: exactly ' + allowed(CLAIM_NPC_ACCESS_LEVELS) + '; choose direct, partial, or unknown from the target NPC actual access, and none only when no claim exists.',
+        '- ResolutionEngine.boundaryPressure.Type: exactly ' + allowed(BOUNDARY_PRESSURE_TYPES) + '; ResolutionEngine.boundaryBreak.Type: exactly ' + allowed(BOUNDARY_BREAK_TYPES) + '; ResolutionEngine.boundaryBreak.Response: exactly ' + allowed(BOUNDARY_BREAK_RESPONSES) + '. Use none unless the corresponding Engine condition is present, then select only the category that matches the controlled object, access, or boundary response.',
+        '- ResolutionEngine.harmMode: exactly ' + allowed(HARM_MODES) + '. Use lethal for methods capable of decisive killing or maiming, nonlethal for ordinary or controlled injuring force, restraint_control only for non-injuring bodily control, and none without bodily harm/control. ResolutionEngine.challengeType: exactly ' + allowed(CHALLENGE_TYPES) + '; it must be none when rollNeeded=N and must describe the actual fresh stake when rollNeeded=Y. ResolutionEngine.socialTactic: exactly ' + allowed(SOCIAL_TACTICS) + '; use diplomacy, bluff, or intimidate only for that matching social contest, otherwise none.',
+        '- ResolutionEngine.environmentDifficultyTier: exactly ' + allowed(ENVIRONMENT_DIFFICULTY_TIERS) + '. Use none unless challengeType=environment; otherwise classify only the concrete non-living obstacle as easy, average, hard, or extreme. ResolutionEngine.genStats.CapabilityPool and RelationshipEngine[i].genStats.CapabilityPool: exactly none|common|trained|elite|boss. Use none when no NPC needs a missing stat seed, common for uncertainty/ordinary capability, then trained, elite, or boss only for the matching established capability evidence. Their MainStat fields: exactly none|PHY|MND|CHA|Balanced; use Balanced when specialization is unclear.',
+        '- RelationshipEngine[i].romanceStyle: exactly ' + allowed(ROMANCE_STYLES) + ', selected only from established relationship context; use none when no supported style applies. standingInfluence: exactly ' + allowed(STANDING_INFLUENCES) + '; use none without a recognized meaningful user-standing difference, aware when it changes expression but not what the NPC dares do, constrained only when it actually limits the NPC expression. Every stakeChangeByOutcome field: exactly benefit|harm|none, based only on that NPC concrete stakes for that specific outcome.',
+        '- UserKnowledgeApplication[i].type: exactly ' + allowed(USER_KNOWLEDGE_TYPES) + '; copy the stored knowledge type. scope: exactly ' + allowed(USER_KNOWLEDGE_SCOPES) + '; copy the stored scope. valence: exactly none|' + allowed(USER_REPUTATION_VALENCES) + '; copy the applicable stored valence. effect: exactly ' + allowed(USER_KNOWLEDGE_APPLICATION_EFFECTS) + '; use the matching Engine-defined relationship effect, contextOnly for narration-only relevance, and none without a current application.',
+        '- InjuryEffectEngine[i].targetRole: exactly OppTarget|HarmedObserver|ActionTarget|User|Other. Use OppTarget only for the directly opposing target, HarmedObserver only for a separately directly injured observer, ActionTarget for a directly affected non-opponent, User when {{user}} is affected, and Other only otherwise. effectType: exactly none|physical_injury|burn|poison|paralysis|disease|blindness|stun|fear|restraint|curse|electrical|exhaustion|mental_status|other_status; choose the actual enduring impairing effect, or none when none qualifies. severityFloor: exactly minor|moderate|severe|critical from the supported minimum impairment. persistence: exactly none|lasting; use lasting only for a continuing effect that should remain after the turn.',
+        '- TrackerUpdateEngine.User.condition and TrackerUpdateEngine.NPC[i].condition: exactly ' + allowed(TRACKER_CONDITIONS) + '. Use unchanged unless current/completed evidence establishes a present condition; never set it from an attempt. TrackerUpdateEngine.BoundCompanionState.status: exactly unchanged|active|inactive; use active/inactive only for an explicit established state change. Its type: exactly none|possession|shared_vessel|intelligent_item|bound_spirit|artifact|implant|other, matching only the established companion form. TrackerUpdateEngine.PendingBoundaryState.status: exactly unchanged|set|clear and type: exactly none|restraint|object_access|space_access|departure|intimacy; semantic preflight normally uses unchanged/none unless the Engine specifically authorizes otherwise.',
+        '- PowerActorAssessment[i].scope: exactly ' + allowed(POWER_ACTOR_ASSESSMENT_SCOPES) + ', matching the actor actual form. PowerActorEnmity[i].effect and LatentGrievance[i].effect: exactly ' + allowed(POWER_ACTOR_EFFECT_TYPES) + ', selected only for the matching supported setback; use none when no qualifying effect exists. LatentFavor[i].benefit: exactly ' + allowed(POWER_ACTOR_FAVOR_TYPES) + ', selected only for the supported substantial help. Their severity fields: exactly ' + allowed(POWER_ACTOR_SEVERITIES) + ', reflecting the Engine-defined concrete impact; use none only when no qualifying record exists. Their actionUnitId fields: exactly A1|A2|A3 and must copy the actual causing action unit.',
+        '- PowerActorFavorAffiliationLink[i].fit: exactly ' + allowed(POWER_ACTOR_FAVOR_FITS) + '; use use_now only when the opportunity naturally fits this visible scene, otherwise defer. PowerEventShape[i].fit: exactly ' + allowed(POWER_EVENT_FITS) + '; use none without a pending event, use_now only for a natural current-scene fit, defer when it may fit later, and drop only for contradiction/impossibility. PowerEventShape[i].contactGender: exactly ' + allowed(POWER_EVENT_CONTACT_GENDERS) + ', based only on established contact information.',
     ].join('\n');
 }
 

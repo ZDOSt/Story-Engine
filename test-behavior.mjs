@@ -20394,6 +20394,13 @@ const tests = [
       const plainBindingBlock = buildSemanticTurnBindingBlock(binding, SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
       assert.match(plainBindingBlock, /Echo turnId exactly in TurnBinding\.turnId\./);
       assert.match(buildSemanticTurnBindingBlock(binding), /Echo turnId exactly in turnBinding\.turnId\./);
+      assert.match(semanticSource, /function compactPlainTextConstraintGuidance\(options = \{\}\)/);
+      assert.match(semanticSource, /targetRole MUST be exactly one of OppTarget\|HarmedObserver\|ActionTarget\|User\|Other/);
+      assert.match(semanticSource, /never choose a plausible-sounding synonym/);
+      assert.match(semanticSource, /WorldProgressionAdvancement\.count=0\.\.18/);
+      assert.match(semanticSource, /WorldTransition\.timeAdvanceCount: canonical integer 1\.\.3650/);
+      assert.match(semanticSource, /compactConstraintGuidance = compactPlainTextConstraintGuidance\(options\)/);
+      assert.equal((semanticSource.match(/compactConstraintGuidance = compactPlainTextConstraintGuidance\(options\)/g) || []).length, 2);
       assert.equal(normalizeSemanticOutputTransport(undefined), SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL);
       assert.equal(normalizeSemanticOutputTransport('plain_text'), SEMANTIC_OUTPUT_TRANSPORTS.PLAIN_TEXT);
       assert.equal(normalizeSemanticOutputTransport('unsupported'), SEMANTIC_OUTPUT_TRANSPORTS.STRICT_TOOL);
