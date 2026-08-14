@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, normalizeStoryEngineThinkingDisableFormat, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveStoryEngineThinkingDisableFormat, sanitizeSemanticAssembledText, STORY_ENGINE_THINKING_DISABLE_FORMATS, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -16798,19 +16798,24 @@ const tests = [
       assert.match(source, /using direct semantic connection profile request/);
       assert.doesNotMatch(source, /semanticReasoningEffort:\s*|settings\.semanticReasoningEffort|structured_preflight_semantic_reasoning_effort|normalizeSemanticReasoningEffort/);
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.semanticReasoningEffort/);
+      assert.doesNotMatch(source, /semanticThinkingDisableFormats:\s*Object\.freeze/);
+      assert.doesNotMatch(source, /structured_preflight_semantic_thinking_disable_format/);
+      assert.doesNotMatch(source, /normalizeSemanticThinkingDisableFormatMap|resolveSemanticThinkingDisableTarget|setSemanticThinkingDisableFormat/);
       const getSettingsSource = source.slice(
         source.indexOf('function getSettings()'),
         source.indexOf('function normalizeNarratorHandoffDisplayMode'),
       );
-      assert.match(getSettingsSource, /const hadRetiredSemanticSettings = \['disableSemanticThinking', 'semanticReasoningEffort'\]/);
+      assert.match(getSettingsSource, /'semanticThinkingDisableFormat',\s*'semanticThinkingDisableFormats'/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticThinkingSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
         storyEngine: {
           disableSemanticThinking: false,
           semanticReasoningEffort: 'high',
+          semanticThinkingDisableFormat: 'deepseek',
+          semanticThinkingDisableFormats: { 'profile:old': 'openrouter_nanogpt' },
         },
       };
       const getMigratedSettings = new Function(
@@ -16821,11 +16826,6 @@ const tests = [
         'migrateTrackerWidgetSettings',
         'migrateNarratorHandoffSettings',
         'migrateProseGuardSettings',
-        'normalizeSemanticThinkingDisableFormatMap',
-        'semanticThinkingDisableFormatMapsEqual',
-        'resolveSemanticThinkingDisableTarget',
-        'normalizeStoryEngineThinkingDisableFormat',
-        'STORY_ENGINE_THINKING_DISABLE_FORMATS',
         'saveExtensionSettings',
         `${getSettingsSource}; return getSettings;`,
       )(
@@ -16836,95 +16836,19 @@ const tests = [
         () => false,
         () => false,
         () => false,
-        value => value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {},
-        (left, right) => JSON.stringify(left || {}) === JSON.stringify(right),
-        () => ({ key: 'current', isCustom: false }),
-        normalizeStoryEngineThinkingDisableFormat,
-        STORY_ENGINE_THINKING_DISABLE_FORMATS,
         () => { settingsSaveCount += 1; },
       );
       const migratedSettings = getMigratedSettings();
       assert.equal('disableSemanticThinking' in migratedSettings, false);
       assert.equal('semanticReasoningEffort' in migratedSettings, false);
+      assert.equal('semanticThinkingDisableFormat' in migratedSettings, false);
+      assert.equal('semanticThinkingDisableFormats' in migratedSettings, false);
       assert.equal(settingsSaveCount, 1);
       getMigratedSettings();
       assert.equal(settingsSaveCount, 1);
-
-      const thinkingSettingsStart = source.indexOf('function normalizeSemanticThinkingDisableFormatMap(');
-      const thinkingSettingsEnd = source.indexOf('function ensureStreamingArtifactRegex(', thinkingSettingsStart);
-      const thinkingSettingsSource = source.slice(thinkingSettingsStart, thinkingSettingsEnd);
-      let activeProfileName = 'Deep Custom';
-      let currentRoute = { source: 'custom' };
-      const profiles = [
-        { id: 'deep-profile', name: 'Deep Custom' },
-        { id: 'nano-profile', name: 'Nano Custom' },
-      ];
-      const thinkingSettingsHelpers = new Function(
-        'normalizeStoryEngineThinkingDisableFormat',
-        'STORY_ENGINE_THINKING_DISABLE_FORMATS',
-        'getConnectionProfileByName',
-        'getChatCompletionProfileRoute',
-        'getCurrentChatCompletionRoute',
-        'getActiveConnectionProfileName',
-        `${thinkingSettingsSource}; return { resolveSemanticThinkingDisableTarget, getSemanticThinkingDisableFormat, setSemanticThinkingDisableFormat };`,
-      )(
-        normalizeStoryEngineThinkingDisableFormat,
-        STORY_ENGINE_THINKING_DISABLE_FORMATS,
-        name => profiles.find(profile => profile.name.toLowerCase() === String(name).toLowerCase()) || null,
-        () => ({ source: 'custom' }),
-        () => currentRoute,
-        () => activeProfileName,
-      );
-      const perProfileSettings = {
-        useSeparateSemanticSettings: true,
-        semanticConnectionProfile: 'Deep Custom',
-        semanticThinkingDisableFormats: {},
-      };
-      let thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
-      assert.equal(thinkingTarget.key, 'profile:deep-profile');
-      thinkingSettingsHelpers.setSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget, STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK);
-      perProfileSettings.semanticConnectionProfile = 'Nano Custom';
-      thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
-      assert.equal(thinkingSettingsHelpers.getSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget), STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE);
-      thinkingSettingsHelpers.setSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget, STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT);
-      perProfileSettings.semanticConnectionProfile = 'Deep Custom';
-      thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
-      assert.equal(thinkingSettingsHelpers.getSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget), STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK);
-      perProfileSettings.useSeparateSemanticSettings = false;
-      activeProfileName = 'Nano Custom';
-      thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
-      assert.equal(thinkingTarget.key, 'profile:nano-profile');
-      assert.equal(thinkingSettingsHelpers.getSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget), STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT);
-      activeProfileName = '';
-      currentRoute = { source: 'custom' };
-      thinkingTarget = thinkingSettingsHelpers.resolveSemanticThinkingDisableTarget(perProfileSettings);
-      assert.equal(thinkingTarget.key, 'current');
-      assert.equal(thinkingSettingsHelpers.getSemanticThinkingDisableFormat(perProfileSettings, thinkingTarget), STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE);
       assert.doesNotMatch(source, /using direct tracker connection profile request/);
       assert.doesNotMatch(source, /using direct Prose Guard connection profile request/);
       assert.doesNotMatch(source, /using direct Progression connection profile request/);
-      assert.equal(normalizeStoryEngineThinkingDisableFormat('OPENAI'), STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI);
-      assert.equal(normalizeStoryEngineThinkingDisableFormat('unsupported'), STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE);
-      const automaticThinkingFormats = new Map([
-        ['openai', STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI],
-        ['azure_openai', STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI],
-        ['openrouter', STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT],
-        ['nanogpt', STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT],
-        ['deepseek', STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK],
-        ['zai', STORY_ENGINE_THINKING_DISABLE_FORMATS.GLM_ZAI],
-        ['moonshot', STORY_ENGINE_THINKING_DISABLE_FORMATS.KIMI_MOONSHOT],
-      ]);
-      for (const [sourceName, expectedFormat] of automaticThinkingFormats) {
-        assert.equal(resolveStoryEngineThinkingDisableFormat(sourceName, STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT), expectedFormat);
-      }
-      assert.equal(
-        resolveStoryEngineThinkingDisableFormat('custom', STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT),
-        STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT,
-      );
-      assert.equal(
-        resolveStoryEngineThinkingDisableFormat('unknown', STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK),
-        STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE,
-      );
 
       const officialDeepSeekPayload = {
         chat_completion_source: 'deepseek',
@@ -16980,7 +16904,7 @@ const tests = [
       assert.equal(officialNanoGptPayload.include_reasoning, false);
       assert.equal(officialNanoGptPayload.reasoning_effort, 'min');
 
-      for (const sourceName of ['zai', 'moonshot']) {
+      for (const sourceName of ['zai', 'moonshot', 'xai', 'unknown']) {
         const officialThinkingTypePayload = {
           chat_completion_source: sourceName,
           reasoning_effort: 'high',
@@ -16999,118 +16923,26 @@ const tests = [
         max_tokens: 4096,
         custom_include_body: customNoneBody,
       };
-      applyStoryEngineThinkingDisabledPayload(customNonePayload, {
-        source: 'custom',
-        thinkingDisableFormat: STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE,
-      });
+      applyStoryEngineThinkingDisabledPayload(customNonePayload, { source: 'custom' });
       assert.equal(customNonePayload.include_reasoning, false);
       assert.equal('reasoning_effort' in customNonePayload, false);
       assert.equal(customNonePayload.max_tokens, 4096);
       assert.equal(customNonePayload.custom_include_body, customNoneBody);
 
-      const conflictingCustomBody = {
-        include_reasoning: true,
-        reasoning_effort: 'high',
-        reasoning: { effort: 'high', preservedOnlyWhenCompatible: false },
-        thinking: { type: 'enabled' },
-        provider_option: true,
-        nested: { kept: 1 },
-      };
-      const customOpenAiPayload = {
+      const customOpaqueBodyPayload = {
         chat_completion_source: 'custom',
-        custom_include_body: JSON.stringify(conflictingCustomBody),
+        custom_include_body: 'provider_option: [unterminated',
       };
-      applyStoryEngineThinkingDisabledPayload(customOpenAiPayload, {
-        source: 'custom',
-        thinkingDisableFormat: STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI,
-      });
-      assert.deepEqual(yaml.parse(customOpenAiPayload.custom_include_body), {
-        provider_option: true,
-        nested: { kept: 1 },
-        reasoning_effort: 'none',
-      });
+      applyStoryEngineThinkingDisabledPayload(customOpaqueBodyPayload, { source: 'custom' });
+      assert.equal(customOpaqueBodyPayload.custom_include_body, 'provider_option: [unterminated');
 
-      const customOpenRouterPayload = {
-        chat_completion_source: 'custom',
-        custom_include_body: JSON.stringify(conflictingCustomBody),
-      };
-      applyStoryEngineThinkingDisabledPayload(customOpenRouterPayload, {
-        source: 'custom',
-        thinkingDisableFormat: STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT,
-      });
-      assert.deepEqual(yaml.parse(customOpenRouterPayload.custom_include_body), {
-        provider_option: true,
-        nested: { kept: 1 },
-        reasoning: { effort: 'none' },
-      });
-
-      for (const thinkingTypeFormat of [
-        STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK,
-        STORY_ENGINE_THINKING_DISABLE_FORMATS.GLM_ZAI,
-        STORY_ENGINE_THINKING_DISABLE_FORMATS.KIMI_MOONSHOT,
-        STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT,
-      ]) {
-        const customThinkingTypePayload = {
-          chat_completion_source: 'custom',
-          custom_include_body: JSON.stringify(conflictingCustomBody),
-        };
-        applyStoryEngineThinkingDisabledPayload(customThinkingTypePayload, {
-          source: 'custom',
-          thinkingDisableFormat: thinkingTypeFormat,
-        });
-        assert.deepEqual(yaml.parse(customThinkingTypePayload.custom_include_body), {
-          provider_option: true,
-          nested: { kept: 1 },
-          thinking: { type: 'disabled' },
-        });
-      }
-
-      const customYamlSequencePayload = {
-        chat_completion_source: 'custom',
-        custom_include_body: '- "quoted-key": kept\n- provider_list:\n    - first\n    - second\n- thinking:\n    type: enabled',
-      };
-      applyStoryEngineThinkingDisabledPayload(customYamlSequencePayload, {
-        source: 'custom',
-        thinkingDisableFormat: STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT,
-      });
-      assert.deepEqual(yaml.parse(customYamlSequencePayload.custom_include_body), {
-        'quoted-key': 'kept',
-        provider_list: ['first', 'second'],
-        thinking: { type: 'disabled' },
-      });
-
-      const customProfileBodyPayload = {
-        chat_completion_source: 'custom',
-        max_tokens: 4096,
-      };
-      applyStoryEngineThinkingDisabledPayload(customProfileBodyPayload, {
-        source: 'custom',
-        customIncludeBody: 'provider_option: true\nthinking:\n  type: enabled\nprovider_tail: kept',
-        thinkingDisableFormat: STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK,
-      });
-      assert.deepEqual(yaml.parse(customProfileBodyPayload.custom_include_body), {
-        provider_option: true,
-        provider_tail: 'kept',
-        thinking: { type: 'disabled' },
-      });
-
-      assert.throws(
-        () => applyStoryEngineThinkingDisabledPayload({
-          chat_completion_source: 'custom',
-          custom_include_body: 'provider_option: [unterminated',
-        }, {
-          source: 'custom',
-          thinkingDisableFormat: STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK,
-        }),
-        /custom_include_body is invalid YAML/,
-      );
-      for (const sourceName of ['deepseek', 'openai']) {
+      for (const sourceName of ['deepseek', 'openai', 'nanogpt', 'openrouter', 'xai']) {
         assert.deepEqual(buildSemanticToolChoice(sourceName), {
           type: 'function',
           function: { name: 'submit_semantic_preflight' },
         });
       }
-      for (const sourceName of ['azure_openai', 'claude', 'gemini', 'nanogpt', 'custom', 'openrouter']) {
+      for (const sourceName of ['azure_openai', 'claude', 'gemini', 'zai', 'custom', 'unknown']) {
         assert.equal(buildSemanticToolChoice(sourceName), 'auto');
       }
       assert.equal(buildSemanticToolChoice('deepseek', { usesCustomUrl: true }), 'auto');
@@ -17119,7 +16951,48 @@ const tests = [
         type: 'function',
         function: { name: 'submit_tracker_delta' },
       });
-      assert.equal(buildStructuredToolChoice('submit_tracker_delta', 'openrouter'), 'auto');
+      assert.deepEqual(buildStructuredToolChoice('submit_tracker_delta', 'openrouter'), {
+        type: 'function',
+        function: { name: 'submit_tracker_delta' },
+      });
+
+      assert.deepEqual(resolveSemanticToolTransportPolicy('deepseek'), {
+        source: 'deepseek',
+        strictSchema: true,
+        exactNamedToolChoice: true,
+        disableParallelToolCalls: false,
+      });
+      for (const sourceName of ['nanogpt', 'openrouter', 'xai']) {
+        assert.deepEqual(resolveSemanticToolTransportPolicy(sourceName), {
+          source: sourceName,
+          strictSchema: false,
+          exactNamedToolChoice: true,
+          disableParallelToolCalls: true,
+        });
+      }
+      assert.deepEqual(resolveSemanticToolTransportPolicy('zai'), {
+        source: 'zai',
+        strictSchema: false,
+        exactNamedToolChoice: false,
+        disableParallelToolCalls: false,
+      });
+      assert.deepEqual(resolveSemanticToolTransportPolicy('openrouter', { usesReverseProxy: true }), {
+        source: 'openrouter',
+        strictSchema: false,
+        exactNamedToolChoice: false,
+        disableParallelToolCalls: false,
+      });
+      const directNanoGptTransportPayload = { chat_completion_source: 'nanogpt' };
+      applyStoryEngineSemanticToolTransportPayload(directNanoGptTransportPayload);
+      assert.equal(directNanoGptTransportPayload.parallel_tool_calls, false);
+      const fallbackTransportPayload = {
+        chat_completion_source: 'openrouter',
+        custom_url: 'https://proxy.example/v1',
+        parallel_tool_calls: true,
+      };
+      applyStoryEngineSemanticToolTransportPayload(fallbackTransportPayload);
+      assert.equal(fallbackTransportPayload.parallel_tool_calls, undefined);
+      assert.doesNotMatch(JSON.stringify(fallbackTransportPayload), /parallel_tool_calls/);
 
       const nanoGptSemanticPayload = {
         chat_completion_source: 'nanogpt',
@@ -17989,15 +17862,20 @@ const tests = [
         semanticSource.indexOf('export function applyStoryEngineBaselineThinkingDisabledPayload('),
         semanticSource.indexOf('function applyOfficialOpenAiThinkingDisabledPayload('),
       );
-      assert.match(semanticThinkingPolicySource, /const parsedCustomBody = parseCustomIncludeBody\(customIncludeBody\)/);
-      assert.doesNotMatch(semanticThinkingPolicySource, /hasThinkingOverride|\/deepseek\/i\.test\(model\)/);
+      assert.match(semanticThinkingPolicySource, /payload\.include_reasoning = false/);
+      assert.match(semanticThinkingPolicySource, /OFFICIAL_OPENAI_SOURCES\.has\(source\)/);
+      assert.match(semanticThinkingPolicySource, /source === 'nanogpt'/);
+      assert.match(semanticThinkingPolicySource, /source === 'openrouter'/);
+      assert.doesNotMatch(semanticThinkingPolicySource, /parseCustomIncludeBody|custom_include_body|thinkingDisableFormat/);
       assert.match(baselineThinkingPolicySource, /hasThinkingOverride/);
       assert.match(baselineThinkingPolicySource, /\/deepseek\/i\.test\(model\)/);
-      assert.match(semanticSource, /resolveStoryEngineThinkingDisableFormat\(source, route\.thinkingDisableFormat\)/);
-      assert.match(semanticSource, /delete parsedCustomBody\.reasoning_effort/);
-      assert.match(semanticSource, /parsedCustomBody\.reasoning = \{ effort: 'none' \}/);
+      assert.match(semanticSource, /export function resolveSemanticToolTransportPolicy/);
+      assert.match(semanticSource, /STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES/);
+      assert.match(semanticSource, /NAMED_SEMANTIC_TOOL_CHOICE_SOURCES/);
+      assert.match(semanticSource, /SERIAL_SEMANTIC_TOOL_CALL_SOURCES/);
+      assert.match(semanticSource, /payload\.parallel_tool_calls = policy\.disableParallelToolCalls \? false : undefined/);
       assert.match(semanticSource, /parsedCustomBody\.thinking = \{ type: 'disabled' \}/);
-      assert.match(semanticSource, /payload\.reasoning_effort = source === 'nanogpt' \? 'min' : 'none'/);
+      assert.match(semanticSource, /payload\.reasoning_effort = 'min'/);
       assert.match(semanticSource, /payload\.reasoning_effort = 'none'/);
       assert.match(semanticSource, /custom_include_body is invalid YAML/);
       assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateSemanticRawWithProfile|isRecoverableSemanticToolCallError|falling back to compact ledger|fallbackFrom:/);
@@ -18006,11 +17884,10 @@ const tests = [
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
       assert.match(adapterSource, /model:\s*String\(profile\?\.model \|\| ''\)/);
       assert.match(adapterSource, /customIncludeBody:\s*getProfileCustomIncludeBody\(profile, context\)/);
-      assert.match(source, /semanticThinkingDisableFormats:\s*Object\.freeze\(\{\}\)/);
-      assert.match(source, /structured_preflight_semantic_thinking_disable_format/);
-      assert.match(source, /customSemanticProfileSelected/);
-      assert.match(source, /semanticThinkingDisableFormat:\s*settings\?\.semanticThinkingDisableFormat/);
-      assert.match(source, /return await callback\(\{ semanticThinkingDisableFormat \}\)/);
+      assert.doesNotMatch(source, /semanticThinkingDisableFormats:\s*Object\.freeze\(\{\}\)/);
+      assert.doesNotMatch(source, /structured_preflight_semantic_thinking_disable_format/);
+      assert.doesNotMatch(source, /customSemanticProfileSelected|semanticThinkingDisableFormat:\s*settings\?\.semanticThinkingDisableFormat/);
+      assert.match(source, /if \(!useSeparateSettings \|\| !semanticProfile\) \{\s*return await callback\(\{\}\);/);
       assert.match(semanticSource, /export async function sendStructuredToolRequest/);
       assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineBaselineThinkingDisabledPayload\(generateData\)/);
@@ -18021,7 +17898,8 @@ const tests = [
       );
       assert.match(semanticProfileToolRequest, /sendConnectionManagerProfileRequest/);
       assert.match(semanticProfileToolRequest, /tool_choice: buildSemanticToolChoice\(chatCompletionSource, route\)/);
-      assert.match(semanticProfileToolRequest, /applyStoryEngineThinkingDisabledPayload\(payload, route\)/);
+      assert.match(semanticProfileToolRequest, /buildSemanticToolTransportOverrides\(chatCompletionSource, route\)/);
+      assert.match(semanticProfileToolRequest, /applySemanticToolRequestPayloadPolicies\(payload, route\)/);
       assert.doesNotMatch(semanticProfileToolRequest, /sendChatCompletionProfileRequest/);
 
       const structuredToolRequest = semanticSource.slice(
@@ -18029,6 +17907,7 @@ const tests = [
         semanticSource.indexOf('export function extractGeneratedText'),
       );
       assert.match(structuredToolRequest, /tool_choice: buildStructuredToolChoice\(toolName, route\.source, route\)/);
+      assert.match(structuredToolRequest, /buildSemanticToolTransportOverrides\(route\.source, route\)/);
       assert.match(structuredToolRequest, /if \(!matching\) \{[\s\S]*throw new Error/);
       assert.doesNotMatch(structuredToolRequest, /extractGeneratedText|sendChatCompletionProfileRequest|fallback/i);
 
@@ -20717,5 +20596,3 @@ for (const result of results) {
 const failures = results.filter(result => result.status === 'FAIL');
 console.log(`SUMMARY ${results.length - failures.length}/${results.length} passed`);
 if (failures.length) process.exitCode = 1;
-
-

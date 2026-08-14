@@ -10,8 +10,6 @@ import {
     generateRawData,
     getActiveConnectionProfileName,
     getActiveUserAvatar,
-    getChatCompletionProfileRoute,
-    getCurrentChatCompletionRoute,
     getConnectionProfileByName,
     getConnectionProfileNames,
     getPersonaText,
@@ -35,7 +33,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeStoryEngineThinkingDisableFormat, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest, STORY_ENGINE_THINKING_DISABLE_FORMATS } from './semantic-extractor.js';
+import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -577,7 +575,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
-    semanticThinkingDisableFormats: Object.freeze({}),
     modelCallDelayEnabled: false,
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
@@ -622,16 +619,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     narratorHandoffWidgetHeight: TRACKER_WIDGET_DEFAULT_HEIGHT,
 
 });
-
-const SEMANTIC_THINKING_DISABLE_FORMAT_OPTIONS = Object.freeze([
-    { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE, label: 'None' },
-    { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI, label: 'OpenAI' },
-    { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT, label: 'OpenRouter / NanoGPT' },
-    { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK, label: 'DeepSeek' },
-    { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.GLM_ZAI, label: 'GLM / Z.AI' },
-    { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.KIMI_MOONSHOT, label: 'Kimi / Moonshot' },
-    { value: STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT, label: 'LongCat' },
-]);
 
 const PROSE_GUARD_TARGETED_BAN_FIELDS = Object.freeze([
     {
@@ -782,13 +769,17 @@ function getSettings() {
     const settings = extension_settings[SETTINGS_KEY];
     const hadExplicitProseGuardMode = settings.proseGuardMode !== undefined;
     const legacyProseGuardEnabled = settings.postNarrationProseGuardEnabled;
-    const hadLegacySemanticThinkingDisableFormat = Object.prototype.hasOwnProperty.call(settings, 'semanticThinkingDisableFormat');
-    const legacySemanticThinkingDisableFormat = settings.semanticThinkingDisableFormat;
-    const hadRetiredSemanticSettings = ['disableSemanticThinking', 'semanticReasoningEffort']
+    const hadRetiredSemanticSettings = [
+        'disableSemanticThinking',
+        'semanticReasoningEffort',
+        'semanticThinkingDisableFormat',
+        'semanticThinkingDisableFormats',
+    ]
         .some(key => Object.prototype.hasOwnProperty.call(settings, key));
     delete extension_settings[SETTINGS_KEY].disableSemanticThinking;
     delete extension_settings[SETTINGS_KEY].semanticReasoningEffort;
     delete extension_settings[SETTINGS_KEY].semanticThinkingDisableFormat;
+    delete extension_settings[SETTINGS_KEY].semanticThinkingDisableFormats;
     delete extension_settings[SETTINGS_KEY].writingStylePrompt;
     delete extension_settings[SETTINGS_KEY].writingStyleDialoguePrompt;
     delete extension_settings[SETTINGS_KEY].writingStyleReminderPrompt;
@@ -802,25 +793,13 @@ function getSettings() {
             extension_settings[SETTINGS_KEY][key] = value;
         }
     }
-    const previousThinkingDisableFormats = settings.semanticThinkingDisableFormats;
-    const thinkingDisableFormats = normalizeSemanticThinkingDisableFormatMap(previousThinkingDisableFormats);
-    let semanticThinkingSettingsChanged = hadLegacySemanticThinkingDisableFormat
-        || !semanticThinkingDisableFormatMapsEqual(previousThinkingDisableFormats, thinkingDisableFormats);
-    settings.semanticThinkingDisableFormats = thinkingDisableFormats;
-    if (hadLegacySemanticThinkingDisableFormat) {
-        const legacyFormat = normalizeStoryEngineThinkingDisableFormat(legacySemanticThinkingDisableFormat);
-        const target = resolveSemanticThinkingDisableTarget(settings);
-        if (target.isCustom && legacyFormat !== STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE && !thinkingDisableFormats[target.key]) {
-            thinkingDisableFormats[target.key] = legacyFormat;
-        }
-    }
     if (!hadExplicitProseGuardMode && legacyProseGuardEnabled === false) {
         settings.proseGuardMode = PROSE_GUARD_MODES.OFF;
     }
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || semanticThinkingSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged) {
+    if (hadRetiredSemanticSettings || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
@@ -966,84 +945,6 @@ function saveExtensionSettings() {
     saveSettingsDebounced();
 }
 
-function normalizeSemanticThinkingDisableFormatMap(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    const normalized = {};
-    for (const [rawKey, rawFormat] of Object.entries(value)) {
-        const key = String(rawKey || '').trim();
-        const format = normalizeStoryEngineThinkingDisableFormat(rawFormat);
-        if (key && format !== STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE) {
-            normalized[key] = format;
-        }
-    }
-    return normalized;
-}
-
-function semanticThinkingDisableFormatMapsEqual(left, right) {
-    const normalizedLeft = left && typeof left === 'object' && !Array.isArray(left) ? left : {};
-    const leftKeys = Object.keys(normalizedLeft);
-    const rightKeys = Object.keys(right);
-    return leftKeys.length === rightKeys.length
-        && rightKeys.every(key => normalizedLeft[key] === right[key]);
-}
-
-function getSemanticThinkingProfileKey(profile, fallback = 'current') {
-    const profileId = String(profile?.id || '').trim();
-    if (profileId) return `profile:${profileId}`;
-    const profileName = String(profile?.name || '').trim().toLocaleLowerCase();
-    return profileName ? `profile-name:${profileName}` : fallback;
-}
-
-function resolveSemanticThinkingDisableTarget(settings) {
-    const usePrivateProfile = Boolean(settings?.useSeparateSemanticSettings);
-    const selectedProfileName = String(settings?.semanticConnectionProfile || '').trim();
-    if (usePrivateProfile && selectedProfileName) {
-        const profile = getConnectionProfileByName(selectedProfileName);
-        if (!profile) {
-            return { key: `profile-name:${selectedProfileName.toLocaleLowerCase()}`, source: '', isCustom: false, profile: null };
-        }
-        try {
-            const route = getChatCompletionProfileRoute(profile.id, profile.name);
-            const source = String(route.source || '').trim().toLowerCase();
-            return { key: getSemanticThinkingProfileKey(profile), source, isCustom: source === 'custom', profile, route };
-        } catch {
-            return { key: getSemanticThinkingProfileKey(profile), source: '', isCustom: false, profile, route: null };
-        }
-    }
-
-    const route = getCurrentChatCompletionRoute();
-    const source = String(route.source || '').trim().toLowerCase();
-    const activeProfileName = getActiveConnectionProfileName('');
-    const activeProfile = activeProfileName ? getConnectionProfileByName(activeProfileName) : null;
-    return {
-        key: getSemanticThinkingProfileKey(activeProfile),
-        source,
-        isCustom: source === 'custom',
-        profile: activeProfile,
-        route,
-    };
-}
-
-function getSemanticThinkingDisableFormat(settings, target = resolveSemanticThinkingDisableTarget(settings)) {
-    if (!target.isCustom) return STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE;
-    const formats = normalizeSemanticThinkingDisableFormatMap(settings?.semanticThinkingDisableFormats);
-    return normalizeStoryEngineThinkingDisableFormat(formats[target.key]);
-}
-
-function setSemanticThinkingDisableFormat(settings, target, value) {
-    if (!target?.isCustom || !target.key) return STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE;
-    const format = normalizeStoryEngineThinkingDisableFormat(value);
-    const formats = normalizeSemanticThinkingDisableFormatMap(settings?.semanticThinkingDisableFormats);
-    if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE) {
-        delete formats[target.key];
-    } else {
-        formats[target.key] = format;
-    }
-    settings.semanticThinkingDisableFormats = formats;
-    return format;
-}
-
-
 function ensureStreamingArtifactRegex() {
     if (!isStoryEngineEnabled()) {
         return removeStreamingArtifactRegex();
@@ -1157,11 +1058,9 @@ async function withSemanticGenerationSettings(callback) {
     const settings = getSettings();
     const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
     const semanticProfile = String(settings.semanticConnectionProfile || '').trim();
-    const thinkingTarget = resolveSemanticThinkingDisableTarget(settings);
-    const semanticThinkingDisableFormat = getSemanticThinkingDisableFormat(settings, thinkingTarget);
 
     if (!useSeparateSettings || !semanticProfile) {
-        return await callback({ semanticThinkingDisableFormat });
+        return await callback({});
     }
 
 
@@ -1178,7 +1077,6 @@ async function withSemanticGenerationSettings(callback) {
     return await callback({
         semanticProfileId: profile.id,
         semanticProfileName: profile.name,
-        semanticThinkingDisableFormat,
     });
 }
 
@@ -1568,8 +1466,6 @@ function refreshSettingsControls() {
     const enabled = Boolean(settings.useSeparateSemanticSettings);
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
-    const thinkingDisableFormatRow = document.getElementById('structured_preflight_semantic_thinking_disable_format_row');
-    const thinkingDisableFormatSelect = document.getElementById('structured_preflight_semantic_thinking_disable_format');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardModeSelect = document.getElementById('structured_preflight_prose_guard_mode');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
@@ -1645,16 +1541,6 @@ function refreshSettingsControls() {
         'Profile not found',
 
     );
-
-    const thinkingDisableTarget = resolveSemanticThinkingDisableTarget(settings);
-    const customSemanticProfileSelected = thinkingDisableTarget.isCustom;
-    if (thinkingDisableFormatSelect) {
-        thinkingDisableFormatSelect.value = getSemanticThinkingDisableFormat(settings, thinkingDisableTarget);
-        thinkingDisableFormatSelect.disabled = !engineEnabled || !customSemanticProfileSelected;
-    }
-    if (thinkingDisableFormatRow) {
-        thinkingDisableFormatRow.hidden = !engineEnabled || !customSemanticProfileSelected;
-    }
 
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
@@ -2184,19 +2070,12 @@ function renderSettingsPanel() {
                                     <input id="structured_preflight_use_separate_semantic_settings" type="checkbox">
                                     <span>Use private Story Engine connection profile</span>
                                 </label>
-                                ${renderSettingsInfo('spe-settings-help-semantic-private', 'Used for semantic preflight and post-narration Story Engine utility calls. Custom profiles remember their downstream provider format separately.', 'About the private Story Engine connection profile')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-private', 'Used for semantic preflight and post-narration Story Engine utility calls. Story Engine automatically uses the selected connector\'s compatible tool and reasoning request settings.', 'About the private Story Engine connection profile')}
                             </div>
                             <div class="spe-settings-row">
                                 <label for="structured_preflight_semantic_profile">Story Engine profile</label>
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-profile', 'Select the SillyTavern connection profile used for semantic preflight and post-narration Story Engine utility calls.', 'About Story Engine profile selection')}
-                            </div>
-                            <div id="structured_preflight_semantic_thinking_disable_format_row" class="spe-settings-row" hidden>
-                                <label for="structured_preflight_semantic_thinking_disable_format">Thinking disable format</label>
-                                <select id="structured_preflight_semantic_thinking_disable_format" class="text_pole flex1">
-                                    ${SEMANTIC_THINKING_DISABLE_FORMAT_OPTIONS.map(option => `<option value="${option.value}">${option.label}</option>`).join('')}
-                                </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-thinking', 'For Custom profiles, select the downstream provider format used to disable reasoning. Each Custom profile remembers its own selection.', 'About thinking disable format')}
                             </div>
                             <div class="spe-settings-row">
                                 <button id="structured_preflight_refresh_semantic_settings" class="menu_button flex1"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh profiles</button>
@@ -2473,11 +2352,6 @@ function renderSettingsPanel() {
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
         settings.semanticConnectionProfile = String(event.target?.value || '');
         refreshSettingsControls();
-        saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_semantic_thinking_disable_format')?.addEventListener('change', event => {
-        const target = resolveSemanticThinkingDisableTarget(settings);
-        setSemanticThinkingDisableFormat(settings, target, event.target?.value);
         saveExtensionSettings();
     });
     document.getElementById('structured_preflight_model_call_delay_enabled')?.addEventListener('change', event => {
@@ -16286,7 +16160,6 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             pendingBoundarySnapshot: pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
-            semanticThinkingDisableFormat: settings?.semanticThinkingDisableFormat,
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',
             latestUserText: pendingGeneration?.latestUserText || getLatestUserText(context?.chat),

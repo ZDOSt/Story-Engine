@@ -35,23 +35,10 @@ const SEMANTIC_DIAGNOSTIC_DETAILS = Symbol('storyEngineSemanticDiagnosticDetails
 const SEMANTIC_DIAGNOSTIC_REPORTED = Symbol('storyEngineSemanticDiagnosticReported');
 const SEMANTIC_DIAGNOSTIC_EXCERPT_RADIUS = 160;
 const CUSTOM_CHAT_COMPLETION_SOURCE = 'custom';
-const EXACT_NAMED_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
-export const STORY_ENGINE_THINKING_DISABLE_FORMATS = Object.freeze({
-    NONE: 'none',
-    OPENAI: 'openai',
-    OPENROUTER_NANOGPT: 'openrouter_nanogpt',
-    DEEPSEEK: 'deepseek',
-    GLM_ZAI: 'glm_zai',
-    KIMI_MOONSHOT: 'kimi_moonshot',
-    LONGCAT: 'longcat',
-});
-const STORY_ENGINE_THINKING_DISABLE_FORMAT_VALUES = Object.freeze(new Set(Object.values(STORY_ENGINE_THINKING_DISABLE_FORMATS)));
-const THINKING_TYPE_DISABLED_FORMATS = Object.freeze(new Set([
-    STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK,
-    STORY_ENGINE_THINKING_DISABLE_FORMATS.GLM_ZAI,
-    STORY_ENGINE_THINKING_DISABLE_FORMATS.KIMI_MOONSHOT,
-    STORY_ENGINE_THINKING_DISABLE_FORMATS.LONGCAT,
-]));
+const STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
+const NAMED_SEMANTIC_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai', 'nanogpt', 'openrouter', 'xai']));
+const SERIAL_SEMANTIC_TOOL_CALL_SOURCES = Object.freeze(new Set(['nanogpt', 'openrouter', 'xai']));
+const OFFICIAL_OPENAI_SOURCES = Object.freeze(new Set(['openai', 'azure_openai']));
 const OPENAI_NONE_FORWARDABLE_MODELS = Object.freeze(new Set([
     'gpt-5.4',
     'gpt-5.4-2026-03-05',
@@ -507,9 +494,7 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
             purpose: 'semantic preflight tool call',
             buildTool: buildSemanticPreflightTool,
             buildToolChoice: buildSemanticToolChoice,
-            preparePayload: payload => applyStoryEngineThinkingDisabledPayload(payload, {
-                thinkingDisableFormat: options.semanticThinkingDisableFormat,
-            }),
+            preparePayload: payload => applySemanticToolRequestPayloadPolicies(payload),
             signal: options.signal,
         });
         if (raw?.error) {
@@ -533,21 +518,19 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
 }
 
 async function generateSemanticToolCallWithProfile(prompt, responseLength, options = {}) {
-    const route = {
-        ...getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName),
-        thinkingDisableFormat: options.semanticThinkingDisableFormat,
-    };
+    const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
     const chatCompletionSource = route.source;
     const toolPrompt = buildSemanticToolPrompt(prompt);
     validateSemanticPromptTurnBinding(toolPrompt, options.semanticTurnBinding);
     const semanticTool = buildSemanticPreflightTool(chatCompletionSource, route);
-    const preparePayload = payload => applyStoryEngineThinkingDisabledPayload(payload, route);
+    const preparePayload = payload => applySemanticToolRequestPayloadPolicies(payload, route);
     const overridePayload = {
         temperature: 0,
         stream: false,
         messages: toolPrompt,
         tools: [semanticTool],
         tool_choice: buildSemanticToolChoice(chatCompletionSource, route),
+        ...buildSemanticToolTransportOverrides(chatCompletionSource, route),
         enable_web_search: false,
         request_images: undefined,
         request_image_resolution: undefined,
@@ -610,7 +593,7 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
         ? prompt
         : [{ role: 'user', content: String(prompt || '') }];
     const buildTool = (chatCompletionSource, route = {}) => {
-        const useStrictSchema = supportsExactNamedToolChoice(chatCompletionSource, route);
+        const useStrictSchema = supportsStrictSemanticToolSchema(chatCompletionSource, route);
         return {
             type: 'function',
             function: {
@@ -624,11 +607,8 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
 
     let result;
     if (options.semanticProfileId) {
-        const route = {
-            ...getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName),
-            thinkingDisableFormat: options.semanticThinkingDisableFormat,
-        };
-        const preparePayload = payload => applyStoryEngineThinkingDisabledPayload(payload, route);
+        const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
+        const preparePayload = payload => applySemanticToolRequestPayloadPolicies(payload, route);
         result = await sendConnectionManagerProfileRequest({
             profileId: options.semanticProfileId,
             profileName: options.semanticProfileName,
@@ -640,6 +620,7 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
                 messages,
                 tools: [buildTool(route.source, route)],
                 tool_choice: buildStructuredToolChoice(toolName, route.source, route),
+                ...buildSemanticToolTransportOverrides(route.source, route),
                 enable_web_search: false,
                 request_images: undefined,
                 request_image_resolution: undefined,
@@ -658,9 +639,7 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
             temperature: 0,
             buildTool: (source, route) => buildTool(source, route),
             buildToolChoice: (source, route) => buildStructuredToolChoice(toolName, source, route),
-            preparePayload: payload => applyStoryEngineThinkingDisabledPayload(payload, {
-                thinkingDisableFormat: options.semanticThinkingDisableFormat,
-            }),
+            preparePayload: payload => applySemanticToolRequestPayloadPolicies(payload),
             signal: options.signal,
         });
     }
@@ -685,33 +664,73 @@ export function extractGeneratedText(raw) {
     return candidates[0] || '';
 }
 
-export function normalizeStoryEngineThinkingDisableFormat(value) {
-    const normalized = String(value || '').trim().toLowerCase();
-    return STORY_ENGINE_THINKING_DISABLE_FORMAT_VALUES.has(normalized)
-        ? normalized
-        : STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE;
+function normalizeChatCompletionSource(value) {
+    return String(value || '').trim().toLowerCase();
 }
 
-export function resolveStoryEngineThinkingDisableFormat(source, requestedFormat = STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE) {
-    const normalizedSource = String(source || '').trim().toLowerCase();
-    switch (normalizedSource) {
-        case 'openai':
-        case 'azure_openai':
-            return STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI;
-        case 'openrouter':
-        case 'nanogpt':
-            return STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT;
-        case 'deepseek':
-            return STORY_ENGINE_THINKING_DISABLE_FORMATS.DEEPSEEK;
-        case 'zai':
-            return STORY_ENGINE_THINKING_DISABLE_FORMATS.GLM_ZAI;
-        case 'moonshot':
-            return STORY_ENGINE_THINKING_DISABLE_FORMATS.KIMI_MOONSHOT;
-        case CUSTOM_CHAT_COMPLETION_SOURCE:
-            return normalizeStoryEngineThinkingDisableFormat(requestedFormat);
-        default:
-            return STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE;
+function hasRouteOverride(value) {
+    if (typeof value === 'boolean') return value;
+    const normalized = String(value || '').trim().toLowerCase();
+    return Boolean(normalized && normalized !== '<none>' && normalized !== '<empty>');
+}
+
+function resolveSemanticPayloadRoute(payload, route = {}) {
+    return {
+        ...route,
+        source: route.source || payload?.chat_completion_source,
+        model: route.model || payload?.model,
+        usesCustomUrl: hasRouteOverride(route.usesCustomUrl)
+            || hasRouteOverride(route.customUrl)
+            || hasRouteOverride(route.custom_url)
+            || hasRouteOverride(payload?.custom_url),
+        usesReverseProxy: hasRouteOverride(route.usesReverseProxy)
+            || hasRouteOverride(route.reverseProxy)
+            || hasRouteOverride(route.reverse_proxy)
+            || hasRouteOverride(payload?.reverse_proxy),
+    };
+}
+
+export function resolveSemanticToolTransportPolicy(chatCompletionSource, route = {}) {
+    const source = normalizeChatCompletionSource(chatCompletionSource || route.source);
+    const directProviderRoute = !hasRouteOverride(route.usesCustomUrl)
+        && !hasRouteOverride(route.customUrl)
+        && !hasRouteOverride(route.custom_url)
+        && !hasRouteOverride(route.usesReverseProxy)
+        && !hasRouteOverride(route.reverseProxy)
+        && !hasRouteOverride(route.reverse_proxy);
+    return {
+        source,
+        strictSchema: directProviderRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(source),
+        exactNamedToolChoice: directProviderRoute && NAMED_SEMANTIC_TOOL_CHOICE_SOURCES.has(source),
+        disableParallelToolCalls: directProviderRoute && SERIAL_SEMANTIC_TOOL_CALL_SOURCES.has(source),
+    };
+}
+
+function supportsStrictSemanticToolSchema(chatCompletionSource, route = {}) {
+    return resolveSemanticToolTransportPolicy(chatCompletionSource, route).strictSchema;
+}
+
+export function applyStoryEngineSemanticToolTransportPayload(payload, route = {}) {
+    if (!payload || typeof payload !== 'object') {
+        return payload;
     }
+
+    const resolvedRoute = resolveSemanticPayloadRoute(payload, route);
+    const policy = resolveSemanticToolTransportPolicy(resolvedRoute.source, resolvedRoute);
+    // An explicit undefined clears any preset-level transport hint without serializing a fallback-only field.
+    payload.parallel_tool_calls = policy.disableParallelToolCalls ? false : undefined;
+    return payload;
+}
+
+function buildSemanticToolTransportOverrides(chatCompletionSource, route = {}) {
+    const policy = resolveSemanticToolTransportPolicy(chatCompletionSource, route);
+    return { parallel_tool_calls: policy.disableParallelToolCalls ? false : undefined };
+}
+
+function applySemanticToolRequestPayloadPolicies(payload, route = {}) {
+    const resolvedRoute = resolveSemanticPayloadRoute(payload, route);
+    applyStoryEngineSemanticToolTransportPayload(payload, resolvedRoute);
+    return applyStoryEngineThinkingDisabledPayload(payload, resolvedRoute);
 }
 
 export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
@@ -720,46 +739,18 @@ export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
     }
 
     payload.include_reasoning = false;
-    const source = String(route.source || payload.chat_completion_source || '').trim().toLowerCase();
-    const format = resolveStoryEngineThinkingDisableFormat(source, route.thinkingDisableFormat);
+    const source = normalizeChatCompletionSource(route.source || payload.chat_completion_source);
     delete payload.reasoning_effort;
 
-    if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI) {
-        if (source === CUSTOM_CHAT_COMPLETION_SOURCE) {
-            payload.reasoning_effort = 'none';
-        } else {
-            applyOfficialOpenAiThinkingDisabledPayload(payload, route);
-        }
-    } else if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT) {
-        payload.reasoning_effort = source === 'nanogpt' ? 'min' : 'none';
+    if (OFFICIAL_OPENAI_SOURCES.has(source)) {
+        applyOfficialOpenAiThinkingDisabledPayload(payload, route);
+    } else if (source === 'nanogpt') {
+        // SillyTavern maps NanoGPT's "min" setting to its native "none" effort.
+        payload.reasoning_effort = 'min';
+    } else if (source === 'openrouter') {
+        payload.reasoning_effort = 'none';
     }
 
-    console.info(`[Story Engine] thinking disable policy: ${format} (source: ${source || 'unknown'}).`);
-
-    if (source !== CUSTOM_CHAT_COMPLETION_SOURCE) {
-        return payload;
-    }
-
-    if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.NONE) {
-        return payload;
-    }
-
-    const customIncludeBody = payload.custom_include_body ?? route.customIncludeBody;
-    const parsedCustomBody = parseCustomIncludeBody(customIncludeBody);
-    delete parsedCustomBody.include_reasoning;
-    delete parsedCustomBody.reasoning_effort;
-    delete parsedCustomBody.reasoning;
-    delete parsedCustomBody.thinking;
-
-    if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENAI) {
-        parsedCustomBody.reasoning_effort = 'none';
-    } else if (format === STORY_ENGINE_THINKING_DISABLE_FORMATS.OPENROUTER_NANOGPT) {
-        parsedCustomBody.reasoning = { effort: 'none' };
-    } else if (THINKING_TYPE_DISABLED_FORMATS.has(format)) {
-        parsedCustomBody.thinking = { type: 'disabled' };
-    }
-
-    payload.custom_include_body = yaml.stringify(parsedCustomBody).trim();
     return payload;
 }
 
@@ -986,15 +977,9 @@ export function buildSemanticToolPrompt(prompt) {
     return messages;
 }
 
-function supportsExactNamedToolChoice(chatCompletionSource, route = {}) {
-    const source = String(chatCompletionSource || '').trim().toLowerCase();
-    return EXACT_NAMED_TOOL_CHOICE_SOURCES.has(source)
-        && route?.usesCustomUrl !== true
-        && route?.usesReverseProxy !== true;
-}
-
 export function buildStructuredToolChoice(toolName, chatCompletionSource, route = {}) {
-    if (!supportsExactNamedToolChoice(chatCompletionSource, route)) return 'auto';
+    const policy = resolveSemanticToolTransportPolicy(chatCompletionSource, route);
+    if (!policy.exactNamedToolChoice) return 'auto';
     return {
         type: 'function',
         function: { name: String(toolName || '').trim() },
@@ -1006,7 +991,7 @@ export function buildSemanticToolChoice(chatCompletionSource, route = {}) {
 }
 
 export function buildSemanticPreflightTool(chatCompletionSource, route = {}) {
-    const strictSchema = supportsExactNamedToolChoice(chatCompletionSource, route);
+    const strictSchema = supportsStrictSemanticToolSchema(chatCompletionSource, route);
     const parameters = buildSemanticPreflightSchema();
     if (!strictSchema) removeStrictOnlySchemaKeywords(parameters);
 
