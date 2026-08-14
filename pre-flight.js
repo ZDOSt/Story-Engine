@@ -428,7 +428,7 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
     const narratorModelHandoff = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, options);
     return [
         '[STORY_ENGINE_ADVENTURE_INTRO_AUDIT v0.1]',
-        'This displayed handoff is for audit only. The narrator model receives narrativeContract(input), not this audit note.',
+        'This displayed handoff is for audit only. The narrator model receives the exact narrator-facing handoff below, not this audit note.',
         'No semantic pre-flight or deterministic mechanics were run for this adventure opening.',
         'The narrator-facing intro prompt is appended as a synthetic in-chat message for the adventure opening.',
         '',
@@ -445,6 +445,11 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const promptHeaderGenre = isIsekaiOpening ? 'ISEKAI' : genreLabel ? genreLabel.toUpperCase() : '';
     const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
+        '#1 - PROSE RULES',
+        'Execute renderControlEngine(input) as a hard constraint on the response.',
+        '',
+        renderControlEngineNarrativeContract(),
+        '',
         promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
         isIsekaiOpening
             ? 'This is the opening turn of a new isekai adventure.'

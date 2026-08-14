@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import yaml from 'yaml';
 import { consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import { ENGINE_PROMPT_TEXT, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, hasMagicStoneEntry, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
-import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
+import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
@@ -16117,6 +16117,11 @@ const tests = [
           isekaiOpeningSeed: openingSeed,
         },
       );
+      assert.match(introPrompt, /^#1 - PROSE RULES/);
+      assert.match(introPrompt, /EXECUTE RenderControlEngine\(response, input, context\) PRIVATELY BEFORE PRODUCING THE FINAL RESPONSE\./);
+      assert.match(introPrompt, /Use each PATTERN EXAMPLE only as structural guidance\./);
+      assert.match(introPrompt, /Combine closely related actions, gestures, dialogue, and immediate consequences/);
+      assert.doesNotMatch(introPrompt, /#2 - RESOLVED FACTS|==MECHANICS_RESULTS==/);
       assert.match(introPrompt, /START_ADVENTURE_PROMPT: ISEKAI/);
       assert.match(introPrompt, /This is the opening turn of a new isekai adventure\./);
       assert.doesNotMatch(introPrompt, /Narrate the opening immediately\./);
@@ -16148,6 +16153,10 @@ const tests = [
       assert.match(introPrompt, /LOCATION: Veyra, Orinth Gate\./);
       assert.match(introPrompt, /Using the provided names for EVERY NEW name is MANDATORY and NON-NEGOTIABLE\./);
       assert.match(introPrompt, /DO NOT invent, modify, combine, translate, or derive names\./);
+      assert.ok(
+        introPrompt.indexOf('#1 - PROSE RULES') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
+        'Trimmed prose rules should precede the Start Adventure handoff.',
+      );
       assert.ok(
         introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI') < introPrompt.indexOf('BEAT #1: EARTH LAST MOMENTS'),
         'Isekai transition/opening seed should appear after the Start Adventure mandate.',
@@ -16202,6 +16211,8 @@ const tests = [
         },
       );
       assert.match(fantasyIntroPrompt, /START_ADVENTURE_PROMPT: FANTASY/);
+      assert.match(fantasyIntroPrompt, /^#1 - PROSE RULES/);
+      assert.match(fantasyIntroPrompt, /PATTERN EXAMPLE:/);
       assert.match(fantasyIntroPrompt, /This is the opening turn of a new Fantasy adventure\./);
       assert.match(fantasyIntroPrompt, /GENRE OPENING:/);
       assert.match(fantasyIntroPrompt, /You MUST begin in the selected genre: Fantasy\./);
@@ -16209,6 +16220,10 @@ const tests = [
       assert.match(fantasyIntroPrompt, /PREMADE CHARACTER RULE:/);
       assert.match(fantasyIntroPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
       assert.match(fantasyIntroPrompt, /NAME REVEAL:/);
+      assert.ok(
+        fantasyIntroPrompt.indexOf('#1 - PROSE RULES') < fantasyIntroPrompt.indexOf('START_ADVENTURE_PROMPT: FANTASY'),
+        'Trimmed prose rules should precede every Start Adventure genre handoff.',
+      );
       assert.ok(
         fantasyIntroPrompt.indexOf('GENRE OPENING:') < fantasyIntroPrompt.indexOf('NAME REVEAL:'),
         'Non-isekai genre opening should appear before name reveal.',
@@ -16218,6 +16233,9 @@ const tests = [
         'Non-isekai name reveal should appear before the reminder.',
       );
       assert.doesNotMatch(fantasyIntroPrompt, /You MUST narrate BOTH required beats below|BEAT #1: EARTH LAST MOMENTS/);
+      const introAudit = formatAdventureIntroNarratorPromptContext('Begin the adventure.', { adventureGenre: 'Fantasy' });
+      assert.match(introAudit, /==NARRATOR_MODEL_HANDOFF==\n#1 - PROSE RULES/);
+      assert.match(introAudit, /exact narrator-facing handoff below/);
     },
   },
   {
