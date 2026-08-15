@@ -2101,7 +2101,23 @@ function powerActorStableHash(value) {
 
 function powerActorLatestActionSource(ledger, context, effect = null, playerTrackerSnapshot = null) {
     const semantic = ledger?.resolutionEngine || {};
-    const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, null, playerTrackerSnapshot);
+    const targets = normalizeTargets(semantic.identifyTargets);
+    const itemUse = normalizeItemUseForHandoff(
+        semantic.itemUse,
+        context,
+        null,
+        playerTrackerSnapshot,
+        null,
+        null,
+        [
+            ...targets.ActionTargets,
+            ...targets.StealthTargets,
+            ...targets.OppTargets.NPC,
+            ...targets.BenefitedObservers,
+            ...targets.HarmedObservers,
+            ...targets.NPCAwareOfUser,
+        ],
+    );
     return [
         context ? getLatestUserTextFromContext(context) : '',
         semantic.identifyGoal,
@@ -3244,7 +3260,7 @@ function normalizeUserAbilityUseForHandoff(value = {}) {
     };
 }
 
-function normalizeItemUseForHandoff(value = {}, context = null, audit = null, playerTrackerSnapshot = null, sceneItemStateSnapshot = null, worldTransition = null) {
+function normalizeItemUseForHandoff(value = {}, context = null, audit = null, playerTrackerSnapshot = null, sceneItemStateSnapshot = null, worldTransition = null, knownNonItemTargets = []) {
     const source = value && typeof value === 'object' ? value : {};
     const latestUserText = getLatestUserTextFromContext(context);
     const semanticAttempted = bool(source.attempted ?? source.Attempted);
@@ -3252,27 +3268,25 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
     const semanticItem = String(source.item ?? source.Item ?? '').trim();
     const semanticSource = normalizeItemUseSource(source.source ?? source.Source);
     const semanticEvidence = String(source.evidence ?? source.Evidence ?? '').trim();
-    const detected = extractLatestUserItemInteraction(latestUserText);
-    const semanticGrounded = semanticAttempted
+    const semanticReferentGrounded = semanticAttempted
         && isReal(semanticItem)
-        && latestUserExplicitlyInteractsWithItem(latestUserText, semanticItem);
-    let attempted = Boolean(detected || semanticGrounded);
-    let item = detected?.item || (semanticGrounded ? semanticItem : '');
+        && latestUserMentionsSemanticItem(latestUserText, semanticItem);
+    // The semantic pass owns the referent classification. A raw verb-object regex
+    // cannot tell an item from a living target, anatomy, or ordinary physical contact.
+    let attempted = semanticReferentGrounded;
+    let item = semanticReferentGrounded ? semanticItem : '';
 
-    if (detected && semanticGrounded && itemNamesOverlap(semanticItem, detected.item)) {
-        item = semanticItem;
-    }
-    if (attempted && itemUseIsBodyPartOrNaturalWeapon(item)) {
+    if (attempted && (itemUseIsBodyPartOrNaturalWeapon(item) || itemUseMatchesKnownLivingTarget(item, knownNonItemTargets))) {
         attempted = false;
         item = '';
     }
     if (!attempted || !isReal(item)) {
-        if (semanticAttempted || detected) {
+        if (semanticAttempted) {
             audit?.push(`2.7s.0 deterministicItemAttemptRepair=${compact({
-                hardRule: 'itemUse requires an explicit latest-user interaction with a concrete non-anatomical item',
+                hardRule: 'itemUse requires semantic classification of a concrete inanimate item; deterministic code does not infer items from verbs',
                 semanticAttempted,
                 semanticItem,
-                detectedItem: detected?.item || NONE,
+                latestUserReferentVerified: semanticReferentGrounded ? 'Y' : 'N',
                 correctedTo: 'not attempted',
             })}`);
         }
@@ -3349,7 +3363,7 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
     };
     if (stableStringify(semanticState) !== stableStringify(deterministicState)) {
         audit?.push(`2.7s.1 deterministicItemSourceEvidenceRepair=${compact({
-            hardRule: 'latest-user interaction is required and item availability/evidence must be mechanically verified',
+            hardRule: 'the semantic item referent must be present in the latest user input and item availability/evidence must be mechanically verified',
             semantic: semanticState,
             correctedTo: deterministicState,
         })}`);
@@ -3432,91 +3446,29 @@ function latestUserInputClaimsItemPossession(item, evidence, context) {
         || new RegExp(`\\b${tail ? escapeRegex(tail) : itemPattern}\\b.{0,60}\\b(?:from|off|at|on|in)\\s+my\\s+${carriedPlaces}\\b`).test(source);
 }
 
-function latestUserExplicitlyInteractsWithItem(text, item) {
+function latestUserMentionsSemanticItem(text, item) {
     const source = normalizeItemPossessionClaimText(stripQuotedItemDialogue(text));
     const itemText = normalizeItemMatchText(item);
     if (!source || !itemText) return false;
     const itemPattern = itemText.split(/\s+/).map(escapeRegex).join('\\s+');
-    const itemMatches = Array.from(source.matchAll(new RegExp(`\\b${itemPattern}\\b`, 'g')));
-    if (!itemMatches.length) return false;
-    const verbPattern = /\b(?:use|access|grab|take|retrieve|draw|wield|consume|present|move|touch|pick\s+up|produce|equip|spend|activate|throw|give|show|pull|reach\s+for|drink\s+from|eat|snatch|lift|collect|unlock|open|attack|strike|hit|defend|block|cut|play|swing|brandish|unsheathe|sheathe|holster|load|fire|shoot|aim|read)\b/g;
-    return Array.from(source.matchAll(verbPattern)).some(verbMatch => {
-        if (!firstPersonControlsItemAction(source, verbMatch.index)) return false;
-        return itemMatches.some(itemMatch => itemInteractionTermsAreLocal(source, verbMatch, itemMatch));
-    });
-}
-
-function itemInteractionTermsAreLocal(source, verbMatch, itemMatch) {
-    const verbStart = verbMatch.index;
-    const verbEnd = verbStart + verbMatch[0].length;
-    const itemStart = itemMatch.index;
-    const itemEnd = itemStart + itemMatch[0].length;
-    const gapStart = Math.min(verbEnd, itemEnd);
-    const gapEnd = Math.max(verbStart, itemStart);
-    if (gapEnd - gapStart > 90) return false;
-    const gap = source.slice(gapStart, gapEnd);
-    return !/\b(?:and|then|but|while|although|because)\b/.test(gap);
-}
-
-function extractLatestUserItemInteraction(text) {
-    const source = stripQuotedItemDialogue(text).replace(/[\r\n]+/g, ' ');
-    if (!source.trim()) return null;
-    const action = '(?:use|access|grab|take|retrieve|draw|wield|consume|present|move|touch|pick\\s+up|produce|equip|spend|activate|throw|give|show|pull|reach\\s+for|drink\\s+from|eat|snatch|lift|collect)';
-    const determiner = '(?:my|a|an|the|this|that|his|her|their|our)';
-    const end = '(?=\\s+(?:from|off|on|at|with|against|into|onto|toward|and|then|so|but|while|before|after|to)\\b|[,.!?;]|$)';
-    const patterns = [
-        new RegExp(`\\b${action}\\s+${determiner}\\s+([a-z0-9][a-z0-9'\\u2019 -]{0,70}?)${end}`, 'gi'),
-        new RegExp(`\\b(?:unlock|open|attack|strike|hit|defend|block|cut|play)\\b[^.!?;]{0,70}?\\bwith\\s+${determiner}\\s+([a-z0-9][a-z0-9'\\u2019 -]{0,70}?)${end}`, 'gi'),
-    ];
-    for (const pattern of patterns) {
-        for (const match of source.matchAll(pattern)) {
-            if (!firstPersonControlsItemAction(source, match.index)) continue;
-            const item = cleanDetectedItemLabel(match[1]);
-            if (!item || itemUseIsBodyPartOrNaturalWeapon(item) || itemUseIsNonItemPhrase(item)) continue;
-            return { item, evidence: match[0].trim() };
-        }
-    }
-    return null;
+    return new RegExp(`\\b${itemPattern}\\b`, 'i').test(source);
 }
 
 function stripQuotedItemDialogue(value) {
     return String(value ?? '').replace(/"[^"\r\n]*"|'[^'\r\n]*'/g, match => ' '.repeat(match.length));
 }
 
-function firstPersonControlsItemAction(source, actionIndex) {
-    const sentenceStart = Math.max(source.lastIndexOf('.', actionIndex), source.lastIndexOf('!', actionIndex), source.lastIndexOf('?', actionIndex), source.lastIndexOf(';', actionIndex)) + 1;
-    const prefix = source.slice(sentenceStart, actionIndex);
-    const firstPerson = Array.from(prefix.matchAll(/\bi\b/gi)).at(-1);
-    if (!firstPerson) return false;
-    const controlledPrefix = prefix.slice(firstPerson.index).toLowerCase();
-    if (/\b(?:and|then)\s*$/.test(controlledPrefix)) return true;
-    return !/\b(?:ask|tell|order|command|instruct|want|watch|see|hear|notice|let|make|have|help)\b/.test(controlledPrefix);
-}
-
-function cleanDetectedItemLabel(value) {
-    return String(value ?? '')
-        .trim()
-        .replace(/^["']+|["']+$/g, '')
-        .replace(/\s+/g, ' ')
-        .slice(0, 80);
-}
-
 function itemUseIsBodyPartOrNaturalWeapon(item) {
     const text = normalizeItemMatchText(item);
     if (!text) return false;
-    const terms = ['hand', 'hands', 'fist', 'fists', 'claw', 'claws', 'fang', 'fangs', 'tooth', 'teeth', 'horn', 'horns', 'talon', 'talons', 'tusk', 'tusks', 'tail', 'tails', 'stinger', 'stingers', 'barb', 'barbs', 'jaw', 'jaws', 'foot', 'feet', 'knee', 'knees', 'elbow', 'elbows', 'head', 'leg', 'legs', 'arm', 'arms', 'body', 'voice', 'breath'];
+    const terms = ['hand', 'hands', 'fist', 'fists', 'claw', 'claws', 'fang', 'fangs', 'tooth', 'teeth', 'horn', 'horns', 'talon', 'talons', 'tusk', 'tusks', 'tail', 'tails', 'stinger', 'stingers', 'barb', 'barbs', 'jaw', 'jaws', 'foot', 'feet', 'knee', 'knees', 'elbow', 'elbows', 'head', 'leg', 'legs', 'arm', 'arms', 'body', 'voice', 'breath', 'ass', 'butt', 'buttocks', 'rear', 'backside'];
     return terms.some(term => text === term || text.endsWith(` ${term}`));
 }
 
-function itemUseIsNonItemPhrase(item) {
-    const text = normalizeItemMatchText(item);
-    return ['step', 'seat', 'look', 'glance', 'breath', 'stance', 'position', 'closer look', 'swig', 'sip', 'drink', 'bite'].includes(text);
-}
-
-function itemNamesOverlap(left, right) {
-    const leftText = normalizeItemMatchText(left);
-    const rightText = normalizeItemMatchText(right);
-    return Boolean(leftText && rightText && (leftText === rightText || itemPhraseEndsWith(leftText, rightText) || itemPhraseEndsWith(rightText, leftText)));
+function itemUseMatchesKnownLivingTarget(item, targets = []) {
+    const requested = normalizeItemMatchText(item);
+    if (!requested) return false;
+    return toRealArray(targets).some(target => itemNamesMatch(target, requested));
 }
 
 function priorAssistantSceneItemMatch(context, item) {
@@ -3907,7 +3859,22 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
     let socialTactic = normalizeSocialTactic(semantic.socialTactic, challengeType);
     let rollReason = normalizeRollReason(semantic.rollReason);
     const itemUseAudit = [];
-    const itemUse = normalizeItemUseForHandoff(semantic.itemUse, context, itemUseAudit, playerTrackerSnapshot, sceneItemStateSnapshot, ledger?.worldTransition);
+    const itemUse = normalizeItemUseForHandoff(
+        semantic.itemUse,
+        context,
+        itemUseAudit,
+        playerTrackerSnapshot,
+        sceneItemStateSnapshot,
+        ledger?.worldTransition,
+        [
+            ...identityTargets.ActionTargets,
+            ...identityTargets.StealthTargets,
+            ...identityTargets.OppTargets.NPC,
+            ...identityTargets.BenefitedObservers,
+            ...identityTargets.HarmedObservers,
+            ...identityTargets.NPCAwareOfUser,
+        ],
+    );
     const lootSearch = normalizeLootSearchForHandoff(semantic.lootSearch);
     const intimacyAdvanceExplicit = bool(semantic.intimacyAdvanceExplicit) ? 'Y' : 'N';
     let restraintControl = normalizeBoundaryObject(semantic.restraintControl);

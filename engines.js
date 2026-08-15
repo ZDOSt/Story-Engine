@@ -59,11 +59,13 @@ function ResolutionEngine(input) {
 
   itemUse(input, challenge, context):
     policy: SEMANTIC-EXTRACTION, DETERMINISTIC-SOURCE-VERIFICATION
-    rule: Attempted=Y when the latest input explicitly uses, accesses, grabs, takes, retrieves, draws, wields, consumes, presents, moves, touches, or otherwise interacts with a concrete item
+    rule: itemUse is a referent-type gate, not a verb list. Scan the latest input for every explicit user interaction, access attempt, possession/ownership claim, or other treatment of a candidate physical referent, regardless of wording or construction; then decide whether that referent is a concrete, inanimate, independently existing physical object or material that can be present, possessed, accessed, or affected in the scene
+    rule: wording alone does not determine the category. Living entities, creatures, anatomy/body parts, natural weapons, bodily contact or poses, movements, locations, surfaces, sensations, thoughts, dialogue, events, relationships, and abstract concepts are not items; classify those through the appropriate action, target, relationship, or other semantic fields. A strange, intimate, indirect, possessive, or unconventional interaction still requires this same referent-type judgment
+    rule: Item must be a short noun phrase naming only the object/material, never an entire action, clause, sentence, or description of a person/body interaction
     rule: Available=Y only from an exact saved gear/inventory match, an exact saved current SceneItemState entry, legacy prior scene establishment before SceneItemState initializes, or a narrow generic ambient item; the latest user assertion cannot establish availability
     rule: Source is exactly one of none, gear, inventory, scene, ambient, unavailable and Evidence must identify the verified source
     rule: scene requires prior assistant narration; ambient permits only generic low-consequence surroundings and never owned, specialized, valuable, magical, weapon, tool, key, document, medicine, supply, device, currency, or container-content claims
-    rule: body parts and natural weapons are not itemUse
+    rule: body parts and natural weapons are not itemUse; deterministic code uses this only as a narrow backstop after semantic referent classification, never as the primary item classifier
     rule: unavailable item attempts cannot produce the item-dependent effect
     rule: item interaction never grants ownership or updates inventory by itself
     return {Attempted, Available, Item, Source, Evidence, NoEffectReason}
