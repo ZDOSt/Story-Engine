@@ -20191,19 +20191,41 @@ const tests = [
         groundedLedger(whitespaceBinding, ['I grab her hand, and pin her against the wall.']),
         whitespaceBinding,
       ));
+      const punctuationBinding = createSemanticTurnBinding({
+        latestUserText: 'I push myself up slowly, and shake my head.',
+        semanticTurnKey: 'run-punctuation-1',
+      }, 'normal');
+      const punctuationLedger = groundedLedger(punctuationBinding, ['i push myself up slowly and shake my head']);
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(punctuationLedger, punctuationBinding));
+      assert.equal(punctuationLedger.resolutionEngine.actionUnits[0].evidence, 'I push myself up slowly, and shake my head');
+      const apostropheBinding = createSemanticTurnBinding({
+        latestUserText: "I take Phoebe's hand, then look around.",
+        semanticTurnKey: 'run-apostrophe-1',
+      }, 'normal');
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(
+        groundedLedger(apostropheBinding, ['i take phoebes hand then look around']),
+        apostropheBinding,
+      ));
+      const unicodeBinding = createSemanticTurnBinding({
+        latestUserText: 'I greet Cafe\u0301, then sit down.',
+        semanticTurnKey: 'run-unicode-1',
+      }, 'normal');
+      const unicodeLedger = groundedLedger(unicodeBinding, ['i greet café then sit down']);
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(unicodeLedger, unicodeBinding));
+      assert.equal(unicodeLedger.resolutionEngine.actionUnits[0].evidence, 'I greet Cafe\u0301, then sit down');
       assert.throws(
         () => validateSemanticTurnGrounding(
           groundedLedger(whitespaceBinding, ['I seize her hand, and pin her against the wall.']),
           whitespaceBinding,
         ),
-        /not grounded by an exact quote/,
+        /not grounded by the same contiguous word sequence/,
       );
       assert.throws(
         () => validateSemanticTurnGrounding(
-          groundedLedger(whitespaceBinding, ['i grab her hand, and pin her against the wall.']),
+          groundedLedger(whitespaceBinding, ['I grab her hand, and pin her against the wall. silently']),
           whitespaceBinding,
         ),
-        /not grounded by an exact quote/,
+        /not grounded by the same contiguous word sequence/,
       );
 
       const wrongTurnLedger = groundedLedger(normalBinding, ['I grab her hand, and pin her against the wall.']);
@@ -20224,7 +20246,7 @@ const tests = [
           groundedLedger(normalBinding, ['User wakes and receives care from guardian NPC']),
           normalBinding,
         ),
-        /not grounded by an exact quote/,
+        /not grounded by the same contiguous word sequence/,
         'The Haiku prior-assistant-narration regression must fail closed.',
       );
       assert.throws(
@@ -20232,7 +20254,7 @@ const tests = [
           groundedLedger(normalBinding, ['Phoebe told him to rest.']),
           normalBinding,
         ),
-        /not grounded by an exact quote/,
+        /not grounded by the same contiguous word sequence/,
         'Evidence copied from prior assistant narration must fail closed.',
       );
 

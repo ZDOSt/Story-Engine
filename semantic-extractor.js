@@ -881,7 +881,7 @@ export function buildSemanticTurnBindingBlock(turnBinding) {
         'The JSON object below is authoritative data for this semantic pass. Analyze effectiveUserInput as the current user turn; use all earlier messages only as context.',
         payload,
         'Echo turnId exactly in turnBinding.turnId.',
-        'For every resolutionEngine.actionUnits entry, copy evidence as an exact contiguous quote from effectiveUserInput. Whitespace and line breaks may be normalized, but wording, punctuation, and letter case must not be changed. Never use assistant narration or an earlier user turn as action-unit evidence.',
+        'For every resolutionEngine.actionUnits entry, copy evidence from one contiguous span of effectiveUserInput using the same words in the same order. Punctuation, whitespace, and letter case may differ, but do not omit, add, substitute, or paraphrase words. Never use assistant narration or an earlier user turn as action-unit evidence.',
     ].join('\n');
 }
 
@@ -905,6 +905,42 @@ function normalizeTurnGroundingQuote(value) {
         .replace(/\s+/gu, ' ');
 }
 
+function tokenizeTurnGroundingText(value) {
+    const text = String(value ?? '');
+    const tokens = [];
+    const pattern = /[\p{L}\p{M}\p{N}]+(?:['’\-][\p{L}\p{M}\p{N}]+)*/gu;
+    for (const match of text.matchAll(pattern)) {
+        const raw = match[0];
+        const value = raw
+            .replace(/['’\-]/gu, '')
+            .normalize('NFC')
+            .toLowerCase();
+        if (!value) continue;
+        tokens.push({
+            value,
+            start: match.index,
+            end: match.index + raw.length,
+        });
+    }
+    return tokens;
+}
+
+function findTurnGroundingSpan(source, evidence) {
+    const sourceTokens = tokenizeTurnGroundingText(source);
+    const evidenceTokens = tokenizeTurnGroundingText(evidence);
+    if (!sourceTokens.length || !evidenceTokens.length || evidenceTokens.length > sourceTokens.length) return '';
+
+    for (let start = 0; start <= sourceTokens.length - evidenceTokens.length; start += 1) {
+        const matches = evidenceTokens.every((token, offset) => token.value === sourceTokens[start + offset].value);
+        if (matches) {
+            const first = sourceTokens[start];
+            const last = sourceTokens[start + evidenceTokens.length - 1];
+            return source.slice(first.start, last.end);
+        }
+    }
+    return '';
+}
+
 function validateSemanticTurnIdentity(ledger, turnBinding) {
     const expectedTurnId = String(turnBinding?.turnId || '').trim();
     const returnedTurnId = String(ledger?.turnBinding?.turnId || '').trim();
@@ -919,8 +955,8 @@ function validateSemanticTurnIdentity(ledger, turnBinding) {
 
 export function validateSemanticTurnGrounding(ledger, turnBinding) {
     validateSemanticTurnIdentity(ledger, turnBinding);
-    const effectiveUserInput = normalizeTurnGroundingQuote(turnBinding?.effectiveUserInput);
-    if (!effectiveUserInput) {
+    const effectiveUserInput = String(turnBinding?.effectiveUserInput ?? '').trim();
+    if (!normalizeTurnGroundingQuote(effectiveUserInput)) {
         throw annotateSemanticDiagnosticError(
             new Error('Semantic current-turn input is empty after normalization.'),
             { code: 'SE-TURN-GROUNDING', stage: 'Current-turn grounding' },
@@ -935,9 +971,12 @@ export function validateSemanticTurnGrounding(ledger, turnBinding) {
     }
     for (const [index, unit] of actionUnits.entries()) {
         const evidence = normalizeTurnGroundingQuote(unit?.evidence);
-        if (!evidence || isNoneValue(evidence) || !effectiveUserInput.includes(evidence)) {
+        const groundedEvidence = !evidence || isNoneValue(evidence)
+            ? ''
+            : findTurnGroundingSpan(effectiveUserInput, evidence);
+        if (!groundedEvidence) {
             throw annotateSemanticDiagnosticError(
-                new Error(`Semantic action unit A${index + 1} is not grounded by an exact quote from the current user input.`),
+                new Error(`Semantic action unit A${index + 1} is not grounded by the same contiguous word sequence from the current user input.`),
                 {
                     code: 'SE-TURN-GROUNDING',
                     stage: 'Current-turn grounding',
@@ -945,6 +984,7 @@ export function validateSemanticTurnGrounding(ledger, turnBinding) {
                 },
             );
         }
+        unit.evidence = groundedEvidence;
     }
     return ledger;
 }
@@ -968,7 +1008,7 @@ export function buildSemanticToolPrompt(prompt) {
         'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
         'For enum fields, use exactly one value listed by the schema. Never invent a synonym or alternate label.',
         'Use an empty array when a repeated section has no entries. Do not emit count fields, placeholder rows, or sentinel values in arrays.',
-        'Echo the exact authoritative current turn ID in turnBinding.turnId, and ground every resolutionEngine.actionUnits evidence value with an exact contiguous quote from the supplied effectiveUserInput.',
+        'Echo the exact authoritative current turn ID in turnBinding.turnId, and ground every resolutionEngine.actionUnits evidence value with the same words in the same order from one contiguous span of the supplied effectiveUserInput. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words.',
         'Legacy shorthand in the semantic guidance maps to this schema as follows: Y/N means true/false; count=0, a list value of (none), or ["(none)"] means an empty array; [index] means one array entry; and references to lines or the template mean the corresponding schema properties. Apply the guidance semantically; never emit compact ledger keys.',
         'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
         'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. The tool schema changes only transport structure; do not reduce, reinterpret, or invent ledger content.',
@@ -1251,7 +1291,7 @@ function buildSemanticPreflightSchema() {
     const actionUnit = object({
         id: enumString(['A1', 'A2', 'A3'], 'A1, A2, or A3. actionUnits is the only semantic source for mechanically counted actions.'),
         action: string('Short clean description of this mechanically counted user action.'),
-        evidence: string('Exact contiguous quote copied from the authoritative effective current user input for this action unit. Whitespace/line breaks may be normalized; wording, punctuation, and letter case may not. Audit only; not narration.'),
+        evidence: string('Words copied in the same order from one contiguous span of the authoritative effective current user input for this action unit. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words. Audit only; not narration.'),
     });
     const worldTransition = object({
         reputationLocation: string('Use unchanged unless the latest user input explicitly changes the current settlement, route, region, or reputation jurisdiction. Never copy or infer the existing scene state.'),
