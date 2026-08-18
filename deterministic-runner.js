@@ -3314,8 +3314,8 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
             transitionEvidence: normalizeWorldTransition(worldTransition || {}).evidence || NONE,
         })}`);
     }
-    const legacySceneMatch = !savedItemMatch && !savedSceneMatch && !currentSceneState.initialized && !ownershipClaimed
-        ? priorAssistantSceneItemMatch(context, item)
+    const legacySceneMatch = !savedItemMatch && !savedSceneMatch && !oldScenePrecedesItem && !ownershipClaimed
+        ? priorAssistantSceneItemMatch(context, item, { latestOnly: currentSceneState.initialized })
         : null;
     const ambientMatch = !savedItemMatch && !savedSceneMatch && !legacySceneMatch && !ownershipClaimed
         ? permittedAmbientItemMatch(item, latestUserText)
@@ -3471,7 +3471,7 @@ function itemUseMatchesKnownLivingTarget(item, targets = []) {
     return toRealArray(targets).some(target => itemNamesMatch(target, requested));
 }
 
-function priorAssistantSceneItemMatch(context, item) {
+function priorAssistantSceneItemMatch(context, item, { latestOnly = false } = {}) {
     const chat = Array.isArray(context?.chat) ? context.chat : [];
     let latestUserIndex = chat.length;
     for (let index = chat.length - 1; index >= 0; index -= 1) {
@@ -3483,9 +3483,11 @@ function priorAssistantSceneItemMatch(context, item) {
     const itemText = normalizeItemMatchText(item);
     if (!itemText) return null;
     const itemPattern = itemText.split(/\s+/).map(escapeRegex).join('\\s+');
+    let assistantMessagesChecked = 0;
     for (let index = latestUserIndex - 1; index >= 0; index -= 1) {
         const message = chat[index];
         if (isUserMessage(message) || message?.is_system || message?.role === 'system') continue;
+        assistantMessagesChecked += 1;
         const sentences = messageText(message).split(/(?<=[.!?])\s+|[\r\n]+/).filter(Boolean);
         for (let sentenceIndex = sentences.length - 1; sentenceIndex >= 0; sentenceIndex -= 1) {
             const sentence = sentences[sentenceIndex].trim();
@@ -3493,6 +3495,7 @@ function priorAssistantSceneItemMatch(context, item) {
             if (!assistantSentenceEstablishesSceneItem(sentence, itemPattern)) continue;
             return { evidence: `"${sentence.replace(/\s+/g, ' ').slice(0, 180)}"` };
         }
+        if (latestOnly && assistantMessagesChecked >= 1) return null;
     }
     return null;
 }
@@ -3500,11 +3503,16 @@ function priorAssistantSceneItemMatch(context, item) {
 function assistantSentenceEstablishesSceneItem(sentence, itemPattern) {
     const text = normalizeItemPossessionClaimText(stripQuotedItemDialogue(sentence));
     if (!text) return false;
-    const absent = `(?:no|not|never|without|missing|absent|cannot|cant|doesnt|didnt|dont\\s+have)`;
-    if (new RegExp(`\\b${absent}\\b.{0,50}\\b${itemPattern}\\b|\\b${itemPattern}\\b.{0,50}\\b(?:missing|absent|doesnt\\s+exist|isnt\\s+there)\\b`).test(text)) return false;
-    if (/\b(?:wish|want|need|hope|imagine|pretend|rumor|rumour|suppose|hypothetical|if only)\b/.test(text)) return false;
-    const physicalVerb = '(?:is|are|was|were|rests|rested|sits|sat|lies|lay|leans|leaned|stands|stood|hangs|hung|waits|waited|remains|remained|holds|held|carries|carried|offers|offered|hands|handed|gives|gave|places|placed|sets|set|puts|put|drops|dropped|left|keeps|kept|wears|wore|uses|used|plays|played|grips|gripped|clutches|clutched|appears|appeared|gleams|gleamed|glints|glinted|visible|seen|spotted)';
-    return new RegExp(`\\b${itemPattern}\\b.{0,70}\\b${physicalVerb}\\b|\\b${physicalVerb}\\b.{0,70}\\b${itemPattern}\\b`).test(text);
+    const absent = `(?:no|not|never|without|missing|absent|cannot|cant|doesnt|doesn\\s+t|didnt|didn\\s+t|dont|don\\s+t|nowhere|no\\s+longer)`;
+    if (new RegExp(`\\b${absent}\\b.{0,50}\\b${itemPattern}\\b|\\b${itemPattern}\\b.{0,50}\\b(?:missing|absent|doesnt\\s+exist|doesn\\s+t\\s+exist|isnt\\s+there|isn\\s+t\\s+there|not\\s+present|gone|nowhere)\\b`).test(text)) return false;
+    if (/\b(?:wish|want|need|hope|imagine|pretend|rumor|rumour|suppose|hypothetical|if only|might|could|would)\b/.test(text)) return false;
+    const physicalVerb = '(?:is|are|was|were|rests|rested|sits|sat|lies|lay|leans|leaned|stands|stood|hangs|hung|waits|waited|remains|remained|holds|held|holding|carries|carried|carrying|offers|offered|hands|handed|gives|gave|places|placed|sets|set|puts|put|drops|dropped|left|keeps|kept|wears|wore|uses|used|plays|played|grips|gripped|clutches|clutched|appears|appeared|gleams|gleamed|glints|glinted|visible|seen|spotted)';
+    const sceneRelation = '(?:on|upon|in|inside|beside|near|against|under|over|atop|across|between|behind|beneath|within|along|around|to)\\s+(?:the|a|an|one|some|this|that|these|those|[a-z0-9])';
+    const declaredState = new RegExp(`\\b${itemPattern}\\b.{0,80}\\b(?:is|are|was|were|has|have|had|remains?|appears?)\\b`);
+    const relatedPlacement = new RegExp(`\\b${itemPattern}\\b.{0,80}\\b${sceneRelation}\\b`);
+    return declaredState.test(text)
+        || relatedPlacement.test(text)
+        || new RegExp(`\\b${itemPattern}\\b.{0,70}\\b${physicalVerb}\\b|\\b${physicalVerb}\\b.{0,70}\\b${itemPattern}\\b`).test(text);
 }
 
 function permittedAmbientItemMatch(item, latestUserText) {

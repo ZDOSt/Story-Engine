@@ -13641,6 +13641,7 @@ const tests = [
       assert.match(semanticSource, /regardless of wording, verb, or construction/i);
       assert.doesNotMatch(semanticSource, /When \{\{user\}\} touches, grabs, holds, embraces, strikes/i);
       assert.match(semanticSource, /scene requires an exact saved current SceneItemState entry/i);
+      assert.match(semanticSource, /factual latest assistant scene narration/i);
       assert.match(semanticSource, /Ambient does not establish owned, specialized, valuable, magical, weapon, tool, key/i);
       assert.match(semanticSource, /Every Attempted=Y entry requires concise Evidence/i);
       assert.match(semanticSource, /Evidence cannot create availability/i);
@@ -14243,7 +14244,7 @@ const tests = [
       assert.equal(staleTransitionReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
       assert(auditIncludes(staleTransitionReport, 'staleSceneItemRejected'));
 
-      const initializedSceneBlocksHistoryReport = runCase({
+      const initializedSceneUsesLatestAssistantEvidenceReport = runCase({
         userText: sceneGuitarText,
         chat: [
           { is_user: true, mes: 'I enter the cottage.' },
@@ -14260,8 +14261,59 @@ const tests = [
         },
         ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'guitar', source: 'scene' }),
       });
-      assert.equal(initializedSceneBlocksHistoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
-      assert.equal(initializedSceneBlocksHistoryReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+      assert.equal(initializedSceneUsesLatestAssistantEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(initializedSceneUsesLatestAssistantEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'scene');
+      assert.match(initializedSceneUsesLatestAssistantEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, /legacy prior assistant scene: "A polished guitar rests against the bedframe/i);
+
+      const fixedPlankLedger = itemLedger({
+        attempted: true,
+        available: false,
+        item: 'pine plank',
+        source: 'unavailable',
+        evidence: '(none)',
+        noEffectReason: 'unknown',
+      });
+      fixedPlankLedger.resolutionEngine.identifyGoal = 'Grab_Pine_Plank';
+      fixedPlankLedger.resolutionEngine.identifyChallenge = 'grab the pine plank despite it being fixed across the wagon';
+      fixedPlankLedger.resolutionEngine.explicitMeans = 'grab the pine plank';
+      fixedPlankLedger.resolutionEngine.identifyTargets = {
+        ActionTargets: [],
+        OppTargets: { NPC: [], ENV: ['wagon'] },
+        BenefitedObservers: [],
+        HarmedObservers: [],
+      };
+      fixedPlankLedger.resolutionEngine.rollNeeded = true;
+      fixedPlankLedger.resolutionEngine.rollReason = 'the fixed plank creates an environmental access challenge';
+      fixedPlankLedger.resolutionEngine.challengeType = 'environment';
+      fixedPlankLedger.resolutionEngine.environmentDifficulty = 4;
+      fixedPlankLedger.resolutionEngine.environmentDifficultyTier = 'hard';
+      const fixedPlankReport = runCase({
+        userText: 'I grab the pine plank.',
+        chat: [
+          { is_user: true, mes: 'I examine the wagon.' },
+          { is_user: false, mes: 'A pine plank remains nailed across the wagon.' },
+          { is_user: true, mes: 'I grab the pine plank.' },
+        ],
+        cardFields: {
+          worldState: cottageWorldState,
+          sceneItems: {
+            sceneKey: buildSceneItemStateKey(cottageWorldState),
+            initialized: true,
+            items: [],
+          },
+        },
+        ledger: fixedPlankLedger,
+      });
+      const fixedPlankPacket = fixedPlankReport.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(fixedPlankPacket.ItemUse.Attempted, 'Y');
+      assert.equal(fixedPlankPacket.ItemUse.Available, 'Y');
+      assert.equal(fixedPlankPacket.ItemUse.Source, 'scene');
+      assert.match(fixedPlankPacket.ItemUse.Evidence, /legacy prior assistant scene: "A pine plank remains nailed across the wagon/i);
+      assert.equal(fixedPlankPacket.RollNeeded, 'Y');
+      assert.equal(fixedPlankPacket.challengeType, 'environment');
+      assert.deepEqual(fixedPlankPacket.OppTargets.ENV, ['wagon']);
+      assert.equal(auditIncludes(fixedPlankReport, 'deterministicUnavailableItem'), false);
+      assert.deepEqual(fixedPlankReport.trackerUpdate.user.inventory, []);
 
       const ambientRockReport = runCase({
         userText: 'I pick up a small rock.',
@@ -14356,6 +14408,18 @@ const tests = [
       assert.equal(dialogueClaimDoesNotEstablishReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
       assert.equal(dialogueClaimDoesNotEstablishReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
 
+      const negatedSceneClaimReport = runCase({
+        userText: 'I grab the guitar.',
+        chat: [
+          { is_user: true, mes: 'I look around.' },
+          { is_user: false, mes: 'There is no guitar anywhere in the cottage.' },
+          { is_user: true, mes: 'I grab the guitar.' },
+        ],
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, available: true, item: 'guitar', source: 'scene', evidence: 'the guitar was in the cottage' }),
+      });
+      assert.equal(negatedSceneClaimReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert.equal(negatedSceneClaimReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+
       const repairedEvidenceReport = runCase({
         userText: 'I draw my sword.',
         userState: { gear: ['sword'], inventory: [] },
@@ -14411,6 +14475,19 @@ const tests = [
       assert.equal(introduced.sceneItems.initialized, true);
       assert.deepEqual(introduced.sceneItems.items.map(item => item.name), ['guitar']);
       assert.match(introduced.sceneItems.items[0].evidence, /polished guitar rests beside the counter/i);
+
+      const fixedIntroduced = reconcilePostNarrationPossessionDelta({
+        snapshot: { user: { inventory: [], gear: [] }, npcs: {}, sceneItems: emptyScene, worldState: bakery },
+        delta: {
+          user: actorDelta(),
+          npcs: [],
+          sceneItems: { add: ['pine plank'], remove: [] },
+        },
+        narration: 'A pine plank remains nailed across the wagon.',
+        worldState: bakery,
+      });
+      assert.deepEqual(fixedIntroduced.sceneItems.items.map(item => item.name), ['pine plank']);
+      assert.match(fixedIntroduced.sceneItems.items[0].evidence, /pine plank remains nailed across the wagon/i);
 
       const moved = normalizeSceneItemState(introduced.sceneItems, forest);
       assert.equal(moved.sceneKey, buildSceneItemStateKey(forest));

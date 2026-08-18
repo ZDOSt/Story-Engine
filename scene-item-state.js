@@ -313,14 +313,13 @@ function groundSceneItemDelta({ before, proposed, narration, itemUse, userDelta,
             audit.push(`SCENE_ITEM rejected add=${item}: ${reason}, not loose in the scene`);
             continue;
         }
-        if (itemUseBlocksAddition(itemUse, sceneItem)) {
-            audit.push(`SCENE_ITEM rejected add=${item}: pre-narration item authority marked the attempted item unavailable`);
-            continue;
-        }
         const evidence = findSceneItemEstablishment(narration, sceneItem);
         if (!evidence) {
-            audit.push(`SCENE_ITEM rejected add=${item}: final narration does not establish a loose current-scene item`);
+            audit.push(`SCENE_ITEM rejected add=${item}: final narration does not establish a current-scene item`);
             continue;
+        }
+        if (itemUseBlocksAddition(itemUse, sceneItem)) {
+            audit.push(`SCENE_ITEM availability repaired from final narration for add=${item}: factual scene presence overrides an unavailable pre-narration item classification`);
         }
         addUniqueItem(add, sceneItem);
     }
@@ -525,8 +524,9 @@ function findSceneItemEstablishment(narration, item) {
         const established = /\bthere\s+(?:is|are|was|were|sits?|rests?|lies?|lay)\b/i.test(text)
             || /\b(?:rests?|sits?|lies?|lay|leans?|stands?|hangs?|waits?|remains?|appears?|visible|spotted)\b/i.test(text)
             || /\b(?:place|places|placed|set|sets|put|puts|drop|drops|dropped|leave|leaves|left)\b/i.test(text)
-            || /\b(?:on|upon|in|inside|beside|near|against|under|over|atop|across)\s+(?:the|a|an|your|their)\b/i.test(text);
-        const heldOnly = /\b(?:holds?|carries|carried|wears?|wore|grips?|clutches?|offers?|offered|shows?|showed|presents?|presented|hands?|handed|gives?|gave|passes?|passed)\b/i.test(text)
+            || /\b(?:on|upon|in|inside|beside|near|against|under|over|atop|across|between|behind|beneath|within|along|around|to)\s+(?:the|a|an|your|their|one|some|this|that|these|those|[a-z0-9])\b/i.test(text)
+            || itemHasDeclarativeState(text, item);
+        const heldOnly = /\b(?:holds?|holding|carries|carried|carrying|wears?|wore|grips?|clutches?|offers?|offered|shows?|showed|presents?|presented|hands?|handed|gives?|gave|passes?|passed)\b/i.test(text)
             && !/\b(?:place|places|placed|set|sets|put|puts|drop|drops|dropped|leave|leaves|left)\b/i.test(text);
         const placedInPersonalPossession = itemPlacedInPersonalPossession(text, item);
         if (established && !heldOnly && !placedInPersonalPossession) {
@@ -534,6 +534,13 @@ function findSceneItemEstablishment(narration, item) {
         }
     }
     return null;
+}
+
+function itemHasDeclarativeState(text, item) {
+    return itemTextVariants(item).some(variant => {
+        const pattern = escapeRegex(variant).replace(/\s+/g, '\\s+');
+        return new RegExp(`(?:^|[^a-z0-9])${pattern}(?=$|[^a-z0-9])[^.!?]{0,80}\\b(?:is|are|was|were|has|have|had|remains?|appears?)\\b`, 'iu').test(text);
+    });
 }
 
 function findSceneItemRemoval(narration, item) {
