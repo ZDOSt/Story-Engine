@@ -553,6 +553,15 @@ function RelationshipEngine(npc, resolutionPacket) {
     rule: blockers include recent coercion, intimidation, betrayal, humiliation, unwanted intimacy pressure, boundary violation, unresolved harm, exploitation, active fear, active hostility, or NPC being trapped/dependent/powerless in a way that makes closeness unsafe to count
     rule: return only categories with explicit evidence in this scene; leave all others 0. Return blocker labels only when explicitly present.
 
+  aggressionMethod(npc, resolutionPacket, context):
+    policy: SEMANTIC-ONLY, METHOD-FIRST, EXPLICIT-CONTEXT
+    rule: classify only this NPC's context-supported method for ongoing or immediately possible aggression this turn, including ProactiveAttack, CounterAttack, Retaliation, CompanionAttack, or a companion counter
+    rule: physical = bodily force, natural weapon, ordinary weapon, tool, projectile, thrown object, or another material attack
+    rule: supernatural = established spell, psychic/mental attack, magical effect, divine/demonic power, or another supernatural attack
+    rule: choose from established current action, equipment, natural weapons, abilities, background, knowledge, and practiced skills; never choose from whichever numeric stat is higher
+    rule: supernatural requires established contextual support; aggression-eligible but uncertain defaults to physical; no ongoing or immediately possible aggression = none
+    return {aggressionMethod:none|physical|supernatural, aggressionMethodEvidence}
+
   slowBondEligible(currentDisposition, currentRapport, slowBondEvidence):
     policy: LOCKED, DETERMINISTIC
     rule: return Y only if currentDisposition.B=3, currentDisposition.F<3, currentDisposition.H<3, currentRapport>=5, blockers empty, and at least ${SLOW_BOND_DISTINCT_CATEGORY_THRESHOLD} distinct positive evidence categories have count > 0
@@ -571,7 +580,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     update disposition and apply rapport reset if present
     if hostilePressureResult.dominatedFearBreak=Y and currentDisposition.F>=4 and currentDisposition.H>=3 -> lower currentDisposition.H by 1
     save currentRapport, lastRapportGainActiveMs, hostilePressure, hostileLandedPressure, dominantLock, and pressureMode to sceneTracker
-    classify disposition, assess standingInfluence/standingBasis, update slowBondEvidence, check slowBondEligible, resolve threshold/override, and check establishedRelationship
+    classify disposition, assess aggressionMethod/aggressionMethodEvidence and standingInfluence/standingBasis, update slowBondEvidence, check slowBondEligible, resolve threshold/override, and check establishedRelationship
     RelationToUserAction = {isDirect, isOpp, isBenefited, isHarmed}
     return NPC handoff including StandingInfluence, StandingBasis, HostilePressure, HostileLandedPressure, DominantLock, PressureMode, and RelationToUserAction
 }
@@ -926,7 +935,8 @@ function NPCAggressionResolution(proactivityResults, resolutionPacket, trackerSn
       targetCore = deterministic runtime user core stats if target={{user}} else target NPC currentCoreStats
       npcDie = 1d20
       targetDie = 1d20
-      attackStat = highest of npcCore.PHY/MND only; ignore CHA for aggression
+      aggressionMethod = matching RelationshipEngine semantic aggressionMethod for this NPC
+      attackStat = MND only when aggressionMethod=supernatural with established evidence; otherwise PHY
       defenseStat = attackStat
       npcTotal = npcDie + npcCore[attackStat] + counterBonus
       targetTotal = targetDie + targetCore[defenseStat]

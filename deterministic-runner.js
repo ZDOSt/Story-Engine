@@ -7402,9 +7402,21 @@ function evaluateNpcDefenseImpairment(npcName, trackerUpdate, trackerSnapshot, p
     };
 }
 
-function deriveNpcAggressionStat(core) {
-    const normalized = normalizeCore(core, { PHY: 1, MND: 1, CHA: 1 });
-    return Number(normalized.MND || 0) > Number(normalized.PHY || 0) ? 'MND' : 'PHY';
+function resolveNpcAggressionMethod(ledger, npc) {
+    const semantic = (ledger?.relationshipEngine || []).find(item => sameName(item?.NPC, npc));
+    const method = String(semantic?.aggressionMethod || '').trim().toLowerCase();
+    const evidence = String(semantic?.aggressionMethodEvidence || '').trim().replace(/\s+/g, ' ').slice(0, 260);
+    if (method === 'supernatural' && isReal(evidence)) {
+        return { method: 'supernatural', evidence };
+    }
+    if (method === 'physical') {
+        return { method: 'physical', evidence: isReal(evidence) ? evidence : NONE };
+    }
+    return { method: 'physical', evidence: NONE };
+}
+
+function deriveNpcAggressionStat(method) {
+    return method === 'supernatural' ? 'MND' : 'PHY';
 }
 
 function normalizeAggressionStat(value) {
@@ -8820,7 +8832,8 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
             ? 'CompanionAttack'
             : baseAttackType;
         const npcCore = normalizeCore(trackerUpdate[npc]?.currentCoreStats || trackerSnapshot[npc]?.currentCoreStats, { PHY: 1, MND: 1, CHA: 1 });
-        const attackStat = deriveNpcAggressionStat(npcCore);
+        const aggressionMethod = resolveNpcAggressionMethod(ledger, npc);
+        const attackStat = deriveNpcAggressionStat(aggressionMethod.method);
         const defenseStat = attackStat;
         const npcImpairment = evaluateNpcAggressionImpairment(npc, trackerUpdate, trackerSnapshot, proactivityResult, attackStat);
         const npcImpairmentPenalty = Number(npcImpairment?.AppliedToRoll === 'Y' ? npcImpairment.RollPenalty : 0);
@@ -8865,9 +8878,9 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
         if (inflictedNpcInjury) {
             npcTrackerDeltas.push({ NPC: target, injury: inflictedNpcInjury });
         }
-        results[npc] = { AttackType: resultAttackType, AttackIntent: proactivityResult.Intent, ProactivityTarget: target, AttackStat: attackStat, AttackStatValue: npcStatValue, DefenseStat: defenseStat, DefenseStatValue: defenderStatValue, AttackStyle: aggressionStatStyle(attackStat), CounterPotential: counterPotential, CounterBonus: counterBonus, ReactionOutcome, Margin: margin, NpcDie: npcDie, DefenderDie: defenderDie, NpcTotal: npcTotal, DefenderTotal: defenderTotal, NPCImpairment: npcImpairment, UserImpairment: targetIsUser ? targetImpairment : null, TargetImpairment: targetImpairment, TargetEquipmentDefense: targetEquipmentDefense, InflictedUserInjury: inflictedUserInjury || null, InflictedTargetInjury: inflictedTargetInjury || null };
+        results[npc] = { AttackType: resultAttackType, AttackIntent: proactivityResult.Intent, ProactivityTarget: target, AggressionMethod: aggressionMethod.method, AggressionMethodEvidence: aggressionMethod.evidence, AttackStat: attackStat, AttackStatValue: npcStatValue, DefenseStat: defenseStat, DefenseStatValue: defenderStatValue, AttackStyle: aggressionStatStyle(attackStat), CounterPotential: counterPotential, CounterBonus: counterBonus, ReactionOutcome, Margin: margin, NpcDie: npcDie, DefenderDie: defenderDie, NpcTotal: npcTotal, DefenderTotal: defenderTotal, NPCImpairment: npcImpairment, UserImpairment: targetIsUser ? targetImpairment : null, TargetImpairment: targetImpairment, TargetEquipmentDefense: targetEquipmentDefense, InflictedUserInjury: inflictedUserInjury || null, InflictedTargetInjury: inflictedTargetInjury || null };
         audit.push(`7.5 ${npc}.npcCore=${compact(npcCore)}`);
-        audit.push(`7.5c ${npc}.AggressionStats=${compact({ AttackStat: attackStat, DefenseStat: defenseStat, AttackStyle: aggressionStatStyle(attackStat) })}`);
+        audit.push(`7.5c ${npc}.AggressionStats=${compact({ AggressionMethod: aggressionMethod.method, AggressionMethodEvidence: aggressionMethod.evidence, AttackStat: attackStat, DefenseStat: defenseStat, AttackStyle: aggressionStatStyle(attackStat) })}`);
         audit.push(`7.5d ${npc}.NPCImpairmentEngine=${compact(npcImpairment)}`);
         audit.push(`7.5e npcTotal=${npcDie}+${attackStat}(${npcStatValue})+${counterBonus}${npcImpairmentPenalty ? `+impairment(${npcImpairmentPenalty})` : ''}=${npcTotal}`);
         audit.push(`7.5f ${npc}.TargetDefenseImpairmentEngine=${compact(targetImpairment)}`);
@@ -8894,7 +8907,8 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
             };
             const counterBonus = counterBonusFromPotential(companionCounterPotential);
             const counterNpcCore = normalizeCore(trackerUpdate[target]?.currentCoreStats || trackerSnapshot[target]?.currentCoreStats, { PHY: 1, MND: 1, CHA: 1 });
-            const counterAttackStat = deriveNpcAggressionStat(counterNpcCore);
+            const counterAggressionMethod = resolveNpcAggressionMethod(ledger, target);
+            const counterAttackStat = deriveNpcAggressionStat(counterAggressionMethod.method);
             const counterDefenseStat = counterAttackStat;
             const counterNpcImpairment = evaluateNpcAggressionImpairment(target, trackerUpdate, trackerSnapshot, counterProactivity, counterAttackStat);
             const counterNpcImpairmentPenalty = Number(counterNpcImpairment?.AppliedToRoll === 'Y' ? counterNpcImpairment.RollPenalty : 0);
@@ -8931,6 +8945,8 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
                 AttackType: 'CounterAttack',
                 AttackIntent: counterProactivity.Intent,
                 ProactivityTarget: npc,
+                AggressionMethod: counterAggressionMethod.method,
+                AggressionMethodEvidence: counterAggressionMethod.evidence,
                 AttackStat: counterAttackStat,
                 AttackStatValue: counterNpcStatValue,
                 DefenseStat: counterDefenseStat,
@@ -8953,7 +8969,7 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
             };
             audit.push(`7.6a companionCounterPotential=${companionCounterPotential}`);
             audit.push(`7.6b ${target}.counterNpcCore=${compact(counterNpcCore)}`);
-            audit.push(`7.6b.1 ${target}.CounterAggressionStats=${compact({ AttackStat: counterAttackStat, DefenseStat: counterDefenseStat, AttackStyle: aggressionStatStyle(counterAttackStat) })}`);
+            audit.push(`7.6b.1 ${target}.CounterAggressionStats=${compact({ AggressionMethod: counterAggressionMethod.method, AggressionMethodEvidence: counterAggressionMethod.evidence, AttackStat: counterAttackStat, DefenseStat: counterDefenseStat, AttackStyle: aggressionStatStyle(counterAttackStat) })}`);
             audit.push(`7.6c ${target}.CounterTargetDefenseImpairmentEngine=${compact(counterTargetImpairment)}`);
             audit.push(`7.6c.1 ${target}.CounterTargetEquipmentDefenseEngine=${compact(counterTargetEquipmentDefense)}`);
             audit.push(`7.6d ${target}.counterTotal=${counterNpcDie}+${counterAttackStat}(${counterNpcStatValue})+${counterBonus}${counterNpcImpairmentPenalty ? `+impairment(${counterNpcImpairmentPenalty})` : ''}=${counterNpcTotal}`);

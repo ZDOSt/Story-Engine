@@ -127,6 +127,8 @@ const emptySlowBondEvidence = () => ({
 function relationship(NPC, extra = {}) {
   return {
     NPC,
+    aggressionMethod: 'none',
+    aggressionMethodEvidence: '(none)',
     initPreset: {
       romanticOpen: false,
       userBadRep: false,
@@ -7602,7 +7604,7 @@ const tests = [
     },
   },
   {
-    name: '16a MND-dominant NPC aggression uses MND against user defense',
+    name: '16a explicitly supernatural NPC aggression uses MND against user defense',
     run() {
       const tracker = {
         Witch: trackerEntry({
@@ -7625,7 +7627,10 @@ const tests = [
             challengeTypeEvidence: 'test fixture',
             socialTactic: 'none',
           },
-          relationshipEngine: [relationship('Witch')],
+          relationshipEngine: [relationship('Witch', {
+            aggressionMethod: 'supernatural',
+            aggressionMethodEvidence: 'established spellcasting ability',
+          })],
         }),
       });
       const aggro = report.finalNarrativeHandoff.aggressionResults.Witch;
@@ -7640,7 +7645,7 @@ const tests = [
     },
   },
   {
-    name: '16b CHA-dominant NPC aggression ignores CHA and uses stronger PHY or MND',
+    name: '16b physical NPC aggression does not follow the highest numeric stat',
     run() {
       const tracker = {
         Siren: trackerEntry({
@@ -7667,10 +7672,11 @@ const tests = [
       });
       const aggro = report.finalNarrativeHandoff.aggressionResults.Siren;
       assert.equal(aggro.AttackType, 'CounterAttack');
-      assert.equal(aggro.AttackStat, 'MND');
-      assert.equal(aggro.DefenseStat, 'MND');
+      assert.equal(aggro.AttackStat, 'PHY');
+      assert.equal(aggro.DefenseStat, 'PHY');
       assert.notEqual(aggro.AttackStat, 'CHA');
-      assert.match(auditPrompt(report), /attackStat:MND\/defenseStat:MND/);
+      assert.match(auditPrompt(report), /AggressionMethod":"physical/);
+      assert.match(auditPrompt(report), /attackStat:PHY\/defenseStat:PHY/);
     },
   },
   {
@@ -9356,7 +9362,10 @@ const tests = [
             challengeType: 'mundane_combat',
             harmMode: 'nonlethal',
           },
-          relationshipEngine: [relationship('Witch')],
+          relationshipEngine: [relationship('Witch', {
+            aggressionMethod: 'supernatural',
+            aggressionMethodEvidence: 'established spellcasting ability',
+          })],
         }),
       });
       const mentalAggression = mental.finalNarrativeHandoff.aggressionResults.Witch;
@@ -17861,10 +17870,10 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 251,
+        leaves: 253,
         objects: 47,
         arrays: 47,
-        descriptions: 110,
+        descriptions: 112,
         incompleteRequired: 0,
       });
       assert.deepEqual(
@@ -18209,6 +18218,8 @@ const tests = [
 
       const relationshipRowDefaults = [
         ['NPC', '(none)'],
+        ['aggressionMethod', 'none'],
+        ['aggressionMethodEvidence', '(none)'],
         ['initPreset.romanticOpen', 'N'],
         ['initPreset.userBadRep', 'N'],
         ['initPreset.priorUserGoodRep', 'N'],
