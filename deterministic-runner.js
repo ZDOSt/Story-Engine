@@ -104,6 +104,7 @@ const NONE = '(none)';
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 const USER_PROACTIVITY_TARGET = '{{user}}';
 const USER_KNOWLEDGE_LEDGER_VERSION = 1;
+const ITEM_USE_GENERIC_REFERENTS = Object.freeze(new Set(['weapon', 'weapons', 'tool', 'tools', 'object', 'objects', 'item', 'items', 'something', 'anything']));
 const ENVIRONMENT_DIFFICULTY_BONUSES = Object.freeze({
     none: 0,
     easy: 0,
@@ -3270,7 +3271,8 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
     const semanticEvidence = String(source.evidence ?? source.Evidence ?? '').trim();
     const semanticReferentGrounded = semanticAttempted
         && isReal(semanticItem)
-        && latestUserMentionsSemanticItem(latestUserText, semanticItem);
+        && latestUserMentionsSemanticItem(latestUserText, semanticItem)
+        && !itemUseIsGenericReferent(semanticItem);
     // The semantic pass owns the referent classification. A raw verb-object regex
     // cannot tell an item from a living target, anatomy, or ordinary physical contact.
     let attempted = semanticReferentGrounded;
@@ -3283,7 +3285,7 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
     if (!attempted || !isReal(item)) {
         if (semanticAttempted) {
             audit?.push(`2.7s.0 deterministicItemAttemptRepair=${compact({
-                hardRule: 'itemUse requires semantic classification of a concrete inanimate item; deterministic code does not infer items from verbs',
+                hardRule: 'itemUse requires a direct interaction with one specifically identified concrete inanimate item; searches and generic categories remain ordinary narration',
                 semanticAttempted,
                 semanticItem,
                 latestUserReferentVerified: semanticReferentGrounded ? 'Y' : 'N',
@@ -3452,6 +3454,10 @@ function latestUserMentionsSemanticItem(text, item) {
     if (!source || !itemText) return false;
     const itemPattern = itemText.split(/\s+/).map(escapeRegex).join('\\s+');
     return new RegExp(`\\b${itemPattern}\\b`, 'i').test(source);
+}
+
+function itemUseIsGenericReferent(item) {
+    return ITEM_USE_GENERIC_REFERENTS.has(normalizeItemMatchText(item));
 }
 
 function stripQuotedItemDialogue(value) {

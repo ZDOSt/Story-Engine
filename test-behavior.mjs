@@ -13637,8 +13637,9 @@ const tests = [
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.Attempted=N/);
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.Available=N/);
       assert.match(semanticSource, /ResolutionEngine\.itemUse\.NoEffectReason=\(none\)/);
-      assert.match(semanticSource, /Scan every explicit treatment of a candidate referent/i);
-      assert.match(semanticSource, /regardless of wording, verb, or construction/i);
+      assert.match(semanticSource, /itemUse is only for a direct user interaction with one specifically identified concrete inanimate object/i);
+      assert.match(semanticSource, /Searching, scanning, looking around, inspecting, examining, rummaging, foraging, or seeking something\/anything useful is not itemUse/i);
+      assert.match(semanticSource, /Generic categories such as weapon, tool, object, item, something, or anything are not concrete Item values/i);
       assert.doesNotMatch(semanticSource, /When \{\{user\}\} touches, grabs, holds, embraces, strikes/i);
       assert.match(semanticSource, /scene requires an exact saved current SceneItemState entry/i);
       assert.match(semanticSource, /factual latest assistant scene narration/i);
@@ -14081,6 +14082,57 @@ const tests = [
         Evidence: '(none)',
         NoEffectReason: '(none)',
       });
+
+      const openEndedSearchReport = runCase({
+        userText: 'I look around the overturned wagon and search the roadside for something I could use as a weapon. A thick branch, a beam of wood, a metal bar. Anything would do.',
+        ledger: itemLedger({
+          ...emptyItemUse(),
+          attempted: true,
+          item: 'a weapon',
+          source: 'unavailable',
+          evidence: 'semantic search collapsed into a generic weapon item',
+          noEffectReason: 'no verified source',
+        }),
+      });
+      assert.deepEqual(openEndedSearchReport.finalNarrativeHandoff.resolutionPacket.ItemUse, {
+        Attempted: 'N',
+        Available: 'N',
+        Item: '(none)',
+        Source: 'none',
+        Evidence: '(none)',
+        NoEffectReason: '(none)',
+      });
+      assert.doesNotMatch(prompt(openEndedSearchReport), /Unavailable item branch:/i);
+
+      const searchThenGrabBranchReport = runCase({
+        userText: 'I search the roadside, then pick up a fallen branch.',
+        ledger: itemLedger({
+          ...emptyItemUse(),
+          attempted: true,
+          item: 'fallen branch',
+          available: true,
+          source: 'ambient',
+          evidence: 'a fallen branch at the roadside',
+        }),
+      });
+      assert.equal(searchThenGrabBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'Y');
+      assert.equal(searchThenGrabBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(searchThenGrabBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'ambient');
+
+      const uncommonInteractionReport = runCase({
+        userText: 'I search the roadside for a fallen branch, then wrench it free from the weeds.',
+        ledger: itemLedger({
+          ...emptyItemUse(),
+          attempted: true,
+          item: 'fallen branch',
+          available: true,
+          source: 'ambient',
+          evidence: 'the user wrenches the fallen branch free',
+        }),
+      });
+      assert.equal(uncommonInteractionReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'Y');
+      assert.equal(uncommonInteractionReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(uncommonInteractionReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'ambient');
 
       const unavailableVaseReport = runCase({
         userText: 'I declare the vase mine and claim it for myself.',
