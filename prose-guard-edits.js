@@ -29,6 +29,14 @@ const NOMINAL_NO_X_BUT_Y_PATTERN = new RegExp(
 const SENTENCE_SEGMENTER = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
     ? new Intl.Segmenter(undefined, { granularity: 'sentence' })
     : null;
+const PROSE_GUARD_REPAIR_OPERATIONS = new Set(['replace', 'delete']);
+const DELETION_SHELL_WORDS = new Set([
+    'a', 'an', 'the', 'this', 'that', 'these', 'those',
+    'i', 'me', 'my', 'mine', 'you', 'your', 'yours',
+    'he', 'him', 'his', 'she', 'her', 'hers', 'it', 'its',
+    'we', 'us', 'our', 'ours', 'they', 'them', 'their', 'theirs',
+    'who', 'whom', 'whose',
+]);
 
 export function removeProseGuardPhraseLines(value, phrases) {
     const source = String(value ?? '');
@@ -62,14 +70,23 @@ export function parseProseGuardRepairPayload(raw) {
         if (!repair || typeof repair !== 'object' || Array.isArray(repair)) {
             throw new Error(`Prose Guard repair ${index + 1} must be an object.`);
         }
-        rejectUnknownKeys(repair, ['findingId', 'replacementSentence'], `Prose Guard repair ${index + 1}`);
+        rejectUnknownKeys(repair, ['findingId', 'operation', 'replacementSentence'], `Prose Guard repair ${index + 1}`);
         const findingId = String(repair.findingId ?? '').trim();
+        const operation = String(repair.operation ?? '').trim().toLocaleLowerCase();
         const replacementSentence = typeof repair.replacementSentence === 'string'
             ? repair.replacementSentence.trim()
             : '';
         if (!findingId) throw new Error(`Prose Guard repair ${index + 1} has no findingId.`);
         if (seenIds.has(findingId)) throw new Error(`Prose Guard returned duplicate findingId "${findingId}".`);
-        if (!replacementSentence) throw new Error(`Prose Guard repair ${index + 1} attempted to delete narration.`);
+        if (!PROSE_GUARD_REPAIR_OPERATIONS.has(operation)) {
+            throw new Error(`Prose Guard repair ${index + 1} operation must be exactly "replace" or "delete".`);
+        }
+        if (operation === 'replace' && !replacementSentence) {
+            throw new Error(`Prose Guard repair ${index + 1} replacementSentence was empty.`);
+        }
+        if (operation === 'delete' && replacementSentence) {
+            throw new Error(`Prose Guard repair ${index + 1} supplied replacement text for a delete operation.`);
+        }
         if (/[\r\n\u2028\u2029]/.test(replacementSentence)) {
             throw new Error(`Prose Guard repair ${index + 1} crossed a line boundary.`);
         }
@@ -77,7 +94,7 @@ export function parseProseGuardRepairPayload(raw) {
             throw new Error(`Prose Guard repair ${index + 1} contains a structured-output artifact.`);
         }
         seenIds.add(findingId);
-        sentenceRepairs.push({ findingId, replacementSentence });
+        sentenceRepairs.push({ findingId, operation, replacementSentence });
     });
 
     return { sentenceRepairs };
@@ -178,16 +195,49 @@ export function applyProseGuardSentenceRepairs(narrationText, findings, rawPaylo
             continue;
         }
         try {
-            validateReplacementSentence(repair.replacementSentence, rules);
-            if (repair.replacementSentence === finding.sentence) {
-                throw new Error('replacement did not change the offending sentence');
+            let editStart = finding.start;
+            let editEnd = finding.end;
+            if (repair.operation === 'delete') {
+                if (!canDeleteProseGuardFinding(finding)) {
+                    throw new Error('delete was unsafe because the sentence contains meaningful content beyond the confirmed violation');
+                }
+                let leadingWhitespaceStart = editStart;
+                let trailingWhitespaceEnd = editEnd;
+                while (/\s/u.test(source[leadingWhitespaceStart - 1] || '')) leadingWhitespaceStart -= 1;
+                while (/\s/u.test(source[trailingWhitespaceEnd] || '')) trailingWhitespaceEnd += 1;
+                const leadingWhitespace = source.slice(leadingWhitespaceStart, editStart);
+                const trailingWhitespace = source.slice(editEnd, trailingWhitespaceEnd);
+                if (leadingWhitespace && trailingWhitespace) {
+                    if (/\r|\n/u.test(trailingWhitespace) && !/\r|\n/u.test(leadingWhitespace)) {
+                        editStart = leadingWhitespaceStart;
+                    } else {
+                        editEnd = trailingWhitespaceEnd;
+                    }
+                } else if (trailingWhitespace) {
+                    editEnd = trailingWhitespaceEnd;
+                } else if (leadingWhitespace) {
+                    editStart = leadingWhitespaceStart;
+                }
+            } else {
+                validateReplacementSentence(repair.replacementSentence, rules);
+                if (repair.replacementSentence === finding.sentence) {
+                    throw new Error('replacement did not change the offending sentence');
+                }
             }
             appliedRepairs.push({
                 findingId: finding.id,
-                start: finding.start,
-                end: finding.end,
+                operation: repair.operation,
+                start: editStart,
+                end: editEnd,
+                sourceStart: editStart,
+                sourceEnd: editEnd,
                 originalText: finding.sentence,
                 replacementText: repair.replacementSentence,
+                removedText: repair.operation === 'delete' ? source.slice(editStart, editEnd) : '',
+                anchorBefore: source.slice(Math.max(0, editStart - 120), editStart),
+                anchorAfter: source.slice(editEnd, Math.min(source.length, editEnd + 120)),
+                ruleNames: Array.isArray(finding.ruleNames) ? [...finding.ruleNames] : [],
+                matches: normalizeFindingMatchOffsets(finding),
             });
         } catch (error) {
             rejectedRepairs.push({
@@ -202,12 +252,88 @@ export function applyProseGuardSentenceRepairs(narrationText, findings, rawPaylo
         corrected = corrected.slice(0, repair.start) + repair.replacementText + corrected.slice(repair.end);
     }
 
+    let offsetDelta = 0;
+    for (const repair of [...appliedRepairs].sort((left, right) => left.sourceStart - right.sourceStart)) {
+        repair.start = repair.sourceStart + offsetDelta;
+        repair.end = repair.start + repair.replacementText.length;
+        offsetDelta += repair.replacementText.length - (repair.sourceEnd - repair.sourceStart);
+    }
+
     return {
         narrationText: corrected,
         changed: corrected !== source,
         appliedRepairs,
         rejectedRepairs,
     };
+}
+
+export function canDeleteProseGuardFinding(finding) {
+    const sentence = String(finding?.sentence || '');
+    if (!sentence.trim()) return false;
+    if (collectDialogueQuoteRanges(sentence).some(range => /[\p{L}\p{N}]/u.test(sentence.slice(range.start, range.end)))) {
+        return false;
+    }
+
+    const ranges = normalizeFindingMatchOffsets(finding)
+        .map(match => ({ start: match.offsetStart, end: match.offsetEnd }))
+        .filter(range => range.start >= 0 && range.end > range.start && range.end <= sentence.length)
+        .sort((left, right) => left.start - right.start);
+    if (!ranges.length) return false;
+
+    let remainder = '';
+    let cursor = 0;
+    for (const range of ranges) {
+        if (range.start > cursor) remainder += sentence.slice(cursor, range.start);
+        cursor = Math.max(cursor, range.end);
+    }
+    remainder += sentence.slice(cursor);
+    const words = [...remainder.matchAll(new RegExp(WORD_SOURCE, 'gu'))]
+        .map(match => String(match[0] || '').toLocaleLowerCase());
+    if (words.every(word => DELETION_SHELL_WORDS.has(word))) return true;
+    const lexicalRemainder = remainder.replace(/[^\p{L}\p{N}'\u2019]+/gu, ' ').trim();
+    return /^(?:(?:a|an|the|this|that|these|those)\s+)?(?:\p{Lu}[\p{L}\p{N}-]*|[\p{L}\p{N}-]+['\u2019]s)$/u.test(lexicalRemainder);
+}
+
+function normalizeFindingMatchOffsets(finding) {
+    const sentence = String(finding?.sentence || '');
+    const findingStart = normalizeNonNegativeInteger(finding?.start) ?? 0;
+    return (Array.isArray(finding?.matches) ? finding.matches : []).map(match => {
+        let offsetStart = normalizeNonNegativeInteger(match?.offsetStart);
+        let offsetEnd = normalizeNonNegativeInteger(match?.offsetEnd);
+        if (offsetStart == null || offsetEnd == null) {
+            const absoluteStart = normalizeNonNegativeInteger(match?.start);
+            const absoluteEnd = normalizeNonNegativeInteger(match?.end);
+            if (absoluteStart != null && absoluteEnd != null) {
+                offsetStart = absoluteStart - findingStart;
+                offsetEnd = absoluteEnd - findingStart;
+            }
+        }
+        if (offsetStart == null || offsetEnd == null
+            || offsetStart < 0 || offsetEnd <= offsetStart || offsetEnd > sentence.length) {
+            const matchedPhrase = String(match?.matchedPhrase || '');
+            const lowerSentence = sentence.toLocaleLowerCase();
+            const lowerPhrase = matchedPhrase.toLocaleLowerCase();
+            const first = lowerPhrase ? lowerSentence.indexOf(lowerPhrase) : -1;
+            const second = first >= 0 ? lowerSentence.indexOf(lowerPhrase, first + Math.max(1, lowerPhrase.length)) : -1;
+            if (first >= 0 && second < 0) {
+                offsetStart = first;
+                offsetEnd = first + matchedPhrase.length;
+            }
+        }
+        return {
+            ruleName: String(match?.ruleName || ''),
+            phrase: String(match?.phrase || ''),
+            matchedPhrase: String(match?.matchedPhrase || ''),
+            offsetStart,
+            offsetEnd,
+        };
+    });
+}
+
+function normalizeNonNegativeInteger(value) {
+    if (value == null || value === '') return null;
+    const normalized = Number(value);
+    return Number.isInteger(normalized) && normalized >= 0 ? normalized : null;
 }
 
 function collectNotXButYMatches(source) {

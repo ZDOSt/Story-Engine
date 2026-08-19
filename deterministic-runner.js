@@ -7,6 +7,7 @@ import {
     routeDispositionTarget,
     resolveStakeChangeByOutcome,
     applyMeaningfulBenefitReferee,
+    applyExceptionalBenefitReferee,
     relationToUserAction,
     proactivityRefereeGuard,
     updateRapport,
@@ -4453,8 +4454,31 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             pressureMode,
         });
         const target = hostilePressureResult?.target || boundaryPressureResult?.target || routedTarget;
-        const rapport = updateRapport(currentRapport, target, rapportEligible, hostilePressureResult ? 'hostilePressure' : 'normal');
-        const rapportConsumedCooldown = rapportEligible && consumesRapportCooldown(target, hostilePressureResult ? 'hostilePressure' : 'normal');
+        const exceptionalReferee = applyExceptionalBenefitReferee(
+            npc,
+            resolutionPacket,
+            relationshipContext,
+            auditInteraction,
+            stakeChange,
+        );
+        const exceptionalBenefit = exceptionalReferee.value && target === 'Bond';
+        const exceptionalRapport = exceptionalBenefit
+            && (currentDisposition.B >= 3 || currentDisposition.F >= 3 || currentDisposition.H >= 3);
+        const exceptionalDirectBond = exceptionalBenefit
+            && !exceptionalRapport
+            && currentDisposition.B < 3
+            && currentDisposition.F < 3
+            && currentDisposition.H < 3;
+        const rapport = updateRapport(
+            currentRapport,
+            target,
+            exceptionalRapport ? true : rapportEligible,
+            hostilePressureResult ? 'hostilePressure' : 'normal',
+            exceptionalRapport ? 2 : 1,
+        );
+        const rapportConsumedCooldown = exceptionalRapport
+            ? consumesRapportCooldown(target, hostilePressureResult ? 'hostilePressure' : 'normal')
+            : rapportEligible && consumesRapportCooldown(target, hostilePressureResult ? 'hostilePressure' : 'normal');
         currentRapport = rapport.currentRapport;
         if (rapportConsumedCooldown) {
             lastRapportGainActiveMs = globalActiveMs;
@@ -4471,6 +4495,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         if (benefitReferee.referee) {
             audit.push(`3.4a.2 deterministicBenefitReferee=${compact(benefitReferee.referee)}`);
         }
+        if (exceptionalReferee.referee) {
+            audit.push(`3.4a.3 deterministicExceptionalBenefitReferee=${compact(exceptionalReferee.referee)}`);
+        }
+        audit.push(`3.4a.4 exceptionalBenefit=${yn(exceptionalBenefit)}${exceptionalBenefit ? ` evidence=${JSON.stringify(exceptionalReferee.evidence)}` : ''}`);
         audit.push(`3.4b NPC_STAKES=${npcStakes}`);
         audit.push(`3.4c routeDispositionTarget=${routedTarget}`);
         if (boundaryPressureResult) {
@@ -4512,6 +4540,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
                 && !bool(relationshipContext.explicitIntimidationOrCoercion)
                 && slowBondBlockersNow.length === 0
                 && !suppressFreshNonHumanNoChangeBond,
+            exceptionalDirectBond,
         });
         const updatedDisposition = updateDisposition(currentDisposition, deltas);
         currentDisposition = updatedDisposition;

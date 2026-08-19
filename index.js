@@ -128,7 +128,7 @@ const NARRATOR_HANDOFF_WIDGET_BUTTON_ID = 'structured_preflight_narrator_handoff
 const NARRATOR_HANDOFF_WIDGET_PANEL_ID = 'structured_preflight_narrator_handoff_panel';
 const NARRATOR_HANDOFF_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
 const PROSE_GUARD_EXTRA_KEY = 'structured_preflight_prose_guard';
-const PROSE_GUARD_EXTRA_VERSION = 3;
+const PROSE_GUARD_EXTRA_VERSION = 4;
 const PROSE_GUARD_RECONCILIATION_EXTRA_KEY = 'structured_preflight_prose_guard_reconciliation';
 const PROSE_GUARD_RECONCILIATION_EXTRA_VERSION = 1;
 const PROSE_GUARD_MODES = Object.freeze({
@@ -6111,10 +6111,20 @@ function sanitizeProseGuardFindingForStorage(finding) {
                 ruleName: String(match?.ruleName || ''),
                 phrase: String(match?.phrase || ''),
                 matchedPhrase: String(match?.matchedPhrase || ''),
+                offsetStart: normalizeProseGuardSpanOffset(match?.offsetStart)
+                    ?? (normalizeProseGuardSpanOffset(match?.start) != null
+                        ? normalizeProseGuardSpanOffset(match.start) - (normalizeProseGuardSpanOffset(finding.start) || 0)
+                        : null),
+                offsetEnd: normalizeProseGuardSpanOffset(match?.offsetEnd)
+                    ?? (normalizeProseGuardSpanOffset(match?.end) != null
+                        ? normalizeProseGuardSpanOffset(match.end) - (normalizeProseGuardSpanOffset(finding.start) || 0)
+                        : null),
             }))
             : [],
         status: String(finding.status || 'pending'),
+        operation: String(finding.operation || ''),
         replacementText: finding.replacementText ? String(finding.replacementText) : '',
+        attemptedOperation: String(finding.attemptedOperation || ''),
         attemptedReplacement: finding.attemptedReplacement ? String(finding.attemptedReplacement) : '',
         failureReason: finding.failureReason ? String(finding.failureReason) : '',
     };
@@ -6128,18 +6138,33 @@ function sanitizeProseGuardStateForStorage(value) {
     const changes = Array.isArray(value.changes)
         ? value.changes.map(change => ({
             findingId: String(change?.findingId || ''),
+            operation: String(change?.operation || (change?.replacementText ? 'replace' : 'delete')),
             start: normalizeProseGuardSpanOffset(change?.start),
             end: normalizeProseGuardSpanOffset(change?.end),
+            sourceStart: normalizeProseGuardSpanOffset(change?.sourceStart),
+            sourceEnd: normalizeProseGuardSpanOffset(change?.sourceEnd),
             originalText: String(change?.originalText || ''),
             replacementText: String(change?.replacementText || ''),
+            removedText: String(change?.removedText || ''),
+            anchorBefore: String(change?.anchorBefore || ''),
+            anchorAfter: String(change?.anchorAfter || ''),
+            ruleNames: Array.isArray(change?.ruleNames) ? change.ruleNames.map(value => String(value)) : [],
+            matches: Array.isArray(change?.matches) ? change.matches.map(match => ({
+                ruleName: String(match?.ruleName || ''),
+                phrase: String(match?.phrase || ''),
+                matchedPhrase: String(match?.matchedPhrase || ''),
+                offsetStart: normalizeProseGuardSpanOffset(match?.offsetStart),
+                offsetEnd: normalizeProseGuardSpanOffset(match?.offsetEnd),
+            })) : [],
             status: String(change?.status || 'applied'),
-        })).filter(change => change.findingId && change.originalText && change.replacementText)
+        })).filter(change => change.findingId && change.originalText && ['replace', 'delete'].includes(change.operation))
         : [];
     const repairAttempts = Array.isArray(value.repairAttempts)
         ? value.repairAttempts.map(attempt => ({
             findingId: String(attempt?.findingId || ''),
             sourceStart: normalizeProseGuardSpanOffset(attempt?.sourceStart),
             originalText: String(attempt?.originalText || ''),
+            operation: String(attempt?.operation || ''),
             replacementText: String(attempt?.replacementText || ''),
             reason: String(attempt?.reason || ''),
             attempt: Number.isInteger(Number(attempt?.attempt)) ? Number(attempt.attempt) : 0,
@@ -9704,27 +9729,37 @@ function getProseGuardMessageText(message) {
 }
 
 function getPendingProseGuardFindings(proseGuardState) {
-    return (proseGuardState?.findings || []).filter(finding => finding.status === 'pending');
+    return (proseGuardState?.findings || [])
+        .filter(finding => ['pending', 'restored', 'retry_failed'].includes(String(finding.status || 'pending')));
 }
 
 function buildReviewProseGuardRows(proseGuardState, messageId) {
-    const pendingFindings = getPendingProseGuardFindings(proseGuardState);
-    if (!pendingFindings.length) {
+    const findings = (proseGuardState?.findings || [])
+        .filter(finding => ['pending', 'fixed', 'deleted', 'restored', 'retry_failed'].includes(String(finding.status || 'pending')));
+    if (!findings.length) {
         return '<div class="structured-preflight-prose-guard-empty">No unresolved violations in the latest response.</div>';
     }
-    return pendingFindings.map(finding => {
+    return findings.map(finding => {
         const matched = uniqueStrings((finding.matches || [])
             .map(match => match.matchedPhrase || match.phrase)
             .filter(Boolean));
         const rules = uniqueStrings(finding.ruleNames || []);
         const meta = [matched.length ? matched.join(', ') : 'Configured violation', rules.length ? rules.join(', ') : ''].filter(Boolean).join(' | ');
         const attemptedReplacement = String(finding.attemptedReplacement || '');
+        const attemptedOperation = String(finding.attemptedOperation || '');
         const failureReason = String(finding.failureReason || '');
+        if (['fixed', 'deleted', 'restored', 'retry_failed'].includes(String(finding.status || ''))) {
+            const change = (proseGuardState.changes || []).find(item => item.findingId === finding.id);
+            return buildProseGuardChangeRow(change, proseGuardState, messageId);
+        }
         const failedRepairHtml = proseGuardState?.automaticRepairFailed
             ? `
                 ${attemptedReplacement
                     ? `<span class="structured-preflight-prose-guard-label">Attempted replacement</span>
                        <p class="structured-preflight-prose-guard-sentence">${escapeHtml(attemptedReplacement)}</p>`
+                    : ''}
+                ${attemptedOperation === 'delete'
+                    ? '<span class="structured-preflight-prose-guard-label">Attempted operation</span><p class="structured-preflight-prose-guard-sentence">Sentence deletion</p>'
                     : ''}
                 <div class="structured-preflight-prose-guard-meta">${escapeHtml(failureReason || 'No validated replacement was returned.')}</div>`
             : '';
@@ -9736,10 +9771,32 @@ function buildReviewProseGuardRows(proseGuardState, messageId) {
                 <div class="structured-preflight-prose-guard-actions">
                     <button class="menu_button" type="button" data-spe-prose-guard-review-action="fix" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Fix</button>
                     <button class="menu_button" type="button" data-spe-prose-guard-review-action="dismiss" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-check" aria-hidden="true"></i> Dismiss</button>
-                    <button class="menu_button" type="button" data-spe-prose-guard-review-action="delete" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-trash" aria-hidden="true"></i> Delete</button>
+                     <button class="menu_button" type="button" data-spe-prose-guard-review-action="delete" data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-finding-id="${escapeHtml(finding.id)}"><i class="fa-solid fa-trash" aria-hidden="true"></i> Delete</button>
                 </div>
             </div>`;
     }).join('');
+}
+
+function buildProseGuardChangeRow(change, proseGuardState, messageId) {
+    if (!change) return '<div class="structured-preflight-prose-guard-empty">Repair history is unavailable.</div>';
+    const deleted = change.operation === 'delete';
+    const retryFailed = change.status === 'retry_failed';
+    const restored = ['restored', 'retry_failed'].includes(change.status);
+    return `
+        <div class="structured-preflight-prose-guard-finding">
+            <div class="structured-preflight-prose-guard-meta">${retryFailed ? 'Retry failed; original restored' : restored ? 'Restored' : 'Repaired'}</div>
+            <span class="structured-preflight-prose-guard-label">Original</span>
+            <p class="structured-preflight-prose-guard-sentence">${escapeHtml(change.originalText)}</p>
+            <span class="structured-preflight-prose-guard-label">${deleted ? 'Result' : 'Replacement'}</span>
+            <p class="structured-preflight-prose-guard-sentence">${deleted ? 'Sentence deleted.' : escapeHtml(change.replacementText)}</p>
+            <div class="structured-preflight-prose-guard-actions">
+                ${restored
+                    ? `<span class="structured-preflight-prose-guard-empty">${retryFailed ? escapeHtml(change.failureReason || 'The original sentence was restored after the retry failed.') : 'Original sentence restored.'}</span>
+                       <button class="menu_button" type="button" data-spe-prose-guard-retry data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-change-index="${proseGuardState.changes.indexOf(change)}"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Retry</button>`
+                    : `<button class="menu_button" type="button" data-spe-prose-guard-restore data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-change-index="${proseGuardState.changes.indexOf(change)}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Restore</button>
+                       <button class="menu_button" type="button" data-spe-prose-guard-retry data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-change-index="${proseGuardState.changes.indexOf(change)}"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Retry</button>`}
+            </div>
+        </div>`;
 }
 
 function buildAutomaticProseGuardRows(proseGuardState, messageId) {
@@ -9747,19 +9804,7 @@ function buildAutomaticProseGuardRows(proseGuardState, messageId) {
     if (!changes.length) {
         return '<div class="structured-preflight-prose-guard-empty">No automatic repairs in the latest response.</div>';
     }
-    return changes.map((change, index) => `
-        <div class="structured-preflight-prose-guard-finding">
-            <div class="structured-preflight-prose-guard-meta">${change.status === 'restored' ? 'Restored' : 'Automatically repaired'}</div>
-            <span class="structured-preflight-prose-guard-label">Original</span>
-            <p class="structured-preflight-prose-guard-sentence">${escapeHtml(change.originalText)}</p>
-            <span class="structured-preflight-prose-guard-label">Replacement</span>
-            <p class="structured-preflight-prose-guard-sentence">${escapeHtml(change.replacementText)}</p>
-            <div class="structured-preflight-prose-guard-actions">
-                ${change.status === 'applied'
-                    ? `<button class="menu_button" type="button" data-spe-prose-guard-restore data-spe-prose-guard-message-id="${messageId}" data-spe-prose-guard-change-index="${index}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Restore</button>`
-                    : '<span class="structured-preflight-prose-guard-empty">Original sentence restored.</span>'}
-            </div>
-        </div>`).join('');
+    return changes.map(change => buildProseGuardChangeRow(change, proseGuardState, messageId)).join('');
 }
 
 function buildProseGuardManualRepairHtml(hasAssistantMessage) {
@@ -9770,8 +9815,14 @@ function buildProseGuardManualRepairHtml(hasAssistantMessage) {
                 <input class="text_pole" type="text" data-spe-prose-guard-manual-phrase autocomplete="off" spellcheck="false" ${hasAssistantMessage ? '' : 'disabled'}>
             </label>
             <label>
-                Reason (optional)
-                <textarea class="text_pole" rows="2" data-spe-prose-guard-manual-reason spellcheck="false" ${hasAssistantMessage ? '' : 'disabled'}></textarea>
+                Rule category
+                <select class="text_pole" data-spe-prose-guard-manual-category ${hasAssistantMessage ? '' : 'disabled'}>
+                    <option value="strictBehaviorism">strictBehaviorism</option>
+                    <option value="embodiedPerception">embodiedPerception</option>
+                    <option value="denotativePhysicality">denotativePhysicality</option>
+                    <option value="antiStockPhrasing">antiStockPhrasing</option>
+                    <option value="userPhraseBans">User List</option>
+                </select>
             </label>
             <div class="structured-preflight-prose-guard-actions">
                 <button class="menu_button" type="button" data-spe-prose-guard-manual-fix ${hasAssistantMessage ? '' : 'disabled'}><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Fix</button>
@@ -9848,22 +9899,31 @@ function resolveStoredProseGuardFinding(text, finding) {
 
 function resolveStoredProseGuardChange(text, change) {
     const source = String(text || '');
-    const replacementText = String(change?.replacementText || '');
-    if (!replacementText) return null;
+    const operation = String(change?.operation || (change?.replacementText ? 'replace' : 'delete'));
+    const targetText = change?.status === 'applied' && operation === 'replace'
+        ? String(change?.replacementText || '')
+        : String(change?.originalText || '');
     const storedStart = normalizeProseGuardSpanOffset(change?.start);
     const storedEnd = normalizeProseGuardSpanOffset(change?.end);
+    if (operation === 'delete' && change?.status === 'applied') {
+        if (storedStart != null && storedEnd === storedStart && storedStart <= source.length) {
+            return { ...change, start: storedStart, end: storedEnd };
+        }
+        return null;
+    }
     if (storedStart != null
-        && storedEnd === storedStart + replacementText.length
-        && source.slice(storedStart, storedEnd) === replacementText) {
+        && storedEnd === storedStart + targetText.length
+        && source.slice(storedStart, storedEnd) === targetText) {
         return { ...change, start: storedStart, end: storedEnd };
     }
+    if (!targetText) return null;
     const matches = [];
     let cursor = 0;
     while (cursor <= source.length) {
-        const start = source.indexOf(replacementText, cursor);
+        const start = source.indexOf(targetText, cursor);
         if (start < 0) break;
-        matches.push({ start, end: start + replacementText.length });
-        cursor = start + Math.max(1, replacementText.length);
+        matches.push({ start, end: start + targetText.length });
+        cursor = start + Math.max(1, targetText.length);
     }
     if (matches.length !== 1) return null;
     const [match] = matches;
@@ -9874,6 +9934,9 @@ function rebaseProseGuardSpan(item, sourceText, nextText, targetText, editSpan =
     const target = String(targetText || '');
     if (!target) return { ...item, start: null, end: null };
     let preferredStart = normalizeProseGuardSpanOffset(item?.start);
+    if (preferredStart != null && nextText.slice(preferredStart, preferredStart + target.length) === target) {
+        return { ...item, start: preferredStart, end: preferredStart + target.length };
+    }
     if (preferredStart != null && editSpan) {
         const editStart = normalizeProseGuardSpanOffset(editSpan.start);
         const editEnd = normalizeProseGuardSpanOffset(editSpan.end);
@@ -9903,6 +9966,52 @@ function rebaseProseGuardSpan(item, sourceText, nextText, targetText, editSpan =
     return { ...item, start: null, end: null };
 }
 
+function rebaseProseGuardInsertion(item, nextText, editSpan = null) {
+    let position = normalizeProseGuardSpanOffset(item?.start);
+    if (position == null) return { ...item, start: null, end: null };
+    const anchorBefore = String(item?.anchorBefore || '');
+    const anchorAfter = String(item?.anchorAfter || '');
+    const matchesPosition = candidate => (
+        candidate >= 0
+        && candidate <= nextText.length
+        && (!anchorBefore || nextText.slice(Math.max(0, candidate - anchorBefore.length), candidate) === anchorBefore)
+        && (!anchorAfter || nextText.slice(candidate, candidate + anchorAfter.length) === anchorAfter)
+    );
+    if (matchesPosition(position)) return { ...item, start: position, end: position };
+    if (editSpan) {
+        const editStart = normalizeProseGuardSpanOffset(editSpan.start);
+        const editEnd = normalizeProseGuardSpanOffset(editSpan.end);
+        const replacementLength = Math.max(0, Number(editSpan.replacementLength) || 0);
+        if (editStart != null && editEnd != null) {
+            if (position >= editEnd) position += replacementLength - (editEnd - editStart);
+            else if (position >= editStart) position = editStart + replacementLength;
+        }
+    }
+    if (matchesPosition(position)) return { ...item, start: position, end: position };
+    const candidates = [];
+    if (anchorAfter) {
+        let cursor = 0;
+        while (cursor <= nextText.length) {
+            const found = nextText.indexOf(anchorAfter, cursor);
+            if (found < 0) break;
+            candidates.push(found);
+            cursor = found + Math.max(1, anchorAfter.length);
+        }
+    } else if (anchorBefore) {
+        let cursor = 0;
+        while (cursor <= nextText.length) {
+            const found = nextText.indexOf(anchorBefore, cursor);
+            if (found < 0) break;
+            candidates.push(found + anchorBefore.length);
+            cursor = found + Math.max(1, anchorBefore.length);
+        }
+    }
+    const matches = uniqueStrings(candidates).map(Number).filter(matchesPosition);
+    return matches.length === 1
+        ? { ...item, start: matches[0], end: matches[0] }
+        : { ...item, start: null, end: null };
+}
+
 function formatProseGuardStateForMessage(value, previousText, nextText, options = {}, editSpan = null) {
     const source = String(previousText || '');
     const formattedText = applyDeterministicNarrationFormatting(String(nextText || ''), options);
@@ -9922,6 +10031,9 @@ function formatProseGuardStateForMessage(value, previousText, nextText, options 
             ...change,
             originalText: applyDeterministicNarrationFormatting(change.originalText, options),
             replacementText: applyDeterministicNarrationFormatting(change.replacementText, options),
+            removedText: applyDeterministicNarrationFormatting(change.removedText, options),
+            anchorBefore: applyDeterministicNarrationFormatting(change.anchorBefore, options),
+            anchorAfter: applyDeterministicNarrationFormatting(change.anchorAfter, options),
         }))
         : [];
 
@@ -9932,36 +10044,33 @@ function formatProseGuardStateForMessage(value, previousText, nextText, options 
         return rebaseProseGuardSpan(finding, source, formattedText, finding.sentence, editSpan);
     });
     formatted.changes = formatted.changes.map(change => {
+        if (['restored', 'retry_failed'].includes(String(change.status || ''))) {
+            return rebaseProseGuardSpan(change, source, formattedText, change.originalText, editSpan);
+        }
         if (String(change.status || '') !== 'applied') {
             return { ...change, start: null, end: null };
+        }
+        if (String(change.operation || '') === 'delete') {
+            return rebaseProseGuardInsertion(change, formattedText, editSpan);
         }
         return rebaseProseGuardSpan(change, source, formattedText, change.replacementText, editSpan);
     });
     return { text: formattedText, state: sanitizeProseGuardStateForStorage(formatted) };
 }
 
-function removeExactProseGuardSentence(text, finding) {
-    const source = String(text || '');
-    const resolved = resolveStoredProseGuardFinding(source, finding);
-    if (!resolved) return null;
-    let prefix = source.slice(0, resolved.start);
-    let suffix = source.slice(resolved.end);
-    if (/\s$/u.test(prefix) && /^\s/u.test(suffix)) {
-        suffix = suffix.replace(/^(?:\r\n|\n|\r|[ \t])/, '');
-    }
-    let result = `${prefix}${suffix}`;
-    if (resolved.start === 0) result = result.replace(/^\s+/u, '');
-    if (resolved.end === source.length) result = result.replace(/\s+$/u, '');
-    return result;
-}
-
-function addCustomProseGuardPhrase(phrase) {
+function addProseGuardPhraseToCategory(phrase, category) {
     const normalizedPhrase = String(phrase || '').trim();
-    if (!normalizedPhrase) return false;
+    const normalizedCategory = String(category || '').trim();
+    if (!normalizedPhrase || !normalizedCategory) return false;
+    const field = PROSE_GUARD_TARGETED_BAN_FIELDS.find(item => (
+        item.ruleName === normalizedCategory
+        || (normalizedCategory === 'User List' && item.ruleName === 'userPhraseBans')
+    ));
+    if (!field) throw new Error('Select a valid Prose Guard rule category.');
     const settings = getSettings();
-    const existing = parseProseGuardBannedPhraseList(settings.proseGuardCustomBannedPhrases);
+    const existing = parseProseGuardBannedPhraseList(settings[field.key]);
     if (existing.some(value => value.toLocaleLowerCase() === normalizedPhrase.toLocaleLowerCase())) return false;
-    settings.proseGuardCustomBannedPhrases = [...existing, normalizedPhrase].join('\n');
+    settings[field.key] = [...existing, normalizedPhrase].join('\n');
     saveExtensionSettings();
     refreshSettingsControls();
     return true;
@@ -10162,6 +10271,49 @@ function getCurrentProseGuardTarget(context, messageId) {
     return latest;
 }
 
+async function requestAndApplyProseGuardRepairs(narrationText, findings, rules, requestOptions = {}) {
+    const raw = await requestTargetedProseBanRepairWithTimeout(findings, rules, requestOptions);
+    const payload = parseTargetedProseGuardResponse(raw);
+    const repaired = applyProseGuardSentenceRepairs(narrationText, findings, payload, { rules });
+    return { payload, repaired };
+}
+
+function recordProseGuardRepair(proseGuardState, finding, applied) {
+    finding.status = applied.operation === 'delete' ? 'deleted' : 'fixed';
+    finding.operation = applied.operation;
+    finding.replacementText = applied.replacementText;
+    proseGuardState.changes.push({ ...applied, status: 'applied' });
+    clearProseGuardFailureIfResolved(proseGuardState);
+}
+
+function clearProseGuardFailureIfResolved(proseGuardState) {
+    if (getPendingProseGuardFindings(proseGuardState).length) return;
+    proseGuardState.automaticRepairFailed = false;
+    proseGuardState.error = '';
+}
+
+function calculateProseGuardEditSpan(previousText, nextText) {
+    const previous = String(previousText || '');
+    const next = String(nextText || '');
+    let start = 0;
+    while (start < previous.length && start < next.length && previous[start] === next[start]) start += 1;
+    let previousEnd = previous.length;
+    let nextEnd = next.length;
+    while (previousEnd > start && nextEnd > start && previous[previousEnd - 1] === next[nextEnd - 1]) {
+        previousEnd -= 1;
+        nextEnd -= 1;
+    }
+    return { start, end: previousEnd, replacementLength: nextEnd - start };
+}
+
+function requireAppliedProseGuardRepair(repaired, findingId) {
+    const applied = repaired.appliedRepairs.find(item => item.findingId === findingId);
+    if (!applied || repaired.rejectedRepairs.length) {
+        throw new Error(repaired.rejectedRepairs[0]?.reason || 'Prose Guard did not return a valid sentence repair.');
+    }
+    return applied;
+}
+
 async function handleProseGuardReviewAction(context, messageId, findingId, action) {
     const latest = getCurrentProseGuardTarget(context, messageId);
     const proseGuardState = getMessageProseGuardState(latest.message);
@@ -10174,111 +10326,207 @@ async function handleProseGuardReviewAction(context, messageId, findingId, actio
     const currentText = getProseGuardMessageText(latest.message);
     if (action === 'dismiss') {
         finding.status = 'dismissed';
+        clearProseGuardFailureIfResolved(proseGuardState);
         await persistProseGuardMessageEdit(context, latest.messageId, currentText, proseGuardState);
         return;
     }
-    if (action === 'delete') {
-        const currentFinding = resolveStoredProseGuardFinding(currentText, finding);
-        if (!currentFinding) throw new Error('The detected sentence no longer matches the latest response.');
-        const nextText = removeExactProseGuardSentence(currentText, currentFinding);
-        if (nextText == null) throw new Error('The detected sentence no longer matches the latest response.');
-        finding.status = 'deleted';
-        await persistProseGuardMessageEdit(context, latest.messageId, nextText, proseGuardState, {
-            reconcile: true,
-            editSpan: { start: currentFinding.start, end: currentFinding.end, replacementLength: 0 },
-        });
-        return;
-    }
-    if (action !== 'fix') throw new Error('Unknown Prose Guard review action.');
+    if (!['fix', 'delete'].includes(action)) throw new Error('Unknown Prose Guard review action.');
 
     const currentFinding = resolveStoredProseGuardFinding(currentText, finding);
     if (!currentFinding) throw new Error('The detected sentence no longer matches the latest response.');
     const rules = getTargetedProseBanRules();
-    const operationIdentity = createStoryEngineEpochIdentity(context);
-    const raw = await requestTargetedProseBanRepairWithTimeout([currentFinding], rules, {
-        isCurrent: () => isCurrentStoryEngineEpoch(operationIdentity, context)
-            && context.chat?.[latest.messageId] === latest.message
-            && getLatestAssistantMessageEntry(context)?.messageId === latest.messageId,
-        expiredMessage: 'Prose Guard review expired because the latest response changed.',
-    });
-    const payload = parseTargetedProseGuardResponse(raw);
-    const repaired = applyProseGuardSentenceRepairs(currentText, [currentFinding], payload, { rules });
-    const applied = repaired.appliedRepairs.find(item => item.findingId === currentFinding.id);
-    if (!applied || repaired.rejectedRepairs.length) {
-        throw new Error(repaired.rejectedRepairs[0]?.reason || 'Prose Guard did not return a valid sentence repair.');
+    let repaired;
+    if (action === 'delete') {
+        repaired = applyProseGuardSentenceRepairs(currentText, [currentFinding], {
+            sentenceRepairs: [{ findingId: currentFinding.id, operation: 'delete', replacementSentence: '' }],
+        }, { rules });
+    } else {
+        const operationIdentity = createStoryEngineEpochIdentity(context);
+        ({ repaired } = await requestAndApplyProseGuardRepairs(currentText, [currentFinding], rules, {
+            isCurrent: () => isCurrentStoryEngineEpoch(operationIdentity, context)
+                && context.chat?.[latest.messageId] === latest.message
+                && getLatestAssistantMessageEntry(context)?.messageId === latest.messageId,
+            expiredMessage: 'Prose Guard review expired because the latest response changed.',
+        }));
     }
-    finding.status = 'fixed';
-    finding.replacementText = applied.replacementText;
-    proseGuardState.changes.push({ ...applied, status: 'applied' });
+    const applied = requireAppliedProseGuardRepair(repaired, currentFinding.id);
+    recordProseGuardRepair(proseGuardState, finding, applied);
     await persistProseGuardMessageEdit(context, latest.messageId, repaired.narrationText, proseGuardState, {
         reconcile: true,
-        editSpan: applied,
+        editSpan: calculateProseGuardEditSpan(currentText, repaired.narrationText),
     });
 }
 
-async function handleAutomaticProseGuardRestore(context, messageId, changeIndex) {
+async function handleProseGuardRestore(context, messageId, changeIndex) {
     const latest = getCurrentProseGuardTarget(context, messageId);
     const proseGuardState = getMessageProseGuardState(latest.message);
-    if (!proseGuardState || proseGuardState.mode !== PROSE_GUARD_MODES.AUTOMATIC) {
-        throw new Error('This response has no automatic Prose Guard repair history.');
-    }
-    const change = proseGuardState.changes[Number(changeIndex)];
+    const change = proseGuardState?.changes?.[Number(changeIndex)];
     if (!change || change.status !== 'applied') throw new Error('That repair is no longer active.');
     const currentText = getProseGuardMessageText(latest.message);
     const currentChange = resolveStoredProseGuardChange(currentText, change);
     if (!currentChange) throw new Error('The repaired sentence no longer matches the latest response.');
+    const restoredText = change.operation === 'delete'
+        ? String(change.removedText || change.originalText)
+        : change.originalText;
     const nextText = currentText.slice(0, currentChange.start)
-        + currentChange.originalText
+        + restoredText
         + currentText.slice(currentChange.end);
     change.status = 'restored';
+    const storedFinding = proseGuardState.findings?.find(item => item.id === change.findingId);
+    if (storedFinding) storedFinding.status = 'restored';
     await persistProseGuardMessageEdit(context, latest.messageId, nextText, proseGuardState, {
         reconcile: true,
-        editSpan: { start: currentChange.start, end: currentChange.end, replacementLength: currentChange.originalText.length },
+        editSpan: calculateProseGuardEditSpan(currentText, nextText),
     });
 }
 
-async function handleManualProseGuardFix(context, messageId, phrase, reason) {
+async function handleProseGuardRetry(context, messageId, changeIndex) {
+    const latest = getCurrentProseGuardTarget(context, messageId);
+    const proseGuardState = getMessageProseGuardState(latest.message);
+    const index = Number(changeIndex);
+    const change = proseGuardState?.changes?.[index];
+    if (!change) throw new Error('That repair history is no longer available.');
+    const currentText = getProseGuardMessageText(latest.message);
+    const currentChange = resolveStoredProseGuardChange(currentText, change);
+    if (!currentChange) throw new Error('The current repair result no longer matches the latest response.');
+
+    let originalText = currentText;
+    let originalStart = currentChange.start;
+    if (change.status === 'applied') {
+        const restoredSegment = change.operation === 'delete'
+            ? String(change.removedText || change.originalText)
+            : change.originalText;
+        originalText = currentText.slice(0, currentChange.start)
+            + restoredSegment
+            + currentText.slice(currentChange.end);
+        originalStart = currentChange.start + Math.max(0, restoredSegment.indexOf(change.originalText));
+    }
+
+    const rules = getProseGuardRulesForStoredChange(change);
+    const rescanned = collectProseGuardSentenceFindings(originalText, rules)
+        .find(item => item.start === originalStart && item.sentence === change.originalText);
+    const storedMatches = (change.matches || []).map(match => {
+        const offsetStart = normalizeProseGuardSpanOffset(match.offsetStart);
+        const offsetEnd = normalizeProseGuardSpanOffset(match.offsetEnd);
+        if (offsetStart == null || offsetEnd == null || offsetEnd <= offsetStart) return null;
+        return {
+            ...match,
+            start: originalStart + offsetStart,
+            end: originalStart + offsetEnd,
+        };
+    }).filter(Boolean);
+    const retryFinding = rescanned || (storedMatches.length ? {
+        id: change.findingId,
+        start: originalStart,
+        end: originalStart + change.originalText.length,
+        sentence: change.originalText,
+        ruleNames: [...(change.ruleNames || [])],
+        matches: storedMatches,
+    } : null);
+    if (!retryFinding) throw new Error('The original violation can no longer be validated for a safe retry.');
+    retryFinding.id = change.findingId;
+
+    const operationIdentity = createStoryEngineEpochIdentity(context);
+    const isRetryTargetCurrent = () => isCurrentStoryEngineEpoch(operationIdentity, context)
+        && context.chat?.[latest.messageId] === latest.message
+        && getLatestAssistantMessageEntry(context)?.messageId === latest.messageId;
+    let repaired;
+    let applied;
+    try {
+        ({ repaired } = await requestAndApplyProseGuardRepairs(originalText, [retryFinding], rules, {
+            isCurrent: isRetryTargetCurrent,
+            expiredMessage: 'Prose Guard retry expired because the latest response changed.',
+        }));
+        applied = requireAppliedProseGuardRepair(repaired, retryFinding.id);
+    } catch (error) {
+        if (!isRetryTargetCurrent()) throw error;
+        change.status = 'retry_failed';
+        change.failureReason = error instanceof Error ? error.message : String(error);
+        const storedFinding = proseGuardState.findings?.find(item => item.id === change.findingId);
+        if (storedFinding) {
+            storedFinding.status = 'retry_failed';
+            storedFinding.failureReason = change.failureReason;
+        }
+        await persistProseGuardMessageEdit(context, latest.messageId, originalText, proseGuardState, {
+            reconcile: true,
+            editSpan: calculateProseGuardEditSpan(currentText, originalText),
+        });
+        throw error;
+    }
+    proseGuardState.changes[index] = { ...applied, status: 'applied' };
+    const storedFinding = proseGuardState.findings?.find(item => item.id === change.findingId);
+    if (storedFinding) {
+        storedFinding.status = applied.operation === 'delete' ? 'deleted' : 'fixed';
+        storedFinding.operation = applied.operation;
+        storedFinding.replacementText = applied.replacementText;
+    }
+    clearProseGuardFailureIfResolved(proseGuardState);
+    await persistProseGuardMessageEdit(context, latest.messageId, repaired.narrationText, proseGuardState, {
+        reconcile: true,
+        editSpan: calculateProseGuardEditSpan(currentText, repaired.narrationText),
+    });
+}
+
+async function handleManualProseGuardFix(context, messageId, phrase, category) {
     const latest = getCurrentProseGuardTarget(context, messageId);
     const normalizedPhrase = String(phrase || '').trim();
+    const normalizedCategory = String(category || '').trim();
     if (!normalizedPhrase) throw new Error('Enter the specific offending phrase.');
+    if (!PROSE_GUARD_TARGETED_BAN_FIELDS.some(field => field.ruleName === normalizedCategory)) {
+        throw new Error('Select a valid Prose Guard rule category.');
+    }
     const currentText = getProseGuardMessageText(latest.message);
-    const rules = getTargetedProseBanRules(getSettings(), [normalizedPhrase]);
+    const rules = getTargetedProseBanRules(getSettings(), [normalizedPhrase], normalizedCategory);
     const finding = collectProseGuardSentenceFindings(currentText, rules)
         .find(item => item.matches.some(match => (
-            match.ruleName === 'userPhraseBans'
+            match.ruleName === normalizedCategory
             && String(match.phrase || '').toLocaleLowerCase() === normalizedPhrase.toLocaleLowerCase()
         )));
     if (!finding) throw new Error('That exact phrase was not found in the latest assistant response.');
 
+    const proseGuardState = getMessageProseGuardState(latest.message) || {
+        version: PROSE_GUARD_EXTRA_VERSION,
+        mode: getProseGuardMode() === PROSE_GUARD_MODES.AUTOMATIC ? PROSE_GUARD_MODES.AUTOMATIC : PROSE_GUARD_MODES.REVIEW,
+        savedAt: Date.now(),
+        findings: [],
+        changes: [],
+    };
+    const matchingStoredFinding = proseGuardState.findings
+        .filter(item => ['pending', 'restored', 'retry_failed'].includes(String(item.status || 'pending')))
+        .map(item => ({ stored: item, resolved: resolveStoredProseGuardFinding(currentText, item) }))
+        .find(item => item.resolved?.start === finding.start && item.resolved?.end === finding.end)
+        ?.stored || null;
+    if (matchingStoredFinding) {
+        finding.id = matchingStoredFinding.id;
+    } else {
+        const usedIds = new Set(proseGuardState.findings.map(item => item.id));
+        let suffix = proseGuardState.findings.length + 1;
+        while (usedIds.has(`PG_MANUAL_${suffix}`)) suffix += 1;
+        finding.id = `PG_MANUAL_${suffix}`;
+    }
+
     const operationIdentity = createStoryEngineEpochIdentity(context);
-    const raw = await requestTargetedProseBanRepairWithTimeout([finding], rules, {
-        guidance: String(reason || '').trim(),
+    const { repaired } = await requestAndApplyProseGuardRepairs(currentText, [finding], rules, {
         isCurrent: () => isCurrentStoryEngineEpoch(operationIdentity, context)
             && context.chat?.[latest.messageId] === latest.message
             && getLatestAssistantMessageEntry(context)?.messageId === latest.messageId,
         expiredMessage: 'Manual Prose Guard repair expired because the latest response changed.',
     });
-    const payload = parseTargetedProseGuardResponse(raw);
-    const repaired = applyProseGuardSentenceRepairs(currentText, [finding], payload, { rules });
-    const applied = repaired.appliedRepairs.find(item => item.findingId === finding.id);
-    if (!applied || repaired.rejectedRepairs.length) {
-        throw new Error(repaired.rejectedRepairs[0]?.reason || 'Prose Guard did not return a valid sentence repair.');
+    const applied = requireAppliedProseGuardRepair(repaired, finding.id);
+    const storedFinding = matchingStoredFinding || { ...finding, status: 'pending' };
+    if (matchingStoredFinding) {
+        Object.assign(storedFinding, finding, { id: matchingStoredFinding.id, status: 'pending' });
+        const existingChangeIndex = proseGuardState.changes.findIndex(item => item.findingId === storedFinding.id);
+        if (existingChangeIndex >= 0) proseGuardState.changes.splice(existingChangeIndex, 1);
+    } else {
+        proseGuardState.findings.push(storedFinding);
     }
-
-    const proseGuardState = getMessageProseGuardState(latest.message);
-    if (proseGuardState) {
-        const matchingFinding = proseGuardState.findings.find(item => item.status === 'pending' && item.sentence === finding.sentence);
-        if (matchingFinding) {
-            matchingFinding.status = 'fixed';
-            matchingFinding.replacementText = applied.replacementText;
-        }
-        proseGuardState.changes.push({ ...applied, status: 'applied' });
-    }
+    recordProseGuardRepair(proseGuardState, storedFinding, applied);
     await persistProseGuardMessageEdit(context, latest.messageId, repaired.narrationText, proseGuardState, {
         reconcile: true,
-        editSpan: applied,
+        editSpan: calculateProseGuardEditSpan(currentText, repaired.narrationText),
     });
-    addCustomProseGuardPhrase(normalizedPhrase);
+    addProseGuardPhraseToCategory(normalizedPhrase, normalizedCategory);
 }
 
 function attachProseGuardWidgetHandlers(strip, context = getContext()) {
@@ -10311,7 +10559,13 @@ function attachProseGuardWidgetHandlers(strip, context = getContext()) {
                 target.getAttribute('data-spe-prose-guard-review-action'),
             );
         } else if (target.matches('[data-spe-prose-guard-restore]')) {
-            operation = handleAutomaticProseGuardRestore(
+            operation = handleProseGuardRestore(
+                context,
+                target.getAttribute('data-spe-prose-guard-message-id'),
+                target.getAttribute('data-spe-prose-guard-change-index'),
+            );
+        } else if (target.matches('[data-spe-prose-guard-retry]')) {
+            operation = handleProseGuardRetry(
                 context,
                 target.getAttribute('data-spe-prose-guard-message-id'),
                 target.getAttribute('data-spe-prose-guard-change-index'),
@@ -10321,7 +10575,7 @@ function attachProseGuardWidgetHandlers(strip, context = getContext()) {
                 context,
                 latest.messageId,
                 strip.querySelector('[data-spe-prose-guard-manual-phrase]')?.value,
-                strip.querySelector('[data-spe-prose-guard-manual-reason]')?.value,
+                strip.querySelector('[data-spe-prose-guard-manual-category]')?.value,
             );
         }
         if (!operation) {
@@ -14093,15 +14347,15 @@ function parseProseGuardBannedPhraseList(value) {
         .filter(Boolean));
 }
 
-function getTargetedProseBanRules(settings = getSettings(), additionalUserPhrases = []) {
+function getTargetedProseBanRules(settings = getSettings(), additionalPhrases = [], additionalCategory = 'userPhraseBans') {
     const configuredRules = PROSE_GUARD_TARGETED_BAN_FIELDS
         .map(field => ({
             ...field,
             rulePrompt: field.rulePrompt || getProseRuleBlock(field.ruleName),
-            phrases: field.ruleName === 'userPhraseBans'
+            phrases: field.ruleName === additionalCategory
                 ? uniqueStrings([
                     ...parseProseGuardBannedPhraseList(settings[field.key] ?? field.defaultValue),
-                    ...additionalUserPhrases,
+                    ...additionalPhrases,
                 ])
                 : parseProseGuardBannedPhraseList(settings[field.key] ?? field.defaultValue),
         }));
@@ -14113,6 +14367,34 @@ function getTargetedProseBanRules(settings = getSettings(), additionalUserPhrase
         }));
     return [...configuredRules, ...automaticRules]
         .filter(rule => rule.phrases.length > 0 || rule.patternNames?.length > 0);
+}
+
+function getProseGuardRulesForStoredChange(change) {
+    const rules = getTargetedProseBanRules().map(rule => ({
+        ...rule,
+        phrases: [...(rule.phrases || [])],
+        patternNames: [...(rule.patternNames || [])],
+    }));
+    for (const match of change?.matches || []) {
+        const ruleName = String(match?.ruleName || '');
+        const phrase = String(match?.phrase || '').trim();
+        if (!ruleName || !phrase || ruleName === 'antiRhetoricalNegation') continue;
+        let rule = rules.find(item => item.ruleName === ruleName);
+        if (!rule) {
+            const field = PROSE_GUARD_TARGETED_BAN_FIELDS.find(item => item.ruleName === ruleName);
+            if (!field) continue;
+            rule = {
+                ...field,
+                rulePrompt: field.rulePrompt || getProseRuleBlock(field.ruleName),
+                phrases: [],
+            };
+            rules.push(rule);
+        }
+        if (!rule.phrases.some(value => value.toLocaleLowerCase() === phrase.toLocaleLowerCase())) {
+            rule.phrases.push(phrase);
+        }
+    }
+    return rules;
 }
 
 function formatTargetedProseBanFindings(findings, rules) {
@@ -14139,14 +14421,14 @@ function buildTargetedProseBanRepairPrompt(findings, rules, guidance = '') {
         'TASK:',
         'The deterministic scanner has already confirmed the listed phrase matches. Configured phrase bans are absolute for this pass, including matches inside quoted dialogue.',
         'Repair ONLY each supplied sentence for its confirmed match. Do not audit or improve anything else.',
-        'Every supplied FINDING_ID MUST receive exactly one compliant replacement. If a safe repair is impossible, the request fails closed; do not omit the finding.',
+        'Every supplied FINDING_ID MUST receive exactly one compliant replace or delete operation. If a safe repair is impossible, the request fails closed; do not omit the finding.',
         '',
         'REPAIR LIMITS:',
-        '- Return exactly one replacement sentence for each supplied FINDING_ID.',
-        '- Change only enough wording to remove the confirmed match and satisfy its matching Prose Rule.',
-        '- Preserve all facts, names, dialogue, quoted wording, actions, consequences, order, tone, intensity, and meaning.',
-        '- Do not add, remove, summarize, soften, or reinterpret scene content.',
-        '- Do not invent gestures, actions, emotions, motives, information, object handling, or consequences.',
+        '- Use operation="delete" with replacementSentence="" ONLY when removing the confirmed violation leaves no meaningful content in that sentence.',
+        '- Otherwise use operation="replace" and return exactly one corrected sentence.',
+        '- Preserve all dialogue, facts, names, actions, consequences, order, tone, intensity, and meaning outside the confirmed violation.',
+        '- Replace emotional or figurative shorthand with observable behavior already supported by the sentence and scene context.',
+        '- Add no unrelated facts, gestures, actions, emotions, motives, information, object handling, or consequences.',
         '- Preserve quoted dialogue exactly except when the confirmed match itself occurs inside that dialogue.',
         '- Do not replace a banned phrase with another banned phrase or an equivalent workaround.',
         '- Return no commentary, analysis, corrected narration, or labels outside the required edit block.',
@@ -14159,7 +14441,7 @@ function buildTargetedProseBanRepairPrompt(findings, rules, guidance = '') {
         '',
         'OUTPUT CONTRACT:',
         `Return exactly ${PROSE_GUARD_EDITS_START}, one JSON object, and ${PROSE_GUARD_EDITS_END}.`,
-        '{"sentenceRepairs":[{"findingId":"PG_SENTENCE_1","replacementSentence":"one corrected sentence"}]}',
+        '{"sentenceRepairs":[{"findingId":"PG_SENTENCE_1","operation":"replace","replacementSentence":"one corrected sentence"}]}',
         'Do not return an empty sentenceRepairs array when findings are supplied.',
         '',
         'The only authorized source text is the supplied SENTENCE_TO_REPAIR for each FINDING_ID.',
@@ -14262,9 +14544,12 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
                 };
             }
 
-            const repairRaw = await requestTargetedProseBanRepairWithTimeout(findings, rules, requestOptions);
-            const repairPayload = parseTargetedProseGuardResponse(repairRaw);
-            const repaired = applyProseGuardSentenceRepairs(currentText, findings, repairPayload, { rules });
+            const { payload: repairPayload, repaired } = await requestAndApplyProseGuardRepairs(
+                currentText,
+                findings,
+                rules,
+                requestOptions,
+            );
             const appliedFindingIds = new Set(repaired.appliedRepairs.map(repair => repair.findingId));
             const unresolvedFindings = findings.filter(finding => !appliedFindingIds.has(finding.id));
             const rejectedByFindingId = new Map(repaired.rejectedRepairs.map(repair => [repair.findingId, repair]));
@@ -14272,6 +14557,7 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
                 const finding = findings.find(item => item.id === repair.findingId);
                 attemptedRepairs.push({
                     findingId: repair.findingId,
+                    operation: repair.operation,
                     sourceStart: finding?.start ?? null,
                     originalText: finding?.sentence || '',
                     replacementText: repair.replacementSentence,
@@ -14284,6 +14570,7 @@ async function applyTargetedProseBanRepairIfNeeded(narrationText, requestOptions
                 if (!supplied) {
                     attemptedRepairs.push({
                         findingId: finding.id,
+                        operation: '',
                         sourceStart: finding.start,
                         originalText: finding.sentence,
                         replacementText: '',
@@ -14375,6 +14662,7 @@ function buildAutomaticProseGuardFailureState(findings, error) {
         return {
             ...finding,
             status: 'pending',
+            attemptedOperation: latestAttempt?.operation || '',
             attemptedReplacement: latestAttempt?.replacementText || '',
             failureReason: latestAttempt?.reason || failureSummary,
         };
@@ -14394,10 +14682,18 @@ function buildAutomaticProseGuardFailureState(findings, error) {
 function buildAutomaticProseGuardState(repairResult) {
     const changes = (repairResult?.appliedRepairs || []).map(repair => ({
         findingId: String(repair.findingId || ''),
+        operation: String(repair.operation || 'replace'),
         start: normalizeProseGuardSpanOffset(repair.start),
         end: normalizeProseGuardSpanOffset(repair.end),
+        sourceStart: normalizeProseGuardSpanOffset(repair.sourceStart),
+        sourceEnd: normalizeProseGuardSpanOffset(repair.sourceEnd),
         originalText: String(repair.originalText || ''),
         replacementText: String(repair.replacementText || ''),
+        removedText: String(repair.removedText || ''),
+        anchorBefore: String(repair.anchorBefore || ''),
+        anchorAfter: String(repair.anchorAfter || ''),
+        ruleNames: Array.isArray(repair.ruleNames) ? [...repair.ruleNames] : [],
+        matches: Array.isArray(repair.matches) ? repair.matches.map(match => ({ ...match })) : [],
         status: 'applied',
     }));
     return {
@@ -14411,7 +14707,8 @@ function buildAutomaticProseGuardState(repairResult) {
             end: change.end,
             ruleNames: [],
             matches: [],
-            status: 'fixed',
+            status: change.operation === 'delete' ? 'deleted' : 'fixed',
+            operation: change.operation,
             replacementText: change.replacementText,
         })),
         changes,
@@ -14443,14 +14740,15 @@ function buildPostNarrationToolDefinition(name, { includeSentenceRepairs = false
         required.push('sentenceRepairs');
         properties.sentenceRepairs = {
             type: 'array',
-            description: 'Exactly one code-authorized sentence-level replacement for every confirmed targeted phrase finding. Missing or rejected repairs fail closed.',
+            description: 'Exactly one code-authorized replace or delete operation for every confirmed targeted phrase finding. Missing or rejected repairs fail closed.',
             items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['findingId', 'replacementSentence'],
+                required: ['findingId', 'operation', 'replacementSentence'],
                 properties: {
                     findingId: { type: 'string', description: 'Exact FINDING_ID supplied by the deterministic scanner.' },
-                    replacementSentence: { type: 'string', description: 'One corrected sentence replacing the supplied sentence, preserving its facts and quoted dialogue.' },
+                    operation: { type: 'string', enum: ['replace', 'delete'], description: 'Use delete only when the confirmed violation is effectively the sentence\'s entire meaningful content; otherwise use replace.' },
+                    replacementSentence: { type: 'string', description: 'For replace: one corrected sentence preserving meaningful content. For delete: an empty string.' },
                 },
             },
         };
@@ -14491,7 +14789,7 @@ function buildPostNarrationToolPrompt(prompt, toolDefinition) {
     const fields = Object.keys(toolDefinition?.parameters?.properties || {});
     const fieldInstructions = [];
     if (fields.includes('sentenceRepairs')) {
-        fieldInstructions.push('Put exactly one repaired sentence for every supplied FINDING_ID in sentenceRepairs. Change only enough wording to remove the confirmed match. Preserve all facts, actors, actions, order, tone, meaning, and unaffected dialogue. Never delete a sentence, invent content, omit a finding, or repair anything the deterministic scanner did not supply.');
+        fieldInstructions.push('Put exactly one replace or delete operation for every supplied FINDING_ID in sentenceRepairs. Delete only a violation-only sentence. Otherwise replace the violation while preserving dialogue and all other meaningful content, using only observable behavior supported by context. Never invent unrelated content, omit a finding, or repair anything the deterministic scanner did not supply.');
     }
     if (fields.includes('trackerDelta')) {
         fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on the supplied final narration exactly as provided.');

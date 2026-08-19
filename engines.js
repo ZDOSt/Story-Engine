@@ -331,6 +331,13 @@ function RelationshipEngine(npc, resolutionPacket) {
     if scene facts show significant concrete benefit to this NPC -> Y
     else -> N
 
+  exceptionalBenefit(npc, resolutionPacket, auditInteraction):
+    policy: EO, DETERMINISTIC-REFEREE
+    rule: strict subset of auditInteraction; if auditInteraction=N -> N
+    rule: semantic Y is only a candidate. Deterministic code requires exceptionalBenefitScale=exceptional, a real successful/landed outcome, a direct or benefited relation to this NPC, no contradictory harm, and evidence naming the NPC and explaining the concrete stakes change and causal user action
+    rule: the semantic pass judges the scale from the complete established situation; deterministic code does not match keywords, named scenarios, or fixed examples
+    exceptionalBenefitEvidence = concise evidence naming the NPC, the concrete stakes at issue, why success would be exceptional in this situation, and how the user action would cause it without predicting the outcome; (none) when N
+
   stakeChangeByOutcome(npc, resolutionPacket):
     policy: EO, FYW
     rule: for each possible resolution outcome, return benefit only if that outcome significantly and concretely improves this NPC's stakes as per DEF.STAKE_CHANGE
@@ -457,6 +464,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     rule: negative encounter = target in [Hostility,Fear,FearHostility]
     rule: rapportEligible = Y only if this NPC has no prior rapport gain or 30 minutes of global active play passed since this NPC's last rapport gain
     rule: cooldown expiry does not change rapport by itself; rapport changes only on the next qualifying interaction with this NPC
+    rule: a valid exceptionalBenefit at B1/B2 directly increases Bond by +1; at B3 or while Fear/Hostility is active it gives +2 Rapport, and that exceptional Rapport reward bypasses the ordinary Rapport cooldown
     rule: when rapport is consumed by Bond or No Change, set this NPC's last rapport gain active time to the current global active play time
     if target in [Bond,No Change] and rapportEligible!=Y -> return {currentRapport:currentRapport}
     if target in [Bond,No Change] -> return {currentRapport:min(5,currentRapport+1)}
@@ -480,6 +488,9 @@ function RelationshipEngine(npc, resolutionPacket) {
         return {b:0,f:(currentDisposition.F=3?-1:0),h:(currentDisposition.H=3?-1:0)}
       else:
         return {b:0,f:0,h:0}
+
+    if target=Bond and exceptionalDirectBond=Y and currentDisposition.B<3 and currentDisposition.F<3 and currentDisposition.H<3:
+      return {b:1,f:0,h:0}
 
     if target=Bond or allowed early No Change:
       if currentDisposition.B=1:
@@ -551,10 +562,12 @@ function RelationshipEngine(npc, resolutionPacket) {
     if npc not in resolutionPacket.NPCInScene -> return uninitialized handoff
     read state, initialize disposition if missing, and check hidden rapport cooldown against global active play time
     read stakeChangeByOutcome for actual resolution outcome, set NPC_STAKES from benefit/harm vs none, audit benefit interaction, route disposition target
+    propose exceptionalBenefit, exceptionalBenefitScale, and exceptionalBenefitEvidence only as a strict subset of auditInteraction; deterministic code then verifies the scale, landed successful outcome, direct/benefited unharmed relation, named evidence, and causal intervention without scenario-specific keyword matching
     hostilePressureResult = applyHostilePhysicalPressure(npc, resolutionPacket, state)
     if hostilePressureResult exists -> target = hostilePressureResult.target else target = routeDispositionTarget
-    update rapport from final target; if a positive/neutral eligible interaction consumed rapport, stamp this NPC's last rapport gain active time
-    if hostilePressureResult exists -> deltas = hostilePressureResult.deltas else deltas = deriveDirection(target, audit, currentDisposition, rapport.currentRapport, resolutionPacket)
+    if exceptionalBenefit=Y and target=Bond and (currentDisposition.B>=3 || currentDisposition.F>=3 || currentDisposition.H>=3) -> update rapport by +2 with cooldown bypass; otherwise use ordinary rapport rules
+    if exceptionalBenefit=Y and target=Bond and currentDisposition.B<3 and currentDisposition.F<3 and currentDisposition.H<3 -> deriveDirection receives exceptionalDirectBond=Y and may increase Bond by exactly +1, capped at B3
+    if hostilePressureResult exists -> deltas = hostilePressureResult.deltas else deltas = deriveDirection(target, audit, currentDisposition, rapport.currentRapport, resolutionPacket, exceptionalDirectBond)
     update disposition and apply rapport reset if present
     if hostilePressureResult.dominatedFearBreak=Y and currentDisposition.F>=4 and currentDisposition.H>=3 -> lower currentDisposition.H by 1
     save currentRapport, lastRapportGainActiveMs, hostilePressure, hostileLandedPressure, dominantLock, and pressureMode to sceneTracker
@@ -1091,12 +1104,50 @@ function landedActionHarmsRelationship(packet, sem, outcome, isHarmed) {
     return normalizeStakeChange(sem.stakeChangeByOutcome?.[String(outcome || 'no_roll')]) === 'harm';
 }
 
+function exceptionalBenefitCandidateForNpc(npc, sem = {}) {
+    const candidate = bool(sem.exceptionalBenefit);
+    const semanticAuditInteraction = bool(sem.auditInteraction);
+    const scale = String(sem.exceptionalBenefitScale || 'ordinary').trim().toLowerCase();
+    const evidence = String(sem.exceptionalBenefitEvidence || '').trim();
+    const namesNpc = textNamesNpc(evidence, npc);
+    return {
+        valid: candidate
+            && semanticAuditInteraction
+            && scale === 'exceptional'
+            && isReal(evidence)
+            && namesNpc,
+        candidate,
+        semanticAuditInteraction,
+        scale,
+        evidence,
+        namesNpc,
+    };
+}
+
+function exceptionalBenefitOutcomeResolved(packet) {
+    const positiveOutcome = ['success', 'dominant_impact', 'solid_impact', 'light_impact'].includes(packet.Outcome);
+    return packet.RollNeeded === 'Y' && positiveOutcome && landedBool(packet.LandedActions);
+}
+
+function exceptionalBenefitOutcomeFailed(packet) {
+    return packet.RollNeeded === 'Y' && !exceptionalBenefitOutcomeResolved(packet);
+}
+
 function directOrOpposedBenefitAllowed(npc, packet, sem) {
     if (packetHarmfulAttackActive(packet)) return false;
     if (packetBoundaryPressureActive(packet)) return false;
     if (packetBoundaryBreakActive(packet)) return false;
     if (packetRestraintActive(packet)) return false;
     if (bool(sem.explicitIntimidationOrCoercion)) return false;
+    const exceptionalCandidate = exceptionalBenefitCandidateForNpc(npc, sem);
+    const relation = relationToUserAction(npc, packet);
+    if (exceptionalCandidate.valid && exceptionalBenefitOutcomeFailed(packet)) return false;
+    if (exceptionalCandidate.valid
+        && exceptionalBenefitOutcomeResolved(packet)
+        && (relation.isDirect || relation.isBenefited)
+        && !relation.isHarmed) {
+        return true;
+    }
     const source = relationshipBenefitSourceText(packet, sem);
     return isConcreteAidBenefitForNpc(source, npc);
 }
@@ -1149,9 +1200,22 @@ export function applyMeaningfulBenefitReferee(npc, packet, stakeChange, sem = {}
     if (stakeChange !== 'benefit') return { value: stakeChange };
 
     const relation = relationToUserAction(npc, packet);
+    const exceptionalCandidate = exceptionalBenefitCandidateForNpc(npc, sem);
+    if (exceptionalCandidate.valid && exceptionalBenefitOutcomeFailed(packet)) {
+        return {
+            value: 'none',
+            referee: {
+                hardRule: 'RelationshipEngine.exceptionalBenefit: a structurally valid exceptional candidate cannot award benefit after a rolled non-success or non-landed outcome',
+                from: stakeChange,
+                to: 'none',
+                relation,
+            },
+        };
+    }
     if (relation.isBenefited && !relation.isDirect && !relation.isOpp) return { value: stakeChange };
 
     const source = relationshipBenefitSourceText(packet, sem);
+    const exceptionalBypass = exceptionalCandidate.valid && exceptionalBenefitOutcomeResolved(packet);
     const strongBenefit = isConcreteAidBenefit(source);
     const falseBenefit = /\b(compliment\w*|flirt\w*|smil\w*|polite|conversation|talk\w* down|de-?escalat\w*|negotiate\w*|persuad\w*|convinc\w*|fail\w*|miss(?:ed)?|surviv\w*|safe|unharmed|choose\w* not to harm|not harm|spare[sd]?|own goal|self-advancement)\b/.test(source);
 
@@ -1168,6 +1232,7 @@ export function applyMeaningfulBenefitReferee(npc, packet, stakeChange, sem = {}
         };
     }
 
+    if (exceptionalBypass) return { value: stakeChange };
     if (strongBenefit && !falseBenefit) return { value: stakeChange };
 
     return {
@@ -1181,9 +1246,42 @@ export function applyMeaningfulBenefitReferee(npc, packet, stakeChange, sem = {}
     };
 }
 
+export function applyExceptionalBenefitReferee(npc, packet, sem = {}, auditInteraction = 'N', stakeChange = 'none') {
+    const structuralCandidate = exceptionalBenefitCandidateForNpc(npc, sem);
+    if (!structuralCandidate.candidate) return { value: false, evidence: '(none)' };
+
+    const relation = relationToUserAction(npc, packet);
+    const resolved = exceptionalBenefitOutcomeResolved(packet);
+    const directBeneficiary = (relation.isBenefited || relation.isDirect) && !relation.isHarmed;
+    const valid = structuralCandidate.valid
+        && auditInteraction === 'Y'
+        && stakeChange === 'benefit'
+        && resolved
+        && directBeneficiary;
+
+    if (valid) return { value: true, evidence: structuralCandidate.evidence };
+    return {
+        value: false,
+        evidence: '(none)',
+        referee: {
+            hardRule: 'exceptionalBenefit requires auditInteraction, exceptionalBenefitScale=exceptional, a landed successful outcome, a direct/benefited unharmed NPC, and named causal evidence',
+            candidate: 'Y',
+            relation,
+            semanticAuditInteraction: structuralCandidate.semanticAuditInteraction ? 'Y' : 'N',
+            auditInteraction,
+            stakeChange,
+            scale: structuralCandidate.scale,
+            resolved: resolved ? 'Y' : 'N',
+            evidence: structuralCandidate.evidence || NONE,
+            namesNpc: structuralCandidate.namesNpc ? 'Y' : 'N',
+        },
+    };
+}
+
 function relationshipBenefitSourceText(packet, sem = {}) {
     return [
         sem?.auditInteraction,
+        sem?.exceptionalBenefitEvidence,
         sem?.identifyGoal,
         sem?.identifyChallenge,
         sem?.explicitMeans,
@@ -1217,6 +1315,12 @@ function escapeNameForLocalRegExp(value) {
     return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
 }
 
+function textNamesNpc(text, npc) {
+    const npcPattern = escapeNameForLocalRegExp(String(npc || '').trim());
+    if (!npcPattern) return false;
+    return new RegExp(`(?:^|[^\\p{L}\\p{N}_])${npcPattern}(?=$|[^\\p{L}\\p{N}_])`, 'iu').test(String(text || ''));
+}
+
 export function relationToUserAction(npc, packet) {
     return {
         isDirect: includesName(packet.ActionTargets, npc),
@@ -1247,11 +1351,11 @@ export function proactivityRefereeGuard(handoff, packet) {
     return null;
 }
 
-export function updateRapport(currentRapport, target, rapportEligible = false, mode = 'normal') {
+export function updateRapport(currentRapport, target, rapportEligible = false, mode = 'normal', positiveAmount = 1) {
     if (mode === 'hostilePressure' && target === 'No Change') return { currentRapport };
     if (['Bond', 'No Change'].includes(target)) {
         return {
-            currentRapport: rapportEligible ? Math.min(5, currentRapport + 1) : currentRapport,
+            currentRapport: rapportEligible ? Math.min(5, currentRapport + Math.max(1, Number(positiveAmount) || 1)) : currentRapport,
         };
     }
     if (['Hostility', 'Fear', 'FearHostility'].includes(target)) return { currentRapport: Math.max(0, currentRapport - 1) };
@@ -1423,6 +1527,9 @@ export function deriveDirection(target, currentDisposition, currentRapport, audi
             return { b: 0, f: currentDisposition.F === 3 ? -1 : 0, h: currentDisposition.H === 3 ? -1 : 0 };
         }
         return { b: 0, f: 0, h: 0 };
+    }
+    if (target === 'Bond' && options.exceptionalDirectBond === true && currentDisposition.B < 3) {
+        return { b: 1, f: 0, h: 0 };
     }
     if (target === 'No Change' && !noChangeCanPromoteEarlyBond) return { b: 0, f: 0, h: 0 };
     if (target === 'Bond') {

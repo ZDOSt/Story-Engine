@@ -136,6 +136,9 @@ function relationship(NPC, extra = {}) {
       ...(extra.initPreset || {}),
     },
     auditInteraction: false,
+    exceptionalBenefit: false,
+    exceptionalBenefitScale: 'ordinary',
+    exceptionalBenefitEvidence: '(none)',
     establishedRelationship: false,
     romanceStyle: 'auto',
     slowBondEvidence: {
@@ -6819,6 +6822,489 @@ const tests = [
         }),
       });
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Bond');
+    },
+  },
+  {
+    name: '14a.1 exceptional benefit rejects ordinary aid even when semantic claims it',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I bandage Mara\'s small cut.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'BandageMara',
+            identifyChallenge: 'bandage Mara\'s small cut',
+            explicitMeans: 'bandage Mara\'s small cut',
+            identifyTargets: { ActionTargets: ['Mara'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'ordinary',
+            exceptionalBenefitEvidence: 'Mara received routine first aid for a small cut.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      const mara = report.finalNarrativeHandoff.npcHandoffs[0];
+      assert.equal(mara.Target, 'Bond');
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 3, F: 1, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.Mara.currentRapport, 1);
+      assert.equal(auditIncludes(report, 'deterministicExceptionalBenefitReferee'), true);
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=N'), true);
+    },
+  },
+  {
+    name: '14a.2 exceptional benefit directly promotes B1 to B2',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I rescue Mara from the collapsing beam before it crushes her to death.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 1, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'RescueMara',
+            identifyChallenge: 'rescue Mara from a collapsing beam',
+            explicitMeans: 'rescue Mara before the beam crushes her to death',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: ['collapsing beam'] }, BenefitedObservers: ['Mara'], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Mara faces death beneath the collapsing beam; the user action would prevent that outcome if it succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 2, F: 1, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.Mara.currentRapport, 1);
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=Y'), true);
+    },
+  },
+  {
+    name: '14a.3 exceptional benefit directly promotes B2 to B3',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I rescue Mara from the collapsing beam before it crushes her to death.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 2, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'RescueMara',
+            identifyChallenge: 'rescue Mara from a collapsing beam',
+            explicitMeans: 'rescue Mara before the beam crushes her to death',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: ['collapsing beam'] }, BenefitedObservers: ['Mara'], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Mara faces death beneath the collapsing beam; the user action would prevent that outcome if it succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 3, F: 1, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.Mara.currentRapport, 1);
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=Y'), true);
+    },
+  },
+  {
+    name: '14a.4 exceptional benefit gives B3 +2 Rapport and reaches B4 despite cooldown',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I rescue Mara from the collapsing beam before it crushes her to death.',
+        dice: [18, 5, 1, 1, 1, 1],
+        rapportClock: { activeMs: 20 * 60 * 1000, lastActivityAt: Date.now() },
+        tracker: {
+          Mara: trackerEntry({
+            currentDisposition: { B: 3, F: 1, H: 1 },
+            currentRapport: 3,
+            lastRapportGainActiveMs: 20 * 60 * 1000,
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'RescueMara',
+            identifyChallenge: 'rescue Mara from a collapsing beam',
+            explicitMeans: 'rescue Mara before the beam crushes her to death',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: ['collapsing beam'] }, BenefitedObservers: ['Mara'], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Mara faces death beneath the collapsing beam; the user action would prevent that outcome if it succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 4, F: 1, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.Mara.currentRapport, 5);
+      assert.equal(auditIncludes(report, 'rapportEligible=N'), true);
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=Y'), true);
+    },
+  },
+  {
+    name: '14a.5 exceptional benefit gives +2 Rapport to recover an F3 lock',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I rescue Mara from the collapsing beam before it crushes her to death.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({
+            currentDisposition: { B: 1, F: 3, H: 1 },
+            currentRapport: 3,
+            lastRapportGainActiveMs: 20 * 60 * 1000,
+          }),
+        },
+        rapportClock: { activeMs: 20 * 60 * 1000, lastActivityAt: Date.now() },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'RescueMara',
+            identifyChallenge: 'rescue Mara from a collapsing beam',
+            explicitMeans: 'rescue Mara before the beam crushes her to death',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: ['collapsing beam'] }, BenefitedObservers: ['Mara'], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Mara faces death beneath the collapsing beam; the user action would prevent that outcome if it succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 1, F: 2, H: 1 });
+      assert.equal(report.trackerUpdate.npcs.Mara.currentRapport, 5);
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=Y'), true);
+    },
+  },
+  {
+    name: '14a.6 exceptional benefit is rejected when the rescue outcome does not land',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I rescue Mara from the collapsing beam before it crushes her to death.',
+        dice: [1, 20, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 3, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'RescueMara',
+            identifyChallenge: 'rescue Mara from a collapsing beam',
+            explicitMeans: 'rescue Mara before the beam crushes her to death',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: ['collapsing beam'] }, BenefitedObservers: ['Mara'], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Mara faces death beneath the collapsing beam; the user action would prevent that outcome if it succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 3, F: 1, H: 1 });
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=N'), true);
+      assert.equal(auditIncludes(report, 'resolved":"N"'), true);
+    },
+  },
+  {
+    name: '14a.6a failed exceptional candidate cannot fall back to ordinary aid',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.failure = 'benefit';
+      const report = runCase({
+        userText: 'I rescue Mara from the collapsing beam before it crushes her to death.',
+        dice: [1, 20, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 1, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'RescueMara',
+            identifyChallenge: 'rescue Mara from a collapsing beam',
+            explicitMeans: 'rescue Mara before the beam crushes her to death',
+            identifyTargets: { ActionTargets: ['Mara'], OppTargets: { NPC: [], ENV: ['collapsing beam'] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Mara would be rescued from death if the intervention succeeds; the user action would cause that rescue.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 2, F: 1, H: 1 });
+      assert.equal(auditIncludes(report, 'deterministicBenefitReferee'), true);
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=N'), true);
+    },
+  },
+  {
+    name: '14a.7 exceptional benefit accepts an abstract semantically qualified situation',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I intervene before Mara suffers the established irreversible outcome.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 1, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'PreserveMaraCoreStakes',
+            identifyChallenge: 'prevent the established irreversible outcome affecting Mara',
+            explicitMeans: 'intervene successfully on Mara\'s behalf',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: ['established threat'] }, BenefitedObservers: ['Mara'], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Mara faces an established irreversible outcome; the user action would change it if the intervention succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 2, F: 1, H: 1 });
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=Y'), true);
+    },
+  },
+  {
+    name: '14a.8 direct exceptional benefit accepts unfamiliar action wording',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I alter the established outcome for Mara through an unfamiliar intervention.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 1, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'AlterMaraOutcome',
+            identifyChallenge: 'alter the established outcome affecting Mara',
+            explicitMeans: 'use an unfamiliar intervention on Mara\'s behalf',
+            identifyTargets: { ActionTargets: ['Mara'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Mara faces an established irreversible outcome; the user action would change it if the intervention succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 2, F: 1, H: 1 });
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=Y'), true);
+    },
+  },
+  {
+    name: '14a.9 malformed exceptional candidate cannot bypass meaningful-benefit referee',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I alter the established outcome for Mara through an unfamiliar intervention.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 1, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'AlterMaraOutcome',
+            identifyChallenge: 'alter the established outcome affecting Mara',
+            explicitMeans: 'use an unfamiliar intervention on Mara\'s behalf',
+            identifyTargets: { ActionTargets: ['Mara'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: '(none)',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 1, F: 1, H: 1 });
+      assert.equal(auditIncludes(report, 'deterministicBenefitReferee'), true);
+      assert.equal(auditIncludes(report, 'deterministicExceptionalBenefitReferee'), true);
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=N'), true);
+    },
+  },
+  {
+    name: '14a.10 exceptional evidence must name the benefited NPC',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I alter the established outcome for Mara through an unfamiliar intervention.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 1, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'AlterMaraOutcome',
+            identifyChallenge: 'alter the established outcome affecting Mara',
+            explicitMeans: 'use an unfamiliar intervention on Mara\'s behalf',
+            identifyTargets: { ActionTargets: ['Mara'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Lyra faces an established irreversible outcome; the user action would change it if the intervention succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.equal(auditIncludes(report, 'namesNpc":"N"'), true);
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=N'), true);
+    },
+  },
+  {
+    name: '14a.11 significant benefit remains non-exceptional',
+    run() {
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I alter the established outcome for Mara through an unfamiliar intervention.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          Mara: trackerEntry({ currentDisposition: { B: 1, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'AlterMaraOutcome',
+            identifyChallenge: 'alter the established outcome affecting Mara',
+            explicitMeans: 'use an unfamiliar intervention on Mara\'s behalf',
+            identifyTargets: { ActionTargets: ['Mara'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship('Mara', {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'significant',
+            exceptionalBenefitEvidence: 'Mara faces a meaningful established outcome; the user action would improve it if the intervention succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'No Change');
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=N'), true);
+    },
+  },
+  {
+    name: '14a.12 Unicode NPC name satisfies exceptional-benefit evidence requirement',
+    run() {
+      const npcName = '\u00c9lodie';
+      const stakes = emptyStakeMap('none');
+      stakes.success = 'benefit';
+      const report = runCase({
+        userText: 'I alter the established outcome for Élodie through an unfamiliar intervention.',
+        dice: [18, 5, 1, 1, 1, 1],
+        tracker: {
+          [npcName]: trackerEntry({ currentDisposition: { B: 1, F: 1, H: 1 }, currentRapport: 0 }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'AlterElodieOutcome',
+            identifyChallenge: 'alter the established outcome affecting Élodie',
+            explicitMeans: 'use an unfamiliar intervention on Élodie\'s behalf',
+            identifyTargets: { ActionTargets: [npcName], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+          relationshipEngine: [relationship(npcName, {
+            auditInteraction: true,
+            exceptionalBenefit: true,
+            exceptionalBenefitScale: 'exceptional',
+            exceptionalBenefitEvidence: 'Élodie faces an established irreversible outcome; the user action would change it if the intervention succeeds.',
+            stakeChangeByOutcome: stakes,
+          })],
+        }),
+      });
+      assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].Target, 'Bond');
+      assert.equal(auditIncludes(report, 'exceptionalBenefit=Y'), true);
+      assert.deepEqual(report.trackerUpdate.npcs[npcName].currentDisposition, { B: 2, F: 1, H: 1 });
     },
   },
   {
@@ -16455,9 +16941,14 @@ const tests = [
       assert.doesNotMatch(source, /proseGuardInanimateObjectivityBannedPhrases|ruleName:\s*'inanimateObjectivity'/);
       assert.match(source, /rulePrompt:\s*field\.rulePrompt \|\| getProseRuleBlock\(field\.ruleName\)/);
       assert.match(source, /function handleManualProseGuardFix/);
-      assert.match(source, /addCustomProseGuardPhrase\(normalizedPhrase\)/);
+      assert.match(source, /addProseGuardPhraseToCategory\(normalizedPhrase, normalizedCategory\)/);
+      assert.match(source, /data-spe-prose-guard-manual-category/);
+      assert.doesNotMatch(source, /data-spe-prose-guard-manual-reason/);
+      assert.match(source, /function handleProseGuardRetry/);
+      assert.match(source, /data-spe-prose-guard-retry/);
+      assert.match(source, /operation:\s*\{ type: 'string', enum: \['replace', 'delete'\]/);
       assert.match(source, /collectProseGuardSentenceFindings\(currentText, rules\)/);
-      assert.match(source, /applyProseGuardSentenceRepairs\(currentText, \[finding\], payload, \{ rules \}\)/);
+      assert.match(source, /requestAndApplyProseGuardRepairs\(currentText, \[finding\], rules/);
       assert.match(source, /function getProseRuleBlock\(ruleName\)/);
       assert.match(source, /const PROSE_GUARD_AUTOMATIC_PATTERN_RULES = Object\.freeze/);
       assert.match(source, /ruleName: 'antiRhetoricalNegation',[\s\S]{0,120}patternNames: \['notXButY'\]/);
@@ -16472,6 +16963,7 @@ const tests = [
       assert.match(editSource, /export function collectProseGuardSentenceFindings/);
       assert.match(editSource, /export function applyProseGuardSentenceRepairs/);
       assert.match(editSource, /export function parseProseGuardRepairPayload/);
+      assert.match(editSource, /export function canDeleteProseGuardFinding/);
       assert.match(source, /includeSentenceRepairs/);
       assert.doesNotMatch(source, /includeProseEdits|proseEdits/);
       assert.doesNotMatch(source, /buildProseGuardPrompt|requestProseGuardCorrection|requestCombinedPostNarrationPass|STORY_ENGINE_COMBINED_POST_NARRATION_PASS/);
@@ -16482,9 +16974,19 @@ const tests = [
       const manualEnd = source.indexOf('function attachProseGuardWidgetHandlers(', manualStart);
       const manualSource = source.slice(manualStart, manualEnd);
       assert.ok(
-        manualSource.indexOf('await persistProseGuardMessageEdit(') < manualSource.indexOf('addCustomProseGuardPhrase(normalizedPhrase)'),
+        manualSource.indexOf('await persistProseGuardMessageEdit(') < manualSource.indexOf('addProseGuardPhraseToCategory(normalizedPhrase, normalizedCategory)'),
         'A manual phrase must be saved only after its repair and reconciliation succeed.',
       );
+      assert.match(manualSource, /const matchingStoredFinding = proseGuardState\.findings/);
+      assert.match(manualSource, /resolveStoredProseGuardFinding\(currentText, item\)/);
+      assert.match(manualSource, /proseGuardState\.changes\.splice\(existingChangeIndex, 1\)/);
+
+      const retryStart = source.indexOf('async function handleProseGuardRetry(');
+      const retryEnd = source.indexOf('async function handleManualProseGuardFix(', retryStart);
+      const retrySource = source.slice(retryStart, retryEnd);
+      assert.match(retrySource, /const isRetryTargetCurrent = \(\) =>/);
+      assert.match(retrySource, /if \(!isRetryTargetCurrent\(\)\) throw error/);
+      assert.match(source, /function clearProseGuardFailureIfResolved\(proseGuardState\)/);
     },
   },
   {
@@ -16681,10 +17183,12 @@ const tests = [
           sentenceRepairs: [
             {
               findingId: findings[0].id,
+              operation: 'replace',
               replacementSentence: 'Maria says, "Stay here," while keeping her gaze on the door.',
             },
             {
               findingId: findings[1].id,
+              operation: 'replace',
               replacementSentence: 'No one speaks for several seconds.',
             },
           ],
@@ -16700,9 +17204,59 @@ const tests = [
       assert.equal(repaired.rejectedRepairs.length, 0);
       assert.deepEqual(collectProseGuardSentenceFindings(repaired.narrationText, rules), []);
 
+      const deletionRules = [{ ruleName: 'strictBehaviorism', phrases: ['jaw works'] }];
+      const deletionSource = 'Her jaw works. She points toward the trail.';
+      const deletionFindings = collectProseGuardSentenceFindings(deletionSource, deletionRules);
+      const deleted = applyProseGuardSentenceRepairs(deletionSource, deletionFindings, {
+        sentenceRepairs: [{ findingId: deletionFindings[0].id, operation: 'delete', replacementSentence: '' }],
+      }, { rules: deletionRules });
+      assert.equal(deleted.narrationText, 'She points toward the trail.');
+      assert.equal(deleted.appliedRepairs[0].operation, 'delete');
+      assert.equal(deleted.appliedRepairs[0].originalText, 'Her jaw works.');
+      assert.equal(deleted.appliedRepairs[0].replacementText, '');
+
+      const namedDeletionSource = "Maria's jaw works. The door opens.";
+      const namedDeletionFindings = collectProseGuardSentenceFindings(namedDeletionSource, deletionRules);
+      const namedDeleted = applyProseGuardSentenceRepairs(namedDeletionSource, namedDeletionFindings, {
+        sentenceRepairs: [{ findingId: namedDeletionFindings[0].id, operation: 'delete', replacementSentence: '' }],
+      }, { rules: deletionRules });
+      assert.equal(namedDeleted.narrationText, 'The door opens.');
+
+      const paragraphDeletionSource = 'The door opens.\n\nHer jaw works.\n\nMaria points toward the trail.';
+      const paragraphDeletionFindings = collectProseGuardSentenceFindings(paragraphDeletionSource, deletionRules);
+      const paragraphDeleted = applyProseGuardSentenceRepairs(paragraphDeletionSource, paragraphDeletionFindings, {
+        sentenceRepairs: [{ findingId: paragraphDeletionFindings[0].id, operation: 'delete', replacementSentence: '' }],
+      }, { rules: deletionRules });
+      assert.equal(paragraphDeleted.narrationText, 'The door opens.\n\nMaria points toward the trail.');
+
+      const inlineDeletionSource = 'The door opens.  Her jaw works.  Maria points toward the trail.';
+      const inlineDeletionFindings = collectProseGuardSentenceFindings(inlineDeletionSource, deletionRules);
+      const inlineDeleted = applyProseGuardSentenceRepairs(inlineDeletionSource, inlineDeletionFindings, {
+        sentenceRepairs: [{ findingId: inlineDeletionFindings[0].id, operation: 'delete', replacementSentence: '' }],
+      }, { rules: deletionRules });
+      assert.equal(inlineDeleted.narrationText, 'The door opens.  Maria points toward the trail.');
+
+      const meaningfulSentence = 'Her jaw works as she points toward the trail.';
+      const meaningfulFinding = collectProseGuardSentenceFindings(meaningfulSentence, deletionRules);
+      const refusedDelete = applyProseGuardSentenceRepairs(meaningfulSentence, meaningfulFinding, {
+        sentenceRepairs: [{ findingId: meaningfulFinding[0].id, operation: 'delete', replacementSentence: '' }],
+      }, { rules: deletionRules });
+      assert.equal(refusedDelete.narrationText, meaningfulSentence);
+      assert.match(refusedDelete.rejectedRepairs[0].reason, /meaningful content/);
+
+      const dialogueSentence = 'She says, "Stay," while her jaw works.';
+      const dialogueFindings = collectProseGuardSentenceFindings(dialogueSentence, deletionRules);
+      assert.equal(dialogueFindings.length, 1);
+      const dialogueDelete = applyProseGuardSentenceRepairs(dialogueSentence, dialogueFindings, {
+        sentenceRepairs: [{ findingId: dialogueFindings[0].id, operation: 'delete', replacementSentence: '' }],
+      }, { rules: deletionRules });
+      assert.equal(dialogueDelete.narrationText, dialogueSentence);
+      assert.match(dialogueDelete.rejectedRepairs[0].reason, /meaningful content/);
+
       const unknownFinding = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId: 'PG_SENTENCE_999',
+          operation: 'replace',
           replacementSentence: 'Maria remains beside the door.',
         }],
       }, { rules });
@@ -16712,6 +17266,7 @@ const tests = [
       const unchangedFinding = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId: findings[0].id,
+          operation: 'replace',
           replacementSentence: findings[0].sentence,
         }],
       }, { rules });
@@ -16721,6 +17276,7 @@ const tests = [
       const replacementWithViolation = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId: findings[0].id,
+          operation: 'replace',
           replacementSentence: 'Maria says, "Stay here," while her breath hitches.',
         }],
       }, { rules });
@@ -16730,6 +17286,7 @@ const tests = [
       const multiSentenceReplacement = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId: findings[0].id,
+          operation: 'replace',
           replacementSentence: 'Maria remains by the door. She raises one hand.',
         }],
       }, { rules });
@@ -16739,6 +17296,7 @@ const tests = [
       const partialRepair = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId: findings[0].id,
+          operation: 'replace',
           replacementSentence: 'Maria says, "Stay here," while keeping her gaze on the door.',
         }],
       }, { rules });
@@ -16752,19 +17310,25 @@ const tests = [
       );
       assert.throws(
         () => parseProseGuardRepairPayload({
-          sentenceRepairs: [{ findingId: findings[0].id, replacementSentence: '' }],
+          sentenceRepairs: [{ findingId: findings[0].id, replacementSentence: 'Maria remains by the door.' }],
         }),
-        /attempted to delete narration/,
+        /operation must be exactly/,
       );
       assert.throws(
         () => parseProseGuardRepairPayload({
-          sentenceRepairs: [{ findingId: findings[0].id, replacementSentence: 'First sentence.\nSecond sentence.' }],
+          sentenceRepairs: [{ findingId: findings[0].id, operation: 'replace', replacementSentence: '' }],
+        }),
+        /replacementSentence was empty/,
+      );
+      assert.throws(
+        () => parseProseGuardRepairPayload({
+          sentenceRepairs: [{ findingId: findings[0].id, operation: 'replace', replacementSentence: 'First sentence.\nSecond sentence.' }],
         }),
         /crossed a line boundary/,
       );
       assert.throws(
         () => parseProseGuardRepairPayload({
-          sentenceRepairs: [{ findingId: findings[0].id, replacementSentence: 'BEGIN_FINAL_NARRATION Maria steps back.' }],
+          sentenceRepairs: [{ findingId: findings[0].id, operation: 'replace', replacementSentence: 'BEGIN_FINAL_NARRATION Maria steps back.' }],
         }),
         /structured-output artifact/,
       );
@@ -16779,6 +17343,7 @@ const tests = [
       const repaired = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{
           findingId: findings[0].id,
+          operation: 'replace',
           replacementSentence: 'The light is bright white.',
         }],
       }, { rules });
@@ -16801,13 +17366,13 @@ const tests = [
       const repairEnd = source.indexOf('function parsePostNarrationTrackerResponse(', repairStart);
       const repairSource = source.slice(repairStart, repairEnd);
       const cleanReturnIndex = repairSource.indexOf('if (!findings.length)');
-      const repairRequestIndex = repairSource.indexOf('await requestTargetedProseBanRepairWithTimeout(');
+      const repairRequestIndex = repairSource.indexOf('requestAndApplyProseGuardRepairs(');
       const completeRescanIndex = repairSource.indexOf('const remainingFindings = collectProseGuardSentenceFindings(currentText, rules);');
 
       assert.ok(repairStart > 0, 'Targeted Prose Guard repair function is missing.');
       assert.ok(cleanReturnIndex >= 0 && cleanReturnIndex < repairRequestIndex, 'Clean narration must return before any repair model request.');
       assert.ok(completeRescanIndex > repairRequestIndex, 'Every repair must be followed by a complete deterministic rescan.');
-      assert.equal((repairSource.match(/requestTargetedProseBanRepairWithTimeout\(/g) || []).length, 1);
+      assert.equal((repairSource.match(/requestAndApplyProseGuardRepairs\(/g) || []).length, 1);
       assert.match(repairSource, /const rules = getTargetedProseBanRules\(\)/);
       assert.match(repairSource, /PROSE_GUARD_REPAIR_BATCH_SIZE/);
       assert.match(repairSource, /Prose Guard could not produce clean narration after one repair retry/);
@@ -17296,12 +17861,16 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 248,
+        leaves: 251,
         objects: 47,
         arrays: 47,
-        descriptions: 107,
+        descriptions: 110,
         incompleteRequired: 0,
       });
+      assert.deepEqual(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items.properties.exceptionalBenefitScale.enum,
+        ['ordinary', 'significant', 'exceptional'],
+      );
       assert.match(
         strictSemanticTool.function.parameters.properties.resolutionEngine.properties.rollNeeded.description,
         /sole semantic roll gate/,
@@ -17657,6 +18226,9 @@ const tests = [
         ['slowBondEvidence.personalAttention', 'N'],
         ['slowBondEvidence.blockers', '(none)'],
         ['auditInteraction', 'N'],
+        ['exceptionalBenefit', 'N'],
+        ['exceptionalBenefitScale', 'ordinary'],
+        ['exceptionalBenefitEvidence', '(none)'],
         ['explicitIntimidationOrCoercion', 'N'],
         ['standingInfluence', 'none'],
         ['standingBasis', '(none)'],
