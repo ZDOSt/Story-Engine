@@ -2754,7 +2754,7 @@ function parseCoreStatsBlock(text) {
 
     const stats = {};
     for (const stat of ['PHY', 'MND', 'CHA']) {
-        const match = source.match(new RegExp(`\\b${stat}\\s*[:=\\-]?\\s*(10|[1-9])\\b`, 'i'));
+        const match = source.match(new RegExp(`\\b${stat}\\s*[:=\\-]?\\s*(1[0-5]|[1-9])\\b`, 'i'));
         if (!match) return null;
         stats[stat] = Number(match[1]);
     }

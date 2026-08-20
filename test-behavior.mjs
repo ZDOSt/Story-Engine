@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import yaml from 'yaml';
-import { consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
-import { ENGINE_PROMPT_TEXT, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, hasMagicStoneEntry, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
+import { buildSpellCastingSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { ENGINE_PROMPT_TEXT, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
@@ -20,6 +20,13 @@ import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 import { generateRawData as generateRawDataAdapter } from './st-adapter.js';
 import { buildSceneItemStateKey, normalizeSceneItemState, reconcilePostNarrationPossessionDelta } from './scene-item-state.js';
+import {
+  applyBreakthroughStatChange,
+  breakthroughSacrificeReason,
+  minimumMndForSpellCount,
+  spellCastCapacityForMnd,
+  spellCapacityForMnd,
+} from './progression-rules.js';
 import {
   BOUNDARY_BREAK_RESPONSES,
   BOUNDARY_BREAK_TYPES,
@@ -320,6 +327,35 @@ function baseLedger(overrides = {}) {
   };
 }
 
+function spellAttemptLedger({ mnd = 7, spellName = 'Mend Flesh', available = true, actionUnits = null, resolutionEngine = {}, ...overrides } = {}) {
+  const resolvedActionUnits = actionUnits || [{ id: 'A1', action: `cast ${spellName}`, evidence: `I cast ${spellName}` }];
+  return baseLedger({
+    engineContext: {
+      userCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 6, MND: mnd, CHA: 6 },
+    },
+    resolutionEngine: {
+      identifyGoal: `Cast${spellName.replace(/\W+/g, '')}`,
+      identifyChallenge: `cast ${spellName}`,
+      explicitMeans: `cast ${spellName}`,
+      userAbilityUse: {
+        used: available,
+        attempted: true,
+        available,
+        abilityName: spellName,
+        evidence: `I cast ${spellName}`,
+        narrativeEffect: 'A closing glow seals the wound.',
+        noEffectReason: available ? '(none)' : 'The spell is not available.',
+        mechanicalScope: 'flavor_only_no_bonus',
+      },
+      actionCount: resolvedActionUnits.map(unit => unit.action),
+      actionUnits: resolvedActionUnits,
+      rollNeeded: false,
+      ...resolutionEngine,
+    },
+    ...overrides,
+  });
+}
+
 function trackerEntry(overrides = {}) {
   return {
     currentDisposition: { B: 2, F: 2, H: 2 },
@@ -492,6 +528,7 @@ function context(latestUserText = '', tracker = {}, user = {}, persona = 'PHY: 6
         sceneItems: cardFields.sceneItems || {},
         descriptiveArchive: cardFields.descriptiveArchive || {},
         worldProgression: cardFields.worldProgression || {},
+        spellCasting: cardFields.spellCasting || {},
       },
     },
     getCharacterCardFields() {
@@ -521,6 +558,7 @@ function runCase(config) {
       config.tracker || {},
       context(config.userText || '', config.tracker || {}, config.userState || {}, config.persona, config.chat || null, config.rapportClock || {}, config.cardFields || {}, config.powerActors || {}, config.latentGrievances || [], config.latentFavors || []),
       'normal',
+      config.options || {},
     ),
   );
 }
@@ -18812,8 +18850,9 @@ const tests = [
       assert.deepEqual(races, [...races].sort((a, b) => a.localeCompare(b)));
       assert.doesNotMatch(raceBlock, /'Random'/);
       assert.match(source, /const PLAYER_GENRE_CHOICES = Object\.freeze/);
-      assert.match(source, /const PLAYER_CREATION_STAT_POINTS = 24/);
-      assert.match(source, /const PLAYER_CREATION_MAX_STAT = 9/);
+      assert.match(source, /const PLAYER_CREATION_STAT_POINTS = 18/);
+      assert.match(source, /const PLAYER_CREATION_MAX_STAT = 7/);
+      assert.match(source, /return \{ PHY: 6, MND: 6, CHA: 6 \}/);
       assert.match(source, /function buildNewCharacterPointBuyState/);
       assert.match(source, /function buildPersonaPointBuyState/);
       assert.match(source, /function buildPlayerStatsHtml/);
@@ -19114,9 +19153,10 @@ const tests = [
       assert.match(source, /Moderate_Success: 20/);
       assert.match(source, /Critical_Success: 30/);
       assert.match(source, /Success: 10/);
-      assert.match(source, /const PROGRESSION_MAX_STAT = 10/);
+      assert.match(source, /const PROGRESSION_MAX_STAT = PROGRESSION_NORMAL_STAT_CAP/);
+      assert.match(source, /const PROGRESSION_MAX_BREAKTHROUGH_STAT = PROGRESSION_BREAKTHROUGH_STAT_CAP/);
       assert.match(source, /const PROGRESSION_SPELL_OPTIONS = 3/);
-      assert.match(source, /const PROGRESSION_MAX_SPELLS = 5/);
+      assert.match(source, /const PROGRESSION_MAX_SPELLS = PROGRESSION_ABSOLUTE_SPELL_CAP/);
       assert.match(source, /characterProgressionEnabled: true/);
       assert.match(source, /id="structured_preflight_progression_enabled"/);
       assert.doesNotMatch(source, /progressionConnectionProfile/);
@@ -19164,17 +19204,23 @@ const tests = [
       assert.match(source, /<button class="menu_button" data-spe-progression-action="back">Back<\/button>/);
       assert.doesNotMatch(source, /Ability options are already generated\. Choose one of the presented abilities/);
       assert.match(source, /id="spe_progression_swap_ability" class="text_pole" \$\{options\.length \? 'disabled' : ''\}/);
-      assert.match(source, /canLearnSpell = Number\(stats\?\.MND \|\| 0\) >= 7 && spellCount < PROGRESSION_MAX_SPELLS/);
+      assert.match(source, /const spellCapacity = spellCapacityForMnd\(stats\?\.MND\)/);
+      assert.match(source, /const canLearnSpell = spellCount < spellCapacity/);
       assert.match(source, /data-spe-progression-action="choose-learn-spell"/);
       assert.match(source, /data-spe-progression-action="generate-spells"/);
       assert.match(source, /data-spe-progression-action="choose-spell"/);
       assert.match(source, /Learning spells requires MND 7 or higher/);
-      assert.match(source, /spells\.length >= PROGRESSION_MAX_SPELLS/);
+      assert.match(source, /spells\.length >= spellCapacity/);
       assert.match(source, /root\.pendingAdvancement\.choice = 'choose'/);
       assert.doesNotMatch(source, /delete root\.pendingAdvancement\.abilityOptions/);
       assert.doesNotMatch(source, /delete root\.pendingAdvancement\.spellOptions/);
       assert.match(source, /stats cannot go above|Stats cannot go above/);
-      assert.match(source, /value >= PROGRESSION_MAX_STAT \? 'disabled'/);
+      assert.match(source, /stat === breakthroughStat \|\| value >= PROGRESSION_MAX_STAT \? 'disabled'/);
+      assert.match(source, /data-spe-progression-action="choose-breakthrough"/);
+      assert.match(source, /data-spe-progression-action="apply-breakthrough"/);
+      assert.match(source, /function applyProgressionBreakthroughChoice/);
+      assert.match(source, /root\.breakthroughStat = existingBreakthroughStat \|\| statName/);
+      assert.match(source, /updatePersonaStatsText\(persona, nextStats\)/);
       assert.match(source, /extractPersonaAbilities/);
       assert.match(source, /extractPersonaSpells/);
       assert.match(source, /function isEmptyAbilityPlaceholder/);
@@ -19195,6 +19241,462 @@ const tests = [
       assert.match(source, /\[-\+\]\?\\d\+\\s\*\(\?:to\|bonus\|modifier/);
       assert.match(source, /feet\|foot\|ft\|yards\?\|meters\?/);
       assert.match(source, /uses\?\\s\+per\|times\?\\s\+per\|per\\s\+\(\?:day\|scene\|turn\|round\|rest\)/);
+    },
+  },
+  {
+    name: '50a progression breakthrough and spell-capacity rules are deterministic',
+    run() {
+      assert.deepEqual(
+        Array.from({ length: 15 }, (_, index) => spellCapacityForMnd(index + 1)),
+        [0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 5, 6, 6, 7],
+      );
+      assert.deepEqual(
+        Array.from({ length: 8 }, (_, spellCount) => minimumMndForSpellCount(spellCount)),
+        [1, 7, 8, 9, 10, 11, 13, 15],
+      );
+      assert.deepEqual(
+        applyBreakthroughStatChange(
+          { PHY: 10, MND: 10, CHA: 10 },
+          'PHY',
+          'MND',
+          { spellCount: 1 },
+        ),
+        { PHY: 11, MND: 7, CHA: 10 },
+      );
+      assert.deepEqual(
+        applyBreakthroughStatChange(
+          { PHY: 11, MND: 10, CHA: 10 },
+          'PHY',
+          'CHA',
+          { existingBreakthroughStat: 'PHY', spellCount: 4 },
+        ),
+        { PHY: 12, MND: 10, CHA: 7 },
+      );
+      assert.match(
+        breakthroughSacrificeReason({ PHY: 10, MND: 10, CHA: 10 }, 'PHY', 'MND', 4),
+        /MND cannot fall below 10/,
+      );
+      assert.throws(
+        () => applyBreakthroughStatChange(
+          { PHY: 11, MND: 9, CHA: 10 },
+          'PHY',
+          'CHA',
+          { existingBreakthroughStat: 'PHY', spellCount: 3 },
+        ),
+        /All stats must be at least 10/,
+      );
+      assert.throws(
+        () => applyBreakthroughStatChange(
+          { PHY: 11, MND: 10, CHA: 10 },
+          'MND',
+          'CHA',
+          { existingBreakthroughStat: 'PHY', spellCount: 4 },
+        ),
+        /Only the permanent PHY breakthrough/,
+      );
+      assert.throws(
+        () => applyBreakthroughStatChange(
+          { PHY: 15, MND: 10, CHA: 10 },
+          'PHY',
+          'CHA',
+          { existingBreakthroughStat: 'PHY', spellCount: 4 },
+        ),
+        /absolute breakthrough cap of 15/,
+      );
+      assert.throws(
+        () => applyBreakthroughStatChange(
+          { PHY: 11, MND: 11, CHA: 10 },
+          'PHY',
+          'CHA',
+          { existingBreakthroughStat: 'PHY', spellCount: 5 },
+        ),
+        /Only PHY may exceed 10/,
+      );
+      const userCore = getUserCoreStats({
+        engineContext: { userCoreStats: { Rank: 'none', MainStat: 'MND', PHY: 10, MND: 15, CHA: 10 } },
+      });
+      assert.equal(userCore.MND, 15);
+      assert.equal(playerStatValue(userCore, 'MND'), 15);
+      assert.equal(normalizeCore({ PHY: 15, MND: 15, CHA: 15 }, { PHY: 1, MND: 1, CHA: 1 }).MND, 14);
+
+      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      assert.ok(semanticSource.includes('(1[0-5]|[1-9])\\\\b'));
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.match(indexSource, /if \(elevatedStats\.length === 1\) root\.breakthroughStat = elevatedStats\[0\]/);
+    },
+  },
+  {
+    name: '50b hidden spell casting resource boundaries and initialization are deterministic',
+    run() {
+      assert.deepEqual(
+        Array.from({ length: 15 }, (_, index) => spellCastCapacityForMnd(index + 1)),
+        [0, 0, 0, 0, 0, 0, 2, 2, 3, 4, 5, 6, 7, 7, 7],
+      );
+      assert.deepEqual(normalizeSpellCastingState({}, 6), { version: 1, capacity: 0, remaining: 0, spent: 0 });
+      assert.deepEqual(normalizeSpellCastingState({}, 7), { version: 1, capacity: 2, remaining: 2, spent: 0 });
+      assert.deepEqual(normalizeSpellCastingState({}, 15), { version: 1, capacity: 7, remaining: 7, spent: 0 });
+
+      const testContext = context('', {}, {}, 'PHY: 6\nMND: 7\nCHA: 6', null, {}, {
+        spellCasting: { version: 1, capacity: 2, remaining: 1, spent: 1 },
+      });
+      assert.deepEqual(buildSpellCastingSnapshot(testContext, { MND: 9 }), {
+        version: 1,
+        capacity: 3,
+        remaining: 2,
+        spent: 1,
+      });
+    },
+  },
+  {
+    name: '50c known successful and failed spell attempts consume one shared cast',
+    run() {
+      const success = runCase({
+        userText: 'I cast Mend Flesh.',
+        ledger: spellAttemptLedger({ mnd: 7 }),
+        options: {
+          knownSpellNames: ['Mend Flesh'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 2, spent: 0 },
+        },
+      });
+      assert.equal(success.trackerUpdate.spellCasting.remaining, 1);
+      assert.equal(success.trackerUpdate.spellCasting.spent, 1);
+      assert.equal(success.finalNarrativeHandoff.spellCasting.castConsumed, 'Y');
+
+      const failure = runCase({
+        userText: 'I cast Arcane Bolt.',
+        dice: [1, 20, 1, 1, 1, 1],
+        ledger: spellAttemptLedger({
+          mnd: 7,
+          spellName: 'Arcane Bolt',
+          resolutionEngine: {
+            rollNeeded: true,
+            challengeType: 'environment',
+            challengeTypeEvidence: 'the ward resists the spell',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: ['arcane ward'] }, BenefitedObservers: [], HarmedObservers: [] },
+          },
+        }),
+        options: {
+          knownSpellNames: ['Arcane Bolt'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 2, spent: 0 },
+        },
+      });
+      assert.equal(failure.finalNarrativeHandoff.resolutionPacket.Outcome, 'failure');
+      assert.equal(failure.trackerUpdate.spellCasting.remaining, 1);
+      assert.equal(failure.trackerUpdate.spellCasting.spent, 1);
+    },
+  },
+  {
+    name: '50d unknown or semantically unavailable spells do not consume the shared pool',
+    run() {
+      const unknown = runCase({
+        userText: 'I cast Unknown Spell.',
+        ledger: spellAttemptLedger({ spellName: 'Unknown Spell' }),
+        options: {
+          knownSpellNames: ['Mend Flesh'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 2, spent: 0 },
+        },
+      });
+      assert.deepEqual(unknown.trackerUpdate.spellCasting, { version: 1, capacity: 2, remaining: 2, spent: 0 });
+
+      const unavailable = runCase({
+        userText: 'I cast Mend Flesh.',
+        ledger: spellAttemptLedger({ available: false }),
+        options: {
+          knownSpellNames: ['Mend Flesh'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 2, spent: 0 },
+        },
+      });
+      assert.deepEqual(unavailable.trackerUpdate.spellCasting, { version: 1, capacity: 2, remaining: 2, spent: 0 });
+      assert.equal(unavailable.finalNarrativeHandoff.spellCasting.castConsumed, 'N');
+      assert.match(prompt(unavailable), /no cast is consumed/);
+      assert.doesNotMatch(prompt(unavailable), /One shared cast has been consumed/);
+    },
+  },
+  {
+    name: '50e exhausted pure spells produce only a narrated attempt and no mechanical effects',
+    run() {
+      const report = runCase({
+        userText: 'I cast Mend Flesh.',
+        ledger: spellAttemptLedger({
+          resolutionEngine: {
+            rollNeeded: true,
+            challengeType: 'supernatural_combat',
+            identifyTargets: { ActionTargets: ['Goblin'], OppTargets: { NPC: ['Goblin'], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            activeHostileThreat: true,
+          },
+          injuryEffectEngine: {
+            effects: [{ target: 'Goblin', targetRole: 'OppTarget', actionUnitId: 'A1', effectType: 'physical_injury', bodyPart: 'arm', description: 'injury', severityFloor: 'minor' }],
+          },
+          powerActorEnmity: {
+            effects: [{ target: 'Guild', actionUnitId: 'A1', effect: 'harm_assets', severity: 'meaningful', reason: 'spell hit', evidence: 'spell hit' }],
+          },
+        }),
+        options: {
+          knownSpellNames: ['Mend Flesh'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 },
+        },
+      });
+      const packet = report.finalNarrativeHandoff.resolutionPacket;
+      assert.equal(report.trackerUpdate.spellCasting.remaining, 0);
+      assert.equal(report.finalNarrativeHandoff.spellCasting.exhausted, 'Y');
+      assert.equal(packet.RollNeeded, 'N');
+      assert.equal(packet.Outcome, 'no_roll');
+      assert.equal(packet.CounterPotential, 'none');
+      assert.deepEqual(packet.InflictedInjuries, []);
+      assert.deepEqual(report.finalNarrativeHandoff.aggressionResults, {});
+      assert.deepEqual(report.trackerUpdate.powerActors, {});
+      assert.match(prompt(report), /No cast remains/);
+      assert.match(prompt(report), /no spell effect/);
+    },
+  },
+  {
+    name: '50f exhausted mixed turns preserve non-spell actions and remap action-scoped effects',
+    run() {
+      const report = runCase({
+        userText: 'I cast Mend Flesh, then punch the goblin.',
+        ledger: spellAttemptLedger({
+          actionUnits: [
+            { id: 'A1', action: 'cast Mend Flesh', evidence: 'I cast Mend Flesh' },
+            { id: 'A2', action: 'punch the goblin', evidence: 'I punch the goblin' },
+          ],
+          resolutionEngine: {
+            rollNeeded: true,
+            challengeType: 'mundane_combat',
+            identifyTargets: { ActionTargets: ['Goblin'], OppTargets: { NPC: ['Goblin'], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+          },
+          injuryEffectEngine: {
+            effects: [
+              { target: 'Goblin', targetRole: 'OppTarget', actionUnitId: 'A1', effectType: 'physical_injury', bodyPart: 'arm', description: 'spell injury', severityFloor: 'minor' },
+              { target: 'Goblin', targetRole: 'OppTarget', actionUnitId: 'A2', effectType: 'physical_injury', bodyPart: 'jaw', description: 'punch injury', severityFloor: 'minor' },
+            ],
+          },
+          powerActorEnmity: {
+            effects: [
+              { target: 'Guild', actionUnitId: 'A1', effect: 'harm_assets', severity: 'meaningful', reason: 'spell hit', evidence: 'spell hit' },
+              { target: 'Guild', actionUnitId: 'A2', effect: 'harm_assets', severity: 'meaningful', reason: 'punch hit', evidence: 'punch hit' },
+            ],
+          },
+        }),
+        options: {
+          knownSpellNames: ['Mend Flesh'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 },
+        },
+      });
+      const units = report.semanticLedger.resolutionEngine.actionUnits;
+      assert.equal(units.length, 1);
+      assert.equal(units[0].id, 'A1');
+      assert.match(units[0].action, /punch the goblin/i);
+      assert.deepEqual(report.semanticLedger.injuryEffectEngine.effects.map(effect => effect.actionUnitId), ['A1']);
+      assert.deepEqual(report.semanticLedger.powerActorEnmity.effects.map(effect => effect.actionUnitId), ['A1']);
+      assert.equal(report.finalNarrativeHandoff.spellCasting.spellOnly, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'Y');
+
+      const defensiveAction = runCase({
+        userText: 'I cast Mend Flesh, then dodge the enemy spell.',
+        ledger: spellAttemptLedger({
+          actionUnits: [
+            { id: 'A1', action: 'cast Mend Flesh', evidence: 'I cast Mend Flesh' },
+            { id: 'A2', action: 'dodge the enemy spell', evidence: 'I dodge the enemy spell' },
+          ],
+          resolutionEngine: {
+            rollNeeded: true,
+            challengeType: 'environment',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: ['incoming enemy spell'] }, BenefitedObservers: [], HarmedObservers: [] },
+          },
+        }),
+        options: {
+          knownSpellNames: ['Mend Flesh'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 },
+        },
+      });
+      assert.equal(defensiveAction.semanticLedger.resolutionEngine.actionUnits.length, 1);
+      assert.match(defensiveAction.semanticLedger.resolutionEngine.actionUnits[0].action, /dodge the enemy spell/i);
+
+      const harmlessMixedLedger = spellAttemptLedger({
+        spellName: 'Arcane Bolt',
+        actionUnits: [
+          { id: 'A1', action: 'cast Arcane Bolt at the goblin', evidence: 'I cast Arcane Bolt at the goblin' },
+          { id: 'A2', action: 'wave to Phoebe', evidence: 'wave to Phoebe' },
+        ],
+        resolutionEngine: {
+          rollNeeded: true,
+          rollReason: 'Arcane Bolt must overcome the goblin defense',
+          challengeType: 'supernatural_combat',
+          challengeTypeEvidence: 'I cast Arcane Bolt at the goblin',
+          harmMode: 'lethal',
+          activeHostileThreat: true,
+          identifyTargets: {
+            ActionTargets: ['Goblin', 'Phoebe'],
+            OppTargets: { NPC: ['Goblin'], ENV: [] },
+            BenefitedObservers: [],
+            HarmedObservers: [],
+          },
+        },
+        relationshipEngine: [
+          relationship('Goblin', { failure: 'harm', no_roll: 'harm' }),
+          relationship('Phoebe', { failure: 'none', no_roll: 'none' }),
+        ],
+      });
+      const harmlessMixed = runCase({
+        userText: 'I cast Arcane Bolt at the goblin, then wave to Phoebe.',
+        ledger: harmlessMixedLedger,
+        tracker: { Goblin: trackerEntry(), Phoebe: trackerEntry() },
+        options: {
+          knownSpellNames: ['Arcane Bolt'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 },
+        },
+      });
+      assert.equal(harmlessMixed.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
+      assert.equal(harmlessMixed.finalNarrativeHandoff.resolutionPacket.challengeType, 'none');
+      assert.deepEqual(harmlessMixed.finalNarrativeHandoff.resolutionPacket.OppTargets.NPC, ['(none)']);
+      assert.deepEqual(harmlessMixed.finalNarrativeHandoff.aggressionResults, {});
+      assert.deepEqual(harmlessMixed.semanticLedger.relationshipEngine.map(entry => entry.NPC), ['Phoebe']);
+
+      const worldStateBefore = normalizeWorldState({
+        reputationLocation: 'Eldermere',
+        place: 'South Road',
+        area: 'wagon wreck',
+        indoors: false,
+        positionEstablished: true,
+      });
+      const blockedSpellTransitionLedger = spellAttemptLedger({
+        spellName: 'Gate Step',
+        actionUnits: [
+          { id: 'A1', action: 'cast Gate Step to reach the tower roof', evidence: 'I cast Gate Step to reach the tower roof' },
+          { id: 'A2', action: 'wave to Phoebe', evidence: 'wave to Phoebe' },
+        ],
+      });
+      blockedSpellTransitionLedger.worldTransition = {
+        reputationLocation: 'unchanged',
+        place: 'tower roof',
+        area: 'unchanged',
+        indoors: 'outdoors',
+        timeAdvance: 'none',
+        timeAdvanceCount: 1,
+        timeOfDay: 'unchanged',
+        requiresSuccess: true,
+        evidence: 'I cast Gate Step to reach the tower roof',
+      };
+      const blockedSpellTransition = runCase({
+        userText: 'I cast Gate Step to reach the tower roof, then wave to Phoebe.',
+        ledger: blockedSpellTransitionLedger,
+        options: {
+          knownSpellNames: ['Gate Step'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 },
+          worldStateSnapshot: worldStateBefore,
+        },
+      });
+      assert.deepEqual(blockedSpellTransition.semanticLedger.worldTransition, {});
+      assert.deepEqual(blockedSpellTransition.trackerUpdate.worldState, worldStateBefore);
+
+      const survivingActionTransitionLedger = spellAttemptLedger({
+        spellName: 'Gate Step',
+        actionUnits: [
+          { id: 'A1', action: 'cast Gate Step', evidence: 'I cast Gate Step' },
+          { id: 'A2', action: 'climb through the inn window', evidence: 'climb through the inn window' },
+        ],
+      });
+      survivingActionTransitionLedger.worldTransition = {
+        reputationLocation: 'unchanged',
+        place: 'Roadside Inn',
+        area: 'common room',
+        indoors: 'indoors',
+        timeAdvance: 'none',
+        timeAdvanceCount: 1,
+        timeOfDay: 'unchanged',
+        requiresSuccess: true,
+        evidence: 'climb through the inn window',
+      };
+      const survivingActionTransition = runCase({
+        userText: 'I cast Gate Step, then climb through the inn window.',
+        ledger: survivingActionTransitionLedger,
+        options: {
+          knownSpellNames: ['Gate Step'],
+          spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 },
+          worldStateSnapshot: worldStateBefore,
+        },
+      });
+      assert.equal(survivingActionTransition.semanticLedger.worldTransition.place, 'Roadside Inn');
+      assert.equal(survivingActionTransition.trackerUpdate.worldState.place, 'Roadside Inn');
+      assert.equal(survivingActionTransition.trackerUpdate.worldState.indoors, true);
+    },
+  },
+  {
+    name: '50g spell recovery requires explicit completed safe sleep and preserves spent casts across stat changes',
+    run() {
+      const genericRest = runCase({
+        userText: 'I rest for a while.',
+        ledger: baseLedger({ engineContext: { userCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 6, MND: 7, CHA: 6 } } }),
+        options: { spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 } },
+      });
+      assert.deepEqual(genericRest.trackerUpdate.spellCasting, { version: 1, capacity: 2, remaining: 0, spent: 2 });
+
+      const unsafeSleep = runCase({
+        userText: 'I sleep until morning in the dungeon corridor.',
+        ledger: baseLedger({
+          engineContext: { userCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 6, MND: 7, CHA: 6 } },
+          resolutionEngine: { identifyGoal: 'sleep until morning in the dungeon corridor', identifyChallenge: 'sleep in danger', explicitMeans: 'sleep until morning in the dungeon corridor' },
+        }),
+        options: { spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 } },
+      });
+      assert.deepEqual(unsafeSleep.trackerUpdate.spellCasting, { version: 1, capacity: 2, remaining: 0, spent: 2 });
+
+      const safeSleepLedger = baseLedger({
+        engineContext: { userCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 6, MND: 7, CHA: 6 } },
+        resolutionEngine: { identifyGoal: 'safe overnight recovery at the inn', identifyChallenge: 'safe sleep until morning', explicitMeans: 'sleep safely at the inn until morning' },
+      });
+      safeSleepLedger.worldTransition = { timeAdvance: 'overnight', timeAdvanceCount: 1, requiresSuccess: false, evidence: 'I sleep safely at the inn until morning.' };
+      const safeSleep = runCase({
+        userText: 'I sleep safely at the inn until morning.',
+        ledger: safeSleepLedger,
+        options: { spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 } },
+      });
+      assert.deepEqual(safeSleep.trackerUpdate.spellCasting, { version: 1, capacity: 2, remaining: 2, spent: 0 });
+
+      const intendedSleepLedger = baseLedger({
+        engineContext: { userCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 6, MND: 7, CHA: 6 } },
+        resolutionEngine: { identifyGoal: 'plan to sleep safely at the inn until morning', identifyChallenge: 'future safe sleep', explicitMeans: 'sleep safely at the inn until morning' },
+      });
+      intendedSleepLedger.worldTransition = { timeAdvance: 'none', timeAdvanceCount: 1, requiresSuccess: false, evidence: '(none)' };
+      const intendedSleep = runCase({
+        userText: 'I will sleep safely at the inn until morning.',
+        ledger: intendedSleepLedger,
+        options: { spellCastingSnapshot: { version: 1, capacity: 2, remaining: 0, spent: 2 } },
+      });
+      assert.deepEqual(intendedSleep.trackerUpdate.spellCasting, { version: 1, capacity: 2, remaining: 0, spent: 2 });
+
+      assert.deepEqual(normalizeSpellCastingState({ version: 1, capacity: 2, remaining: 1, spent: 1 }, 9), {
+        version: 1, capacity: 3, remaining: 2, spent: 1,
+      });
+      assert.deepEqual(normalizeSpellCastingState({ version: 1, capacity: 3, remaining: 2, spent: 1 }, 6), {
+        version: 1, capacity: 0, remaining: 0, spent: 1,
+      });
+      assert.deepEqual(normalizeSpellCastingState({ version: 1, capacity: 0, remaining: 0, spent: 1 }, 9), {
+        version: 1, capacity: 3, remaining: 2, spent: 1,
+      });
+    },
+  },
+  {
+    name: '50h spell casting persists but remains absent from visible tracker rendering',
+    async run() {
+      const testContext = context('', {}, {}, 'PHY: 6\nMND: 7\nCHA: 6', null, {}, {
+        spellCasting: { version: 1, capacity: 2, remaining: 2, spent: 0 },
+      });
+      await saveTrackerUpdate(testContext, {
+        spellCasting: { version: 1, capacity: 2, remaining: 1, spent: 1 },
+      }, { save: false });
+      assert.deepEqual(testContext.chatMetadata.structuredPreflightTracker.spellCasting, {
+        version: 1, capacity: 2, remaining: 1, spent: 1,
+      });
+
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const displayStart = indexSource.indexOf('function buildTrackerDisplayHtml(snapshot)');
+      const displayEnd = indexSource.indexOf('function ', displayStart + 10);
+      const displaySource = indexSource.slice(displayStart, displayEnd > displayStart ? displayEnd : displayStart + 30000);
+      assert.doesNotMatch(displaySource, /spellCasting/);
+      assert.match(indexSource, /beforeSpellCasting/);
+      assert.match(indexSource, /afterSpellCasting/);
+      assert.match(indexSource, /root\.spellCasting = normalizeSpellCastingState/);
     },
   },
   {

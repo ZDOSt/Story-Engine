@@ -2733,7 +2733,14 @@ export function normalizeCore(value, fallback) {
 }
 
 export function getUserCoreStats(ledger) {
-    return normalizeCore(ledger?.engineContext?.userCoreStats, { Rank: 'none', MainStat: 'none', PHY: 1, MND: 1, CHA: 1 });
+    const value = ledger?.engineContext?.userCoreStats || {};
+    return {
+        Rank: normalizeRank(value.Rank),
+        MainStat: normalizeMainStat(value.MainStat),
+        PHY: clamp(Number(value.PHY ?? 1), 1, 15),
+        MND: clamp(Number(value.MND ?? 1), 1, 15),
+        CHA: clamp(Number(value.CHA ?? 1), 1, 15),
+    };
 }
 
 export function normalizeRank(value) {
@@ -2746,6 +2753,11 @@ export function normalizeMainStat(value) {
 
 export function statValue(core, stat) {
     return normalizeCore(core, { PHY: 1, MND: 1, CHA: 1 })[stat] || 1;
+}
+
+export function playerStatValue(core, stat) {
+    const value = Number(core?.[stat]);
+    return Number.isFinite(value) ? clamp(value, 1, 15) : 1;
 }
 
 export function normalizeChallengeType(value, rollNeeded = 'Y') {

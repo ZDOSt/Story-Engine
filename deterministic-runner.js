@@ -56,6 +56,7 @@ import {
     normalizeCore,
     getUserCoreStats,
     statValue,
+    playerStatValue,
     normalizeChallengeType,
     normalizeSocialTactic,
     deterministicStatsForChallenge,
@@ -100,8 +101,11 @@ import { buildDeterministicLootEnvelope, getNpcLootRankProfile, normalizeEconomy
 import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
 import { ROMANCE_STYLES } from './semantic-contract.js';
 import { findSceneItemMatch, normalizeSceneItemState } from './scene-item-state.js';
+import { spellCastCapacityForMnd } from './progression-rules.js';
 
 const NONE = '(none)';
+const SPELL_CAST_STATE_VERSION = 1;
+const SPELL_CAST_CAPACITY_MAX = 7;
 const NAME_REGISTRY_KEY = 'structuredPreflightNameRegistry';
 const USER_PROACTIVITY_TARGET = '{{user}}';
 const USER_KNOWLEDGE_LEDGER_VERSION = 1;
@@ -702,6 +706,378 @@ export function buildPendingBoundarySnapshot(context) {
     return normalizePendingBoundaryState(context?.chatMetadata?.structuredPreflightTracker?.pendingBoundary || {});
 }
 
+function spellCastCapacityFromState(value) {
+    const capacity = Number(value?.capacity);
+    return Number.isFinite(capacity)
+        ? clamp(Math.floor(capacity), 0, SPELL_CAST_CAPACITY_MAX)
+        : 0;
+}
+
+export function normalizeSpellCastingState(value = {}, mnd = null) {
+    const source = value && typeof value === 'object' ? value : {};
+    const suppliedMnd = Number(mnd);
+    const hasSuppliedMnd = mnd !== null
+        && mnd !== undefined
+        && String(mnd).trim() !== ''
+        && Number.isFinite(suppliedMnd);
+    const persistedCapacity = spellCastCapacityFromState(source);
+    const capacity = hasSuppliedMnd
+        ? spellCastCapacityForMnd(suppliedMnd)
+        : persistedCapacity;
+    const hasPersistedState = source.version === SPELL_CAST_STATE_VERSION
+        || Object.hasOwn(source, 'remaining')
+        || Object.hasOwn(source, 'capacity')
+        || Object.hasOwn(source, 'spent');
+    const persistedRemaining = clamp(
+        Math.floor(Number(source.remaining ?? persistedCapacity)),
+        0,
+        persistedCapacity,
+    );
+    const rawSpent = Number(source.spent);
+    const spent = hasPersistedState
+        ? clamp(
+            Math.floor(Number.isFinite(rawSpent) ? rawSpent : persistedCapacity - persistedRemaining),
+            0,
+            SPELL_CAST_CAPACITY_MAX,
+        )
+        : 0;
+    const remaining = hasPersistedState ? Math.max(0, capacity - spent) : capacity;
+    return {
+        version: SPELL_CAST_STATE_VERSION,
+        capacity,
+        remaining,
+        spent,
+    };
+}
+
+export function buildSpellCastingSnapshot(context, userCoreStats = null) {
+    const mnd = Number(userCoreStats?.MND);
+    return normalizeSpellCastingState(
+        context?.chatMetadata?.structuredPreflightTracker?.spellCasting || {},
+        Number.isFinite(mnd) ? mnd : null,
+    );
+}
+
+function normalizeSpellNameKey(value) {
+    return String(value ?? '')
+        .replace(/[`*_~]/g, '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function isSpellLikeActionText(value, spellName = '') {
+    const text = String(value ?? '').toLowerCase();
+    const normalizedSpell = normalizeSpellNameKey(spellName);
+    return (normalizedSpell && normalizeSpellNameKey(text).includes(normalizedSpell))
+        || /\b(?:cast|casts|casting|conjure|conjures|conjuring|invoke|invokes|invoking|channel|channels|channeling)\b/i.test(text)
+        || /\b(?:unleash|unleashes|unleashing|release|releases|releasing|activate|activates|activating)\b.{0,48}\b(?:spell|magic|incantation)\b/i.test(text);
+}
+
+function classifySpellCastAttempt(ledger, knownSpellNames = [], spellCastingBefore = {}, context = null) {
+    const ability = ledger?.resolutionEngine?.userAbilityUse || {};
+    const attempted = bool(ability.attempted ?? ability.Attempted ?? ability.used ?? ability.Used);
+    const abilityName = String(ability.abilityName ?? ability.AbilityName ?? '').trim();
+    const wanted = normalizeSpellNameKey(abilityName);
+    const hasAvailabilityField = Object.hasOwn(ability, 'available') || Object.hasOwn(ability, 'Available');
+    const semanticallyAvailable = !hasAvailabilityField || bool(ability.available ?? ability.Available);
+    const knownName = (Array.isArray(knownSpellNames) ? knownSpellNames : [])
+        .map(name => String(name ?? '').trim())
+        .find(name => normalizeSpellNameKey(name) === wanted);
+    if (!attempted || !knownName || !semanticallyAvailable) {
+        return {
+            attemptedKnown: Boolean(attempted && knownName),
+            known: Boolean(knownName),
+            spellName: knownName || abilityName || NONE,
+            canCast: false,
+            castConsumed: false,
+            blocked: false,
+            mixedTurn: false,
+            remainingActionUnits: [],
+        };
+    }
+
+    const rawUnits = Array.isArray(ledger?.resolutionEngine?.actionUnits)
+        ? ledger.resolutionEngine.actionUnits
+        : [];
+    const units = rawUnits.length ? rawUnits : [{ action: ability.evidence || ability.narrativeEffect || abilityName }];
+    const remainingActionUnits = units.filter(unit => !isSpellLikeActionText(
+        `${unit?.action ?? unit?.Action ?? ''} ${unit?.evidence ?? unit?.Evidence ?? ''}`,
+        knownName,
+    ));
+    const spellActionUnits = units.filter(unit => !remainingActionUnits.includes(unit));
+    const mixedTurn = remainingActionUnits.length > 0;
+    const remaining = Math.max(0, Math.floor(Number(spellCastingBefore?.remaining) || 0));
+    return {
+        attemptedKnown: true,
+        known: true,
+        spellName: knownName,
+        canCast: remaining > 0,
+        castConsumed: remaining > 0,
+        blocked: remaining <= 0,
+        mixedTurn,
+        spellOnly: !mixedTurn,
+        spellActionUnitIds: spellActionUnits.map((unit, index) => String(unit?.id ?? unit?.Id ?? `A${index + 1}`)),
+        remainingActionUnits,
+        hasNonSpellHealingAction: remainingActionUnits.some(unit =>
+            /\b(?:heal|healing|cure|mend|restore|regenerat|treat|bandage|first[-\s]?aid|medicine|salve|ointment|poultice|stitch|splint|stabiliz)\w*\b/i.test(
+                `${unit?.action ?? unit?.Action ?? ''} ${unit?.evidence ?? unit?.Evidence ?? ''}`,
+            )),
+        context,
+    };
+}
+
+function applySpellCastConsumption(spellCastingBefore, decision, recovery = false) {
+    const before = normalizeSpellCastingState(spellCastingBefore);
+    let spent = recovery ? 0 : before.spent;
+    if (decision?.castConsumed) spent = Math.min(SPELL_CAST_CAPACITY_MAX, spent + 1);
+    return { ...before, remaining: Math.max(0, before.capacity - spent), spent };
+}
+
+function isExplicitSafeSleepCompleteTurn(ledger, resolutionPacket, context) {
+    const semantic = ledger?.resolutionEngine || {};
+    const transition = normalizeWorldTransition(ledger?.worldTransition || {});
+    if (resolutionPacket?.activeHostileThreat === 'Y' || bool(semantic.activeHostileThreat)) return false;
+    if (toRealArray(resolutionPacket?.hostilesInScene?.NPC || semantic.identifyTargets?.hostilesInScene?.NPC).length) return false;
+    if (toRealArray(resolutionPacket?.OppTargets?.NPC || semantic.identifyTargets?.OppTargets?.NPC).length) return false;
+    if (toRealArray(resolutionPacket?.OppTargets?.ENV || semantic.identifyTargets?.OppTargets?.ENV).length) return false;
+    if (transition.timeAdvance === 'none' || transition.requiresSuccess) return false;
+    const source = [
+        getLatestUserTextFromContext(context),
+        semantic.identifyGoal,
+        semantic.identifyChallenge,
+        semantic.explicitMeans,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const completedSleep = /\b(?:slept|sleep(?:s|ing|t)?\s+(?:through\s+the\s+night|until\s+(?:morning|dawn)|overnight|for\s+the\s+night)|overnight\s+sleep|after\s+(?:sleep|sleeping)|wake(?:s|ning)?\s+(?:up\s+)?(?:the\s+)?next\s+morning)\b/.test(source);
+    const safeSleep = /\b(?:safe|safely|secure|secured|sheltered|protected|undisturbed|uninterrupted|inn|lodging|home|sanctuary|temple|hospital|clinic|safe\s+camp|secure\s+camp)\b/.test(source);
+    if (!completedSleep || !safeSleep) return false;
+    const unsafeContext = /\b(?:dungeon|battlefield|combat|fight|ambush|pursuit|chase|hostile|enemy|enemies|danger|dangerous|unsafe|threat|threatening|under\s+attack|siege|trap|trapped|monster|monsters|guarded|patrolled|wilderness\s+danger)\b/.test(source)
+        && !/\b(?:safe|safely|secure|secured|protected|sheltered|inn|lodging|town|village|home|sanctuary|healer|clinic|temple|hospital|camp\s+is\s+secure|no\s+danger)\b/.test(source);
+    return !unsafeContext;
+}
+
+function emptyResolutionTargets() {
+    return {
+        hostilesInScene: { NPC: [] },
+        ActionTargets: [],
+        StealthTargets: [],
+        OppTargets: { NPC: [], ENV: [] },
+        BenefitedObservers: [],
+        HarmedObservers: [],
+        NPCAwareOfUser: [],
+        PowerActors: [],
+    };
+}
+
+function worldTransitionDependsOnBlockedSpell(transition, decision, spellActionUnits = []) {
+    const normalized = normalizeWorldTransition(transition || {});
+    if (!normalized.requiresSuccess || !isReal(normalized.evidence)) return false;
+
+    const evidence = normalizeSpellNameKey(normalized.evidence);
+    if (!evidence) return false;
+    if (isSpellLikeActionText(normalized.evidence, decision?.spellName)) return true;
+
+    return spellActionUnits.some(unit => {
+        const actionText = normalizeSpellNameKey(
+            `${unit?.action ?? unit?.Action ?? ''} ${unit?.evidence ?? unit?.Evidence ?? ''}`,
+        );
+        return actionText && (actionText.includes(evidence) || evidence.includes(actionText));
+    });
+}
+
+function actionUnitIsSupportedByText(unit, value) {
+    const source = normalizeSpellNameKey(value);
+    if (!source) return false;
+    return [unit?.action ?? unit?.Action, unit?.evidence ?? unit?.Evidence]
+        .map(normalizeSpellNameKey)
+        .filter(text => text.length >= 3)
+        .some(text => source.includes(text) || text.includes(source));
+}
+
+function blockedSpellChallengeDecision(resolution, decision, spellActionUnits, remainingUnits, filteredInjuryEffects, retainedPowerEffects) {
+    const challengeSource = [
+        resolution?.identifyGoal,
+        resolution?.identifyChallenge,
+        resolution?.explicitMeans,
+        resolution?.challengeTypeEvidence,
+        resolution?.rollReason,
+    ].filter(Boolean).join(' ');
+    const spellOwned = isSpellLikeActionText(challengeSource, decision?.spellName)
+        || spellActionUnits.some(unit => actionUnitIsSupportedByText(unit, challengeSource));
+    const survivingChallenge = remainingUnits.some(unit => actionUnitIsSupportedByText(unit, challengeSource))
+        || filteredInjuryEffects.length > 0
+        || retainedPowerEffects.length > 0;
+    return {
+        blocked: spellOwned && !survivingChallenge,
+        rerouteMundaneCombat: String(resolution?.challengeType || '').toLowerCase() === 'supernatural_combat'
+            && filteredInjuryEffects.length > 0,
+    };
+}
+
+function filterSpellOnlyRelationshipTargets(resolution, relationshipEngine, remainingUnits) {
+    const remainingText = remainingUnits
+        .map(unit => `${unit?.action ?? unit?.Action ?? ''} ${unit?.evidence ?? unit?.Evidence ?? ''}`)
+        .join(' ');
+    const names = unique([
+        ...toRealArray(resolution?.identifyTargets?.ActionTargets),
+        ...toRealArray(resolution?.identifyTargets?.StealthTargets),
+        ...toRealArray(resolution?.identifyTargets?.OppTargets?.NPC),
+        ...toRealArray(resolution?.identifyTargets?.BenefitedObservers),
+        ...toRealArray(resolution?.identifyTargets?.HarmedObservers),
+        ...toRealArray(resolution?.identifyTargets?.NPCAwareOfUser),
+        ...(Array.isArray(relationshipEngine) ? relationshipEngine.map(entry => entry?.NPC) : []),
+    ]).filter(name => normalizeSpellNameKey(name)
+        && normalizeSpellNameKey(remainingText).includes(normalizeSpellNameKey(name)));
+    const keep = value => toRealArray(value).filter(name => names.some(saved => sameName(saved, name)));
+    return {
+        names,
+        targets: {
+            ...(resolution?.identifyTargets || {}),
+            ActionTargets: keep(resolution?.identifyTargets?.ActionTargets),
+            StealthTargets: [],
+            OppTargets: { NPC: [], ENV: [] },
+            BenefitedObservers: keep(resolution?.identifyTargets?.BenefitedObservers),
+            HarmedObservers: keep(resolution?.identifyTargets?.HarmedObservers),
+            NPCAwareOfUser: keep(resolution?.identifyTargets?.NPCAwareOfUser),
+        },
+    };
+}
+
+function blockedSpellLedger(ledger, decision) {
+    if (!decision?.blocked) return ledger;
+    const resolution = ledger?.resolutionEngine || {};
+    const ability = resolution.userAbilityUse && typeof resolution.userAbilityUse === 'object'
+        ? resolution.userAbilityUse
+        : {};
+    const userAbilityUse = {
+        ...ability,
+        attempted: true,
+        available: false,
+        used: false,
+        abilityName: decision.spellName,
+        noEffectReason: 'No remaining spell casts; the attempt produces no spell effect.',
+        narrativeEffect: 'No spell effect occurs because no casts remain.',
+    };
+    const actionUnitIdMap = new Map();
+    const remainingUnits = decision.remainingActionUnits.map((unit, index) => {
+        const oldId = String(unit?.id ?? unit?.Id ?? `A${index + 1}`);
+        const newId = `A${index + 1}`;
+        actionUnitIdMap.set(oldId, newId);
+        return { ...unit, id: newId };
+    });
+    const pureSpell = decision.spellOnly;
+    const spellActionUnitIds = new Set(decision.spellActionUnitIds || []);
+    const spellActionUnits = (Array.isArray(resolution.actionUnits) ? resolution.actionUnits : [])
+        .filter((unit, index) => spellActionUnitIds.has(String(unit?.id ?? unit?.Id ?? `A${index + 1}`)));
+    const blockedSpellTransition = !pureSpell
+        && worldTransitionDependsOnBlockedSpell(ledger?.worldTransition, decision, spellActionUnits);
+    const filteredInjuryEffects = pureSpell
+        ? []
+        : Array.isArray(ledger?.injuryEffectEngine?.effects)
+            ? ledger.injuryEffectEngine.effects
+                .filter(effect => actionUnitIdMap.has(String(effect?.actionUnitId ?? effect?.ActionUnitId ?? '')))
+                .map(effect => ({
+                    ...effect,
+                    actionUnitId: actionUnitIdMap.get(String(effect?.actionUnitId ?? effect?.ActionUnitId ?? '')),
+                }))
+            : [];
+    const remapActionScopedEntries = entries => (Array.isArray(entries) ? entries : [])
+        .filter(entry => actionUnitIdMap.has(String(entry?.actionUnitId ?? entry?.ActionUnitId ?? '')))
+        .map(entry => ({
+            ...entry,
+            actionUnitId: actionUnitIdMap.get(String(entry?.actionUnitId ?? entry?.ActionUnitId ?? '')),
+        }));
+    const retainedPowerEffects = pureSpell ? [] : remapActionScopedEntries(ledger?.powerActorEnmity?.effects);
+    const challengeDecision = pureSpell
+        ? { blocked: true, rerouteMundaneCombat: false }
+        : blockedSpellChallengeDecision(
+            resolution,
+            decision,
+            spellActionUnits,
+            remainingUnits,
+            filteredInjuryEffects,
+            retainedPowerEffects,
+        );
+    const filteredRelationships = challengeDecision.blocked && !pureSpell
+        ? filterSpellOnlyRelationshipTargets(resolution, ledger?.relationshipEngine, remainingUnits)
+        : null;
+    const nextResolution = {
+        ...resolution,
+        userAbilityUse,
+        deterministicSpellExhausted: true,
+        deterministicSpellTransitionBlocked: blockedSpellTransition,
+        allowNonSpellHealing: decision.hasNonSpellHealingAction,
+        actionCount: remainingUnits.length ? remainingUnits.map(unit => unit?.marker || unit?.action || unit?.Action || 'action') : ['a1'],
+        actionUnits: remainingUnits.length ? remainingUnits : [{ id: 'A1', action: `{{user}} attempts ${decision.spellName}, but no cast remains`, evidence: `known spell exhausted: ${decision.spellName}` }],
+        ...(challengeDecision.rerouteMundaneCombat ? {
+            challengeType: 'mundane_combat',
+            socialTactic: 'none',
+        } : {}),
+        ...(challengeDecision.blocked && !pureSpell ? {
+            identifyGoal: remainingUnits.map(unit => unit?.action || unit?.Action).filter(Boolean).join('; ') || 'Ordinary non-spell action',
+            identifyChallenge: 'none',
+            explicitMeans: remainingUnits.map(unit => unit?.evidence || unit?.Evidence || unit?.action || unit?.Action).filter(Boolean).join('; '),
+            identifyTargets: filteredRelationships.targets,
+            rollNeeded: false,
+            rollReason: 'The exhausted spell supplied the removed challenge; the surviving action has no independent stakes-bearing resolution.',
+            challengeType: 'none',
+            socialTactic: 'none',
+            harmMode: 'none',
+            activeHostileThreat: false,
+        } : {}),
+        ...(pureSpell ? {
+            identifyGoal: `Attempted exhausted spell: ${decision.spellName}`,
+            identifyChallenge: 'no spell effect',
+            explicitMeans: `{{user}} attempts the known spell ${decision.spellName} without a remaining cast`,
+            identifyTargets: emptyResolutionTargets(),
+            rollNeeded: false,
+            challengeType: 'none',
+            socialTactic: 'none',
+            harmMode: 'none',
+            activeHostileThreat: false,
+        } : {}),
+    };
+    const nextLedger = {
+        ...ledger,
+        resolutionEngine: nextResolution,
+        injuryEffectEngine: {
+            ...(ledger?.injuryEffectEngine || {}),
+            effects: filteredInjuryEffects,
+        },
+    };
+    if (!pureSpell) {
+        nextLedger.powerActorEnmity = {
+            ...(ledger?.powerActorEnmity || {}),
+            effects: retainedPowerEffects,
+            latentGrievances: remapActionScopedEntries(ledger?.powerActorEnmity?.latentGrievances),
+            latentFavors: remapActionScopedEntries(ledger?.powerActorEnmity?.latentFavors),
+        };
+        if (challengeDecision.blocked) {
+            nextLedger.relationshipEngine = (Array.isArray(ledger?.relationshipEngine) ? ledger.relationshipEngine : [])
+                .filter(entry => filteredRelationships.names.some(name => sameName(name, entry?.NPC)));
+            nextLedger.userKnowledgeApplication = {
+                ...(ledger?.userKnowledgeApplication || {}),
+                applications: (Array.isArray(ledger?.userKnowledgeApplication?.applications) ? ledger.userKnowledgeApplication.applications : [])
+                    .filter(entry => filteredRelationships.names.some(name => sameName(name, entry?.target))),
+            };
+        }
+        if (blockedSpellTransition) nextLedger.worldTransition = {};
+    }
+    if (pureSpell) {
+        nextLedger.worldTransition = {};
+        nextLedger.relationshipEngine = [];
+        nextLedger.userKnowledgeApplication = { applications: [] };
+        nextLedger.powerActorEnmity = { assessments: [], effects: [], latentGrievances: [], affiliationLinks: [], latentFavors: [], favorAffiliationLinks: [] };
+        nextLedger.powerEventShape = { events: [] };
+        nextLedger.chaosSemantic = { sceneSummary: '' };
+        nextLedger.proactivitySemantic = {};
+        nextLedger.worldProgression = { advancements: [] };
+        nextLedger.trackerUpdateEngine = { user: {}, npcs: [] };
+    }
+    return nextLedger;
+}
+
 function runDeterministicLootDiscovery({ search = {}, trackerSnapshot = {}, hiddenHealth = null, context = null, adventureGenre = 'Fantasy', audit = [] } = {}) {
     if (search?.Attempted !== 'Y') return { packet: null };
 
@@ -903,6 +1279,7 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     root.economy = normalizeEconomyState(root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(root.pendingBoundary || {});
+    root.spellCasting = normalizeSpellCastingState(root.spellCasting || {});
     root.rapportClock = normalizeRapportClock(root.rapportClock);
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
 
@@ -961,6 +1338,9 @@ export async function saveTrackerUpdate(context, trackerUpdate, options = {}) {
     if (trackerUpdate.pendingBoundary) {
         root.pendingBoundary = normalizePendingBoundaryState(trackerUpdate.pendingBoundary);
     }
+    if (trackerUpdate.spellCasting) {
+        root.spellCasting = normalizeSpellCastingState(trackerUpdate.spellCasting);
+    }
     if (trackerUpdate.rapportClock) {
         const rapportClock = normalizeRapportClock(trackerUpdate.rapportClock);
         root.rapportClock = {
@@ -997,6 +1377,34 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const dice = createDice();
     const refereeContext = buildRefereeContext(context);
     const playerTrackerSnapshot = normalizeTrackerUserState(options?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context));
+    const userCoreStats = getUserCoreStats(ledger);
+    const spellCastingBefore = normalizeSpellCastingState(
+        options?.spellCastingSnapshot || context?.chatMetadata?.structuredPreflightTracker?.spellCasting || {},
+        userCoreStats?.MND,
+    );
+    const spellSleepRecovery = isExplicitSafeSleepCompleteTurn(ledger, {
+        activeHostileThreat: bool(ledger?.resolutionEngine?.activeHostileThreat) ? 'Y' : 'N',
+        hostilesInScene: ledger?.resolutionEngine?.identifyTargets?.hostilesInScene,
+        OppTargets: ledger?.resolutionEngine?.identifyTargets?.OppTargets,
+    }, context);
+    const spellCastingAvailable = applySpellCastConsumption(spellCastingBefore, null, spellSleepRecovery);
+    const spellDecision = classifySpellCastAttempt(
+        ledger,
+        options?.knownSpellNames || [],
+        spellCastingAvailable,
+        context,
+    );
+    const effectiveLedger = blockedSpellLedger(ledger, spellDecision);
+    const spellCastingAfter = applySpellCastConsumption(spellCastingAvailable, spellDecision);
+    if (spellSleepRecovery) {
+        audit.push(`SPELL_CASTING_RECOVERY=${compact({ rule: 'explicit_completed_safe_sleep_only', before: spellCastingBefore, after: spellCastingAvailable })}`);
+    }
+    if (spellDecision.attemptedKnown) {
+        audit.push(`SPELL_CASTING_ATTEMPT=${compact({ spell: spellDecision.spellName, consumed: spellDecision.castConsumed ? 'Y' : 'N', blocked: spellDecision.blocked ? 'Y' : 'N', remainingBefore: spellCastingAvailable.remaining, remainingAfter: spellCastingAfter.remaining })}`);
+    }
+    if (spellDecision.blocked) {
+        audit.push(`SPELL_CASTING_EXHAUSTED=${compact({ spell: spellDecision.spellName, spellOnly: spellDecision.spellOnly ? 'Y' : 'N', rule: 'narrate_attempt_without_effect; preserve non-spell action units' })}`);
+    }
     const worldStateBefore = normalizeWorldState(options?.worldStateSnapshot || buildWorldStateSnapshot(context));
     const sceneItemsBefore = normalizeSceneItemState(
         options?.sceneItemStateSnapshot || buildSceneItemStateSnapshot(context),
@@ -1008,14 +1416,14 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     const pendingBoundaryBefore = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context));
     const latentGrievancesBefore = normalizeLatentGrievances(options?.latentGrievanceSnapshot || buildLatentGrievanceSnapshot(context));
     const latentFavorsBefore = normalizeLatentFavors(options?.latentFavorSnapshot || buildLatentFavorSnapshot(context));
-    const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, ledger, context);
+    const healthNpcRefsBefore = buildHiddenHealthNpcRefs(trackerSnapshot, effectiveLedger, context);
     const healthBefore = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
         npcs: healthNpcRefsBefore,
     });
     const rapportClock = advanceRapportClock(context, audit);
-    const resolution = runResolution(ledger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot, healthBefore, pendingBoundaryBefore, sceneItemsBefore);
-    const worldState = projectWorldStateTransition(worldStateBefore, ledger?.worldTransition || {}, {
+    const resolution = runResolution(effectiveLedger, trackerSnapshot, dice, audit, context, refereeContext, playerTrackerSnapshot, healthBefore, pendingBoundaryBefore, sceneItemsBefore);
+    const worldState = projectWorldStateTransition(worldStateBefore, effectiveLedger?.worldTransition || {}, {
         resolutionPacket: resolution.packet,
         seed: options?.latestUserText || resolution.packet?.GOAL || '',
     });
@@ -1023,15 +1431,15 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     if (JSON.stringify(worldState) !== JSON.stringify(worldStateBefore)) {
         audit.push(`WORLD_TRANSITION=${JSON.stringify(worldState)}`);
     }
-    const relationships = runRelationships(ledger, trackerSnapshot, resolution.packet, audit, refereeContext, context, rapportClock, dice);
-    const chaos = runChaos(ledger, relationships.handoffs, resolution.packet, dice, audit);
-    const name = runNameGeneration(ledger, audit, context, type);
+    const relationships = runRelationships(effectiveLedger, trackerSnapshot, resolution.packet, audit, refereeContext, context, rapportClock, dice);
+    const chaos = runChaos(effectiveLedger, relationships.handoffs, resolution.packet, dice, audit);
+    const name = runNameGeneration(effectiveLedger, audit, context, type);
     const injuryTrackerUpdate = applyInflictedNpcInjuriesToTrackerUpdate(resolution.packet, relationships.trackerUpdate, trackerSnapshot, audit);
-    const proactivity = runProactivity(ledger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit, refereeContext, context, rapportClock);
+    const proactivity = runProactivity(effectiveLedger, relationships.handoffs, resolution.packet, chaos.handoff, dice, audit, refereeContext, context, rapportClock);
     applyProactivityMemoryResults(injuryTrackerUpdate, relationships.handoffs, proactivity.results, dice, audit, rapportClock);
-    const aggression = runAggression(ledger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext, playerTrackerSnapshot);
+    const aggression = runAggression(effectiveLedger, trackerSnapshot, injuryTrackerUpdate, proactivity.results, resolution.packet, dice, audit, context, refereeContext, playerTrackerSnapshot);
     const healthEvents = collectHiddenHealthEvents({
-        ledger,
+        ledger: effectiveLedger,
         resolutionPacket: resolution.packet,
         aggression,
         context,
@@ -1044,7 +1452,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         npcs: buildHiddenHealthNpcRefs({
             ...(trackerSnapshot || {}),
             ...(injuryTrackerUpdate || {}),
-        }, ledger, context),
+        }, effectiveLedger, context),
     };
     const healthAfterUserAction = applyHiddenHealthEvents(
         healthBefore,
@@ -1064,10 +1472,10 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         audit,
     });
     if (lootDiscovery.packet) resolution.packet.LootDiscovery = lootDiscovery.packet;
-    const trackerDeltas = runTrackerUpdates(ledger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter, playerTrackerSnapshot);
-    const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), ledger?.trackerUpdateEngine?.userReputation || {});
+    const trackerDeltas = runTrackerUpdates(effectiveLedger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter, playerTrackerSnapshot);
+    const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), effectiveLedger?.trackerUpdateEngine?.userReputation || {});
     const powerActors = runPowerActorEnmity(
-        ledger,
+        effectiveLedger,
         context,
         audit,
         dice,
@@ -1083,7 +1491,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     );
     const worldProgressionResult = advanceDueWorldPlans(
         worldProgressionBefore,
-        ledger?.worldProgression?.advancements || [],
+        effectiveLedger?.worldProgression?.advancements || [],
         worldState,
         {
             allowUnexpected: true,
@@ -1099,7 +1507,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     audit.push(...worldProgressionResult.audit.map(line => `WORLD_PROGRESSION ${line}`));
     const boundCompanion = runBoundCompanionEngine({
         before: boundCompanionBefore,
-        semanticDelta: ledger?.trackerUpdateEngine?.boundCompanion,
+        semanticDelta: effectiveLedger?.trackerUpdateEngine?.boundCompanion,
         resolutionPacket: resolution.packet,
         worldState,
         relationships: relationships.handoffs,
@@ -1138,6 +1546,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         boundCompanion: boundCompanion.state,
         pendingBoundary: pendingBoundaryBefore,
         sceneItems,
+        spellCasting: spellCastingAfter,
         latentGrievances: powerActors.latentGrievances,
         latentFavors: powerActors.latentFavors,
         descriptiveArchive,
@@ -1173,6 +1582,15 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         sceneState: worldState,
         persistencePolicy: buildPersistencePolicy(),
         resultLine: resolution.resultLine,
+        spellCasting: {
+            attemptedKnownSpell: spellDecision.attemptedKnown ? 'Y' : 'N',
+            spellName: spellDecision.attemptedKnown ? spellDecision.spellName : NONE,
+            castConsumed: spellDecision.castConsumed ? 'Y' : 'N',
+            exhausted: spellDecision.blocked ? 'Y' : 'N',
+            spellOnly: spellDecision.spellOnly ? 'Y' : 'N',
+            remaining: spellCastingAfter.remaining,
+            capacity: spellCastingAfter.capacity,
+        },
         narrationGuidance: buildNarrationGuidance(narrativeResolutionPacket, relationships.handoffs, chaos.handoff, proactivity.results, aggression.results),
         sceneTrackerUpdate: visibleTrackerUpdate,
     };
@@ -1182,7 +1600,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
 
     return {
         auditLines: audit,
-        semanticLedger: ledger,
+        semanticLedger: effectiveLedger,
         finalNarrativeHandoff,
         trackerUpdate,
         worldProgressionProjection: {
@@ -4193,7 +4611,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         const atkDie = rollPool[0];
         userAttackDie = atkDie;
         const defDie = healingStaticDc ? null : rollPool[1];
-        const userStatValue = statValue(userCore, userStat);
+        const userStatValue = playerStatValue(userCore, userStat);
         const atkTot = atkDie + userStatValue + impairmentPenalty;
         const defTot = healingStaticDc
             ? healingStaticDc
@@ -6109,6 +6527,9 @@ function collectHiddenNaturalRecoveryEvents({ ledger, resolutionPacket, context,
 }
 
 function classifyHealingAttempt(semantic, goal, context) {
+    if (semantic?.deterministicSpellExhausted === true && semantic?.allowNonSpellHealing !== true) {
+        return { isHealing: false, isMagic: false };
+    }
     const source = [
         semanticSourceText({ ...semantic, identifyGoal: goal }),
         getLatestUserTextFromContext(context),
@@ -8847,7 +9268,9 @@ function runAggression(ledger, trackerSnapshot, trackerUpdate, proactivityResult
         const npcDie = dice.d20();
         const defenderDie = dice.d20();
         const npcStatValue = statValue(npcCore, attackStat);
-        const defenderStatValue = statValue(defenderCore, defenseStat);
+        const defenderStatValue = targetIsUser
+            ? playerStatValue(defenderCore, defenseStat)
+            : statValue(defenderCore, defenseStat);
         const targetEquipmentDefense = attackStat === 'PHY'
             ? targetIsUser
                 ? resolveUserEquipmentDefense(userEquipmentState)

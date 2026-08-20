@@ -34,7 +34,7 @@ import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
 import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -56,6 +56,16 @@ import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, 
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, getNpcLootRankProfile, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, normalizeEquipmentTierAssignments, renderEconomyTrackerContext } from './economy.js';
 import { normalizeSceneItemState, reconcilePostNarrationPossessionDelta, sceneItemStateForModel } from './scene-item-state.js';
+import {
+    PROGRESSION_ABSOLUTE_SPELL_CAP,
+    PROGRESSION_BREAKTHROUGH_SACRIFICE,
+    PROGRESSION_BREAKTHROUGH_STAT_CAP,
+    PROGRESSION_NORMAL_STAT_CAP,
+    applyBreakthroughStatChange,
+    breakthroughSacrificeReason,
+    normalizeBreakthroughStat,
+    spellCapacityForMnd,
+} from './progression-rules.js';
 
 
 const EXTENSION_NAME = 'Story Engine';
@@ -156,7 +166,7 @@ const PERSONA_METADATA_TRANSACTION_KEYS = Object.freeze([
     PROGRESSION_KEY,
     'structuredPreflightTracker',
 ]);
-const PROGRESSION_VERSION = 1;
+const PROGRESSION_VERSION = 2;
 const PROGRESSION_CARD_ID = 'structured_preflight_progression_card';
 const PROGRESSION_STYLE_ID = 'structured_preflight_progression_styles';
 const PROGRESSION_MILESTONE_XP = 100;
@@ -169,15 +179,16 @@ const PROGRESSION_XP_AWARDS = Object.freeze({
     Success: 10,
 });
 const PROGRESSION_REQUIRED_ABILITIES = 1;
-const PROGRESSION_MAX_STAT = 10;
+const PROGRESSION_MAX_STAT = PROGRESSION_NORMAL_STAT_CAP;
+const PROGRESSION_MAX_BREAKTHROUGH_STAT = PROGRESSION_BREAKTHROUGH_STAT_CAP;
 const PROGRESSION_ABILITY_OPTIONS = 3;
 const PROGRESSION_SPELL_OPTIONS = 3;
-const PROGRESSION_MAX_SPELLS = 5;
+const PROGRESSION_MAX_SPELLS = PROGRESSION_ABSOLUTE_SPELL_CAP;
 const PLAYER_CREATION_MAX_STARTING_SPELLS = 1;
 const PLAYER_STATS = Object.freeze(['PHY', 'MND', 'CHA']);
-const PLAYER_CREATION_STAT_POINTS = 24;
+const PLAYER_CREATION_STAT_POINTS = 18;
 const PLAYER_CREATION_MIN_STAT = 1;
-const PLAYER_CREATION_MAX_STAT = 9;
+const PLAYER_CREATION_MAX_STAT = 7;
 const PLAYER_RACE_CHOICES = Object.freeze([
     'Aasimar',
     'Angelkin',
@@ -3477,6 +3488,7 @@ function getTrackerRoot(context = getContext()) {
     root.economy = normalizeEconomyState(root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(root.pendingBoundary || {});
+    root.spellCasting = normalizeSpellCastingState(root.spellCasting || {});
     root.health = normalizeHiddenHealth(root.health, { user: root.user, npcs: root.npcs });
     const seededPlayerTracker = seedPlayerTrackerFromPersonaIfEmpty(root, context);
     if (seededPlayerTracker) {
@@ -3580,6 +3592,12 @@ function getProgressionRoot(context = getContext()) {
         ? root.accomplishments.map(normalizeProgressionRecord).filter(Boolean)
         : [];
     root.spentAdvancements = Math.max(0, Math.floor(Number(root.spentAdvancements || 0)));
+    root.breakthroughStat = normalizeBreakthroughStat(root.breakthroughStat);
+    if (!root.breakthroughStat) {
+        const personaStats = getPersonaCoreStats(context);
+        const elevatedStats = PLAYER_STATS.filter(stat => Number(personaStats?.[stat] || 0) > PROGRESSION_MAX_STAT);
+        if (elevatedStats.length === 1) root.breakthroughStat = elevatedStats[0];
+    }
     root.pendingAdvancement = root.pendingAdvancement && typeof root.pendingAdvancement === 'object' ? root.pendingAdvancement : null;
     root.ui = root.ui && typeof root.ui === 'object' ? root.ui : {};
     return root;
@@ -3957,7 +3975,7 @@ function isValidCoreStats(stats) {
 
         const value = Number(stats?.[stat]);
 
-        return Number.isInteger(value) && value >= 1 && value <= 10;
+        return Number.isInteger(value) && value >= 1 && value <= PROGRESSION_MAX_BREAKTHROUGH_STAT;
 
     });
 
@@ -3969,11 +3987,11 @@ function normalizeCoreStats(stats) {
 
     return {
 
-        PHY: clampNumber(stats?.PHY, 1, 10, 1),
+        PHY: clampNumber(stats?.PHY, 1, PROGRESSION_MAX_BREAKTHROUGH_STAT, 1),
 
-        MND: clampNumber(stats?.MND, 1, 10, 1),
+        MND: clampNumber(stats?.MND, 1, PROGRESSION_MAX_BREAKTHROUGH_STAT, 1),
 
-        CHA: clampNumber(stats?.CHA, 1, 10, 1),
+        CHA: clampNumber(stats?.CHA, 1, PROGRESSION_MAX_BREAKTHROUGH_STAT, 1),
 
     };
 
@@ -4037,11 +4055,11 @@ function normalizeCoreStatsParseText(text) {
 
 function findCoreStatValue(source, stat) {
 
-    const numberPattern = '(10|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten)';
+    const numberPattern = '(1[0-5]|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)';
 
     const statPattern = new RegExp(
 
-        `(?:^|[^A-Za-z0-9])${stat}\\s*(?:stat|score|rating|attribute|value)?\\s*(?:(?:is|at|as|=|:|-)\\s*)?${numberPattern}(?:\\s*(?:out\\s+of\\s+10|of\\s+10))?(?=$|[^A-Za-z0-9])`,
+        `(?:^|[^A-Za-z0-9])${stat}\\s*(?:stat|score|rating|attribute|value)?\\s*(?:(?:is|at|as|=|:|-)\\s*)?${numberPattern}(?:\\s*(?:out\\s+of\\s+(?:10|15)|of\\s+(?:10|15)))?(?=$|[^A-Za-z0-9])`,
 
         'i',
 
@@ -4109,7 +4127,7 @@ function extractCoreStatNumbers(line) {
 
     const numbers = [];
 
-    const pattern = /\b(10|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten)\b/gi;
+    const pattern = /\b(1[0-5]|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\b/gi;
 
     for (const match of String(line ?? '').matchAll(pattern)) {
 
@@ -4181,6 +4199,16 @@ function parseCoreStatNumber(value) {
 
         ten: 10,
 
+        eleven: 11,
+
+        twelve: 12,
+
+        thirteen: 13,
+
+        fourteen: 14,
+
+        fifteen: 15,
+
     };
 
     return words[text] || Number(text) || null;
@@ -4202,7 +4230,7 @@ function clampNumber(value, min, max, fallback) {
 
 
 function defaultPlayerPointBuyStats() {
-    return { PHY: 8, MND: 8, CHA: 8 };
+    return { PHY: 6, MND: 6, CHA: 6 };
 }
 
 function playerPointBuySpent(stats = {}) {
@@ -4218,7 +4246,7 @@ function normalizePlayerCreationStats(stats = {}) {
     const source = isValidCoreStats(stats) ? normalizeCoreStats(stats) : defaultPlayerPointBuyStats();
     const normalized = {};
     for (const stat of PLAYER_STATS) {
-        normalized[stat] = clampNumber(source[stat], PLAYER_CREATION_MIN_STAT, PLAYER_CREATION_MAX_STAT, 8);
+        normalized[stat] = clampNumber(source[stat], PLAYER_CREATION_MIN_STAT, PLAYER_CREATION_MAX_STAT, 6);
     }
     return normalized;
 }
@@ -4557,12 +4585,12 @@ function appendSpellToPersona(personaText, option) {
 function updatePersonaStatText(personaText, stat, value) {
     const statName = String(stat || '').toUpperCase();
     if (!PLAYER_STATS.includes(statName)) throw new Error('Choose a valid stat.');
-    const nextValue = clampNumber(value, 1, PROGRESSION_MAX_STAT, 1);
+    const nextValue = clampNumber(value, 1, PROGRESSION_MAX_BREAKTHROUGH_STAT, 1);
     const section = findPersonaSection(personaText, isStatsSectionHeading);
     const lines = [...section.lines];
     const start = section.start >= 0 ? section.start + 1 : 0;
     const end = section.start >= 0 ? section.end : lines.length;
-    const pattern = new RegExp(`^(\\s*(?:[-*+]\\s*)?(?:\\*\\*)?${statName}(?:\\*\\*)?\\s*(?::|=|-)\\s*)(10|[1-9])(\\b.*)$`, 'i');
+    const pattern = new RegExp(`^(\\s*(?:[-*+]\\s*)?(?:\\*\\*)?${statName}(?:\\*\\*)?\\s*(?::|=|-)\\s*)(1[0-5]|[1-9])(\\b.*)$`, 'i');
     for (let index = start; index < end; index += 1) {
         const match = pattern.exec(lines[index]);
         if (!match) continue;
@@ -4570,6 +4598,12 @@ function updatePersonaStatText(personaText, stat, value) {
         return lines.join('\n').trim();
     }
     throw new Error(`Could not find ${statName} in the persona # STATS section.`);
+}
+
+function updatePersonaStatsText(personaText, stats = {}) {
+    return PLAYER_STATS.reduce((text, stat) => (
+        Number.isInteger(Number(stats?.[stat])) ? updatePersonaStatText(text, stat, Number(stats[stat])) : text
+    ), String(personaText || ''));
 }
 
 function syncPlayerRootAfterPersonaEdit(context, nextText, stats = null) {
@@ -4978,6 +5012,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     const economy = normalizeEconomyState(pendingRun?.economyAfter || pendingRun?.economyBefore || {});
     const boundCompanion = normalizeBoundCompanionState(pendingRun?.boundCompanionAfter || pendingRun?.boundCompanionBefore || {});
     const pendingBoundary = normalizePendingBoundaryState(pendingRun?.pendingBoundaryAfter || pendingRun?.pendingBoundaryBefore || {});
+    const spellCasting = normalizeSpellCastingState(pendingRun?.spellCastingAfter || pendingRun?.spellCastingBefore || {});
     const promotionResult = applyExplicitNamePromotions(trackerAfter, {
         messageKey,
         assistantText,
@@ -5016,6 +5051,7 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
         economy,
         boundCompanion,
         pendingBoundary,
+        spellCasting,
         npcs: promotionResult.npcs,
     };
     const activeNames = getActiveDisplayNpcNamesFromReport(snapshot.npcs, report);
@@ -5044,6 +5080,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
     const economySnapshot = pendingGeneration?.economySnapshot || buildEconomySnapshot(context);
     const boundCompanionSnapshot = pendingGeneration?.boundCompanionSnapshot || buildBoundCompanionSnapshot(context);
     const pendingBoundarySnapshot = pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context);
+    const spellCastingSnapshot = pendingGeneration?.spellCastingSnapshot || buildSpellCastingSnapshot(context, parseCoreStatsBlock(getPersonaText(context)));
     const nameGeneration = pendingGeneration?.nameGenerationSnapshot || {};
     const healthSnapshot = normalizeHiddenHealth(context?.chatMetadata?.structuredPreflightTracker?.health, {
         user: playerTrackerSnapshot,
@@ -5096,6 +5133,7 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
             economy: economySnapshot,
             boundCompanion: boundCompanionSnapshot,
             pendingBoundary: pendingBoundarySnapshot,
+            spellCasting: spellCastingSnapshot,
         },
     };
     return {
@@ -5134,6 +5172,8 @@ function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModel
         boundCompanionAfter: boundCompanionSnapshot,
         pendingBoundaryBefore: pendingBoundarySnapshot,
         pendingBoundaryAfter: pendingBoundarySnapshot,
+        spellCastingBefore: spellCastingSnapshot,
+        spellCastingAfter: spellCastingSnapshot,
         nameGeneration,
         resolutionPacket: report.finalNarrativeHandoff.resolutionPacket,
         userCoreStats: playerTrackerSnapshot?.coreStats || null,
@@ -5378,6 +5418,7 @@ function buildTrackerUpdateForPersistence(displaySnapshot, hiddenHealth = null, 
         economy: normalizeEconomyState(displaySnapshot?.economy || {}),
         boundCompanion: normalizeBoundCompanionState(displaySnapshot?.boundCompanion || {}),
         pendingBoundary: normalizePendingBoundaryState(displaySnapshot?.pendingBoundary || {}),
+        spellCasting: normalizeSpellCastingState(displaySnapshot?.spellCasting || {}),
         descriptiveArchive: normalizeDescriptiveArchive(hiddenState.descriptiveArchive || {}),
         worldProgression: normalizeWorldProgression(hiddenState.worldProgression || {}),
     };
@@ -6478,6 +6519,7 @@ function restoreTrackerFromLatestDisplaySnapshot(context = getContext()) {
     root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(snapshot.pendingBoundary || root.pendingBoundary || {});
+    root.spellCasting = normalizeSpellCastingState(snapshot.spellCasting || root.snapshots?.[snapshot.messageKey]?.afterSpellCasting || root.spellCasting || {});
     root.health = normalizeHiddenHealth(snapshot.hiddenHealth || root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
@@ -6516,6 +6558,7 @@ function restoreTrackerFromMessageDisplaySnapshot(messageId, context = getContex
     root.economy = normalizeEconomyState(snapshot.economy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.boundCompanion || root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(snapshot.pendingBoundary || root.pendingBoundary || {});
+    root.spellCasting = normalizeSpellCastingState(snapshot.spellCasting || root.snapshots?.[snapshot.messageKey]?.afterSpellCasting || root.spellCasting || {});
     root.health = normalizeHiddenHealth(snapshot.hiddenHealth || root.snapshots?.[snapshot.messageKey]?.afterHealth || root.health, { user: root.user, npcs: root.npcs });
     root.rapportClock = rapportClock;
     return true;
@@ -10103,6 +10146,7 @@ function restoreTrackerBeforeProseGuardEdit(context, messageId, messageKey) {
     root.economy = normalizeEconomyState(snapshot.beforeEconomy || root.economy || {});
     root.boundCompanion = normalizeBoundCompanionState(snapshot.beforeBoundCompanion || root.boundCompanion || {});
     root.pendingBoundary = normalizePendingBoundaryState(snapshot.beforePendingBoundary || root.pendingBoundary || {});
+    root.spellCasting = normalizeSpellCastingState(snapshot.beforeSpellCasting || root.spellCasting || {});
     root.rapportClock = normalizeRapportClockState(snapshot.beforeRapportClock);
     rebuildWorldMemoryFromSelectedSwipes(context, { beforeMessageId: messageId });
     removeProgressionRecordsAtOrAfterMessageId(getChatId(context), messageId, context);
@@ -11858,25 +11902,58 @@ function buildProgressionCardHtml(root, context = getContext()) {
     const spells = extractPersonaSpells(persona);
     const abilityCount = abilities.length;
     const spellCount = spells.length;
-    const canRaiseStat = PLAYER_STATS.some(stat => Number(stats?.[stat] || 0) < PROGRESSION_MAX_STAT);
+    const breakthroughStat = normalizeBreakthroughStat(root?.breakthroughStat);
+    const spellCapacity = spellCapacityForMnd(stats?.MND);
+    const allStatsAtNormalCap = PLAYER_STATS.every(stat => Number(stats?.[stat] || 0) >= PROGRESSION_MAX_STAT);
+    const canRaiseStat = PLAYER_STATS.some(stat => (
+        stat !== breakthroughStat && Number(stats?.[stat] || 0) < PROGRESSION_MAX_STAT
+    ));
+    const canBreakthrough = allStatsAtNormalCap
+        && (!breakthroughStat || Number(stats?.[breakthroughStat] || 0) < PROGRESSION_MAX_BREAKTHROUGH_STAT);
     const canSwapAbility = abilityCount >= 1;
-    const canLearnSpell = Number(stats?.MND || 0) >= 7 && spellCount < PROGRESSION_MAX_SPELLS;
+    const canLearnSpell = spellCount < spellCapacity;
     const choice = pending.choice || 'choose';
     const error = root?.ui?.error ? `<div class="spe-progression-error">${escapeHtml(root.ui.error)}</div>` : '';
     const busy = state.progressionBusy ? '<div class="spe-progression-muted">Working...</div>' : '';
     let body = '';
 
     if (choice === 'stat') {
+        const statInstruction = breakthroughStat
+            ? `Restore a reduced stat toward ${PROGRESSION_MAX_STAT}. ${breakthroughStat} can advance only through another breakthrough after every stat is restored.`
+            : `Choose one stat to raise. Stats cannot go above ${PROGRESSION_MAX_STAT} before a breakthrough.`;
         body = `
-            <div class="spe-progression-muted">Choose one stat to raise. Stats cannot go above ${PROGRESSION_MAX_STAT}.</div>
+            <div class="spe-progression-muted">${statInstruction}</div>
             <div class="spe-progression-actions">
                 ${PLAYER_STATS.map(stat => {
                     const value = Number(stats?.[stat] || 1);
-                    const disabled = value >= PROGRESSION_MAX_STAT ? 'disabled' : '';
-                    return `<button class="menu_button" data-spe-progression-action="apply-stat" data-stat="${stat}" ${disabled}>${stat} ${value} -> ${Math.min(PROGRESSION_MAX_STAT, value + 1)}</button>`;
+                    const disabled = stat === breakthroughStat || value >= PROGRESSION_MAX_STAT ? 'disabled' : '';
+                    const label = stat === breakthroughStat
+                        ? `${stat} ${value} (Breakthrough)`
+                        : value >= PROGRESSION_MAX_STAT
+                            ? `${stat} ${value} (Maximum)`
+                            : `${stat} ${value} -> ${value + 1}`;
+                    return `<button class="menu_button" data-spe-progression-action="apply-stat" data-stat="${stat}" ${disabled}>${label}</button>`;
                 }).join('')}
                 <button class="menu_button" data-spe-progression-action="back">Back</button>
             </div>`;
+    } else if (choice === 'breakthrough') {
+        const targetStats = breakthroughStat ? [breakthroughStat] : PLAYER_STATS;
+        const breakthroughLabel = breakthroughStat ? 'Advance Breakthrough' : 'Choose Permanent Breakthrough';
+        body = `
+            <div class="spe-progression-muted"><b>${breakthroughLabel}.</b> Raising a stat above ${PROGRESSION_MAX_STAT} permanently makes it the only stat that can exceed ${PROGRESSION_MAX_STAT}. Each breakthrough sacrifices ${PROGRESSION_BREAKTHROUGH_SACRIFICE} points from a different stat. Every stat must be restored to at least ${PROGRESSION_MAX_STAT} before another breakthrough. MND cannot be sacrificed below the requirement for currently learned spells.</div>
+            ${targetStats.map(target => `
+                <div class="spe-progression-option">
+                    <b>${target} ${Number(stats?.[target] || 1)} -> ${Number(stats?.[target] || 1) + 1}</b>
+                    <div class="spe-progression-actions">
+                        ${PLAYER_STATS.filter(stat => stat !== target).map(sacrifice => {
+                            const reason = breakthroughSacrificeReason(stats, target, sacrifice, spellCount);
+                            const nextValue = Number(stats?.[sacrifice] || 1) - PROGRESSION_BREAKTHROUGH_SACRIFICE;
+                            return `<button class="menu_button" data-spe-progression-action="apply-breakthrough" data-stat="${target}" data-sacrifice-stat="${sacrifice}" ${reason ? 'disabled' : ''} title="${escapeHtml(reason || `Sacrifice ${PROGRESSION_BREAKTHROUGH_SACRIFICE} ${sacrifice}`)}">Sacrifice ${sacrifice}: ${Number(stats?.[sacrifice] || 1)} -> ${nextValue}</button>`;
+                        }).join('')}
+                    </div>
+                </div>
+            `).join('')}
+            <div class="spe-progression-actions"><button class="menu_button" data-spe-progression-action="back">Back</button></div>`;
     } else if (choice === 'swapAbility') {
         const options = Array.isArray(pending.abilityOptions) ? pending.abilityOptions : [];
         const swapSelect = `<div class="spe-progression-row">
@@ -11905,7 +11982,7 @@ function buildProgressionCardHtml(root, context = getContext()) {
     } else if (choice === 'learnSpell') {
         const options = Array.isArray(pending.spellOptions) ? pending.spellOptions : [];
         body = `
-            <div class="spe-progression-muted">Choose one generated spell to learn. Spells require MND 7+ and cannot exceed ${PROGRESSION_MAX_SPELLS}. Spell options cannot be rerolled.</div>
+            <div class="spe-progression-muted">Choose one generated spell to learn. Current MND supports ${spellCapacity} spell${spellCapacity === 1 ? '' : 's'}; ${spellCount} currently learned. Spell options cannot be rerolled.</div>
             <div class="spe-progression-actions">
                 ${options.length ? '' : '<button class="menu_button" data-spe-progression-action="generate-spells">Generate Spell Options</button>'}
                 <button class="menu_button" data-spe-progression-action="back">Back</button>
@@ -11924,6 +12001,7 @@ function buildProgressionCardHtml(root, context = getContext()) {
             <div class="spe-progression-muted">Recent accomplishments have opened a path for growth. Choose how the character advances.</div>
             <div class="spe-progression-actions">
                 ${canRaiseStat ? '<button class="menu_button" data-spe-progression-action="choose-stat">Raise Stat</button>' : ''}
+                ${canBreakthrough ? `<button class="menu_button" data-spe-progression-action="choose-breakthrough">${breakthroughStat ? 'Advance Breakthrough' : 'Breakthrough'}</button>` : ''}
                 ${canSwapAbility ? '<button class="menu_button" data-spe-progression-action="choose-swap-ability">Swap Ability</button>' : ''}
                 ${canLearnSpell ? '<button class="menu_button" data-spe-progression-action="choose-learn-spell">Learn Spell</button>' : ''}
             </div>`;
@@ -12216,8 +12294,9 @@ function bindProgressionCardEvents(card, context = getContext()) {
         if (!button || state.progressionBusy) return;
         const action = button.getAttribute('data-spe-progression-action');
         const stat = button.getAttribute('data-stat');
+        const sacrificeStat = button.getAttribute('data-sacrifice-stat');
         const optionIndex = button.getAttribute('data-option-index');
-        await handleProgressionAction(action, { stat, optionIndex, card }, getContext() || context);
+        await handleProgressionAction(action, { stat, sacrificeStat, optionIndex, card }, getContext() || context);
     };
     card.querySelectorAll('[data-spe-progression-action]').forEach(button => {
         button.onclick = async event => {
@@ -12251,14 +12330,25 @@ async function handleProgressionAction(action, details = {}, context = getContex
     try {
         if (action === 'choose-stat') {
             root.pendingAdvancement.choice = 'stat';
+        } else if (action === 'choose-breakthrough') {
+            const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
+            if (!isValidCoreStats(stats) || !PLAYER_STATS.every(stat => Number(stats[stat]) >= PROGRESSION_MAX_STAT)) {
+                throw new Error(`All stats must be at least ${PROGRESSION_MAX_STAT} before a breakthrough.`);
+            }
+            const breakthroughStat = normalizeBreakthroughStat(root.breakthroughStat);
+            if (breakthroughStat && Number(stats[breakthroughStat]) >= PROGRESSION_MAX_BREAKTHROUGH_STAT) {
+                throw new Error(`${breakthroughStat} has reached the absolute breakthrough cap of ${PROGRESSION_MAX_BREAKTHROUGH_STAT}.`);
+            }
+            root.pendingAdvancement.choice = 'breakthrough';
         } else if (action === 'choose-swap-ability') {
             root.pendingAdvancement.choice = 'swapAbility';
             root.pendingAdvancement.abilityOptions = Array.isArray(root.pendingAdvancement.abilityOptions) ? root.pendingAdvancement.abilityOptions : [];
         } else if (action === 'choose-learn-spell') {
             const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
             const spells = extractPersonaSpells(getPersonaText(context));
-            if (Number(stats?.MND || 0) < 7) throw new Error('Learning spells requires MND 7 or higher.');
-            if (spells.length >= PROGRESSION_MAX_SPELLS) throw new Error(`Spell list is already at the maximum of ${PROGRESSION_MAX_SPELLS}.`);
+            const spellCapacity = spellCapacityForMnd(stats?.MND);
+            if (spellCapacity <= 0) throw new Error('Learning spells requires MND 7 or higher.');
+            if (spells.length >= spellCapacity) throw new Error(`MND ${Number(stats?.MND || 0)} supports at most ${spellCapacity} learned spell${spellCapacity === 1 ? '' : 's'}.`);
             root.pendingAdvancement.choice = 'learnSpell';
             root.pendingAdvancement.spellOptions = Array.isArray(root.pendingAdvancement.spellOptions) ? root.pendingAdvancement.spellOptions : [];
         } else if (action === 'back') {
@@ -12268,6 +12358,13 @@ async function handleProgressionAction(action, details = {}, context = getContex
                 context,
                 actionIdentity,
                 () => applyProgressionStatChoice(root, details.stat, context, actionIdentity),
+            );
+            transactionPersisted = true;
+        } else if (action === 'apply-breakthrough') {
+            await runPersonaMetadataTransaction(
+                context,
+                actionIdentity,
+                () => applyProgressionBreakthroughChoice(root, details.stat, details.sacrificeStat, context, actionIdentity),
             );
             transactionPersisted = true;
         } else if (action === 'generate-abilities') {
@@ -12675,6 +12772,10 @@ async function applyProgressionStatChoice(root, stat, context = getContext(), ac
     if (!PLAYER_STATS.includes(statName)) throw new Error('Choose a valid stat.');
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
     if (!isValidCoreStats(stats)) throw new Error('Cannot raise a stat because the active persona has no valid PHY/MND/CHA block.');
+    const breakthroughStat = normalizeBreakthroughStat(root?.breakthroughStat);
+    if (statName === breakthroughStat) {
+        throw new Error(`${statName} can advance only through another breakthrough after every stat is restored to ${PROGRESSION_MAX_STAT}.`);
+    }
     if (Number(stats[statName]) >= PROGRESSION_MAX_STAT) {
         throw new Error(`${statName} is already at ${PROGRESSION_MAX_STAT}.`);
     }
@@ -12692,6 +12793,36 @@ async function applyProgressionStatChoice(root, stat, context = getContext(), ac
         type: 'stat',
         stat: statName,
         value: nextStats[statName],
+    }, context);
+}
+
+async function applyProgressionBreakthroughChoice(root, stat, sacrificeStat, context = getContext(), actionIdentity = null) {
+    const statName = normalizeBreakthroughStat(stat);
+    const sacrificeName = normalizeBreakthroughStat(sacrificeStat);
+    const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
+    if (!isValidCoreStats(stats)) throw new Error('Cannot apply a breakthrough because the active persona has no valid PHY/MND/CHA block.');
+    const persona = getPersonaText(context);
+    const spells = extractPersonaSpells(persona);
+    const existingBreakthroughStat = normalizeBreakthroughStat(root?.breakthroughStat);
+    const nextStats = applyBreakthroughStatChange(stats, statName, sacrificeName, {
+        existingBreakthroughStat,
+        spellCount: spells.length,
+    });
+    const nextText = updatePersonaStatsText(persona, nextStats);
+    await writePlayerSheetToPersona(nextText, context, actionIdentity);
+    if (actionIdentity) {
+        assertStoryEngineEpochCurrent(actionIdentity, 'Progression breakthrough update expired because the active chat changed.');
+    }
+    root.breakthroughStat = existingBreakthroughStat || statName;
+    root.breakthroughChosenAt = root.breakthroughChosenAt || Date.now();
+    syncPlayerRootAfterPersonaEdit(context, nextText, nextStats);
+    completeProgressionAdvancement(root, {
+        type: 'breakthrough',
+        stat: statName,
+        value: nextStats[statName],
+        sacrificedStat: sacrificeName,
+        sacrificedValue: nextStats[sacrificeName],
+        initial: !existingBreakthroughStat,
     }, context);
 }
 
@@ -12737,8 +12868,9 @@ async function applyProgressionSpellChoice(root, optionIndex, context = getConte
     const persona = getPersonaText(context);
     const stats = getPlayerCoreStats(context) || getPersonaCoreStats(context);
     const spells = extractPersonaSpells(persona);
-    if (Number(stats?.MND || 0) < 7) throw new Error('Learning spells requires MND 7 or higher.');
-    if (spells.length >= PROGRESSION_MAX_SPELLS) throw new Error(`Spell list is already at the maximum of ${PROGRESSION_MAX_SPELLS}.`);
+    const spellCapacity = spellCapacityForMnd(stats?.MND);
+    if (spellCapacity <= 0) throw new Error('Learning spells requires MND 7 or higher.');
+    if (spells.length >= spellCapacity) throw new Error(`MND ${Number(stats?.MND || 0)} supports at most ${spellCapacity} learned spell${spellCapacity === 1 ? '' : 's'}.`);
     const nextText = appendSpellToPersona(persona, option);
 
     await writePlayerSheetToPersona(nextText, context, actionIdentity);
@@ -12918,6 +13050,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
     const powerProfile = getCharacterSheetPowerProfile(genre);
     const recent = getProgressionRecentAccomplishments(getProgressionRoot(context), pending);
     const retryNotes = Array.isArray(pending?.retryNotes) ? pending.retryNotes : [];
+    const spellCapacity = spellCapacityForMnd(stats?.MND);
     return [
         {
             role: 'system',
@@ -12946,7 +13079,7 @@ function buildProgressionSpellPrompt(pending, context = getContext()) {
                 `SELECTED GENRE: ${genre}\n` +
                 `${retryNotes.length ? `PRIOR RETRY NOTES:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 `LOCKED STATS: ${PLAYER_STATS.map(stat => `${stat} ${stats?.[stat] ?? 'unknown'}`).join(', ')}\n` +
-                `SPELL LIMIT: current ${spells.length}; maximum ${PROGRESSION_MAX_SPELLS}\n` +
+                `SPELL LIMIT: current ${spells.length}; current MND capacity ${spellCapacity}; absolute maximum ${PROGRESSION_MAX_SPELLS}\n` +
                 `EXISTING ABILITIES:\n${abilities.length ? abilities.map((ability, index) => `${index + 1}. ${ability.text}`).join('\n') : 'none'}\n\n` +
                 `EXISTING SPELLS:\n${spells.length ? spells.map((spell, index) => `${index + 1}. ${spell.text}`).join('\n') : 'none'}\n\n` +
                 `RECENT ADVANCEMENT ACCOMPLISHMENTS:\n${recent.length ? recent.map((record, index) => `${index + 1}. ${formatProgressionRecordForPrompt(record)}`).join('\n') : 'none'}\n\n` +
@@ -14311,6 +14444,7 @@ function restoreTrackerForRegeneration(type) {
         root.economy = normalizeEconomyState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeEconomy || root.economy || {});
         root.boundCompanion = normalizeBoundCompanionState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeBoundCompanion || root.boundCompanion || {});
         root.pendingBoundary = normalizePendingBoundaryState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforePendingBoundary || root.pendingBoundary || {});
+        root.spellCasting = normalizeSpellCastingState(root.snapshots?.[getMessageKey(targetMessageId, context)]?.beforeSpellCasting || root.spellCasting || {});
         root.rapportClock = rapportClock;
         root.snapshots[getMessageKey(targetMessageId, context)].restoredForRegeneration = Date.now();
 
@@ -15527,6 +15661,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 beforeEconomy: clone(pendingRun.economyBefore || {}),
                 beforeBoundCompanion: clone(pendingRun.boundCompanionBefore || {}),
                 beforePendingBoundary: clone(pendingRun.pendingBoundaryBefore || {}),
+                beforeSpellCasting: clone(pendingRun.spellCastingBefore || {}),
                 after: clone(trackerDisplaySnapshot.npcs),
                 afterUser: clone(trackerDisplaySnapshot.user),
                 afterHealth: cloneHiddenHealth(hiddenHealthAfter || root.health),
@@ -15540,6 +15675,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 afterEconomy: clone(trackerDisplaySnapshot.economy || {}),
                 afterBoundCompanion: clone(trackerDisplaySnapshot.boundCompanion || {}),
                 afterPendingBoundary: clone(trackerDisplaySnapshot.pendingBoundary || {}),
+                afterSpellCasting: clone(trackerDisplaySnapshot.spellCasting || pendingRun.spellCastingAfter || {}),
                 beforeRapportClock: clone(rapportClockBefore),
                 display: clone(trackerDisplaySnapshot),
                 type: pendingRun.type,
@@ -15730,7 +15866,7 @@ async function handleMessageDeleted(newLength) {
         if (snapshotChatId !== chatId) continue;
         if (Number.isFinite(messageId) && messageId >= firstAffectedMessageId) {
             if (snapshot?.before && (!restoreCandidate || messageId < restoreCandidate.messageId)) {
-                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeLatentGrievanceIds: snapshot.beforeLatentGrievanceIds, beforeLatentFavorIds: snapshot.beforeLatentFavorIds, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeSceneItems: snapshot.beforeSceneItems, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary };
+                restoreCandidate = { messageId, before: snapshot.before, beforeUser: snapshot.beforeUser, beforeHealth: snapshot.beforeHealth, beforePowerActors: snapshot.beforePowerActors, beforeLatentGrievanceIds: snapshot.beforeLatentGrievanceIds, beforeLatentFavorIds: snapshot.beforeLatentFavorIds, beforeUserKnowledge: snapshot.beforeUserKnowledge, beforeUserReputation: snapshot.beforeUserReputation, beforeWorldState: snapshot.beforeWorldState, beforeSceneItems: snapshot.beforeSceneItems, beforeEconomy: snapshot.beforeEconomy, beforeBoundCompanion: snapshot.beforeBoundCompanion, beforePendingBoundary: snapshot.beforePendingBoundary, beforeSpellCasting: snapshot.beforeSpellCasting };
             }
             delete root.snapshots[key];
         }
@@ -15763,6 +15899,7 @@ async function handleMessageDeleted(newLength) {
         root.economy = normalizeEconomyState(restoreCandidate.beforeEconomy || root.economy || {});
         root.boundCompanion = normalizeBoundCompanionState(restoreCandidate.beforeBoundCompanion || root.boundCompanion || {});
         root.pendingBoundary = normalizePendingBoundaryState(restoreCandidate.beforePendingBoundary || root.pendingBoundary || {});
+        root.spellCasting = normalizeSpellCastingState(restoreCandidate.beforeSpellCasting || root.spellCasting || {});
         await persistMetadata(context);
         if (!isCurrentStoryEngineEpoch(operationIdentity, context)) return;
         console.info(`[${EXTENSION_NAME}] restored tracker snapshot after message deletion from index ${firstAffectedMessageId}`);
@@ -16141,6 +16278,8 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         economySnapshot: buildEconomySnapshot(context),
         boundCompanionSnapshot: buildBoundCompanionSnapshot(context),
         pendingBoundarySnapshot: buildPendingBoundarySnapshot(context),
+        spellCastingSnapshot: buildSpellCastingSnapshot(context, parseCoreStatsBlock(getPersonaText(context))),
+        knownSpellNames: extractPersonaSpells(getPersonaText(context)).map(entry => String(entry?.name || '').trim()).filter(Boolean),
         adventureGenre: getActiveAdventureGenre(context),
         adventureStartPrompt: getBeginningAdventureStartPrompt(context, type),
         contextSize,
@@ -16309,6 +16448,8 @@ async function handleChatCompletionPromptReady(eventData) {
                 worldProgressionSnapshot: pendingGeneration.worldProgressionSnapshot || buildWorldProgressionSnapshot(context),
                 boundCompanionSnapshot: pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
                 pendingBoundarySnapshot: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+                spellCastingSnapshot: pendingGeneration.spellCastingSnapshot || buildSpellCastingSnapshot(context, parseCoreStatsBlock(getPersonaText(context))),
+                knownSpellNames: pendingGeneration.knownSpellNames || extractPersonaSpells(getPersonaText(context)).map(entry => String(entry?.name || '').trim()).filter(Boolean),
                 adventureGenre: pendingGeneration.adventureGenre || getActiveAdventureGenre(context),
                 latestUserText: pendingGeneration.latestUserText || getLatestUserText(eventData.chat),
                 sceneNames: getConfirmedSceneNpcNames(context),
@@ -16372,6 +16513,8 @@ async function handleChatCompletionPromptReady(eventData) {
             boundCompanionAfter: report.trackerUpdate?.boundCompanion || pendingGeneration.boundCompanionSnapshot || buildBoundCompanionSnapshot(context),
             pendingBoundaryBefore: pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             pendingBoundaryAfter: report.trackerUpdate?.pendingBoundary || pendingGeneration.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
+            spellCastingBefore: pendingGeneration.spellCastingSnapshot || buildSpellCastingSnapshot(context, parseCoreStatsBlock(getPersonaText(context))),
+            spellCastingAfter: report.trackerUpdate?.spellCasting || pendingGeneration.spellCastingSnapshot || buildSpellCastingSnapshot(context, parseCoreStatsBlock(getPersonaText(context))),
             rapportClockAfter: report.trackerUpdate?.rapportClock || null,
             resolutionPacket: report.finalNarrativeHandoff?.resolutionPacket || {},
             userCoreStats: report.semanticLedger?.engineContext?.userCoreStats || null,

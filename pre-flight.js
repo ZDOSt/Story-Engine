@@ -1603,6 +1603,7 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         ['relationshipState', narrativeRelationshipFact(handoff)],
         ['intimacyAndConsent', narrativeIntimacyFact(handoff)],
         ['abilityUse', narrativeAbilityFact(resolution.UserAbilityUse)],
+        ['spellCasting', narrativeSpellCastingFact(handoff?.spellCasting)],
         ['itemUse', narrativeItemFact(resolution.ItemUse)],
         ['lootDiscovery', narrativeLootDiscoveryFact(resolution.LootDiscovery)],
         ['claimOrDeception', narrativeClaimFact(resolution.ClaimCheck, resolution, summary)],
@@ -1622,6 +1623,19 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         '',
         ...facts.flatMap(([key, value]) => [key + ':', value, '']),
     ].join('\n').trimEnd();
+}
+
+function narrativeSpellCastingFact(spellCasting = {}) {
+    if (spellCasting?.attemptedKnownSpell !== 'Y') return '';
+    const spell = valueOrNone(spellCasting.spellName);
+    if (spellCasting.exhausted === 'Y') {
+        const mixed = spellCasting.spellOnly === 'Y' ? '' : ' Preserve and narrate any separately resolved non-spell action in the same turn normally.';
+        return `Known spell attempt: ${spell}. No cast remains. Narrate the attempt as an ordinary visible attempt, but produce no spell effect, roll consequence, damage, healing, status, counterattack, retaliation, or other spell-dependent mechanical outcome.${mixed}`;
+    }
+    if (spellCasting.castConsumed !== 'Y') {
+        return `Known spell attempt: ${spell}. The ability gate marked this attempt unavailable before the shared cast pool, so no cast is consumed; obey the authoritative ability-use no-effect reason.`;
+    }
+    return `Known spell attempt: ${spell}. One shared cast has been consumed whether the resolved spell action succeeds or fails; obey the other authoritative action and outcome facts for its result.`;
 }
 
 function narrativeAttemptedActions(resolution = {}, summary = {}) {
