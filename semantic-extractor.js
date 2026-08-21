@@ -1750,6 +1750,10 @@ export function parseSemanticToolArgumentJson(text) {
         if (repaired && repaired !== jsonText) {
             try {
                 const parsed = JSON.parse(repaired);
+                if (looksLikeSemanticToolArgumentPayload(parsed)) {
+                    const schema = buildSemanticPreflightSchema();
+                    validateSchemaValue(normalizeSemanticToolArgumentTypes(parsed, schema), schema, '$');
+                }
                 console.warn('[Structured Preflight Engines] repaired malformed semantic tool-call JSON locally before validation.');
                 return parsed;
             } catch (candidateError) {
@@ -1757,18 +1761,33 @@ export function parseSemanticToolArgumentJson(text) {
                 // Throw the original parse error below; it points to the provider payload.
             }
         }
+        const schemaRepair = repairSemanticToolArgumentStructure(jsonText);
+        if (schemaRepair.value) {
+            console.warn(`[Structured Preflight Engines] repaired malformed semantic tool-call JSON with schema-aware structural recovery: ${schemaRepair.repairs.join('; ')}`);
+            return schemaRepair.value;
+        }
         throw annotateSemanticDiagnosticError(error, {
             code: 'SE-JSON-PARSE',
             stage: 'JSON parsing',
             line: location.line,
             column: location.column,
             excerpt: buildSemanticJsonDiagnosticExcerpt(jsonText, location.index),
-            repairAttempted: repaired !== jsonText,
-            repairResult: repaired !== jsonText
-                ? `Still invalid${repairError?.message ? ` (${String(repairError.message).slice(0, 180)})` : ''}`
-                : 'No unambiguous local repair matched',
+            repairAttempted: repaired !== jsonText || schemaRepair.attempted,
+            repairResult: schemaRepair.attempted
+                ? `Schema-aware repair rejected${schemaRepair.reason ? ` (${schemaRepair.reason})` : ''}${repairError?.message ? `; syntax repair remained invalid (${String(repairError.message).slice(0, 180)})` : ''}`
+                : repaired !== jsonText
+                    ? `Still invalid${repairError?.message ? ` (${String(repairError.message).slice(0, 180)})` : ''}`
+                    : 'No unambiguous local repair matched',
         });
     }
+}
+
+function looksLikeSemanticToolArgumentPayload(value) {
+    return isRecord(value)
+        && isRecord(value.turnBinding)
+        && (Object.prototype.hasOwnProperty.call(value, 'engineContext')
+            || Object.prototype.hasOwnProperty.call(value, 'resolutionEngine')
+            || Object.prototype.hasOwnProperty.call(value, 'worldTransition'));
 }
 
 function locateJsonParseFailure(error, text) {
@@ -1907,6 +1926,13 @@ function semanticErrorDetail(error, keys) {
 }
 
 function repairToolArgumentJson(text) {
+    let repaired = normalizeRepairableToolArgumentJsonSyntax(text);
+    repaired = balanceJsonDelimiters(repaired);
+    repaired = repairPrematureSemanticRootClosure(repaired);
+    return repaired;
+}
+
+function normalizeRepairableToolArgumentJsonSyntax(text) {
     let repaired = String(text || '');
     repaired = repaired
         .replace(/,\s*([}\]])/g, '$1')
@@ -1917,9 +1943,237 @@ function repairToolArgumentJson(text) {
         .replace(/:\s*'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_match, value) => `: "${value.replace(/"/g, '\\"')}"`);
     repaired = insertMissingCommasBetweenProperties(repaired);
     repaired = insertMissingCommasBetweenArrayElements(repaired);
-    repaired = balanceJsonDelimiters(repaired);
-    repaired = repairPrematureSemanticRootClosure(repaired);
     return repaired;
+}
+
+function repairSemanticToolArgumentStructure(text) {
+    const attempted = true;
+    try {
+        const source = normalizeRepairableToolArgumentJsonSyntax(text);
+        const tokens = tokenizeRepairableJson(source);
+        const state = { tokens, index: 0, repairs: [] };
+        const schema = buildSemanticPreflightSchema();
+        const value = parseSchemaGuidedJsonValue(state, schema, '$', []);
+        if (state.index !== tokens.length) {
+            throw new Error(`unconsumed token at ${tokens[state.index]?.start ?? source.length}`);
+        }
+        if (!state.repairs.length) throw new Error('no unique schema boundary was recoverable');
+        const normalized = normalizeSemanticToolArgumentTypes(value, schema);
+        validateSchemaValue(normalized, schema, '$');
+        return { attempted, value, repairs: state.repairs };
+    } catch (error) {
+        return {
+            attempted,
+            value: null,
+            repairs: [],
+            reason: String(error?.message || error).replace(/\s+/g, ' ').slice(0, 220),
+        };
+    }
+}
+
+function tokenizeRepairableJson(text) {
+    const source = String(text || '');
+    const tokens = [];
+    let index = 0;
+    while (index < source.length) {
+        if (/\s/.test(source[index])) {
+            index += 1;
+            continue;
+        }
+        const start = index;
+        const char = source[index];
+        if ('{}[]:,'.includes(char)) {
+            tokens.push({ type: char, value: char, start, end: ++index });
+            continue;
+        }
+        if (char === '"') {
+            index += 1;
+            let escaped = false;
+            while (index < source.length) {
+                const current = source[index];
+                if (escaped) {
+                    escaped = false;
+                } else if (current === '\\') {
+                    escaped = true;
+                } else if (current === '"') {
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            if (source[index - 1] !== '"') throw new Error(`unterminated string at ${start}`);
+            const raw = source.slice(start, index);
+            tokens.push({ type: 'string', value: JSON.parse(raw), start, end: index });
+            continue;
+        }
+        const remainder = source.slice(index);
+        const primitive = remainder.match(/^(?:true|false|null)(?![A-Za-z0-9_$-])/);
+        if (primitive) {
+            const raw = primitive[0];
+            tokens.push({ type: 'primitive', value: JSON.parse(raw), start, end: index + raw.length });
+            index += raw.length;
+            continue;
+        }
+        const number = remainder.match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+        if (number) {
+            const raw = number[0];
+            tokens.push({ type: 'primitive', value: JSON.parse(raw), start, end: index + raw.length });
+            index += raw.length;
+            continue;
+        }
+        throw new Error(`unsupported token at ${start}`);
+    }
+    return tokens;
+}
+
+function parseSchemaGuidedJsonValue(state, schema, path, ancestors) {
+    const token = state.tokens[state.index];
+    if (!token) throw new Error(`missing value at ${path}`);
+    if (schema?.type === 'object') return parseSchemaGuidedJsonObject(state, schema, path, ancestors);
+    if (schema?.type === 'array') return parseSchemaGuidedJsonArray(state, schema, path, ancestors);
+    if (token.type !== 'string' && token.type !== 'primitive') {
+        throw new Error(`invalid scalar token at ${path}`);
+    }
+    state.index += 1;
+    return token.value;
+}
+
+function parseSchemaGuidedJsonObject(state, schema, path, ancestors) {
+    if (state.tokens[state.index]?.type !== '{') throw new Error(`missing object opening at ${path}`);
+    state.index += 1;
+    const value = {};
+    const frame = { schema, path, seen: new Set() };
+    const openObjects = [...ancestors, frame];
+
+    while (state.index < state.tokens.length) {
+        const token = state.tokens[state.index];
+        if (token.type === '}') {
+            state.index += 1;
+            return value;
+        }
+        if (token.type === ']') {
+            closeSchemaObjectIfComplete(frame, state, 'before parent array closure');
+            return value;
+        }
+        if (!isJsonPropertyToken(state)) throw new Error(`expected property at ${path}`);
+        const name = token.value;
+        const childSchema = schema.properties?.[name];
+        if (!childSchema) {
+            const boundary = uniqueAncestorPropertyBoundary(name, ancestors);
+            if (!boundary) throw new Error(`unknown or ambiguous property ${name} at ${path}`);
+            closeSchemaObjectIfComplete(frame, state, `before ${boundary.path}.${name}`);
+            return value;
+        }
+        if (frame.seen.has(name)) throw new Error(`duplicate property ${name} at ${path}`);
+        frame.seen.add(name);
+        state.index += 2;
+        value[name] = parseSchemaGuidedJsonValue(state, childSchema, `${path}.${name}`, openObjects);
+
+        const separator = state.tokens[state.index];
+        if (!separator) {
+            closeSchemaObjectIfComplete(frame, state, 'at end of input');
+            return value;
+        }
+        if (separator.type === ',') {
+            state.index += 1;
+            continue;
+        }
+        if (separator.type === '}') continue;
+        if (separator.type === ']' || isJsonPropertyToken(state)) {
+            if (isJsonPropertyToken(state) && schema.properties?.[separator.value] && !frame.seen.has(separator.value)) {
+                state.repairs.push(`inserted comma before ${path}.${separator.value}`);
+                continue;
+            }
+            closeSchemaObjectIfComplete(frame, state, 'before enclosing schema boundary');
+            return value;
+        }
+        throw new Error(`invalid property separator at ${path}.${name}`);
+    }
+
+    closeSchemaObjectIfComplete(frame, state, 'at end of input');
+    return value;
+}
+
+function parseSchemaGuidedJsonArray(state, schema, path, ancestors) {
+    if (state.tokens[state.index]?.type !== '[') throw new Error(`missing array opening at ${path}`);
+    state.index += 1;
+    const value = [];
+    const frame = { type: 'array', schema, path };
+    const itemAncestors = [...ancestors, frame];
+
+    while (state.index < state.tokens.length) {
+        const token = state.tokens[state.index];
+        if (token.type === ']') {
+            state.index += 1;
+            return value;
+        }
+        if (token.type === '}' || isAncestorPropertyToken(state, ancestors)) {
+            closeSchemaArrayIfComplete(schema, value, state, path, token.type === '}' ? 'before parent object closure' : `before ${token.value}`);
+            return value;
+        }
+        value.push(parseSchemaGuidedJsonValue(state, schema.items, `${path}[${value.length}]`, itemAncestors));
+
+        const separator = state.tokens[state.index];
+        if (!separator) {
+            closeSchemaArrayIfComplete(schema, value, state, path, 'at end of input');
+            return value;
+        }
+        if (separator.type === ',') {
+            state.index += 1;
+            continue;
+        }
+        if (separator.type === ']') continue;
+        if (separator.type === '}' || isAncestorPropertyToken(state, ancestors)) {
+            closeSchemaArrayIfComplete(schema, value, state, path, 'before enclosing schema boundary');
+            return value;
+        }
+        if (isJsonValueStart(separator)) {
+            state.repairs.push(`inserted comma before ${path}[${value.length}]`);
+            continue;
+        }
+        throw new Error(`invalid array separator at ${path}[${value.length - 1}]`);
+    }
+
+    closeSchemaArrayIfComplete(schema, value, state, path, 'at end of input');
+    return value;
+}
+
+function isJsonPropertyToken(state) {
+    return state.tokens[state.index]?.type === 'string' && state.tokens[state.index + 1]?.type === ':';
+}
+
+function isAncestorPropertyToken(state, ancestors) {
+    if (!isJsonPropertyToken(state)) return false;
+    return Boolean(uniqueAncestorPropertyBoundary(state.tokens[state.index].value, ancestors));
+}
+
+function uniqueAncestorPropertyBoundary(name, ancestors) {
+    let lastArrayIndex = -1;
+    for (let index = 0; index < ancestors.length; index += 1) {
+        if (ancestors[index]?.type === 'array') lastArrayIndex = index;
+    }
+    const objectAncestors = lastArrayIndex >= 0 ? ancestors.slice(lastArrayIndex + 1) : ancestors;
+    const matches = objectAncestors.filter(frame => frame?.type !== 'array'
+        && Object.prototype.hasOwnProperty.call(frame.schema?.properties || {}, name)
+        && !frame.seen.has(name));
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function closeSchemaObjectIfComplete(frame, state, reason) {
+    const missing = (frame.schema?.required || []).filter(name => !frame.seen.has(name));
+    if (missing.length) throw new Error(`cannot close ${frame.path}; missing ${missing.slice(0, 4).join(', ')}`);
+    state.repairs.push(`inserted } for ${frame.path} ${reason}`);
+}
+
+function closeSchemaArrayIfComplete(schema, value, state, path, reason) {
+    if (Number.isInteger(schema?.minItems) && value.length < schema.minItems) {
+        throw new Error(`cannot close ${path}; requires at least ${schema.minItems} item(s)`);
+    }
+    state.repairs.push(`inserted ] for ${path} ${reason}`);
+}
+
+function isJsonValueStart(token) {
+    return ['{', '[', 'string', 'primitive'].includes(token?.type);
 }
 
 function repairPrematureSemanticRootClosure(text) {

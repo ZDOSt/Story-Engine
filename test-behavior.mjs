@@ -16977,7 +16977,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.85');
+      assert.equal(manifest.version, '0.9.86');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -18093,6 +18093,74 @@ const tests = [
       );
       const serializedStructuredLedger = JSON.stringify(structuredLedger);
       const turnBindingFragment = `"turnBinding":${JSON.stringify(structuredLedger.turnBinding)}`;
+      const actionUnitLedger = structuredClone(structuredLedger);
+      actionUnitLedger.resolutionEngine.actionUnits.push(buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.items,
+      ));
+      actionUnitLedger.resolutionEngine.actionUnits[0].action = 'comment on Phoebe\'s appearance';
+      actionUnitLedger.resolutionEngine.actionUnits[0].evidence = 'I like it short, like this. It looks really good on you';
+      const missingActionUnitArrayClosure = JSON.stringify(actionUnitLedger).replace(
+        '],"environmentDifficultyTier"',
+        ',"environmentDifficultyTier"',
+      );
+      const repairedActionUnitArrayClosure = parseSemanticToolArgumentJson(missingActionUnitArrayClosure);
+      assert.deepEqual(repairedActionUnitArrayClosure, actionUnitLedger);
+      assert.equal(validateSemanticToolArguments(repairedActionUnitArrayClosure), repairedActionUnitArrayClosure);
+
+      const relationshipArrayLedger = structuredClone(structuredLedger);
+      relationshipArrayLedger.relationshipEngine.push(buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items,
+      ));
+      const missingUnrelatedArrayClosure = JSON.stringify(relationshipArrayLedger).replace(
+        '],"injuryEffectEngine"',
+        ',"injuryEffectEngine"',
+      );
+      const repairedUnrelatedArrayClosure = parseSemanticToolArgumentJson(missingUnrelatedArrayClosure);
+      assert.deepEqual(repairedUnrelatedArrayClosure, relationshipArrayLedger);
+      assert.equal(validateSemanticToolArguments(repairedUnrelatedArrayClosure), repairedUnrelatedArrayClosure);
+
+      const missingNestedObjectClosure = serializedStructuredLedger.replace(
+        '},"worldProgression"',
+        ',"worldProgression"',
+      );
+      const repairedNestedObjectClosure = parseSemanticToolArgumentJson(missingNestedObjectClosure);
+      assert.deepEqual(repairedNestedObjectClosure, structuredLedger);
+      assert.equal(validateSemanticToolArguments(repairedNestedObjectClosure), repairedNestedObjectClosure);
+
+      const propertyTextLedger = structuredClone(actionUnitLedger);
+      propertyTextLedger.resolutionEngine.actionUnits[0].evidence = 'She literally says "environmentDifficultyTier": "hard" here';
+      const propertyTextWithMissingClosure = JSON.stringify(propertyTextLedger).replace(
+        '],"environmentDifficultyTier"',
+        ',"environmentDifficultyTier"',
+      );
+      assert.deepEqual(
+        parseSemanticToolArgumentJson(propertyTextWithMissingClosure),
+        propertyTextLedger,
+        'Property-like text inside a JSON string must remain data during schema-aware recovery.',
+      );
+
+      const ambiguousArrayBoundary = JSON.stringify(actionUnitLedger).replace(
+        '],"environmentDifficultyTier"',
+        ',"evidence":"ambiguous","environmentDifficultyTier"',
+      );
+      assert.throws(
+        () => parseSemanticToolArgumentJson(ambiguousArrayBoundary),
+        /JSON|position|Unexpected|array element/i,
+        'A property that does not identify a unique open schema boundary must fail closed.',
+      );
+
+      const relationshipItemText = JSON.stringify(relationshipArrayLedger.relationshipEngine[0]);
+      const unknownArrayItemProperty = relationshipItemText.slice(0, -1) + ',"injuryEffectEngine":{}';
+      const unknownArrayItemPropertyPayload = JSON.stringify(relationshipArrayLedger).replace(
+        relationshipItemText,
+        unknownArrayItemProperty,
+      );
+      assert.throws(
+        () => parseSemanticToolArgumentJson(unknownArrayItemPropertyPayload),
+        /JSON|position|Unexpected|property/i,
+        'An unknown property inside an array item must not be reinterpreted as a later sibling section.',
+      );
+
       const prematureRootClosure = serializedStructuredLedger.replace(
         `{${turnBindingFragment},`,
         `{${turnBindingFragment}},`,
@@ -18127,8 +18195,8 @@ const tests = [
       assert.match(jsonDiagnostic, /Stage: JSON parsing/);
       assert.match(jsonDiagnostic, /Location: line 1, column \d+/);
       assert.match(jsonDiagnostic, /Raw excerpt: .*"Mira" <<<ERROR>>>true/);
-      assert.match(jsonDiagnostic, /Repair attempted: no/);
-      assert.match(jsonDiagnostic, /Repair result: No unambiguous local repair matched/);
+      assert.match(jsonDiagnostic, /Repair attempted: yes/);
+      assert.match(jsonDiagnostic, /Repair result: Schema-aware repair rejected/);
       assert.match(jsonDiagnostic, /Action: Generation aborted before narration/);
 
       const secretDiagnosticError = annotateSemanticDiagnosticError(
@@ -21603,7 +21671,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.85');
+      assert.equal(manifest.version, '0.9.86');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);
