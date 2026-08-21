@@ -10384,6 +10384,75 @@ const tests = [
     },
   },
   {
+    name: '33.0 mechanics audit places NPC aggression after counter eligibility',
+    run() {
+      const report = {
+        semanticLedger: {},
+        finalNarrativeHandoff: {
+          resolutionPacket: {
+            GOAL: 'attempt a surprise attack',
+            RollNeeded: 'Y',
+            RollReason: 'direct hostile action',
+            CounterPotential: 'severe',
+            OutcomeTier: 'Critical_Failure',
+            Outcome: 'avoided',
+            LandedActions: 0,
+            ActionTargets: ['Seraphina'],
+            StealthTargets: [],
+            OppTargets: { NPC: ['Seraphina'], ENV: [] },
+            NPCAwareOfUser: ['Seraphina'],
+            NPCInScene: ['Seraphina'],
+          },
+          npcHandoffs: [],
+          proactivityResults: {
+            Seraphina: {
+              Proactive: 'Y',
+              Intent: 'BOUNDARY_PHYSICAL',
+              ProactivityTarget: '{{user}}',
+            },
+          },
+          aggressionResults: {
+            Seraphina: {
+              AttackType: 'CounterAttack',
+              AttackIntent: 'BOUNDARY_PHYSICAL',
+              ProactivityTarget: '{{user}}',
+              AttackStat: 'PHY',
+              DefenseStat: 'PHY',
+              CounterPotential: 'severe',
+              CounterBonus: 6,
+              NpcDie: 19,
+              DefenderDie: 4,
+              NpcTotal: 31,
+              DefenderTotal: 10,
+              Margin: 21,
+              ReactionOutcome: 'npc_overpowers',
+              InflictedUserInjury: {
+                targetType: 'user',
+                condition: 'badly_wounded',
+                severity: 'severe',
+                woundsAdd: [],
+                statusAdd: [],
+              },
+            },
+          },
+          resultLine: '',
+          chaosHandoff: { CHAOS: { triggered: false } },
+          sceneTrackerUpdate: {},
+        },
+      };
+      const text = auditPrompt(report);
+      const start = text.indexOf('==MECHANICS_RESULTS==');
+      const end = text.indexOf('==NARRATOR_MODEL_HANDOFF==');
+      const mechanics = text.slice(start, end);
+      const position = token => mechanics.indexOf(token);
+      assert.ok(position('- resolution.counterPotential:') >= 0);
+      assert.ok(position('- resolution.counterPotential:') < position('- proactivity.result:'));
+      assert.ok(position('- proactivity.result:') < position('- aggression.roll.Seraphina:'));
+      assert.ok(position('- aggression.roll.Seraphina:') < position('- aggression.result.Seraphina:'));
+      assert.ok(position('- aggression.result.Seraphina:') < position('- injury.inflictedUser:'));
+    },
+  },
+  {
     name: '33.1 post-narration FameInfamyLedger parses hidden reputation deltas',
     run() {
       const delta = parseNarratorTrackerDelta(TRACKER_DELTA_TEMPLATE
@@ -16977,7 +17046,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.86');
+      assert.equal(manifest.version, '0.9.87');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -21671,7 +21740,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.86');
+      assert.equal(manifest.version, '0.9.87');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);
