@@ -450,6 +450,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         '',
         renderControlEngineNarrativeContract(),
         '',
+        ...renderSceneStyleProfileSection(options),
         promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
         isIsekaiOpening
             ? 'This is the opening turn of a new isekai adventure.'
@@ -1370,6 +1371,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '',
         ...renderGenreLensSection(options),
         ...renderEconomyLensSection(options),
+        ...renderSceneStyleProfileSection(options),
         '#2 - RESOLVED FACTS',
         'narrativeFacts(input) below is the AUTHORITATIVE SCENE RESOLUTION FOR THIS RESPONSE.',
         'The facts below are immutable and unbreakable. They override style, drama, pacing, genre expectations, and narrative convenience.',
@@ -1400,6 +1402,11 @@ function renderGenreLensSection(options = {}) {
 function renderEconomyLensSection(options = {}) {
     const lens = renderEconomyAndValueLens(options);
     return lens ? ['#1.6 - ECONOMY AND VALUE', lens, ''] : [];
+}
+
+function renderSceneStyleProfileSection(options = {}) {
+    const profile = String(options?.sceneStyleProfile || '').trim();
+    return profile ? ['#1.7 - SCENE STYLE PROFILE', profile, ''] : [];
 }
 
 function renderGenreLens(options = {}, context = {}) {

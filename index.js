@@ -338,6 +338,8 @@ Let intimate scenes linger when the scene supports it. Capture shifting position
 
 Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, exposure, or physical intimacy when the scene supports sustained detail.`;
 
+const DEFAULT_DIALOGUE_STYLE_PROMPT = '';
+
 const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES = String.raw`cheeks flush
 cheeks flushed
 face flushes
@@ -602,6 +604,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT,
     writingStyleActionPrompt: DEFAULT_ACTION_STYLE_PROMPT,
     writingStyleIntimacyPrompt: DEFAULT_INTIMACY_STYLE_PROMPT,
+    writingStyleDialoguePrompt: DEFAULT_DIALOGUE_STYLE_PROMPT,
 
     nameStyle: 'Balanced Fantasy',
 
@@ -792,7 +795,6 @@ function getSettings() {
     delete extension_settings[SETTINGS_KEY].semanticThinkingDisableFormat;
     delete extension_settings[SETTINGS_KEY].semanticThinkingDisableFormats;
     delete extension_settings[SETTINGS_KEY].writingStylePrompt;
-    delete extension_settings[SETTINGS_KEY].writingStyleDialoguePrompt;
     delete extension_settings[SETTINGS_KEY].writingStyleReminderPrompt;
     delete extension_settings[SETTINGS_KEY].writingStylePlacement;
     delete extension_settings[SETTINGS_KEY].writingStyleDepth;
@@ -1425,7 +1427,7 @@ function injectPromptOptionPrompts() {
     }
     clearLegacyFinalReminderPrompt();
     injectProseRulesPrompt();
-    injectWritingStylePrompt();
+    clearStandaloneWritingStylePrompt();
 }
 
 
@@ -1451,6 +1453,11 @@ const WRITING_STYLE_SECTION_FIELDS = Object.freeze([
         id: 'structured_preflight_writing_style_intimacy_prompt',
         key: 'writingStyleIntimacyPrompt',
         defaultValue: DEFAULT_INTIMACY_STYLE_PROMPT,
+    },
+    {
+        id: 'structured_preflight_writing_style_dialogue_prompt',
+        key: 'writingStyleDialoguePrompt',
+        defaultValue: DEFAULT_DIALOGUE_STYLE_PROMPT,
     },
 ]);
 
@@ -2147,7 +2154,7 @@ function renderSettingsPanel() {
                                     <input id="structured_preflight_writing_style_enabled" type="checkbox">
                                     <span>Enable Writing Style</span>
                                 </label>
-                                ${renderSettingsInfo('spe-settings-help-writing-style', 'Injected after Prose Rules as sceneStyleProfile. Section text is editable; internal function names are added automatically.', 'About Writing Style')}
+                                ${renderSettingsInfo('spe-settings-help-writing-style', 'Included in the narrator handoff as sceneStyleProfile after the render-control rules. Section text is editable; internal function names are added automatically.', 'About Writing Style')}
                             </div>
                             <details id="structured_preflight_writing_style_drawer" data-structured-preflight-prompt-drawer>
                                 <summary class="spe-settings-writing-summary">
@@ -2184,6 +2191,16 @@ function renderSettingsPanel() {
                                             <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleIntimacyPrompt">Reset</button>
                                         </div>
                                         <textarea id="structured_preflight_writing_style_intimacy_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
+                                    </div>
+                                    <div class="spe-settings-style-block">
+                                        <div class="spe-settings-style-header">
+                                            <span class="spe-settings-style-label">
+                                                <label for="structured_preflight_writing_style_dialogue_prompt">Dialogue</label>
+                                                ${renderSettingsInfo('spe-settings-help-writing-dialogue', 'Editable dialogue-scene prose guidance. Internal function names are added automatically.', 'About Dialogue writing style')}
+                                            </span>
+                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleDialoguePrompt">Reset</button>
+                                        </div>
+                                        <textarea id="structured_preflight_writing_style_dialogue_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
                                     </div>
                                 </div>
                             </details>
@@ -2462,7 +2479,7 @@ function renderSettingsPanel() {
     for (const { id, key } of WRITING_STYLE_SECTION_FIELDS) {
         document.getElementById(id)?.addEventListener('input', event => {
             settings[key] = String(event.target?.value ?? '');
-            injectWritingStylePrompt();
+            clearStandaloneWritingStylePrompt();
             saveExtensionSettings();
         });
     }
@@ -2480,7 +2497,7 @@ function renderSettingsPanel() {
                 settings[key] = defaultsByKey[key];
             }
             refreshSettingsControls();
-            injectWritingStylePrompt();
+            clearStandaloneWritingStylePrompt();
             saveExtensionSettings();
         });
     });
@@ -2640,42 +2657,27 @@ function buildSceneStyleProfilePrompt(settings = getSettings()) {
         '',
         '  intimacyStyle:',
         indentStyleBlock(settings.writingStyleIntimacyPrompt ?? DEFAULT_INTIMACY_STYLE_PROMPT),
+        '',
+        '  dialogueStyle:',
+        indentStyleBlock(settings.writingStyleDialoguePrompt ?? DEFAULT_DIALOGUE_STYLE_PROMPT),
         '}',
     ].join('\n');
 }
 
 
-function injectWritingStylePrompt() {
+function getSceneStyleProfilePrompt(settings = getSettings()) {
+    if (!isStoryEngineEnabled() || settings.writingStyleEnabled === false) return '';
+    const hasStyleText = WRITING_STYLE_SECTION_FIELDS.some(({ key }) => String(settings[key] ?? '').trim());
+    return hasStyleText ? buildSceneStyleProfilePrompt(settings) : '';
+}
+
+
+function clearStandaloneWritingStylePrompt() {
     const context = getContext();
-    if (!context?.setExtensionPrompt) {
-        return;
-    }
-    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
-    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
-
-    const settings = getSettings();
-    if (!isStoryEngineEnabled() || settings.writingStyleEnabled === false) {
-        if (context.extensionPrompts) delete context.extensionPrompts[WRITING_STYLE_PROMPT_KEY];
-        return;
-    }
-
-
-    const promptText = buildSceneStyleProfilePrompt(settings);
-
-    injectMovablePrompt(
-
-        WRITING_STYLE_PROMPT_KEY,
-
-        promptText,
-
-        'in_prompt',
-
-        0,
-
-        EXTENSION_PROMPT_ROLES.SYSTEM,
-
-    );
-
+    if (!context?.extensionPrompts) return;
+    delete context.extensionPrompts[WRITING_STYLE_PROMPT_KEY];
+    delete context.extensionPrompts[LEGACY_WRITING_STYLE_PROMPT_KEY];
+    delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
 }
 
 
@@ -16263,6 +16265,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         latestUserText: userInputMode.innerText || latestUserText,
         inlineProxyInstructions: userInputMode.inlineProxyInstructions || [],
         coAuthorModeEnabled: getSettings().coAuthorModeEnabled === true,
+        sceneStyleProfile: getSceneStyleProfilePrompt(getSettings()),
 
         trackerSnapshot: buildTrackerSnapshot(context),
         playerTrackerSnapshot: buildPlayerTrackerSnapshot(context),
@@ -16384,6 +16387,7 @@ async function handleChatCompletionPromptReady(eventData) {
                 worldState: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
                 nameGeneration,
                 isekaiOpeningSeed,
+                sceneStyleProfile: pendingGeneration.sceneStyleProfile || '',
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
             const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, introOptions);

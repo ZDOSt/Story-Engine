@@ -16364,7 +16364,7 @@ const tests = [
     },
   },
   {
-    name: '45 writing style remains narrator-only without dialogue or a handoff reminder',
+    name: '45 writing style remains narrator-only and is assembled into the narrator handoff',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
@@ -16378,10 +16378,11 @@ const tests = [
       assert.match(source, /writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT/);
       assert.match(source, /writingStyleActionPrompt: DEFAULT_ACTION_STYLE_PROMPT/);
       assert.match(source, /writingStyleIntimacyPrompt: DEFAULT_INTIMACY_STYLE_PROMPT/);
-      assert.doesNotMatch(source, /writingStyleDialoguePrompt:\s*DEFAULT_DIALOGUE_STYLE_PROMPT/);
+      assert.match(source, /const DEFAULT_DIALOGUE_STYLE_PROMPT = ''/);
+      assert.match(source, /writingStyleDialoguePrompt: DEFAULT_DIALOGUE_STYLE_PROMPT/);
       assert.doesNotMatch(source, /writingStyleReminderPrompt:\s*DEFAULT_WRITING_STYLE_REMINDER_PROMPT/);
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStylePrompt/);
-      assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleDialoguePrompt/);
+      assert.doesNotMatch(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleDialoguePrompt/);
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleReminderPrompt/);
       assert.match(source, /Notice the details that matter/);
       const sectionDefaults = source.slice(
@@ -16389,19 +16390,23 @@ const tests = [
         source.indexOf('const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES'),
       );
       assert.doesNotMatch(sectionDefaults, /ACTION-BEAT DIALOGUE:|FINAL WRITING STYLE REMINDER:/);
-      assert.doesNotMatch(source, /const (?:PREVIOUS_)?DEFAULT_DIALOGUE_STYLE_PROMPT/);
       assert.doesNotMatch(source, /const DEFAULT_WRITING_STYLE_REMINDER_PROMPT/);
       const profileBuilder = source.slice(
         source.indexOf('function buildSceneStyleProfilePrompt'),
-        source.indexOf('function injectWritingStylePrompt'),
+        source.indexOf('function getSceneStyleProfilePrompt'),
       );
       assert.match(profileBuilder, /function sceneStyleProfile\(response, context\) \{/);
       assert.match(profileBuilder, /Shape narration by scene type while obeying every renderControlEngine rule above/);
       assert.match(profileBuilder, /explorationStyle:/);
       assert.match(profileBuilder, /actionStyle:/);
       assert.match(profileBuilder, /intimacyStyle:/);
-      assert.doesNotMatch(profileBuilder, /dialogueStyle:|writingStyleDialoguePrompt|writingStyleReminderPrompt/);
-      assert.match(source, /injectMovablePrompt\(\s*WRITING_STYLE_PROMPT_KEY,\s*promptText,\s*'in_prompt',\s*0,\s*EXTENSION_PROMPT_ROLES\.SYSTEM,\s*\)/);
+      assert.match(profileBuilder, /dialogueStyle:/);
+      assert.match(profileBuilder, /writingStyleDialoguePrompt/);
+      assert.doesNotMatch(profileBuilder, /writingStyleReminderPrompt/);
+      assert.match(source, /function getSceneStyleProfilePrompt\(settings = getSettings\(\)\)/);
+      assert.match(source, /const hasStyleText = WRITING_STYLE_SECTION_FIELDS\.some/);
+      assert.doesNotMatch(source, /function injectWritingStylePrompt\(|injectWritingStylePrompt\(/);
+      assert.doesNotMatch(source, /injectMovablePrompt\(\s*WRITING_STYLE_PROMPT_KEY/);
       assert.match(source, /injectMovablePrompt\(\s*PROSE_RULES_PROMPT_KEY,\s*DEFAULT_PROSE_RULES_PROMPT,\s*'in_prompt',\s*0,\s*EXTENSION_PROMPT_ROLES\.SYSTEM,\s*\)/);
       assert.doesNotMatch(source, /injectMovablePrompt\(\s*(?:WRITING_STYLE_PROMPT_KEY|PROSE_RULES_PROMPT_KEY),[\s\S]{0,120}'before_prompt'/);
       const promptInjection = source.slice(
@@ -16409,9 +16414,12 @@ const tests = [
         source.indexOf('function clearLegacyFinalReminderPrompt'),
       );
       assert.ok(
-        promptInjection.indexOf('injectProseRulesPrompt();') < promptInjection.indexOf('injectWritingStylePrompt();'),
-        'Prose Rules should be injected before sceneStyleProfile.',
+        promptInjection.indexOf('injectProseRulesPrompt();') < promptInjection.indexOf('clearStandaloneWritingStylePrompt();'),
+        'Prose Rules should be injected while the standalone style prompt is cleared.',
       );
+      assert.match(source, /delete context\.extensionPrompts\[WRITING_STYLE_PROMPT_KEY\]/);
+      assert.match(source, /delete context\.extensionPrompts\[LEGACY_WRITING_STYLE_PROMPT_KEY\]/);
+      assert.match(source, /delete context\.extensionPrompts\[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY\]/);
       assert.doesNotMatch(handoffSource, /DEFAULT_FINAL_WRITING_STYLE_REMINDER|renderFinalWritingStyleReminder|writingStyleReminderPrompt|FINAL WRITING STYLE REMINDER/);
       assert.match(source, /const LEGACY_FINAL_REMINDER_PROMPT_KEY = 'structured_preflight_30_final_reminder'/);
       assert.match(source, /delete context\.extensionPrompts\[LEGACY_FINAL_REMINDER_PROMPT_KEY\]/);
@@ -16696,8 +16704,12 @@ const tests = [
         'Genre lens should appear before the economy lens.',
       );
       assert.ok(
-        narrativeContractSource.indexOf('renderEconomyLensSection(options)') < narrativeContractSource.indexOf('formatNarrativeFacts({ summary, handoff, resolution, ledger, options })'),
-        'Economy lens should appear immediately before narrativeFacts.',
+        narrativeContractSource.indexOf('renderEconomyLensSection(options)') < narrativeContractSource.indexOf('renderSceneStyleProfileSection(options)'),
+        'Economy lens should appear before the scene style profile.',
+      );
+      assert.ok(
+        narrativeContractSource.indexOf('renderSceneStyleProfileSection(options)') < narrativeContractSource.indexOf('formatNarrativeFacts({ summary, handoff, resolution, ledger, options })'),
+        'Scene style profile should appear immediately before narrativeFacts.',
       );
       assert.ok(
         narrativeContractSource.indexOf('formatNarrativeFacts({ summary, handoff, resolution, ledger, options })') < narrativeContractSource.indexOf("'#3 - OUTPUT'"),
@@ -16916,12 +16928,15 @@ const tests = [
             },
           },
           isekaiOpeningSeed: openingSeed,
+          sceneStyleProfile: 'SCENE STYLE PROFILE: Use vivid, scene-aware prose.',
         },
       );
       assert.match(introPrompt, /^#1 - PROSE RULES/);
       assert.match(introPrompt, /EXECUTE RenderControlEngine\(response, input, context\) PRIVATELY BEFORE PRODUCING THE FINAL RESPONSE\./);
       assert.match(introPrompt, /Use each PATTERN EXAMPLE only as structural guidance\./);
       assert.match(introPrompt, /Combine closely related actions, gestures, dialogue, and immediate consequences/);
+      assert.match(introPrompt, /#1\.7 - SCENE STYLE PROFILE/);
+      assert.match(introPrompt, /SCENE STYLE PROFILE: Use vivid, scene-aware prose\./);
       assert.doesNotMatch(introPrompt, /#2 - RESOLVED FACTS|==MECHANICS_RESULTS==/);
       assert.match(introPrompt, /START_ADVENTURE_PROMPT: ISEKAI/);
       assert.match(introPrompt, /This is the opening turn of a new isekai adventure\./);
@@ -16957,6 +16972,14 @@ const tests = [
       assert.ok(
         introPrompt.indexOf('#1 - PROSE RULES') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
         'Trimmed prose rules should precede the Start Adventure handoff.',
+      );
+      assert.ok(
+        introPrompt.indexOf('#1 - PROSE RULES') < introPrompt.indexOf('#1.7 - SCENE STYLE PROFILE'),
+        'Render-control rules should precede the Start Adventure scene style profile.',
+      );
+      assert.ok(
+        introPrompt.indexOf('#1.7 - SCENE STYLE PROFILE') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
+        'Start Adventure scene style profile should precede the adventure prompt.',
       );
       assert.ok(
         introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI') < introPrompt.indexOf('BEAT #1: EARTH LAST MOMENTS'),
@@ -17021,6 +17044,7 @@ const tests = [
       assert.match(fantasyIntroPrompt, /PREMADE CHARACTER RULE:/);
       assert.match(fantasyIntroPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
       assert.match(fantasyIntroPrompt, /NAME REVEAL:/);
+      assert.doesNotMatch(fantasyIntroPrompt, /#1\.7 - SCENE STYLE PROFILE/);
       assert.ok(
         fantasyIntroPrompt.indexOf('#1 - PROSE RULES') < fantasyIntroPrompt.indexOf('START_ADVENTURE_PROMPT: FANTASY'),
         'Trimmed prose rules should precede every Start Adventure genre handoff.',
@@ -17046,7 +17070,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.87');
+      assert.equal(manifest.version, '0.9.88');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -19895,6 +19919,7 @@ const tests = [
         'structured_preflight_writing_style_exploration_prompt',
         'structured_preflight_writing_style_action_prompt',
         'structured_preflight_writing_style_intimacy_prompt',
+        'structured_preflight_writing_style_dialogue_prompt',
         'structured_preflight_player_setup_status',
         'structured_preflight_show_player_setup',
         'structured_preflight_force_player_setup',
@@ -19918,9 +19943,11 @@ const tests = [
       assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleExplorationPrompt"/);
       assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleActionPrompt"/);
       assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleIntimacyPrompt"/);
-      assert.doesNotMatch(renderSource, /structured_preflight_writing_style_(?:dialogue|reminder)_prompt/);
-      assert.doesNotMatch(renderSource, /data-structured-preflight-reset-writing-style="writingStyle(?:Dialogue|Reminder)Prompt"/);
-      assert.match(renderSource, /Injected after Prose Rules as sceneStyleProfile/);
+      assert.match(renderSource, /structured_preflight_writing_style_dialogue_prompt/);
+      assert.match(renderSource, /data-structured-preflight-reset-writing-style="writingStyleDialoguePrompt"/);
+      assert.doesNotMatch(renderSource, /structured_preflight_writing_style_reminder_prompt/);
+      assert.doesNotMatch(renderSource, /data-structured-preflight-reset-writing-style="writingStyleReminderPrompt"/);
+      assert.match(renderSource, /Included in the narrator handoff as sceneStyleProfile after the render-control rules/);
       assert.match(renderSource, /Use private Story Engine connection profile/);
       assert.match(renderSource, /Story Engine profile/);
       assert.match(renderSource, /Used for semantic preflight and post-narration Story Engine utility calls/);
@@ -19986,7 +20013,9 @@ const tests = [
 
       assert.match(source, /function ensureStreamingArtifactRegex\(\) \{\s*if \(!isStoryEngineEnabled\(\)\) \{\s*return removeStreamingArtifactRegex\(\);/);
       assert.match(source, /function injectPromptOptionPrompts\(\) \{\s*if \(!isStoryEngineEnabled\(\)\) \{\s*clearPromptOptionPrompts\(\);/);
-      assert.match(source, /function injectWritingStylePrompt\(\)[\s\S]*if \(!isStoryEngineEnabled\(\) \|\| settings\.writingStyleEnabled === false\)/);
+      assert.match(source, /function clearStandaloneWritingStylePrompt\(\)/);
+      assert.match(source, /delete context\.extensionPrompts\[WRITING_STYLE_PROMPT_KEY\]/);
+      assert.doesNotMatch(source, /function injectWritingStylePrompt\(|injectWritingStylePrompt\(/);
       assert.match(source, /function injectProseRulesPrompt\(\)[\s\S]*if \(!isStoryEngineEnabled\(\)\)/);
       assert.match(source, /function getTrackerRoot\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return null;/);
       assert.match(source, /function getPlayerRoot\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return null;/);
@@ -21740,7 +21769,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.87');
+      assert.equal(manifest.version, '0.9.88');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);
