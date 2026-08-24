@@ -320,25 +320,50 @@ const NAME_STYLE_OPTIONS = Object.freeze([
 
 ]);
 
-const DEFAULT_EXPLORATION_STYLE_PROMPT = String.raw`In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use concrete environmental detail to make the current place legible: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
+const DEFAULT_EXPLORATION_STYLE_PROMPT = String.raw`During exploration, arrival, travel, investigation, observation, or location discovery, narrate a vivid, detailed image for {{user}}.
+
+Describe the space, boundaries, distance, available routes, meaningful obstacles, and what can be seen from {{user}}'s position. Then develop the scene through carefully chosen sensory details: light, the texture of surfaces, weather, temperature, sound, smell, movement, and signs of use or damage.
+
+Give very special attention to details that make the world feel alive and lived-in: what people are wearing, including specific details, tools, weapons, posture, trade signs, worn surfaces, broken objects, mud, blood, smoke, crowd movement, and how people respond. Let details emerge through {{user}}'s attention and movement rather than presenting them as a checklist.
+
+Combine related observations into flowing paragraphs, vary sentence rhythm, and make every location feel specific, inhabited, and physically coherent. Always choose a few precise, evocative details that paint a vivid image over a long inventory of generic description.`;
+
+const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, kinetic, and visceral. Keep the reader inside the movement: show where each body is, how distance and balance change, what reaches its target, and how each action affects the next moment.
+
+Make every exchange feel physically real and carefully choreographed. Let force reveal itself through concrete detail: sparks scattering from clashing metal, wood splintering under impact, grit kicking beneath a shifting foot, breath breaking, steel ringing, a shoulder twisting with effort, or a body recoiling from contact. Use these details selectively, when they are supported by the established weapons, materials, surroundings, and resolved events.
+
+Connect related movements into fluid action rather than listing isolated steps. Let sentence rhythm tighten around sudden impact, interruption, reversal, and danger, then stretch through pursuit, evasive movement, and linked attacks. Present every established participant's resolved action clearly, including overlapping or coordinated movement, while preserving the authoritative handoff exactly. Enrich the choreography and physical sensation without inventing, removing, escalating, or reversing mechanical outcomes.`;
+
+const DEFAULT_INTIMACY_STYLE_PROMPT = String.raw`When an intimate or erotic scene is established and supported by the authoritative handoff, let the prose slow down and become deeply sensual, embodied, and vivid. Make the intimacy feel immediate and physical: skin meeting skin, lips lingering, hands exploring, bodies drawing closer, and warmth gathering wherever contact is sustained.
+
+Show how each person responds through observable detail. Describe changing breathing, muscles tensing and releasing, weight shifting, fingers tightening, mouths pausing, and bodies answering one another. Build the scene through anticipation, contact, reaction, and changing closeness so that every touch carries sensation and meaning.
+
+Let intimate moments unfold at their natural pace, giving sustained attention to texture, pressure, heat, movement, sound, vulnerability, desire, consent, and aftermath when the scene supports them. Use flowing, immersive sentences for lingering sensation and sharper rhythm for sudden reactions or heightened urgency. Make the erotic detail specific to these bodies, this setting, and this relationship, preserving established boundaries, agency, and resolved events exactly.`;
+
+const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`During dialogue, present the exchange as a lived, emotionally grounded, physically present moment. Weave speech together with the gestures, posture, expressions, object handling, and shifts in attention that naturally arise from the speaker's words and emotional state.
+
+Choose details selectively and let them emerge organically through the exchange. Treat them as fluid parts of the prose rather than required beats or a checklist. Immediate ambient details may enter when a character notices or interacts with them, or when they directly shape the conversation.
+
+Keep each turn focused, proportionate, and responsive. Let the current line and its accompanying action carry the exchange forward one meaningful beat at a time, preserving the established dialogue turn, agency, facts, outcomes, and tone.`;
+
+const LEGACY_DEFAULT_STYLE_PROMPTS = Object.freeze({
+    writingStyleExplorationPrompt: String.raw`In exploration, arrival, travel, investigation, quiet observation, or location discovery, let the prose breathe. Use concrete environmental detail to make the current place legible: layout, light, texture, weather, sound, visible objects, routes, obstacles, signs of use, damage, concealment, and what becomes possible from the current position.
 
 Notice the details that matter: clothing, tools, weapons, posture, trade signs, worn surfaces, broken objects, rank markers, mud, blood, smoke, light, crowd movement, and how people react to pressure.
 
-Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`;
-
-const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
+Exploration prose should be rich and easy to picture without becoming a static catalog. Let the scene feel inhabited, but keep every detail tied to orientation, pressure, discovery, interaction, or consequence.`,
+    writingStyleActionPrompt: String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, and kinetic. Prioritize position, angle, reach, footing, leverage, timing, momentum, impact, recovery, blocked access, injury, changed distance, and immediate consequence.
 
 Action prose should be vivid but efficient. Every sentence should clarify what happens, where bodies move, what changes, and what can happen next. Let movement change the shape of the room and the next possible action.
 
-Use shorter rhythm for impact, interruption, danger, refusal, sudden contact, or reversal. Use enough physical detail that the action is easy to picture, but do not pause urgent motion for decorative description.`;
-
-const DEFAULT_INTIMACY_STYLE_PROMPT = String.raw`When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, let the prose become detailed, sensual, embodied, and physically specific. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, wetness, heat, restraint, exposure, proximity, bodies, consent, and aftermath.
+Use shorter rhythm for impact, interruption, danger, refusal, sudden contact, or reversal. Use enough physical detail that the action is easy to picture, but do not pause urgent motion for decorative description.`,
+    writingStyleIntimacyPrompt: String.raw`When intimacy, arousal, exposure, or explicit sex is present and supported by the scene, let the prose become detailed, sensual, embodied, and physically specific. Keep the focus on contact, pressure, angle, rhythm, weight, resistance, sound, wetness, heat, restraint, exposure, proximity, bodies, consent, and aftermath.
 
 Let intimate scenes linger when the scene supports it. Capture shifting positions, breath against skin, hands, tension, release, texture, sound, slickness, and the changing pressure between bodies. Keep the prose direct, specific, and scene-aware.
 
-Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, exposure, or physical intimacy when the scene supports sustained detail.`;
-
-const DEFAULT_DIALOGUE_STYLE_PROMPT = '';
+Intimacy has its own pacing. Do not apply dialogue compression to sex, arousal, exposure, or physical intimacy when the scene supports sustained detail.`,
+    writingStyleDialoguePrompt: '',
+});
 
 const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES = String.raw`cheeks flush
 cheeks flushed
@@ -801,6 +826,13 @@ function getSettings() {
     delete extension_settings[SETTINGS_KEY].writingStyleRole;
     delete extension_settings[SETTINGS_KEY].proseGuardFormattingEnabled;
     delete extension_settings[SETTINGS_KEY].proseGuardFormattingPrompt;
+    let writingStyleSettingsChanged = false;
+    for (const [key, legacyValue] of Object.entries(LEGACY_DEFAULT_STYLE_PROMPTS)) {
+        if (settings[key] === legacyValue) {
+            settings[key] = DEFAULT_SETTINGS[key];
+            writingStyleSettingsChanged = true;
+        }
+    }
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = value;
@@ -812,7 +844,7 @@ function getSettings() {
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged) {
+    if (hadRetiredSemanticSettings || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
