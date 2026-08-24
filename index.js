@@ -340,7 +340,9 @@ Show how each person responds through observable detail. Describe changing breat
 
 Let intimate moments unfold at their natural pace, giving sustained attention to texture, pressure, heat, movement, sound, vulnerability, desire, consent, and aftermath when the scene supports them. Use flowing, immersive sentences for lingering sensation and sharper rhythm for sudden reactions or heightened urgency. Make the erotic detail specific to these bodies, this setting, and this relationship, preserving established boundaries, agency, and resolved events exactly.`;
 
-const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`During dialogue, present the exchange as a lived, emotionally grounded, physically present moment. Weave speech together with the gestures, posture, expressions, object handling, and shifts in attention that naturally arise from the speaker's words and emotional state.
+const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`**EMBODIED, NATURAL DIALOGUE**
+
+During dialogue, present the exchange as a lived, emotionally grounded, physically present moment. Weave speech together with the gestures, posture, expressions, object handling, and shifts in attention that naturally arise from the speaker's words and emotional state.
 
 Choose details selectively and let them emerge organically through the exchange. Treat them as fluid parts of the prose rather than required beats or a checklist. Immediate ambient details may enter when a character notices or interacts with them, or when they directly shape the conversation.
 
