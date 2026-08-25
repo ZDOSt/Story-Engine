@@ -17949,7 +17949,7 @@ const tests = [
         source: 'custom',
         strictSchema: false,
         exactNamedToolChoice: true,
-        disableParallelToolCalls: true,
+        disableParallelToolCalls: false,
       });
       const customUrlProviderPolicies = [
         ['https://api.deepseek.com/beta', true, true, false],
@@ -18020,10 +18020,8 @@ const tests = [
         custom_include_headers: 'X-Story-Engine: retained\nuser-agent: replaced',
       };
       applyStoryEngineSemanticToolTransportPayload(trollLlmTransportPayload);
-      assert.equal(trollLlmTransportPayload.parallel_tool_calls, false);
-      assert.deepEqual(yaml.parse(trollLlmTransportPayload.custom_include_body), {
-        parallel_tool_calls: false,
-      });
+      assert.equal(trollLlmTransportPayload.parallel_tool_calls, undefined);
+      assert.equal('custom_include_body' in trollLlmTransportPayload, false);
       assert.deepEqual(yaml.parse(trollLlmTransportPayload.custom_include_headers), {
         'X-Story-Engine': 'retained',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',

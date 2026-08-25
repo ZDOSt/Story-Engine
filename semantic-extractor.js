@@ -754,7 +754,7 @@ export function resolveSemanticToolTransportPolicy(chatCompletionSource, route =
         source: identity.source,
         strictSchema: !trollLlmRoute && providerPolicyRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(identity.provider),
         exactNamedToolChoice: trollLlmRoute || (providerPolicyRoute && NAMED_SEMANTIC_TOOL_CHOICE_SOURCES.has(identity.provider)),
-        disableParallelToolCalls: trollLlmRoute || (providerPolicyRoute && SERIAL_SEMANTIC_TOOL_CALL_SOURCES.has(identity.provider)),
+        disableParallelToolCalls: providerPolicyRoute && SERIAL_SEMANTIC_TOOL_CALL_SOURCES.has(identity.provider),
     };
 }
 
