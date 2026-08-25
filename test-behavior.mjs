@@ -21576,6 +21576,16 @@ const tests = [
       const punctuationLedger = groundedLedger(punctuationBinding, ['i push myself up slowly and shake my head']);
       assert.doesNotThrow(() => validateSemanticTurnGrounding(punctuationLedger, punctuationBinding));
       assert.equal(punctuationLedger.resolutionEngine.actionUnits[0].evidence, 'I push myself up slowly, and shake my head');
+
+      const actionRecoveryBinding = createSemanticTurnBinding({
+        latestUserText: 'I follow Phoebe quietly, keeping to the shadows.',
+        semanticTurnKey: 'run-action-recovery-1',
+      }, 'normal');
+      const actionRecoveryLedger = groundedLedger(actionRecoveryBinding, ['The user follows Phoebe quietly.']);
+      actionRecoveryLedger.resolutionEngine.actionUnits[0].action = 'follow Phoebe quietly';
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(actionRecoveryLedger, actionRecoveryBinding));
+      assert.equal(actionRecoveryLedger.resolutionEngine.actionUnits[0].evidence, 'follow Phoebe quietly');
+
       const apostropheBinding = createSemanticTurnBinding({
         latestUserText: "I take Phoebe's hand, then look around.",
         semanticTurnKey: 'run-apostrophe-1',
@@ -21597,6 +21607,32 @@ const tests = [
           whitespaceBinding,
         ),
         /not grounded by the same contiguous word sequence/,
+      );
+      const paraphrasedActionLedger = groundedLedger(whitespaceBinding, ['The user seizes her hand and pins her against the wall.']);
+      paraphrasedActionLedger.resolutionEngine.actionUnits[0].action = 'I seize her hand and pin her against the wall';
+      assert.throws(
+        () => validateSemanticTurnGrounding(paraphrasedActionLedger, whitespaceBinding),
+        /not grounded by the same contiguous word sequence/,
+        'Action-based recovery must not accept a substituted action verb.',
+      );
+      const placeholderActionLedger = groundedLedger(
+        createSemanticTurnBinding({
+          latestUserText: 'I mention none.',
+          semanticTurnKey: 'run-placeholder-action-1',
+        }, 'normal'),
+        ['The user mentions something.'],
+      );
+      placeholderActionLedger.resolutionEngine.actionUnits[0].action = '(none)';
+      assert.throws(
+        () => validateSemanticTurnGrounding(
+          placeholderActionLedger,
+          createSemanticTurnBinding({
+            latestUserText: 'I mention none.',
+            semanticTurnKey: 'run-placeholder-action-1',
+          }, 'normal'),
+        ),
+        /not grounded by the same contiguous word sequence/,
+        'Placeholder action text must not ground an action unit.',
       );
       assert.throws(
         () => validateSemanticTurnGrounding(

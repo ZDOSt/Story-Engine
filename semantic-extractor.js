@@ -945,6 +945,36 @@ function findTurnGroundingSpan(source, evidence) {
     return '';
 }
 
+function findTurnGroundingActionSpan(source, action) {
+    const normalizedAction = normalizeTurnGroundingQuote(action);
+    if (!normalizedAction || isNoneValue(normalizedAction) || /^a\d+$/iu.test(normalizedAction)) return '';
+    const sourceTokens = tokenizeTurnGroundingText(source);
+    const actionTokens = tokenizeTurnGroundingText(normalizedAction);
+    if (!sourceTokens.length || !actionTokens.length) return '';
+
+    let bestLength = 0;
+    let bestStart = -1;
+    for (let sourceStart = 0; sourceStart < sourceTokens.length; sourceStart += 1) {
+        let length = 0;
+        while (
+            length < actionTokens.length
+            && sourceStart + length < sourceTokens.length
+            && actionTokens[length].value === sourceTokens[sourceStart + length].value
+        ) {
+            length += 1;
+        }
+        if (length > bestLength) {
+            bestLength = length;
+            bestStart = sourceStart;
+        }
+    }
+
+    if (bestStart < 0 || bestLength < 2) return '';
+    const first = sourceTokens[bestStart];
+    const last = sourceTokens[bestStart + bestLength - 1];
+    return source.slice(first.start, last.end);
+}
+
 function validateSemanticTurnIdentity(ledger, turnBinding) {
     const expectedTurnId = String(turnBinding?.turnId || '').trim();
     const returnedTurnId = String(ledger?.turnBinding?.turnId || '').trim();
@@ -975,12 +1005,18 @@ export function validateSemanticTurnGrounding(ledger, turnBinding) {
     }
     for (const [index, unit] of actionUnits.entries()) {
         const evidence = normalizeTurnGroundingQuote(unit?.evidence);
-        const groundedEvidence = !evidence || isNoneValue(evidence)
+        let groundedEvidence = !evidence || isNoneValue(evidence)
             ? ''
             : findTurnGroundingSpan(effectiveUserInput, evidence);
         if (!groundedEvidence) {
+            groundedEvidence = findTurnGroundingActionSpan(
+                effectiveUserInput,
+                normalizeTurnGroundingQuote(unit?.action),
+            );
+        }
+        if (!groundedEvidence) {
             throw annotateSemanticDiagnosticError(
-                new Error(`Semantic action unit A${index + 1} is not grounded by the same contiguous word sequence from the current user input.`),
+                new Error(`Semantic action unit A${index + 1} is not grounded by the same contiguous word sequence from the current user input or a safe exact action sequence.`),
                 {
                     code: 'SE-TURN-GROUNDING',
                     stage: 'Current-turn grounding',
