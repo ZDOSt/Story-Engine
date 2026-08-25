@@ -1547,9 +1547,9 @@ function RenderControlEngine(response, input, context) {
 
       Enclose audible dialogue in double quotation marks. Enclose private mental communication through an established link in single asterisks.
 
-      Shape that contribution to account for all audible dialogue addressed to them, private mental communication explicitly addressed to them through an established link, and externally observable actions that directly involve or materially affect them.
+      Give every materially distinct statement, question, offer, gesture, or action from {{user}} that the character/NPC perceives a clear response through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Include all audible dialogue addressed to them, private mental communication explicitly addressed to them through an established link, and externally observable actions that directly involve or materially affect them.
 
-      Combine related points into one natural response.
+      Combine related elements naturally within the character/NPC's single conversational contribution.
 
       Show intentional refusal, deflection, avoidance, or withholding through dialogue or observable behavior.
 

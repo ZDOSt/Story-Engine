@@ -16378,13 +16378,14 @@ const tests = [
       assert.match(source, /writingStyleExplorationPrompt: DEFAULT_EXPLORATION_STYLE_PROMPT/);
       assert.match(source, /writingStyleActionPrompt: DEFAULT_ACTION_STYLE_PROMPT/);
       assert.match(source, /writingStyleIntimacyPrompt: DEFAULT_INTIMACY_STYLE_PROMPT/);
-      assert.match(source, /const DEFAULT_DIALOGUE_STYLE_PROMPT = ''/);
+      assert.match(source, /const DEFAULT_DIALOGUE_STYLE_PROMPT = String\.raw`\*\*EMBODIED, NATURAL DIALOGUE\*\*/);
       assert.match(source, /writingStyleDialoguePrompt: DEFAULT_DIALOGUE_STYLE_PROMPT/);
+      assert.match(source, /settings\.writingStyleDialoguePrompt === LEGACY_DEFAULT_DIALOGUE_STYLE_PROMPT/);
       assert.doesNotMatch(source, /writingStyleReminderPrompt:\s*DEFAULT_WRITING_STYLE_REMINDER_PROMPT/);
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStylePrompt/);
       assert.doesNotMatch(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleDialoguePrompt/);
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleReminderPrompt/);
-      assert.match(source, /Notice the details that matter/);
+      assert.match(source, /Give very special attention to details that make the world feel alive and lived-in/);
       const sectionDefaults = source.slice(
         source.indexOf('const DEFAULT_EXPLORATION_STYLE_PROMPT'),
         source.indexOf('const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES'),
@@ -16508,9 +16509,10 @@ const tests = [
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
       assert.match(mainRulesSource, /When a character\/NPC responds to \{\{user\}\} or another present character\/NPC, they may make ONLY ONE conversational contribution per response/);
       assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link\. It is NEVER ordinary inner thought or audible dialogue/);
-      assert.match(mainRulesSource, /That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them/);
+      assert.match(mainRulesSource, /That contribution MUST clearly account for every materially distinct statement, question, offer, gesture, or action from \{\{user\}\} that the character\/NPC perceives/);
       assert.match(mainRulesSource, /ONLY the intended recipient of private mental communication through an established link may respond to it/);
-      assert.match(mainRulesSource, /Related points may be combined into one natural response\. Do not answer them point by point/);
+      assert.match(mainRulesSource, /Account for each element through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction/);
+      assert.match(mainRulesSource, /Related elements may be combined naturally within the character\/NPC's single conversational contribution\. Do not answer them point by point/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
       assert.match(mainRulesSource, /Once this contribution is complete, that character\/NPC's turn ENDS/);
       assert.match(mainRulesSource, /DO NOT allow a character\/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE/);
@@ -17070,7 +17072,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.88');
+      assert.equal(manifest.version, '0.9.89');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -17711,7 +17713,7 @@ const tests = [
       );
       assert.match(getSettingsSource, /'semanticThinkingDisableFormat',\s*'semanticThinkingDisableFormats'/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
@@ -17726,6 +17728,8 @@ const tests = [
         'extension_settings',
         'SETTINGS_KEY',
         'DEFAULT_SETTINGS',
+        'LEGACY_DEFAULT_STYLE_PROMPTS',
+        'LEGACY_DEFAULT_DIALOGUE_STYLE_PROMPT',
         'PROSE_GUARD_MODES',
         'migrateTrackerWidgetSettings',
         'migrateNarratorHandoffSettings',
@@ -17735,7 +17739,9 @@ const tests = [
       )(
         retiredSettingsStore,
         'storyEngine',
+        { writingStyleDialoguePrompt: '**EMBODIED, NATURAL DIALOGUE**' },
         {},
+        'During dialogue, present the exchange as a lived moment.',
         { OFF: 'off' },
         () => false,
         () => false,
@@ -21769,7 +21775,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.88');
+      assert.equal(manifest.version, '0.9.89');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

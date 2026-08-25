@@ -340,6 +340,12 @@ Show how each person responds through observable detail. Describe changing breat
 
 Let intimate moments unfold at their natural pace, giving sustained attention to texture, pressure, heat, movement, sound, vulnerability, desire, consent, and aftermath when the scene supports them. Use flowing, immersive sentences for lingering sensation and sharper rhythm for sudden reactions or heightened urgency. Make the erotic detail specific to these bodies, this setting, and this relationship, preserving established boundaries, agency, and resolved events exactly.`;
 
+const LEGACY_DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`During dialogue, present the exchange as a lived, emotionally grounded, physically present moment. Weave speech together with the gestures, posture, expressions, object handling, and shifts in attention that naturally arise from the speaker's words and emotional state.
+
+Choose details selectively and let them emerge organically through the exchange. Treat them as fluid parts of the prose rather than required beats or a checklist. Immediate ambient details may enter when a character notices or interacts with them, or when they directly shape the conversation.
+
+Keep each turn focused, proportionate, and responsive. Let the current line and its accompanying action carry the exchange forward one meaningful beat at a time, preserving the established dialogue turn, agency, facts, outcomes, and tone.`;
+
 const DEFAULT_DIALOGUE_STYLE_PROMPT = String.raw`**EMBODIED, NATURAL DIALOGUE**
 
 During dialogue, present the exchange as a lived, emotionally grounded, physically present moment. Weave speech together with the gestures, posture, expressions, object handling, and shifts in attention that naturally arise from the speaker's words and emotional state.
@@ -467,9 +473,9 @@ function RenderControlEngine(response, input, context) {
 
       ONLY text enclosed in double quotation marks ("...") is audible dialogue. Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link. It is NEVER ordinary inner thought or audible dialogue.
 
-      That contribution MUST account for ALL audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them.
+      That contribution MUST clearly account for every materially distinct statement, question, offer, gesture, or action from {{user}} that the character/NPC perceives, including all audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them.
 
-      Related points may be combined into one natural response. Do not answer them point by point.
+      Account for each element through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Related elements may be combined naturally within the character/NPC's single conversational contribution. Do not answer them point by point.
 
       Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly shown through dialogue or observable behavior rather than accidental omission.
 
@@ -834,6 +840,10 @@ function getSettings() {
             settings[key] = DEFAULT_SETTINGS[key];
             writingStyleSettingsChanged = true;
         }
+    }
+    if (settings.writingStyleDialoguePrompt === LEGACY_DEFAULT_DIALOGUE_STYLE_PROMPT) {
+        settings.writingStyleDialoguePrompt = DEFAULT_SETTINGS.writingStyleDialoguePrompt;
+        writingStyleSettingsChanged = true;
     }
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
