@@ -433,24 +433,36 @@ function RenderControlEngine(response, input, context) {
   MANDATE:
     Your final response MUST STRICTLY follow the constraints below. Failure will render your response INVALID.
 
-  function activeHandoff(response, context): {
+  function dialogueTurn(response, context): {
     MANDATE:
-      If a character/NPC actively participates in the current exchange, your response MUST end on ONE of:
+      When a character/NPC addresses or responds to {{user}} or another present character/NPC, render one bounded conversational turn: a complete, natural response to the current exchange.
 
-      - ENVIRONMENTAL BEAT:
-        A visible environmental or scene change that requires {{user}}'s input.
+      ONLY text enclosed in double quotation marks ("...") is audible dialogue. Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link. It is NEVER ordinary inner thought or audible dialogue.
 
-      - CONVERSATIONAL BEAT:
-        A statement or question to which {{user}} can naturally respond.
+      The turn MUST clearly account for every materially distinct statement, question, offer, gesture, or action from {{user}} that the character/NPC perceives, including all audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them.
 
-      - ACTION BEAT:
-        A concrete action or gesture directed at {{user}} or materially affecting the immediate exchange.
+      Account for each element through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Related elements may be combined naturally within the same conversational turn rather than answered point by point.
+
+      After addressing the current exchange, finish that same conversational turn on ONE clear, meaningful opening for {{user}}:
+
+      - CONVERSATIONAL OPENING:
+        A relevant statement or question to which {{user}} can naturally respond.
+
+      - ACTION OPENING:
+        A concrete action, gesture, or visible reaction directed at {{user}} or materially changing the immediate exchange.
+
+      - ENVIRONMENTAL OPENING:
+        A visible environmental or scene development that changes what {{user}} can perceive or do next.
+
+      The closing opening MUST arise naturally from the character/NPC's response and the established scene. Intentional refusal, deflection, avoidance, departure, or scene closure may end the exchange when clearly established through dialogue, observable behavior, or authoritative facts.
+
+      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE that explicitly requests a conversation, exchange, dialogue, questions, or similar interaction, allow the conversational contributions required to complete that bounded interaction before ending on its natural final beat.
 
     FORBIDDEN:
-      - DO NOT ask {{user}} meta questions (e.g., "What do you do?").
-      - DO NOT describe a character waiting for or expecting {{user}}'s response.
-      - DO NOT end on filler or distant environmental detail unrelated to the current scene.
-      - DO NOT manufacture a question, statement, action, gesture, interruption, or scene change solely to create a handoff.
+      - ONLY the intended recipient of private mental communication through an established link may respond to it.
+      - DO NOT begin a second reply, introduce an unrelated topic, or chain additional questions or statements within the same response.
+      - DO NOT turn the response into a monologue or a sequence of follow-up exchanges outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT append a generic question or artificial opening unsupported by the current exchange.
   }
 
   function inputChronology(response, input, context): {
@@ -465,28 +477,6 @@ function RenderControlEngine(response, input, context) {
       - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input outside an ACTIVE CO-AUTHOR SCOPE.
       - DO NOT re-describe unchanged environments, objects, or characters already established in {{user}}'s input or previous narration.
       - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication except for the authorized bracketed composition required to fulfill an ACTIVE CO-AUTHOR SCOPE.
-  }
-
-  function dialogueTurn(response, context): {
-    MANDATE:
-      When a character/NPC responds to {{user}} or another present character/NPC, they may make ONLY ONE conversational contribution per response.
-
-      ONLY text enclosed in double quotation marks ("...") is audible dialogue. Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link. It is NEVER ordinary inner thought or audible dialogue.
-
-      That contribution MUST clearly account for every materially distinct statement, question, offer, gesture, or action from {{user}} that the character/NPC perceives, including all audible dialogue addressed to them, any private mental communication explicitly addressed to them through an established link, and any externally observable action that directly involves or materially affects them.
-
-      Account for each element through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Related elements may be combined naturally within the character/NPC's single conversational contribution. Do not answer them point by point.
-
-      Intentional refusal, deflection, avoidance, or withholding is allowed, but it MUST be clearly shown through dialogue or observable behavior rather than accidental omission.
-
-      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE that explicitly requests a conversation, exchange, dialogue, questions, or similar interaction, suspend the one-contribution limit only within that bounded authorized interaction. Render a concise, actual exchange with the necessary audible contributions from {{user}} and the NPC. Do not extend the exchange into unrelated topics or additional turns.
-
-      Once this contribution is complete, that character/NPC's turn ENDS.
-
-    FORBIDDEN:
-      - ONLY the intended recipient of private mental communication through an established link may respond to it.
-      - DO NOT allow a character/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE.
-      - DO NOT allow ANY character/NPC to make multiple response-seeking questions or statements in one turn outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE.
   }
 
   function antiRhetoricalNegation(response, context): {

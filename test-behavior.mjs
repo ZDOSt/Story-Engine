@@ -13864,7 +13864,7 @@ const tests = [
       assert.equal(applyStreamingArtifactDisplayRegex('```story_engine_tracker_delta\nBEGIN_TRACKER_DELTA\nTrackerUpdateEngine.user.condition=unchanged').trim(), '');
       assert.equal(applyStreamingArtifactDisplayRegex('Val steps back.\nBEGIN_TRACKER_DELTA\nTrackerUpdateEngine.user.condition=unchanged').trim(), 'Val steps back.');
       assert.equal(applyStreamingArtifactDisplayRegex('Val says, "This is not a tracker delta."'), 'Val says, "This is not a tracker delta."');
-      for (const stage of ['activeHandoff', 'dialogueTurn', 'inputChronology', 'agencySeparation', 'strictBehaviorism', 'strictEpistemology', 'diegeticPhysicality', 'embodiedPerception', 'denotativePhysicality', 'cohesiveSceneBeats']) {
+      for (const stage of ['dialogueTurn', 'inputChronology', 'agencySeparation', 'strictBehaviorism', 'strictEpistemology', 'diegeticPhysicality', 'embodiedPerception', 'denotativePhysicality', 'cohesiveSceneBeats']) {
         const narration = 'Val steps back.';
         assert.equal(applyStreamingArtifactDisplayRegex(`${stage}: complete\n${narration}`).trim(), narration);
         assert.equal(applyStreamingArtifactDisplayRegex(`function ${stage}(response, context): complete\n${narration}`).trim(), narration);
@@ -13913,7 +13913,7 @@ const tests = [
       );
 
       const renderControlLeak = [
-        '1. **activeHandoff:** End on an active beat that immediately requires a user response.',
+        '1. **dialogueTurn:** Respond to the current exchange and end on a meaningful opening for the user.',
         '',
         '2. **dialogueTurn:** Keep dialogue to one conversational contribution per character.',
         '',
@@ -16496,31 +16496,24 @@ const tests = [
       assert.match(mainRulesSource, /Unformatted text describes narration or action\. It is NEVER audible dialogue/);
       assert.doesNotMatch(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard|Otherwise, it is private inner thought/);
       assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
-      assert.match(mainRulesSource, /function activeHandoff\(response, context\):/);
-      assert.match(mainRulesSource, /If a character\/NPC actively participates in the current exchange, your response MUST end on ONE of/);
-      assert.match(mainRulesSource, /ENVIRONMENTAL BEAT:[\s\S]*A visible environmental or scene change that requires \{\{user\}\}'s input/);
-      assert.match(mainRulesSource, /CONVERSATIONAL BEAT:[\s\S]*A statement or question to which \{\{user\}\} can naturally respond/);
-      assert.match(mainRulesSource, /ACTION BEAT:[\s\S]*A concrete action or gesture directed at \{\{user\}\} or materially affecting the immediate exchange/);
-      assert.match(mainRulesSource, /DO NOT ask \{\{user\}\} meta questions/);
-      assert.match(mainRulesSource, /DO NOT describe a character waiting for or expecting \{\{user\}\}'s response/);
-      assert.match(mainRulesSource, /DO NOT manufacture a question, statement, action, gesture, interruption, or scene change solely to create a handoff/);
-      assert.doesNotMatch(mainRulesSource, /You MUST end every response on ONE of the following|Dialogue directed at \{\{user\}\}/);
-
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
-      assert.match(mainRulesSource, /When a character\/NPC responds to \{\{user\}\} or another present character\/NPC, they may make ONLY ONE conversational contribution per response/);
+      assert.match(mainRulesSource, /When a character\/NPC addresses or responds to \{\{user\}\} or another present character\/NPC, render one bounded conversational turn: a complete, natural response to the current exchange/);
       assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link\. It is NEVER ordinary inner thought or audible dialogue/);
-      assert.match(mainRulesSource, /That contribution MUST clearly account for every materially distinct statement, question, offer, gesture, or action from \{\{user\}\} that the character\/NPC perceives/);
+      assert.match(mainRulesSource, /The turn MUST clearly account for every materially distinct statement, question, offer, gesture, or action from \{\{user\}\} that the character\/NPC perceives/);
       assert.match(mainRulesSource, /ONLY the intended recipient of private mental communication through an established link may respond to it/);
-      assert.match(mainRulesSource, /Account for each element through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction/);
-      assert.match(mainRulesSource, /Related elements may be combined naturally within the character\/NPC's single conversational contribution\. Do not answer them point by point/);
-      assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, or withholding is allowed/);
-      assert.match(mainRulesSource, /Once this contribution is complete, that character\/NPC's turn ENDS/);
-      assert.match(mainRulesSource, /DO NOT allow a character\/NPC to monologue, introduce unrelated topics, chain multiple replies, arguments, or follow-ups outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE/);
-      assert.match(mainRulesSource, /DO NOT allow ANY character\/NPC to make multiple response-seeking questions or statements in one turn outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE/);
+      assert.match(mainRulesSource, /Account for each element through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction\. Related elements may be combined naturally within the same conversational turn rather than answered point by point/);
+      assert.match(mainRulesSource, /After addressing the current exchange, finish that same conversational turn on ONE clear, meaningful opening for \{\{user\}\}/);
+      assert.match(mainRulesSource, /CONVERSATIONAL OPENING:[\s\S]*A relevant statement or question to which \{\{user\}\} can naturally respond/);
+      assert.match(mainRulesSource, /ACTION OPENING:[\s\S]*A concrete action, gesture, or visible reaction directed at \{\{user\}\} or materially changing the immediate exchange/);
+      assert.match(mainRulesSource, /ENVIRONMENTAL OPENING:[\s\S]*A visible environmental or scene development that changes what \{\{user\}\} can perceive or do next/);
+      assert.match(mainRulesSource, /The closing opening MUST arise naturally from the character\/NPC's response and the established scene/);
+      assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, departure, or scene closure may end the exchange/);
+      assert.match(mainRulesSource, /DO NOT begin a second reply, introduce an unrelated topic, or chain additional questions or statements within the same response/);
+      assert.match(mainRulesSource, /DO NOT turn the response into a monologue or a sequence of follow-up exchanges outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE/);
+      assert.match(mainRulesSource, /DO NOT append a generic question or artificial opening unsupported by the current exchange/);
       assert.match(mainRulesSource, /SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts\(input\) declares an ACTIVE CO-AUTHOR SCOPE that explicitly requests a conversation/);
-      assert.match(mainRulesSource, /Render a concise, actual exchange with the necessary audible contributions from \{\{user\}\} and the NPC/);
-      assert.doesNotMatch(mainRulesSource, /The contribution MUST leave the current exchange active|ONE brief continuation tied to the SAME exchange|response-seeking continuation/);
-      assert.doesNotMatch(mainRulesSource, /A dialogue turn MAY contain AT MOST ONE of each component|Reaction Beat:|Action Beat:|These components are LIMITS, not a checklist/);
+      assert.match(mainRulesSource, /allow the conversational contributions required to complete that bounded interaction before ending on its natural final beat/);
+      assert.doesNotMatch(mainRulesSource, /function activeHandoff\(response, context\):/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
       assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Your response MUST begin at the FIRST moment AFTER the final action, observation, line of audible dialogue, or private mental communication in \{\{user\}\}'s input/);
@@ -16614,9 +16607,8 @@ const tests = [
         handoffSource.indexOf('function formatNarrativeFacts'),
       );
       const mainRuleOrder = [
-        'activeHandoff',
-        'inputChronology',
         'dialogueTurn',
+        'inputChronology',
         'antiRhetoricalNegation',
         'strictBehaviorism',
         'antiStockPhrasing',

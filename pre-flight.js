@@ -1541,26 +1541,6 @@ function RenderControlEngine(response, input, context) {
       [EVENT] produces [CONCRETE EFFECT] in [OBSERVABLE LOCATION].
   }
 
-  function dialogueTurn(response, context): {
-    MANDATE:
-      When a character/NPC responds to {{user}} or another present character/NPC, give them ONE conversational contribution per response.
-
-      Enclose audible dialogue in double quotation marks. Enclose private mental communication through an established link in single asterisks.
-
-      Give every materially distinct statement, question, offer, gesture, or action from {{user}} that the character/NPC perceives a clear response through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Include all audible dialogue addressed to them, private mental communication explicitly addressed to them through an established link, and externally observable actions that directly involve or materially affect them.
-
-      Combine related elements naturally within the character/NPC's single conversational contribution.
-
-      Show intentional refusal, deflection, avoidance, or withholding through dialogue or observable behavior.
-
-      When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE that requests a conversation, exchange, dialogue, questions, or similar interaction, allow the conversational contributions required for that bounded interaction.
-
-      Complete the character/NPC's turn when their contribution is complete.
-
-    PATTERN EXAMPLE:
-      [NPC] combines [RELATED RESPONSE] and "[AUDIBLE DIALOGUE]" into one conversational contribution.
-  }
-
   function inputChronology(response, input, context): {
     MANDATE:
       Treat {{user}}'s input as an event that has already occurred. Begin the response at the first moment after the final action, observation, line of audible dialogue, or private mental communication in {{user}}'s input.
@@ -1573,22 +1553,26 @@ function RenderControlEngine(response, input, context) {
       [IMMEDIATE RESULT] occurs, followed by [NEXT OBSERVABLE DEVELOPMENT].
   }
 
-  function activeHandoff(response, context): {
+  function dialogueTurn(response, context): {
     MANDATE:
-      When a character/NPC actively participates in the current exchange, end the response on ONE of:
+      When a character/NPC addresses or responds to {{user}} or another present character/NPC, give them one bounded conversational turn: a complete, natural response to the current exchange.
 
-      - ENVIRONMENTAL BEAT:
-        A visible environmental or scene change that requires {{user}}'s input.
+      Enclose audible dialogue in double quotation marks. Enclose private mental communication through an established link in single asterisks.
 
-      - CONVERSATIONAL BEAT:
-        A statement or question to which {{user}} can naturally respond.
+      Clearly account for every materially distinct statement, question, offer, gesture, or action from {{user}} that the character/NPC perceives through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Include all audible dialogue addressed to them, private mental communication explicitly addressed to them through an established link, and externally observable actions that directly involve or materially affect them.
 
-      - ACTION BEAT:
-        A concrete action or gesture directed at {{user}} or materially affecting the immediate exchange.
+      Combine related elements naturally within the same conversational turn.
+
+      After addressing the current exchange, finish that same turn with one clear, meaningful opening for {{user}} through a relevant statement or question, a concrete action or visible reaction, or an environmental development that changes what {{user}} can perceive or do next.
+
+      Let the closing opening arise naturally from the character/NPC's response and the established scene. Render intentional refusal, deflection, avoidance, departure, or scene closure clearly when the exchange genuinely ends.
+
+      When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE that requests a conversation, exchange, dialogue, questions, or similar interaction, allow the contributions required to complete that bounded interaction before ending on its natural final beat.
 
     PATTERN EXAMPLE:
-      [NPC] directs [ACTION OR GESTURE] toward {{user}} and asks "[RESPONSE-SEEKING DIALOGUE]?"
+      [NPC] responds to [RELATED INPUT ELEMENTS] through "[AUDIBLE DIALOGUE]" and [VISIBLE REACTION], then ends on [MEANINGFUL OPENING BEAT].
   }
+
 }`;
 }
 
