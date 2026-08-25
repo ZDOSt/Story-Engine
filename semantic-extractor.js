@@ -37,6 +37,18 @@ const SEMANTIC_DIAGNOSTIC_DETAILS = Symbol('storyEngineSemanticDiagnosticDetails
 const SEMANTIC_DIAGNOSTIC_REPORTED = Symbol('storyEngineSemanticDiagnosticReported');
 const SEMANTIC_DIAGNOSTIC_EXCERPT_RADIUS = 160;
 const CUSTOM_CHAT_COMPLETION_SOURCE = 'custom';
+const UNKNOWN_CHAT_COMPLETION_SOURCE = 'unknown';
+const TROLL_LLM_PROVIDER = 'trollllm';
+const TROLL_LLM_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+const SEMANTIC_PROVIDER_BY_API_HOST = Object.freeze(new Map([
+    ['api.deepseek.com', 'deepseek'],
+    ['api.openai.com', 'openai'],
+    ['api.x.ai', 'xai'],
+    ['api.z.ai', 'zai'],
+    ['chat.trollllm.xyz', TROLL_LLM_PROVIDER],
+    ['nano-gpt.com', 'nanogpt'],
+    ['openrouter.ai', 'openrouter'],
+]));
 const STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
 const NAMED_SEMANTIC_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai', 'nanogpt', 'openrouter', 'xai']));
 const SERIAL_SEMANTIC_TOOL_CALL_SOURCES = Object.freeze(new Set(['nanogpt', 'openrouter', 'xai']));
@@ -689,14 +701,15 @@ function hasRouteOverride(value) {
 }
 
 function resolveSemanticPayloadRoute(payload, route = {}) {
+    const customUrl = route.customUrl || route.custom_url || payload?.custom_url || '';
     return {
         ...route,
         source: route.source || payload?.chat_completion_source,
         model: route.model || payload?.model,
+        customUrl,
+        customIncludeHeaders: payload?.custom_include_headers ?? route.customIncludeHeaders,
         usesCustomUrl: hasRouteOverride(route.usesCustomUrl)
-            || hasRouteOverride(route.customUrl)
-            || hasRouteOverride(route.custom_url)
-            || hasRouteOverride(payload?.custom_url),
+            || hasRouteOverride(customUrl),
         usesReverseProxy: hasRouteOverride(route.usesReverseProxy)
             || hasRouteOverride(route.reverseProxy)
             || hasRouteOverride(route.reverse_proxy)
@@ -704,19 +717,44 @@ function resolveSemanticPayloadRoute(payload, route = {}) {
     };
 }
 
-export function resolveSemanticToolTransportPolicy(chatCompletionSource, route = {}) {
+function getSemanticProviderFromApiUrl(route = {}) {
+    const customUrl = String(route.customUrl || route.custom_url || '').trim();
+    if (!customUrl) return '';
+    try {
+        return SEMANTIC_PROVIDER_BY_API_HOST.get(new URL(customUrl).hostname.toLowerCase()) || '';
+    } catch {
+        return '';
+    }
+}
+
+function resolveSemanticProviderIdentity(chatCompletionSource, route = {}) {
     const source = normalizeChatCompletionSource(chatCompletionSource || route.source);
+    const mayDetectFromUrl = !source
+        || source === CUSTOM_CHAT_COMPLETION_SOURCE
+        || source === UNKNOWN_CHAT_COMPLETION_SOURCE;
+    const urlProvider = mayDetectFromUrl ? getSemanticProviderFromApiUrl(route) : '';
+    return {
+        source,
+        provider: urlProvider || source,
+        identifiedByUrl: Boolean(urlProvider),
+    };
+}
+
+export function resolveSemanticToolTransportPolicy(chatCompletionSource, route = {}) {
+    const identity = resolveSemanticProviderIdentity(chatCompletionSource, route);
+    const trollLlmRoute = identity.provider === TROLL_LLM_PROVIDER;
     const directProviderRoute = !hasRouteOverride(route.usesCustomUrl)
         && !hasRouteOverride(route.customUrl)
         && !hasRouteOverride(route.custom_url)
         && !hasRouteOverride(route.usesReverseProxy)
         && !hasRouteOverride(route.reverseProxy)
         && !hasRouteOverride(route.reverse_proxy);
+    const providerPolicyRoute = directProviderRoute || identity.identifiedByUrl;
     return {
-        source,
-        strictSchema: directProviderRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(source),
-        exactNamedToolChoice: directProviderRoute && NAMED_SEMANTIC_TOOL_CHOICE_SOURCES.has(source),
-        disableParallelToolCalls: directProviderRoute && SERIAL_SEMANTIC_TOOL_CALL_SOURCES.has(source),
+        source: identity.source,
+        strictSchema: !trollLlmRoute && providerPolicyRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(identity.provider),
+        exactNamedToolChoice: trollLlmRoute || (providerPolicyRoute && NAMED_SEMANTIC_TOOL_CHOICE_SOURCES.has(identity.provider)),
+        disableParallelToolCalls: trollLlmRoute || (providerPolicyRoute && SERIAL_SEMANTIC_TOOL_CALL_SOURCES.has(identity.provider)),
     };
 }
 
@@ -731,8 +769,15 @@ export function applyStoryEngineSemanticToolTransportPayload(payload, route = {}
 
     const resolvedRoute = resolveSemanticPayloadRoute(payload, route);
     const policy = resolveSemanticToolTransportPolicy(resolvedRoute.source, resolvedRoute);
+    const identity = resolveSemanticProviderIdentity(resolvedRoute.source, resolvedRoute);
     // An explicit undefined clears any preset-level transport hint without serializing a fallback-only field.
     payload.parallel_tool_calls = policy.disableParallelToolCalls ? false : undefined;
+    if (identity.identifiedByUrl && policy.disableParallelToolCalls) {
+        updateCustomIncludeBody(payload, resolvedRoute, body => {
+            body.parallel_tool_calls = false;
+        });
+    }
+    if (identity.provider === TROLL_LLM_PROVIDER) applyTrollLlmRequiredHeaders(payload, resolvedRoute);
     return payload;
 }
 
@@ -753,11 +798,16 @@ export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
     }
 
     payload.include_reasoning = false;
-    const source = normalizeChatCompletionSource(route.source || payload.chat_completion_source);
+    const resolvedRoute = resolveSemanticPayloadRoute(payload, route);
+    const identity = resolveSemanticProviderIdentity(resolvedRoute.source, resolvedRoute);
+    const source = identity.provider;
     delete payload.reasoning_effort;
 
+    if (applyUrlProviderThinkingDisabledPayload(payload, resolvedRoute, identity)) {
+        return payload;
+    }
     if (OFFICIAL_OPENAI_SOURCES.has(source)) {
-        applyOfficialOpenAiThinkingDisabledPayload(payload, route);
+        applyOfficialOpenAiThinkingDisabledPayload(payload, resolvedRoute);
     } else if (source === 'nanogpt') {
         // SillyTavern maps NanoGPT's "min" setting to its native "none" effort.
         payload.reasoning_effort = 'min';
@@ -835,6 +885,73 @@ function parseCustomIncludeBody(value) {
         Object.assign(merged, parsed);
     }
     return merged;
+}
+
+function updateCustomIncludeBody(payload, route, update) {
+    const customIncludeBody = payload.custom_include_body ?? route.customIncludeBody;
+    const body = parseCustomIncludeBody(customIncludeBody);
+    update(body);
+    payload.custom_include_body = yaml.stringify(body).trim();
+}
+
+function applyUrlProviderThinkingDisabledPayload(payload, route, identity) {
+    if (!identity.identifiedByUrl) return false;
+
+    if (identity.provider === 'nanogpt') {
+        updateCustomIncludeBody(payload, route, body => {
+            const reasoning = isRecord(body.reasoning) ? body.reasoning : {};
+            body.reasoning = { ...reasoning, effort: 'none' };
+        });
+        return true;
+    }
+    if (identity.provider === 'openrouter') {
+        updateCustomIncludeBody(payload, route, body => {
+            const reasoning = isRecord(body.reasoning) ? body.reasoning : {};
+            body.reasoning = { ...reasoning, effort: 'none', exclude: true };
+        });
+        return true;
+    }
+    if (identity.provider === 'zai') {
+        updateCustomIncludeBody(payload, route, body => {
+            const thinking = isRecord(body.thinking) ? body.thinking : {};
+            body.thinking = { ...thinking, type: 'disabled' };
+        });
+        return true;
+    }
+    return false;
+}
+
+function parseCustomIncludeHeaders(value) {
+    if (isRecord(value)) return { ...value };
+    const source = String(value ?? '');
+    if (!source.trim()) return {};
+
+    let parsed;
+    try {
+        parsed = yaml.parse(source);
+    } catch (error) {
+        const detail = String(error?.message || error || 'Unknown YAML parse error').split(/\r?\n/, 1)[0];
+        throw new Error(`Story Engine could not prepare the TrollLLM request because custom_include_headers is invalid YAML: ${detail}`, { cause: error });
+    }
+
+    const merged = {};
+    if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+            if (isRecord(item)) Object.assign(merged, item);
+        }
+    } else if (isRecord(parsed)) {
+        Object.assign(merged, parsed);
+    }
+    return merged;
+}
+
+function applyTrollLlmRequiredHeaders(payload, route = {}) {
+    const configuredHeaders = payload.custom_include_headers ?? route.customIncludeHeaders;
+    const headers = parseCustomIncludeHeaders(configuredHeaders);
+    const existingUserAgentKey = Object.keys(headers)
+        .find(key => String(key).trim().toLowerCase() === 'user-agent');
+    headers[existingUserAgentKey || 'User-Agent'] = TROLL_LLM_USER_AGENT;
+    payload.custom_include_headers = yaml.stringify(headers).trim();
 }
 
 function isRecord(value) {

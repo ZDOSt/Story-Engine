@@ -17838,6 +17838,55 @@ const tests = [
       applyStoryEngineThinkingDisabledPayload(customOpaqueBodyPayload, { source: 'custom' });
       assert.equal(customOpaqueBodyPayload.custom_include_body, 'provider_option: [unterminated');
 
+      const customNanoGptThinkingPayload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://nano-gpt.com/api/v1',
+        model: 'deepseek/deepseek-chat',
+        reasoning_effort: 'high',
+      };
+      applyStoryEngineThinkingDisabledPayload(customNanoGptThinkingPayload);
+      assert.equal(customNanoGptThinkingPayload.include_reasoning, false);
+      assert.equal('reasoning_effort' in customNanoGptThinkingPayload, false);
+      assert.deepEqual(yaml.parse(customNanoGptThinkingPayload.custom_include_body), {
+        reasoning: { effort: 'none' },
+      });
+
+      const customOpenRouterThinkingPayload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://openrouter.ai/api/v1',
+        model: 'deepseek/deepseek-chat',
+        reasoning_effort: 'high',
+      };
+      applyStoryEngineThinkingDisabledPayload(customOpenRouterThinkingPayload);
+      assert.equal(customOpenRouterThinkingPayload.include_reasoning, false);
+      assert.equal('reasoning_effort' in customOpenRouterThinkingPayload, false);
+      assert.deepEqual(yaml.parse(customOpenRouterThinkingPayload.custom_include_body), {
+        reasoning: { effort: 'none', exclude: true },
+      });
+
+      const customOpenAiThinkingPayload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://api.openai.com/v1',
+        model: 'gpt-5.4',
+        reasoning_effort: 'high',
+      };
+      applyStoryEngineThinkingDisabledPayload(customOpenAiThinkingPayload);
+      assert.equal(customOpenAiThinkingPayload.include_reasoning, false);
+      assert.equal(customOpenAiThinkingPayload.reasoning_effort, 'none');
+
+      const customZaiThinkingPayload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://api.z.ai/api/paas/v4',
+        model: 'glm-4.5',
+        custom_include_body: 'provider_option: retained\nthinking:\n  type: enabled',
+      };
+      applyStoryEngineThinkingDisabledPayload(customZaiThinkingPayload);
+      assert.equal(customZaiThinkingPayload.include_reasoning, false);
+      assert.deepEqual(yaml.parse(customZaiThinkingPayload.custom_include_body), {
+        provider_option: 'retained',
+        thinking: { type: 'disabled' },
+      });
+
       for (const sourceName of ['deepseek', 'openai', 'nanogpt', 'openrouter', 'xai']) {
         assert.deepEqual(buildSemanticToolChoice(sourceName), {
           type: 'function',
@@ -17849,6 +17898,18 @@ const tests = [
       }
       assert.equal(buildSemanticToolChoice('deepseek', { usesCustomUrl: true }), 'auto');
       assert.equal(buildSemanticToolChoice('openai', { usesReverseProxy: true }), 'auto');
+      const trollLlmRoute = {
+        customUrl: 'https://chat.trollllm.xyz/v1',
+        usesCustomUrl: true,
+      };
+      assert.deepEqual(buildSemanticToolChoice('custom', trollLlmRoute), {
+        type: 'function',
+        function: { name: 'submit_semantic_preflight' },
+      });
+      assert.deepEqual(buildStructuredToolChoice('submit_tracker_delta', 'custom', trollLlmRoute), {
+        type: 'function',
+        function: { name: 'submit_tracker_delta' },
+      });
       assert.deepEqual(buildStructuredToolChoice('submit_tracker_delta', 'openai'), {
         type: 'function',
         function: { name: 'submit_tracker_delta' },
@@ -17884,6 +17945,64 @@ const tests = [
         exactNamedToolChoice: false,
         disableParallelToolCalls: false,
       });
+      assert.deepEqual(resolveSemanticToolTransportPolicy('custom', trollLlmRoute), {
+        source: 'custom',
+        strictSchema: false,
+        exactNamedToolChoice: true,
+        disableParallelToolCalls: true,
+      });
+      const customUrlProviderPolicies = [
+        ['https://api.deepseek.com/beta', true, true, false],
+        ['https://api.openai.com/v1', true, true, false],
+        ['https://NANO-GPT.COM:443/api/v1', false, true, true],
+        ['https://openrouter.ai/api/v1', false, true, true],
+        ['https://api.x.ai/v1', false, true, true],
+        ['https://api.z.ai/api/paas/v4', false, false, false],
+      ];
+      for (const [customUrl, strictSchema, exactNamedToolChoice, disableParallelToolCalls] of customUrlProviderPolicies) {
+        const route = { customUrl, usesCustomUrl: true };
+        assert.deepEqual(resolveSemanticToolTransportPolicy('custom', route), {
+          source: 'custom',
+          strictSchema,
+          exactNamedToolChoice,
+          disableParallelToolCalls,
+        });
+        assert.deepEqual(
+          buildSemanticToolChoice('custom', route),
+          exactNamedToolChoice
+            ? { type: 'function', function: { name: 'submit_semantic_preflight' } }
+            : 'auto',
+        );
+      }
+      assert.deepEqual(resolveSemanticToolTransportPolicy('unknown', {
+        customUrl: 'https://nano-gpt.com/api/v1',
+        usesCustomUrl: true,
+      }), {
+        source: 'unknown',
+        strictSchema: false,
+        exactNamedToolChoice: true,
+        disableParallelToolCalls: true,
+      });
+      assert.deepEqual(resolveSemanticToolTransportPolicy('custom', {
+        customUrl: 'https://chat.trollllm.xyz.example/v1',
+        usesCustomUrl: true,
+      }), {
+        source: 'custom',
+        strictSchema: false,
+        exactNamedToolChoice: false,
+        disableParallelToolCalls: false,
+      });
+      for (const providerHost of ['api.deepseek.com', 'api.openai.com', 'api.x.ai', 'api.z.ai', 'nano-gpt.com', 'openrouter.ai']) {
+        assert.deepEqual(resolveSemanticToolTransportPolicy('custom', {
+          customUrl: `https://${providerHost}.example/v1`,
+          usesCustomUrl: true,
+        }), {
+          source: 'custom',
+          strictSchema: false,
+          exactNamedToolChoice: false,
+          disableParallelToolCalls: false,
+        });
+      }
       const directNanoGptTransportPayload = { chat_completion_source: 'nanogpt' };
       applyStoryEngineSemanticToolTransportPayload(directNanoGptTransportPayload);
       assert.equal(directNanoGptTransportPayload.parallel_tool_calls, false);
@@ -17895,6 +18014,40 @@ const tests = [
       applyStoryEngineSemanticToolTransportPayload(fallbackTransportPayload);
       assert.equal(fallbackTransportPayload.parallel_tool_calls, undefined);
       assert.doesNotMatch(JSON.stringify(fallbackTransportPayload), /parallel_tool_calls/);
+      const trollLlmTransportPayload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://chat.trollllm.xyz/v1',
+        custom_include_headers: 'X-Story-Engine: retained\nuser-agent: replaced',
+      };
+      applyStoryEngineSemanticToolTransportPayload(trollLlmTransportPayload);
+      assert.equal(trollLlmTransportPayload.parallel_tool_calls, false);
+      assert.deepEqual(yaml.parse(trollLlmTransportPayload.custom_include_body), {
+        parallel_tool_calls: false,
+      });
+      assert.deepEqual(yaml.parse(trollLlmTransportPayload.custom_include_headers), {
+        'X-Story-Engine': 'retained',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      });
+      assert.throws(
+        () => applyStoryEngineSemanticToolTransportPayload({
+          chat_completion_source: 'custom',
+          custom_url: 'https://chat.trollllm.xyz/v1',
+          custom_include_headers: 'X-Story-Engine: [unterminated',
+        }),
+        /custom_include_headers is invalid YAML/,
+      );
+      const customNanoGptTransportPayload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://nano-gpt.com/api/v1',
+        custom_include_body: 'provider_option: retained',
+      };
+      applyStoryEngineSemanticToolTransportPayload(customNanoGptTransportPayload);
+      applyStoryEngineThinkingDisabledPayload(customNanoGptTransportPayload);
+      assert.deepEqual(yaml.parse(customNanoGptTransportPayload.custom_include_body), {
+        provider_option: 'retained',
+        parallel_tool_calls: false,
+        reasoning: { effort: 'none' },
+      });
 
       const nanoGptSemanticPayload = {
         chat_completion_source: 'nanogpt',
@@ -17958,6 +18111,16 @@ const tests = [
       const portableSemanticTool = buildSemanticPreflightTool('nanogpt');
       assert.equal(portableSemanticTool.type, 'function');
       assert.equal(portableSemanticTool.function.name, 'submit_semantic_preflight');
+      const trollLlmSemanticTool = buildSemanticPreflightTool('custom', trollLlmRoute);
+      assert.equal('strict' in trollLlmSemanticTool.function, false);
+      assert.equal('additionalProperties' in trollLlmSemanticTool.function.parameters, false);
+      assert.deepEqual(trollLlmSemanticTool.function.parameters.required, portableSemanticTool.function.parameters.required);
+      const customDeepSeekSemanticTool = buildSemanticPreflightTool('custom', {
+        customUrl: 'https://api.deepseek.com/beta',
+        usesCustomUrl: true,
+      });
+      assert.equal(customDeepSeekSemanticTool.function.strict, true);
+      assert.equal(customDeepSeekSemanticTool.function.parameters.additionalProperties, false);
       assert.equal(portableSemanticTool.function.strict, undefined);
       assert.deepEqual(portableSemanticTool.function.parameters.required, expectedLedgerProperties);
       assert.deepEqual(Object.keys(portableSemanticTool.function.parameters.properties), expectedLedgerProperties);
@@ -18862,7 +19025,9 @@ const tests = [
       assert.match(adapterSource, /export function getChatCompletionProfileRoute/);
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
       assert.match(adapterSource, /model:\s*String\(profile\?\.model \|\| ''\)/);
+      assert.match(adapterSource, /customUrl:\s*String\(profile\?\.\['api-url'\] \|\| ''\)/);
       assert.match(adapterSource, /customIncludeBody:\s*getProfileCustomIncludeBody\(profile, context\)/);
+      assert.match(adapterSource, /customIncludeHeaders:\s*getProfileCustomIncludeHeaders\(profile, context\)/);
       assert.doesNotMatch(source, /semanticThinkingDisableFormats:\s*Object\.freeze\(\{\}\)/);
       assert.doesNotMatch(source, /structured_preflight_semantic_thinking_disable_format/);
       assert.doesNotMatch(source, /customSemanticProfileSelected|semanticThinkingDisableFormat:\s*settings\?\.semanticThinkingDisableFormat/);

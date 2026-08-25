@@ -91,9 +91,11 @@ export function getCurrentChatCompletionRoute() {
     return {
         source,
         model: source.toLowerCase() === 'custom' ? String(settings?.custom_model || '') : '',
+        customUrl: String(settings?.custom_url || ''),
         usesCustomUrl: hasRoutingValue(settings?.custom_url),
         usesReverseProxy: hasRoutingValue(settings?.reverse_proxy),
         customIncludeBody: source.toLowerCase() === 'custom' ? String(settings?.custom_include_body || '') : '',
+        customIncludeHeaders: source.toLowerCase() === 'custom' ? String(settings?.custom_include_headers || '') : '',
     };
 }
 
@@ -557,8 +559,12 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
 
     const chatCompletionSource = generateData.chat_completion_source || chatCompletionSettings?.chat_completion_source;
     const route = {
+        model: String(generateData.model || ''),
+        customUrl: String(generateData.custom_url || ''),
         usesCustomUrl: hasRoutingValue(generateData.custom_url),
         usesReverseProxy: hasRoutingValue(generateData.reverse_proxy),
+        customIncludeBody: String(generateData.custom_include_body || ''),
+        customIncludeHeaders: String(generateData.custom_include_headers || ''),
     };
     const tool = options?.buildTool?.(chatCompletionSource, route);
     const toolChoice = options?.buildToolChoice?.(chatCompletionSource, route);
@@ -639,9 +645,11 @@ export function getChatCompletionProfileRoute(profileId, profileName = '') {
     return {
         source: String(chatCompletionSource),
         model: String(profile?.model || ''),
+        customUrl: String(profile?.['api-url'] || ''),
         usesCustomUrl: hasRoutingValue(profile?.['api-url']),
         usesReverseProxy: hasRoutingValue(profile?.proxy),
         customIncludeBody: getProfileCustomIncludeBody(profile, context),
+        customIncludeHeaders: getProfileCustomIncludeHeaders(profile, context),
     };
 }
 
@@ -651,6 +659,17 @@ function getProfileCustomIncludeBody(profile, context = getContext()) {
     try {
         const preset = context?.getPresetManager?.('openai')?.getCompletionPresetByName?.(presetName);
         return String(preset?.custom_include_body || '');
+    } catch {
+        return '';
+    }
+}
+
+function getProfileCustomIncludeHeaders(profile, context = getContext()) {
+    const presetName = String(profile?.preset || '').trim();
+    if (!presetName) return '';
+    try {
+        const preset = context?.getPresetManager?.('openai')?.getCompletionPresetByName?.(presetName);
+        return String(preset?.custom_include_headers || '');
     } catch {
         return '';
     }
