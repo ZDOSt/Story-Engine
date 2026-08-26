@@ -18020,8 +18020,12 @@ const tests = [
         custom_include_headers: 'X-Story-Engine: retained\nuser-agent: replaced',
       };
       applyStoryEngineSemanticToolTransportPayload(trollLlmTransportPayload);
+      applyStoryEngineThinkingDisabledPayload(trollLlmTransportPayload);
       assert.equal(trollLlmTransportPayload.parallel_tool_calls, undefined);
-      assert.equal('custom_include_body' in trollLlmTransportPayload, false);
+      assert.deepEqual(yaml.parse(trollLlmTransportPayload.custom_include_body), {
+        reasoning_effort: 'low',
+      });
+      assert.equal('reasoning_effort' in trollLlmTransportPayload, false);
       assert.deepEqual(yaml.parse(trollLlmTransportPayload.custom_include_headers), {
         'X-Story-Engine': 'retained',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -21749,6 +21753,25 @@ const tests = [
       assert.doesNotThrow(() => validateSemanticTurnGrounding(actionRecoveryLedger, actionRecoveryBinding));
       assert.equal(actionRecoveryLedger.resolutionEngine.actionUnits[0].evidence, 'follow Phoebe quietly');
 
+      const framedActionRecoveryLedger = groundedLedger(actionRecoveryBinding, ['The user follows Phoebe quietly.']);
+      framedActionRecoveryLedger.resolutionEngine.actionUnits[0].action = 'Aelemar attempts to follow Phoebe quietly';
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(framedActionRecoveryLedger, actionRecoveryBinding));
+      assert.equal(framedActionRecoveryLedger.resolutionEngine.actionUnits[0].evidence, 'follow Phoebe quietly');
+
+      const actorFramedActionRecoveryLedger = groundedLedger(actionRecoveryBinding, ['The user follows Phoebe quietly.']);
+      actorFramedActionRecoveryLedger.resolutionEngine.actionUnits[0].action = 'The user attempts to follow Phoebe quietly';
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(actorFramedActionRecoveryLedger, actionRecoveryBinding));
+      assert.equal(actorFramedActionRecoveryLedger.resolutionEngine.actionUnits[0].evidence, 'follow Phoebe quietly');
+
+      const completeActionBinding = createSemanticTurnBinding({
+        latestUserText: 'I attempt to follow Phoebe quietly.',
+        semanticTurnKey: 'run-complete-action-recovery-1',
+      }, 'normal');
+      const completeActionLedger = groundedLedger(completeActionBinding, ['The user attempts to follow Phoebe quietly.']);
+      completeActionLedger.resolutionEngine.actionUnits[0].action = 'attempt to follow Phoebe quietly';
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(completeActionLedger, completeActionBinding));
+      assert.equal(completeActionLedger.resolutionEngine.actionUnits[0].evidence, 'attempt to follow Phoebe quietly');
+
       const apostropheBinding = createSemanticTurnBinding({
         latestUserText: "I take Phoebe's hand, then look around.",
         semanticTurnKey: 'run-apostrophe-1',
@@ -21777,6 +21800,20 @@ const tests = [
         () => validateSemanticTurnGrounding(paraphrasedActionLedger, whitespaceBinding),
         /not grounded by the same contiguous word sequence/,
         'Action-based recovery must not accept a substituted action verb.',
+      );
+      const framedParaphrasedActionLedger = groundedLedger(whitespaceBinding, ['The user seizes her hand and pins her against the wall.']);
+      framedParaphrasedActionLedger.resolutionEngine.actionUnits[0].action = 'The user attempts to seize her hand and pin her against the wall';
+      assert.throws(
+        () => validateSemanticTurnGrounding(framedParaphrasedActionLedger, whitespaceBinding),
+        /not grounded by the same contiguous word sequence/,
+        'Framing recovery must not accept a substituted action verb.',
+      );
+      const extendedActionLedger = groundedLedger(actionRecoveryBinding, ['The user follows Phoebe quietly and attacks her.']);
+      extendedActionLedger.resolutionEngine.actionUnits[0].action = 'Aelemar attempts to follow Phoebe quietly and attack her';
+      assert.throws(
+        () => validateSemanticTurnGrounding(extendedActionLedger, actionRecoveryBinding),
+        /not grounded by the same contiguous word sequence/,
+        'Framing recovery must require the complete remaining action core.',
       );
       const placeholderActionLedger = groundedLedger(
         createSemanticTurnBinding({
@@ -21817,6 +21854,21 @@ const tests = [
         }
       }, /did not echo the current turn ID exactly/);
       assert.match(formatSemanticDiagnostic(wrongTurnError), /Code: SE-TURN-GROUNDING/);
+
+      const diagnosticLedger = groundedLedger(actionRecoveryBinding, ['The user shadows Phoebe.']);
+      diagnosticLedger.resolutionEngine.actionUnits[0].action = 'The user attempts to shadow Phoebe';
+      let groundingDiagnosticError;
+      assert.throws(() => {
+        try {
+          validateSemanticTurnGrounding(diagnosticLedger, actionRecoveryBinding);
+        } catch (error) {
+          groundingDiagnosticError = error;
+          throw error;
+        }
+      }, /not grounded by the same contiguous word sequence/);
+      const groundingDiagnostic = formatSemanticDiagnostic(groundingDiagnosticError);
+      assert.match(groundingDiagnostic, /Received: \{"evidence":"The user shadows Phoebe\.","action":"The user attempts to shadow Phoebe"\}/);
+      assert.match(groundingDiagnostic, /Raw excerpt: Current user input: I follow Phoebe quietly, keeping to the shadows\./);
 
       assert.throws(
         () => validateSemanticTurnGrounding(

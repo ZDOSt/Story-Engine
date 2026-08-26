@@ -897,6 +897,12 @@ function updateCustomIncludeBody(payload, route, update) {
 function applyUrlProviderThinkingDisabledPayload(payload, route, identity) {
     if (!identity.identifiedByUrl) return false;
 
+    if (identity.provider === TROLL_LLM_PROVIDER) {
+        updateCustomIncludeBody(payload, route, body => {
+            body.reasoning_effort = 'low';
+        });
+        return true;
+    }
     if (identity.provider === 'nanogpt') {
         updateCustomIncludeBody(payload, route, body => {
             const reasoning = isRecord(body.reasoning) ? body.reasoning : {};
@@ -1051,15 +1057,80 @@ function findTurnGroundingSpan(source, evidence) {
     const evidenceTokens = tokenizeTurnGroundingText(evidence);
     if (!sourceTokens.length || !evidenceTokens.length || evidenceTokens.length > sourceTokens.length) return '';
 
-    for (let start = 0; start <= sourceTokens.length - evidenceTokens.length; start += 1) {
-        const matches = evidenceTokens.every((token, offset) => token.value === sourceTokens[start + offset].value);
+    return findExactTurnGroundingTokenSpan(source, sourceTokens, evidenceTokens);
+}
+
+function findExactTurnGroundingTokenSpan(source, sourceTokens, expectedTokens) {
+    if (!sourceTokens.length || !expectedTokens.length || expectedTokens.length > sourceTokens.length) return '';
+
+    for (let start = 0; start <= sourceTokens.length - expectedTokens.length; start += 1) {
+        const matches = expectedTokens.every((token, offset) => token.value === sourceTokens[start + offset].value);
         if (matches) {
             const first = sourceTokens[start];
-            const last = sourceTokens[start + evidenceTokens.length - 1];
+            const last = sourceTokens[start + expectedTokens.length - 1];
             return source.slice(first.start, last.end);
         }
     }
     return '';
+}
+
+const TURN_GROUNDING_ACTOR_PREFIXES = Object.freeze([
+    ['the', 'user'],
+    ['the', 'player'],
+    ['the', 'player', 'character'],
+    ['the', 'character'],
+    ['user'],
+    ['player'],
+    ['player', 'character'],
+    ['character'],
+]);
+
+const TURN_GROUNDING_ATTEMPT_PREFIXES = Object.freeze([
+    ['attempt', 'to'],
+    ['attempts', 'to'],
+    ['attempted', 'to'],
+    ['attempting', 'to'],
+    ['try', 'to'],
+    ['tries', 'to'],
+    ['tried', 'to'],
+    ['trying', 'to'],
+    ['is', 'attempting', 'to'],
+    ['was', 'attempting', 'to'],
+    ['is', 'trying', 'to'],
+    ['was', 'trying', 'to'],
+    ['makes', 'an', 'attempt', 'to'],
+    ['made', 'an', 'attempt', 'to'],
+]);
+
+function turnGroundingTokensMatchAt(tokens, expected, start) {
+    return start >= 0
+        && start + expected.length <= tokens.length
+        && expected.every((value, offset) => tokens[start + offset]?.value === value);
+}
+
+function turnGroundingActionCoreStarts(actionTokens) {
+    const starts = new Set([0]);
+    const actorEnds = [];
+    for (const prefix of TURN_GROUNDING_ACTOR_PREFIXES) {
+        if (!turnGroundingTokensMatchAt(actionTokens, prefix, 0)) continue;
+        actorEnds.push(prefix.length);
+        starts.add(prefix.length);
+    }
+
+    for (const prefix of TURN_GROUNDING_ATTEMPT_PREFIXES) {
+        if (turnGroundingTokensMatchAt(actionTokens, prefix, 0)) starts.add(prefix.length);
+        for (const actorEnd of actorEnds) {
+            if (turnGroundingTokensMatchAt(actionTokens, prefix, actorEnd)) {
+                starts.add(actorEnd + prefix.length);
+            }
+        }
+        // A provider may identify the actor by persona name instead of "the user".
+        if (turnGroundingTokensMatchAt(actionTokens, prefix, 1)) {
+            starts.add(1 + prefix.length);
+        }
+    }
+
+    return [...starts];
 }
 
 function findTurnGroundingActionSpan(source, action) {
@@ -1069,27 +1140,13 @@ function findTurnGroundingActionSpan(source, action) {
     const actionTokens = tokenizeTurnGroundingText(normalizedAction);
     if (!sourceTokens.length || !actionTokens.length) return '';
 
-    let bestLength = 0;
-    let bestStart = -1;
-    for (let sourceStart = 0; sourceStart < sourceTokens.length; sourceStart += 1) {
-        let length = 0;
-        while (
-            length < actionTokens.length
-            && sourceStart + length < sourceTokens.length
-            && actionTokens[length].value === sourceTokens[sourceStart + length].value
-        ) {
-            length += 1;
-        }
-        if (length > bestLength) {
-            bestLength = length;
-            bestStart = sourceStart;
-        }
+    for (const coreStart of turnGroundingActionCoreStarts(actionTokens)) {
+        const coreTokens = actionTokens.slice(coreStart);
+        if (coreTokens.length < 2) continue;
+        const grounded = findExactTurnGroundingTokenSpan(source, sourceTokens, coreTokens);
+        if (grounded) return grounded;
     }
-
-    if (bestStart < 0 || bestLength < 2) return '';
-    const first = sourceTokens[bestStart];
-    const last = sourceTokens[bestStart + bestLength - 1];
-    return source.slice(first.start, last.end);
+    return '';
 }
 
 function validateSemanticTurnIdentity(ledger, turnBinding) {
@@ -1132,12 +1189,15 @@ export function validateSemanticTurnGrounding(ledger, turnBinding) {
             );
         }
         if (!groundedEvidence) {
+            const action = normalizeTurnGroundingQuote(unit?.action);
             throw annotateSemanticDiagnosticError(
                 new Error(`Semantic action unit A${index + 1} is not grounded by the same contiguous word sequence from the current user input or a safe exact action sequence.`),
                 {
                     code: 'SE-TURN-GROUNDING',
                     stage: 'Current-turn grounding',
                     field: `$.resolutionEngine.actionUnits[${index}].evidence`,
+                    received: { evidence: evidence || '(none)', action: action || '(none)' },
+                    excerpt: `Current user input: ${effectiveUserInput.slice(0, 320)}`,
                 },
             );
         }
