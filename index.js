@@ -33,7 +33,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeSemanticOutputMode, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -611,6 +611,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
+    semanticOutputMode: SEMANTIC_OUTPUT_MODES.TOOL_CALL,
     modelCallDelayEnabled: false,
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
@@ -1518,6 +1519,7 @@ function refreshSettingsControls() {
     const enabled = Boolean(settings.useSeparateSemanticSettings);
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
+    const semanticOutputModeSelect = document.getElementById('structured_preflight_semantic_output_mode');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardModeSelect = document.getElementById('structured_preflight_prose_guard_mode');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
@@ -1541,6 +1543,7 @@ function refreshSettingsControls() {
 
     if (storyEngineCheckbox) storyEngineCheckbox.checked = engineEnabled;
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
+    if (semanticOutputModeSelect) semanticOutputModeSelect.value = normalizeSemanticOutputMode(settings.semanticOutputMode);
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (proseGuardModeSelect) proseGuardModeSelect.value = getProseGuardMode(settings);
     for (const { element, key, defaultValue } of proseGuardBanFields) {
@@ -1613,6 +1616,7 @@ function refreshSettingsControls() {
     }
     [
         trackerEnabledCheckbox,
+        semanticOutputModeSelect,
         proseGuardModeSelect,
         progressionEnabledCheckbox,
         enabledCheckbox,
@@ -2125,6 +2129,14 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-semantic-private', 'Used for semantic preflight and post-narration Story Engine utility calls. Story Engine automatically uses the selected connector\'s compatible tool and reasoning request settings.', 'About the private Story Engine connection profile')}
                             </div>
                             <div class="spe-settings-row">
+                                <label for="structured_preflight_semantic_output_mode">Semantic preflight output</label>
+                                <select id="structured_preflight_semantic_output_mode" class="text_pole flex1">
+                                    <option value="${SEMANTIC_OUTPUT_MODES.TOOL_CALL}">Tool Call</option>
+                                    <option value="${SEMANTIC_OUTPUT_MODES.TEXT_ONLY}">Text Only (strict JSON)</option>
+                                </select>
+                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Text Only requests the same complete nested semantic ledger as strict marker-delimited JSON, then applies the same local schema, grounding, and consistency validation. Invalid or incomplete output aborts before narration.', 'About semantic preflight output')}
+                            </div>
+                            <div class="spe-settings-row">
                                 <label for="structured_preflight_semantic_profile">Story Engine profile</label>
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-profile', 'Select the SillyTavern connection profile used for semantic preflight and post-narration Story Engine utility calls.', 'About Story Engine profile selection')}
@@ -2413,6 +2425,11 @@ function renderSettingsPanel() {
 
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
         settings.semanticConnectionProfile = String(event.target?.value || '');
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_semantic_output_mode')?.addEventListener('change', event => {
+        settings.semanticOutputMode = normalizeSemanticOutputMode(event.target?.value);
         refreshSettingsControls();
         saveExtensionSettings();
     });
@@ -16639,6 +16656,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             pendingBoundarySnapshot: pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
+            semanticOutputMode: normalizeSemanticOutputMode(getSettings().semanticOutputMode),
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',
             latestUserText: pendingGeneration?.latestUserText || getLatestUserText(context?.chat),

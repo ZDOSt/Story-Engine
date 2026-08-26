@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticToolArgumentTypes, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTextRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticTextPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticTextLedger, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -17064,7 +17064,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.89');
+      assert.equal(manifest.version, '0.9.90');
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -19023,7 +19023,7 @@ const tests = [
       assert.match(semanticSource, /payload\.reasoning_effort = 'none'/);
       assert.match(semanticSource, /custom_include_body is invalid YAML/);
       assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateSemanticRawWithProfile|isRecoverableSemanticToolCallError|falling back to compact ledger|fallbackFrom:/);
-      assert.match(semanticSource, /Semantic tool-call pass returned no valid complete ledger\. Generation aborted before narration/);
+      assert.match(semanticSource, /Semantic \$\{transportLabel\} pass returned no valid complete ledger\. Generation aborted before narration/);
       assert.match(adapterSource, /export function getChatCompletionProfileRoute/);
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
       assert.match(adapterSource, /model:\s*String\(profile\?\.model \|\| ''\)/);
@@ -19095,6 +19095,150 @@ const tests = [
       assert.match(semanticSource, /status: semanticErrorDetail\(error, \['status', 'statusCode'\]\)/);
       assert.match(semanticSource, /body: semanticErrorDetail\(error, \['body', 'responseBody'\]\)/);
       assert.match(semanticSource, /requestId: semanticErrorDetail\(error, \['requestId', 'request_id'\]\)/);
+    },
+  },
+  {
+    name: '48a.1 semantic text-only transport uses the authoritative nested schema and fails closed',
+    run() {
+      const strictSchema = buildSemanticPreflightTool('deepseek').function.parameters;
+      const buildSchemaFixture = schema => {
+        if (schema.type === 'object') {
+          return Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, buildSchemaFixture(value)]));
+        }
+        if (schema.type === 'array') {
+          return Array.from({ length: schema.minItems || 0 }, () => buildSchemaFixture(schema.items));
+        }
+        if (schema.type === 'boolean') return false;
+        if (schema.type === 'integer') return schema.minimum ?? 0;
+        if (Array.isArray(schema.enum)) return schema.enum[0];
+        return '(none)';
+      };
+      const ledger = buildSchemaFixture(strictSchema);
+      ledger.chaosSemantic.sceneSummary = 'A literal {brace} remains inside this quoted JSON string.';
+      const ledgerText = `BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(ledger)}\nEND_SEMANTIC_PREFLIGHT_JSON`;
+      const raw = {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: ledgerText,
+            reasoning_content: 'BEGIN_SEMANTIC_PREFLIGHT_JSON\n{"invented":true}\nEND_SEMANTIC_PREFLIGHT_JSON',
+          },
+        }],
+      };
+      assert.deepEqual(extractSemanticTextLedger(raw), ledger);
+      assert.deepEqual(extractSemanticTextLedger({
+        candidates: [{ content: { parts: [{ text: ledgerText }] } }],
+      }), ledger);
+      assert.deepEqual(extractSemanticTextLedger({
+        responseContent: { parts: [{ text: ledgerText }] },
+      }), ledger);
+
+      const sharedSemanticPrompt = [
+        { role: 'system', content: 'ENGINE REFERENCE: authoritative semantic rules.' },
+        { role: 'system', content: 'TRACKER SNAPSHOT: relevant current state.' },
+        { role: 'assistant', content: 'RECENT CONTEXT: relevant prior scene facts.' },
+        { role: 'user', content: 'STRICT COMPACT PREFLIGHT LEDGER CONTRACT:\nlegacy output' },
+      ];
+      const toolPromptFromSharedContext = buildSemanticToolPrompt(sharedSemanticPrompt);
+      const textPrompt = buildSemanticTextPrompt(sharedSemanticPrompt);
+      assert.equal(textPrompt.length, sharedSemanticPrompt.length);
+      assert.equal(textPrompt[0].content, 'ENGINE REFERENCE: authoritative semantic rules.');
+      assert.deepEqual(textPrompt.slice(0, -1), toolPromptFromSharedContext.slice(0, -1));
+      assert.deepEqual(sharedSemanticPrompt.slice(0, -1), textPrompt.slice(0, -1));
+      assert.match(textPrompt.at(-1).content, /Return exactly one complete semantic preflight JSON object/);
+      assert.match(textPrompt.at(-1).content, /Every required property must be present exactly once/);
+      assert.match(textPrompt.at(-1).content, /no unknown property is allowed/);
+      assert.match(textPrompt.at(-1).content, /schema description as a mandatory semantic decision rule/);
+      assert.match(textPrompt.at(-1).content, /Accuracy has priority over choosing an active value/);
+      assert.match(textPrompt.at(-1).content, /silently verify that the object satisfies the entire schema/);
+      assert.match(textPrompt.at(-1).content, /Choose it only when its field guidance and the supplied context support it/);
+      assert.doesNotMatch(textPrompt.at(-1).content, /legacy output/);
+      const serializedPromptSchema = textPrompt.at(-1).content
+        .slice(textPrompt.at(-1).content.indexOf('AUTHORITATIVE SEMANTIC PREFLIGHT JSON SCHEMA:')
+          + 'AUTHORITATIVE SEMANTIC PREFLIGHT JSON SCHEMA:'.length)
+        .trim();
+      assert.deepEqual(JSON.parse(serializedPromptSchema), strictSchema);
+
+      assert.equal(normalizeSemanticOutputMode(undefined), SEMANTIC_OUTPUT_MODES.TOOL_CALL);
+      assert.equal(normalizeSemanticOutputMode('unexpected'), SEMANTIC_OUTPUT_MODES.TOOL_CALL);
+      assert.equal(normalizeSemanticOutputMode(SEMANTIC_OUTPUT_MODES.TEXT_ONLY), SEMANTIC_OUTPUT_MODES.TEXT_ONLY);
+
+      const missingField = structuredClone(ledger);
+      delete missingField.resolutionEngine.rollReason;
+      assert.throws(
+        () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(missingField)}\nEND_SEMANTIC_PREFLIGHT_JSON`),
+        /resolutionEngine\.rollReason is required/,
+      );
+      const invalidEnum = structuredClone(ledger);
+      invalidEnum.resolutionEngine.challengeType = 'whatever';
+      assert.throws(
+        () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(invalidEnum)}\nEND_SEMANTIC_PREFLIGHT_JSON`),
+        /resolutionEngine\.challengeType must be one of/,
+      );
+      assert.throws(
+        () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify({ ...ledger, invented: true })}\nEND_SEMANTIC_PREFLIGHT_JSON`),
+        /contains unknown properties: invented/,
+      );
+      assert.throws(
+        () => extractSemanticTextLedger(`commentary\n${ledgerText}`),
+        /text outside the mandatory JSON markers/,
+      );
+      assert.throws(
+        () => extractSemanticTextLedger(`${ledgerText}\n${ledgerText}`),
+        /exactly one BEGIN_SEMANTIC_PREFLIGHT_JSON\/END_SEMANTIC_PREFLIGHT_JSON block/,
+      );
+      assert.throws(
+        () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(ledger)}\n{}\nEND_SEMANTIC_PREFLIGHT_JSON`),
+        /exactly one JSON object/,
+      );
+      assert.throws(
+        () => extractSemanticTextLedger({ choices: [{ message: { reasoning_content: ledgerText, content: '' } }] }),
+        /exactly one final assistant answer; found 0/,
+      );
+      assert.throws(
+        () => extractSemanticTextLedger({ choices: { malformed: true } }),
+        /exactly one final assistant answer; found 0/,
+      );
+      assert.throws(
+        () => extractSemanticTextLedger({
+          choices: [
+            { message: { content: ledgerText } },
+            { message: { content: ledgerText.replace('{brace}', '{different}') } },
+          ],
+        }),
+        /exactly one final assistant answer; found 2/,
+      );
+
+      const inheritedPayload = {
+        chat_completion_source: 'custom',
+        tools: [{ type: 'function' }],
+        tool_choice: 'auto',
+        parallel_tool_calls: true,
+        response_format: { type: 'json_object' },
+        json_schema: { type: 'object' },
+        custom_include_body: yaml.stringify({
+          provider_option: 'retained',
+          tools: [{ type: 'function' }],
+          response_format: { type: 'json_object' },
+          json_schema: { type: 'object' },
+        }),
+      };
+      applySemanticTextRequestPayloadPolicies(inheritedPayload);
+      for (const field of ['tools', 'tool_choice', 'parallel_tool_calls', 'response_format', 'json_schema']) {
+        assert.equal(field in inheritedPayload, false, `${field} must not survive a text-only semantic request.`);
+      }
+      assert.equal(inheritedPayload.include_reasoning, false);
+      assert.deepEqual(yaml.parse(inheritedPayload.custom_include_body), { provider_option: 'retained' });
+
+      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
+      assert.match(semanticSource, /generateSemanticTextResponse/);
+      assert.match(semanticSource, /generateSemanticTextResponseWithProfile/);
+      assert.match(semanticSource, /extractData: true/);
+      assert.match(semanticSource, /Object\.assign\(payload, semanticStructuredOutputOverrides\(\)\)/);
+      assert.match(adapterSource, /sendDefaultChatCompletionTextRequest/);
+      assert.match(adapterSource, /clearStructuredOutput: true/);
+      assert.match(adapterSource, /if \(clearStructuredOutput\) clearChatCompletionStructuredOutputFields\(generateData\)/);
     },
   },
   {
@@ -20073,6 +20217,7 @@ const tests = [
       const controlIds = [
         'structured_preflight_story_engine_enabled',
         'structured_preflight_use_separate_semantic_settings',
+        'structured_preflight_semantic_output_mode',
         'structured_preflight_semantic_profile',
         'structured_preflight_refresh_semantic_settings',
         'structured_preflight_post_tracker_enabled',
@@ -20114,6 +20259,9 @@ const tests = [
       assert.doesNotMatch(renderSource, /data-structured-preflight-reset-writing-style="writingStyleReminderPrompt"/);
       assert.match(renderSource, /Included in the narrator handoff as sceneStyleProfile after the render-control rules/);
       assert.match(renderSource, /Use private Story Engine connection profile/);
+      assert.match(renderSource, /Semantic preflight output/);
+      assert.match(renderSource, /Tool Call/);
+      assert.match(renderSource, /Text Only \(strict JSON\)/);
       assert.match(renderSource, /Story Engine profile/);
       assert.match(renderSource, /Used for semantic preflight and post-narration Story Engine utility calls/);
       assert.match(renderSource, /Narration, adventure openings, character creation, and character progression use the current SillyTavern profile/);
@@ -22018,7 +22166,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.89');
+      assert.equal(manifest.version, '0.9.90');
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

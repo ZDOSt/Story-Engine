@@ -541,6 +541,20 @@ function assertPersonaWriteCurrent(expectedAvatarId, options = {}) {
     }
 }
 
+const CHAT_COMPLETION_STRUCTURED_OUTPUT_FIELDS = Object.freeze([
+    'tools',
+    'tool_choice',
+    'parallel_tool_calls',
+    'functions',
+    'function_call',
+    'response_format',
+    'json_schema',
+]);
+
+function clearChatCompletionStructuredOutputFields(payload) {
+    for (const field of CHAT_COMPLETION_STRUCTURED_OUTPUT_FIELDS) delete payload[field];
+}
+
 export async function sendDefaultChatCompletionToolRequest(messages, responseLength, options = {}) {
     let generateData;
     const purpose = String(options?.purpose || 'semantic tool call').trim() || 'semantic tool call';
@@ -568,14 +582,19 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     };
     const tool = options?.buildTool?.(chatCompletionSource, route);
     const toolChoice = options?.buildToolChoice?.(chatCompletionSource, route);
+    const clearStructuredOutput = options?.clearStructuredOutput === true;
     generateData.messages = messages;
     generateData.stream = false;
     generateData.n = undefined;
-    if (tool) generateData.tools = [tool];
-    if (toolChoice) {
-        generateData.tool_choice = toolChoice;
-    } else if (typeof options?.buildToolChoice === 'function') {
-        delete generateData.tool_choice;
+    if (clearStructuredOutput) {
+        clearChatCompletionStructuredOutputFields(generateData);
+    } else {
+        if (tool) generateData.tools = [tool];
+        if (toolChoice) {
+            generateData.tool_choice = toolChoice;
+        } else if (typeof options?.buildToolChoice === 'function') {
+            delete generateData.tool_choice;
+        }
     }
     generateData.enable_web_search = false;
     delete generateData.request_images;
@@ -593,6 +612,7 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     }
 
     options?.preparePayload?.(generateData);
+    if (clearStructuredOutput) clearChatCompletionStructuredOutputFields(generateData);
 
     if (Object.prototype.hasOwnProperty.call(generateData, 'temperature')) {
         const requestedTemperature = Number(options?.temperature);
@@ -629,6 +649,13 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     }
 
     return await response.json();
+}
+
+export async function sendDefaultChatCompletionTextRequest(messages, responseLength, options = {}) {
+    return await sendDefaultChatCompletionToolRequest(messages, responseLength, {
+        ...options,
+        clearStructuredOutput: true,
+    });
 }
 
 export function getChatCompletionSourceForProfile(profileId, profileName = '') {
