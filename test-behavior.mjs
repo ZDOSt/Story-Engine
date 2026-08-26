@@ -19098,7 +19098,7 @@ const tests = [
     },
   },
   {
-    name: '48a.1 semantic text-only transport uses the authoritative nested schema and fails closed',
+    name: '48a.1 semantic text-only transport uses the schema-derived output template and fails closed',
     run() {
       const strictSchema = buildSemanticPreflightTool('deepseek').function.parameters;
       const buildSchemaFixture = schema => {
@@ -19112,6 +19112,30 @@ const tests = [
         if (schema.type === 'integer') return schema.minimum ?? 0;
         if (Array.isArray(schema.enum)) return schema.enum[0];
         return '(none)';
+      };
+      const assertTemplateMatchesSchema = (template, schema, path = '') => {
+        if (schema.type === 'object') {
+          assert.ok(template && typeof template === 'object' && !Array.isArray(template), `${path || '$'} must be an object template.`);
+          assert.deepEqual(Object.keys(template), Object.keys(schema.properties), `${path || '$'} must retain every schema property in order.`);
+          for (const [key, value] of Object.entries(schema.properties)) {
+            assertTemplateMatchesSchema(template[key], value, path ? `${path}.${key}` : key);
+          }
+          return;
+        }
+        if (schema.type === 'array') {
+          assert.ok(Array.isArray(template), `${path} must be an array template.`);
+          const expectedEntryCount = path === 'resolutionEngine.actionUnits' ? 3 : 1;
+          assert.equal(template.length, expectedEntryCount, `${path} must expose its required illustrative entry shape.`);
+          template.forEach((entry, index) => assertTemplateMatchesSchema(entry, schema.items, `${path}[${index}]`));
+          return;
+        }
+        if (/^resolutionEngine\.actionUnits\[\d+\]\.id$/.test(path)) {
+          const index = Number(path.match(/\[(\d+)\]/)?.[1] || 0);
+          assert.equal(template, `A${index + 1}`, `${path} must make the counted action slot explicit.`);
+          return;
+        }
+        assert.equal(typeof template, 'string', `${path} must be a typed prompt placeholder.`);
+        assert.match(template, /^__.+__$/, `${path} placeholder must be explicit and removable.`);
       };
       const ledger = buildSchemaFixture(strictSchema);
       ledger.chaosSemantic.sceneSummary = 'A literal {brace} remains inside this quoted JSON string.';
@@ -19146,18 +19170,27 @@ const tests = [
       assert.deepEqual(textPrompt.slice(0, -1), toolPromptFromSharedContext.slice(0, -1));
       assert.deepEqual(sharedSemanticPrompt.slice(0, -1), textPrompt.slice(0, -1));
       assert.match(textPrompt.at(-1).content, /Return exactly one complete semantic preflight JSON object/);
-      assert.match(textPrompt.at(-1).content, /Every required property must be present exactly once/);
-      assert.match(textPrompt.at(-1).content, /no unknown property is allowed/);
-      assert.match(textPrompt.at(-1).content, /schema description as a mandatory semantic decision rule/);
+      assert.match(textPrompt.at(-1).content, /Retain every object property and nesting shown in the final ledger/);
+      assert.match(textPrompt.at(-1).content, /No unknown property is allowed/);
+      assert.match(textPrompt.at(-1).content, /placeholder description as a mandatory semantic decision rule/);
       assert.match(textPrompt.at(-1).content, /Accuracy has priority over choosing an active value/);
-      assert.match(textPrompt.at(-1).content, /silently verify that the object satisfies the entire schema/);
       assert.match(textPrompt.at(-1).content, /Choose it only when its field guidance and the supplied context support it/);
+      assert.match(textPrompt.at(-1).content, /Each template array shows its entry shape/);
+      assert.match(textPrompt.at(-1).content, /FINAL SEMANTIC ACCURACY AUDIT/);
+      assert.match(textPrompt.at(-1).content, /explicitly repeats a direct combat action N times/);
+      assert.match(textPrompt.at(-1).content, /"I strike the guard twice" requires A1 and A2/);
       assert.doesNotMatch(textPrompt.at(-1).content, /legacy output/);
-      const serializedPromptSchema = textPrompt.at(-1).content
-        .slice(textPrompt.at(-1).content.indexOf('AUTHORITATIVE SEMANTIC PREFLIGHT JSON SCHEMA:')
-          + 'AUTHORITATIVE SEMANTIC PREFLIGHT JSON SCHEMA:'.length)
+      const templateHeader = 'AUTHORITATIVE SEMANTIC PREFLIGHT JSON OUTPUT TEMPLATE:';
+      const auditHeader = 'FINAL SEMANTIC ACCURACY AUDIT:';
+      const templateStart = textPrompt.at(-1).content.indexOf(templateHeader);
+      const auditStart = textPrompt.at(-1).content.indexOf(auditHeader);
+      assert.ok(templateStart >= 0, 'Text-only prompt must include the schema-derived output template.');
+      assert.ok(auditStart > templateStart, 'The final semantic audit must follow the output template.');
+      const serializedPromptTemplate = textPrompt.at(-1).content
+        .slice(templateStart + templateHeader.length, auditStart)
         .trim();
-      assert.deepEqual(JSON.parse(serializedPromptSchema), strictSchema);
+      const promptTemplate = JSON.parse(serializedPromptTemplate);
+      assertTemplateMatchesSchema(promptTemplate, strictSchema);
 
       assert.equal(normalizeSemanticOutputMode(undefined), SEMANTIC_OUTPUT_MODES.TOOL_CALL);
       assert.equal(normalizeSemanticOutputMode('unexpected'), SEMANTIC_OUTPUT_MODES.TOOL_CALL);
