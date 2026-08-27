@@ -17829,10 +17829,7 @@ const tests = [
       assert.equal(customNonePayload.include_reasoning, false);
       assert.equal('reasoning_effort' in customNonePayload, false);
       assert.equal(customNonePayload.max_tokens, 4096);
-      assert.deepEqual(yaml.parse(customNonePayload.custom_include_body), {
-        provider_option: true,
-        thinking: { type: 'disabled' },
-      });
+      assert.equal(customNonePayload.custom_include_body, customNoneBody);
 
       const customOpaqueBodyPayload = {
         chat_completion_source: 'custom',
@@ -17842,6 +17839,7 @@ const tests = [
       assert.equal(customOpaqueBodyPayload.custom_include_body, 'provider_option: [unterminated');
 
       for (const model of [
+        'deepseek-v4-flash',
         'z-ai/glm-5.3-flash',
         'moonshot/kimi-k3',
         'moonshot/kimi-k2.7-code',
@@ -17903,7 +17901,7 @@ const tests = [
       assert.equal(customZaiThinkingPayload.include_reasoning, false);
       assert.deepEqual(yaml.parse(customZaiThinkingPayload.custom_include_body), {
         provider_option: 'retained',
-        thinking: { type: 'disabled' },
+        thinking: { type: 'enabled' },
       });
       const customZaiForcedThinkingPayload = {
         chat_completion_source: 'custom',
@@ -18057,48 +18055,28 @@ const tests = [
         'X-Story-Engine': 'retained',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       });
-      const controllableTrollLlmModels = [
-        ['deepseek/deepseek-v4-flash:free', { thinking: { type: 'disabled' } }],
-        ['z-ai/glm-5.2-flash', { thinking: { type: 'disabled' } }],
-        ['xiaomi/mimo-v2.5-pro', { thinking: { type: 'disabled' } }],
-        ['moonshot/kimi-k2.6', { thinking: { type: 'disabled' } }],
-        ['qwen/qwen3.7-plus', { enable_thinking: false }],
-      ];
-      for (const [model, expectedControl] of controllableTrollLlmModels) {
+      for (const model of [
+        'deepseek/deepseek-v4-flash:free',
+        'z-ai/glm-5.2-flash',
+        'xiaomi/mimo-v2.5-pro',
+        'moonshot/kimi-k2.6',
+        'qwen/qwen3.7-plus',
+        'z-ai/glm-5.3-flash',
+        'moonshot/kimi-k3',
+        'qwen/qwen3.7-plus-thinking',
+        'google/gemini-3.7-flash',
+      ]) {
         const modelPayload = {
           chat_completion_source: 'custom',
           custom_url: 'https://chat.trollllm.xyz/v1',
           model,
-          custom_include_body: yaml.stringify({
-            provider_option: 'retained',
-            reasoning: { effort: 'high' },
-            reasoning_effort: 'high',
-            thinking: { type: 'enabled' },
-            enable_thinking: true,
-          }),
+          custom_include_body: 'provider_option: retained',
         };
         applyStoryEngineThinkingDisabledPayload(modelPayload);
         assert.deepEqual(yaml.parse(modelPayload.custom_include_body), {
           provider_option: 'retained',
-          ...expectedControl,
-        }, `${model} must receive exactly one model-native thinking control.`);
-      }
-      for (const model of [
-        'z-ai/glm-5.3-flash',
-        'moonshot/kimi-k3',
-        'moonshot/kimi-k2.7-code',
-        'qwen/qwen3.7-plus-thinking',
-        'google/gemini-3.7-flash',
-      ]) {
-        const excludedModelPayload = {
-          chat_completion_source: 'custom',
-          custom_url: 'https://chat.trollllm.xyz/v1',
-          model,
-        };
-        applyStoryEngineThinkingDisabledPayload(excludedModelPayload);
-        assert.deepEqual(yaml.parse(excludedModelPayload.custom_include_body), {
           reasoning_effort: 'low',
-        }, `${model} must not receive an unsupported model-native disable control.`);
+        }, `${model} must receive the same TrollLLM provider policy.`);
       }
       assert.throws(
         () => applyStoryEngineSemanticToolTransportPayload({
@@ -18161,10 +18139,7 @@ const tests = [
         custom_include_body: 'provider_option: true',
       };
       applyStoryEngineBaselineThinkingDisabledPayload(baselineCustomDeepSeekPayload);
-      assert.deepEqual(yaml.parse(baselineCustomDeepSeekPayload.custom_include_body), {
-        provider_option: true,
-        thinking: { type: 'disabled' },
-      });
+      assert.equal(baselineCustomDeepSeekPayload.custom_include_body, 'provider_option: true');
 
       const expectedLedgerProperties = [
         'turnBinding',
@@ -19085,16 +19060,16 @@ const tests = [
       assert.match(semanticThinkingPolicySource, /source === 'nanogpt'/);
       assert.match(semanticThinkingPolicySource, /source === 'openrouter'/);
       assert.doesNotMatch(semanticThinkingPolicySource, /parseCustomIncludeBody|custom_include_body|thinkingDisableFormat/);
-      assert.match(baselineThinkingPolicySource, /hasThinkingOverride/);
-      assert.match(baselineThinkingPolicySource, /\/deepseek\/i\.test\(model\)/);
+      assert.doesNotMatch(baselineThinkingPolicySource, /hasThinkingOverride|\/deepseek\/i\.test\(model\)/);
+      assert.doesNotMatch(semanticSource, /SEMANTIC_(?:FORCED|THINKING|QWEN)|resolveSemanticModelThinkingControl|isControllableQwenHybridModel|setModelThinkingDisabledControl|applyCustomModelThinkingDisabledPayload/);
       assert.match(semanticSource, /export function resolveSemanticToolTransportPolicy/);
       assert.match(semanticSource, /STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES/);
       assert.match(semanticSource, /NAMED_SEMANTIC_TOOL_CHOICE_SOURCES/);
       assert.match(semanticSource, /SERIAL_SEMANTIC_TOOL_CALL_SOURCES/);
       assert.match(semanticSource, /payload\.parallel_tool_calls = policy\.disableParallelToolCalls \? false : undefined/);
-      assert.match(semanticSource, /parsedCustomBody\.thinking = \{ type: 'disabled' \}/);
       assert.match(semanticSource, /payload\.reasoning_effort = 'min'/);
       assert.match(semanticSource, /payload\.reasoning_effort = 'none'/);
+      assert.match(semanticSource, /body\.reasoning_effort = 'low'/);
       assert.match(semanticSource, /custom_include_body is invalid YAML/);
       assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateSemanticRawWithProfile|isRecoverableSemanticToolCallError|falling back to compact ledger|fallbackFrom:/);
       assert.match(semanticSource, /Semantic \$\{transportLabel\} pass returned no valid complete ledger\. Generation aborted before narration/);
@@ -19356,7 +19331,7 @@ const tests = [
       assert.equal('response_format' in textModeModelPayload, false);
       assert.deepEqual(yaml.parse(textModeModelPayload.custom_include_body), {
         provider_option: 'retained',
-        thinking: { type: 'disabled' },
+        reasoning_effort: 'low',
       });
 
       const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');

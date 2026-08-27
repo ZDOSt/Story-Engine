@@ -79,22 +79,6 @@ const OPENAI_NONE_FORWARDABLE_MODELS = Object.freeze(new Set([
     'gpt-5.5-2026-04-23',
 ]));
 const OPENAI_KNOWN_NON_REASONING_MODEL_PATTERN = /^(?:chatgpt-4o(?:-|$)|gpt-(?:3(?:\.5)?|4)(?:[.\-]|$))/i;
-const SEMANTIC_THINKING_CONTROL_KINDS = Object.freeze({
-    THINKING_TYPE: 'thinking_type',
-    QWEN_ENABLE_THINKING: 'qwen_enable_thinking',
-});
-const SEMANTIC_FORCED_THINKING_MODEL_PATTERNS = Object.freeze([
-    /(?:^|\/)glm-5\.3(?:[-/:]|$)/i,
-    /(?:^|\/)kimi-k3(?:[-/:]|$)/i,
-    /(?:^|\/)kimi-k2\.7-code(?:[-/:]|$)/i,
-]);
-const SEMANTIC_THINKING_TYPE_MODEL_PATTERNS = Object.freeze([
-    /(?:^|\/)deepseek-v4-(?:flash|pro)(?:[-/:]|$)/i,
-    /(?:^|\/)glm-(?:4\.5|4\.6|4\.7|5|5\.1|5\.2)(?:[-/:]|$)/i,
-    /(?:^|\/)mimo-v2\.5(?:-pro)?(?:[-/:]|$)/i,
-    /(?:^|\/)kimi-k2\.(?:5|6)(?:[-/:]|$)/i,
-]);
-const SEMANTIC_QWEN_UNCONTROLLABLE_MODEL_PATTERN = /(?:^|[\/_-])(?:qwq|thinking|instruct|coder)(?:$|[\/_-])/i;
 const SEMANTIC_TOOL_SECTIONS = Object.freeze([
     { name: 'engineContext', roots: ['EngineContext'] },
     { name: 'worldTransition', roots: ['WorldTransition'] },
@@ -973,13 +957,9 @@ export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
     const resolvedRoute = resolveSemanticPayloadRoute(payload, route);
     const identity = resolveSemanticProviderIdentity(resolvedRoute.source, resolvedRoute);
     const source = identity.provider;
-    const modelControl = resolveSemanticModelThinkingControl(resolvedRoute.model);
     delete payload.reasoning_effort;
 
-    if (applyUrlProviderThinkingDisabledPayload(payload, resolvedRoute, identity, modelControl)) {
-        return payload;
-    }
-    if (applyCustomModelThinkingDisabledPayload(payload, resolvedRoute, identity, modelControl)) {
+    if (applyUrlProviderThinkingDisabledPayload(payload, resolvedRoute, identity)) {
         return payload;
     }
     if (OFFICIAL_OPENAI_SOURCES.has(source)) {
@@ -992,48 +972,6 @@ export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
     }
 
     return payload;
-}
-
-function resolveSemanticModelThinkingControl(model) {
-    const normalized = String(model || '').trim().toLowerCase();
-    if (!normalized) return null;
-    if (SEMANTIC_FORCED_THINKING_MODEL_PATTERNS.some(pattern => pattern.test(normalized))) {
-        return { forced: true };
-    }
-    if (SEMANTIC_THINKING_TYPE_MODEL_PATTERNS.some(pattern => pattern.test(normalized))) {
-        return { kind: SEMANTIC_THINKING_CONTROL_KINDS.THINKING_TYPE };
-    }
-    if (isControllableQwenHybridModel(normalized)) {
-        return { kind: SEMANTIC_THINKING_CONTROL_KINDS.QWEN_ENABLE_THINKING };
-    }
-    return null;
-}
-
-function isControllableQwenHybridModel(model) {
-    const leaf = String(model || '').split('/').filter(Boolean).at(-1) || '';
-    if (!leaf || SEMANTIC_QWEN_UNCONTROLLABLE_MODEL_PATTERN.test(leaf)) return false;
-    return /^qwen-(?:plus|max)(?:[-:]|$)/i.test(leaf)
-        || /^qwen3(?:\.\d+)*-(?:[a-z0-9])/i.test(leaf);
-}
-
-function setModelThinkingDisabledControl(body, modelControl) {
-    delete body.reasoning;
-    delete body.reasoning_effort;
-    delete body.thinking;
-    delete body.enable_thinking;
-
-    if (modelControl.kind === SEMANTIC_THINKING_CONTROL_KINDS.THINKING_TYPE) {
-        body.thinking = { type: 'disabled' };
-    } else if (modelControl.kind === SEMANTIC_THINKING_CONTROL_KINDS.QWEN_ENABLE_THINKING) {
-        body.enable_thinking = false;
-    }
-}
-
-function applyCustomModelThinkingDisabledPayload(payload, route, identity, modelControl) {
-    if (!modelControl?.kind) return false;
-    if (![CUSTOM_CHAT_COMPLETION_SOURCE, UNKNOWN_CHAT_COMPLETION_SOURCE].includes(identity.source)) return false;
-    updateCustomIncludeBody(payload, route, body => setModelThinkingDisabledControl(body, modelControl));
-    return true;
 }
 
 export function applyStoryEngineBaselineThinkingDisabledPayload(payload, route = {}) {
@@ -1049,20 +987,6 @@ export function applyStoryEngineBaselineThinkingDisabledPayload(payload, route =
         delete payload.reasoning_effort;
     }
 
-    if (source !== CUSTOM_CHAT_COMPLETION_SOURCE) {
-        return payload;
-    }
-
-    const model = String(route.model || payload.model || '').trim();
-    const customIncludeBody = payload.custom_include_body ?? route.customIncludeBody;
-    const parsedCustomBody = parseCustomIncludeBody(customIncludeBody);
-    const hasThinkingOverride = Object.prototype.hasOwnProperty.call(parsedCustomBody, 'thinking');
-    if (!hasThinkingOverride && !/deepseek/i.test(model)) {
-        return payload;
-    }
-
-    parsedCustomBody.thinking = { type: 'disabled' };
-    payload.custom_include_body = yaml.stringify(parsedCustomBody).trim();
     return payload;
 }
 
@@ -1112,16 +1036,12 @@ function updateCustomIncludeBody(payload, route, update) {
     payload.custom_include_body = yaml.stringify(body).trim();
 }
 
-function applyUrlProviderThinkingDisabledPayload(payload, route, identity, modelControl) {
+function applyUrlProviderThinkingDisabledPayload(payload, route, identity) {
     if (!identity.identifiedByUrl) return false;
 
     if (identity.provider === TROLL_LLM_PROVIDER) {
         updateCustomIncludeBody(payload, route, body => {
-            if (modelControl?.kind) {
-                setModelThinkingDisabledControl(body, modelControl);
-            } else {
-                body.reasoning_effort = 'low';
-            }
+            body.reasoning_effort = 'low';
         });
         return true;
     }
@@ -1137,12 +1057,6 @@ function applyUrlProviderThinkingDisabledPayload(payload, route, identity, model
             const reasoning = isRecord(body.reasoning) ? body.reasoning : {};
             body.reasoning = { ...reasoning, effort: 'none', exclude: true };
         });
-        return true;
-    }
-    if (identity.provider === 'zai') {
-        if (modelControl?.kind) {
-            updateCustomIncludeBody(payload, route, body => setModelThinkingDisabledControl(body, modelControl));
-        }
         return true;
     }
     return false;
