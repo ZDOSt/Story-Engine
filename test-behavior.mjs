@@ -18155,17 +18155,33 @@ const tests = [
         'trackerUpdateEngine',
         'chaosSemantic',
       ];
-      const portableSemanticTool = buildSemanticPreflightTool('nanogpt');
+      const semanticToolTurnBinding = {
+        turnId: 'se-turn-tool-schema-binding-test',
+        effectiveUserInput: 'I test the semantic tool binding.',
+      };
+      const portableSemanticTool = buildSemanticPreflightTool('nanogpt', {}, semanticToolTurnBinding);
       assert.equal(portableSemanticTool.type, 'function');
       assert.equal(portableSemanticTool.function.name, 'submit_semantic_preflight');
-      const trollLlmSemanticTool = buildSemanticPreflightTool('custom', trollLlmRoute);
+      assert.deepEqual(
+        portableSemanticTool.function.parameters.properties.turnBinding.properties.turnId.enum,
+        [semanticToolTurnBinding.turnId],
+      );
+      assert.match(
+        portableSemanticTool.function.parameters.properties.turnBinding.properties.turnId.description,
+        /se-turn-tool-schema-binding-test/,
+      );
+      const trollLlmSemanticTool = buildSemanticPreflightTool('custom', trollLlmRoute, semanticToolTurnBinding);
       assert.equal('strict' in trollLlmSemanticTool.function, false);
       assert.equal('additionalProperties' in trollLlmSemanticTool.function.parameters, false);
+      assert.deepEqual(
+        trollLlmSemanticTool.function.parameters.properties.turnBinding.properties.turnId.enum,
+        [semanticToolTurnBinding.turnId],
+      );
       assert.deepEqual(trollLlmSemanticTool.function.parameters.required, portableSemanticTool.function.parameters.required);
       const customDeepSeekSemanticTool = buildSemanticPreflightTool('custom', {
         customUrl: 'https://api.deepseek.com/beta',
         usesCustomUrl: true,
-      });
+      }, semanticToolTurnBinding);
       assert.equal(customDeepSeekSemanticTool.function.strict, true);
       assert.equal(customDeepSeekSemanticTool.function.parameters.additionalProperties, false);
       assert.equal(portableSemanticTool.function.strict, undefined);
@@ -18180,10 +18196,14 @@ const tests = [
         'Portable providers should receive the typed contract without strict-only additionalProperties keywords.',
       );
 
-      const strictSemanticTool = buildSemanticPreflightTool('deepseek');
+      const strictSemanticTool = buildSemanticPreflightTool('deepseek', {}, semanticToolTurnBinding);
       assert.equal(strictSemanticTool.function.strict, true);
       assert.equal(strictSemanticTool.function.parameters.additionalProperties, false);
       assert.equal(strictSemanticTool.function.parameters.properties.resolutionEngine.additionalProperties, false);
+      assert.deepEqual(
+        strictSemanticTool.function.parameters.properties.turnBinding.properties.turnId.enum,
+        [semanticToolTurnBinding.turnId],
+      );
       assert.deepEqual(
         strictSemanticTool.function.parameters.properties.powerActorEnmity
           .properties.assessments.items.properties.scope.enum,
@@ -19087,11 +19107,21 @@ const tests = [
       assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineBaselineThinkingDisabledPayload\(generateData\)/);
 
+      const semanticDefaultToolRequest = semanticSource.slice(
+        semanticSource.indexOf('async function generateSemanticToolCall('),
+        semanticSource.indexOf('async function generateSemanticToolCallWithProfile('),
+      );
+      assert.match(
+        semanticDefaultToolRequest,
+        /buildTool: \(source, route\) => buildSemanticPreflightTool\(source, route, options\.semanticTurnBinding\)/,
+      );
+
       const semanticProfileToolRequest = semanticSource.slice(
         semanticSource.indexOf('async function generateSemanticToolCallWithProfile'),
         semanticSource.indexOf('export async function sendStructuredToolRequest'),
       );
       assert.match(semanticProfileToolRequest, /sendConnectionManagerProfileRequest/);
+      assert.match(semanticProfileToolRequest, /buildSemanticPreflightTool\(chatCompletionSource, route, options\.semanticTurnBinding\)/);
       assert.match(semanticProfileToolRequest, /tool_choice: buildSemanticToolChoice\(chatCompletionSource, route\)/);
       assert.match(semanticProfileToolRequest, /buildSemanticToolTransportOverrides\(chatCompletionSource, route\)/);
       assert.match(semanticProfileToolRequest, /applySemanticToolRequestPayloadPolicies\(payload, route\)/);

@@ -551,7 +551,7 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
     try {
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
             purpose: 'semantic preflight tool call',
-            buildTool: buildSemanticPreflightTool,
+            buildTool: (source, route) => buildSemanticPreflightTool(source, route, options.semanticTurnBinding),
             buildToolChoice: buildSemanticToolChoice,
             preparePayload: payload => applySemanticToolRequestPayloadPolicies(payload),
             signal: options.signal,
@@ -581,7 +581,7 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
     const chatCompletionSource = route.source;
     const toolPrompt = buildSemanticToolPrompt(prompt);
     validateSemanticPromptTurnBinding(toolPrompt, options.semanticTurnBinding);
-    const semanticTool = buildSemanticPreflightTool(chatCompletionSource, route);
+    const semanticTool = buildSemanticPreflightTool(chatCompletionSource, route, options.semanticTurnBinding);
     const preparePayload = payload => applySemanticToolRequestPayloadPolicies(payload, route);
     const overridePayload = {
         temperature: 0,
@@ -1425,9 +1425,10 @@ export function buildSemanticToolChoice(chatCompletionSource, route = {}) {
     return buildStructuredToolChoice(SEMANTIC_TOOL_NAME, chatCompletionSource, route);
 }
 
-export function buildSemanticPreflightTool(chatCompletionSource, route = {}) {
+export function buildSemanticPreflightTool(chatCompletionSource, route = {}, turnBinding = null) {
     const strictSchema = supportsStrictSemanticToolSchema(chatCompletionSource, route);
     const parameters = buildSemanticPreflightSchema();
+    constrainSemanticToolTurnId(parameters, turnBinding);
     if (!strictSchema) removeStrictOnlySchemaKeywords(parameters);
 
     const tool = {
@@ -1441,6 +1442,19 @@ export function buildSemanticPreflightTool(chatCompletionSource, route = {}) {
 
     if (strictSchema) tool.function.strict = true;
     return tool;
+}
+
+function constrainSemanticToolTurnId(parameters, turnBinding) {
+    const turnId = String(turnBinding?.turnId || '').trim();
+    if (!turnId) return;
+
+    const turnIdSchema = parameters?.properties?.turnBinding?.properties?.turnId;
+    if (!turnIdSchema || turnIdSchema.type !== 'string') {
+        throw new Error('Semantic tool schema is missing the turnBinding.turnId string field.');
+    }
+
+    turnIdSchema.enum = [turnId];
+    turnIdSchema.description = `Return exactly ${JSON.stringify(turnId)}. This is the only valid turn ID for this request.`;
 }
 
 function removeStrictOnlySchemaKeywords(schema) {
