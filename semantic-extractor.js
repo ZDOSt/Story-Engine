@@ -79,6 +79,22 @@ const OPENAI_NONE_FORWARDABLE_MODELS = Object.freeze(new Set([
     'gpt-5.5-2026-04-23',
 ]));
 const OPENAI_KNOWN_NON_REASONING_MODEL_PATTERN = /^(?:chatgpt-4o(?:-|$)|gpt-(?:3(?:\.5)?|4)(?:[.\-]|$))/i;
+const SEMANTIC_THINKING_CONTROL_KINDS = Object.freeze({
+    THINKING_TYPE: 'thinking_type',
+    QWEN_ENABLE_THINKING: 'qwen_enable_thinking',
+});
+const SEMANTIC_FORCED_THINKING_MODEL_PATTERNS = Object.freeze([
+    /(?:^|\/)glm-5\.3(?:[-/:]|$)/i,
+    /(?:^|\/)kimi-k3(?:[-/:]|$)/i,
+    /(?:^|\/)kimi-k2\.7-code(?:[-/:]|$)/i,
+]);
+const SEMANTIC_THINKING_TYPE_MODEL_PATTERNS = Object.freeze([
+    /(?:^|\/)deepseek-v4-(?:flash|pro)(?:[-/:]|$)/i,
+    /(?:^|\/)glm-(?:4\.5|4\.6|4\.7|5|5\.1|5\.2)(?:[-/:]|$)/i,
+    /(?:^|\/)mimo-v2\.5(?:-pro)?(?:[-/:]|$)/i,
+    /(?:^|\/)kimi-k2\.(?:5|6)(?:[-/:]|$)/i,
+]);
+const SEMANTIC_QWEN_UNCONTROLLABLE_MODEL_PATTERN = /(?:^|[\/_-])(?:qwq|thinking|instruct|coder)(?:$|[\/_-])/i;
 const SEMANTIC_TOOL_SECTIONS = Object.freeze([
     { name: 'engineContext', roots: ['EngineContext'] },
     { name: 'worldTransition', roots: ['WorldTransition'] },
@@ -957,9 +973,13 @@ export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
     const resolvedRoute = resolveSemanticPayloadRoute(payload, route);
     const identity = resolveSemanticProviderIdentity(resolvedRoute.source, resolvedRoute);
     const source = identity.provider;
+    const modelControl = resolveSemanticModelThinkingControl(resolvedRoute.model);
     delete payload.reasoning_effort;
 
-    if (applyUrlProviderThinkingDisabledPayload(payload, resolvedRoute, identity)) {
+    if (applyUrlProviderThinkingDisabledPayload(payload, resolvedRoute, identity, modelControl)) {
+        return payload;
+    }
+    if (applyCustomModelThinkingDisabledPayload(payload, resolvedRoute, identity, modelControl)) {
         return payload;
     }
     if (OFFICIAL_OPENAI_SOURCES.has(source)) {
@@ -972,6 +992,48 @@ export function applyStoryEngineThinkingDisabledPayload(payload, route = {}) {
     }
 
     return payload;
+}
+
+function resolveSemanticModelThinkingControl(model) {
+    const normalized = String(model || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (SEMANTIC_FORCED_THINKING_MODEL_PATTERNS.some(pattern => pattern.test(normalized))) {
+        return { forced: true };
+    }
+    if (SEMANTIC_THINKING_TYPE_MODEL_PATTERNS.some(pattern => pattern.test(normalized))) {
+        return { kind: SEMANTIC_THINKING_CONTROL_KINDS.THINKING_TYPE };
+    }
+    if (isControllableQwenHybridModel(normalized)) {
+        return { kind: SEMANTIC_THINKING_CONTROL_KINDS.QWEN_ENABLE_THINKING };
+    }
+    return null;
+}
+
+function isControllableQwenHybridModel(model) {
+    const leaf = String(model || '').split('/').filter(Boolean).at(-1) || '';
+    if (!leaf || SEMANTIC_QWEN_UNCONTROLLABLE_MODEL_PATTERN.test(leaf)) return false;
+    return /^qwen-(?:plus|max)(?:[-:]|$)/i.test(leaf)
+        || /^qwen3(?:\.\d+)*-(?:[a-z0-9])/i.test(leaf);
+}
+
+function setModelThinkingDisabledControl(body, modelControl) {
+    delete body.reasoning;
+    delete body.reasoning_effort;
+    delete body.thinking;
+    delete body.enable_thinking;
+
+    if (modelControl.kind === SEMANTIC_THINKING_CONTROL_KINDS.THINKING_TYPE) {
+        body.thinking = { type: 'disabled' };
+    } else if (modelControl.kind === SEMANTIC_THINKING_CONTROL_KINDS.QWEN_ENABLE_THINKING) {
+        body.enable_thinking = false;
+    }
+}
+
+function applyCustomModelThinkingDisabledPayload(payload, route, identity, modelControl) {
+    if (!modelControl?.kind) return false;
+    if (![CUSTOM_CHAT_COMPLETION_SOURCE, UNKNOWN_CHAT_COMPLETION_SOURCE].includes(identity.source)) return false;
+    updateCustomIncludeBody(payload, route, body => setModelThinkingDisabledControl(body, modelControl));
+    return true;
 }
 
 export function applyStoryEngineBaselineThinkingDisabledPayload(payload, route = {}) {
@@ -1050,12 +1112,16 @@ function updateCustomIncludeBody(payload, route, update) {
     payload.custom_include_body = yaml.stringify(body).trim();
 }
 
-function applyUrlProviderThinkingDisabledPayload(payload, route, identity) {
+function applyUrlProviderThinkingDisabledPayload(payload, route, identity, modelControl) {
     if (!identity.identifiedByUrl) return false;
 
     if (identity.provider === TROLL_LLM_PROVIDER) {
         updateCustomIncludeBody(payload, route, body => {
-            body.reasoning_effort = 'low';
+            if (modelControl?.kind) {
+                setModelThinkingDisabledControl(body, modelControl);
+            } else {
+                body.reasoning_effort = 'low';
+            }
         });
         return true;
     }
@@ -1074,10 +1140,9 @@ function applyUrlProviderThinkingDisabledPayload(payload, route, identity) {
         return true;
     }
     if (identity.provider === 'zai') {
-        updateCustomIncludeBody(payload, route, body => {
-            const thinking = isRecord(body.thinking) ? body.thinking : {};
-            body.thinking = { ...thinking, type: 'disabled' };
-        });
+        if (modelControl?.kind) {
+            updateCustomIncludeBody(payload, route, body => setModelThinkingDisabledControl(body, modelControl));
+        }
         return true;
     }
     return false;
@@ -2143,7 +2208,10 @@ export function normalizeSemanticToolArgumentTypes(ledger, schema = buildSemanti
     }
 
     if (schema.type === 'boolean') return normalizeSemanticBooleanToken(ledger);
-    if (path === '$.worldTransition.indoors') return normalizeSemanticIndoorsValue(ledger);
+    if (path === '$.worldTransition.indoors') ledger = normalizeSemanticIndoorsValue(ledger);
+    if (schema.type === 'string' && Array.isArray(schema.enum)) {
+        return normalizeSemanticEnumValue(ledger, schema.enum);
+    }
     return ledger;
 }
 
@@ -2164,6 +2232,40 @@ function normalizeSemanticIndoorsValue(value) {
     if (['true', 'yes', 'y', 'indoors'].includes(token)) return 'indoors';
     if (['false', 'no', 'n', 'outdoors'].includes(token)) return 'outdoors';
     return value;
+}
+
+function normalizeSemanticEnumValue(value, allowedValues) {
+    if (typeof value !== 'string' || !Array.isArray(allowedValues)) return value;
+    if (allowedValues.includes(value)) return value;
+
+    const token = semanticEnumShapeToken(value);
+    if (!token) return value;
+    const structuralMatches = allowedValues.filter(candidate => semanticEnumShapeToken(candidate) === token);
+    if (structuralMatches.length === 1) return structuralMatches[0];
+    if (structuralMatches.length > 1) return value;
+
+    const tokenForms = semanticEnumInflectionForms(token);
+    const inflectionMatches = allowedValues.filter(candidate => {
+        const candidateForms = semanticEnumInflectionForms(semanticEnumShapeToken(candidate));
+        return [...tokenForms].some(form => candidateForms.has(form));
+    });
+    return inflectionMatches.length === 1 ? inflectionMatches[0] : value;
+}
+
+function semanticEnumShapeToken(value) {
+    return String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+function semanticEnumInflectionForms(token) {
+    const forms = new Set([token]);
+    if (/ies$/.test(token) && token.length > 3) {
+        forms.add(`${token.slice(0, -3)}y`);
+    } else if (/(?:ches|shes|xes|zes)$/.test(token) && token.length > 4) {
+        forms.add(token.slice(0, -2));
+    } else if (/s$/.test(token) && !/(?:ss|us|is|ws)$/.test(token) && token.length > 2) {
+        forms.add(token.slice(0, -1));
+    }
+    return forms;
 }
 
 function validateSchemaValue(value, schema, path) {

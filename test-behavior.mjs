@@ -17829,7 +17829,10 @@ const tests = [
       assert.equal(customNonePayload.include_reasoning, false);
       assert.equal('reasoning_effort' in customNonePayload, false);
       assert.equal(customNonePayload.max_tokens, 4096);
-      assert.equal(customNonePayload.custom_include_body, customNoneBody);
+      assert.deepEqual(yaml.parse(customNonePayload.custom_include_body), {
+        provider_option: true,
+        thinking: { type: 'disabled' },
+      });
 
       const customOpaqueBodyPayload = {
         chat_completion_source: 'custom',
@@ -17837,6 +17840,22 @@ const tests = [
       };
       applyStoryEngineThinkingDisabledPayload(customOpaqueBodyPayload, { source: 'custom' });
       assert.equal(customOpaqueBodyPayload.custom_include_body, 'provider_option: [unterminated');
+
+      for (const model of [
+        'z-ai/glm-5.3-flash',
+        'moonshot/kimi-k3',
+        'moonshot/kimi-k2.7-code',
+        'qwen/qwen3.7-plus-thinking',
+        'google/gemini-3.7-flash',
+      ]) {
+        const excludedCustomPayload = {
+          chat_completion_source: 'custom',
+          model,
+          custom_include_body: customNoneBody,
+        };
+        applyStoryEngineThinkingDisabledPayload(excludedCustomPayload);
+        assert.equal(excludedCustomPayload.custom_include_body, customNoneBody);
+      }
 
       const customNanoGptThinkingPayload = {
         chat_completion_source: 'custom',
@@ -17886,6 +17905,14 @@ const tests = [
         provider_option: 'retained',
         thinking: { type: 'disabled' },
       });
+      const customZaiForcedThinkingPayload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://api.z.ai/api/paas/v4',
+        model: 'glm-5.3-flash',
+        custom_include_body: customNoneBody,
+      };
+      applyStoryEngineThinkingDisabledPayload(customZaiForcedThinkingPayload);
+      assert.equal(customZaiForcedThinkingPayload.custom_include_body, customNoneBody);
 
       for (const sourceName of ['deepseek', 'openai', 'nanogpt', 'openrouter', 'xai']) {
         assert.deepEqual(buildSemanticToolChoice(sourceName), {
@@ -18030,6 +18057,49 @@ const tests = [
         'X-Story-Engine': 'retained',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       });
+      const controllableTrollLlmModels = [
+        ['deepseek/deepseek-v4-flash:free', { thinking: { type: 'disabled' } }],
+        ['z-ai/glm-5.2-flash', { thinking: { type: 'disabled' } }],
+        ['xiaomi/mimo-v2.5-pro', { thinking: { type: 'disabled' } }],
+        ['moonshot/kimi-k2.6', { thinking: { type: 'disabled' } }],
+        ['qwen/qwen3.7-plus', { enable_thinking: false }],
+      ];
+      for (const [model, expectedControl] of controllableTrollLlmModels) {
+        const modelPayload = {
+          chat_completion_source: 'custom',
+          custom_url: 'https://chat.trollllm.xyz/v1',
+          model,
+          custom_include_body: yaml.stringify({
+            provider_option: 'retained',
+            reasoning: { effort: 'high' },
+            reasoning_effort: 'high',
+            thinking: { type: 'enabled' },
+            enable_thinking: true,
+          }),
+        };
+        applyStoryEngineThinkingDisabledPayload(modelPayload);
+        assert.deepEqual(yaml.parse(modelPayload.custom_include_body), {
+          provider_option: 'retained',
+          ...expectedControl,
+        }, `${model} must receive exactly one model-native thinking control.`);
+      }
+      for (const model of [
+        'z-ai/glm-5.3-flash',
+        'moonshot/kimi-k3',
+        'moonshot/kimi-k2.7-code',
+        'qwen/qwen3.7-plus-thinking',
+        'google/gemini-3.7-flash',
+      ]) {
+        const excludedModelPayload = {
+          chat_completion_source: 'custom',
+          custom_url: 'https://chat.trollllm.xyz/v1',
+          model,
+        };
+        applyStoryEngineThinkingDisabledPayload(excludedModelPayload);
+        assert.deepEqual(yaml.parse(excludedModelPayload.custom_include_body), {
+          reasoning_effort: 'low',
+        }, `${model} must not receive an unsupported model-native disable control.`);
+      }
       assert.throws(
         () => applyStoryEngineSemanticToolTransportPayload({
           chat_completion_source: 'custom',
@@ -18256,11 +18326,13 @@ const tests = [
       const structuredLedger = buildSchemaFixture(strictSemanticTool.function.parameters);
       assert.equal(validateSemanticToolArguments(structuredLedger), structuredLedger);
       const transportVariantLedger = structuredClone(structuredLedger);
-      transportVariantLedger.worldTransition.indoors = true;
+      transportVariantLedger.worldTransition.indoors = ' Indoor ';
+      transportVariantLedger.worldTransition.timeOfDay = ' NIGHT ';
       transportVariantLedger.worldTransition.requiresSuccess = 'YES';
       transportVariantLedger.resolutionEngine.rollNeeded = 'N';
       transportVariantLedger.resolutionEngine.activeHostileThreat = 'false';
       transportVariantLedger.resolutionEngine.intimacyAdvanceExplicit = 'y';
+      transportVariantLedger.resolutionEngine.challengeType = 'MUNDANE-COMBAT';
       transportVariantLedger.relationshipEngine.push(buildSchemaFixture(
         strictSemanticTool.function.parameters.properties.relationshipEngine.items,
       ));
@@ -18269,10 +18341,12 @@ const tests = [
       transportVariantLedger.relationshipEngine[0].overrideFlags.CurrentInvitation = 'n';
       const normalizedTransportVariant = normalizeSemanticToolArgumentTypes(transportVariantLedger);
       assert.equal(normalizedTransportVariant.worldTransition.indoors, 'indoors');
+      assert.equal(normalizedTransportVariant.worldTransition.timeOfDay, 'night');
       assert.equal(normalizedTransportVariant.worldTransition.requiresSuccess, true);
       assert.equal(normalizedTransportVariant.resolutionEngine.rollNeeded, false);
       assert.equal(normalizedTransportVariant.resolutionEngine.activeHostileThreat, false);
       assert.equal(normalizedTransportVariant.resolutionEngine.intimacyAdvanceExplicit, true);
+      assert.equal(normalizedTransportVariant.resolutionEngine.challengeType, 'mundane_combat');
       assert.equal(normalizedTransportVariant.relationshipEngine[0].initPreset.romanticOpen, false);
       assert.equal(normalizedTransportVariant.relationshipEngine[0].slowBondEvidence.teamwork, true);
       assert.equal(normalizedTransportVariant.relationshipEngine[0].overrideFlags.CurrentInvitation, false);
@@ -19202,6 +19276,14 @@ const tests = [
         () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(missingField)}\nEND_SEMANTIC_PREFLIGHT_JSON`),
         /resolutionEngine\.rollReason is required/,
       );
+      const canonicalTextEnum = structuredClone(ledger);
+      canonicalTextEnum.worldTransition.indoors = 'Indoor';
+      canonicalTextEnum.resolutionEngine.challengeType = 'mundane-combat';
+      const canonicalTextResult = extractSemanticTextLedger(
+        `BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(canonicalTextEnum)}\nEND_SEMANTIC_PREFLIGHT_JSON`,
+      );
+      assert.equal(canonicalTextResult.worldTransition.indoors, 'indoors');
+      assert.equal(canonicalTextResult.resolutionEngine.challengeType, 'mundane_combat');
       const invalidEnum = structuredClone(ledger);
       invalidEnum.resolutionEngine.challengeType = 'whatever';
       assert.throws(
@@ -19262,6 +19344,20 @@ const tests = [
       }
       assert.equal(inheritedPayload.include_reasoning, false);
       assert.deepEqual(yaml.parse(inheritedPayload.custom_include_body), { provider_option: 'retained' });
+
+      const textModeModelPayload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://chat.trollllm.xyz/v1',
+        model: 'xiaomi/mimo-v2.5',
+        response_format: { type: 'json_object' },
+        custom_include_body: 'provider_option: retained\nreasoning_effort: high',
+      };
+      applySemanticTextRequestPayloadPolicies(textModeModelPayload);
+      assert.equal('response_format' in textModeModelPayload, false);
+      assert.deepEqual(yaml.parse(textModeModelPayload.custom_include_body), {
+        provider_option: 'retained',
+        thinking: { type: 'disabled' },
+      });
 
       const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
       const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
