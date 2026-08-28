@@ -314,10 +314,14 @@ function normalizeEstablishedFlag(value, fallback = false) {
     return Boolean(fallback);
 }
 
-function inferLegacyPositionEstablished(source, indoors) {
-    if (!indoors) return false;
+function inferLegacyPositionEstablished(source) {
+    if (!Object.prototype.hasOwnProperty.call(source || {}, 'indoors')) return false;
+    if (typeof source.indoors === 'boolean') return true;
     const text = String(source?.indoors ?? '').trim().toLowerCase();
-    return source?.indoors === true || ['y', 'yes', 'true', '1', 'indoors', 'indoor', 'inside'].includes(text);
+    return [
+        'y', 'yes', 'true', '1', 'indoors', 'indoor', 'inside',
+        'n', 'no', 'false', '0', 'outdoors', 'outdoor', 'outside',
+    ].includes(text);
 }
 
 function normalizeTimeOfDay(value) {

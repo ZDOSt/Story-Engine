@@ -145,30 +145,24 @@ export function stripNarratorMetaPrefix(text) {
         return source.slice(finalWritingCue.index + finalWritingCue[0].length).trim();
     }
 
-    const prefix = source.slice(0, 2500);
-    const narratorMetaSignal = new RegExp(`\\b(?:preflight|pre-flight|mechanics|NPC State|Proactivity|Chaos|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|narrativeFacts|PRIVATE_MECHANICS_AUDIT|narrator prompt|formatting rules|The user action|draft narration|scratchpad|${RENDER_CONTROL_STAGE})\\b`, 'i');
-    if (!narratorMetaSignal.test(prefix)) {
-        return source;
-    }
-
     const lines = source.split(/\r?\n/);
     let cut = 0;
+    let sawArtifact = false;
     for (let index = 0; index < Math.min(lines.length, 40); index += 1) {
         const line = lines[index].trim();
-        if (
-            !line
-            || /^[-*]\s+/.test(line)
-            || new RegExp(`^(?:\\d+[.)]?\\s*)?(?:[*_~]{1,3})?\\s*(?:function\\s+)?${RENDER_CONTROL_STAGE}\\b`, 'i').test(line)
-            || /^(The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|BINDING_NARRATION_DIRECTIVE|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|NARRATOR_HANDOFF|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|MODEL_INSTRUCTION|PROMPT|STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|renderControlEngine|narrativeFacts|MANDATE|STRICT RULES|PART 1|PART 2|PRIVATE_MECHANICS_AUDIT|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary)\b/i.test(line)
-            || /\b(preflight|pre-flight|mechanics|formatting rules|Length target|Hard maximum|PRIVATE HANDOFF|should be|Let me|scratchpad|stage order|RenderControlEngine)\b/i.test(line)
-        ) {
+        if (!line && sawArtifact) {
+            cut = index + 1;
+            continue;
+        }
+        if (isNarratorArtifactLine(line) || (sawArtifact && isNarratorArtifactContinuationLine(line))) {
+            sawArtifact = true;
             cut = index + 1;
             continue;
         }
         break;
     }
 
-    return cut > 0 ? lines.slice(cut).join('\n').trim() : source;
+    return sawArtifact ? lines.slice(cut).join('\n').trim() : source;
 }
 
 function extractAfterLeakedNarratorScratchpad(text) {
@@ -197,7 +191,7 @@ function extractAfterLeakedNarratorScratchpad(text) {
             if (sawArtifact) lastArtifact = index;
             continue;
         }
-        if (isNarratorArtifactLine(line)) {
+        if (isNarratorArtifactLine(line) || (sawArtifact && isNarratorArtifactContinuationLine(line))) {
             sawArtifact = true;
             lastArtifact = index;
             continue;
@@ -214,7 +208,7 @@ function firstNarrativeLineIndex(text) {
     const lines = String(text ?? '').split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index].trim();
-        if (!line || isNarratorArtifactLine(line)) continue;
+        if (!line || isNarratorArtifactLine(line) || isNarratorArtifactContinuationLine(line)) continue;
         return index;
     }
     return 0;
@@ -224,14 +218,19 @@ function isNarratorArtifactLine(line) {
     const text = String(line ?? '').trim();
     if (!text) return true;
     if (/^<\/?think\b/i.test(text)) return true;
-    if (/^[-*]\s+/.test(text)) return true;
     if (new RegExp(`^\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\b`, 'i').test(text)) return true;
     if (new RegExp(`^(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\s*(?:[*_~]{1,3})?\\s*:`, 'i').test(text)) return true;
     if (/^(?:[*_~]{1,3})?\s*(?:CONCLUSION|VALIDATION CONCLUSION|FINAL CHECK|RENDER CHECK)\s*:/i.test(text)) return true;
     if (/^(?:Valid to proceed|All checks pass|All good|Proceed with narration)\b/i.test(text)) return true;
-    if (/^(?:STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract|renderControlEngine|narrativeFacts|MANDATE|STRICT RULES|PART 1|PART 2|PRE-FLIGHT CHECK|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary|AUTHORITY|CONTROLLING AUTHORITY|CLOSED-WORLD RESOLUTION|MECHANICS LOCK|UNRESOLVED INPUT RULE|SOURCE OF TRUTH|BRANCH PRIORITY|CONFLICT RULE|OUTPUT CONTRACT|VALIDITY CONTRACT|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|NARRATOR_HANDOFF|MODEL_INSTRUCTION|PROMPT)\b/i.test(text)) return true;
+    if (/^(?:STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract\(input\)|renderControlEngine\(input\)|PRE-FLIGHT CHECK)\s*:?[\s]*$/i.test(text)) return true;
+    if (/^(?:MANDATE|STRICT RULES|PART 1|PART 2|AUTHORITY|CONTROLLING AUTHORITY|CLOSED-WORLD RESOLUTION|MECHANICS LOCK|UNRESOLVED INPUT RULE|SOURCE OF TRUTH|BRANCH PRIORITY|CONFLICT RULE|OUTPUT CONTRACT|VALIDITY CONTRACT|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|NARRATOR_HANDOFF|MODEL_INSTRUCTION|PROMPT)\s*:?[\s]*$/i.test(text)) return true;
+    if (/^(?:The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|narrativeFacts|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary)\s*[:=]/i.test(text)) return true;
     if (/^(?:You are the final scene narrator|You must narrate the next scene beat|Use only the NARRATOR_HANDOFF|The NARRATOR_HANDOFF sections|Use ACTIVE_BRANCH_FACTS|If an action, hit, injury|If a completed action, hit, injury|If sections conflict|LandedActions, Outcome|A command to an ally|Do not upgrade requests|Do not output|Return only final|Final narration may only|When writing the final in-character response|EXECUTE RenderControlEngine|Execute RenderControlEngine|Required internal calls|Required internal stage order|Required stage order)\b/i.test(text)) return true;
     return false;
+}
+
+function isNarratorArtifactContinuationLine(line) {
+    return /^[-*]\s+/.test(String(line ?? '').trim());
 }
 
 function isNarrativeStartLine(line) {

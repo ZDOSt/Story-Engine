@@ -87,13 +87,24 @@ export function normalizeHiddenHealth(value = {}, refs = {}) {
     const existingNpcs = source.npcs && typeof source.npcs === 'object' ? source.npcs : {};
     const npcs = {};
 
-    for (const name of uniqueStrings([...Object.keys(existingNpcs), ...Object.keys(npcRefs)])) {
-        if (!isRealName(name)) continue;
-        npcs[name] = normalizeHealthActor(existingNpcs[name], {
-            maxHp: defaultNpcMaxHp(npcRefs[name], name, seed),
-            condition: normalizeCondition(npcRefs[name]?.condition),
+    for (const identity of uniqueStrings([...Object.keys(existingNpcs), ...Object.keys(npcRefs)])) {
+        const existingKeys = findHealthNpcKeys(existingNpcs, identity);
+        const refKey = findHealthNpcKey(npcRefs, identity);
+        const displayName = refKey || existingKeys[0] || identity;
+        if (!isRealName(displayName)) continue;
+        const refEntry = refKey ? npcRefs[refKey] : {};
+        const defaults = {
+            maxHp: defaultNpcMaxHp(refEntry, displayName, seed),
+            condition: normalizeCondition(refEntry?.condition),
             actorType: 'npc',
-        });
+        };
+        const merged = existingKeys.reduce(
+            (actor, key) => actor
+                ? mergeHealthActors(actor, normalizeHealthActor(existingNpcs[key], defaults))
+                : normalizeHealthActor(existingNpcs[key], defaults),
+            null,
+        );
+        npcs[displayName] = merged || normalizeHealthActor(null, defaults);
     }
 
     return {
@@ -173,7 +184,8 @@ export function getHealthActor(health, target = {}) {
     if (targetType === 'user') return normalized.user;
     const name = String(target.name || target.NPC || target.target || '').trim();
     if (!name) return null;
-    return normalized.npcs[name] || null;
+    const key = findHealthNpcKey(normalized.npcs, name);
+    return key ? normalized.npcs[key] : null;
 }
 
 export function conditionFromHealthActor(actor = {}) {
@@ -217,7 +229,8 @@ export function applyHiddenHealthToTrackerState(state = {}, health) {
     }
 
     for (const [name, entry] of Object.entries(result.npcs || {})) {
-        const actor = normalized.npcs[name];
+        const healthKey = findHealthNpcKey(normalized.npcs, name);
+        const actor = healthKey ? normalized.npcs[healthKey] : null;
         if (!actor) continue;
         result.npcs[name] = reconcileVisibleInjuryState(entry || {}, conditionFromHealthActor(actor));
     }
@@ -228,11 +241,15 @@ export function applyHiddenHealthToTrackerState(state = {}, health) {
 export function renameHiddenHealthNpc(health, oldName, newName) {
     const oldKey = String(oldName || '').trim();
     const newKey = String(newName || '').trim();
-    if (!oldKey || !newKey || oldKey.toLowerCase() === newKey.toLowerCase()) return normalizeHiddenHealth(health);
+    if (!oldKey || !newKey) return normalizeHiddenHealth(health);
     const next = normalizeHiddenHealth(health);
-    if (!next.npcs[oldKey]) return next;
-    next.npcs[newKey] = mergeHealthActors(next.npcs[oldKey], next.npcs[newKey]);
-    delete next.npcs[oldKey];
+    const storedOldKey = findHealthNpcKey(next.npcs, oldKey);
+    if (!storedOldKey) return next;
+    const storedNewKey = findHealthNpcKey(next.npcs, newKey);
+    next.npcs[newKey] = mergeHealthActors(next.npcs[storedOldKey], storedNewKey ? next.npcs[storedNewKey] : null);
+    for (const key of uniqueStrings([storedOldKey, storedNewKey])) {
+        if (key !== newKey) delete next.npcs[key];
+    }
     next.updatedAt = Date.now();
     return next;
 }
@@ -244,16 +261,22 @@ export function applyProgressionHealthMilestone(root, companionNames = []) {
 
     for (const name of uniqueStrings(companionNames)) {
         if (!isRealName(name)) continue;
-        const entry = root.npcs?.[name] || {};
-        const actor = root.health.npcs[name] || normalizeHealthActor(null, {
-            maxHp: Math.max(ADVENTURING_NPC_BASE_MAX_HP, defaultNpcMaxHp(entry, name, root.health.seed)),
+        const trackerKey = findHealthNpcKey(root.npcs, name);
+        const healthKey = findHealthNpcKey(root.health.npcs, name);
+        const resolvedName = healthKey || trackerKey || name;
+        const entry = trackerKey ? root.npcs[trackerKey] : {};
+        const actor = healthKey ? root.health.npcs[healthKey] : normalizeHealthActor(null, {
+            maxHp: Math.max(ADVENTURING_NPC_BASE_MAX_HP, defaultNpcMaxHp(entry, resolvedName, root.health.seed)),
             condition: normalizeCondition(entry.condition),
             actorType: 'npc',
         });
         actor.maxHp = Math.max(ADVENTURING_NPC_BASE_MAX_HP, Number(actor.maxHp || 0));
         actor.currentHp = clampInt(actor.currentHp, 0, actor.maxHp);
         changed = increaseActorMaxAndCurrent(actor, 1) || changed;
-        root.health.npcs[name] = actor;
+        root.health.npcs[resolvedName] = actor;
+        for (const key of findHealthNpcKeys(root.health.npcs, resolvedName)) {
+            if (key !== resolvedName) delete root.health.npcs[key];
+        }
     }
 
     if (changed) root.health.updatedAt = Date.now();
@@ -285,15 +308,19 @@ function resolveEventTarget(health, event = {}, refs = {}) {
 
     const name = String(event.target || event.NPC || event.name || '').trim();
     if (!name) return { actor: null, name: '' };
-    if (!health.npcs[name]) {
-        const entry = refs.npcs?.[name] || {};
-        health.npcs[name] = normalizeHealthActor(null, {
-            maxHp: defaultNpcMaxHp(entry, name, health.seed),
+    const existingKey = findHealthNpcKey(health.npcs, name);
+    if (existingKey) return { actor: health.npcs[existingKey], name: existingKey };
+
+    const npcRefs = refs.npcs && typeof refs.npcs === 'object' ? refs.npcs : {};
+    const refKey = findHealthNpcKey(npcRefs, name);
+    if (!refKey) return { actor: null, name: '' };
+    const entry = npcRefs[refKey] || {};
+    health.npcs[refKey] = normalizeHealthActor(null, {
+            maxHp: defaultNpcMaxHp(entry, refKey, health.seed),
             condition: normalizeCondition(entry.condition),
             actorType: 'npc',
-        });
-    }
-    return { actor: health.npcs[name], name };
+    });
+    return { actor: health.npcs[refKey], name: refKey };
 }
 
 function applyDamageEvent(actor, event = {}) {
@@ -379,6 +406,12 @@ function mergeHealthActors(oldActor, newActor) {
     const oldNormalized = normalizeHealthActor(oldActor);
     const newNormalized = normalizeHealthActor(newActor);
     const maxHp = Math.max(oldNormalized.maxHp, newNormalized.maxHp);
+    const newestTreatment = oldNormalized.naturalTreatmentAt >= newNormalized.naturalTreatmentAt
+        ? oldNormalized
+        : newNormalized;
+    const newestDamage = oldNormalized.lastDamageAt >= newNormalized.lastDamageAt
+        ? oldNormalized
+        : newNormalized;
     return normalizeHealthActor({
         ...newNormalized,
         maxHp,
@@ -386,7 +419,21 @@ function mergeHealthActors(oldActor, newActor) {
         dead: oldNormalized.dead || newNormalized.dead,
         nonlethalDefeat: oldNormalized.nonlethalDefeat || newNormalized.nonlethalDefeat,
         defeatedCondition: oldNormalized.defeatedCondition !== 'none' ? oldNormalized.defeatedCondition : newNormalized.defeatedCondition,
+        naturalTreatmentKey: newestTreatment.naturalTreatmentKey,
+        naturalTreatmentAt: Math.max(oldNormalized.naturalTreatmentAt, newNormalized.naturalTreatmentAt),
+        lastDamageAt: Math.max(oldNormalized.lastDamageAt, newNormalized.lastDamageAt),
+        lastDamageStateKey: newestDamage.lastDamageStateKey,
     });
+}
+
+function findHealthNpcKeys(npcs, name) {
+    const wanted = String(name || '').trim().toLowerCase();
+    if (!wanted || !npcs || typeof npcs !== 'object') return [];
+    return Object.keys(npcs).filter(key => String(key).trim().toLowerCase() === wanted);
+}
+
+function findHealthNpcKey(npcs, name) {
+    return findHealthNpcKeys(npcs, name)[0] || '';
 }
 
 function increaseActorMaxAndCurrent(actor, amount) {

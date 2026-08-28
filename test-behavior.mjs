@@ -13,7 +13,7 @@ import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTe
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
-import { applyHiddenHealthEvents } from './health-state.js';
+import { applyHiddenHealthEvents, applyProgressionHealthMilestone, getHealthActor, normalizeHiddenHealth } from './health-state.js';
 import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
@@ -10358,6 +10358,7 @@ const tests = [
         .filter(value => value.Proactive === 'Y');
       assert.equal(active.length, 3);
       assert.equal(auditIncludes(report, '6.2c cap=3'), true);
+      assert.equal(auditIncludes(report, '6.3 FOR Dava'), true);
     },
   },
   {
@@ -17064,7 +17065,7 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', import.meta.url), 'utf8'));
 
-      assert.equal(manifest.version, '0.9.90');
+      assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
       assert.match(source, /const PROSE_GUARD_MODES = Object\.freeze/);
       assert.match(source, /proseGuardMode:\s*PROSE_GUARD_MODES\.AUTOMATIC/);
       assert.match(source, /proseGuardCustomBannedPhrases:\s*''/);
@@ -17782,13 +17783,14 @@ const tests = [
       applyStoryEngineThinkingDisabledPayload(officialOpenAiNonReasoningPayload);
       assert.equal(officialOpenAiNonReasoningPayload.include_reasoning, false);
       assert.equal('reasoning_effort' in officialOpenAiNonReasoningPayload, false);
-      assert.throws(
-        () => applyStoryEngineThinkingDisabledPayload({
-          chat_completion_source: 'openai',
-          model: 'gpt-5.6-provider-alias',
-        }),
-        /cannot guarantee thinking is disabled/,
-      );
+      const officialOpenAiUnknownAliasPayload = {
+        chat_completion_source: 'openai',
+        model: 'gpt-5.6-provider-alias',
+        reasoning_effort: 'high',
+      };
+      applyStoryEngineThinkingDisabledPayload(officialOpenAiUnknownAliasPayload);
+      assert.equal(officialOpenAiUnknownAliasPayload.include_reasoning, false);
+      assert.equal('reasoning_effort' in officialOpenAiUnknownAliasPayload, false);
 
       const officialOpenRouterPayload = {
         chat_completion_source: 'openrouter',
@@ -18581,12 +18583,12 @@ const tests = [
       assert.equal(toolPrompt.length, 2);
       assert.equal(toolPrompt[0].content, semanticEngineGuidance);
       assert.match(toolPrompt[1].content, /Call the function tool submit_semantic_preflight exactly once/);
-      assert.match(toolPrompt[1].content, /Every required property must be present/);
+      assert.match(toolPrompt[1].content, /Retain every required object property and nesting/);
       assert.match(toolPrompt[1].content, /For enum fields, use exactly one value listed by the schema/);
-      assert.match(toolPrompt[1].content, /Do not emit count fields, placeholder rows, or sentinel values in arrays/);
+      assert.match(toolPrompt[1].content, /Do not emit placeholders, template rows, count fields, sentinel values/);
       assert.match(toolPrompt[1].content, /count=0, a list value of \(none\), or \["\(none\)"\] means an empty array/);
       assert.match(toolPrompt[1].content, /references to lines or the template mean the corresponding schema properties/);
-      assert.match(toolPrompt[1].content, /tool schema changes only transport structure; do not reduce, reinterpret, or invent ledger content/);
+      assert.match(toolPrompt[1].content, /Output mode changes only the transport; do not reduce, reinterpret, invent, or silently omit ledger content/);
       assert.doesNotMatch(toolPrompt[1].content, /ResolutionEngine\.identifyGoal: test/);
       assert.doesNotMatch(toolPrompt[1].content, /BEGIN_SEMANTIC_PREFLIGHT|END_SEMANTIC_PREFLIGHT/);
       assert.doesNotMatch(toolPrompt[1].content, /SEMANTIC_PREFLIGHT_COMPLETE|stop sentinel/);
@@ -19249,12 +19251,12 @@ const tests = [
       assert.deepEqual(textPrompt.slice(0, -1), toolPromptFromSharedContext.slice(0, -1));
       assert.deepEqual(sharedSemanticPrompt.slice(0, -1), textPrompt.slice(0, -1));
       assert.match(textPrompt.at(-1).content, /Return exactly one complete semantic preflight JSON object/);
-      assert.match(textPrompt.at(-1).content, /Retain every object property and nesting shown in the final ledger/);
+      assert.match(textPrompt.at(-1).content, /Retain every required object property and nesting/);
       assert.match(textPrompt.at(-1).content, /No unknown property is allowed/);
-      assert.match(textPrompt.at(-1).content, /placeholder description as a mandatory semantic decision rule/);
+      assert.match(textPrompt.at(-1).content, /field description as a mandatory semantic decision rule/);
       assert.match(textPrompt.at(-1).content, /Accuracy has priority over choosing an active value/);
       assert.match(textPrompt.at(-1).content, /Choose it only when its field guidance and the supplied context support it/);
-      assert.match(textPrompt.at(-1).content, /Each template array shows its entry shape/);
+      assert.match(textPrompt.at(-1).content, /Each schema array defines one entry shape/);
       assert.match(textPrompt.at(-1).content, /FINAL SEMANTIC ACCURACY AUDIT/);
       assert.match(textPrompt.at(-1).content, /explicitly repeats a direct combat action N times/);
       assert.match(textPrompt.at(-1).content, /"I strike the guard twice" requires A1 and A2/);
@@ -20788,6 +20790,41 @@ const tests = [
     },
   },
   {
+    name: '61b health identity is case-insensitive and duplicate records merge',
+    run() {
+      const normalized = normalizeHiddenHealth({
+        seed: 'case-insensitive-health-test',
+        npcs: {
+          Seraphina: { maxHp: 10, currentHp: 8 },
+          seraphina: { maxHp: 12, currentHp: 5 },
+        },
+      });
+      assert.deepEqual(Object.keys(normalized.npcs), ['Seraphina']);
+      assert.equal(normalized.npcs.Seraphina.maxHp, 12);
+      assert.equal(normalized.npcs.Seraphina.currentHp, 5);
+      assert.equal(getHealthActor(normalized, { name: 'SERAPHINA' }).currentHp, 5);
+
+      const progressed = {
+        user: {},
+        npcs: { Seraphina: {} },
+        health: { seed: 'case-insensitive-health-test', npcs: { seraphina: { maxHp: 10, currentHp: 10 } } },
+      };
+      applyProgressionHealthMilestone(progressed, ['seraphina']);
+      assert.deepEqual(Object.keys(progressed.health.npcs), ['Seraphina']);
+      assert.equal(progressed.health.npcs.Seraphina.maxHp, 11);
+      assert.equal(progressed.health.npcs.Seraphina.currentHp, 11);
+    },
+  },
+  {
+    name: '61c unknown health targets cannot create hidden state',
+    run() {
+      const before = normalizeHiddenHealth({ seed: 'unknown-health-target-test', npcs: { Guard: { maxHp: 10 } } });
+      const after = applyHiddenHealthEvents(before, [{ kind: 'damage', targetType: 'npc', target: 'Unknown', amount: 3 }]);
+      assert.deepEqual(Object.keys(after.npcs), ['Guard']);
+      assert.deepEqual(after.npcs, before.npcs);
+    },
+  },
+  {
     name: '61a dead tracker targets are excluded from living resolution targets',
     run() {
       const report = runCase({
@@ -22305,7 +22342,7 @@ const tests = [
         { TRACKER: 'left', NARRATOR_HANDOFF: 'right' },
       );
 
-      assert.equal(manifest.version, '0.9.90');
+      assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
       assert.match(source, /narratorHandoffEnabled:\s*false/);
       assert.match(source, /narratorHandoffDisplayMode:\s*NARRATOR_HANDOFF_DISPLAY_MODES\.SIDE_PANEL/);
       assert.match(source, /narratorHandoffWidgetCollapsed:\s*true/);

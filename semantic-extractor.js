@@ -1000,10 +1000,8 @@ function applyOfficialOpenAiThinkingDisabledPayload(payload, route = {}) {
         return;
     }
 
-    throw new Error(
-        `Story Engine cannot guarantee thinking is disabled for official OpenAI model "${model || '(unknown)'}" through this SillyTavern version. `
-        + 'Use a recognized non-reasoning model, update SillyTavern support, or use a Custom profile with the OpenAI thinking format.',
-    );
+    // Unknown official model aliases must remain usable. SillyTavern/provider defaults
+    // are safer than forwarding an unverified reasoning_effort value.
 }
 
 function parseCustomIncludeBody(value) {
@@ -1345,14 +1343,8 @@ export function buildSemanticToolPrompt(prompt) {
     const toolContract = [
         `MANDATORY OUTPUT CONTRACT: Call the function tool ${SEMANTIC_TOOL_NAME} exactly once.`,
         'Do not output narration, prose, markdown, visible JSON, or ordinary assistant text.',
-        'Fill the complete nested object defined by the tool schema. Every required property must be present.',
-        'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
-        'For enum fields, use exactly one value listed by the schema. Never invent a synonym or alternate label.',
-        'Use an empty array when a repeated section has no entries. Do not emit count fields, placeholder rows, or sentinel values in arrays.',
-        'Echo the exact authoritative current turn ID in turnBinding.turnId, and ground every resolutionEngine.actionUnits evidence value with the same words in the same order from one contiguous span of the supplied effectiveUserInput. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words.',
-        'Legacy shorthand in the semantic guidance maps to this schema as follows: Y/N means true/false; count=0, a list value of (none), or ["(none)"] means an empty array; [index] means one array entry; and references to lines or the template mean the corresponding schema properties. Apply the guidance semantically; never emit compact ledger keys.',
-        'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
-        'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. The tool schema changes only transport structure; do not reduce, reinterpret, or invent ledger content.',
+        ...buildSharedSemanticOutputRules(),
+        SEMANTIC_ACTION_UNIT_ACCURACY_AUDIT,
     ].join('\n');
 
     return replaceSemanticOutputContract(prompt, toolContract);
@@ -1365,26 +1357,33 @@ export function buildSemanticTextPrompt(prompt) {
         `MANDATORY OUTPUT CONTRACT: Return exactly one complete semantic preflight JSON object between ${SEMANTIC_TEXT_LEDGER_START} and ${SEMANTIC_TEXT_LEDGER_END}.`,
         `The final assistant response must begin with ${SEMANTIC_TEXT_LEDGER_START} on its own line and end with ${SEMANTIC_TEXT_LEDGER_END} on its own line.`,
         'Output no narration, prose, explanation, reasoning, markdown fences, tools, or text outside those markers.',
-        'Fill the complete nested object represented by the authoritative output template below. Retain every object property and nesting shown in the final ledger; each real array entry retains its complete displayed property set. No unknown property is allowed.',
-        'The template is generated from the exact same submit_semantic_preflight schema used for Tool Call. Its field names, nesting, types, enums, and field guidance are authoritative.',
-        'Treat every placeholder description as a mandatory semantic decision rule, not as an example. Evaluate every field independently against the supplied authoritative context.',
-        'Complete every required object and array even when the scene does not activate that engine. Use only the schema-defined neutral, false, none, unchanged, or empty value appropriate to the field when its evidence is absent.',
-        'Accuracy has priority over choosing an active value. Every non-neutral classification must be supported by the supplied context; never invent evidence, infer an unsupported fact, or select a value merely to fill the ledger.',
-        'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
-        'For enum fields, use exactly one value listed by the schema. Choose it only when its field guidance and the supplied context support it; never choose randomly, invent a synonym, or use an alternate label.',
-        'Each template array shows its entry shape. Return an empty array when no real entries apply, keep only real entries, and repeat the entry shape only as needed. Do not emit placeholders, template rows, count fields, sentinel values, comments, trailing commas, or ellipses.',
-        'Echo the exact authoritative current turn ID in turnBinding.turnId, and ground every resolutionEngine.actionUnits evidence value with the same words in the same order from one contiguous span of the supplied effectiveUserInput. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words.',
-        'Legacy shorthand in the semantic guidance maps to this schema as follows: Y/N means true/false; count=0, a list value of (none), or ["(none)"] means an empty array; [index] means one array entry; and references to lines or the template mean the corresponding schema properties. Apply the guidance semantically; never emit compact ledger keys.',
-        'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
-        'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. This text format changes only transport structure; do not reduce, reinterpret, invent, or silently omit ledger content.',
+        ...buildSharedSemanticOutputRules(),
         'AUTHORITATIVE SEMANTIC PREFLIGHT JSON OUTPUT TEMPLATE:',
         JSON.stringify(outputTemplate, null, 2),
-        'FINAL SEMANTIC ACCURACY AUDIT: Perform this silently before serializing the JSON. Preserve every explicit quantity, negation, target, and stated method from effectiveUserInput. Treat resolutionEngine.actionUnits as an accounting of individually resolvable actions, never a summary of the overall intent. When the current user input explicitly repeats a direct combat action N times, emit N separate actionUnits, capped at three. Each actionUnit describes one occurrence; multiple units may cite the same exact evidence phrase when that phrase establishes the repeated actions. Pattern: "I strike the guard twice" requires A1 and A2, each describing one strike and citing that same phrase. Do not output this audit or any placeholder text.',
+        SEMANTIC_ACTION_UNIT_ACCURACY_AUDIT,
         `Return only the complete verified JSON object between ${SEMANTIC_TEXT_LEDGER_START} and ${SEMANTIC_TEXT_LEDGER_END}.`,
     ].join('\n');
 
     return replaceSemanticOutputContract(prompt, textContract);
 }
+
+function buildSharedSemanticOutputRules() {
+    return [
+        'Fill the complete nested semantic object defined by the authoritative submit_semantic_preflight schema. Retain every required object property and nesting; each real array entry retains its complete property set. No unknown property is allowed.',
+        'The schema field names, nesting, types, enums, and field guidance are authoritative in both Tool Call and Text Only modes. Treat every field description as a mandatory semantic decision rule, not as an example, and evaluate every field independently against the supplied authoritative context.',
+        'Complete every required object and array even when the scene does not activate that engine. Use only the schema-defined neutral, false, none, unchanged, or empty value appropriate to the field when its evidence is absent.',
+        'Accuracy has priority over choosing an active value. Every non-neutral classification must be supported by the supplied context; never invent evidence, infer an unsupported fact, or select a value merely to fill the ledger.',
+        'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
+        'For enum fields, use exactly one value listed by the schema. Choose it only when its field guidance and the supplied context support it; never choose randomly, invent a synonym, or use an alternate label.',
+        'Each schema array defines one entry shape. Return an empty array when no real entries apply, keep only real entries, and repeat the entry shape only as needed. Do not emit placeholders, template rows, count fields, sentinel values, comments, trailing commas, or ellipses.',
+        'Echo the exact authoritative current turn ID in turnBinding.turnId, and ground every resolutionEngine.actionUnits evidence value with the same words in the same order from one contiguous span of the supplied effectiveUserInput. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words.',
+        'Legacy shorthand in the semantic guidance maps to this schema as follows: Y/N means true/false; count=0, a list value of (none), or ["(none)"] means an empty array; [index] means one array entry; and references to lines or the template mean the corresponding schema properties. Apply the guidance semantically; never emit compact ledger keys.',
+        'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
+        'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. Output mode changes only the transport; do not reduce, reinterpret, invent, or silently omit ledger content.',
+    ];
+}
+
+const SEMANTIC_ACTION_UNIT_ACCURACY_AUDIT = 'FINAL SEMANTIC ACCURACY AUDIT: Perform this silently before submitting the semantic object. Preserve every explicit quantity, negation, target, and stated method from effectiveUserInput. Treat resolutionEngine.actionUnits as an accounting of individually resolvable actions, never a summary of the overall intent. When the current user input explicitly repeats a direct combat action N times, emit N separate actionUnits, capped at three. Each actionUnit describes one occurrence; multiple units may cite the same exact evidence phrase when that phrase establishes the repeated actions. Pattern: "I strike the guard twice" requires A1 and A2, each describing one strike and citing that same phrase. Do not output this audit or any placeholder text.';
 
 function replaceSemanticOutputContract(prompt, contract) {
     const messages = Array.isArray(prompt)
@@ -3771,9 +3770,6 @@ function extractTextCandidates(raw) {
         if (typeof value === 'object') {
             if (typeof value.text === 'string') add(value.text);
             if (typeof value.content === 'string') add(value.content);
-            if (typeof value.reasoning === 'string') add(value.reasoning);
-            if (typeof value.reasoning_content === 'string') add(value.reasoning_content);
-            if (typeof value.reasoning_details === 'string') add(value.reasoning_details);
             if (typeof value.message === 'string') add(value.message);
             if (value.message && typeof value.message === 'object') add(value.message);
             if (value.delta && typeof value.delta === 'object') add(value.delta);
