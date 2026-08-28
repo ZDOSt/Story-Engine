@@ -13670,10 +13670,11 @@ function buildNewCharacterAdditionalDetailsInstruction(identity = {}) {
     const details = String(identity.additionalDetails || identity.appearance || '').trim();
     if (identity.additionalDetailsMode === 'user' && details) {
         return [
-            'The user-provided additional character details are locked starting facts. Preserve their meaning exactly.',
-            'Use them to shape background, Earth life, arrival/origin, appearance, clothing, profession, prior training, inventory, body type, race flavor, or other fixed sheet details as applicable.',
-            'Fill missing details normally, but do not contradict, replace, weaken, intensify, or ignore these notes.',
-            'Do not turn these notes into personality, future choices, goals, fears, habits, tactics, morals, emotional reactions, preferred behavior, or statements about what the character will/may/usually/tends to do.',
+            'The user-provided additional character details are locked starting facts. Preserve every explicit fact, relationship, limitation, named detail, number, and stated item, but treat the notes as source material rather than text to reproduce.',
+            'Preserve their meaning exactly while paraphrasing and reorganizing the wording naturally for the appropriate character-sheet fields. Do not copy the notes sentence-for-sentence, preserve their original order, or repeat them as a block.',
+            'Use the notes as the central foundation for this character. Develop a coherent, specific character around them and fill genuinely missing details with grounded additions that fit the selected race, genre, stats, and concept.',
+            'Do not contradict, erase, weaken, intensify, or ignore these notes, and do not turn them into personality, future choices, goals, fears, habits, tactics, morals, emotional reactions, preferred behavior, or statements about what the character will/may/usually/tends to do.',
+            'Use exact wording only when it is itself a fixed fact, such as a proper name, title, number, unique term, or explicitly quoted phrase.',
             identity.genre === 'Isekai'
                 ? 'Because the selected genre is Isekai, any Earth-life details in these notes describe the character before death and reincarnation. Do not establish time since crossing, prior new-world life, adaptation, local knowledge, previous-life memory state, or whether memories are retained or lost unless the user explicitly wrote that detail.'
                 : '',

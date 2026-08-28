@@ -19541,7 +19541,12 @@ const tests = [
       assert.match(source, /died on Earth and was reincarnated in another world/);
       assert.match(source, /Do not establish time since crossing, prior new-world life, adaptation, local knowledge, previous-life memory state/);
       assert.match(source, /The user-provided additional character details are locked starting facts/);
-      assert.match(source, /Use them to shape background, Earth life, arrival\/origin, appearance, clothing/);
+      assert.match(source, /Use the notes as the central foundation for this character/);
+      assert.match(source, /treat the notes as source material rather than text to reproduce/);
+      assert.match(source, /paraphrasing and reorganizing the wording naturally/);
+      assert.match(source, /Do not copy the notes sentence-for-sentence/);
+      assert.match(source, /Develop a coherent, specific character around them/);
+      assert.match(source, /Use exact wording only when it is itself a fixed fact/);
       assert.doesNotMatch(source, /placeholder="Optional background,[^"]*scars/);
       assert.match(source, /Because the selected genre is Isekai, any Earth-life details/);
       assert.match(source, /before death and reincarnation/);
