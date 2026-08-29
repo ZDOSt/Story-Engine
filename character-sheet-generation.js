@@ -195,6 +195,7 @@ export function buildCharacterSheetSchema(options = {}) {
     const fixedRace = cleanInline(options.fixedRace);
     const fixedUserNonHuman = normalizeFixedUserNonHuman(options.fixedUserNonHuman, mode);
     const needsStartingSpell = mode === 'new' && stats.MND >= 7;
+    const isNewIsekai = mode === 'new' && String(options.genre || '').trim().toLowerCase() === 'isekai';
     const explicitAnchorSource = cleanSourceText(options.explicitAnchorSource);
     const explicitAppearanceSource = cleanSourceText(options.explicitAppearanceSource);
     const allowNewCharacterAnchors = mode === 'new' && Boolean(explicitAnchorSource);
@@ -289,9 +290,15 @@ export function buildCharacterSheetSchema(options = {}) {
                 maxItems: mode === 'new' ? (needsStartingSpell ? 1 : 0) : 5,
                 items: namedEntry,
             },
-            inventory: stringArray('Carried or stowed possessions that are not worn, equipped, or currency.'),
-            currency: stringArray('Money only. Use an empty array when none is explicit or appropriate.', 8),
-            gear: stringArray('Worn, equipped, or immediately ready items only.'),
+            inventory: stringArray(isNewIsekai
+                ? 'Modern Earth belongings carried or stowed at the moment of transition, excluding worn, equipped, and currency items. Include only plausible personal possessions the character could have had before reincarnation. Do not invent fantasy or new-world supplies, tools, weapons, or equipment unless explicitly supplied by the user.'
+                : 'Carried or stowed possessions that are not worn, equipped, or currency.'),
+            currency: stringArray(isNewIsekai
+                ? 'Must be an empty array for a new Isekai character. The character starts with no new-world currency; money is acquired through gameplay.'
+                : 'Money only. Use an empty array when none is explicit or appropriate.', 8),
+            gear: stringArray(isNewIsekai
+                ? 'Modern Earth clothing and equipped or worn items the character possessed at the moment of transition. Do not invent fantasy weapons, armor, adventuring equipment, or other new-world possessions unless explicitly supplied by the user.'
+                : 'Worn, equipped, or immediately ready items only.'),
             characterAnchors: {
                 ...stringArray(
                     mode === 'new'
@@ -382,6 +389,7 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
     const explicitAnchorSource = cleanSourceText(options.explicitAnchorSource);
     const explicitAppearanceSource = cleanSourceText(options.explicitAppearanceSource);
     const allowNewCharacterAnchors = mode === 'new' && Boolean(explicitAnchorSource);
+    const isNewIsekai = mode === 'new' && String(options.genre || '').trim().toLowerCase() === 'isekai';
     const source = parseCharacterSheetPayload(payload, 'character-sheet payload');
     assertExactKeys(source, ROOT_FIELDS, 'character-sheet payload');
 
@@ -435,7 +443,7 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
 
     const naturalWeapons = normalizeStringArray(source.naturalWeapons, 'naturalWeapons', 8);
     const inventory = normalizeStringArray(source.inventory, 'inventory', 48);
-    const currency = normalizeStringArray(source.currency, 'currency', 8);
+    const currency = isNewIsekai ? [] : normalizeStringArray(source.currency, 'currency', 8);
     const gear = normalizeStringArray(source.gear, 'gear', 48);
     const submittedAnchors = normalizeStringArray(source.characterAnchors, 'characterAnchors', mode === 'new' && allowNewCharacterAnchors ? 3 : 48);
     const representedFacts = [

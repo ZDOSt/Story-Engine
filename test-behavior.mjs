@@ -19600,7 +19600,7 @@ const tests = [
       assert.match(source, /INVENTORY: carried or stowed items only/);
       assert.match(source, /Do not list clothing worn on the body, armor, weapons worn ready, currency/);
       assert.match(source, /CURRENCY: money only, using the genre currency when possible/);
-      assert.match(source, /For fantasy and isekai use silver \(sv\), for modern use dollars \(\$\), for cyberpunk use credits \(cr\)/);
+      assert.match(source, /For fantasy use silver \(sv\), for modern use dollars \(\$\), for cyberpunk use credits \(cr\)/);
       assert.match(source, /Do not put currency in INVENTORY or GEAR/);
       assert.match(source, /GEAR: worn, equipped, or immediately ready items only/);
       assert.match(source, /Do not list currency, carried supplies, pack contents, natural weapons, or body anatomy here/);
@@ -20983,6 +20983,9 @@ const tests = [
       assert.match(schema.properties.appearance.description, /Face must avoid beauty judgments/);
       assert.match(schema.properties.appearance.description, /Hands must not infer strength, history, skill, or behavior/);
       assert.match(schema.properties.basicInfo.properties.priorRoleOrTraining.description, /Preserve an explicit user-supplied role faithfully without broadening it/);
+      assert.match(schema.properties.inventory.description, /Modern Earth belongings carried or stowed/);
+      assert.match(schema.properties.gear.description, /Modern Earth clothing and equipped or worn items/);
+      assert.match(schema.properties.currency.description, /Must be an empty array for a new Isekai character/);
       assert.equal(buildCharacterSheetJsonSchema(options).strict, true);
 
       const deepSeekTool = buildCharacterSheetTool('deepseek', options);
@@ -20997,6 +21000,12 @@ const tests = [
       });
 
       const payload = structuredCharacterSheetPayload();
+      const normalizedIsekai = normalizeCharacterSheetPayload(payload, options);
+      assert.deepEqual(normalizedIsekai.currency, []);
+      assert.deepEqual(normalizedIsekai.inventory, payload.inventory);
+      assert.deepEqual(normalizedIsekai.gear, payload.gear);
+      const normalizedNonIsekai = normalizeCharacterSheetPayload(payload, { ...options, genre: 'Fantasy' });
+      assert.deepEqual(normalizedNonIsekai.currency, payload.currency);
       const raw = {
         choices: [{
           message: {
@@ -21220,6 +21229,13 @@ const tests = [
       assert.match(source, /Skin may state tone and visible physical qualities but must not assert scars, marks, or their absence unless explicitly supplied/);
       assert.match(source, /Face must use concrete physical features without beauty judgments/);
       assert.match(source, /Hands must use physical characteristics only and must not infer strength, history, skill, or behavior/);
+      const newCharacterGeneration = source.slice(source.indexOf('async function generateNewPlayerCharacterSheet'), source.indexOf('function getPlayerSetupPersonaName'));
+      assert.match(newCharacterGeneration, /const possessionInstructions = genre === 'Isekai'/);
+      assert.match(newCharacterGeneration, /always return an empty array for a new Isekai character/);
+      assert.match(newCharacterGeneration, /modern-Earth belongings carried or stowed at the moment of transition only/);
+      assert.match(newCharacterGeneration, /modern-Earth clothing and other worn or equipped items the character possessed at the moment of transition only/);
+      assert.match(newCharacterGeneration, /For fantasy use silver \(sv\)/);
+      assert.match(newCharacterGeneration, /Do not casually add magic items, self-guiding tools, special artifacts, weapons, or supernatural equipment/);
       assert.match(source, /buildTool: source => buildCharacterSheetTool\(source, generationOptions\)/);
       assert.match(source, /buildToolChoice: buildCharacterSheetToolChoice/);
       assert.match(source, /preparePayload: applyStoryEngineBaselineThinkingDisabledPayload/);
