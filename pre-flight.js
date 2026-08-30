@@ -253,6 +253,9 @@ export function formatNarratorPromptContext(report, options = {}) {
         '[STORY_ENGINE_MECHANICS_AUDIT v0.9]',
         'This displayed handoff is for audit only. The narrator model receives narrativeContract(input), not this mechanics audit.',
         '',
+        '==SEMANTIC_TRANSPORT==',
+        ...formatSemanticTransportAudit(ledger),
+        '',
         '==MECHANICS_RESULTS==',
         ...formatMechanicsResultList(summary, resolution, handoff, ledger, report),
         '',
@@ -263,6 +266,38 @@ export function formatNarratorPromptContext(report, options = {}) {
     ];
 
     return lines.join('\n');
+}
+
+function formatSemanticTransportAudit(ledger = {}) {
+    const extraction = ledger?.deterministicOverrides?.semanticLedgerExtraction;
+    if (!extraction || typeof extraction !== 'object') {
+        return [
+            '- status: unavailable (no semantic preflight metadata)',
+        ];
+    }
+
+    const transport = extraction.transport === 'text_only'
+        ? 'Strict JSON (native schema first)'
+        : extraction.transport === 'tool_call'
+            ? 'Tool Call'
+            : valueOrNone(extraction.transport);
+    const nativeAttempted = extraction.nativeSchemaAttempted === true;
+    const fallbackUsed = extraction.nativeSchemaFallback === true;
+    const acceptedPath = fallbackUsed
+        ? 'Marker-delimited text-only JSON fallback'
+        : nativeAttempted
+            ? 'Native SillyTavern JSON Schema'
+            : extraction.transport === 'tool_call'
+                ? 'Tool Call'
+                : 'Unavailable (unrecognized transport metadata)';
+
+    return [
+        `- selected mode: ${transport}`,
+        `- native schema attempted: ${nativeAttempted ? 'YES' : 'NO'}`,
+        `- accepted path: ${acceptedPath}`,
+        `- text fallback used: ${fallbackUsed ? 'YES' : 'NO'}`,
+        `- local validation: ${extraction.strict === true ? 'complete and strict' : 'complete'}`,
+    ];
 }
 
 function formatMechanicsResultList(summary, resolution, handoff = {}, ledger = {}, report = {}) {

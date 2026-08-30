@@ -575,6 +575,19 @@ function auditIncludes(report, text) {
   return report.auditLines.some(line => line.includes(text));
 }
 
+function semanticTransportAuditReport(metadata) {
+  return {
+    semanticLedger: {
+      deterministicOverrides: {
+        semanticLedgerExtraction: metadata,
+      },
+    },
+    finalNarrativeHandoff: {
+      resolutionPacket: {},
+    },
+  };
+}
+
 function nthRandomForDie(die, sides) {
   return (Math.max(1, Math.min(sides, die)) - 0.5) / sides;
 }
@@ -630,6 +643,54 @@ const tests = [
       assert.equal(handoff.StandingBasis, '(none)');
       assert.equal(report.finalNarrativeHandoff.proactivityResults.Servant.Proactive, 'Y');
       assert.doesNotMatch(prompt(report), /The standing this NPC recognizes in \{\{user\}\}/);
+    },
+  },
+  {
+    name: '00a semantic transport is visible in the mechanics handoff',
+    run() {
+      const nativeAudit = auditPrompt(semanticTransportAuditReport({
+        transport: 'text_only',
+        nativeSchemaAttempted: true,
+        nativeSchemaFallback: false,
+        strict: true,
+      }));
+      assert.match(nativeAudit, /==SEMANTIC_TRANSPORT==[\s\S]*selected mode: Strict JSON \(native schema first\)/);
+      assert.match(nativeAudit, /accepted path: Native SillyTavern JSON Schema/);
+      assert.match(nativeAudit, /text fallback used: NO/);
+      assert.match(nativeAudit, /local validation: complete and strict/);
+      assert.doesNotMatch(prompt(semanticTransportAuditReport({
+        transport: 'text_only',
+        nativeSchemaAttempted: true,
+        nativeSchemaFallback: false,
+        strict: true,
+      })), /SEMANTIC_TRANSPORT|Native SillyTavern JSON Schema/);
+
+      const fallbackAudit = auditPrompt(semanticTransportAuditReport({
+        transport: 'text_only',
+        nativeSchemaAttempted: true,
+        nativeSchemaFallback: true,
+        strict: true,
+      }));
+      assert.match(fallbackAudit, /accepted path: Marker-delimited text-only JSON fallback/);
+      assert.match(fallbackAudit, /text fallback used: YES/);
+
+      const toolAudit = auditPrompt(semanticTransportAuditReport({
+        transport: 'tool_call',
+        nativeSchemaAttempted: false,
+        nativeSchemaFallback: false,
+        strict: true,
+      }));
+      assert.match(toolAudit, /selected mode: Tool Call/);
+      assert.match(toolAudit, /accepted path: Tool Call/);
+      assert.match(toolAudit, /native schema attempted: NO/);
+
+      const unknownAudit = auditPrompt(semanticTransportAuditReport({
+        transport: 'legacy_mode',
+        nativeSchemaAttempted: false,
+        nativeSchemaFallback: false,
+        strict: true,
+      }));
+      assert.match(unknownAudit, /accepted path: Unavailable \(unrecognized transport metadata\)/);
     },
   },
   {
