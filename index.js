@@ -2132,9 +2132,9 @@ function renderSettingsPanel() {
                                 <label for="structured_preflight_semantic_output_mode">Semantic preflight output</label>
                                 <select id="structured_preflight_semantic_output_mode" class="text_pole flex1">
                                     <option value="${SEMANTIC_OUTPUT_MODES.TOOL_CALL}">Tool Call</option>
-                                    <option value="${SEMANTIC_OUTPUT_MODES.TEXT_ONLY}">Text Only (strict JSON)</option>
+                                    <option value="${SEMANTIC_OUTPUT_MODES.TEXT_ONLY}">Strict JSON (native schema first)</option>
                                 </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Text Only requests the same complete nested semantic ledger as strict marker-delimited JSON, then applies the same local schema, grounding, and consistency validation. Invalid or incomplete output aborts before narration.', 'About semantic preflight output')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Strict JSON first requests SillyTavern native JSON Schema structured output, then retries with the existing marker-delimited JSON contract if the native request is rejected or its result fails local validation. Both paths use the same complete ledger, schema, grounding, and consistency validation before narration.', 'About semantic preflight output')}
                             </div>
                             <div class="spe-settings-row">
                                 <label for="structured_preflight_semantic_profile">Story Engine profile</label>

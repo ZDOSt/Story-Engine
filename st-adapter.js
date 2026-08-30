@@ -560,10 +560,13 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     const purpose = String(options?.purpose || 'semantic tool call').trim() || 'semantic tool call';
     const chatCompletionSettings = getChatCompletionSettings();
     const signal = options?.signal || null;
+    const jsonSchema = options?.jsonSchema && typeof options.jsonSchema === 'object'
+        ? options.jsonSchema
+        : null;
     throwIfRequestAborted(signal);
     try {
         const model = await getChatCompletionModel(chatCompletionSettings);
-        const params = await createGenerationParameters(chatCompletionSettings, model, 'quiet', messages);
+        const params = await createGenerationParameters(chatCompletionSettings, model, 'quiet', messages, { jsonSchema });
         generateData = params.generate_data;
     } catch (error) {
         if (signal?.aborted) throw getRequestAbortError(signal);
@@ -582,7 +585,7 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     };
     const tool = options?.buildTool?.(chatCompletionSource, route);
     const toolChoice = options?.buildToolChoice?.(chatCompletionSource, route);
-    const clearStructuredOutput = options?.clearStructuredOutput === true;
+    const clearStructuredOutput = options?.clearStructuredOutput === true || Boolean(jsonSchema);
     generateData.messages = messages;
     generateData.stream = false;
     generateData.n = undefined;
@@ -603,6 +606,8 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     delete generateData.json_schema;
     delete generateData.stop;
 
+    if (jsonSchema) generateData.json_schema = jsonSchema;
+
     if (Number.isFinite(responseLength) && responseLength > 0) {
         if (Object.prototype.hasOwnProperty.call(generateData, 'max_completion_tokens') && !Object.prototype.hasOwnProperty.call(generateData, 'max_tokens')) {
             generateData.max_completion_tokens = responseLength;
@@ -612,7 +617,10 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     }
 
     options?.preparePayload?.(generateData);
-    if (clearStructuredOutput) clearChatCompletionStructuredOutputFields(generateData);
+    if (clearStructuredOutput) {
+        clearChatCompletionStructuredOutputFields(generateData);
+        if (jsonSchema) generateData.json_schema = jsonSchema;
+    }
 
     if (Object.prototype.hasOwnProperty.call(generateData, 'temperature')) {
         const requestedTemperature = Number(options?.temperature);
@@ -654,6 +662,17 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
 export async function sendDefaultChatCompletionTextRequest(messages, responseLength, options = {}) {
     return await sendDefaultChatCompletionToolRequest(messages, responseLength, {
         ...options,
+        clearStructuredOutput: true,
+    });
+}
+
+export async function sendDefaultChatCompletionJsonSchemaRequest(messages, responseLength, jsonSchema, options = {}) {
+    if (!jsonSchema || typeof jsonSchema !== 'object' || Array.isArray(jsonSchema)) {
+        throw adapterTransportError('Semantic native JSON Schema request is missing a valid schema envelope.', { stage: 'build' });
+    }
+    return await sendDefaultChatCompletionToolRequest(messages, responseLength, {
+        ...options,
+        jsonSchema,
         clearStructuredOutput: true,
     });
 }
