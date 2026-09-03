@@ -65,7 +65,7 @@ const SEMANTIC_PROVIDER_BY_API_HOST = Object.freeze(new Map([
     ['nano-gpt.com', 'nanogpt'],
     ['openrouter.ai', 'openrouter'],
 ]));
-const STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
+const STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES = Object.freeze(new Set(['deepseek', 'openai', TROLL_LLM_PROVIDER]));
 const NAMED_SEMANTIC_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai', 'nanogpt', 'openrouter', 'xai']));
 const SERIAL_SEMANTIC_TOOL_CALL_SOURCES = Object.freeze(new Set(['nanogpt', 'openrouter', 'xai']));
 const OFFICIAL_OPENAI_SOURCES = Object.freeze(new Set(['openai', 'azure_openai']));
@@ -1003,7 +1003,7 @@ export function resolveSemanticToolTransportPolicy(chatCompletionSource, route =
     const providerPolicyRoute = directProviderRoute || identity.identifiedByUrl;
     return {
         source: identity.source,
-        strictSchema: !trollLlmRoute && providerPolicyRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(identity.provider),
+        strictSchema: providerPolicyRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(identity.provider),
         exactNamedToolChoice: trollLlmRoute || (providerPolicyRoute && NAMED_SEMANTIC_TOOL_CHOICE_SOURCES.has(identity.provider)),
         disableParallelToolCalls: providerPolicyRoute && SERIAL_SEMANTIC_TOOL_CALL_SOURCES.has(identity.provider),
     };

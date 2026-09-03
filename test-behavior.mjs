@@ -18035,13 +18035,14 @@ const tests = [
       });
       assert.deepEqual(resolveSemanticToolTransportPolicy('custom', trollLlmRoute), {
         source: 'custom',
-        strictSchema: false,
+        strictSchema: true,
         exactNamedToolChoice: true,
         disableParallelToolCalls: false,
       });
       const customUrlProviderPolicies = [
         ['https://api.deepseek.com/beta', true, true, false],
         ['https://api.openai.com/v1', true, true, false],
+        ['https://chat.trollllm.xyz/v1', true, true, false],
         ['https://NANO-GPT.COM:443/api/v1', false, true, true],
         ['https://openrouter.ai/api/v1', false, true, true],
         ['https://api.x.ai/v1', false, true, true],
@@ -18234,8 +18235,8 @@ const tests = [
         /se-turn-tool-schema-binding-test/,
       );
       const trollLlmSemanticTool = buildSemanticPreflightTool('custom', trollLlmRoute, semanticToolTurnBinding);
-      assert.equal('strict' in trollLlmSemanticTool.function, false);
-      assert.equal('additionalProperties' in trollLlmSemanticTool.function.parameters, false);
+      assert.equal(trollLlmSemanticTool.function.strict, true);
+      assert.equal(trollLlmSemanticTool.function.parameters.additionalProperties, false);
       assert.deepEqual(
         trollLlmSemanticTool.function.parameters.properties.turnBinding.properties.turnId.enum,
         [semanticToolTurnBinding.turnId],
