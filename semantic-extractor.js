@@ -65,7 +65,7 @@ const SEMANTIC_PROVIDER_BY_API_HOST = Object.freeze(new Map([
     ['nano-gpt.com', 'nanogpt'],
     ['openrouter.ai', 'openrouter'],
 ]));
-const STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES = Object.freeze(new Set(['deepseek', 'openai', TROLL_LLM_PROVIDER]));
+const STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
 const NAMED_SEMANTIC_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai', 'nanogpt', 'openrouter', 'xai']));
 const SERIAL_SEMANTIC_TOOL_CALL_SOURCES = Object.freeze(new Set(['nanogpt', 'openrouter', 'xai']));
 const OFFICIAL_OPENAI_SOURCES = Object.freeze(new Set(['openai', 'azure_openai']));
@@ -1006,7 +1006,10 @@ export function resolveSemanticToolTransportPolicy(chatCompletionSource, route =
     const providerPolicyRoute = directProviderRoute || identity.identifiedByUrl;
     return {
         source: identity.source,
-        strictSchema: providerPolicyRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(identity.provider),
+        // Strict-schema capability is tied to SillyTavern's actual connector source.
+        // URL inference remains available for transport quirks, but must not turn a
+        // Custom profile into an unconfigurable hardcoded strict route.
+        strictSchema: directProviderRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(identity.source),
         exactNamedToolChoice: trollLlmRoute || (providerPolicyRoute && NAMED_SEMANTIC_TOOL_CHOICE_SOURCES.has(identity.provider)),
         disableParallelToolCalls: providerPolicyRoute && SERIAL_SEMANTIC_TOOL_CALL_SOURCES.has(identity.provider),
     };
@@ -1028,7 +1031,9 @@ export function normalizeSemanticToolSchemaRouteKey(chatCompletionSource, route 
         source: chatCompletionSource || route.source,
     });
     const identity = resolveSemanticProviderIdentity(resolvedRoute.source, resolvedRoute);
-    const provider = identity.provider || identity.source || UNKNOWN_CHAT_COMPLETION_SOURCE;
+    const source = identity.source || UNKNOWN_CHAT_COMPLETION_SOURCE;
+    if (source === CUSTOM_CHAT_COMPLETION_SOURCE) return `${source}|<custom>`;
+    const provider = identity.provider || source;
     const customUrl = String(resolvedRoute.customUrl || '').trim();
     let endpoint = '<direct>';
     if (customUrl) {

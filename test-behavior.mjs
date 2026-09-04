@@ -18040,14 +18040,14 @@ const tests = [
       });
       assert.deepEqual(resolveSemanticToolTransportPolicy('custom', trollLlmRoute), {
         source: 'custom',
-        strictSchema: true,
+        strictSchema: false,
         exactNamedToolChoice: true,
         disableParallelToolCalls: false,
       });
       assert.equal(
         isSemanticToolSchemaOverrideAllowed('custom', trollLlmRoute),
-        false,
-        'Hardcoded strict providers must not expose a redundant opt-in control.',
+        true,
+        'Custom profiles must expose the configurable strict control regardless of endpoint URL.',
       );
       assert.deepEqual(
         resolveSemanticToolTransportPolicy('newapi', {
@@ -18056,19 +18056,24 @@ const tests = [
         }),
         {
           source: 'newapi',
-          strictSchema: true,
+          strictSchema: false,
           exactNamedToolChoice: true,
           disableParallelToolCalls: false,
         },
-        'Known provider URL detection must override a connector-specific profile source label.',
+        'Known provider URL detection may preserve transport quirks without changing the source-level strict policy.',
       );
       assert.equal(
         isSemanticToolSchemaOverrideAllowed('newapi', {
           customUrl: 'https://chat.trollllm.xyz/v1',
           usesCustomUrl: true,
         }),
+        true,
+        'Unknown connector sources must retain a configurable strict control even when their URL is recognized.',
+      );
+      assert.equal(
+        resolveSemanticToolTransportPolicy('trollllm').strictSchema,
         false,
-        'A known TrollLLM endpoint must hide the configurable strict control even when its source label is custom.',
+        'TrollLLM must not remain a hardcoded strict source after moving it behind Custom.',
       );
       assert.equal(
         isSemanticToolSchemaOverrideAllowed('nanogpt'),
@@ -18085,7 +18090,15 @@ const tests = [
           customUrl: 'HTTPS://NANO-GPT.COM:443/api/v1/?provider=1',
           usesCustomUrl: true,
         }),
-        'nanogpt|https://nano-gpt.com/api/v1',
+        'custom|<custom>',
+      );
+      assert.equal(
+        normalizeSemanticToolSchemaRouteKey('custom', {
+          customUrl: 'https://chat.trollllm.xyz/v1',
+          usesCustomUrl: true,
+        }),
+        'custom|<custom>',
+        'All Custom profiles must share one persisted strict preference.',
       );
       assert.equal(
         normalizeSemanticToolSchemaRouteKey('openrouter', { usesReverseProxy: true }),
@@ -18100,9 +18113,9 @@ const tests = [
         'Hardcoded strict providers must remain strict regardless of the checkbox state.',
       );
       const customUrlProviderPolicies = [
-        ['https://api.deepseek.com/beta', true, true, false],
-        ['https://api.openai.com/v1', true, true, false],
-        ['https://chat.trollllm.xyz/v1', true, true, false],
+        ['https://api.deepseek.com/beta', false, true, false],
+        ['https://api.openai.com/v1', false, true, false],
+        ['https://chat.trollllm.xyz/v1', false, true, false],
         ['https://NANO-GPT.COM:443/api/v1', false, true, true],
         ['https://openrouter.ai/api/v1', false, true, true],
         ['https://api.x.ai/v1', false, true, true],
@@ -18295,8 +18308,14 @@ const tests = [
         /se-turn-tool-schema-binding-test/,
       );
       const trollLlmSemanticTool = buildSemanticPreflightTool('custom', trollLlmRoute, semanticToolTurnBinding);
-      assert.equal(trollLlmSemanticTool.function.strict, true);
-      assert.equal(trollLlmSemanticTool.function.parameters.additionalProperties, false);
+      assert.equal(trollLlmSemanticTool.function.strict, undefined);
+      assert.equal('additionalProperties' in trollLlmSemanticTool.function.parameters, false);
+      const optedInCustomTrollLlmSemanticTool = buildSemanticPreflightTool('custom', {
+        ...trollLlmRoute,
+        strictSchemaOverride: true,
+      }, semanticToolTurnBinding);
+      assert.equal(optedInCustomTrollLlmSemanticTool.function.strict, true);
+      assert.equal(optedInCustomTrollLlmSemanticTool.function.parameters.additionalProperties, false);
       assert.deepEqual(
         trollLlmSemanticTool.function.parameters.properties.turnBinding.properties.turnId.enum,
         [semanticToolTurnBinding.turnId],
@@ -18306,8 +18325,8 @@ const tests = [
         customUrl: 'https://api.deepseek.com/beta',
         usesCustomUrl: true,
       }, semanticToolTurnBinding);
-      assert.equal(customDeepSeekSemanticTool.function.strict, true);
-      assert.equal(customDeepSeekSemanticTool.function.parameters.additionalProperties, false);
+      assert.equal(customDeepSeekSemanticTool.function.strict, undefined);
+      assert.equal('additionalProperties' in customDeepSeekSemanticTool.function.parameters, false);
       assert.equal(portableSemanticTool.function.strict, undefined);
       assert.deepEqual(portableSemanticTool.function.parameters.required, expectedLedgerProperties);
       assert.deepEqual(Object.keys(portableSemanticTool.function.parameters.properties), expectedLedgerProperties);
