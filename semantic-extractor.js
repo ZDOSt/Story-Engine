@@ -985,10 +985,8 @@ function getSemanticProviderFromApiUrl(route = {}) {
 
 function resolveSemanticProviderIdentity(chatCompletionSource, route = {}) {
     const source = normalizeChatCompletionSource(chatCompletionSource || route.source);
-    const mayDetectFromUrl = !source
-        || source === CUSTOM_CHAT_COMPLETION_SOURCE
-        || source === UNKNOWN_CHAT_COMPLETION_SOURCE;
-    const urlProvider = mayDetectFromUrl ? getSemanticProviderFromApiUrl(route) : '';
+    // Connection profiles can report a connector-specific source label while routing to a known provider URL.
+    const urlProvider = getSemanticProviderFromApiUrl(route);
     return {
         source,
         provider: urlProvider || source,

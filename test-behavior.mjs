@@ -18049,6 +18049,27 @@ const tests = [
         false,
         'Hardcoded strict providers must not expose a redundant opt-in control.',
       );
+      assert.deepEqual(
+        resolveSemanticToolTransportPolicy('newapi', {
+          customUrl: 'https://chat.trollllm.xyz/v1',
+          usesCustomUrl: true,
+        }),
+        {
+          source: 'newapi',
+          strictSchema: true,
+          exactNamedToolChoice: true,
+          disableParallelToolCalls: false,
+        },
+        'Known provider URL detection must override a connector-specific profile source label.',
+      );
+      assert.equal(
+        isSemanticToolSchemaOverrideAllowed('newapi', {
+          customUrl: 'https://chat.trollllm.xyz/v1',
+          usesCustomUrl: true,
+        }),
+        false,
+        'A known TrollLLM endpoint must hide the configurable strict control even when its source label is custom.',
+      );
       assert.equal(
         isSemanticToolSchemaOverrideAllowed('nanogpt'),
         true,
