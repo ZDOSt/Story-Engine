@@ -10,6 +10,8 @@ import {
     generateRawData,
     getActiveConnectionProfileName,
     getActiveUserAvatar,
+    getChatCompletionProfileRoute,
+    getCurrentChatCompletionRoute,
     getConnectionProfileByName,
     getConnectionProfileNames,
     getPersonaText,
@@ -33,7 +35,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, normalizeSemanticOutputMode, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -612,6 +614,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
     semanticOutputMode: SEMANTIC_OUTPUT_MODES.TOOL_CALL,
+    semanticStrictToolSchemaByRoute: Object.freeze({}),
     modelCallDelayEnabled: false,
     modelCallDelaySeconds: 3,
     postNarrationTrackerEnabled: true,
@@ -807,6 +810,7 @@ function getSettings() {
     const settings = extension_settings[SETTINGS_KEY];
     const hadExplicitProseGuardMode = settings.proseGuardMode !== undefined;
     const legacyProseGuardEnabled = settings.postNarrationProseGuardEnabled;
+    let semanticStrictSettingsChanged = false;
     const hadRetiredSemanticSettings = [
         'disableSemanticThinking',
         'semanticReasoningEffort',
@@ -841,13 +845,26 @@ function getSettings() {
             extension_settings[SETTINGS_KEY][key] = value;
         }
     }
+    if (!settings.semanticStrictToolSchemaByRoute
+        || typeof settings.semanticStrictToolSchemaByRoute !== 'object'
+        || Array.isArray(settings.semanticStrictToolSchemaByRoute)) {
+        settings.semanticStrictToolSchemaByRoute = {};
+        semanticStrictSettingsChanged = true;
+    } else {
+        for (const [key, value] of Object.entries(settings.semanticStrictToolSchemaByRoute)) {
+            if (value !== true) {
+                delete settings.semanticStrictToolSchemaByRoute[key];
+                semanticStrictSettingsChanged = true;
+            }
+        }
+    }
     if (!hadExplicitProseGuardMode && legacyProseGuardEnabled === false) {
         settings.proseGuardMode = PROSE_GUARD_MODES.OFF;
     }
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
+    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
@@ -993,6 +1010,39 @@ function saveExtensionSettings() {
     saveSettingsDebounced();
 }
 
+function getSemanticSettingsRoute(settings = getSettings()) {
+    const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
+    const semanticProfile = String(settings.semanticConnectionProfile || '').trim();
+    if (useSeparateSettings && semanticProfile) {
+        const profile = getConnectionProfileByName(semanticProfile);
+        if (!profile) return null;
+        try {
+            return getChatCompletionProfileRoute(profile.id, profile.name);
+        } catch {
+            return null;
+        }
+    }
+    try {
+        return getCurrentChatCompletionRoute();
+    } catch {
+        return null;
+    }
+}
+
+function getSemanticStrictToolSchemaState(settings = getSettings()) {
+    const route = getSemanticSettingsRoute(settings);
+    if (!route || !isSemanticToolSchemaOverrideAllowed(route.source, route)) {
+        return { route: null, key: '', visible: false, enabled: false };
+    }
+    const key = normalizeSemanticToolSchemaRouteKey(route.source, route);
+    return {
+        route,
+        key,
+        visible: Boolean(key),
+        enabled: Boolean(key && settings.semanticStrictToolSchemaByRoute?.[key] === true),
+    };
+}
+
 function ensureStreamingArtifactRegex() {
     if (!isStoryEngineEnabled()) {
         return removeStreamingArtifactRegex();
@@ -1106,9 +1156,10 @@ async function withSemanticGenerationSettings(callback) {
     const settings = getSettings();
     const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
     const semanticProfile = String(settings.semanticConnectionProfile || '').trim();
+    const semanticStrictToolSchema = getSemanticStrictToolSchemaState(settings).enabled;
 
     if (!useSeparateSettings || !semanticProfile) {
-        return await callback({});
+        return await callback({ semanticStrictToolSchema });
     }
 
 
@@ -1125,6 +1176,7 @@ async function withSemanticGenerationSettings(callback) {
     return await callback({
         semanticProfileId: profile.id,
         semanticProfileName: profile.name,
+        semanticStrictToolSchema,
     });
 }
 
@@ -1520,6 +1572,8 @@ function refreshSettingsControls() {
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const semanticOutputModeSelect = document.getElementById('structured_preflight_semantic_output_mode');
+    const semanticStrictSchemaRow = document.getElementById('structured_preflight_semantic_strict_schema_row');
+    const semanticStrictSchemaCheckbox = document.getElementById('structured_preflight_semantic_strict_schema');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardModeSelect = document.getElementById('structured_preflight_prose_guard_mode');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
@@ -1544,6 +1598,14 @@ function refreshSettingsControls() {
     if (storyEngineCheckbox) storyEngineCheckbox.checked = engineEnabled;
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (semanticOutputModeSelect) semanticOutputModeSelect.value = normalizeSemanticOutputMode(settings.semanticOutputMode);
+    const semanticStrictToolSchemaState = getSemanticStrictToolSchemaState(settings);
+    if (semanticStrictSchemaRow) semanticStrictSchemaRow.hidden = !semanticStrictToolSchemaState.visible;
+    if (semanticStrictSchemaCheckbox) {
+        semanticStrictSchemaCheckbox.checked = semanticStrictToolSchemaState.enabled;
+        semanticStrictSchemaCheckbox.disabled = !engineEnabled
+            || !semanticStrictToolSchemaState.visible
+            || normalizeSemanticOutputMode(settings.semanticOutputMode) !== SEMANTIC_OUTPUT_MODES.TOOL_CALL;
+    }
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (proseGuardModeSelect) proseGuardModeSelect.value = getProseGuardMode(settings);
     for (const { element, key, defaultValue } of proseGuardBanFields) {
@@ -1617,6 +1679,7 @@ function refreshSettingsControls() {
     [
         trackerEnabledCheckbox,
         semanticOutputModeSelect,
+        semanticStrictSchemaCheckbox,
         proseGuardModeSelect,
         progressionEnabledCheckbox,
         enabledCheckbox,
@@ -1631,6 +1694,11 @@ function refreshSettingsControls() {
     ].forEach(control => {
         if (control) control.disabled = !engineEnabled;
     });
+    if (semanticStrictSchemaCheckbox) {
+        semanticStrictSchemaCheckbox.disabled = !engineEnabled
+            || !semanticStrictToolSchemaState.visible
+            || normalizeSemanticOutputMode(settings.semanticOutputMode) !== SEMANTIC_OUTPUT_MODES.TOOL_CALL;
+    }
     if (narratorHandoffDisplayModeSelect) {
         narratorHandoffDisplayModeSelect.disabled = !engineEnabled || settings.narratorHandoffEnabled !== true;
     }
@@ -2136,6 +2204,13 @@ function renderSettingsPanel() {
                                 </select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Strict JSON first requests SillyTavern native JSON Schema structured output, then retries with the existing marker-delimited JSON contract if the native request is rejected or its result fails local validation. Both paths use the same complete ledger, schema, grounding, and consistency validation before narration.', 'About semantic preflight output')}
                             </div>
+                            <div id="structured_preflight_semantic_strict_schema_row" class="spe-settings-toggle-row" hidden>
+                                <label class="checkbox_label flexNoGap">
+                                    <input id="structured_preflight_semantic_strict_schema" type="checkbox">
+                                    <span>Strict Tool Schema</span>
+                                </label>
+                                ${renderSettingsInfo('spe-settings-help-semantic-strict-schema', 'For providers without a hardcoded strict policy, enforce the complete closed JSON schema and function.strict on semantic Tool Call requests. Native JSON is already strict; this setting does not change it or the text fallback.', 'About Strict Tool Schema')}
+                            </div>
                             <div class="spe-settings-row">
                                 <label for="structured_preflight_semantic_profile">Story Engine profile</label>
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
@@ -2430,6 +2505,24 @@ function renderSettingsPanel() {
     });
     document.getElementById('structured_preflight_semantic_output_mode')?.addEventListener('change', event => {
         settings.semanticOutputMode = normalizeSemanticOutputMode(event.target?.value);
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_semantic_strict_schema')?.addEventListener('change', event => {
+        const routeState = getSemanticStrictToolSchemaState(settings);
+        if (!routeState.visible || !routeState.key) {
+            refreshSettingsControls();
+            return;
+        }
+        const overrides = {
+            ...(settings.semanticStrictToolSchemaByRoute || {}),
+        };
+        if (event.target?.checked) {
+            overrides[routeState.key] = true;
+        } else {
+            delete overrides[routeState.key];
+        }
+        settings.semanticStrictToolSchemaByRoute = overrides;
         refreshSettingsControls();
         saveExtensionSettings();
     });
@@ -16666,6 +16759,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             pendingBoundarySnapshot: pendingGeneration?.pendingBoundarySnapshot || buildPendingBoundarySnapshot(context),
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
+            semanticStrictToolSchema: settings?.semanticStrictToolSchema === true,
             semanticOutputMode: normalizeSemanticOutputMode(getSettings().semanticOutputMode),
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',

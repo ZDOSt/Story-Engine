@@ -583,7 +583,7 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
     try {
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
             purpose: 'semantic preflight tool call',
-            buildTool: (source, route) => buildSemanticPreflightTool(source, route, options.semanticTurnBinding),
+            buildTool: (source, route) => buildSemanticPreflightTool(source, applySemanticToolSchemaOption(route, options), options.semanticTurnBinding),
             buildToolChoice: buildSemanticToolChoice,
             preparePayload: payload => applySemanticToolRequestPayloadPolicies(payload),
             signal: options.signal,
@@ -613,7 +613,7 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
     const chatCompletionSource = route.source;
     const toolPrompt = buildSemanticToolPrompt(prompt);
     validateSemanticPromptTurnBinding(toolPrompt, options.semanticTurnBinding);
-    const semanticTool = buildSemanticPreflightTool(chatCompletionSource, route, options.semanticTurnBinding);
+    const semanticTool = buildSemanticPreflightTool(chatCompletionSource, applySemanticToolSchemaOption(route, options), options.semanticTurnBinding);
     const preparePayload = payload => applySemanticToolRequestPayloadPolicies(payload, route);
     const overridePayload = {
         temperature: 0,
@@ -945,6 +945,11 @@ function normalizeChatCompletionSource(value) {
     return String(value || '').trim().toLowerCase();
 }
 
+function applySemanticToolSchemaOption(route = {}, options = {}) {
+    if (options?.semanticStrictToolSchema !== true) return route;
+    return { ...route, strictSchemaOverride: true };
+}
+
 function hasRouteOverride(value) {
     if (typeof value === 'boolean') return value;
     const normalized = String(value || '').trim().toLowerCase();
@@ -1009,8 +1014,48 @@ export function resolveSemanticToolTransportPolicy(chatCompletionSource, route =
     };
 }
 
+export function isSemanticToolSchemaOverrideAllowed(chatCompletionSource, route = {}) {
+    const resolvedRoute = resolveSemanticPayloadRoute({}, {
+        ...route,
+        source: chatCompletionSource || route.source,
+    });
+    const identity = resolveSemanticProviderIdentity(resolvedRoute.source, resolvedRoute);
+    if (!identity.source && !identity.provider && !String(resolvedRoute.customUrl || '').trim()) return false;
+    return !resolveSemanticToolTransportPolicy(resolvedRoute.source, resolvedRoute).strictSchema;
+}
+
+export function normalizeSemanticToolSchemaRouteKey(chatCompletionSource, route = {}) {
+    const resolvedRoute = resolveSemanticPayloadRoute({}, {
+        ...route,
+        source: chatCompletionSource || route.source,
+    });
+    const identity = resolveSemanticProviderIdentity(resolvedRoute.source, resolvedRoute);
+    const provider = identity.provider || identity.source || UNKNOWN_CHAT_COMPLETION_SOURCE;
+    const customUrl = String(resolvedRoute.customUrl || '').trim();
+    let endpoint = '<direct>';
+    if (customUrl) {
+        try {
+            const url = new URL(customUrl);
+            const defaultPort = (url.protocol === 'https:' && url.port === '443')
+                || (url.protocol === 'http:' && url.port === '80');
+            const port = url.port && !defaultPort ? `:${url.port}` : '';
+            const pathname = url.pathname.replace(/\/+$/, '') || '/';
+            endpoint = `${url.protocol.toLowerCase()}//${url.hostname.toLowerCase()}${port}${pathname}`;
+        } catch {
+            endpoint = customUrl.toLowerCase().replace(/[?#].*$/, '').replace(/\/+$/, '') || '<invalid>';
+        }
+    } else if (hasRouteOverride(resolvedRoute.usesReverseProxy)
+        || hasRouteOverride(resolvedRoute.reverseProxy)
+        || hasRouteOverride(resolvedRoute.reverse_proxy)) {
+        endpoint = '<reverse-proxy>';
+    }
+    return `${provider}|${endpoint}`;
+}
+
 function supportsStrictSemanticToolSchema(chatCompletionSource, route = {}) {
-    return resolveSemanticToolTransportPolicy(chatCompletionSource, route).strictSchema;
+    const policy = resolveSemanticToolTransportPolicy(chatCompletionSource, route);
+    return policy.strictSchema
+        || (route?.strictSchemaOverride === true && isSemanticToolSchemaOverrideAllowed(chatCompletionSource, route));
 }
 
 export function applyStoryEngineSemanticToolTransportPayload(payload, route = {}) {

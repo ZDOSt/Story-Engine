@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticTextRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticTextPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticTextLedger, formatSemanticDiagnostic, getPersonaIdentityHints, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticTextRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticTextPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticTextLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -17557,6 +17557,9 @@ const tests = [
       const editSource = fs.readFileSync(new URL('prose-guard-edits.js', import.meta.url), 'utf8');
       const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
       const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
+      assert.match(source, /semanticStrictToolSchemaByRoute/);
+      assert.match(source, /Strict Tool Schema/);
+      assert.match(source, /getSemanticStrictToolSchemaState/);
 
       const repairStart = source.indexOf('async function applyTargetedProseBanRepairIfNeeded(');
       const repairEnd = source.indexOf('function parsePostNarrationTrackerResponse(', repairStart);
@@ -17767,7 +17770,7 @@ const tests = [
       );
       assert.match(getSettingsSource, /'semanticThinkingDisableFormat',\s*'semanticThinkingDisableFormats'/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
@@ -18039,6 +18042,40 @@ const tests = [
         exactNamedToolChoice: true,
         disableParallelToolCalls: false,
       });
+      assert.equal(
+        isSemanticToolSchemaOverrideAllowed('custom', trollLlmRoute),
+        false,
+        'Hardcoded strict providers must not expose a redundant opt-in control.',
+      );
+      assert.equal(
+        isSemanticToolSchemaOverrideAllowed('nanogpt'),
+        true,
+        'Portable provider routes should be eligible for an explicit strict opt-in.',
+      );
+      assert.equal(
+        isSemanticToolSchemaOverrideAllowed('deepseek', { usesReverseProxy: true }),
+        true,
+        'A proxy route must remain configurable even when its provider has a direct strict policy.',
+      );
+      assert.equal(
+        normalizeSemanticToolSchemaRouteKey('custom', {
+          customUrl: 'HTTPS://NANO-GPT.COM:443/api/v1/?provider=1',
+          usesCustomUrl: true,
+        }),
+        'nanogpt|https://nano-gpt.com/api/v1',
+      );
+      assert.equal(
+        normalizeSemanticToolSchemaRouteKey('openrouter', { usesReverseProxy: true }),
+        'openrouter|<reverse-proxy>',
+      );
+      const optedInPortableSemanticTool = buildSemanticPreflightTool('nanogpt', { strictSchemaOverride: true });
+      assert.equal(optedInPortableSemanticTool.function.strict, true);
+      assert.equal(optedInPortableSemanticTool.function.parameters.additionalProperties, false);
+      assert.equal(
+        buildSemanticPreflightTool('deepseek', { strictSchemaOverride: false }).function.strict,
+        true,
+        'Hardcoded strict providers must remain strict regardless of the checkbox state.',
+      );
       const customUrlProviderPolicies = [
         ['https://api.deepseek.com/beta', true, true, false],
         ['https://api.openai.com/v1', true, true, false],
@@ -19166,7 +19203,7 @@ const tests = [
       assert.doesNotMatch(source, /semanticThinkingDisableFormats:\s*Object\.freeze\(\{\}\)/);
       assert.doesNotMatch(source, /structured_preflight_semantic_thinking_disable_format/);
       assert.doesNotMatch(source, /customSemanticProfileSelected|semanticThinkingDisableFormat:\s*settings\?\.semanticThinkingDisableFormat/);
-      assert.match(source, /if \(!useSeparateSettings \|\| !semanticProfile\) \{\s*return await callback\(\{\}\);/);
+      assert.match(source, /if \(!useSeparateSettings \|\| !semanticProfile\) \{\s*return await callback\(\{ semanticStrictToolSchema \}\);/);
       assert.match(semanticSource, /export async function sendStructuredToolRequest/);
       assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineBaselineThinkingDisabledPayload\(generateData\)/);
@@ -19177,7 +19214,7 @@ const tests = [
       );
       assert.match(
         semanticDefaultToolRequest,
-        /buildTool: \(source, route\) => buildSemanticPreflightTool\(source, route, options\.semanticTurnBinding\)/,
+        /buildTool: \(source, route\) => buildSemanticPreflightTool\(source, applySemanticToolSchemaOption\(route, options\), options\.semanticTurnBinding\)/,
       );
 
       const semanticProfileToolRequest = semanticSource.slice(
@@ -19185,7 +19222,7 @@ const tests = [
         semanticSource.indexOf('export async function sendStructuredToolRequest'),
       );
       assert.match(semanticProfileToolRequest, /sendConnectionManagerProfileRequest/);
-      assert.match(semanticProfileToolRequest, /buildSemanticPreflightTool\(chatCompletionSource, route, options\.semanticTurnBinding\)/);
+      assert.match(semanticProfileToolRequest, /buildSemanticPreflightTool\(chatCompletionSource, applySemanticToolSchemaOption\(route, options\), options\.semanticTurnBinding\)/);
       assert.match(semanticProfileToolRequest, /tool_choice: buildSemanticToolChoice\(chatCompletionSource, route\)/);
       assert.match(semanticProfileToolRequest, /buildSemanticToolTransportOverrides\(chatCompletionSource, route\)/);
       assert.match(semanticProfileToolRequest, /applySemanticToolRequestPayloadPolicies\(payload, route\)/);
