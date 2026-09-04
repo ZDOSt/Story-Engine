@@ -125,6 +125,13 @@ export function getConnectionProfileByName(profileName) {
         .find(profile => String(profile?.name || '').trim().toLowerCase() === wanted.toLowerCase()) || null;
 }
 
+export function getConnectionProfileById(profileId) {
+    const wanted = String(profileId || '').trim();
+    if (!wanted) return null;
+    return (getExtensionSettings().connectionManager?.profiles || [])
+        .find(profile => String(profile?.id || '').trim() === wanted) || null;
+}
+
 export function getActiveConnectionProfileName(fallbackName = '<None>') {
     const settings = getExtensionSettings();
     const selectedProfile = settings.connectionManager?.selectedProfile;
@@ -744,7 +751,8 @@ export async function sendChatCompletionProfileRequest(request = {}) {
 
     const context = getContext();
     const profile = getConnectionProfile(profileId);
-    const chatCompletionSource = context?.CONNECT_API_MAP?.[profile?.api]?.source;
+    const route = getChatCompletionProfileRoute(profileId, profileName);
+    const chatCompletionSource = route.source;
     if (!context?.ChatCompletionService?.processRequest || !chatCompletionSource) {
         throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support direct chat-completion requests.`, { stage: 'profile' });
     }
@@ -801,7 +809,8 @@ export async function sendConnectionManagerProfileRequest(request = {}) {
 
     const context = getContext();
     const profile = getConnectionProfile(profileId);
-    const chatCompletionSource = context?.CONNECT_API_MAP?.[profile?.api]?.source;
+    const route = getChatCompletionProfileRoute(profileId, profileName);
+    const chatCompletionSource = route.source;
     const requestService = context?.ConnectionManagerRequestService;
     if (!requestService?.sendRequest || !chatCompletionSource) {
         throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support native Connection Manager chat-completion requests.`, { stage: 'profile' });
@@ -851,8 +860,7 @@ function getActiveUserAvatarFromDom() {
 }
 
 function getConnectionProfile(profileId) {
-    const profile = getExtensionSettings().connectionManager?.profiles
-        ?.find(item => item?.id === profileId);
+    const profile = getConnectionProfileById(profileId);
     if (!profile) {
         throw adapterTransportError(`Semantic connection profile not found: ${profileId}`, { stage: 'profile' });
     }

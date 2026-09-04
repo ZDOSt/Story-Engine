@@ -17560,6 +17560,11 @@ const tests = [
       assert.match(source, /semanticStrictToolSchemaByRoute/);
       assert.match(source, /Strict Tool Schema/);
       assert.match(source, /getSemanticStrictToolSchemaState/);
+      assert.match(source, /function getSemanticProfileSelection\(settings = getSettings\(\)\)/);
+      assert.match(source, /getConnectionProfileById\(profileId\) \|\| getConnectionProfileByName\(profileName\)/);
+      assert.match(source, /const selection = getSemanticProfileSelection\(settings\)/);
+      assert.match(source, /semanticConnectionProfileId/);
+      assert.match(source, /const selectedSemanticProfile = getConnectionProfileById\(storedSemanticProfileId\)/);
       assert.match(source, /const semanticStrictToolSchemaVisible = semanticStrictToolSchemaState\.visible && semanticToolMode/);
       assert.match(source, /semanticStrictSchemaRow\.hidden = !semanticStrictToolSchemaVisible/);
       assert.match(source, /<select id="structured_preflight_semantic_strict_schema"/);
@@ -17780,7 +17785,7 @@ const tests = [
       );
       assert.match(getSettingsSource, /'semanticThinkingDisableFormat',\s*'semanticThinkingDisableFormats'/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| semanticProfileSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
@@ -17801,6 +17806,8 @@ const tests = [
         'migrateTrackerWidgetSettings',
         'migrateNarratorHandoffSettings',
         'migrateProseGuardSettings',
+        'getConnectionProfileById',
+        'getConnectionProfileByName',
         'saveExtensionSettings',
         `${getSettingsSource}; return getSettings;`,
       )(
@@ -17813,6 +17820,8 @@ const tests = [
         () => false,
         () => false,
         () => false,
+        () => null,
+        () => null,
         () => { settingsSaveCount += 1; },
       );
       const migratedSettings = getMigratedSettings();
@@ -19251,9 +19260,11 @@ const tests = [
       assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateSemanticRawWithProfile|isRecoverableSemanticToolCallError|falling back to compact ledger|fallbackFrom:/);
       assert.match(semanticSource, /Semantic \$\{transportLabel\} pass returned no valid complete ledger\. Generation aborted before narration/);
       assert.match(adapterSource, /export function getChatCompletionProfileRoute/);
+      assert.match(adapterSource, /export function getConnectionProfileById/);
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
       assert.match(adapterSource, /const profileApi = String\(profile\?\.api \|\| ''\)\.trim\(\)\.toLowerCase\(\)/);
       assert.match(adapterSource, /context\?\.CONNECT_API_MAP\?\.\[profileApi\]\?\.source/);
+      assert.match(adapterSource, /const route = getChatCompletionProfileRoute\(profileId, profileName\)/);
       assert.match(adapterSource, /model:\s*String\(profile\?\.model \|\| ''\)/);
       assert.match(adapterSource, /customUrl:\s*String\(profile\?\.\['api-url'\] \|\| ''\)/);
       assert.match(adapterSource, /customIncludeBody:\s*getProfileCustomIncludeBody\(profile, context\)/);
@@ -19261,7 +19272,7 @@ const tests = [
       assert.doesNotMatch(source, /semanticThinkingDisableFormats:\s*Object\.freeze\(\{\}\)/);
       assert.doesNotMatch(source, /structured_preflight_semantic_thinking_disable_format/);
       assert.doesNotMatch(source, /customSemanticProfileSelected|semanticThinkingDisableFormat:\s*settings\?\.semanticThinkingDisableFormat/);
-      assert.match(source, /if \(!useSeparateSettings \|\| !semanticProfile\) \{\s*return await callback\(\{ semanticStrictToolSchema \}\);/);
+      assert.match(source, /if \(!selection\.selected\) \{\s*return await callback\(\{ semanticStrictToolSchema \}\);/);
       assert.match(semanticSource, /export async function sendStructuredToolRequest/);
       assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineBaselineThinkingDisabledPayload\(generateData\)/);

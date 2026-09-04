@@ -10,6 +10,7 @@ import {
     generateRawData,
     getActiveConnectionProfileName,
     getActiveUserAvatar,
+    getConnectionProfileById,
     getChatCompletionProfileRoute,
     getCurrentChatCompletionRoute,
     getConnectionProfileByName,
@@ -613,6 +614,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
+    semanticConnectionProfileId: '',
     semanticOutputMode: SEMANTIC_OUTPUT_MODES.TOOL_CALL,
     semanticStrictToolSchemaByRoute: Object.freeze({}),
     modelCallDelayEnabled: false,
@@ -811,6 +813,7 @@ function getSettings() {
     const hadExplicitProseGuardMode = settings.proseGuardMode !== undefined;
     const legacyProseGuardEnabled = settings.postNarrationProseGuardEnabled;
     let semanticStrictSettingsChanged = false;
+    let semanticProfileSettingsChanged = false;
     const hadRetiredSemanticSettings = [
         'disableSemanticThinking',
         'semanticReasoningEffort',
@@ -845,6 +848,22 @@ function getSettings() {
             extension_settings[SETTINGS_KEY][key] = value;
         }
     }
+    const storedSemanticProfileId = String(settings.semanticConnectionProfileId || '').trim();
+    const storedSemanticProfileName = String(settings.semanticConnectionProfile || '').trim();
+    const selectedSemanticProfile = getConnectionProfileById(storedSemanticProfileId)
+        || getConnectionProfileByName(storedSemanticProfileName);
+    if (selectedSemanticProfile) {
+        const selectedId = String(selectedSemanticProfile.id || '').trim();
+        const selectedName = String(selectedSemanticProfile.name || '').trim();
+        if (selectedId && settings.semanticConnectionProfileId !== selectedId) {
+            settings.semanticConnectionProfileId = selectedId;
+            semanticProfileSettingsChanged = true;
+        }
+        if (selectedName && settings.semanticConnectionProfile !== selectedName) {
+            settings.semanticConnectionProfile = selectedName;
+            semanticProfileSettingsChanged = true;
+        }
+    }
     if (!settings.semanticStrictToolSchemaByRoute
         || typeof settings.semanticStrictToolSchemaByRoute !== 'object'
         || Array.isArray(settings.semanticStrictToolSchemaByRoute)) {
@@ -864,7 +883,7 @@ function getSettings() {
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
+    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || semanticProfileSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
@@ -1010,11 +1029,22 @@ function saveExtensionSettings() {
     saveSettingsDebounced();
 }
 
-function getSemanticSettingsRoute(settings = getSettings()) {
+function getSemanticProfileSelection(settings = getSettings()) {
     const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
-    const semanticProfile = String(settings.semanticConnectionProfile || '').trim();
-    if (useSeparateSettings && semanticProfile) {
-        const profile = getConnectionProfileByName(semanticProfile);
+    const profileId = String(settings.semanticConnectionProfileId || '').trim();
+    const profileName = String(settings.semanticConnectionProfile || '').trim();
+    if (!useSeparateSettings || (!profileId && !profileName)) {
+        return { selected: false, profile: null };
+    }
+
+    const profile = getConnectionProfileById(profileId) || getConnectionProfileByName(profileName);
+    return { selected: true, profile };
+}
+
+function getSemanticSettingsRoute(settings = getSettings()) {
+    const selection = getSemanticProfileSelection(settings);
+    if (selection.selected) {
+        const profile = selection.profile;
         if (!profile) return null;
         try {
             return getChatCompletionProfileRoute(profile.id, profile.name);
@@ -1154,22 +1184,15 @@ function removeStreamingArtifactRegex() {
 
 async function withSemanticGenerationSettings(callback) {
     const settings = getSettings();
-    const useSeparateSettings = Boolean(settings.useSeparateSemanticSettings);
-    const semanticProfile = String(settings.semanticConnectionProfile || '').trim();
+    const selection = getSemanticProfileSelection(settings);
     const semanticStrictToolSchema = getSemanticStrictToolSchemaState(settings).enabled;
 
-    if (!useSeparateSettings || !semanticProfile) {
+    if (!selection.selected) {
         return await callback({ semanticStrictToolSchema });
     }
 
-
-    const profile = getConnectionProfileByName(semanticProfile);
-
-    if (!profile) {
-
-        throw new Error(`Semantic connection profile "${semanticProfile}" was not found.`);
-
-    }
+    const profile = selection.profile;
+    if (!profile) throw new Error(`Semantic connection profile "${settings.semanticConnectionProfile || settings.semanticConnectionProfileId}" was not found.`);
 
 
     console.info(`[${EXTENSION_NAME}] using direct semantic connection profile request: ${profile.name}`);
@@ -1183,8 +1206,9 @@ async function withSemanticGenerationSettings(callback) {
 function semanticDiagnosticProfileLabel() {
     try {
         const settings = getSettings();
-        return settings.useSeparateSemanticSettings
-            ? (settings.semanticConnectionProfile || 'configured semantic profile')
+        const selection = getSemanticProfileSelection(settings);
+        return selection.selected
+            ? (selection.profile?.name || settings.semanticConnectionProfile || settings.semanticConnectionProfileId || 'configured semantic profile')
             : (getActiveConnectionProfileName() || 'active SillyTavern connection');
     } catch {
         return 'active SillyTavern connection';
@@ -2499,6 +2523,7 @@ function renderSettingsPanel() {
 
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
         settings.semanticConnectionProfile = String(event.target?.value || '');
+        settings.semanticConnectionProfileId = getConnectionProfileByName(settings.semanticConnectionProfile)?.id || '';
         refreshSettingsControls();
         saveExtensionSettings();
     });
