@@ -2464,7 +2464,9 @@ export function normalizeSemanticToolArgumentTypes(ledger, schema = buildSemanti
                 normalized[name] = normalizeSemanticToolArgumentTypes(normalized[name], childSchema, `${path}.${name}`);
             }
         }
-        return normalized;
+        return path === '$'
+            ? repairUnambiguousRelationshipNPC(normalized, schema)
+            : normalized;
     }
 
     if (schema.type === 'array') {
@@ -2484,6 +2486,48 @@ export function normalizeSemanticToolArgumentTypes(ledger, schema = buildSemanti
         return normalizeSemanticEnumValue(ledger, schema.enum);
     }
     return ledger;
+}
+
+function repairUnambiguousRelationshipNPC(ledger, schema) {
+    const relationshipEngine = ledger?.relationshipEngine;
+    const resolutionEngine = ledger?.resolutionEngine;
+    const relationshipSchema = schema?.properties?.relationshipEngine?.items;
+    if (!Array.isArray(relationshipEngine)
+        || !relationshipEngine.length
+        || !relationshipSchema
+        || !resolutionEngine) return ledger;
+
+    const missingRows = relationshipEngine
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => isRecord(item)
+            && (!Object.prototype.hasOwnProperty.call(item, 'NPC')
+                || (typeof item.NPC === 'string' && !item.NPC.trim())));
+    if (missingRows.length !== 1) return ledger;
+
+    const requiredNames = requiredRelationshipCoverageNames(resolutionEngine);
+    const assignedKeys = new Set(
+        relationshipEngine
+            .map(item => (typeof item?.NPC === 'string' ? item.NPC.trim() : ''))
+            .filter(Boolean)
+            .map(normalizeNameKey),
+    );
+    const candidates = requiredNames.filter(name => !assignedKeys.has(normalizeNameKey(name)));
+    if (candidates.length !== 1) return ledger;
+
+    const rowSchema = {
+        ...relationshipSchema,
+        required: (relationshipSchema.required || []).filter(name => name !== 'NPC'),
+    };
+    try {
+        validateSchemaValue(missingRows[0].item, rowSchema, `$.relationshipEngine[${missingRows[0].index}]`);
+    } catch {
+        return ledger;
+    }
+
+    const repairedRows = relationshipEngine.map((item, index) => index === missingRows[0].index
+        ? { ...item, NPC: candidates[0] }
+        : item);
+    return { ...ledger, relationshipEngine: repairedRows };
 }
 
 function normalizeSemanticArrayContainer(value, schema, path) {

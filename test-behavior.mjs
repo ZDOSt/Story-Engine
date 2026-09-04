@@ -18558,6 +18558,72 @@ const tests = [
         canonicalRepresentation,
         'Text-only JSON responses with lossless shorthand representations must use the shared canonical form.',
       );
+      const relationshipMissingNpcVariant = structuredClone(structuredLedger);
+      relationshipMissingNpcVariant.resolutionEngine.identifyTargets.ActionTargets = ['Phoebe'];
+      relationshipMissingNpcVariant.relationshipEngine = [buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items,
+      )];
+      delete relationshipMissingNpcVariant.relationshipEngine[0].NPC;
+      const repairedRelationshipMissingNpc = normalizeSemanticToolArgumentTypes(relationshipMissingNpcVariant);
+      assert.equal(repairedRelationshipMissingNpc.relationshipEngine[0].NPC, 'Phoebe');
+      assert.equal(validateSemanticToolArguments(repairedRelationshipMissingNpc), repairedRelationshipMissingNpc);
+      assert.deepEqual(
+        extractSemanticToolLedger({
+          choices: [{ message: { tool_calls: [{
+            type: 'function',
+            function: { name: 'submit_semantic_preflight', arguments: JSON.stringify(relationshipMissingNpcVariant) },
+          }] } }],
+        }),
+        repairedRelationshipMissingNpc,
+        'Tool responses with one unambiguous missing relationship NPC must be repaired before validation.',
+      );
+      assert.deepEqual(
+        extractSemanticNativeLedger({ choices: [{ message: { content: JSON.stringify(relationshipMissingNpcVariant) } }] }),
+        repairedRelationshipMissingNpc,
+        'Native JSON responses with one unambiguous missing relationship NPC must be repaired before validation.',
+      );
+      assert.deepEqual(
+        extractSemanticTextLedger(
+          `BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(relationshipMissingNpcVariant)}\nEND_SEMANTIC_PREFLIGHT_JSON`,
+        ),
+        repairedRelationshipMissingNpc,
+        'Text-only JSON responses with one unambiguous missing relationship NPC must be repaired before validation.',
+      );
+      const multipleVisibleNpcVariant = structuredClone(relationshipMissingNpcVariant);
+      multipleVisibleNpcVariant.engineContext.trackerRelevantNPCs = [{ NPC: 'Phoebe' }, { NPC: 'Seraphina' }];
+      assert.equal(
+        normalizeSemanticToolArgumentTypes(multipleVisibleNpcVariant).relationshipEngine[0].NPC,
+        'Phoebe',
+        'Visible bystanders do not prevent repair when the authoritative relationship candidate is unique.',
+      );
+      const visibleOnlyNpcVariant = structuredClone(relationshipMissingNpcVariant);
+      visibleOnlyNpcVariant.resolutionEngine.identifyTargets.ActionTargets = [];
+      visibleOnlyNpcVariant.engineContext.trackerRelevantNPCs = [{ NPC: 'Phoebe' }];
+      const unchangedVisibleOnlyNpc = normalizeSemanticToolArgumentTypes(visibleOnlyNpcVariant);
+      assert.equal(Object.prototype.hasOwnProperty.call(unchangedVisibleOnlyNpc.relationshipEngine[0], 'NPC'), false);
+      assert.throws(
+        () => validateSemanticToolArguments(unchangedVisibleOnlyNpc),
+        /relationshipEngine\[0\]\.NPC is required/,
+        'A scene-visible NPC without authoritative target coverage must not be inferred.',
+      );
+      const ambiguousRelationshipMissingNpc = structuredClone(relationshipMissingNpcVariant);
+      ambiguousRelationshipMissingNpc.resolutionEngine.identifyTargets.ActionTargets = ['Phoebe', 'Seraphina'];
+      const unchangedAmbiguousRelationship = normalizeSemanticToolArgumentTypes(ambiguousRelationshipMissingNpc);
+      assert.equal(Object.prototype.hasOwnProperty.call(unchangedAmbiguousRelationship.relationshipEngine[0], 'NPC'), false);
+      assert.throws(
+        () => validateSemanticToolArguments(unchangedAmbiguousRelationship),
+        /relationshipEngine\[0\]\.NPC is required/,
+        'Multiple authoritative NPC candidates must not be assigned by guess or order.',
+      );
+      const incompleteRelationshipMissingNpc = structuredClone(relationshipMissingNpcVariant);
+      delete incompleteRelationshipMissingNpc.relationshipEngine[0].aggressionMethodEvidence;
+      const unchangedIncompleteRelationship = normalizeSemanticToolArgumentTypes(incompleteRelationshipMissingNpc);
+      assert.equal(Object.prototype.hasOwnProperty.call(unchangedIncompleteRelationship.relationshipEngine[0], 'NPC'), false);
+      assert.throws(
+        () => validateSemanticToolArguments(unchangedIncompleteRelationship),
+        /relationshipEngine\[0\]\.NPC is required/,
+        'A row missing additional required data must not receive an inferred NPC.',
+      );
       const invalidRepresentation = structuredClone(structuredLedger);
       invalidRepresentation.engineContext.trackerRelevantNPCs = [123];
       assert.throws(
