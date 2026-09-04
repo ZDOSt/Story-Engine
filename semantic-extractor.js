@@ -2094,7 +2094,7 @@ function buildSemanticPreflightSchema() {
     });
 }
 
-function extractSemanticToolLedger(raw, diagnosticContext = {}, turnBinding = null) {
+export function extractSemanticToolLedger(raw, diagnosticContext = {}, turnBinding = null) {
     const calls = collectToolCalls(raw);
     const responseDiagnosticContext = {
         requestId: semanticResponseRequestId(raw),
@@ -2468,16 +2468,44 @@ export function normalizeSemanticToolArgumentTypes(ledger, schema = buildSemanti
     }
 
     if (schema.type === 'array') {
-        if (!Array.isArray(ledger)) return ledger;
-        return ledger.map((item, index) => normalizeSemanticToolArgumentTypes(item, schema.items, `${path}[${index}]`));
+        const arrayValue = normalizeSemanticArrayContainer(ledger, schema, path);
+        if (!Array.isArray(arrayValue)) return arrayValue;
+        return arrayValue.map((item, index) => normalizeSemanticToolArgumentTypes(
+            normalizeSemanticArrayItem(item, schema, path),
+            schema.items,
+            `${path}[${index}]`,
+        ));
     }
 
     if (schema.type === 'boolean') return normalizeSemanticBooleanToken(ledger);
+    if (schema.type === 'integer') return normalizeSemanticIntegerToken(ledger);
     if (path === '$.worldTransition.indoors') ledger = normalizeSemanticIndoorsValue(ledger);
     if (schema.type === 'string' && Array.isArray(schema.enum)) {
         return normalizeSemanticEnumValue(ledger, schema.enum);
     }
     return ledger;
+}
+
+function normalizeSemanticArrayContainer(value, schema, path) {
+    if (Array.isArray(value)) return value;
+
+    // These repairs preserve one represented item; they never invent additional entries.
+    if (path === '$.engineContext.trackerRelevantNPCs' && typeof value === 'string' && value.trim()) {
+        return [{ NPC: value }];
+    }
+    if (schema.items?.type === 'object' && isRecord(value)) return [value];
+    if (schema.items?.type === 'string' && typeof value === 'string' && value.trim()) return [value];
+    return value;
+}
+
+function normalizeSemanticArrayItem(value, schema, path) {
+    if (path === '$.engineContext.trackerRelevantNPCs'
+        && schema.items?.type === 'object'
+        && typeof value === 'string'
+        && value.trim()) {
+        return { NPC: value };
+    }
+    return value;
 }
 
 function normalizeSemanticBooleanToken(value) {
@@ -2486,6 +2514,14 @@ function normalizeSemanticBooleanToken(value) {
     if (['true', 'yes', 'y'].includes(token)) return true;
     if (['false', 'no', 'n'].includes(token)) return false;
     return value;
+}
+
+function normalizeSemanticIntegerToken(value) {
+    if (typeof value !== 'string') return value;
+    const token = value.trim();
+    if (!/^-?(?:0|[1-9]\d*)$/u.test(token)) return value;
+    const integer = Number(token);
+    return Number.isSafeInteger(integer) ? integer : value;
 }
 
 function normalizeSemanticIndoorsValue(value) {

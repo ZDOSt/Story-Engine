@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticTextRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticTextPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticTextLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticTextRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticTextPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -17567,6 +17567,7 @@ const tests = [
       assert.match(source, /const selectedSemanticProfile = getConnectionProfileById\(storedSemanticProfileId\)/);
       assert.match(source, /const semanticStrictToolSchemaVisible = semanticStrictToolSchemaState\.visible && semanticToolMode/);
       assert.match(source, /semanticStrictSchemaRow\.hidden = !semanticStrictToolSchemaVisible/);
+      assert.match(source, /\.spe-settings-toggle-row\[hidden\]\s*\{\s*display:\s*none !important;/);
       assert.match(source, /<select id="structured_preflight_semantic_strict_schema"/);
       assert.match(source, /Provider default/);
       assert.match(source, /Enforce strict schema/);
@@ -18512,6 +18513,65 @@ const tests = [
       assert.equal(normalizedTransportVariant.relationshipEngine[0].slowBondEvidence.teamwork, true);
       assert.equal(normalizedTransportVariant.relationshipEngine[0].overrideFlags.CurrentInvitation, false);
       assert.equal(validateSemanticToolArguments(normalizedTransportVariant), normalizedTransportVariant);
+
+      const representationVariant = structuredClone(structuredLedger);
+      representationVariant.engineContext.trackerRelevantNPCs = ['Phoebe'];
+      representationVariant.worldTransition.timeAdvanceCount = '14';
+      representationVariant.resolutionEngine.identifyTargets.ActionTargets = 'Phoebe';
+      representationVariant.resolutionEngine.actionUnits = buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.items,
+      );
+      const canonicalRepresentation = structuredClone(structuredLedger);
+      canonicalRepresentation.engineContext.trackerRelevantNPCs = [{ NPC: 'Phoebe' }];
+      canonicalRepresentation.worldTransition.timeAdvanceCount = 14;
+      canonicalRepresentation.resolutionEngine.identifyTargets.ActionTargets = ['Phoebe'];
+      canonicalRepresentation.resolutionEngine.actionUnits = [buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.items,
+      )];
+      const normalizedRepresentation = normalizeSemanticToolArgumentTypes(representationVariant);
+      assert.deepEqual(normalizedRepresentation, canonicalRepresentation);
+      assert.equal(normalizedRepresentation.resolutionEngine.actionUnits.length, 1);
+      assert.equal(validateSemanticToolArguments(normalizedRepresentation), normalizedRepresentation);
+      assert.deepEqual(representationVariant.engineContext.trackerRelevantNPCs, ['Phoebe']);
+      assert.equal(representationVariant.worldTransition.timeAdvanceCount, '14');
+      assert.equal(representationVariant.resolutionEngine.identifyTargets.ActionTargets, 'Phoebe');
+      assert.equal(!Array.isArray(representationVariant.resolutionEngine.actionUnits), true);
+      assert.deepEqual(
+        extractSemanticToolLedger({
+          choices: [{ message: { tool_calls: [{
+            type: 'function',
+            function: { name: 'submit_semantic_preflight', arguments: JSON.stringify(representationVariant) },
+          }] } }],
+        }),
+        canonicalRepresentation,
+        'Tool responses with lossless shorthand representations must use the shared canonical form.',
+      );
+      assert.deepEqual(
+        extractSemanticNativeLedger({ choices: [{ message: { content: JSON.stringify(representationVariant) } }] }),
+        canonicalRepresentation,
+        'Native JSON responses with lossless shorthand representations must use the shared canonical form.',
+      );
+      assert.deepEqual(
+        extractSemanticTextLedger(
+          `BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(representationVariant)}\nEND_SEMANTIC_PREFLIGHT_JSON`,
+        ),
+        canonicalRepresentation,
+        'Text-only JSON responses with lossless shorthand representations must use the shared canonical form.',
+      );
+      const invalidRepresentation = structuredClone(structuredLedger);
+      invalidRepresentation.engineContext.trackerRelevantNPCs = [123];
+      assert.throws(
+        () => validateSemanticToolArguments(normalizeSemanticToolArgumentTypes(invalidRepresentation)),
+        /engineContext\.trackerRelevantNPCs\[0\] must be an object/,
+        'An invalid NPC representation must still fail schema validation.',
+      );
+      const ambiguousRepresentation = structuredClone(structuredLedger);
+      ambiguousRepresentation.engineContext.trackerRelevantNPCs = [{ name: 'Phoebe' }];
+      assert.throws(
+        () => validateSemanticToolArguments(normalizeSemanticToolArgumentTypes(ambiguousRepresentation)),
+        /engineContext\.trackerRelevantNPCs\[0\]\.NPC is required/,
+        'An unapproved object alias must not be guessed into the canonical NPC field.',
+      );
       assert.equal(structuredLedger.worldTransition.indoors, 'unchanged');
       const falseIndoorsLedger = structuredClone(structuredLedger);
       falseIndoorsLedger.worldTransition.indoors = 'NO';

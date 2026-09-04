@@ -1936,6 +1936,9 @@ function ensureSettingsPanelStyles() {
             border-radius: 5px;
             background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 5%, transparent);
         }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-toggle-row[hidden] {
+            display: none !important;
+        }
         #${SETTINGS_CONTAINER_ID} .spe-settings-toggle-row .checkbox_label {
             flex: 1 1 auto;
             justify-content: flex-start;
