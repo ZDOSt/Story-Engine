@@ -65,7 +65,7 @@ const SEMANTIC_PROVIDER_BY_API_HOST = Object.freeze(new Map([
     ['nano-gpt.com', 'nanogpt'],
     ['openrouter.ai', 'openrouter'],
 ]));
-const STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES = Object.freeze(new Set(['deepseek', 'openai']));
+const STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES = Object.freeze(new Set(['deepseek', 'openai', 'azure_openai']));
 const NAMED_SEMANTIC_TOOL_CHOICE_SOURCES = Object.freeze(new Set(['deepseek', 'openai', 'nanogpt', 'openrouter', 'xai']));
 const SERIAL_SEMANTIC_TOOL_CALL_SOURCES = Object.freeze(new Set(['nanogpt', 'openrouter', 'xai']));
 const OFFICIAL_OPENAI_SOURCES = Object.freeze(new Set(['openai', 'azure_openai']));
@@ -1009,7 +1009,7 @@ export function resolveSemanticToolTransportPolicy(chatCompletionSource, route =
         // Strict-schema capability is tied to SillyTavern's actual connector source.
         // URL inference remains available for transport quirks, but must not turn a
         // Custom profile into an unconfigurable hardcoded strict route.
-        strictSchema: directProviderRoute && STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(identity.source),
+        strictSchema: STRICT_SEMANTIC_TOOL_SCHEMA_SOURCES.has(identity.source),
         exactNamedToolChoice: trollLlmRoute || (providerPolicyRoute && NAMED_SEMANTIC_TOOL_CHOICE_SOURCES.has(identity.provider)),
         disableParallelToolCalls: providerPolicyRoute && SERIAL_SEMANTIC_TOOL_CALL_SOURCES.has(identity.provider),
     };

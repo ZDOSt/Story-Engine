@@ -1573,7 +1573,7 @@ function refreshSettingsControls() {
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const semanticOutputModeSelect = document.getElementById('structured_preflight_semantic_output_mode');
     const semanticStrictSchemaRow = document.getElementById('structured_preflight_semantic_strict_schema_row');
-    const semanticStrictSchemaCheckbox = document.getElementById('structured_preflight_semantic_strict_schema');
+    const semanticStrictSchemaSelect = document.getElementById('structured_preflight_semantic_strict_schema');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardModeSelect = document.getElementById('structured_preflight_prose_guard_mode');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
@@ -1602,9 +1602,9 @@ function refreshSettingsControls() {
     const semanticToolMode = normalizeSemanticOutputMode(settings.semanticOutputMode) === SEMANTIC_OUTPUT_MODES.TOOL_CALL;
     const semanticStrictToolSchemaVisible = semanticStrictToolSchemaState.visible && semanticToolMode;
     if (semanticStrictSchemaRow) semanticStrictSchemaRow.hidden = !semanticStrictToolSchemaVisible;
-    if (semanticStrictSchemaCheckbox) {
-        semanticStrictSchemaCheckbox.checked = semanticStrictToolSchemaState.enabled;
-        semanticStrictSchemaCheckbox.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
+    if (semanticStrictSchemaSelect) {
+        semanticStrictSchemaSelect.value = semanticStrictToolSchemaState.enabled ? 'true' : 'false';
+        semanticStrictSchemaSelect.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
     }
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (proseGuardModeSelect) proseGuardModeSelect.value = getProseGuardMode(settings);
@@ -1679,7 +1679,7 @@ function refreshSettingsControls() {
     [
         trackerEnabledCheckbox,
         semanticOutputModeSelect,
-        semanticStrictSchemaCheckbox,
+        semanticStrictSchemaSelect,
         proseGuardModeSelect,
         progressionEnabledCheckbox,
         enabledCheckbox,
@@ -1694,8 +1694,8 @@ function refreshSettingsControls() {
     ].forEach(control => {
         if (control) control.disabled = !engineEnabled;
     });
-    if (semanticStrictSchemaCheckbox) {
-        semanticStrictSchemaCheckbox.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
+    if (semanticStrictSchemaSelect) {
+        semanticStrictSchemaSelect.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
     }
     if (narratorHandoffDisplayModeSelect) {
         narratorHandoffDisplayModeSelect.disabled = !engineEnabled || settings.narratorHandoffEnabled !== true;
@@ -2203,10 +2203,11 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Strict JSON first requests SillyTavern native JSON Schema structured output, then retries with the existing marker-delimited JSON contract if the native request is rejected or its result fails local validation. Both paths use the same complete ledger, schema, grounding, and consistency validation before narration.', 'About semantic preflight output')}
                             </div>
                             <div id="structured_preflight_semantic_strict_schema_row" class="spe-settings-toggle-row" hidden>
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_semantic_strict_schema" type="checkbox">
-                                    <span>Strict Tool Schema</span>
-                                </label>
+                                <label for="structured_preflight_semantic_strict_schema">Strict Tool Schema</label>
+                                <select id="structured_preflight_semantic_strict_schema" class="text_pole flex1">
+                                    <option value="false">Provider default</option>
+                                    <option value="true">Enforce strict schema</option>
+                                </select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-strict-schema', 'For providers without a hardcoded strict policy, enforce the complete closed JSON schema and function.strict on semantic Tool Call requests. Native JSON is already strict; this setting does not change it or the text fallback.', 'About Strict Tool Schema')}
                             </div>
                             <div class="spe-settings-row">
@@ -2515,7 +2516,7 @@ function renderSettingsPanel() {
         const overrides = {
             ...(settings.semanticStrictToolSchemaByRoute || {}),
         };
-        if (event.target?.checked) {
+        if (String(event.target?.value || '') === 'true') {
             overrides[routeState.key] = true;
         } else {
             delete overrides[routeState.key];
@@ -2524,6 +2525,8 @@ function renderSettingsPanel() {
         refreshSettingsControls();
         saveExtensionSettings();
     });
+    onEvent('CHATCOMPLETION_SOURCE_CHANGED', refreshSettingsControls, getContext(), { warn: false });
+    onEvent('CONNECTION_PROFILE_LOADED', refreshSettingsControls, getContext(), { warn: false });
     document.getElementById('structured_preflight_model_call_delay_enabled')?.addEventListener('change', event => {
         settings.modelCallDelayEnabled = Boolean(event.target?.checked);
         refreshSettingsControls();

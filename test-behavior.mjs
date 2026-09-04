@@ -17562,6 +17562,14 @@ const tests = [
       assert.match(source, /getSemanticStrictToolSchemaState/);
       assert.match(source, /const semanticStrictToolSchemaVisible = semanticStrictToolSchemaState\.visible && semanticToolMode/);
       assert.match(source, /semanticStrictSchemaRow\.hidden = !semanticStrictToolSchemaVisible/);
+      assert.match(source, /<select id="structured_preflight_semantic_strict_schema"/);
+      assert.match(source, /Provider default/);
+      assert.match(source, /Enforce strict schema/);
+      assert.doesNotMatch(source, /<input id="structured_preflight_semantic_strict_schema"/);
+      assert.match(source, /semanticStrictSchemaSelect\.value = semanticStrictToolSchemaState\.enabled \? 'true' : 'false'/);
+      assert.match(source, /String\(event\.target\?\.value \|\| ''\) === 'true'/);
+      assert.match(source, /onEvent\('CHATCOMPLETION_SOURCE_CHANGED', refreshSettingsControls/);
+      assert.match(source, /onEvent\('CONNECTION_PROFILE_LOADED', refreshSettingsControls/);
 
       const repairStart = source.indexOf('async function applyTargetedProseBanRepairIfNeeded(');
       const repairEnd = source.indexOf('function parsePostNarrationTrackerResponse(', repairStart);
@@ -18012,12 +18020,18 @@ const tests = [
         function: { name: 'submit_tracker_delta' },
       });
 
-      assert.deepEqual(resolveSemanticToolTransportPolicy('deepseek'), {
-        source: 'deepseek',
-        strictSchema: true,
-        exactNamedToolChoice: true,
-        disableParallelToolCalls: false,
-      });
+      for (const sourceName of ['deepseek', 'openai', 'azure_openai']) {
+        assert.equal(
+          resolveSemanticToolTransportPolicy(sourceName).strictSchema,
+          true,
+          `${sourceName} must remain hardwired strict by its actual Chat Completion Source.`,
+        );
+        assert.equal(
+          buildSemanticPreflightTool(sourceName).function.strict,
+          true,
+          `${sourceName} must emit function.strict=true.`,
+        );
+      }
       for (const sourceName of ['nanogpt', 'openrouter', 'xai']) {
         assert.deepEqual(resolveSemanticToolTransportPolicy(sourceName), {
           source: sourceName,
@@ -18082,8 +18096,8 @@ const tests = [
       );
       assert.equal(
         isSemanticToolSchemaOverrideAllowed('deepseek', { usesReverseProxy: true }),
-        true,
-        'A proxy route must remain configurable even when its provider has a direct strict policy.',
+        false,
+        'Hardcoded strict sources must hide the override regardless of proxy details.',
       );
       assert.equal(
         normalizeSemanticToolSchemaRouteKey('custom', {
@@ -18445,8 +18459,8 @@ const tests = [
       assert.equal(strictSemanticTool.function.parameters.properties.trackerUpdateEngine.properties.npcs.maxItems, 20);
       assert.equal(
         buildSemanticPreflightTool('deepseek', { usesCustomUrl: true }).function.strict,
-        undefined,
-        'Custom DeepSeek-compatible routes should retain the portable schema path.',
+        true,
+        'Official hardcoded strict sources must remain strict regardless of route details.',
       );
 
       const buildSchemaFixture = schema => {
@@ -19238,6 +19252,8 @@ const tests = [
       assert.match(semanticSource, /Semantic \$\{transportLabel\} pass returned no valid complete ledger\. Generation aborted before narration/);
       assert.match(adapterSource, /export function getChatCompletionProfileRoute/);
       assert.match(semanticSource, /getChatCompletionProfileRoute/);
+      assert.match(adapterSource, /const profileApi = String\(profile\?\.api \|\| ''\)\.trim\(\)\.toLowerCase\(\)/);
+      assert.match(adapterSource, /context\?\.CONNECT_API_MAP\?\.\[profileApi\]\?\.source/);
       assert.match(adapterSource, /model:\s*String\(profile\?\.model \|\| ''\)/);
       assert.match(adapterSource, /customUrl:\s*String\(profile\?\.\['api-url'\] \|\| ''\)/);
       assert.match(adapterSource, /customIncludeBody:\s*getProfileCustomIncludeBody\(profile, context\)/);

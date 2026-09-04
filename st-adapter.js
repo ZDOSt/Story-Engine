@@ -684,7 +684,8 @@ export function getChatCompletionSourceForProfile(profileId, profileName = '') {
 export function getChatCompletionProfileRoute(profileId, profileName = '') {
     const context = getContext();
     const profile = getConnectionProfile(profileId);
-    const chatCompletionSource = context?.CONNECT_API_MAP?.[profile?.api]?.source;
+    const profileApi = String(profile?.api || '').trim().toLowerCase();
+    const chatCompletionSource = context?.CONNECT_API_MAP?.[profileApi]?.source;
     if (!chatCompletionSource) {
         throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support chat-completion requests.`, { stage: 'profile' });
     }
