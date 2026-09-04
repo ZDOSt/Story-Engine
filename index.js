@@ -1599,12 +1599,12 @@ function refreshSettingsControls() {
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (semanticOutputModeSelect) semanticOutputModeSelect.value = normalizeSemanticOutputMode(settings.semanticOutputMode);
     const semanticStrictToolSchemaState = getSemanticStrictToolSchemaState(settings);
-    if (semanticStrictSchemaRow) semanticStrictSchemaRow.hidden = !semanticStrictToolSchemaState.visible;
+    const semanticToolMode = normalizeSemanticOutputMode(settings.semanticOutputMode) === SEMANTIC_OUTPUT_MODES.TOOL_CALL;
+    const semanticStrictToolSchemaVisible = semanticStrictToolSchemaState.visible && semanticToolMode;
+    if (semanticStrictSchemaRow) semanticStrictSchemaRow.hidden = !semanticStrictToolSchemaVisible;
     if (semanticStrictSchemaCheckbox) {
         semanticStrictSchemaCheckbox.checked = semanticStrictToolSchemaState.enabled;
-        semanticStrictSchemaCheckbox.disabled = !engineEnabled
-            || !semanticStrictToolSchemaState.visible
-            || normalizeSemanticOutputMode(settings.semanticOutputMode) !== SEMANTIC_OUTPUT_MODES.TOOL_CALL;
+        semanticStrictSchemaCheckbox.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
     }
     if (trackerEnabledCheckbox) trackerEnabledCheckbox.checked = settings.postNarrationTrackerEnabled !== false;
     if (proseGuardModeSelect) proseGuardModeSelect.value = getProseGuardMode(settings);
@@ -1695,9 +1695,7 @@ function refreshSettingsControls() {
         if (control) control.disabled = !engineEnabled;
     });
     if (semanticStrictSchemaCheckbox) {
-        semanticStrictSchemaCheckbox.disabled = !engineEnabled
-            || !semanticStrictToolSchemaState.visible
-            || normalizeSemanticOutputMode(settings.semanticOutputMode) !== SEMANTIC_OUTPUT_MODES.TOOL_CALL;
+        semanticStrictSchemaCheckbox.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
     }
     if (narratorHandoffDisplayModeSelect) {
         narratorHandoffDisplayModeSelect.disabled = !engineEnabled || settings.narratorHandoffEnabled !== true;

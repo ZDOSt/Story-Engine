@@ -17560,6 +17560,8 @@ const tests = [
       assert.match(source, /semanticStrictToolSchemaByRoute/);
       assert.match(source, /Strict Tool Schema/);
       assert.match(source, /getSemanticStrictToolSchemaState/);
+      assert.match(source, /const semanticStrictToolSchemaVisible = semanticStrictToolSchemaState\.visible && semanticToolMode/);
+      assert.match(source, /semanticStrictSchemaRow\.hidden = !semanticStrictToolSchemaVisible/);
 
       const repairStart = source.indexOf('async function applyTargetedProseBanRepairIfNeeded(');
       const repairEnd = source.indexOf('function parsePostNarrationTrackerResponse(', repairStart);
