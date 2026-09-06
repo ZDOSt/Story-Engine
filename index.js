@@ -814,6 +814,7 @@ function getSettings() {
     const legacyProseGuardEnabled = settings.postNarrationProseGuardEnabled;
     let semanticStrictSettingsChanged = false;
     let semanticProfileSettingsChanged = false;
+    let semanticOutputSettingsChanged = false;
     const hadRetiredSemanticSettings = [
         'disableSemanticThinking',
         'semanticReasoningEffort',
@@ -847,6 +848,10 @@ function getSettings() {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = value;
         }
+    }
+    if (settings.semanticOutputMode === 'text_only') {
+        settings.semanticOutputMode = SEMANTIC_OUTPUT_MODES.NATIVE_JSON;
+        semanticOutputSettingsChanged = true;
     }
     const storedSemanticProfileId = String(settings.semanticConnectionProfileId || '').trim();
     const storedSemanticProfileName = String(settings.semanticConnectionProfile || '').trim();
@@ -883,7 +888,7 @@ function getSettings() {
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || semanticProfileSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
+    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || semanticProfileSettingsChanged || semanticOutputSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
@@ -2225,9 +2230,9 @@ function renderSettingsPanel() {
                                 <label for="structured_preflight_semantic_output_mode">Semantic preflight output</label>
                                 <select id="structured_preflight_semantic_output_mode" class="text_pole flex1">
                                     <option value="${SEMANTIC_OUTPUT_MODES.TOOL_CALL}">Tool Call</option>
-                                    <option value="${SEMANTIC_OUTPUT_MODES.TEXT_ONLY}">Strict JSON (native schema first)</option>
+                                    <option value="${SEMANTIC_OUTPUT_MODES.NATIVE_JSON}">Native JSON Schema</option>
                                 </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Strict JSON first requests SillyTavern native JSON Schema structured output, then retries with the existing marker-delimited JSON contract if the native request is rejected or its result fails local validation. Both paths use the same complete ledger, schema, grounding, and consistency validation before narration.', 'About semantic preflight output')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Native JSON Schema uses SillyTavern structured output with the same complete ledger, schema, grounding, and consistency validation. A rejected or incomplete native request stops the semantic pass; it does not fall back to prompt-based text.', 'About semantic preflight output')}
                             </div>
                             <div id="structured_preflight_semantic_strict_schema_row" class="spe-settings-toggle-row" hidden>
                                 <label for="structured_preflight_semantic_strict_schema">Strict Tool Schema</label>
@@ -2235,7 +2240,7 @@ function renderSettingsPanel() {
                                     <option value="false">Provider default</option>
                                     <option value="true">Enforce strict schema</option>
                                 </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-strict-schema', 'For providers without a hardcoded strict policy, enforce the complete closed JSON schema and function.strict on semantic Tool Call requests. Native JSON is already strict; this setting does not change it or the text fallback.', 'About Strict Tool Schema')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-strict-schema', 'For providers without a hardcoded strict policy, enforce the complete closed JSON schema and function.strict on semantic Tool Call requests. Native JSON Schema is always strict and does not use this setting.', 'About Strict Tool Schema')}
                             </div>
                             <div class="spe-settings-row">
                                 <label for="structured_preflight_semantic_profile">Story Engine profile</label>

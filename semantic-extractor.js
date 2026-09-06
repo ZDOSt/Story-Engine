@@ -1,6 +1,6 @@
 import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizeNpcCapabilityField, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
-import { getChatCompletionProfileRoute, sendConnectionManagerProfileRequest, sendDefaultChatCompletionJsonSchemaRequest, sendDefaultChatCompletionTextRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
+import { getChatCompletionProfileRoute, sendConnectionManagerProfileRequest, sendDefaultChatCompletionJsonSchemaRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
 import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
 import { buildWorldProgressionSemanticContext, normalizeWorldProgression, normalizeWorldProgressionAdvancements, validateWorldProgressionAdvancementCoverage } from './world-memory.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
@@ -35,10 +35,8 @@ const SEMANTIC_TOOL_NAME = 'submit_semantic_preflight';
 const SEMANTIC_NATIVE_SCHEMA_DESCRIPTION = 'Return the complete structured semantic preflight ledger for deterministic Story Engine resolution. This is data extraction only; do not narrate or roll dice.';
 export const SEMANTIC_OUTPUT_MODES = Object.freeze({
     TOOL_CALL: 'tool_call',
-    TEXT_ONLY: 'text_only',
+    NATIVE_JSON: 'native_json',
 });
-const SEMANTIC_TEXT_LEDGER_START = 'BEGIN_SEMANTIC_PREFLIGHT_JSON';
-const SEMANTIC_TEXT_LEDGER_END = 'END_SEMANTIC_PREFLIGHT_JSON';
 const SEMANTIC_STRUCTURED_OUTPUT_FIELDS = Object.freeze([
     'tools',
     'tool_choice',
@@ -47,6 +45,8 @@ const SEMANTIC_STRUCTURED_OUTPUT_FIELDS = Object.freeze([
     'function_call',
     'response_format',
     'json_schema',
+    'responseMimeType',
+    'responseSchema',
 ]);
 const SEMANTIC_TOOL_CONFLICT_FIELDS = Object.freeze([
     'response_format',
@@ -168,8 +168,8 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
     const turnBinding = createSemanticTurnBinding(options, type);
     const semanticOptions = { ...options, semanticTurnBinding: turnBinding };
     const semanticOutputMode = normalizeSemanticOutputMode(semanticOptions.semanticOutputMode);
-    const textOnly = semanticOutputMode === SEMANTIC_OUTPUT_MODES.TEXT_ONLY;
-    const transportLabel = textOnly ? 'native-schema JSON' : 'tool-call';
+    const nativeJson = semanticOutputMode === SEMANTIC_OUTPUT_MODES.NATIVE_JSON;
+    const transportLabel = nativeJson ? 'native-schema JSON' : 'tool-call';
     const playerTrackerSnapshot = semanticOptions?.playerTrackerSnapshot || {};
     const prompt = semanticOptions?.assembledPrompt
         ? buildSemanticPromptFromAssembledChat(context, promptContext, type, trackerSnapshot, playerTrackerSnapshot, semanticOptions)
@@ -181,9 +181,7 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
 
     let semanticResult;
     let normalized;
-    let nativeSchemaFallback = false;
-    if (textOnly) {
-        let nativeFailure;
+    if (nativeJson) {
         try {
             semanticResult = semanticOptions?.semanticProfileId
                 ? await generateSemanticNativeSchemaResponseWithProfile(prompt, responseLength, semanticOptions)
@@ -191,23 +189,12 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
             normalized = validateSemanticTransportResult(semanticResult, trackerSnapshot, semanticOptions, context, turnBinding, transportLabel);
         } catch (error) {
             options?.signal?.throwIfAborted?.();
-            nativeFailure = error;
-            try {
-                semanticResult = semanticOptions?.semanticProfileId
-                    ? await generateSemanticTextResponseWithProfile(prompt, responseLength, semanticOptions)
-                    : await generateSemanticTextResponse(prompt, responseLength, semanticOptions);
-                normalized = validateSemanticTransportResult(semanticResult, trackerSnapshot, semanticOptions, context, turnBinding, 'text-only JSON fallback');
-                nativeSchemaFallback = true;
-            } catch (fallbackError) {
-                options?.signal?.throwIfAborted?.();
-                const nativeMessage = nativeFailure instanceof Error ? nativeFailure.message : String(nativeFailure);
-                const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-                throw wrapSemanticDiagnosticError(
-                    fallbackError,
-                    `Semantic native-schema JSON pass failed and its prompt-based text-only fallback returned no valid complete ledger. Generation aborted before narration. Native failure: ${nativeMessage}. Fallback failure: ${fallbackMessage}`,
-                    { code: 'SE-NATIVE-FALLBACK', stage: 'Native-schema JSON fallback' },
-                );
-            }
+            const message = error instanceof Error ? error.message : String(error);
+            throw wrapSemanticDiagnosticError(
+                error,
+                `Semantic native-schema JSON pass returned no valid complete ledger. Generation aborted before narration. ${message}`,
+                { code: 'SE-NATIVE-SCHEMA', stage: 'Native-schema JSON request' },
+            );
         }
     } else {
         try {
@@ -226,20 +213,18 @@ async function extractSemanticLedgerInternal(context, promptContext, type, track
         normalized = validateSemanticTransportResult(semanticResult, trackerSnapshot, semanticOptions, context, turnBinding, transportLabel);
     }
 
-    const resolvedTransportLabel = nativeSchemaFallback ? 'text-only JSON fallback' : transportLabel;
     normalized.deterministicOverrides = {
         ...(normalized.deterministicOverrides || {}),
         semanticLedgerExtraction: {
             source: semanticOptions?.semanticProfileId
-                ? `SillyTavern Connection Manager profile ${resolvedTransportLabel} + complete local validation (${semanticOptions.semanticProfileName || semanticOptions.semanticProfileId})`
-                : `SillyTavern backend ${resolvedTransportLabel} + complete local validation`,
+                ? `SillyTavern Connection Manager profile ${transportLabel} + complete local validation (${semanticOptions.semanticProfileName || semanticOptions.semanticProfileId})`
+                : `SillyTavern backend ${transportLabel} + complete local validation`,
             schema: 'submit_semantic_preflight_structured_v4',
             strict: true,
             transport: semanticOutputMode,
-            nativeSchemaAttempted: textOnly,
-            nativeSchemaFallback,
+            nativeSchemaAttempted: nativeJson,
             responseLength,
-            ...(!textOnly ? { toolName: SEMANTIC_TOOL_NAME } : {}),
+            ...(!nativeJson ? { toolName: SEMANTIC_TOOL_NAME } : {}),
             semanticProfile: semanticOptions?.semanticProfileName || undefined,
         },
     };
@@ -315,8 +300,9 @@ function validateSemanticTransportResult(semanticResult, trackerSnapshot, semant
 }
 
 export function normalizeSemanticOutputMode(value) {
-    return value === SEMANTIC_OUTPUT_MODES.TEXT_ONLY
-        ? SEMANTIC_OUTPUT_MODES.TEXT_ONLY
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === SEMANTIC_OUTPUT_MODES.NATIVE_JSON || normalized === 'text_only'
+        ? SEMANTIC_OUTPUT_MODES.NATIVE_JSON
         : SEMANTIC_OUTPUT_MODES.TOOL_CALL;
 }
 
@@ -721,6 +707,7 @@ async function generateSemanticNativeSchemaResponseWithProfile(prompt, responseL
     const overridePayload = {
         temperature: 0,
         stream: false,
+        n: 1,
         messages: nativePrompt,
         ...semanticStructuredOutputOverrides(),
         json_schema: nativeSchema,
@@ -775,99 +762,6 @@ async function generateSemanticNativeSchemaResponseWithProfile(prompt, responseL
     return { raw, ledger };
 }
 
-async function generateSemanticTextResponse(prompt, responseLength, options = {}) {
-    const textPrompt = buildSemanticTextPrompt(prompt);
-    validateSemanticPromptTurnBinding(textPrompt, options.semanticTurnBinding);
-    try {
-        const raw = await sendDefaultChatCompletionTextRequest(textPrompt, responseLength, {
-            purpose: 'semantic preflight text-only JSON request',
-            preparePayload: payload => applySemanticTextRequestPayloadPolicies(payload),
-            signal: options.signal,
-        });
-        if (raw?.error) {
-            throw new SemanticTransportError(`Provider returned an error for semantic text-only JSON request: ${previewRaw(raw)}`, {
-                body: previewRaw(raw),
-                status: semanticResponseStatus(raw),
-                requestId: semanticResponseRequestId(raw),
-            });
-        }
-        const ledger = extractSemanticTextLedger(raw, {}, options.semanticTurnBinding);
-        return { raw, ledger };
-    } catch (error) {
-        if (isSemanticTransportError(error) || findSemanticDiagnosticDetails(error)) throw error;
-        throw new SemanticTransportError(error instanceof Error ? error.message : String(error), {
-            status: error?.status,
-            body: error?.body,
-            cause: error,
-            requestId: error?.requestId || error?.request_id,
-        });
-    }
-}
-
-async function generateSemanticTextResponseWithProfile(prompt, responseLength, options = {}) {
-    const route = getChatCompletionProfileRoute(options.semanticProfileId, options.semanticProfileName);
-    const textPrompt = buildSemanticTextPrompt(prompt);
-    validateSemanticPromptTurnBinding(textPrompt, options.semanticTurnBinding);
-    const preparePayload = payload => {
-        applySemanticTextRequestPayloadPolicies(payload, route);
-        Object.assign(payload, semanticStructuredOutputOverrides());
-    };
-    const overridePayload = {
-        temperature: 0,
-        stream: false,
-        messages: textPrompt,
-        ...semanticStructuredOutputOverrides(),
-        enable_web_search: false,
-        request_images: undefined,
-        request_image_resolution: undefined,
-        request_image_aspect_ratio: undefined,
-        stop: undefined,
-        ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
-    };
-
-    let raw;
-    try {
-        raw = await sendConnectionManagerProfileRequest({
-            profileId: options.semanticProfileId,
-            profileName: options.semanticProfileName,
-            prompt: textPrompt,
-            responseLength,
-            overridePayload,
-            extractData: true,
-            preparePayload,
-            signal: options.signal,
-        });
-    } catch (error) {
-        throw new SemanticTransportError(`Connection Manager semantic profile text-only JSON request failed: ${error instanceof Error ? error.message : String(error)}`, {
-            cause: error,
-            provider: route.source,
-            model: route.model,
-            profile: options.semanticProfileName || options.semanticProfileId,
-            status: semanticErrorDetail(error, ['status', 'statusCode']),
-            body: semanticErrorDetail(error, ['body', 'responseBody']),
-            requestId: semanticErrorDetail(error, ['requestId', 'request_id']),
-        });
-    }
-
-    if (raw?.error) {
-        throw new SemanticTransportError(`Provider returned an error for semantic profile text-only JSON request: ${previewRaw(raw)}`, {
-            body: previewRaw(raw),
-            provider: route.source,
-            model: route.model,
-            profile: options.semanticProfileName || options.semanticProfileId,
-            status: semanticResponseStatus(raw),
-            requestId: semanticResponseRequestId(raw),
-        });
-    }
-
-    const ledger = extractSemanticTextLedger(raw, {
-        provider: route.source,
-        model: route.model,
-        profile: options.semanticProfileName || options.semanticProfileId,
-    }, options.semanticTurnBinding);
-    return { raw, ledger };
-}
-
 export async function sendStructuredToolRequest(prompt, responseLength, options = {}, toolDefinition = {}) {
     const toolName = String(toolDefinition.name || '').trim();
     if (!toolName || !toolDefinition.parameters || typeof toolDefinition.parameters !== 'object') {
@@ -902,6 +796,7 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
             overridePayload: {
                 temperature: 0,
                 stream: false,
+                n: 1,
                 messages,
                 tools: [buildTool(route.source, route)],
                 tool_choice: buildStructuredToolChoice(toolName, route.source, route),
@@ -1121,16 +1016,6 @@ function clearSemanticToolConflictFields(payload, route = {}) {
         changed = true;
     }
     if (changed) payload.custom_include_body = yaml.stringify(body).trim();
-    return payload;
-}
-
-export function applySemanticTextRequestPayloadPolicies(payload, route = {}) {
-    if (!payload || typeof payload !== 'object') return payload;
-    const resolvedRoute = resolveSemanticPayloadRoute(payload, route);
-    const identity = resolveSemanticProviderIdentity(resolvedRoute.source, resolvedRoute);
-    if (identity.provider === TROLL_LLM_PROVIDER) applyTrollLlmRequiredHeaders(payload, resolvedRoute);
-    applyStoryEngineThinkingDisabledPayload(payload, resolvedRoute);
-    clearSemanticStructuredOutputFields(payload, resolvedRoute);
     return payload;
 }
 
@@ -1564,23 +1449,6 @@ export function buildSemanticToolPrompt(prompt) {
     return replaceSemanticOutputContract(prompt, toolContract);
 }
 
-export function buildSemanticTextPrompt(prompt) {
-    const schema = buildSemanticPreflightSchema();
-    const outputTemplate = buildSemanticTextLedgerTemplate(schema);
-    const textContract = [
-        `MANDATORY OUTPUT CONTRACT: Return exactly one complete semantic preflight JSON object between ${SEMANTIC_TEXT_LEDGER_START} and ${SEMANTIC_TEXT_LEDGER_END}.`,
-        `The final assistant response must begin with ${SEMANTIC_TEXT_LEDGER_START} on its own line and end with ${SEMANTIC_TEXT_LEDGER_END} on its own line.`,
-        'Output no narration, prose, explanation, reasoning, markdown fences, tools, or text outside those markers.',
-        ...buildSharedSemanticOutputRules(),
-        'AUTHORITATIVE SEMANTIC PREFLIGHT JSON OUTPUT TEMPLATE:',
-        JSON.stringify(outputTemplate, null, 2),
-        SEMANTIC_ACTION_UNIT_ACCURACY_AUDIT,
-        `Return only the complete verified JSON object between ${SEMANTIC_TEXT_LEDGER_START} and ${SEMANTIC_TEXT_LEDGER_END}.`,
-    ].join('\n');
-
-    return replaceSemanticOutputContract(prompt, textContract);
-}
-
 export function buildSemanticNativeSchemaPrompt(prompt) {
     const nativeContract = [
         'MANDATORY OUTPUT CONTRACT: Return exactly one complete semantic preflight JSON object through SillyTavern native JSON Schema structured output.',
@@ -1596,7 +1464,7 @@ export function buildSemanticNativeSchemaPrompt(prompt) {
 function buildSharedSemanticOutputRules() {
     return [
         'Fill the complete nested semantic object defined by the authoritative submit_semantic_preflight schema. Retain every required object property and nesting; each real array entry retains its complete property set. No unknown property is allowed.',
-        'The schema field names, nesting, types, enums, and field guidance are authoritative in both Tool Call and Text Only modes. Treat every field description as a mandatory semantic decision rule, not as an example, and evaluate every field independently against the supplied authoritative context.',
+        'The schema field names, nesting, types, enums, and field guidance are authoritative in both Tool Call and Native JSON Schema modes. Treat every field description as a mandatory semantic decision rule, not as an example, and evaluate every field independently against the supplied authoritative context.',
         'Complete every required object and array even when the scene does not activate that engine. Use only the schema-defined neutral, false, none, unchanged, or empty value appropriate to the field when its evidence is absent.',
         'Accuracy has priority over choosing an active value. Every non-neutral classification must be supported by the supplied context; never invent evidence, infer an unsupported fact, or select a value merely to fill the ledger.',
         'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
@@ -1605,7 +1473,7 @@ function buildSharedSemanticOutputRules() {
         'Echo the exact authoritative current turn ID in turnBinding.turnId, and ground every resolutionEngine.actionUnits evidence value with the same words in the same order from one contiguous span of the supplied effectiveUserInput. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words.',
         'Legacy shorthand in the semantic guidance maps to this schema as follows: Y/N means true/false; count=0, a list value of (none), or ["(none)"] means an empty array; [index] means one array entry; and references to lines or the template mean the corresponding schema properties. Apply the guidance semantically; never emit compact ledger keys.',
         'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
-        'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. Output mode changes only the transport; do not reduce, reinterpret, invent, or silently omit ledger content.',
+        'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. Transport changes only how the same ledger is returned; do not reduce, reinterpret, invent, or silently omit ledger content.',
     ];
 }
 
@@ -1700,55 +1568,6 @@ function removeStrictOnlySchemaKeywords(schema) {
         Object.values(schema.properties).forEach(removeStrictOnlySchemaKeywords);
     }
     if (schema.items) removeStrictOnlySchemaKeywords(schema.items);
-}
-
-function buildSemanticTextLedgerTemplate(schema, path = '') {
-    if (!schema || typeof schema !== 'object') {
-        throw new Error(`Semantic text template cannot represent invalid schema at ${path || '$'}.`);
-    }
-
-    if (schema.type === 'object') {
-        return Object.fromEntries(Object.entries(schema.properties || {}).map(([key, value]) => [
-            key,
-            buildSemanticTextLedgerTemplate(value, path ? `${path}.${key}` : key),
-        ]));
-    }
-
-    if (schema.type === 'array') {
-        const entryCount = path === 'resolutionEngine.actionUnits' ? 3 : 1;
-        return Array.from({ length: entryCount }, (_, index) => {
-            const itemTemplate = buildSemanticTextLedgerTemplate(schema.items, `${path}[${index}]`);
-            if (path === 'resolutionEngine.actionUnits' && itemTemplate && typeof itemTemplate === 'object') {
-                itemTemplate.id = `A${index + 1}`;
-            }
-            return itemTemplate;
-        });
-    }
-
-    return buildSemanticTextTemplatePlaceholder(schema, path);
-}
-
-function buildSemanticTextTemplatePlaceholder(schema, path) {
-    const description = cleanSemanticTextTemplateDescription(schema.description);
-    const detail = description ? ` ${description}` : '';
-    if (Array.isArray(schema.enum)) {
-        return `__ENUM: ${schema.enum.join(' | ')}.${detail}__`;
-    }
-    if (schema.type === 'boolean') {
-        return `__BOOLEAN: true | false.${detail}__`;
-    }
-    if (schema.type === 'integer') {
-        const range = [schema.minimum, schema.maximum].filter(Number.isFinite).join(' to ');
-        return `__INTEGER${range ? `: ${range}` : ''}.${detail}__`;
-    }
-    return `__STRING: ${path || 'value'}.${detail}__`;
-}
-
-function cleanSemanticTextTemplateDescription(value) {
-    return String(value || '')
-        .replace(/\s+/g, ' ')
-        .replace(/\*\//g, '')
-        .trim();
 }
 
 function buildSemanticPreflightSchema() {
@@ -2187,49 +2006,6 @@ export function extractSemanticToolLedger(raw, diagnosticContext = {}, turnBindi
     return normalizedLedger;
 }
 
-export function extractSemanticTextLedger(raw, diagnosticContext = {}, turnBinding = null) {
-    const responseDiagnosticContext = {
-        requestId: semanticResponseRequestId(raw),
-        ...diagnosticContext,
-    };
-    let text;
-    let jsonText;
-    let ledger;
-    try {
-        text = extractSemanticFinalAssistantText(raw);
-        jsonText = extractSemanticTextJsonBlock(text);
-        ledger = parseSemanticToolArgumentJson(jsonText);
-    } catch (error) {
-        throw annotateSemanticDiagnosticError(error, {
-            code: findSemanticDiagnosticDetails(error)?.code || 'SE-TEXT-EXTRACTION',
-            stage: findSemanticDiagnosticDetails(error)?.stage || 'Text-only JSON extraction',
-            responseShape: describeSemanticResponseShape(raw),
-            excerpt: text || previewRaw(raw),
-            ...responseDiagnosticContext,
-        });
-    }
-
-    if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
-        throw annotateSemanticDiagnosticError(
-            new Error(`Semantic text-only JSON payload was not an object. RawPreview=${previewRaw(raw)}`),
-            {
-                code: 'SE-TEXT-EXTRACTION',
-                stage: 'Text-only JSON extraction',
-                responseShape: describeSemanticResponseShape(raw),
-                ...responseDiagnosticContext,
-            },
-        );
-    }
-    if (turnBinding) validateSemanticTurnIdentity(ledger, turnBinding);
-    const normalizedLedger = normalizeSemanticToolArgumentTypes(ledger);
-    try {
-        validateSemanticToolArguments(normalizedLedger);
-    } catch (error) {
-        throw annotateSemanticDiagnosticError(error, responseDiagnosticContext);
-    }
-    return normalizedLedger;
-}
-
 export function extractSemanticNativeLedger(raw, diagnosticContext = {}, turnBinding = null) {
     const responseDiagnosticContext = {
         requestId: semanticResponseRequestId(raw),
@@ -2241,6 +2017,8 @@ export function extractSemanticNativeLedger(raw, diagnosticContext = {}, turnBin
         .filter(candidate => candidate !== undefined && candidate !== null)
         .concat(collectSemanticNativeCandidates(raw));
     const errors = [];
+    let acceptedLedger = null;
+    let acceptedSignature = '';
 
     for (const candidate of candidates) {
         let ledger = candidate;
@@ -2267,8 +2045,26 @@ export function extractSemanticNativeLedger(raw, diagnosticContext = {}, turnBin
         } catch (error) {
             throw annotateSemanticDiagnosticError(error, responseDiagnosticContext);
         }
-        return normalizedLedger;
+        const signature = stableSemanticValueSignature(normalizedLedger);
+        if (acceptedLedger) {
+            if (signature !== acceptedSignature) {
+                throw annotateSemanticDiagnosticError(
+                    new Error('Semantic native JSON Schema response contained multiple conflicting structured ledgers.'),
+                    {
+                        code: 'SE-NATIVE-DUPLICATE',
+                        stage: 'Native JSON Schema extraction',
+                        responseShape: describeSemanticResponseShape(raw),
+                        ...responseDiagnosticContext,
+                    },
+                );
+            }
+            continue;
+        }
+        acceptedLedger = normalizedLedger;
+        acceptedSignature = signature;
     }
+
+    if (acceptedLedger) return acceptedLedger;
 
     throw annotateSemanticDiagnosticError(
         new Error(`Semantic native JSON Schema response did not contain a complete structured ledger. Candidates=${candidates.length}. Errors=${errors.slice(0, 4).join(' | ') || 'no structured candidates'}. RawPreview=${previewRaw(raw)}`),
@@ -2280,6 +2076,14 @@ export function extractSemanticNativeLedger(raw, diagnosticContext = {}, turnBin
             ...responseDiagnosticContext,
         },
     );
+}
+
+function stableSemanticValueSignature(value) {
+    if (Array.isArray(value)) return `[${value.map(stableSemanticValueSignature).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableSemanticValueSignature(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
 }
 
 function collectSemanticNativeCandidates(raw) {
@@ -2358,133 +2162,6 @@ function semanticNativePartsText(value) {
 
 function isSemanticNativeThoughtPart(part) {
     return Boolean(part?.thought === true || /(?:reasoning|thinking|thought)/i.test(String(part?.type || '')));
-}
-
-function extractSemanticFinalAssistantText(raw) {
-    const candidates = [];
-    const seen = new Set();
-    const add = value => {
-        const text = semanticFinalContentText(value).trim();
-        if (!text || seen.has(text)) return;
-        seen.add(text);
-        candidates.push(text);
-    };
-
-    if (typeof raw === 'string') add(raw);
-    for (const choice of (Array.isArray(raw?.choices) ? raw.choices : [])) {
-        add(choice?.message?.content);
-        if (!choice?.message) add(choice?.text);
-    }
-    if (Array.isArray(raw?.candidates)) {
-        for (const candidate of raw.candidates) add(candidate?.content?.parts);
-    }
-    add(raw?.responseContent?.parts);
-    if (raw?.message && typeof raw.message === 'object') add(raw.message.content);
-    add(raw?.output_text);
-    if (Array.isArray(raw?.output)) {
-        for (const item of raw.output) {
-            const role = String(item?.role || '').toLowerCase();
-            const type = String(item?.type || '').toLowerCase();
-            if (role === 'assistant' || type === 'message') add(item?.content);
-        }
-    }
-    if (Array.isArray(raw?.content) || typeof raw?.content === 'string') add(raw.content);
-    if (raw?.response && raw.response !== raw) {
-        if (typeof raw.response === 'string') add(raw.response);
-        else if (typeof raw.response === 'object') {
-            add(raw.response?.message?.content);
-            add(raw.response?.output_text);
-            if (Array.isArray(raw.response?.content)) add(raw.response.content);
-        }
-    }
-
-    if (candidates.length !== 1) {
-        throw new Error(`Semantic text-only response must contain exactly one final assistant answer; found ${candidates.length}.`);
-    }
-    return candidates[0];
-}
-
-function semanticFinalContentText(value) {
-    if (typeof value === 'string') return value;
-    if (!Array.isArray(value)) return '';
-    return value
-        .map(part => {
-            if (typeof part === 'string') return part;
-            if (!part || typeof part !== 'object') return '';
-            const type = String(part.type || '').toLowerCase();
-            if (/(?:reasoning|thinking)/.test(type)) return '';
-            if (typeof part.text === 'string') return part.text;
-            if (typeof part.output_text === 'string') return part.output_text;
-            return '';
-        })
-        .filter(Boolean)
-        .join('\n');
-}
-
-function extractSemanticTextJsonBlock(text) {
-    const source = String(text || '').replace(/^\uFEFF/, '');
-    const startMatches = [...source.matchAll(new RegExp(`^${SEMANTIC_TEXT_LEDGER_START}[ \\t]*\\r?$`, 'gm'))];
-    const endMatches = [...source.matchAll(new RegExp(`^${SEMANTIC_TEXT_LEDGER_END}[ \\t]*\\r?$`, 'gm'))];
-    if (startMatches.length !== 1 || endMatches.length !== 1) {
-        throw new Error(`Semantic text-only response must contain exactly one ${SEMANTIC_TEXT_LEDGER_START}/${SEMANTIC_TEXT_LEDGER_END} block.`);
-    }
-
-    const start = startMatches[0];
-    const end = endMatches[0];
-    const contentStart = start.index + start[0].length;
-    if (end.index <= contentStart) {
-        throw new Error('Semantic text-only response markers are empty or out of order.');
-    }
-    if (source.slice(0, start.index).trim() || source.slice(end.index + end[0].length).trim()) {
-        throw new Error('Semantic text-only response contains text outside the mandatory JSON markers.');
-    }
-
-    return extractSingleBalancedJsonObject(source.slice(contentStart, end.index));
-}
-
-function extractSingleBalancedJsonObject(value) {
-    const text = String(value || '').trim();
-    if (!text.startsWith('{')) {
-        throw new Error('Semantic text-only block must begin with a JSON object.');
-    }
-
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    let objectEnd = -1;
-    for (let index = 0; index < text.length; index += 1) {
-        const char = text[index];
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-            } else if (char === '\\') {
-                escaped = true;
-            } else if (char === '"') {
-                inString = false;
-            }
-            continue;
-        }
-        if (char === '"') {
-            inString = true;
-        } else if (char === '{') {
-            depth += 1;
-        } else if (char === '}') {
-            depth -= 1;
-            if (depth < 0) throw new Error('Semantic text-only block contains an unmatched closing brace.');
-            if (depth === 0) {
-                objectEnd = index + 1;
-                break;
-            }
-        }
-    }
-
-    if (inString || objectEnd < 0 || depth !== 0) {
-        throw new Error('Semantic text-only block does not contain one complete balanced JSON object.');
-    }
-    if (text.slice(objectEnd).trim()) {
-        throw new Error('Semantic text-only block must contain exactly one JSON object.');
-    }
-    return text.slice(0, objectEnd);
 }
 
 export function validateSemanticToolArguments(ledger) {

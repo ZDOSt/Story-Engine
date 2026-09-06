@@ -276,15 +276,18 @@ function formatSemanticTransportAudit(ledger = {}) {
         ];
     }
 
-    const transport = extraction.transport === 'text_only'
-        ? 'Strict JSON (native schema first)'
-        : extraction.transport === 'tool_call'
-            ? 'Tool Call'
-            : valueOrNone(extraction.transport);
+    const historicalTextMode = extraction.transport === 'text_only';
+    const historicalFallback = historicalTextMode && extraction.nativeSchemaFallback === true;
+    const transport = extraction.transport === 'native_json'
+        ? 'Native JSON Schema'
+        : historicalTextMode
+            ? 'Legacy Strict JSON (retired)'
+            : extraction.transport === 'tool_call'
+                ? 'Tool Call'
+                : valueOrNone(extraction.transport);
     const nativeAttempted = extraction.nativeSchemaAttempted === true;
-    const fallbackUsed = extraction.nativeSchemaFallback === true;
-    const acceptedPath = fallbackUsed
-        ? 'Marker-delimited text-only JSON fallback'
+    const acceptedPath = historicalFallback
+        ? 'Historical prompt-based text result'
         : nativeAttempted
             ? 'Native SillyTavern JSON Schema'
             : extraction.transport === 'tool_call'
@@ -295,7 +298,7 @@ function formatSemanticTransportAudit(ledger = {}) {
         `- selected mode: ${transport}`,
         `- native schema attempted: ${nativeAttempted ? 'YES' : 'NO'}`,
         `- accepted path: ${acceptedPath}`,
-        `- text fallback used: ${fallbackUsed ? 'YES' : 'NO'}`,
+        `- fallback used: ${historicalFallback ? 'YES (historical result)' : 'NO'}`,
         `- local validation: ${extraction.strict === true ? 'complete and strict' : 'complete'}`,
     ];
 }

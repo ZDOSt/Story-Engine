@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticTextPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -649,35 +649,32 @@ const tests = [
     name: '00a semantic transport is visible in the mechanics handoff',
     run() {
       const nativeAudit = auditPrompt(semanticTransportAuditReport({
-        transport: 'text_only',
+        transport: 'native_json',
         nativeSchemaAttempted: true,
-        nativeSchemaFallback: false,
         strict: true,
       }));
-      assert.match(nativeAudit, /==SEMANTIC_TRANSPORT==[\s\S]*selected mode: Strict JSON \(native schema first\)/);
+      assert.match(nativeAudit, /==SEMANTIC_TRANSPORT==[\s\S]*selected mode: Native JSON Schema/);
       assert.match(nativeAudit, /accepted path: Native SillyTavern JSON Schema/);
-      assert.match(nativeAudit, /text fallback used: NO/);
+      assert.match(nativeAudit, /fallback used: NO/);
       assert.match(nativeAudit, /local validation: complete and strict/);
       assert.doesNotMatch(prompt(semanticTransportAuditReport({
-        transport: 'text_only',
+        transport: 'native_json',
         nativeSchemaAttempted: true,
-        nativeSchemaFallback: false,
         strict: true,
       })), /SEMANTIC_TRANSPORT|Native SillyTavern JSON Schema/);
 
-      const fallbackAudit = auditPrompt(semanticTransportAuditReport({
+      const historicalAudit = auditPrompt(semanticTransportAuditReport({
         transport: 'text_only',
         nativeSchemaAttempted: true,
         nativeSchemaFallback: true,
         strict: true,
       }));
-      assert.match(fallbackAudit, /accepted path: Marker-delimited text-only JSON fallback/);
-      assert.match(fallbackAudit, /text fallback used: YES/);
+      assert.match(historicalAudit, /accepted path: Historical prompt-based text result/);
+      assert.doesNotMatch(historicalAudit, /accepted path: Native SillyTavern JSON Schema/);
 
       const toolAudit = auditPrompt(semanticTransportAuditReport({
         transport: 'tool_call',
         nativeSchemaAttempted: false,
-        nativeSchemaFallback: false,
         strict: true,
       }));
       assert.match(toolAudit, /selected mode: Tool Call/);
@@ -687,7 +684,6 @@ const tests = [
       const unknownAudit = auditPrompt(semanticTransportAuditReport({
         transport: 'legacy_mode',
         nativeSchemaAttempted: false,
-        nativeSchemaFallback: false,
         strict: true,
       }));
       assert.match(unknownAudit, /accepted path: Unavailable \(unrecognized transport metadata\)/);
@@ -17786,7 +17782,7 @@ const tests = [
       );
       assert.match(getSettingsSource, /'semanticThinkingDisableFormat',\s*'semanticThinkingDisableFormats'/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| semanticProfileSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| semanticProfileSettingsChanged \|\| semanticOutputSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
@@ -17795,12 +17791,14 @@ const tests = [
           semanticReasoningEffort: 'high',
           semanticThinkingDisableFormat: 'deepseek',
           semanticThinkingDisableFormats: { 'profile:old': 'openrouter_nanogpt' },
+          semanticOutputMode: 'text_only',
         },
       };
       const getMigratedSettings = new Function(
         'extension_settings',
         'SETTINGS_KEY',
         'DEFAULT_SETTINGS',
+        'SEMANTIC_OUTPUT_MODES',
         'LEGACY_DEFAULT_STYLE_PROMPTS',
         'LEGACY_DEFAULT_DIALOGUE_STYLE_PROMPT',
         'PROSE_GUARD_MODES',
@@ -17815,6 +17813,7 @@ const tests = [
         retiredSettingsStore,
         'storyEngine',
         { writingStyleDialoguePrompt: '**EMBODIED, NATURAL DIALOGUE**' },
+        SEMANTIC_OUTPUT_MODES,
         {},
         'During dialogue, present the exchange as a lived moment.',
         { OFF: 'off' },
@@ -17830,6 +17829,7 @@ const tests = [
       assert.equal('semanticReasoningEffort' in migratedSettings, false);
       assert.equal('semanticThinkingDisableFormat' in migratedSettings, false);
       assert.equal('semanticThinkingDisableFormats' in migratedSettings, false);
+      assert.equal(migratedSettings.semanticOutputMode, 'native_json');
       assert.equal(settingsSaveCount, 1);
       getMigratedSettings();
       assert.equal(settingsSaveCount, 1);
@@ -18551,13 +18551,6 @@ const tests = [
         canonicalRepresentation,
         'Native JSON responses with lossless shorthand representations must use the shared canonical form.',
       );
-      assert.deepEqual(
-        extractSemanticTextLedger(
-          `BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(representationVariant)}\nEND_SEMANTIC_PREFLIGHT_JSON`,
-        ),
-        canonicalRepresentation,
-        'Text-only JSON responses with lossless shorthand representations must use the shared canonical form.',
-      );
       const relationshipMissingNpcVariant = structuredClone(structuredLedger);
       relationshipMissingNpcVariant.resolutionEngine.identifyTargets.ActionTargets = ['Phoebe'];
       relationshipMissingNpcVariant.relationshipEngine = [buildSchemaFixture(
@@ -18581,13 +18574,6 @@ const tests = [
         extractSemanticNativeLedger({ choices: [{ message: { content: JSON.stringify(relationshipMissingNpcVariant) } }] }),
         repairedRelationshipMissingNpc,
         'Native JSON responses with one unambiguous missing relationship NPC must be repaired before validation.',
-      );
-      assert.deepEqual(
-        extractSemanticTextLedger(
-          `BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(relationshipMissingNpcVariant)}\nEND_SEMANTIC_PREFLIGHT_JSON`,
-        ),
-        repairedRelationshipMissingNpc,
-        'Text-only JSON responses with one unambiguous missing relationship NPC must be repaired before validation.',
       );
       const multipleVisibleNpcVariant = structuredClone(relationshipMissingNpcVariant);
       multipleVisibleNpcVariant.engineContext.trackerRelevantNPCs = [{ NPC: 'Phoebe' }, { NPC: 'Seraphina' }];
@@ -18878,7 +18864,7 @@ const tests = [
       assert.match(toolPrompt[1].content, /Do not emit placeholders, template rows, count fields, sentinel values/);
       assert.match(toolPrompt[1].content, /count=0, a list value of \(none\), or \["\(none\)"\] means an empty array/);
       assert.match(toolPrompt[1].content, /references to lines or the template mean the corresponding schema properties/);
-      assert.match(toolPrompt[1].content, /Output mode changes only the transport; do not reduce, reinterpret, invent, or silently omit ledger content/);
+      assert.match(toolPrompt[1].content, /Transport changes only how the same ledger is returned; do not reduce, reinterpret, invent, or silently omit ledger content/);
       assert.doesNotMatch(toolPrompt[1].content, /ResolutionEngine\.identifyGoal: test/);
       assert.doesNotMatch(toolPrompt[1].content, /BEGIN_SEMANTIC_PREFLIGHT|END_SEMANTIC_PREFLIGHT/);
       assert.doesNotMatch(toolPrompt[1].content, /SEMANTIC_PREFLIGHT_COMPLETE|stop sentinel/);
@@ -19544,7 +19530,7 @@ const tests = [
       assert.throws(
         () => extractSemanticNativeLedger({ choices: [{ message: { content: serializedLedger.replace(',', '') } }] }),
         /did not contain a complete structured ledger/,
-        'Malformed native JSON must be rejected so the prompt-based fallback can run.',
+        'Malformed native JSON must be rejected before narration.',
       );
       assert.throws(
         () => extractSemanticNativeLedger({
@@ -19559,6 +19545,18 @@ const tests = [
         }),
         /did not contain a complete structured ledger/,
         'An unrelated tool call must not be accepted as native semantic output.',
+      );
+      const conflictingLedger = structuredClone(ledger);
+      conflictingLedger.chaosSemantic.sceneSummary = 'A conflicting native ledger.';
+      assert.throws(
+        () => extractSemanticNativeLedger({
+          choices: [
+            { message: { content: serializedLedger } },
+            { message: { content: JSON.stringify(conflictingLedger) } },
+          ],
+        }),
+        /multiple conflicting structured ledgers/,
+        'Conflicting native structured results must fail closed instead of accepting the first candidate.',
       );
 
       const prompt = buildSemanticNativeSchemaPrompt([
@@ -19576,16 +19574,20 @@ const tests = [
         tool_choice: 'auto',
         parallel_tool_calls: true,
         response_format: { type: 'json_object' },
+        responseMimeType: 'application/json',
+        responseSchema: { type: 'object' },
         custom_include_body: yaml.stringify({
           provider_option: 'retained',
           tools: [{ type: 'function' }],
           response_format: { type: 'json_object' },
           json_schema: { type: 'object' },
+          responseMimeType: 'application/json',
+          responseSchema: { type: 'object' },
         }),
       };
       applySemanticNativeSchemaRequestPayloadPolicies(nativePayload);
       assert.deepEqual(nativePayload.json_schema, nativeSchema);
-      for (const field of ['tools', 'tool_choice', 'parallel_tool_calls', 'response_format']) {
+      for (const field of ['tools', 'tool_choice', 'parallel_tool_calls', 'response_format', 'responseMimeType', 'responseSchema']) {
         assert.equal(field in nativePayload, false, `${field} must not survive a native schema request.`);
       }
       assert.deepEqual(yaml.parse(nativePayload.custom_include_body), { provider_option: 'retained' });
@@ -19594,209 +19596,26 @@ const tests = [
       const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
       assert.match(semanticSource, /generateSemanticNativeSchemaResponse/);
       assert.match(semanticSource, /generateSemanticNativeSchemaResponseWithProfile/);
-      assert.match(semanticSource, /SE-NATIVE-FALLBACK/);
-      assert.match(semanticSource, /nativeSchemaFallback/);
+      assert.doesNotMatch(semanticSource, /generateSemanticTextResponse|extractSemanticTextLedger|SE-NATIVE-FALLBACK|nativeSchemaFallback/);
       assert.match(adapterSource, /sendDefaultChatCompletionJsonSchemaRequest/);
       assert.match(adapterSource, /createGenerationParameters\(chatCompletionSettings, model, 'quiet', messages, \{ jsonSchema \}\)/);
     },
   },
   {
-    name: '48a.1 semantic text-only transport uses the schema-derived output template and fails closed',
+    name: '48a.1 native JSON Schema transport fails closed without text fallback',
     run() {
-      const strictSchema = buildSemanticPreflightTool('deepseek').function.parameters;
-      const buildSchemaFixture = schema => {
-        if (schema.type === 'object') {
-          return Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, buildSchemaFixture(value)]));
-        }
-        if (schema.type === 'array') {
-          return Array.from({ length: schema.minItems || 0 }, () => buildSchemaFixture(schema.items));
-        }
-        if (schema.type === 'boolean') return false;
-        if (schema.type === 'integer') return schema.minimum ?? 0;
-        if (Array.isArray(schema.enum)) return schema.enum[0];
-        return '(none)';
-      };
-      const assertTemplateMatchesSchema = (template, schema, path = '') => {
-        if (schema.type === 'object') {
-          assert.ok(template && typeof template === 'object' && !Array.isArray(template), `${path || '$'} must be an object template.`);
-          assert.deepEqual(Object.keys(template), Object.keys(schema.properties), `${path || '$'} must retain every schema property in order.`);
-          for (const [key, value] of Object.entries(schema.properties)) {
-            assertTemplateMatchesSchema(template[key], value, path ? `${path}.${key}` : key);
-          }
-          return;
-        }
-        if (schema.type === 'array') {
-          assert.ok(Array.isArray(template), `${path} must be an array template.`);
-          const expectedEntryCount = path === 'resolutionEngine.actionUnits' ? 3 : 1;
-          assert.equal(template.length, expectedEntryCount, `${path} must expose its required illustrative entry shape.`);
-          template.forEach((entry, index) => assertTemplateMatchesSchema(entry, schema.items, `${path}[${index}]`));
-          return;
-        }
-        if (/^resolutionEngine\.actionUnits\[\d+\]\.id$/.test(path)) {
-          const index = Number(path.match(/\[(\d+)\]/)?.[1] || 0);
-          assert.equal(template, `A${index + 1}`, `${path} must make the counted action slot explicit.`);
-          return;
-        }
-        assert.equal(typeof template, 'string', `${path} must be a typed prompt placeholder.`);
-        assert.match(template, /^__.+__$/, `${path} placeholder must be explicit and removable.`);
-      };
-      const ledger = buildSchemaFixture(strictSchema);
-      ledger.chaosSemantic.sceneSummary = 'A literal {brace} remains inside this quoted JSON string.';
-      const ledgerText = `BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(ledger)}\nEND_SEMANTIC_PREFLIGHT_JSON`;
-      const raw = {
-        choices: [{
-          message: {
-            role: 'assistant',
-            content: ledgerText,
-            reasoning_content: 'BEGIN_SEMANTIC_PREFLIGHT_JSON\n{"invented":true}\nEND_SEMANTIC_PREFLIGHT_JSON',
-          },
-        }],
-      };
-      assert.deepEqual(extractSemanticTextLedger(raw), ledger);
-      assert.deepEqual(extractSemanticTextLedger({
-        candidates: [{ content: { parts: [{ text: ledgerText }] } }],
-      }), ledger);
-      assert.deepEqual(extractSemanticTextLedger({
-        responseContent: { parts: [{ text: ledgerText }] },
-      }), ledger);
-
-      const sharedSemanticPrompt = [
-        { role: 'system', content: 'ENGINE REFERENCE: authoritative semantic rules.' },
-        { role: 'system', content: 'TRACKER SNAPSHOT: relevant current state.' },
-        { role: 'assistant', content: 'RECENT CONTEXT: relevant prior scene facts.' },
-        { role: 'user', content: 'STRICT COMPACT PREFLIGHT LEDGER CONTRACT:\nlegacy output' },
-      ];
-      const toolPromptFromSharedContext = buildSemanticToolPrompt(sharedSemanticPrompt);
-      const textPrompt = buildSemanticTextPrompt(sharedSemanticPrompt);
-      assert.equal(textPrompt.length, sharedSemanticPrompt.length);
-      assert.equal(textPrompt[0].content, 'ENGINE REFERENCE: authoritative semantic rules.');
-      assert.deepEqual(textPrompt.slice(0, -1), toolPromptFromSharedContext.slice(0, -1));
-      assert.deepEqual(sharedSemanticPrompt.slice(0, -1), textPrompt.slice(0, -1));
-      assert.match(textPrompt.at(-1).content, /Return exactly one complete semantic preflight JSON object/);
-      assert.match(textPrompt.at(-1).content, /Retain every required object property and nesting/);
-      assert.match(textPrompt.at(-1).content, /No unknown property is allowed/);
-      assert.match(textPrompt.at(-1).content, /field description as a mandatory semantic decision rule/);
-      assert.match(textPrompt.at(-1).content, /Accuracy has priority over choosing an active value/);
-      assert.match(textPrompt.at(-1).content, /Choose it only when its field guidance and the supplied context support it/);
-      assert.match(textPrompt.at(-1).content, /Each schema array defines one entry shape/);
-      assert.match(textPrompt.at(-1).content, /FINAL SEMANTIC ACCURACY AUDIT/);
-      assert.match(textPrompt.at(-1).content, /explicitly repeats a direct combat action N times/);
-      assert.match(textPrompt.at(-1).content, /"I strike the guard twice" requires A1 and A2/);
-      assert.doesNotMatch(textPrompt.at(-1).content, /legacy output/);
-      const templateHeader = 'AUTHORITATIVE SEMANTIC PREFLIGHT JSON OUTPUT TEMPLATE:';
-      const auditHeader = 'FINAL SEMANTIC ACCURACY AUDIT:';
-      const templateStart = textPrompt.at(-1).content.indexOf(templateHeader);
-      const auditStart = textPrompt.at(-1).content.indexOf(auditHeader);
-      assert.ok(templateStart >= 0, 'Text-only prompt must include the schema-derived output template.');
-      assert.ok(auditStart > templateStart, 'The final semantic audit must follow the output template.');
-      const serializedPromptTemplate = textPrompt.at(-1).content
-        .slice(templateStart + templateHeader.length, auditStart)
-        .trim();
-      const promptTemplate = JSON.parse(serializedPromptTemplate);
-      assertTemplateMatchesSchema(promptTemplate, strictSchema);
-
       assert.equal(normalizeSemanticOutputMode(undefined), SEMANTIC_OUTPUT_MODES.TOOL_CALL);
       assert.equal(normalizeSemanticOutputMode('unexpected'), SEMANTIC_OUTPUT_MODES.TOOL_CALL);
-      assert.equal(normalizeSemanticOutputMode(SEMANTIC_OUTPUT_MODES.TEXT_ONLY), SEMANTIC_OUTPUT_MODES.TEXT_ONLY);
-
-      const missingField = structuredClone(ledger);
-      delete missingField.resolutionEngine.rollReason;
-      assert.throws(
-        () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(missingField)}\nEND_SEMANTIC_PREFLIGHT_JSON`),
-        /resolutionEngine\.rollReason is required/,
-      );
-      const canonicalTextEnum = structuredClone(ledger);
-      canonicalTextEnum.worldTransition.indoors = 'Indoor';
-      canonicalTextEnum.resolutionEngine.challengeType = 'mundane-combat';
-      const canonicalTextResult = extractSemanticTextLedger(
-        `BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(canonicalTextEnum)}\nEND_SEMANTIC_PREFLIGHT_JSON`,
-      );
-      assert.equal(canonicalTextResult.worldTransition.indoors, 'indoors');
-      assert.equal(canonicalTextResult.resolutionEngine.challengeType, 'mundane_combat');
-      const invalidEnum = structuredClone(ledger);
-      invalidEnum.resolutionEngine.challengeType = 'whatever';
-      assert.throws(
-        () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(invalidEnum)}\nEND_SEMANTIC_PREFLIGHT_JSON`),
-        /resolutionEngine\.challengeType must be one of/,
-      );
-      assert.throws(
-        () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify({ ...ledger, invented: true })}\nEND_SEMANTIC_PREFLIGHT_JSON`),
-        /contains unknown properties: invented/,
-      );
-      assert.throws(
-        () => extractSemanticTextLedger(`commentary\n${ledgerText}`),
-        /text outside the mandatory JSON markers/,
-      );
-      assert.throws(
-        () => extractSemanticTextLedger(`${ledgerText}\n${ledgerText}`),
-        /exactly one BEGIN_SEMANTIC_PREFLIGHT_JSON\/END_SEMANTIC_PREFLIGHT_JSON block/,
-      );
-      assert.throws(
-        () => extractSemanticTextLedger(`BEGIN_SEMANTIC_PREFLIGHT_JSON\n${JSON.stringify(ledger)}\n{}\nEND_SEMANTIC_PREFLIGHT_JSON`),
-        /exactly one JSON object/,
-      );
-      assert.throws(
-        () => extractSemanticTextLedger({ choices: [{ message: { reasoning_content: ledgerText, content: '' } }] }),
-        /exactly one final assistant answer; found 0/,
-      );
-      assert.throws(
-        () => extractSemanticTextLedger({ choices: { malformed: true } }),
-        /exactly one final assistant answer; found 0/,
-      );
-      assert.throws(
-        () => extractSemanticTextLedger({
-          choices: [
-            { message: { content: ledgerText } },
-            { message: { content: ledgerText.replace('{brace}', '{different}') } },
-          ],
-        }),
-        /exactly one final assistant answer; found 2/,
-      );
-
-      const inheritedPayload = {
-        chat_completion_source: 'custom',
-        tools: [{ type: 'function' }],
-        tool_choice: 'auto',
-        parallel_tool_calls: true,
-        response_format: { type: 'json_object' },
-        json_schema: { type: 'object' },
-        custom_include_body: yaml.stringify({
-          provider_option: 'retained',
-          tools: [{ type: 'function' }],
-          response_format: { type: 'json_object' },
-          json_schema: { type: 'object' },
-        }),
-      };
-      applySemanticTextRequestPayloadPolicies(inheritedPayload);
-      for (const field of ['tools', 'tool_choice', 'parallel_tool_calls', 'response_format', 'json_schema']) {
-        assert.equal(field in inheritedPayload, false, `${field} must not survive a text-only semantic request.`);
-      }
-      assert.equal(inheritedPayload.include_reasoning, false);
-      assert.deepEqual(yaml.parse(inheritedPayload.custom_include_body), { provider_option: 'retained' });
-
-      const textModeModelPayload = {
-        chat_completion_source: 'custom',
-        custom_url: 'https://chat.trollllm.xyz/v1',
-        model: 'xiaomi/mimo-v2.5',
-        response_format: { type: 'json_object' },
-        custom_include_body: 'provider_option: retained\nreasoning_effort: high',
-      };
-      applySemanticTextRequestPayloadPolicies(textModeModelPayload);
-      assert.equal('response_format' in textModeModelPayload, false);
-      assert.deepEqual(yaml.parse(textModeModelPayload.custom_include_body), {
-        provider_option: 'retained',
-        reasoning_effort: 'low',
-      });
-
       const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
       const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
-      assert.match(semanticSource, /generateSemanticTextResponse/);
-      assert.match(semanticSource, /generateSemanticTextResponseWithProfile/);
-      assert.match(semanticSource, /extractData: true/);
-      assert.match(semanticSource, /Object\.assign\(payload, semanticStructuredOutputOverrides\(\)\)/);
-      assert.match(adapterSource, /sendDefaultChatCompletionTextRequest/);
-      assert.match(adapterSource, /clearStructuredOutput: true/);
-      assert.match(adapterSource, /if \(clearStructuredOutput\) \{\s*clearChatCompletionStructuredOutputFields\(generateData\)/);
+      assert.doesNotMatch(semanticSource, /generateSemanticTextResponse|extractSemanticTextLedger|applySemanticTextRequestPayloadPolicies|buildSemanticTextPrompt|SEMANTIC_TEXT_LEDGER/);
+      assert.doesNotMatch(semanticSource, /SE-NATIVE-FALLBACK|nativeSchemaFallback/);
+      assert.match(semanticSource, /Semantic native-schema JSON pass returned no valid complete ledger/);
+      assert.match(semanticSource, /applySemanticNativeSchemaRequestPayloadPolicies/);
+      assert.match(adapterSource, /sendDefaultChatCompletionJsonSchemaRequest/);
+      assert.doesNotMatch(adapterSource, /sendDefaultChatCompletionTextRequest/);
+      assert.equal(normalizeSemanticOutputMode('text_only'), SEMANTIC_OUTPUT_MODES.NATIVE_JSON);
+      assert.equal(normalizeSemanticOutputMode(SEMANTIC_OUTPUT_MODES.NATIVE_JSON), SEMANTIC_OUTPUT_MODES.NATIVE_JSON);
     },
   },
   {
@@ -20824,7 +20643,7 @@ const tests = [
       assert.match(renderSource, /Use private Story Engine connection profile/);
       assert.match(renderSource, /Semantic preflight output/);
       assert.match(renderSource, /Tool Call/);
-      assert.match(renderSource, /Strict JSON \(native schema first\)/);
+      assert.match(renderSource, /Native JSON Schema/);
       assert.match(renderSource, /Story Engine profile/);
       assert.match(renderSource, /Used for semantic preflight and post-narration Story Engine utility calls/);
       assert.match(renderSource, /Narration, adventure openings, character creation, and character progression use the current SillyTavern profile/);
