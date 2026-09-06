@@ -15206,7 +15206,7 @@ function buildPostNarrationTrackerPrompt({ pendingRun, messageKey, narrationText
     const previous = {
         user: sanitizeTrackerUserStateForModel(pendingRun?.userBefore || {}),
         npcs: pendingRun?.trackerBefore || {},
-        userKnowledge: pendingRun?.userKnowledgeBefore || {},
+        userKnowledge: pendingRun?.userKnowledgeAfter || pendingRun?.userKnowledgeBefore || {},
         worldState: pendingRun?.worldStateBefore || {},
         sceneItems: sceneItemStateForModel(
             pendingRun?.sceneItemsBefore || {},

@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticTextRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticTextPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticTextPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseAndValidateSemanticToolSections, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reconstructSemanticToolLedger, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -19429,7 +19429,7 @@ const tests = [
       );
       assert.match(structuredToolRequest, /tool_choice: buildStructuredToolChoice\(toolName, route\.source, route\)/);
       assert.match(structuredToolRequest, /buildSemanticToolTransportOverrides\(route\.source, route\)/);
-      assert.match(structuredToolRequest, /if \(!matching\) \{[\s\S]*throw new Error/);
+      assert.match(structuredToolRequest, /const matchingCalls = calls\.filter\([\s\S]*if \(!matchingCalls\.length\) \{[\s\S]*throw new Error/);
       assert.doesNotMatch(structuredToolRequest, /extractGeneratedText|sendChatCompletionProfileRequest|fallback/i);
 
       const connectionManagerRequest = adapterSource.slice(
@@ -23054,6 +23054,38 @@ const tests = [
       assert.match(source, /protectedResizeCorner/);
       assert.match(source, /handle\.hidden = isProtected/);
       assert.match(source, /left: opensLeft \? TRACKER_WIDGET_BUTTON_SIZE - panelWidth : 0/);
+    },
+  },
+  {
+    name: 'tool transport removes conflicting custom structured-output fields',
+    run() {
+      const payload = {
+        chat_completion_source: 'custom',
+        custom_url: 'https://example.test/v1',
+        custom_include_body: 'response_format: json_object\njson_schema: stale\nparallel_tool_calls: true',
+        response_format: { type: 'json_object' },
+        json_schema: { name: 'stale' },
+      };
+      applySemanticToolRequestPayloadPolicies(payload);
+      assert.equal(Object.hasOwn(payload, 'response_format'), false);
+      assert.equal(Object.hasOwn(payload, 'json_schema'), false);
+      const customBody = yaml.parse(payload.custom_include_body);
+      assert.equal(Object.hasOwn(customBody, 'response_format'), false);
+      assert.equal(Object.hasOwn(customBody, 'json_schema'), false);
+      assert.equal(customBody.parallel_tool_calls, true);
+    },
+  },
+  {
+    name: 'tool transport rejects duplicate semantic calls',
+    run() {
+      const call = {
+        type: 'function',
+        function: { name: 'submit_semantic_preflight', arguments: '{}' },
+      };
+      assert.throws(
+        () => extractSemanticToolLedger({ choices: [{ message: { tool_calls: [call, structuredClone(call)] } }] }),
+        /contained 2 calls to submit_semantic_preflight; exactly one is required/,
+      );
     },
   },
 ];

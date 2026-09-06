@@ -48,6 +48,14 @@ const SEMANTIC_STRUCTURED_OUTPUT_FIELDS = Object.freeze([
     'response_format',
     'json_schema',
 ]);
+const SEMANTIC_TOOL_CONFLICT_FIELDS = Object.freeze([
+    'response_format',
+    'json_schema',
+    'functions',
+    'function_call',
+    'responseMimeType',
+    'responseSchema',
+]);
 const SEMANTIC_TURN_BINDING_BLOCK_HEADER = 'STORY ENGINE CURRENT TURN BINDING';
 const SEMANTIC_DIAGNOSTIC_DETAILS = Symbol('storyEngineSemanticDiagnosticDetails');
 const SEMANTIC_DIAGNOSTIC_REPORTED = Symbol('storyEngineSemanticDiagnosticReported');
@@ -925,11 +933,14 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
     }
 
     const calls = collectToolCalls(result);
-    const matching = calls.find(call => getToolCallName(call) === toolName);
-    if (!matching) {
+    const matchingCalls = calls.filter(call => getToolCallName(call) === toolName);
+    if (!matchingCalls.length) {
         throw new Error(`Structured response did not call ${toolName}. RawPreview=${previewRaw(result)}`);
     }
-    const payload = parseToolArguments(getToolCallArguments(matching));
+    if (matchingCalls.length !== 1) {
+        throw new Error(`Structured response returned ${matchingCalls.length} calls to ${toolName}; exactly one is required. RawPreview=${previewRaw(result)}`);
+    }
+    const payload = parseToolArguments(getToolCallArguments(matchingCalls[0]));
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         throw new Error(`Structured response for ${toolName} was not an object. RawPreview=${previewRaw(result)}`);
     }
@@ -1089,10 +1100,28 @@ function semanticStructuredOutputOverrides() {
     return Object.fromEntries(SEMANTIC_STRUCTURED_OUTPUT_FIELDS.map(field => [field, undefined]));
 }
 
-function applySemanticToolRequestPayloadPolicies(payload, route = {}) {
+export function applySemanticToolRequestPayloadPolicies(payload, route = {}) {
     const resolvedRoute = resolveSemanticPayloadRoute(payload, route);
+    clearSemanticToolConflictFields(payload, resolvedRoute);
     applyStoryEngineSemanticToolTransportPayload(payload, resolvedRoute);
     return applyStoryEngineThinkingDisabledPayload(payload, resolvedRoute);
+}
+
+function clearSemanticToolConflictFields(payload, route = {}) {
+    if (!payload || typeof payload !== 'object') return payload;
+    for (const field of SEMANTIC_TOOL_CONFLICT_FIELDS) delete payload[field];
+
+    const customIncludeBody = payload.custom_include_body ?? route.customIncludeBody;
+    if (customIncludeBody == null || !String(customIncludeBody).trim()) return payload;
+    const body = parseCustomIncludeBody(customIncludeBody);
+    let changed = false;
+    for (const field of SEMANTIC_TOOL_CONFLICT_FIELDS) {
+        if (!Object.prototype.hasOwnProperty.call(body, field)) continue;
+        delete body[field];
+        changed = true;
+    }
+    if (changed) payload.custom_include_body = yaml.stringify(body).trim();
+    return payload;
 }
 
 export function applySemanticTextRequestPayloadPolicies(payload, route = {}) {
@@ -2100,8 +2129,8 @@ export function extractSemanticToolLedger(raw, diagnosticContext = {}, turnBindi
         requestId: semanticResponseRequestId(raw),
         ...diagnosticContext,
     };
-    const matching = calls.find(call => getToolCallName(call) === SEMANTIC_TOOL_NAME);
-    if (!matching) {
+    const matchingCalls = calls.filter(call => getToolCallName(call) === SEMANTIC_TOOL_NAME);
+    if (!matchingCalls.length) {
         throw annotateSemanticDiagnosticError(
             new Error(`semantic tool-call response did not contain ${SEMANTIC_TOOL_NAME}. RawPreview=${previewRaw(raw)}`),
             {
@@ -2114,8 +2143,22 @@ export function extractSemanticToolLedger(raw, diagnosticContext = {}, turnBindi
             },
         );
     }
+    if (matchingCalls.length !== 1) {
+        throw annotateSemanticDiagnosticError(
+            new Error(`semantic tool-call response contained ${matchingCalls.length} calls to ${SEMANTIC_TOOL_NAME}; exactly one is required. RawPreview=${previewRaw(raw)}`),
+            {
+                code: 'SE-TOOL-DUPLICATE',
+                stage: 'Tool-call extraction',
+                expectedTool: SEMANTIC_TOOL_NAME,
+                returnedTools: calls.map(getToolCallName).filter(Boolean),
+                matchingToolCallCount: matchingCalls.length,
+                responseShape: describeSemanticResponseShape(raw),
+                ...responseDiagnosticContext,
+            },
+        );
+    }
 
-    const args = getToolCallArguments(matching);
+    const args = getToolCallArguments(matchingCalls[0]);
     let ledger;
     try {
         ledger = parseToolArguments(args);
