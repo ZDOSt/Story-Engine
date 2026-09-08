@@ -18575,6 +18575,127 @@ const tests = [
         repairedRelationshipMissingNpc,
         'Native JSON responses with one unambiguous missing relationship NPC must be repaired before validation.',
       );
+      const missingIdentifyTargetsVariant = structuredClone(structuredLedger);
+      delete missingIdentifyTargetsVariant.resolutionEngine.identifyTargets;
+      missingIdentifyTargetsVariant.resolutionEngine.restraintControl.present = true;
+      missingIdentifyTargetsVariant.resolutionEngine.restraintControl.targetNPC = 'Phoebe';
+      missingIdentifyTargetsVariant.relationshipEngine = [buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items,
+      )];
+      missingIdentifyTargetsVariant.relationshipEngine[0].NPC = 'Phoebe';
+      const repairedMissingIdentifyTargets = normalizeSemanticToolArgumentTypes(missingIdentifyTargetsVariant);
+      assert.deepEqual(repairedMissingIdentifyTargets.resolutionEngine.identifyTargets, {
+        hostilesInScene: { NPC: [] },
+        ActionTargets: ['Phoebe'],
+        StealthTargets: [],
+        OppTargets: { NPC: [], ENV: [] },
+        BenefitedObservers: [],
+        HarmedObservers: [],
+        NPCAwareOfUser: [],
+        PowerActors: [],
+      });
+      assert.equal(validateSemanticToolArguments(repairedMissingIdentifyTargets), repairedMissingIdentifyTargets);
+      assert.deepEqual(
+        extractSemanticToolLedger({
+          choices: [{ message: { tool_calls: [{
+            type: 'function',
+            function: { name: 'submit_semantic_preflight', arguments: JSON.stringify(missingIdentifyTargetsVariant) },
+          }] } }],
+        }),
+        repairedMissingIdentifyTargets,
+        'Tool responses with one unambiguous missing identifyTargets object must be repaired before validation.',
+      );
+      assert.deepEqual(
+        extractSemanticNativeLedger({ choices: [{ message: { content: JSON.stringify(missingIdentifyTargetsVariant) } }] }),
+        repairedMissingIdentifyTargets,
+        'Native JSON responses with one unambiguous missing identifyTargets object must be repaired before validation.',
+      );
+      const incompleteIdentifyTargetSource = structuredClone(missingIdentifyTargetsVariant);
+      delete incompleteIdentifyTargetSource.resolutionEngine.restraintControl.evidence;
+      const unchangedIncompleteIdentifyTargetSource = normalizeSemanticToolArgumentTypes(incompleteIdentifyTargetSource);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(unchangedIncompleteIdentifyTargetSource.resolutionEngine, 'identifyTargets'),
+        false,
+        'An incomplete target-bearing source must not authorize target reconstruction.',
+      );
+      assert.throws(
+        () => validateSemanticToolArguments(unchangedIncompleteIdentifyTargetSource),
+        /resolutionEngine\.identifyTargets is required/,
+        'An incomplete target-bearing source must remain a hard validation failure.',
+      );
+      const missingIdentifyTargetsWithUnrelatedRelationshipRows = structuredClone(missingIdentifyTargetsVariant);
+      missingIdentifyTargetsWithUnrelatedRelationshipRows.relationshipEngine.push(buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items,
+      ));
+      missingIdentifyTargetsWithUnrelatedRelationshipRows.relationshipEngine[1].NPC = 'Seraphina';
+      const repairedIdentifyTargetsWithUnrelatedRelationshipRows = normalizeSemanticToolArgumentTypes(
+        missingIdentifyTargetsWithUnrelatedRelationshipRows,
+      );
+      assert.deepEqual(
+        repairedIdentifyTargetsWithUnrelatedRelationshipRows.resolutionEngine.identifyTargets.ActionTargets,
+        ['Phoebe'],
+        'Unrelated relationship rows must not make an explicit structured target ambiguous.',
+      );
+      const missingIdentifyTargetsInjuryVariant = structuredClone(structuredLedger);
+      delete missingIdentifyTargetsInjuryVariant.resolutionEngine.identifyTargets;
+      missingIdentifyTargetsInjuryVariant.injuryEffectEngine.effects = [buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.injuryEffectEngine.properties.effects.items,
+      )];
+      missingIdentifyTargetsInjuryVariant.injuryEffectEngine.effects[0].target = 'Phoebe';
+      missingIdentifyTargetsInjuryVariant.injuryEffectEngine.effects[0].targetRole = 'OppTarget';
+      missingIdentifyTargetsInjuryVariant.injuryEffectEngine.effects[0].effectType = 'physical_injury';
+      missingIdentifyTargetsInjuryVariant.relationshipEngine = [buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items,
+      )];
+      missingIdentifyTargetsInjuryVariant.relationshipEngine[0].NPC = 'Phoebe';
+      const repairedMissingIdentifyTargetsFromInjury = normalizeSemanticToolArgumentTypes(missingIdentifyTargetsInjuryVariant);
+      assert.deepEqual(repairedMissingIdentifyTargetsFromInjury.resolutionEngine.identifyTargets.ActionTargets, ['Phoebe']);
+      assert.deepEqual(repairedMissingIdentifyTargetsFromInjury.resolutionEngine.identifyTargets.OppTargets.NPC, ['Phoebe']);
+      assert.equal(validateSemanticToolArguments(repairedMissingIdentifyTargetsFromInjury), repairedMissingIdentifyTargetsFromInjury);
+      const conflictingTargetRoles = structuredClone(missingIdentifyTargetsVariant);
+      conflictingTargetRoles.injuryEffectEngine.effects = [buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.injuryEffectEngine.properties.effects.items,
+      )];
+      conflictingTargetRoles.injuryEffectEngine.effects[0].target = 'Phoebe';
+      conflictingTargetRoles.injuryEffectEngine.effects[0].targetRole = 'HarmedObserver';
+      conflictingTargetRoles.injuryEffectEngine.effects[0].effectType = 'physical_injury';
+      const unchangedConflictingTargetRoles = normalizeSemanticToolArgumentTypes(conflictingTargetRoles);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(unchangedConflictingTargetRoles.resolutionEngine, 'identifyTargets'),
+        false,
+        'Conflicting direct-target and observer-role evidence must not be merged by guess.',
+      );
+      assert.throws(
+        () => validateSemanticToolArguments(unchangedConflictingTargetRoles),
+        /resolutionEngine\.identifyTargets is required/,
+      );
+      const conflictingIdentifyTargets = structuredClone(missingIdentifyTargetsVariant);
+      conflictingIdentifyTargets.injuryEffectEngine.effects = [buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.injuryEffectEngine.properties.effects.items,
+      )];
+      conflictingIdentifyTargets.injuryEffectEngine.effects[0].target = 'Seraphina';
+      conflictingIdentifyTargets.injuryEffectEngine.effects[0].targetRole = 'OppTarget';
+      conflictingIdentifyTargets.injuryEffectEngine.effects[0].effectType = 'physical_injury';
+      const unchangedConflictingIdentifyTargets = normalizeSemanticToolArgumentTypes(conflictingIdentifyTargets);
+      assert.equal(Object.prototype.hasOwnProperty.call(unchangedConflictingIdentifyTargets.resolutionEngine, 'identifyTargets'), false);
+      assert.throws(
+        () => validateSemanticToolArguments(unchangedConflictingIdentifyTargets),
+        /resolutionEngine\.identifyTargets is required/,
+        'Conflicting structured target sources must not be resolved by guess or order.',
+      );
+      const unsupportedIdentifyTargets = structuredClone(structuredLedger);
+      delete unsupportedIdentifyTargets.resolutionEngine.identifyTargets;
+      unsupportedIdentifyTargets.relationshipEngine = [buildSchemaFixture(
+        strictSemanticTool.function.parameters.properties.relationshipEngine.items,
+      )];
+      unsupportedIdentifyTargets.relationshipEngine[0].NPC = 'Phoebe';
+      const unchangedUnsupportedIdentifyTargets = normalizeSemanticToolArgumentTypes(unsupportedIdentifyTargets);
+      assert.equal(Object.prototype.hasOwnProperty.call(unchangedUnsupportedIdentifyTargets.resolutionEngine, 'identifyTargets'), false);
+      assert.throws(
+        () => validateSemanticToolArguments(unchangedUnsupportedIdentifyTargets),
+        /resolutionEngine\.identifyTargets is required/,
+        'A relationship row alone is not enough proof to reconstruct target categories.',
+      );
       const multipleVisibleNpcVariant = structuredClone(relationshipMissingNpcVariant);
       multipleVisibleNpcVariant.engineContext.trackerRelevantNPCs = [{ NPC: 'Phoebe' }, { NPC: 'Seraphina' }];
       assert.equal(

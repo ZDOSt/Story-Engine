@@ -2184,9 +2184,9 @@ export function normalizeSemanticToolArgumentTypes(ledger, schema = buildSemanti
                 normalized[name] = normalizeSemanticToolArgumentTypes(normalized[name], childSchema, `${path}.${name}`);
             }
         }
-        return path === '$'
-            ? repairUnambiguousRelationshipNPC(normalized, schema)
-            : normalized;
+        if (path !== '$') return normalized;
+        const repairedTargets = repairUnambiguousIdentifyTargets(normalized, schema);
+        return repairUnambiguousRelationshipNPC(repairedTargets, schema);
     }
 
     if (schema.type === 'array') {
@@ -2248,6 +2248,101 @@ function repairUnambiguousRelationshipNPC(ledger, schema) {
         ? { ...item, NPC: candidates[0] }
         : item);
     return { ...ledger, relationshipEngine: repairedRows };
+}
+
+function repairUnambiguousIdentifyTargets(ledger, schema) {
+    const resolutionEngine = ledger?.resolutionEngine;
+    if (!isRecord(resolutionEngine)) return ledger;
+    if (isRecord(resolutionEngine.identifyTargets)) return ledger;
+    if (resolutionEngine.identifyTargets !== undefined && resolutionEngine.identifyTargets !== null) return ledger;
+
+    const resolutionSchema = schema?.properties?.resolutionEngine;
+    const sourceSchemas = {
+        restraintControl: resolutionSchema?.properties?.restraintControl,
+        boundaryPressure: resolutionSchema?.properties?.boundaryPressure,
+        boundaryBreak: resolutionSchema?.properties?.boundaryBreak,
+        claimCheck: resolutionSchema?.properties?.claimCheck,
+        injuryEffect: schema?.properties?.injuryEffectEngine?.properties?.effects?.items,
+    };
+    const validSource = (value, sourceSchema, path) => {
+        if (!sourceSchema) return false;
+        try {
+            validateSchemaValue(value, sourceSchema, path);
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
+    const candidates = new Map();
+    const addCandidate = (value, role) => {
+        const name = cleanScalar(value).replace(/\s+/g, ' ').trim();
+        if (!name || isNoneValue(name)) return;
+        const key = normalizeNameKey(name);
+        if (!key) return;
+        const candidate = candidates.get(key) || { name, roles: new Set() };
+        candidate.roles.add(role);
+        candidates.set(key, candidate);
+    };
+
+    if (resolutionEngine.restraintControl?.present === true
+        && validSource(resolutionEngine.restraintControl, sourceSchemas.restraintControl, '$.resolutionEngine.restraintControl')) {
+        addCandidate(resolutionEngine.restraintControl.targetNPC, 'ActionTargets');
+    }
+    if (resolutionEngine.boundaryPressure?.present === true
+        && validSource(resolutionEngine.boundaryPressure, sourceSchemas.boundaryPressure, '$.resolutionEngine.boundaryPressure')) {
+        addCandidate(resolutionEngine.boundaryPressure.targetNPC, 'ActionTargets');
+    }
+    if (resolutionEngine.boundaryBreak?.present === true
+        && validSource(resolutionEngine.boundaryBreak, sourceSchemas.boundaryBreak, '$.resolutionEngine.boundaryBreak')) {
+        addCandidate(resolutionEngine.boundaryBreak.targetNPC, 'ActionTargets');
+    }
+    if (resolutionEngine.claimCheck?.present === true
+        && validSource(resolutionEngine.claimCheck, sourceSchemas.claimCheck, '$.resolutionEngine.claimCheck')) {
+        addCandidate(resolutionEngine.claimCheck.targetNPC, 'ActionTargets');
+    }
+
+    for (const effect of (Array.isArray(ledger?.injuryEffectEngine?.effects) ? ledger.injuryEffectEngine.effects : [])) {
+        if (!validSource(effect, sourceSchemas.injuryEffect, '$.injuryEffectEngine.effects[]')
+            || cleanScalar(effect.effectType).toLowerCase() === 'none') continue;
+        const role = cleanScalar(effect.targetRole).toLowerCase().replace(/[\s-]+/g, '');
+        if (role === 'opptarget') {
+            addCandidate(effect.target, 'ActionTargets');
+            addCandidate(effect.target, 'OppTargets.NPC');
+        } else if (role === 'actiontarget') {
+            addCandidate(effect.target, 'ActionTargets');
+        } else if (role === 'harmedobserver') {
+            addCandidate(effect.target, 'HarmedObservers');
+        }
+    }
+
+    if (candidates.size !== 1) return ledger;
+    const [, candidate] = candidates.entries().next().value;
+    if (candidate.roles.has('HarmedObservers')
+        && (candidate.roles.has('ActionTargets') || candidate.roles.has('OppTargets.NPC'))) return ledger;
+
+    const identifyTargets = {
+        hostilesInScene: { NPC: [] },
+        ActionTargets: [],
+        StealthTargets: [],
+        OppTargets: { NPC: [], ENV: [] },
+        BenefitedObservers: [],
+        HarmedObservers: [],
+        NPCAwareOfUser: [],
+        PowerActors: [],
+    };
+    for (const role of candidate.roles) {
+        if (role === 'ActionTargets') identifyTargets.ActionTargets.push(candidate.name);
+        if (role === 'OppTargets.NPC') identifyTargets.OppTargets.NPC.push(candidate.name);
+        if (role === 'HarmedObservers') identifyTargets.HarmedObservers.push(candidate.name);
+    }
+    return {
+        ...ledger,
+        resolutionEngine: {
+            ...resolutionEngine,
+            identifyTargets,
+        },
+    };
 }
 
 function normalizeSemanticArrayContainer(value, schema, path) {
