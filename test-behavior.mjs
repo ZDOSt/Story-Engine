@@ -8377,13 +8377,13 @@ const tests = [
         assert.doesNotMatch(name, /(?:Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
       }
       const modelPrompt = prompt(report);
-      assert.match(modelPrompt, /Reveal a NEW person, entity, or location name ONLY when it is revealed in the current scene/);
+      assert.match(modelPrompt, /Use a proper name only when it is already established as known or when a current-scene discovery is supported by nameReveal/);
       assert.match(modelPrompt, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(modelPrompt, /FEMALE: /);
       assert.match(modelPrompt, /MALE: /);
       assert.match(modelPrompt, /LOCATION: /);
       assert.match(modelPrompt, /Previously revealed names MUST remain unchanged\./);
-      assert.match(modelPrompt, /Using the provided names for EVERY NEW name is MANDATORY and NON-NEGOTIABLE\./);
+      assert.match(modelPrompt, /When a new name is revealed, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
       assert.match(modelPrompt, /Any unauthorized NEW name renders the response INVALID\./);
       assert.match(modelPrompt, /DO NOT invent, modify, combine, translate, or derive names\./);
       assert.match(modelPrompt, /DO NOT use ANY NEW name outside the appropriate pool\./);
@@ -8428,13 +8428,13 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /Reveal a NEW person, entity, or location name ONLY when it is revealed in the current scene/);
+      assert.match(text, /Use a proper name only when it is already established as known or when a current-scene discovery is supported by nameReveal/);
       assert.match(text, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(text, /FEMALE: [A-Z]/);
       assert.match(text, /MALE: [A-Z]/);
       assert.match(text, /LOCATION: [A-Z]/);
       assert.match(text, /Previously revealed names MUST remain unchanged\./);
-      assert.match(text, /Using the provided names for EVERY NEW name is MANDATORY and NON-NEGOTIABLE\./);
+      assert.match(text, /When a new name is revealed, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
       assert.match(text, /Any unauthorized NEW name renders the response INVALID\./);
       assert.match(text, /DO NOT use ANY NEW name outside the appropriate pool\./);
       assert.doesNotMatch(text, /Name reveal is LOCKED and GATED|If no name is revealed in-scene|Do NOT name background, incidental, unseen, or merely described figures/);
@@ -14184,8 +14184,8 @@ const tests = [
       assert.match(semanticSource, /userAbilityUse:\s*normalizeUserAbilityUse/);
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /When an ability, spell, power, trait, or supernatural effect is used, narrate its OBSERVABLE effects and consequences within the scene\./i);
-      assert.match(preflightSource, /\[VISIBLE EFFECT\] reaches \[TARGET\] and produces \[OBSERVABLE CONSEQUENCE\]\./i);
+      assert.match(preflightSource, /For an ability, spell, power, trait, or supernatural effect, describe only its established observable effects and consequences\./i);
+      assert.match(preflightSource, /Its name may appear only when explicitly spoken in dialogue\./i);
 
       const report = runCase({
         userText: 'I whisper under my breath, meant only for Alice: "Leave him alone."',
@@ -16652,7 +16652,7 @@ const tests = [
     },
   },
   {
-    name: '46a narrator reminder is a positive, fact-anchored contract in reverse execution order',
+    name: '46a narrator handoff uses a compact direct prose contract',
     run() {
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
@@ -16677,7 +16677,6 @@ const tests = [
         'denotativePhysicality',
         'cohesiveSceneBeats',
       ];
-      const handoffRuleOrder = [...mainRuleOrder].reverse();
       const assertRuleOrder = (source, order, label) => {
         for (let i = 1; i < order.length; i++) {
           const previous = 'function ' + order[i - 1] + '(';
@@ -16688,19 +16687,26 @@ const tests = [
           );
         }
       };
-      const extractRuleBlock = (source, name) => {
-        const start = source.indexOf('function ' + name + '(');
-        assert.ok(start >= 0, name + ' should exist.');
-        const end = source.indexOf('\n  }', start);
-        assert.ok(end > start, name + ' should have a closing block.');
-        return source.slice(start, end + 4);
+      const assertNamedRuleOrder = (source, order, label) => {
+        for (let i = 1; i < order.length; i++) {
+          const previous = '[' + order[i - 1] + ']';
+          const current = '[' + order[i] + ']';
+          assert.ok(
+            source.indexOf(previous) < source.indexOf(current),
+            previous + ' should appear before ' + current + ' in ' + label + '.',
+          );
+        }
       };
       assertRuleOrder(mainRulesSource, mainRuleOrder, 'the full prose rules');
-      assertRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator reminder');
-      assert.match(handoffRulesSource, /INPUT FORMAT:/);
-      assert.match(handoffRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) represents audible dialogue/);
-      assert.match(handoffRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) represents private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
-      assert.match(handoffRulesSource, /Unformatted text represents narration or action/);
+      assert.match(handoffRulesSource, /NARRATOR PROSE RULES/);
+      assert.match(handoffRulesSource, /Follow these rules while generating the response\. They are binding\./);
+      assert.match(handoffRulesSource, /narrativeFacts\(input\) determines what occurs/);
+      assert.match(handoffRulesSource, /Style, atmosphere, drama, genre, and creativity never create permission to invent/);
+      assert.match(handoffRulesSource, /INPUT FORMAT/);
+      assert.match(handoffRulesSource, /Text in double quotation marks \("\.\.\."\) is audible dialogue/);
+      assert.match(handoffRulesSource, /Text in single asterisks \(\*\.\.\.\*\) is private mental communication/);
+      assert.match(handoffRulesSource, /Italic text is never ordinary thought, emphasis, narration, or audible dialogue/);
+      assert.match(handoffRulesSource, /Unformatted text is narration or action/);
 
       for (const name of mainRuleOrder) {
         assert.equal(
@@ -16709,29 +16715,38 @@ const tests = [
           name + ' should appear exactly once in the full prose rules.',
         );
         assert.equal(
-          (handoffRulesSource.match(new RegExp('function ' + name + '\\(', 'g')) || []).length,
+          (handoffRulesSource.match(new RegExp('\\[' + name + '\\]', 'g')) || []).length,
           1,
-          name + ' should appear exactly once in the narrator reminder.',
+          name + ' should appear exactly once as a named narrator rule.',
         );
-        const handoffRule = extractRuleBlock(handoffRulesSource, name);
-        assert.match(handoffRule, /MANDATE:/, name + ' should retain a positive mandate.');
-        assert.match(handoffRule, /PATTERN EXAMPLE:/, name + ' should include a pattern example.');
       }
 
-      assert.match(handoffRulesSource, /EXECUTE RenderControlEngine\(response, input, context\) PRIVATELY BEFORE PRODUCING THE FINAL RESPONSE/);
-      assert.match(handoffRulesSource, /Your final response MUST STRICTLY follow every positive directive below/);
-      assert.match(handoffRulesSource, /Use each PATTERN EXAMPLE only as structural guidance\. Let the current scene and authoritative narrativeFacts\(input\) supply every entity, object, action, setting, sensory detail, and line of dialogue; the examples remain outside the scene's factual state\./);
-      assert.doesNotMatch(handoffRulesSource, /FORBIDDEN:/);
-      assert.doesNotMatch(handoffRulesSource, /REMEMBER:/);
-      assert.doesNotMatch(handoffRulesSource, /EXCEPTIONS TO THE .* BAN/);
-      assert.doesNotMatch(handoffRulesSource, /barely above a murmur|barely above a whisper|barely above a breath|knuckle whitening|Rooms DO NOT breathe|Words DO NOT hang|Silence DOES NOT stretch/);
-      assert.doesNotMatch(handoffRulesSource, /negative anaphora|category rejection|micro-reaction loops|body-cue pileups/);
-      assert.match(handoffRulesSource, /function strictEpistemology[\s\S]*PATTERN EXAMPLE:[\s\S]*function agencySeparation/);
-      assert.match(handoffRulesSource, /function agencySeparation[\s\S]*PATTERN EXAMPLE:[\s\S]*function antiStockPhrasing/);
-      assert.doesNotMatch(handoffRulesSource, /function linearChronology\(/);
-      assert.doesNotMatch(handoffRulesSource, /function inanimateObjectivity\(/);
-      assert.doesNotMatch(handoffRulesSource, /function realisticConversation|function npcRambleGuard|characterTurnPacing|DIALOGUE-TURN-LIMITS/);
-      assert.doesNotMatch(handoffRulesSource, /itemAvailability:|applicationContract:/);
+      const handoffRuleOrder = [
+        'agencySeparation',
+        'inputChronology',
+        'strictEpistemology',
+        'nameReveal',
+        'narrativeFacts',
+        'dialogueTurn',
+        'strictBehaviorism',
+        'embodiedPerception',
+        'denotativePhysicality',
+        'diegeticPhysicality',
+        'cohesiveSceneBeats',
+        'antiRhetoricalNegation',
+        'antiStockPhrasing',
+      ];
+      assertNamedRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator handoff contract');
+      assert.match(handoffRulesSource, /The supplied name pool are approved unused candidates|Names listed in the supplied name pool are approved unused candidates/);
+      assert.match(handoffRulesSource, /Their presence in this handoff is never permission to reveal or use them/);
+      assert.match(handoffRulesSource, /Until discovery, refer to a person, place, group, or object by its established role or direct observable description/);
+      assert.match(handoffRulesSource, /The current narrativeFacts\(input\) is authoritative and immutable/);
+      assert.match(handoffRulesSource, /Address every materially distinct statement, question, offer, gesture, or action/);
+      assert.match(handoffRulesSource, /Do not ignore a materially distinct input element, ramble, begin another exchange/);
+      assert.match(handoffRulesSource, /Do not narrate smell or taste unless/);
+      assert.match(handoffRulesSource, /Rooms do not breathe; words do not hang; silence does not stretch/);
+      assert.match(handoffRulesSource, /do not use "barely above a murmur," "barely above a whisper," "barely above a breath,"/);
+      assert.doesNotMatch(handoffRulesSource, /function RenderControlEngine\(|PATTERN EXAMPLE:|FINAL SILENT CHECK|check and revise/i);
 
       assert.match(handoffSource, /narrativeContract\(input\): \{/);
       assert.match(handoffSource, /MANDATE: The following instructions are BINDING and NON-NEGOTIABLE/);
@@ -16984,9 +16999,8 @@ const tests = [
         },
       );
       assert.match(introPrompt, /^#1 - PROSE RULES/);
-      assert.match(introPrompt, /EXECUTE RenderControlEngine\(response, input, context\) PRIVATELY BEFORE PRODUCING THE FINAL RESPONSE\./);
-      assert.match(introPrompt, /Use each PATTERN EXAMPLE only as structural guidance\./);
-      assert.match(introPrompt, /Combine closely related actions, gestures, dialogue, and immediate consequences/);
+      assert.match(introPrompt, /NARRATOR PROSE RULES/);
+      assert.match(introPrompt, /Connect related actions, gestures, dialogue, contact, and immediate consequences into clear chronological scene beats\./);
       assert.match(introPrompt, /#1\.7 - SCENE STYLE PROFILE/);
       assert.match(introPrompt, /SCENE STYLE PROFILE: Use vivid, scene-aware prose\./);
       assert.doesNotMatch(introPrompt, /#2 - RESOLVED FACTS|==MECHANICS_RESULTS==/);
@@ -17014,12 +17028,12 @@ const tests = [
       assert.match(introPrompt, /must not rebuild, reroll, overwrite, infantize, or replace them/);
       assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
       assert.match(introPrompt, /NAME REVEAL:/);
-      assert.match(introPrompt, /Reveal a NEW person, entity, or location name ONLY when it is revealed in the current scene/);
+      assert.match(introPrompt, /Use a proper name only when it is already established as known or when a current-scene discovery is supported by nameReveal/);
       assert.match(introPrompt, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(introPrompt, /FEMALE: Ariana, Mira\./);
       assert.match(introPrompt, /MALE: Darin, Kell\./);
       assert.match(introPrompt, /LOCATION: Veyra, Orinth Gate\./);
-      assert.match(introPrompt, /Using the provided names for EVERY NEW name is MANDATORY and NON-NEGOTIABLE\./);
+      assert.match(introPrompt, /When a new name is revealed, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
       assert.match(introPrompt, /DO NOT invent, modify, combine, translate, or derive names\./);
       assert.ok(
         introPrompt.indexOf('#1 - PROSE RULES') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
@@ -17088,7 +17102,7 @@ const tests = [
       );
       assert.match(fantasyIntroPrompt, /START_ADVENTURE_PROMPT: FANTASY/);
       assert.match(fantasyIntroPrompt, /^#1 - PROSE RULES/);
-      assert.match(fantasyIntroPrompt, /PATTERN EXAMPLE:/);
+      assert.match(fantasyIntroPrompt, /NARRATOR PROSE RULES/);
       assert.match(fantasyIntroPrompt, /This is the opening turn of a new Fantasy adventure\./);
       assert.match(fantasyIntroPrompt, /GENRE OPENING:/);
       assert.match(fantasyIntroPrompt, /You MUST begin in the selected genre: Fantasy\./);

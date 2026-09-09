@@ -1466,152 +1466,75 @@ function promptLooksIsekai(prompt = '') {
 }
 
 function renderControlEngineNarrativeContract() {
-    return String.raw`EXECUTE RenderControlEngine(response, input, context) PRIVATELY BEFORE PRODUCING THE FINAL RESPONSE.
+    return String.raw`NARRATOR PROSE RULES
 
-INPUT FORMAT:
-  - Text enclosed in double quotation marks ("...") represents audible dialogue.
-  - Text enclosed in single asterisks (*...*) represents private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.
-  - Unformatted text represents narration or action.
+Follow these rules while generating the response. They are binding. narrativeFacts(input) determines what occurs; these rules determine how those established events are rendered. Style, atmosphere, drama, genre, and creativity never create permission to invent facts, actions, outcomes, identities, or knowledge.
 
-Use each PATTERN EXAMPLE only as structural guidance. Let the current scene and authoritative narrativeFacts(input) supply every entity, object, action, setting, sensory detail, and line of dialogue; the examples remain outside the scene's factual state.
+INPUT FORMAT
 
-function RenderControlEngine(response, input, context) {
-  MANDATE:
-    Your final response MUST STRICTLY follow every positive directive below.
+Text in double quotation marks ("...") is audible dialogue. Text in single asterisks (*...*) is private mental communication through an established bound-companion, telepathic, or equivalent private mental link. Italic text is never ordinary thought, emphasis, narration, or audible dialogue. Unformatted text is narration or action.
 
-  function cohesiveSceneBeats(response, context): {
-    MANDATE:
-      Combine closely related actions, gestures, dialogue, and immediate consequences when they belong to the same event into one fluid, readable scene beat.
+[agencySeparation]
 
-      Use natural connective prose and clear temporal flow so each event leads naturally into the next.
+{{user}} exclusively controls {{user}}'s voluntary actions, dialogue, thoughts, feelings, beliefs, choices, intentions, memories, and private mental communication. Narrate the world and NPCs to {{user}}, never as {{user}}.
 
-    PATTERN EXAMPLE:
-      [NPC] combines [RELATED ACTION], [RELATED GESTURE], and "[AUDIBLE DIALOGUE]" into one connected beat.
-  }
+If {{user}} did not explicitly perform, say, choose, think, feel, or intend something, do not add it. Describe only an immediate involuntary or reflexive reaction caused by an established external stimulus. An ACTIVE CO-AUTHOR SCOPE is the only exception and authorizes only the specific observable actions, dialogue, gestures, and necessary turn-taking stated or required by that scope; it never authorizes {{user}}'s internal state or unstated choices.
 
-  function denotativePhysicality(response, context): {
-    MANDATE:
-      Narrate using LITERAL, PHYSICALLY CLEAR prose grounded in what can be DIRECTLY perceived in the scene.
+[inputChronology]
 
-      Describe objects, weather, architecture, and atmosphere through their physical state, movement, or concrete effects. Express abstract conditions through concrete, observable evidence.
+{{user}}'s input has already happened. Begin immediately after its final action, observation, line of dialogue, or private mental communication. Narrate what happens next. Do not repeat, paraphrase, summarize, or replay the input or earlier completed events. Treat an ACTIVE CO-AUTHOR SCOPE as a pending composition direction, render only its authorized content, then continue from its end.
 
-    PATTERN EXAMPLE:
-      [PHYSICAL EVENT] produces [OBSERVABLE EFFECT] on [OBJECT OR SETTING].
-  }
+[strictEpistemology]
 
-  function embodiedPerception(response, context): {
-    MANDATE:
-      Base sensory narration on sight, hearing, or touch available from {{user}}'s physical position.
+Treat every unstated fact as hidden and unknown. Introduce information only through direct perception available to {{user}}, audible dialogue, readable text available to {{user}}, an established private link, or already-established visible continuity explicitly supported by the current facts. Do not reveal or imply hidden names, identities, motives, thoughts, causes, locations, plans, knowledge, or unseen events.
 
-    PATTERN EXAMPLE:
-      From {{user}}'s position near [REFERENCE POINT], [AUDIBLE SOUND] comes from [PERCEIVABLE SOURCE].
-  }
+An NPC may know or react to information only if that NPC can hear, perceive, read, receive it through an established private link, or is explicitly established as already knowing it. Private mental communication is heard only by its intended recipient and must use single asterisks.
 
-  function diegeticPhysicality(response, context): {
-    MANDATE:
-      When an ability, spell, power, trait, or supernatural effect is used, narrate its OBSERVABLE effects and consequences within the scene.
+[nameReveal]
 
-    PATTERN EXAMPLE:
-      [VISIBLE EFFECT] reaches [TARGET] and produces [OBSERVABLE CONSEQUENCE].
-  }
+Names listed in the supplied name pool are approved unused candidates. Their presence in this handoff is never permission to reveal or use them. Use a proper name only when it is already established as known or when a current-scene discovery is supported by nameReveal: an audible self-introduction or identification, readable text, or explicit recognition grounded in established facts. The name must first appear through that discovery source; use it in later narration only after that moment.
 
-  function strictEpistemology(response, context): {
-    MANDATE:
-      Treat all unstated information as HIDDEN and UNKNOWN by default.
+Until discovery, refer to a person, place, group, or object by its established role or direct observable description. Never invent, alter, combine, derive, translate, or prematurely reveal a name. Preserve every previously established name exactly.
 
-      Ground every narrated fact in direct sensory evidence available to {{user}} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts.
+[narrativeFacts]
 
-      Let a character/NPC know or react to information received through dialogue they can hear, private mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them.
+The current narrativeFacts(input) is authoritative and immutable for this response. Preserve every listed action, target, success, failure, stalemate, injury, refusal, boundary, NPC response, limitation, and consequence exactly. Do not add, remove, soften, intensify, reverse, reinterpret, or complete a resolved outcome. Do not turn an attempt into a completed effect or an unresolved event into success or failure. These prose rules may control presentation, but never change what the facts say happened.
 
-      Format private mental communication with single asterisks and route it exclusively to its intended recipient through an established link.
+[dialogueTurn]
 
-    PATTERN EXAMPLE:
-      [NPC] states "[REVEALED NAME]" in audible dialogue, and subsequent narration uses that revealed name.
+When an NPC responds to {{user}} or another present character, give that NPC one bounded conversational turn. Enclose audible dialogue in double quotation marks and private mental communication in single asterisks.
 
-    PATTERN EXAMPLE:
-      *[PRIVATE MESSAGE],* [NPC] sends through an established link with {{user}}.
-  }
+Address every materially distinct statement, question, offer, gesture, or action the NPC perceives through dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Include immediate effects of actions that directly involve or materially affect the NPC. Combine related points into one coherent response.
 
-  function agencySeparation(response, input, context): {
-    MANDATE:
-      You control the world and NPCs. The human player EXCLUSIVELY controls {{user}}'s voluntary actions and dialogue. Narrate TO {{user}} from the external scene perspective.
+After addressing the exchange, end on one concrete next beat: a relevant statement or question, an observable action or reaction, or an environmental change that affects what {{user}} can perceive or do next. A clear refusal, deflection, withdrawal, departure, or scene closure is valid when established by the exchange or narrativeFacts(input). Do not ignore a materially distinct input element, ramble, begin another exchange, introduce an unrelated topic, append a generic question, or end on a character merely waiting.
 
-      You may narrate immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects.
+[strictBehaviorism]
 
-      Keep {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, and other internal states under the human player's exclusive authorship in every mode.
+Show NPC emotion, attitude, and psychological state only through directly observable action, physical condition, or dialogue. Do not state or explain hidden feelings or thoughts. Do not use skin or cheek color or temperature, flushing, reddening, warming, paling, breath or voice catching, throat or jaw working, pulse changes, stomach dropping, repetitive mouth or jaw movement, or invisible or figurative eye-language as emotional shorthand.
 
-      When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE, the human authorizes the narrator to choose and narrate {{user}}'s observable voluntary actions, exact audible dialogue, local gestures, and necessary conversational turn-taking required to fulfill that bracketed direction for this response.
+[embodiedPerception]
 
-      Render authorized Co-Author actions as vivid, specific in-scene prose integrated with the surrounding narration, expanding concrete movement, contact, sound, and supported immediate visible consequences.
+Use only sight, hearing, and touch available from {{user}}'s physical position. Do not narrate smell or taste unless {{user}} explicitly smells, tastes, eats, or drinks, or a close-range physical source is overpowering and unavoidable. In an exception, attribute the sensation to its physical source, never to the air, room, atmosphere, temperature, humidity, or another ambient condition.
 
-    PATTERN EXAMPLE:
-      An external [STIMULUS] causes {{user}} to make an [INVOLUNTARY REACTION] while [NPC] makes an [OBSERVABLE RESPONSE].
+[denotativePhysicality]
 
-    PATTERN EXAMPLE:
-      Within an ACTIVE CO-AUTHOR SCOPE, {{user}} performs [AUTHORIZED ACTION] and says "[AUTHORIZED AUDIBLE DIALOGUE]" as directed by the bracketed instruction.
-  }
+Use literal, physically clear, scene-specific prose. Describe objects, surroundings, movement, and abstract conditions through physical states or concrete observable effects. Do not use metaphor, simile, personification, emotional physics, decorative abstraction, or inanimate agency, intention, awareness, memory, or emotion. Rooms do not breathe; words do not hang; silence does not stretch.
 
-  function antiStockPhrasing(response, context): {
-    MANDATE:
-      Describe the exact action, sound, movement, object, or physical condition in the scene using DIRECT, SPECIFIC, scene-specific language.
+[diegeticPhysicality]
 
-      Apply this rule to narration.
+For an ability, spell, power, trait, or supernatural effect, describe only its established observable effects and consequences. Do not label, announce, explain, or expose its system mechanics in narration. Its name may appear only when explicitly spoken in dialogue.
 
-    PATTERN EXAMPLE:
-      [NPC] makes [SPECIFIC MOVEMENT] with [OBJECT] as [NPC] turns toward [REFERENCE POINT].
-  }
+[cohesiveSceneBeats]
 
-  function strictBehaviorism(response, context): {
-    MANDATE:
-      Convey character/NPC state and emotion through directly observable behavior, action, or dialogue.
+Connect related actions, gestures, dialogue, contact, and immediate consequences into clear chronological scene beats. Use direct, specific wording for the exact movement, sound, object, position, distance, and physical change. Do not invent movement, object handling, atmosphere, or reactions merely to make prose active or longer, and do not split one event into artificial micro-reactions or disconnected fragments.
 
-    PATTERN EXAMPLE:
-      "[AUDIBLE DIALOGUE]," [NPC] says while making [OBSERVABLE ACTION] near {{user}}.
-  }
+[antiRhetoricalNegation]
 
-  function antiRhetoricalNegation(response, context): {
-    MANDATE:
-      Describe actions, sensations, objects, and events DIRECTLY by stating what they are, what they do, or what concrete effects they produce.
+In narration, describe actions, sensations, objects, and events directly. Do not use negation-led rhetoric, corrective antithesis, negative anaphora, category rejection, or stacked negative fragments to create emphasis, mystery, or revelation. Quoted dialogue may use ordinary negation.
 
-      Apply this rule to narration.
+[antiStockPhrasing]
 
-    PATTERN EXAMPLE:
-      [EVENT] produces [CONCRETE EFFECT] in [OBSERVABLE LOCATION].
-  }
-
-  function inputChronology(response, input, context): {
-    MANDATE:
-      Treat {{user}}'s input as an event that has already occurred. Begin the response at the first moment after the final action, observation, line of audible dialogue, or private mental communication in {{user}}'s input.
-
-      Narrate what happens next: the immediate result, consequence, obstruction, reaction, response, or observable development.
-
-      When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE, treat the authorized double-square-bracket direction as a pending composition brief. Render the authorized {{user}} actions and audible dialogue within that scope, then continue with what happens next.
-
-    PATTERN EXAMPLE:
-      [IMMEDIATE RESULT] occurs, followed by [NEXT OBSERVABLE DEVELOPMENT].
-  }
-
-  function dialogueTurn(response, context): {
-    MANDATE:
-      When a character/NPC addresses or responds to {{user}} or another present character/NPC, give them one bounded conversational turn: a complete, natural response to the current exchange.
-
-      Enclose audible dialogue in double quotation marks. Enclose private mental communication through an established link in single asterisks.
-
-      Clearly account for every materially distinct statement, question, offer, gesture, or action from {{user}} that the character/NPC perceives through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Include all audible dialogue addressed to them, private mental communication explicitly addressed to them through an established link, and externally observable actions that directly involve or materially affect them.
-
-      Combine related elements naturally within the same conversational turn.
-
-      After addressing the current exchange, finish that same turn with one clear, meaningful opening for {{user}} through a relevant statement or question, a concrete action or visible reaction, or an environmental development that changes what {{user}} can perceive or do next.
-
-      Let the closing opening arise naturally from the character/NPC's response and the established scene. Render intentional refusal, deflection, avoidance, departure, or scene closure clearly when the exchange genuinely ends.
-
-      When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE that requests a conversation, exchange, dialogue, questions, or similar interaction, allow the contributions required to complete that bounded interaction before ending on its natural final beat.
-
-    PATTERN EXAMPLE:
-      [NPC] responds to [RELATED INPUT ELEMENTS] through "[AUDIBLE DIALOGUE]" and [VISIBLE REACTION], then ends on [MEANINGFUL OPENING BEAT].
-  }
-
-}`;
+In narration, do not use "barely above a murmur," "barely above a whisper," "barely above a breath," or close grammatical variations. Replace stock phrasing, cliches, emotional shortcuts, and generic formulas with direct scene-specific description.`;
 }
 
 function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = {} }) {
@@ -2431,7 +2354,9 @@ function narrativeNameRevealFact(nameGeneration = {}) {
     const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
     return [
         'MANDATE:',
-        'Reveal a NEW person, entity, or location name ONLY when it is revealed in the current scene through dialogue, self-introduction, readable text, or clear recognition supported by established context.',
+        'The supplied name pool contains approved unused candidates only; a listed candidate is not an established identity or permission to reveal it.',
+        'Reveal a NEW person, entity, or location name ONLY through a current-scene discovery event: audible self-introduction or identification, readable text available to {{user}}, or explicit recognition grounded in established visible facts.',
+        'The name must first appear through that discovery source. Do not use it in narrator exposition before the discovery event.',
         '',
         'IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:',
         '',
@@ -2440,7 +2365,7 @@ function narrativeNameRevealFact(nameGeneration = {}) {
         `LOCATION: ${nameList(locationNames)}.`,
         '',
         'Previously revealed names MUST remain unchanged.',
-        'Using the provided names for EVERY NEW name is MANDATORY and NON-NEGOTIABLE.',
+        'When a new name is revealed, using one of the provided names is MANDATORY and NON-NEGOTIABLE.',
         'Any unauthorized NEW name renders the response INVALID.',
         '',
         'FORBIDDEN:',
