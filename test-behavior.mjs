@@ -14167,7 +14167,6 @@ const tests = [
       const runnerSource = fs.readFileSync(extensionFile('deterministic-runner.js'), 'utf8');
       const preflightSource = fs.readFileSync(extensionFile('pre-flight.js'), 'utf8');
 
-      assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.Used=N/);
       assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.Attempted=N/);
       assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.Available=N/);
       assert.match(semanticSource, /ResolutionEngine\.userAbilityUse\.NoEffectReason=\(none\)/);
@@ -14179,8 +14178,8 @@ const tests = [
       assert.match(semanticSource, /meant only for X/);
       assert.match(semanticSource, /only X can hear/);
       assert.match(semanticSource, /Mark Available=Y only if/i);
-      assert.match(semanticSource, /MechanicalScope must always be flavor_only_no_bonus/i);
-      assert.match(semanticSource, /never a bonus, never a dice modifier, never a separate roll/i);
+      assert.match(semanticSource, /extension derives Used from Attempted and Available/i);
+      assert.match(semanticSource, /fixed flavor_only_no_bonus mechanical scope/i);
       assert.match(semanticSource, /userAbilityUse:\s*normalizeUserAbilityUse/);
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
@@ -18317,7 +18316,6 @@ const tests = [
       assert.equal(baselineCustomDeepSeekPayload.custom_include_body, 'provider_option: true');
 
       const expectedLedgerProperties = [
-        'turnBinding',
         'engineContext',
         'worldTransition',
         'worldProgression',
@@ -18337,14 +18335,14 @@ const tests = [
       const portableSemanticTool = buildSemanticPreflightTool('nanogpt', {}, semanticToolTurnBinding);
       assert.equal(portableSemanticTool.type, 'function');
       assert.equal(portableSemanticTool.function.name, 'submit_semantic_preflight');
-      assert.deepEqual(
-        portableSemanticTool.function.parameters.properties.turnBinding.properties.turnId.enum,
-        [semanticToolTurnBinding.turnId],
-      );
-      assert.match(
-        portableSemanticTool.function.parameters.properties.turnBinding.properties.turnId.description,
-        /se-turn-tool-schema-binding-test/,
-      );
+      assert.equal('turnBinding' in portableSemanticTool.function.parameters.properties, false);
+      assert.equal('trackerRelevantNPCs' in portableSemanticTool.function.parameters.properties.engineContext.properties, false);
+      assert.equal('used' in portableSemanticTool.function.parameters.properties.resolutionEngine.properties.userAbilityUse.properties, false);
+      assert.equal('mechanicalScope' in portableSemanticTool.function.parameters.properties.resolutionEngine.properties.userAbilityUse.properties, false);
+      assert.equal('boundaryId' in portableSemanticTool.function.parameters.properties.resolutionEngine.properties.boundaryBreak.properties, false);
+      assert.equal('targetNPC' in portableSemanticTool.function.parameters.properties.resolutionEngine.properties.boundaryBreak.properties, false);
+      assert.equal('type' in portableSemanticTool.function.parameters.properties.resolutionEngine.properties.boundaryBreak.properties, false);
+      assert.equal('pendingBoundary' in portableSemanticTool.function.parameters.properties.trackerUpdateEngine.properties, false);
       const trollLlmSemanticTool = buildSemanticPreflightTool('custom', trollLlmRoute, semanticToolTurnBinding);
       assert.equal(trollLlmSemanticTool.function.strict, undefined);
       assert.equal('additionalProperties' in trollLlmSemanticTool.function.parameters, false);
@@ -18354,10 +18352,6 @@ const tests = [
       }, semanticToolTurnBinding);
       assert.equal(optedInCustomTrollLlmSemanticTool.function.strict, true);
       assert.equal(optedInCustomTrollLlmSemanticTool.function.parameters.additionalProperties, false);
-      assert.deepEqual(
-        trollLlmSemanticTool.function.parameters.properties.turnBinding.properties.turnId.enum,
-        [semanticToolTurnBinding.turnId],
-      );
       assert.deepEqual(trollLlmSemanticTool.function.parameters.required, portableSemanticTool.function.parameters.required);
       const customDeepSeekSemanticTool = buildSemanticPreflightTool('custom', {
         customUrl: 'https://api.deepseek.com/beta',
@@ -18381,10 +18375,7 @@ const tests = [
       assert.equal(strictSemanticTool.function.strict, true);
       assert.equal(strictSemanticTool.function.parameters.additionalProperties, false);
       assert.equal(strictSemanticTool.function.parameters.properties.resolutionEngine.additionalProperties, false);
-      assert.deepEqual(
-        strictSemanticTool.function.parameters.properties.turnBinding.properties.turnId.enum,
-        [semanticToolTurnBinding.turnId],
-      );
+      assert.equal('turnBinding' in strictSemanticTool.function.parameters.properties, false);
       assert.deepEqual(
         strictSemanticTool.function.parameters.properties.powerActorEnmity
           .properties.assessments.items.properties.scope.enum,
@@ -18410,10 +18401,10 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 253,
-        objects: 47,
-        arrays: 47,
-        descriptions: 112,
+        leaves: 240,
+        objects: 44,
+        arrays: 46,
+        descriptions: 107,
         incompleteRequired: 0,
       });
       assert.deepEqual(
@@ -18529,14 +18520,12 @@ const tests = [
       assert.equal(validateSemanticToolArguments(normalizedTransportVariant), normalizedTransportVariant);
 
       const representationVariant = structuredClone(structuredLedger);
-      representationVariant.engineContext.trackerRelevantNPCs = ['Phoebe'];
       representationVariant.worldTransition.timeAdvanceCount = '14';
       representationVariant.resolutionEngine.identifyTargets.ActionTargets = 'Phoebe';
       representationVariant.resolutionEngine.actionUnits = buildSchemaFixture(
         strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.items,
       );
       const canonicalRepresentation = structuredClone(structuredLedger);
-      canonicalRepresentation.engineContext.trackerRelevantNPCs = [{ NPC: 'Phoebe' }];
       canonicalRepresentation.worldTransition.timeAdvanceCount = 14;
       canonicalRepresentation.resolutionEngine.identifyTargets.ActionTargets = ['Phoebe'];
       canonicalRepresentation.resolutionEngine.actionUnits = [buildSchemaFixture(
@@ -18546,7 +18535,6 @@ const tests = [
       assert.deepEqual(normalizedRepresentation, canonicalRepresentation);
       assert.equal(normalizedRepresentation.resolutionEngine.actionUnits.length, 1);
       assert.equal(validateSemanticToolArguments(normalizedRepresentation), normalizedRepresentation);
-      assert.deepEqual(representationVariant.engineContext.trackerRelevantNPCs, ['Phoebe']);
       assert.equal(representationVariant.worldTransition.timeAdvanceCount, '14');
       assert.equal(representationVariant.resolutionEngine.identifyTargets.ActionTargets, 'Phoebe');
       assert.equal(!Array.isArray(representationVariant.resolutionEngine.actionUnits), true);
@@ -18746,18 +18734,18 @@ const tests = [
         'A row missing additional required data must not receive an inferred NPC.',
       );
       const invalidRepresentation = structuredClone(structuredLedger);
-      invalidRepresentation.engineContext.trackerRelevantNPCs = [123];
+      invalidRepresentation.engineContext.unapprovedSnapshotField = 123;
       assert.throws(
         () => validateSemanticToolArguments(normalizeSemanticToolArgumentTypes(invalidRepresentation)),
-        /engineContext\.trackerRelevantNPCs\[0\] must be an object/,
-        'An invalid NPC representation must still fail schema validation.',
+        /engineContext contains unknown properties: unapprovedSnapshotField/,
+        'An unknown engine-context field must still fail schema validation.',
       );
       const ambiguousRepresentation = structuredClone(structuredLedger);
-      ambiguousRepresentation.engineContext.trackerRelevantNPCs = [{ name: 'Phoebe' }];
+      ambiguousRepresentation.engineContext.userReputationContext.name = 'Phoebe';
       assert.throws(
         () => validateSemanticToolArguments(normalizeSemanticToolArgumentTypes(ambiguousRepresentation)),
-        /engineContext\.trackerRelevantNPCs\[0\]\.NPC is required/,
-        'An unapproved object alias must not be guessed into the canonical NPC field.',
+        /engineContext\.userReputationContext contains unknown properties: name/,
+        'An unapproved reputation-context alias must not be accepted.',
       );
       assert.equal(structuredLedger.worldTransition.indoors, 'unchanged');
       const falseIndoorsLedger = structuredClone(structuredLedger);
@@ -19059,6 +19047,33 @@ const tests = [
       const validatedDefault = parseAndValidateSemanticToolSections(completeSections);
       assert.equal(validatedDefault.resolutionEngine.rollNeeded, false);
       assert.equal(validatedDefault.resolutionEngine.challengeType, 'none');
+      assert.deepEqual(
+        validatedDefault.engineContext.trackerRelevantNPCs,
+        [],
+        'Host-owned tracker NPC context must be reconstructed when omitted from the semantic response.',
+      );
+      assert.equal(
+        validatedDefault.resolutionEngine.userAbilityUse.used,
+        false,
+        'Host-owned ability-use status must be reconstructed from attempted and available.',
+      );
+      assert.equal(
+        validatedDefault.resolutionEngine.userAbilityUse.mechanicalScope,
+        'flavor_only_no_bonus',
+        'Host-owned ability-use scope must retain the fixed engine policy.',
+      );
+      assert.deepEqual(
+        validatedDefault.trackerUpdateEngine.pendingBoundary,
+        {
+          status: 'unchanged',
+          boundaryId: null,
+          targetNPC: null,
+          type: null,
+          objectOrAccess: null,
+          evidence: null,
+        },
+        'Host-owned pending-boundary tracker output must be reconstructed as neutral unchanged state.',
+      );
 
       const relationshipRowDefaults = [
         ['NPC', '(none)'],
@@ -19195,9 +19210,6 @@ const tests = [
       );
       for (const [key, value] of [
         ['ResolutionEngine.boundaryBreak.Present', 'Y'],
-        ['ResolutionEngine.boundaryBreak.BoundaryId', 'pb_alice_test'],
-        ['ResolutionEngine.boundaryBreak.TargetNPC', 'Alice'],
-        ['ResolutionEngine.boundaryBreak.Type', 'intimacy'],
         ['ResolutionEngine.boundaryBreak.Response', 'continued'],
         ['ResolutionEngine.boundaryBreak.Evidence', 'continued after refusal'],
       ]) {
@@ -19225,8 +19237,11 @@ const tests = [
           warnings: 1,
         },
       });
-      assert.equal(mismatchedBoundaryLedger.relationshipEngine[0].slowBondEvidence.boundaryRespect, true);
-      assert.deepEqual(mismatchedBoundaryLedger.relationshipEngine[0].slowBondEvidence.blockers, []);
+      assert.equal(mismatchedBoundaryLedger.resolutionEngine.boundaryBreak.boundaryId, 'pb_other_boundary');
+      assert.equal(mismatchedBoundaryLedger.resolutionEngine.boundaryBreak.targetNPC, 'Alice');
+      assert.equal(mismatchedBoundaryLedger.resolutionEngine.boundaryBreak.type, 'intimacy');
+      assert.equal(mismatchedBoundaryLedger.relationshipEngine[0].slowBondEvidence.boundaryRespect, false);
+      assert.deepEqual(mismatchedBoundaryLedger.relationshipEngine[0].slowBondEvidence.blockers, ['boundary violation']);
 
       let duplicateRelationshipSections = replaceLedgerLine(
         relationshipSections,
@@ -19615,7 +19630,6 @@ const tests = [
         return '(none)';
       };
       const ledger = buildSchemaFixture(nativeSchema.value);
-      ledger.turnBinding.turnId = turnBinding.turnId;
       const serializedLedger = JSON.stringify(ledger);
 
       assert.deepEqual(
@@ -22558,18 +22572,12 @@ const tests = [
         /not grounded by the same contiguous word sequence/,
       );
 
-      const wrongTurnLedger = groundedLedger(normalBinding, ['I grab her hand, and pin her against the wall.']);
-      wrongTurnLedger.turnBinding.turnId = 'se-turn-wrong';
-      let wrongTurnError;
-      assert.throws(() => {
-        try {
-          validateSemanticTurnGrounding(wrongTurnLedger, normalBinding);
-        } catch (error) {
-          wrongTurnError = error;
-          throw error;
-        }
-      }, /did not echo the current turn ID exactly/);
-      assert.match(formatSemanticDiagnostic(wrongTurnError), /Code: SE-TURN-GROUNDING/);
+      const internallyCorrelatedLedger = groundedLedger(normalBinding, ['I grab her hand, and pin her against the wall.']);
+      internallyCorrelatedLedger.turnBinding = { turnId: 'legacy-provider-field-is-ignored' };
+      assert.doesNotThrow(
+        () => validateSemanticTurnGrounding(internallyCorrelatedLedger, normalBinding),
+        'Turn correlation is host-owned; legacy echoed IDs must not be required for grounding.',
+      );
 
       const diagnosticLedger = groundedLedger(actionRecoveryBinding, ['The user shadows Phoebe.']);
       diagnosticLedger.resolutionEngine.actionUnits[0].action = 'The user attempts to shadow Phoebe';
@@ -22619,7 +22627,7 @@ const tests = [
       assert.equal(toolPrompt[1].content, cardContext);
       assert.equal(toolPrompt[2].content, semanticPrompt[2].content);
       assert.match(toolPrompt[3].content, /Call the function tool submit_semantic_preflight exactly once/);
-      assert.match(toolPrompt[3].content, /Echo the exact authoritative current turn ID/);
+      assert.match(toolPrompt[3].content, /ground every resolutionEngine\.actionUnits evidence value/i);
       assert.equal(toolPrompt[4].content, buildSemanticTurnBindingBlock(normalBinding));
       assert.equal(toolPrompt[4].role, 'user');
 
