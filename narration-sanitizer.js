@@ -1,3 +1,5 @@
+import { TRACKER_DELTA_END, TRACKER_DELTA_START } from './tracker-delta-contract.js';
+
 const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
 const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
 export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
@@ -67,8 +69,8 @@ export function stripStructuredArtifacts(text) {
         .replace(/(?:STORY_ENGINE_TARGETED_PROSE_BAN_REPAIR\s*)?BEGIN_PROSE_GUARD_EDITS[\s\S]*?END_PROSE_GUARD_EDITS\s*/gi, '')
         .replace(/BEGIN_PROSE_GUARD_EDITS[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
         .replace(/(?:^|\n)\s*STORY_ENGINE_TARGETED_PROSE_BAN_REPAIR\s*(?=\n|$)/gi, '')
-        .replace(/BEGIN_TRACKER_DELTA[\s\S]*?END_TRACKER_DELTA\s*/gi, '')
-        .replace(/BEGIN_TRACKER_DELTA[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
+        .replace(new RegExp(`${TRACKER_DELTA_START}[\\s\\S]*?${TRACKER_DELTA_END}\\s*`, 'gi'), '')
+        .replace(new RegExp(`${TRACKER_DELTA_START}[\\s\\S]*?(?=BEGIN_FINAL_NARRATION|$)`, 'gi'), '')
         .replace(/^\s*narrativeContract\(input\)[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
         .replace(/\[STORY_ENGINE_NARRATOR_HANDOFF[\s\S]*?==BINDING_NARRATION_DIRECTIVE==[\s\S]*?(?=BEGIN_FINAL_NARRATION|$)/gi, '')
         .replace(/\[STORY_ENGINE_NARRATOR_DIRECTIVE[\s\S]*?==PROMPT==\s*/gi, '')

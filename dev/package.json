@@ -1,0 +1,14 @@
+{
+    "name": "story-engine-dev",
+    "private": true,
+    "type": "module",
+    "engines": {
+        "node": ">=20"
+    },
+    "scripts": {
+        "test": "node run-tests.mjs"
+    },
+    "dependencies": {
+        "yaml": "2.8.3"
+    }
+}

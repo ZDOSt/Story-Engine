@@ -5350,7 +5350,7 @@ function parseCompactLedger(text, trackerSnapshot) {
 
 function parseNarratorTrackerDeltaText(text) {
     const source = String(text || '');
-    const match = source.match(/BEGIN_TRACKER_DELTA([\s\S]*?)END_TRACKER_DELTA/i);
+    const match = source.match(new RegExp(`${TRACKER_DELTA_START}([\\s\\S]*?)${TRACKER_DELTA_END}`, 'i'));
     const body = match ? match[1] : source;
 
     const fields = new Map();
@@ -5743,7 +5743,7 @@ function isPersistentTrackerEffect(item, narration, requireLastingEvidence) {
     if (hasLastingInjuryEvidence(text) || hasPersistingEffectLanguage(text)) return true;
     const escaped = escapeRegExp(text);
     if (escaped && new RegExp(`\\b(?:still|remains?|ongoing|continues?|lingering|persistent)\\b.{0,80}\\b${escaped}\\b`, 'i').test(narration)) return true;
-    return true;
+    return false;
 }
 
 function hasTransientOnlyInjuryLanguage(value) {

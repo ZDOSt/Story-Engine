@@ -1,4 +1,5 @@
 import { RENDER_CONTROL_STAGE_PATTERN } from './narration-sanitizer.js';
+import { TRACKER_DELTA_END, TRACKER_DELTA_START } from './tracker-delta-contract.js';
 
 export const STREAMING_ARTIFACT_REGEX_SCRIPT_NAME = 'Story Engine - Hide Narrator Artifacts (Streaming Display)';
 export const STREAMING_ARTIFACT_REGEX_SCRIPT_ID = 'story-engine-hide-narrator-artifacts-v1';
@@ -14,7 +15,7 @@ export const STREAMING_ARTIFACT_REGEX_SOURCE = [
     '```story_engine_tracker_delta\\s*[\\s\\S]*?(?:```[\\t ]*|(?=BEGIN_FINAL_NARRATION)|$)',
     '\\s*(?:<!--\\s*)?STORY_ENGINE_TRACKER_DELTA[\\s\\S]*?(?:STORY_ENGINE_TRACKER_DELTA_END\\s*-->|(?=BEGIN_FINAL_NARRATION)|$)',
     '\\s*&lt;!--\\s*STORY_ENGINE_TRACKER_DELTA[\\s\\S]*?(?:STORY_ENGINE_TRACKER_DELTA_END\\s*--&gt;|(?=BEGIN_FINAL_NARRATION)|$)',
-    '\\s*BEGIN_TRACKER_DELTA[\\s\\S]*?(?:END_TRACKER_DELTA|(?=BEGIN_FINAL_NARRATION)|$)',
+    `\\s*${TRACKER_DELTA_START}[\\s\\S]*?(?:${TRACKER_DELTA_END}|(?=BEGIN_FINAL_NARRATION)|$)`,
     '\\s*<trackers>[\\s\\S]*?(?:<\\/trackers>|(?=BEGIN_FINAL_NARRATION)|$)',
     '\\s*&lt;trackers&gt;[\\s\\S]*?(?:&lt;\\/trackers&gt;|(?=BEGIN_FINAL_NARRATION)|$)',
 ].join('|');

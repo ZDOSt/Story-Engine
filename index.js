@@ -45,7 +45,7 @@ import {
     renameHiddenHealthNpc,
 } from './health-state.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps } from './tracker-injury-caps.js';
-import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
+import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import {
     STREAMING_ARTIFACT_REGEX_SCRIPT_ID,
     STREAMING_ARTIFACT_REGEX_SCRIPT_NAME,
@@ -14495,7 +14495,7 @@ function extractTrackerDeltaText(text) {
 
         || source.match(/&lt;trackers&gt;([\s\S]*?)&lt;\/trackers&gt;/i);
 
-    const match = (wrapperMatch?.[1] || source).match(/BEGIN_TRACKER_DELTA[\s\S]*?END_TRACKER_DELTA/i);
+    const match = (wrapperMatch?.[1] || source).match(new RegExp(`${TRACKER_DELTA_START}[\\s\\S]*?${TRACKER_DELTA_END}`, 'i'));
     return match?.[0] || '';
 }
 
@@ -15081,7 +15081,7 @@ function buildPostNarrationToolDefinition(name, { includeSentenceRepairs = false
         required.push('trackerDelta');
         properties.trackerDelta = {
             type: 'string',
-            description: 'The complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger derived from the supplied final narration.',
+            description: `The complete ${TRACKER_DELTA_START} through ${TRACKER_DELTA_END} ledger derived from the supplied final narration.`,
         };
     }
     if (includeWorldMemoryDelta) {
@@ -15116,7 +15116,7 @@ function buildPostNarrationToolPrompt(prompt, toolDefinition) {
         fieldInstructions.push('Put exactly one replace or delete operation for every supplied FINDING_ID in sentenceRepairs. Delete only a violation-only sentence. Otherwise replace the violation while preserving dialogue and all other meaningful content, using only observable behavior supported by context. Never invent unrelated content, omit a finding, or repair anything the deterministic scanner did not supply.');
     }
     if (fields.includes('trackerDelta')) {
-        fieldInstructions.push('Put the complete BEGIN_TRACKER_DELTA through END_TRACKER_DELTA ledger in trackerDelta. Base it on the supplied final narration exactly as provided.');
+        fieldInstructions.push(`Put the complete ${TRACKER_DELTA_START} through ${TRACKER_DELTA_END} ledger in trackerDelta. Base it on the supplied final narration exactly as provided.`);
     }
     if (fields.includes('worldMemoryDelta')) {
         fieldInstructions.push('Put the complete BEGIN_WORLD_MEMORY_DELTA through END_WORLD_MEMORY_DELTA JSON block in worldMemoryDelta. Keep hidden progression private and mark only evidence actually presented in the supplied final narration as discovered.');

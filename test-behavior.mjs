@@ -10419,6 +10419,30 @@ const tests = [
     },
   },
   {
+    name: '33.0a post-narration rejects uncorroborated vague wounds',
+    run() {
+      const buildDelta = wound => TRACKER_DELTA_TEMPLATE
+        .replace('TrackerUpdateEngine.NPC.count=0', 'TrackerUpdateEngine.NPC.count=1')
+        .replace('TrackerUpdateEngine.NPC[0].NPC=(none)', 'TrackerUpdateEngine.NPC[0].NPC=Phoebe')
+        .replace('TrackerUpdateEngine.NPC[0].condition=unchanged', 'TrackerUpdateEngine.NPC[0].condition=wounded')
+        .replace('TrackerUpdateEngine.NPC[0].woundsAdd=(none)', `TrackerUpdateEngine.NPC[0].woundsAdd=${wound}`);
+
+      const uncorroborated = parseNarratorTrackerDelta(
+        buildDelta('injury to left arm'),
+        'Phoebe is wounded but steps back and raises her guard.',
+      );
+      assert.deepEqual(uncorroborated.npcs[0].woundsAdd, []);
+      assert.equal(uncorroborated.npcs[0].condition, 'wounded');
+
+      const corroborated = parseNarratorTrackerDelta(
+        buildDelta('injury to left arm'),
+        'Phoebe still has an injury to left arm and cannot lift it.',
+      );
+      assert.deepEqual(corroborated.npcs[0].woundsAdd, ['injury to left arm']);
+      assert.equal(corroborated.npcs[0].condition, 'wounded');
+    },
+  },
+  {
     name: '33 post-narration tracker delta uses fenced prefix block and narrator omits it',
     run() {
       assert.match(TRACKER_DELTA_TEMPLATE, /```story_engine_tracker_delta\s*BEGIN_TRACKER_DELTA/i);
