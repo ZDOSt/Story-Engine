@@ -850,7 +850,7 @@ function getSettings() {
         }
     }
     if (settings.semanticOutputMode === 'text_only') {
-        settings.semanticOutputMode = SEMANTIC_OUTPUT_MODES.NATIVE_JSON;
+        settings.semanticOutputMode = SEMANTIC_OUTPUT_MODES.TEXT_LEDGER;
         semanticOutputSettingsChanged = true;
     }
     const storedSemanticProfileId = String(settings.semanticConnectionProfileId || '').trim();
@@ -2231,8 +2231,9 @@ function renderSettingsPanel() {
                                 <select id="structured_preflight_semantic_output_mode" class="text_pole flex1">
                                     <option value="${SEMANTIC_OUTPUT_MODES.TOOL_CALL}">Tool Call</option>
                                     <option value="${SEMANTIC_OUTPUT_MODES.NATIVE_JSON}">Native JSON Schema</option>
+                                    <option value="${SEMANTIC_OUTPUT_MODES.TEXT_LEDGER}">Validated Text Ledger</option>
                                 </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Native JSON Schema uses SillyTavern structured output with the same complete ledger, schema, grounding, and consistency validation. A rejected or incomplete native request stops the semantic pass; it does not fall back to prompt-based text.', 'About semantic preflight output')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Native JSON Schema uses SillyTavern structured output. Validated Text Ledger uses ordinary text generation, requires one exact JSON ledger frame, retries one returned-format failure, and applies the same complete-ledger, grounding, and consistency validation before narration.', 'About semantic preflight output')}
                             </div>
                             <div id="structured_preflight_semantic_strict_schema_row" class="spe-settings-toggle-row" hidden>
                                 <label for="structured_preflight_semantic_strict_schema">Strict Tool Schema</label>

@@ -677,6 +677,13 @@ export async function sendDefaultChatCompletionJsonSchemaRequest(messages, respo
     });
 }
 
+export async function sendDefaultChatCompletionTextRequest(messages, responseLength, options = {}) {
+    return await sendDefaultChatCompletionToolRequest(messages, responseLength, {
+        ...options,
+        clearStructuredOutput: true,
+    });
+}
+
 export function getChatCompletionSourceForProfile(profileId, profileName = '') {
     return getChatCompletionProfileRoute(profileId, profileName).source;
 }
