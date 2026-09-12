@@ -22284,6 +22284,15 @@ const tests = [
       assert.equal(toolPrompt[4].content, buildSemanticTurnBindingBlock(normalBinding));
       assert.equal(toolPrompt[4].role, 'user');
 
+      const promptWithoutLegacyContract = [
+        { role: 'system', content: engineReference },
+        { role: 'user', content: buildSemanticTurnBindingBlock(normalBinding) },
+      ];
+      const repairedToolPrompt = buildSemanticToolPrompt(promptWithoutLegacyContract);
+      assert.match(repairedToolPrompt.at(-2).content, /Call the function tool submit_semantic_preflight exactly once/);
+      assert.equal(repairedToolPrompt.at(-1).content, buildSemanticTurnBindingBlock(normalBinding));
+      assert.equal(repairedToolPrompt.at(-1).role, 'user');
+
       assert.throws(
         () => createSemanticTurnBinding({ latestUserText: '   ' }, 'normal'),
         /no effective current user input/,

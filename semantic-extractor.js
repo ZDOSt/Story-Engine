@@ -1667,7 +1667,12 @@ function replaceSemanticOutputContract(prompt, contract) {
             content: contract,
         };
     } else {
-        messages.push({ role: 'user', content: contract });
+        const finalMessage = messages.at(-1);
+        const hasFinalTurnBinding = finalMessage?.role === 'user'
+            && typeof finalMessage.content === 'string'
+            && finalMessage.content.startsWith(`${SEMANTIC_TURN_BINDING_BLOCK_HEADER}\n`);
+        const insertAt = hasFinalTurnBinding ? messages.length - 1 : messages.length;
+        messages.splice(insertAt, 0, { role: 'user', content: contract });
     }
 
     return messages;
