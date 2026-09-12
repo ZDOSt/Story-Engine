@@ -215,11 +215,7 @@ function baseLedger(overrides = {}) {
       },
       itemUse: {
         attempted: false,
-        available: false,
         item: '(none)',
-        source: 'none',
-        evidence: '(none)',
-        noEffectReason: '(none)',
       },
       lootSearch: {
         attempted: false,
@@ -476,10 +472,7 @@ function linkedPowerAssessment(actor = 'Ash Gate Company') {
 function affiliationLink(overrides = {}) {
   return {
     grievanceId: 'lg_test_cale_cart',
-    target: 'Cale',
     powerActor: 'Ash Gate Company',
-    actorType: 'merchant company',
-    hasReach: true,
     affiliationEvidence: 'Cale is explicitly identified as an Ash Gate Company factor',
     knownToActor: true,
     knowledgeEvidence: 'Cale filed a named loss report with the company',
@@ -490,10 +483,7 @@ function affiliationLink(overrides = {}) {
 function favorAffiliationLink(overrides = {}) {
   return {
     favorId: 'lf_test_cale_rescue',
-    target: 'Cale',
     powerActor: 'Ash Gate Company',
-    actorType: 'merchant company',
-    hasReach: true,
     affiliationEvidence: 'Cale is explicitly identified as an Ash Gate Company factor',
     knownToActor: true,
     knowledgeEvidence: 'Cale reported the rescue to the company',
@@ -11356,6 +11346,18 @@ const tests = [
       });
       assert.deepEqual(noKnowledge.trackerUpdate.latentGrievances, [stored]);
       assert.equal(auditIncludes(noKnowledge, 'no knowledge or discovery path yet'), true);
+
+      const contradictoryTarget = runLink({
+        link: affiliationLink({ target: 'Mira' }),
+      });
+      assert.deepEqual(contradictoryTarget.trackerUpdate.latentGrievances, [stored]);
+      assert.equal(auditIncludes(contradictoryTarget, 'link target contradicts exact latent grievance reference'), true);
+
+      const contradictoryAssessmentMetadata = runLink({
+        link: affiliationLink({ actorType: 'ordinary person' }),
+      });
+      assert.deepEqual(contradictoryAssessmentMetadata.trackerUpdate.latentGrievances, [stored]);
+      assert.equal(auditIncludes(contradictoryAssessmentMetadata, 'legacy link metadata contradicts the authoritative actor assessment'), true);
     },
   },
   {
@@ -11415,6 +11417,18 @@ const tests = [
       assert.match(semanticSource, /affiliationLinks: array\(powerActorAffiliationLink, 12\)/);
       assert.match(semanticSource, /latentFavors: array\(latentFavor, 12\)/);
       assert.match(semanticSource, /favorAffiliationLinks: array\(powerActorFavorAffiliationLink, 12\)/);
+      const grievanceLinkSchema = semanticSource.slice(
+        semanticSource.indexOf('const powerActorAffiliationLink = object({'),
+        semanticSource.indexOf('const latentFavor = object({'),
+      );
+      const favorLinkSchema = semanticSource.slice(
+        semanticSource.indexOf('const powerActorFavorAffiliationLink = object({'),
+        semanticSource.indexOf('const powerEvent = object({'),
+      );
+      assert.match(grievanceLinkSchema, /grievanceId: string/);
+      assert.doesNotMatch(grievanceLinkSchema, /target:|actorType:|hasReach:/);
+      assert.match(favorLinkSchema, /favorId: string/);
+      assert.doesNotMatch(favorLinkSchema, /target:|actorType:|hasReach:/);
       const semanticSnapshotSanitizer = semanticSource.slice(
         semanticSource.indexOf('function sanitizeLatentGrievanceSnapshotForSemantic'),
         semanticSource.indexOf('function sanitizeUserKnowledgeSnapshotForSemantic'),
@@ -11895,6 +11909,19 @@ const tests = [
       assert.deepEqual(hostile.trackerUpdate.latentFavors, [stored]);
       assert.equal(hostile.finalNarrativeHandoff.powerActorFavor, null);
       assert.equal(auditIncludes(hostile, 'currently has active enmity'), true);
+
+      const contradictoryTarget = runCase({
+        latentFavors: [stored],
+        ledger: baseLedger({
+          powerActorEnmity: {
+            assessments: [linkedPowerAssessment()],
+            favorAffiliationLinks: [favorAffiliationLink({ target: 'Mira' })],
+          },
+        }),
+      });
+      assert.deepEqual(contradictoryTarget.trackerUpdate.latentFavors, [stored]);
+      assert.equal(contradictoryTarget.finalNarrativeHandoff.powerActorFavor, null);
+      assert.equal(auditIncludes(contradictoryTarget, 'link target contradicts exact latent favor reference'), true);
     },
   },
   {
@@ -14320,18 +14347,22 @@ const tests = [
       assert.match(semanticSource, /ITEM_USE_SOURCES/);
       assert.match(semanticSource, /const itemUse = object\(\{/);
       assert.match(semanticSource, /attempted: boolean\('Y only when the latest user input directly handles, uses, accesses, possesses, transfers/);
-      assert.match(semanticSource, /available: boolean\('After Attempted=Y and only after the referent is classified as an item/);
-      assert.match(semanticSource, /noEffectReason: string\(\)/);
+      const itemUseSchema = semanticSource.slice(
+        semanticSource.indexOf('const itemUse = object({'),
+        semanticSource.indexOf('const lootSearch = object({'),
+      );
+      assert.doesNotMatch(itemUseSchema, /available:|source:|evidence:|noEffectReason:/);
+      assert.match(semanticSource, /Return only the semantic referent decision: Attempted and Item/i);
       assert.match(semanticSource, /itemUse is only for a direct user interaction with one specifically identified concrete inanimate object/i);
       assert.match(semanticSource, /Searching, scanning, looking around, inspecting, examining, rummaging, foraging, or seeking something\/anything useful is not itemUse/i);
       assert.match(semanticSource, /Generic categories such as weapon, tool, object, item, something, or anything are not concrete Item values/i);
       assert.doesNotMatch(semanticSource, /When \{\{user\}\} touches, grabs, holds, embraces, strikes/i);
-      assert.match(semanticSource, /scene requires an exact saved current SceneItemState entry/i);
-      assert.match(semanticSource, /factual latest assistant scene narration/i);
-      assert.match(semanticSource, /Ambient does not establish owned, specialized, valuable, magical, weapon, tool, key/i);
-      assert.match(semanticSource, /Every Attempted=Y entry requires concise Evidence/i);
-      assert.match(semanticSource, /Evidence cannot create availability/i);
-      assert.match(semanticSource, /latest user wording cannot establish presence or possession/i);
+      assert.match(runnerSource, /findSceneItemMatch/);
+      assert.match(runnerSource, /priorAssistantSceneItemMatch/);
+      assert.match(runnerSource, /AMBIENT_ITEM_NOUNS/);
+      assert.match(semanticSource, /Return only the semantic referent decision: Attempted and Item/i);
+      assert.match(runnerSource, /the semantic item referent must be present in the latest user input and item availability\/evidence must be mechanically verified/i);
+      assert.match(runnerSource, /latestUserInputClaimsItemPossession/);
       assert.doesNotMatch(semanticSource, /setting_affordance/);
       assert.doesNotMatch(semanticSource, /consequence_affordance/);
       assert.match(runnerSource, /USER_OWNED_ITEM_SOURCES/);
@@ -18428,10 +18459,10 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 237,
+        leaves: 227,
         objects: 44,
         arrays: 44,
-        descriptions: 106,
+        descriptions: 100,
         incompleteRequired: 0,
       });
       assert.equal(
@@ -18533,6 +18564,18 @@ const tests = [
       };
       const structuredLedger = buildSchemaFixture(strictSemanticTool.function.parameters);
       assert.equal(validateSemanticToolArguments(structuredLedger), structuredLedger);
+      assert.deepEqual(Object.keys(structuredLedger.resolutionEngine.itemUse), ['attempted', 'item']);
+      assert.deepEqual(
+        Object.keys(strictSemanticTool.function.parameters.properties.powerActorEnmity.properties.affiliationLinks.items.properties),
+        ['grievanceId', 'powerActor', 'affiliationEvidence', 'knownToActor', 'knowledgeEvidence'],
+      );
+      assert.deepEqual(
+        Object.keys(strictSemanticTool.function.parameters.properties.powerActorEnmity.properties.favorAffiliationLinks.items.properties),
+        ['favorId', 'powerActor', 'affiliationEvidence', 'knownToActor', 'knowledgeEvidence', 'knownToUser', 'userKnowledgeEvidence', 'fit', 'fitEvidence'],
+      );
+      const invalidDerivedItemField = structuredClone(structuredLedger);
+      invalidDerivedItemField.resolutionEngine.itemUse.available = false;
+      assert.throws(() => validateSemanticToolArguments(invalidDerivedItemField), /unknown properties: available/);
       const transportVariantLedger = structuredClone(structuredLedger);
       transportVariantLedger.worldTransition.indoors = ' Indoor ';
       transportVariantLedger.worldTransition.timeOfDay = ' NIGHT ';

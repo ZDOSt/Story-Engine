@@ -2002,8 +2002,8 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
             continue;
         }
         const grievance = latentGrievances.find(item => item.id === link.grievanceId);
-        if (!grievance || !sameName(grievance.target, link.target)) {
-            audit.push(`3P.4a ignoredPowerActorAffiliationLink=${compact({ reason: 'no exact latent grievance match', grievanceId: link.grievanceId, target: link.target })}`);
+        if (!grievance || (link.target && !sameName(grievance.target, link.target))) {
+            audit.push(`3P.4a ignoredPowerActorAffiliationLink=${compact({ reason: grievance ? 'link target contradicts exact latent grievance reference' : 'no exact latent grievance match', grievanceId: link.grievanceId, target: link.target || grievance?.target })}`);
             continue;
         }
         if (consumedGrievanceIds.has(grievance.id)) {
@@ -2013,6 +2013,10 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
         const assessment = assessments.find(item => sameName(item.actor, link.powerActor));
         if (!assessment?.isPowerActor || !assessment.hasReach) {
             audit.push(`3P.4a ignoredPowerActorAffiliationLink=${compact({ reason: 'linked entity was not independently assessed as a power actor with reach', grievanceId: grievance.id, actor: link.powerActor })}`);
+            continue;
+        }
+        if (link.hasReach === false || (link.actorType && !samePowerActorType(link.actorType, assessment.actorType))) {
+            audit.push(`3P.4a ignoredPowerActorAffiliationLink=${compact({ reason: 'legacy link metadata contradicts the authoritative actor assessment', grievanceId: grievance.id, actor: link.powerActor, linkActorType: link.actorType, assessmentActorType: assessment.actorType, linkHasReach: link.hasReach })}`);
             continue;
         }
         establishedLinkedTargetKeys.add(normalizeNameKey(grievance.target));
@@ -2080,13 +2084,17 @@ function runPowerActorEnmity(ledger, context, audit, dice, rapportClock = normal
             continue;
         }
         const favor = latentFavors.find(item => item.id === link.favorId);
-        if (!favor || !sameName(favor.target, link.target)) {
-            audit.push(`3P.4c.1 ignoredPowerActorFavorAffiliationLink=${compact({ reason: 'no exact latent favor match', favorId: link.favorId, target: link.target })}`);
+        if (!favor || (link.target && !sameName(favor.target, link.target))) {
+            audit.push(`3P.4c.1 ignoredPowerActorFavorAffiliationLink=${compact({ reason: favor ? 'link target contradicts exact latent favor reference' : 'no exact latent favor match', favorId: link.favorId, target: link.target || favor?.target })}`);
             continue;
         }
         const assessment = assessments.find(item => sameName(item.actor, link.powerActor));
         if (!assessment?.isPowerActor || !assessment.hasReach) {
             audit.push(`3P.4c.1 ignoredPowerActorFavorAffiliationLink=${compact({ reason: 'linked entity was not independently assessed as a power actor with reach', favorId: favor.id, actor: link.powerActor })}`);
+            continue;
+        }
+        if (link.hasReach === false || (link.actorType && !samePowerActorType(link.actorType, assessment.actorType))) {
+            audit.push(`3P.4c.1 ignoredPowerActorFavorAffiliationLink=${compact({ reason: 'legacy link metadata contradicts the authoritative actor assessment', favorId: favor.id, actor: link.powerActor, linkActorType: link.actorType, assessmentActorType: assessment.actorType, linkHasReach: link.hasReach })}`);
             continue;
         }
         establishedLinkedTargetKeys.add(normalizeNameKey(favor.target));
@@ -2345,6 +2353,11 @@ function normalizePowerActorAssessmentForRunner(value) {
     };
 }
 
+function samePowerActorType(left, right) {
+    const normalize = value => cleanPowerActorScalar(value, 80).toLowerCase().replace(/[\s_-]+/g, ' ');
+    return normalize(left) === normalize(right);
+}
+
 function normalizeLatentGrievanceCandidate(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const target = cleanPowerActorScalar(source.target ?? source.Target, 100);
@@ -2399,18 +2412,20 @@ function normalizePowerActorAffiliationLink(value = {}) {
     const actorType = cleanPowerActorScalar(source.actorType ?? source.ActorType, 80);
     const affiliationEvidence = cleanPowerActorScalar(source.affiliationEvidence ?? source.AffiliationEvidence, 220);
     const knowledgeEvidence = cleanPowerActorScalar(source.knowledgeEvidence ?? source.KnowledgeEvidence, 220);
-    const hasReach = bool(source.hasReach ?? source.HasReach);
-    if (!grievanceId || !target || !powerActor || !actorType || !affiliationEvidence || !hasReach) return null;
-    return {
+    if (!grievanceId || !powerActor || !affiliationEvidence) return null;
+    const link = {
         grievanceId,
-        target,
         powerActor,
-        actorType,
-        hasReach: true,
         affiliationEvidence,
         knownToActor: bool(source.knownToActor ?? source.KnownToActor),
         knowledgeEvidence,
     };
+    if (target) link.target = target;
+    if (actorType) link.actorType = actorType;
+    if (Object.prototype.hasOwnProperty.call(source, 'hasReach') || Object.prototype.hasOwnProperty.call(source, 'HasReach')) {
+        link.hasReach = bool(source.hasReach ?? source.HasReach);
+    }
+    return link;
 }
 
 function normalizePowerActorFavorAffiliationLink(value = {}) {
@@ -2423,14 +2438,10 @@ function normalizePowerActorFavorAffiliationLink(value = {}) {
     const knowledgeEvidence = cleanPowerActorScalar(source.knowledgeEvidence ?? source.KnowledgeEvidence, 220);
     const userKnowledgeEvidence = cleanPowerActorScalar(source.userKnowledgeEvidence ?? source.UserKnowledgeEvidence, 220);
     const fitEvidence = cleanPowerActorScalar(source.fitEvidence ?? source.FitEvidence, 220);
-    const hasReach = bool(source.hasReach ?? source.HasReach);
-    if (!favorId || !target || !powerActor || !actorType || !affiliationEvidence || !hasReach) return null;
-    return {
+    if (!favorId || !powerActor || !affiliationEvidence) return null;
+    const link = {
         favorId,
-        target,
         powerActor,
-        actorType,
-        hasReach: true,
         affiliationEvidence,
         knownToActor: bool(source.knownToActor ?? source.KnownToActor),
         knowledgeEvidence,
@@ -2439,6 +2450,12 @@ function normalizePowerActorFavorAffiliationLink(value = {}) {
         fit: normalizePowerActorFavorFit(source.fit ?? source.Fit),
         fitEvidence,
     };
+    if (target) link.target = target;
+    if (actorType) link.actorType = actorType;
+    if (Object.prototype.hasOwnProperty.call(source, 'hasReach') || Object.prototype.hasOwnProperty.call(source, 'HasReach')) {
+        link.hasReach = bool(source.hasReach ?? source.HasReach);
+    }
+    return link;
 }
 
 function currentLatentGrievanceTargets(ledger, resolutionPacket = {}, trackerSnapshot = {}, hiddenHealthSnapshot = null, context = {}) {
