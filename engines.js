@@ -195,9 +195,9 @@ function ResolutionEngine(input) {
 
   actionUnits(input, challenge, challengeType):
     policy: LOCKED, EXPLICIT-ONLY, SEMANTIC-ONLY, MAX 3 ACTIONS
-    output: [{id:A1, action, evidence}, ...]
+    output: [{action, evidence}, ...]
     rule: actionUnits is the ONLY semantic source for mechanically counted actions
-    rule: if challengeType is not mundane_combat or supernatural_combat, return exactly one unit: A1
+    rule: if challengeType is not mundane_combat or supernatural_combat, return exactly one unit; the extension assigns it A1
     rule: if challengeType is mundane_combat or supernatural_combat, return one unit per explicit discrete attack/effect, capped at three
     rule: each unit is one mechanically resolved action that could separately land, miss, be blocked, dodged, deflected, or apply an effect
     rule: count separate attacks/effects even when they share target, goal, sentence, ability name, or combo
@@ -205,7 +205,7 @@ function ResolutionEngine(input) {
     rule: do not count setup, aiming, drawing, focusing, chanting, movement, pivoting, repositioning, defense, recovery, or flavor unless that act itself is a separate attack/effect
     rule: each unit must include a short clean action description and brief evidence phrase from the latest user input
     rule: actionUnits do not decide success, failure, outcome, injury, counterattack, or narration
-    return [{id:A1,...}] | [{id:A1,...},{id:A2,...}] | [{id:A1,...},{id:A2,...},{id:A3,...}]
+    return [{action,...}] | [{action,...},{action,...}] | [{action,...},{action,...},{action,...}]
 
   environmentDifficultyTier(challengeType, targets, context):
     policy: LOCKED, EXPLICIT-ONLY
@@ -250,7 +250,7 @@ function ResolutionEngine(input) {
     activeHostileThreat = activeHostileThreat(input, finalGoal, targets, context)
     harmMode = harmMode(input, finalGoal, challenge, challengeType, targets, context)
     actionUnits = actionUnits(input, challenge, challengeType)
-    actions = actionUnits ids
+    actions = extension-assigned positional actionUnit ids (A1, A2, A3)
     envDifficultyTier = rollNeeded=Y ? environmentDifficultyTier(challengeType, targets, context) : none
     if first OppTargets.NPC currentCoreStats missing:
       generatedStatsSeed = genStats(first OppTargets.NPC, context)

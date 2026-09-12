@@ -18425,12 +18425,26 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 240,
+        leaves: 237,
         objects: 44,
-        arrays: 46,
-        descriptions: 107,
+        arrays: 44,
+        descriptions: 106,
         incompleteRequired: 0,
       });
+      assert.equal(
+        'id' in strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.items.properties,
+        false,
+        'Action-unit IDs are assigned positionally by the extension.',
+      );
+      assert.equal(
+        'currencyAdd' in strictSemanticTool.function.parameters.properties.trackerUpdateEngine.properties.user.properties,
+        false,
+        'User currency is owned by post-narration tracking, not semantic preflight.',
+      );
+      assert.match(
+        strictSemanticTool.function.parameters.properties.powerActorEnmity.properties.effects.items.properties.actionUnitId.description,
+        /first entry=A1, second=A2, third=A3.*extension assigns/i,
+      );
       assert.deepEqual(
         strictSemanticTool.function.parameters.properties.relationshipEngine.items.properties.exceptionalBenefitScale.enum,
         ['ordinary', 'significant', 'exceptional'],
@@ -18546,9 +18560,14 @@ const tests = [
       const representationVariant = structuredClone(structuredLedger);
       representationVariant.worldTransition.timeAdvanceCount = '14';
       representationVariant.resolutionEngine.identifyTargets.ActionTargets = 'Phoebe';
-      representationVariant.resolutionEngine.actionUnits = buildSchemaFixture(
-        strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.items,
-      );
+      representationVariant.resolutionEngine.actionUnits = {
+        id: 'A3',
+        ...buildSchemaFixture(
+          strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.items,
+        ),
+      };
+      representationVariant.trackerUpdateEngine.user.currencyAdd = ['100 sv'];
+      representationVariant.trackerUpdateEngine.user.currencyRemove = ['10 sv'];
       const canonicalRepresentation = structuredClone(structuredLedger);
       canonicalRepresentation.worldTransition.timeAdvanceCount = 14;
       canonicalRepresentation.resolutionEngine.identifyTargets.ActionTargets = ['Phoebe'];
@@ -18562,6 +18581,9 @@ const tests = [
       assert.equal(representationVariant.worldTransition.timeAdvanceCount, '14');
       assert.equal(representationVariant.resolutionEngine.identifyTargets.ActionTargets, 'Phoebe');
       assert.equal(!Array.isArray(representationVariant.resolutionEngine.actionUnits), true);
+      assert.equal('id' in normalizedRepresentation.resolutionEngine.actionUnits[0], false);
+      assert.equal('currencyAdd' in normalizedRepresentation.trackerUpdateEngine.user, false);
+      assert.equal('currencyRemove' in normalizedRepresentation.trackerUpdateEngine.user, false);
       assert.deepEqual(
         extractSemanticToolLedger({
           choices: [{ message: { tool_calls: [{
