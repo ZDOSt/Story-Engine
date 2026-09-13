@@ -1647,6 +1647,8 @@ export function buildSemanticTextLedgerPrompt(prompt) {
         SEMANTIC_ACTION_UNIT_ACCURACY_AUDIT,
         'JSON OUTPUT SHAPE: This is the current complete key and nesting guide. Replace its sample values with decisions from the authoritative context. Every array is [] when no real entry applies; otherwise every real entry must retain the complete item shape shown here. Never emit the displayed sample array entries unless they are real and fully supported.',
         buildSemanticTextLedgerShapeGuide(),
+        'FINAL TEXT-LEDGER FORMAT REQUIREMENT: The response is invalid unless every enum property contains exactly one token from the CLOSED ENUM CONTRACT above, with no sentence, explanation, mechanism, symptom, label, synonym, or extra words. Put prose only in non-enum fields such as reason, evidence, description, or bodyPart. When no qualifying entry exists, use the field\'s exact neutral token or the schema-required empty array. These are generation constraints, not suggestions.',
+        buildSemanticEnumContract(),
     ].join('\n');
 
     return replaceSemanticOutputContract(prompt, textContract);
@@ -1661,12 +1663,39 @@ function buildSharedSemanticOutputRules() {
         'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
         'For enum fields, use exactly one value listed by the schema. Choose it only when its field guidance and the supplied context support it; never choose randomly, invent a synonym, or use an alternate label.',
         'InjuryEffectEngine.effectType is a closed canonical enum, not a free-text label: use exactly the listed values, map direct bodily-damage terms such as blunt force, bruising, wounds, cuts, lacerations, fractures, and sprains to physical_injury, and keep mechanism/body detail in description/bodyPart. Do not use pain, impact, trauma, or another ambiguous symptom as the category.',
+        'PowerActorEnmity.effects[].effect is a closed strategic-consequence enum, not a narrative description. Use reason for the explanatory sentence and return an empty effects array when no qualifying strategic consequence exists. An ordinary personal assault is not automatically power-actor enmity.',
         'Each schema array defines one entry shape. Return an empty array when no real entries apply, keep only real entries, and repeat the entry shape only as needed. Do not emit placeholders, template rows, count fields, sentinel values, comments, trailing commas, or ellipses.',
         'Ground every resolutionEngine.actionUnits evidence value with the same words in the same order from one contiguous span of the supplied effectiveUserInput. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words.',
         'Interpret any legacy semantic guidance by its equivalent canonical JSON meaning: Y/N maps to true/false, and absent applicable entries map to an empty array. Apply field guidance only through the canonical schema properties.',
         'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
         'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. Transport changes only how the same ledger is returned; do not reduce, reinterpret, invent, or silently omit ledger content.',
     ];
+}
+
+let semanticEnumContractCache = '';
+
+function buildSemanticEnumContract() {
+    if (semanticEnumContractCache) return semanticEnumContractCache;
+    const lines = [
+        'CLOSED ENUM CONTRACT: Every path below is a constrained JSON string. Output exactly one token from its listed values, with exact spelling and capitalization. Never output a sentence, explanation, mechanism, symptom, label, or synonym in place of a listed token. Use the field guidance to choose the meaning; use this contract to choose the representation.',
+    ];
+    const visit = (schema, path) => {
+        if (!schema || typeof schema !== 'object') return;
+        if (Array.isArray(schema.enum)) {
+            lines.push(`${path} MUST be exactly one of: ${schema.enum.join(', ')}.`);
+            return;
+        }
+        if (schema.type === 'object') {
+            for (const [name, childSchema] of Object.entries(schema.properties || {})) {
+                visit(childSchema, `${path}.${name}`);
+            }
+            return;
+        }
+        if (schema.type === 'array') visit(schema.items, `${path}[]`);
+    };
+    visit(buildSemanticPreflightSchema(), '$');
+    semanticEnumContractCache = lines.join('\n');
+    return semanticEnumContractCache;
 }
 
 let semanticTextLedgerShapeGuideCache = '';

@@ -19472,6 +19472,12 @@ const tests = [
       assert.match(prompt.at(-1).content, /JSON OUTPUT SHAPE/);
       assert.match(prompt.at(-1).content, /"resolutionEngine"/);
       assert.match(prompt.at(-1).content, /effectType is a closed canonical enum/);
+      assert.match(prompt.at(-1).content, /CLOSED ENUM CONTRACT/);
+      assert.match(
+        prompt.at(-1).content,
+        /\$\.powerActorEnmity\.effects\[\]\.?effect MUST be exactly one of: none, thwart, expose, harm_assets, steal, humiliate, help_enemy, disrupt_operation, kill_or_capture_people, damage_reputation_or_income\./,
+      );
+      assert.match(prompt.at(-1).content, /FINAL TEXT-LEDGER FORMAT REQUIREMENT/);
       assert.doesNotMatch(prompt.at(-1).content, /legacy contract/);
       assert.doesNotMatch(prompt.at(-1).content, /Call the function tool/);
 
