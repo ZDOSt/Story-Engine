@@ -22236,18 +22236,25 @@ const tests = [
       }, 'normal');
       const actionRecoveryLedger = groundedLedger(actionRecoveryBinding, ['The user follows Phoebe quietly.']);
       actionRecoveryLedger.resolutionEngine.actionUnits[0].action = 'follow Phoebe quietly';
-      assert.doesNotThrow(() => validateSemanticTurnGrounding(actionRecoveryLedger, actionRecoveryBinding));
-      assert.equal(actionRecoveryLedger.resolutionEngine.actionUnits[0].evidence, 'follow Phoebe quietly');
+      assert.throws(
+        () => validateSemanticTurnGrounding(actionRecoveryLedger, actionRecoveryBinding),
+        /not grounded by the same contiguous word sequence/,
+        'Evidence must be copied from the current input rather than recovered from a paraphrased action description.',
+      );
 
       const framedActionRecoveryLedger = groundedLedger(actionRecoveryBinding, ['The user follows Phoebe quietly.']);
       framedActionRecoveryLedger.resolutionEngine.actionUnits[0].action = 'Aelemar attempts to follow Phoebe quietly';
-      assert.doesNotThrow(() => validateSemanticTurnGrounding(framedActionRecoveryLedger, actionRecoveryBinding));
-      assert.equal(framedActionRecoveryLedger.resolutionEngine.actionUnits[0].evidence, 'follow Phoebe quietly');
+      assert.throws(
+        () => validateSemanticTurnGrounding(framedActionRecoveryLedger, actionRecoveryBinding),
+        /not grounded by the same contiguous word sequence/,
+      );
 
       const actorFramedActionRecoveryLedger = groundedLedger(actionRecoveryBinding, ['The user follows Phoebe quietly.']);
       actorFramedActionRecoveryLedger.resolutionEngine.actionUnits[0].action = 'The user attempts to follow Phoebe quietly';
-      assert.doesNotThrow(() => validateSemanticTurnGrounding(actorFramedActionRecoveryLedger, actionRecoveryBinding));
-      assert.equal(actorFramedActionRecoveryLedger.resolutionEngine.actionUnits[0].evidence, 'follow Phoebe quietly');
+      assert.throws(
+        () => validateSemanticTurnGrounding(actorFramedActionRecoveryLedger, actionRecoveryBinding),
+        /not grounded by the same contiguous word sequence/,
+      );
 
       const completeActionBinding = createSemanticTurnBinding({
         latestUserText: 'I attempt to follow Phoebe quietly.',
@@ -22255,8 +22262,51 @@ const tests = [
       }, 'normal');
       const completeActionLedger = groundedLedger(completeActionBinding, ['The user attempts to follow Phoebe quietly.']);
       completeActionLedger.resolutionEngine.actionUnits[0].action = 'attempt to follow Phoebe quietly';
-      assert.doesNotThrow(() => validateSemanticTurnGrounding(completeActionLedger, completeActionBinding));
-      assert.equal(completeActionLedger.resolutionEngine.actionUnits[0].evidence, 'attempt to follow Phoebe quietly');
+      assert.throws(
+        () => validateSemanticTurnGrounding(completeActionLedger, completeActionBinding),
+        /not grounded by the same contiguous word sequence/,
+      );
+
+      const perspectiveBinding = createSemanticTurnBinding({
+        latestUserText: 'I pick Thoti up in my arms as I get up, sit on the sofa, and deposit her on my lap.',
+        semanticTurnKey: 'run-perspective-evidence-1',
+      }, 'normal');
+      const perspectiveLedger = groundedLedger(perspectiveBinding, [
+        'I pick Thoti up in my arms as I get up, sit on the sofa, and deposit her on her lap.',
+      ]);
+      perspectiveLedger.resolutionEngine.actionUnits[0].action = 'Pick Thoti up, sit on the sofa, and deposit her on his lap';
+      assert.doesNotThrow(() => validateSemanticTurnGrounding(perspectiveLedger, perspectiveBinding));
+      assert.equal(
+        perspectiveLedger.resolutionEngine.actionUnits[0].evidence,
+        'I pick Thoti up in my arms as I get up, sit on the sofa, and deposit her on my lap',
+        'Pronoun-perspective recovery must restore the exact source span.',
+      );
+
+      const missingEvidenceLedger = groundedLedger(perspectiveBinding, [null]);
+      missingEvidenceLedger.resolutionEngine.actionUnits[0].action = 'Pick Thoti up and deposit her on my lap';
+      assert.throws(
+        () => validateSemanticTurnGrounding(missingEvidenceLedger, perspectiveBinding),
+        /not grounded by the same contiguous word sequence/,
+        'Missing evidence must fail closed rather than being synthesized from action text.',
+      );
+
+      const hallucinatedEvidenceLedger = groundedLedger(perspectiveBinding, [
+        'I pick Thoti up in my arms, sit on the sofa, and deposit her on the table.',
+      ]);
+      hallucinatedEvidenceLedger.resolutionEngine.actionUnits[0].action = 'Pick Thoti up and deposit her on the table';
+      assert.throws(
+        () => validateSemanticTurnGrounding(hallucinatedEvidenceLedger, perspectiveBinding),
+        /not grounded by the same contiguous word sequence/,
+        'Evidence with a substantive hallucinated object must fail closed.',
+      );
+
+      const unrelatedEvidenceLedger = groundedLedger(perspectiveBinding, ['Phoebe told him to rest.']);
+      unrelatedEvidenceLedger.resolutionEngine.actionUnits[0].action = 'pick Thoti up';
+      assert.throws(
+        () => validateSemanticTurnGrounding(unrelatedEvidenceLedger, perspectiveBinding),
+        /not grounded by the same contiguous word sequence/,
+        'Unrelated evidence must fail even when the action description contains a valid source phrase.',
+      );
 
       const apostropheBinding = createSemanticTurnBinding({
         latestUserText: "I take Phoebe's hand, then look around.",

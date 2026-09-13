@@ -1414,7 +1414,7 @@ export function buildSemanticTurnBindingBlock(turnBinding) {
         SEMANTIC_TURN_BINDING_BLOCK_HEADER,
         'The JSON object below is authoritative data for this semantic pass. Analyze effectiveUserInput as the current user turn; use all earlier messages only as context.',
         payload,
-        'For every resolutionEngine.actionUnits entry, copy evidence from one contiguous span of effectiveUserInput using the same words in the same order. Punctuation, whitespace, and letter case may differ, but do not omit, add, substitute, or paraphrase words. Never use assistant narration or an earlier user turn as action-unit evidence.',
+        'For every resolutionEngine.actionUnits entry, copy evidence exactly from one contiguous span of effectiveUserInput. Preserve every source word, first-person/third-person pronoun, possessive, quantity, negation, target, and action term in the same order. Do not summarize, paraphrase, translate, normalize, reframe from the character\'s perspective, or copy from assistant narration or an earlier user turn. Punctuation, whitespace, letter case, apostrophe style, and JSON escaping may differ only because of formatting; the extension will restore the exact source span.',
     ].join('\n');
 }
 
@@ -1480,77 +1480,47 @@ function findExactTurnGroundingTokenSpan(source, sourceTokens, expectedTokens) {
     return '';
 }
 
-const TURN_GROUNDING_ACTOR_PREFIXES = Object.freeze([
-    ['the', 'user'],
-    ['the', 'player'],
-    ['the', 'player', 'character'],
-    ['the', 'character'],
-    ['user'],
-    ['player'],
-    ['player', 'character'],
-    ['character'],
-]);
+const TURN_GROUNDING_PRONOUNS = Object.freeze(new Set([
+    'i', 'me', 'my', 'mine', 'myself',
+    'we', 'us', 'our', 'ours', 'ourselves',
+    'you', 'your', 'yours', 'yourself', 'yourselves',
+    'he', 'him', 'his', 'himself',
+    'she', 'her', 'hers', 'herself',
+    'they', 'them', 'their', 'theirs', 'themselves',
+    'it', 'its', 'itself',
+]));
 
-const TURN_GROUNDING_ATTEMPT_PREFIXES = Object.freeze([
-    ['attempt', 'to'],
-    ['attempts', 'to'],
-    ['attempted', 'to'],
-    ['attempting', 'to'],
-    ['try', 'to'],
-    ['tries', 'to'],
-    ['tried', 'to'],
-    ['trying', 'to'],
-    ['is', 'attempting', 'to'],
-    ['was', 'attempting', 'to'],
-    ['is', 'trying', 'to'],
-    ['was', 'trying', 'to'],
-    ['makes', 'an', 'attempt', 'to'],
-    ['made', 'an', 'attempt', 'to'],
-]);
-
-function turnGroundingTokensMatchAt(tokens, expected, start) {
-    return start >= 0
-        && start + expected.length <= tokens.length
-        && expected.every((value, offset) => tokens[start + offset]?.value === value);
+function isTurnGroundingPronoun(value) {
+    return TURN_GROUNDING_PRONOUNS.has(String(value || '').toLowerCase());
 }
 
-function turnGroundingActionCoreStarts(actionTokens) {
-    const starts = new Set([0]);
-    const actorEnds = [];
-    for (const prefix of TURN_GROUNDING_ACTOR_PREFIXES) {
-        if (!turnGroundingTokensMatchAt(actionTokens, prefix, 0)) continue;
-        actorEnds.push(prefix.length);
-        starts.add(prefix.length);
-    }
-
-    for (const prefix of TURN_GROUNDING_ATTEMPT_PREFIXES) {
-        if (turnGroundingTokensMatchAt(actionTokens, prefix, 0)) starts.add(prefix.length);
-        for (const actorEnd of actorEnds) {
-            if (turnGroundingTokensMatchAt(actionTokens, prefix, actorEnd)) {
-                starts.add(actorEnd + prefix.length);
-            }
-        }
-        // A provider may identify the actor by persona name instead of "the user".
-        if (turnGroundingTokensMatchAt(actionTokens, prefix, 1)) {
-            starts.add(1 + prefix.length);
-        }
-    }
-
-    return [...starts];
-}
-
-function findTurnGroundingActionSpan(source, action) {
-    const normalizedAction = normalizeTurnGroundingQuote(action);
-    if (!normalizedAction || isNoneValue(normalizedAction) || /^a\d+$/iu.test(normalizedAction)) return '';
+function findPerspectiveAdjustedTurnGroundingSpan(source, evidence) {
     const sourceTokens = tokenizeTurnGroundingText(source);
-    const actionTokens = tokenizeTurnGroundingText(normalizedAction);
-    if (!sourceTokens.length || !actionTokens.length) return '';
+    const evidenceTokens = tokenizeTurnGroundingText(evidence);
+    if (!sourceTokens.length || !evidenceTokens.length || evidenceTokens.length > sourceTokens.length) return '';
 
-    for (const coreStart of turnGroundingActionCoreStarts(actionTokens)) {
-        const coreTokens = actionTokens.slice(coreStart);
-        if (coreTokens.length < 2) continue;
-        const grounded = findExactTurnGroundingTokenSpan(source, sourceTokens, coreTokens);
-        if (grounded) return grounded;
+    for (let start = 0; start <= sourceTokens.length - evidenceTokens.length; start += 1) {
+        let substantiveMatches = 0;
+        let pronounSubstitutions = 0;
+        let matches = true;
+        for (let offset = 0; offset < evidenceTokens.length; offset += 1) {
+            const sourceToken = sourceTokens[start + offset].value;
+            const evidenceToken = evidenceTokens[offset].value;
+            if (sourceToken === evidenceToken) {
+                if (!isTurnGroundingPronoun(sourceToken)) substantiveMatches += 1;
+                continue;
+            }
+            if (isTurnGroundingPronoun(sourceToken) && isTurnGroundingPronoun(evidenceToken)) {
+                pronounSubstitutions += 1;
+                continue;
+            }
+            matches = false;
+            break;
+        }
+        if (!matches || substantiveMatches === 0 || pronounSubstitutions === 0) continue;
+        const first = sourceTokens[start];
+        const last = sourceTokens[start + evidenceTokens.length - 1];
+        return source.slice(first.start, last.end);
     }
     return '';
 }
@@ -1588,16 +1558,15 @@ export function validateSemanticTurnGrounding(ledger, turnBinding) {
         let groundedEvidence = !evidence || isNoneValue(evidence)
             ? ''
             : findTurnGroundingSpan(effectiveUserInput, evidence);
-        if (!groundedEvidence) {
-            groundedEvidence = findTurnGroundingActionSpan(
-                effectiveUserInput,
-                normalizeTurnGroundingQuote(unit?.action),
-            );
+        let groundingRecovery = '';
+        if (!groundedEvidence && evidence && !isNoneValue(evidence)) {
+            groundedEvidence = findPerspectiveAdjustedTurnGroundingSpan(effectiveUserInput, evidence);
+            if (groundedEvidence) groundingRecovery = 'pronoun-perspective substitution';
         }
         if (!groundedEvidence) {
             const action = normalizeTurnGroundingQuote(unit?.action);
             throw annotateSemanticDiagnosticError(
-                new Error(`Semantic action unit A${index + 1} is not grounded by the same contiguous word sequence from the current user input or a safe exact action sequence.`),
+                new Error(`Semantic action unit A${index + 1} evidence is not grounded by the same contiguous word sequence from the current user input or an allowed pronoun-perspective equivalent.`),
                 {
                     code: 'SE-TURN-GROUNDING',
                     stage: 'Current-turn grounding',
@@ -1606,6 +1575,13 @@ export function validateSemanticTurnGrounding(ledger, turnBinding) {
                     excerpt: `Current user input: ${effectiveUserInput.slice(0, 320)}`,
                 },
             );
+        }
+        if (groundingRecovery) {
+            try {
+                console.warn(`[Structured Preflight Engines] repaired action-unit A${index + 1} evidence from a ${groundingRecovery}; the exact current-turn source span was restored.`);
+            } catch {
+                // Diagnostics must never affect semantic validation.
+            }
         }
         unit.evidence = groundedEvidence;
     }
@@ -1668,7 +1644,7 @@ function buildSharedSemanticOutputRules() {
         'InjuryEffectEngine.effectType is a closed canonical enum, not a free-text label: use exactly the listed values, map direct bodily-damage terms such as blunt force, bruising, wounds, cuts, lacerations, fractures, and sprains to physical_injury, and keep mechanism/body detail in description/bodyPart. Do not use pain, impact, trauma, or another ambiguous symptom as the category.',
         'PowerActorEnmity.effects[].effect is a closed strategic-consequence enum, not a narrative description. Use reason for the explanatory sentence and return an empty effects array when no qualifying strategic consequence exists. An ordinary personal assault is not automatically power-actor enmity.',
         'Each schema array defines one entry shape. Return an empty array when no real entries apply, keep only real entries, and repeat the entry shape only as needed. Do not emit placeholders, template rows, count fields, sentinel values, comments, trailing commas, or ellipses.',
-        'Ground every resolutionEngine.actionUnits evidence value with the same words in the same order from one contiguous span of the supplied effectiveUserInput. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words.',
+        'Ground every resolutionEngine.actionUnits evidence value with an exact contiguous span of the supplied effectiveUserInput. Preserve every source word, first-person/third-person pronoun, possessive, quantity, negation, target, and action term in the same order. Do not summarize, paraphrase, translate, normalize, reframe from the character\'s perspective, or copy from assistant narration or an earlier user turn. Punctuation, whitespace, letter case, apostrophe style, and JSON escaping may differ only as formatting; the extension restores the exact source span. If the evidence is absent or contains substantive words not present in the current input, do not fabricate a replacement: the semantic pass must fail validation.',
         'Interpret any legacy semantic guidance by its equivalent canonical JSON meaning: Y/N maps to true/false, and absent applicable entries map to an empty array. Apply field guidance only through the canonical schema properties.',
         'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
         'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. Transport changes only how the same ledger is returned; do not reduce, reinterpret, invent, or silently omit ledger content.',
@@ -1727,7 +1703,7 @@ function buildSemanticTextLedgerShapeValue(schema) {
     return '(none)';
 }
 
-const SEMANTIC_ACTION_UNIT_ACCURACY_AUDIT = 'FINAL SEMANTIC ACCURACY AUDIT: Perform this silently before submitting the semantic object. Preserve every explicit quantity, negation, target, and stated method from effectiveUserInput. Treat resolutionEngine.actionUnits as an accounting of individually resolvable actions, never a summary of the overall intent. When the current user input explicitly repeats a direct combat action N times, emit N separate actionUnits, capped at three. Each actionUnit describes one occurrence; multiple units may cite the same exact evidence phrase when that phrase establishes the repeated actions. Pattern: "I strike the guard twice" requires A1 and A2, each describing one strike and citing that same phrase. Do not output this audit or any placeholder text.';
+const SEMANTIC_ACTION_UNIT_ACCURACY_AUDIT = 'FINAL SEMANTIC ACCURACY AUDIT: Perform this silently before submitting the semantic object. Preserve every explicit quantity, negation, target, and stated method from effectiveUserInput. Treat resolutionEngine.actionUnits as an accounting of individually resolvable actions, never a summary of the overall intent. When the current user input explicitly repeats a direct combat action N times, emit N separate actionUnits, capped at three. Each actionUnit describes one occurrence; multiple units may cite the same exact evidence phrase when that phrase establishes the repeated actions. Evidence is an audit citation, not a paraphrase: copy one contiguous source span word for word, preserving pronouns and possessives; do not reframe it from another character\'s perspective. If no source span supports the evidence, do not invent one. Pattern: "I strike the guard twice" requires A1 and A2, each describing one strike and citing that same phrase. Do not output this audit or any placeholder text.';
 
 function replaceSemanticOutputContract(prompt, contract) {
     const messages = Array.isArray(prompt)
@@ -2010,7 +1986,7 @@ function buildSemanticPreflightSchema() {
     });
     const actionUnit = object({
         action: string('Short clean description of this mechanically counted user action.'),
-        evidence: string('Words copied in the same order from one contiguous span of the authoritative effective current user input for this action unit. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words. Audit only; not narration.'),
+        evidence: string('Exact words copied from one contiguous span of the authoritative effective current user input for this action unit. Preserve every source word, pronoun, possessive, quantity, negation, target, and action term in the same order. Do not summarize, paraphrase, translate, normalize, or reframe perspective. Punctuation, whitespace, letter case, apostrophe style, and JSON escaping may differ only as formatting; audit only, not narration.'),
     });
     const worldTransition = object({
         reputationLocation: string('Use unchanged unless the latest user input explicitly changes the current settlement, route, region, or reputation jurisdiction. Never copy or infer the existing scene state.'),
