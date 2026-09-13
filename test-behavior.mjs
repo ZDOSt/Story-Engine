@@ -16779,19 +16779,19 @@ const tests = [
       }
 
       const handoffRuleOrder = [
-        'agencySeparation',
-        'inputChronology',
+        'cohesiveSceneBeats',
+        'denotativePhysicality',
+        'embodiedPerception',
+        'diegeticPhysicality',
         'strictEpistemology',
         'nameReveal',
         'narrativeFacts',
-        'dialogueTurn',
-        'strictBehaviorism',
-        'embodiedPerception',
-        'denotativePhysicality',
-        'diegeticPhysicality',
-        'cohesiveSceneBeats',
-        'antiRhetoricalNegation',
+        'agencySeparation',
         'antiStockPhrasing',
+        'strictBehaviorism',
+        'antiRhetoricalNegation',
+        'inputChronology',
+        'dialogueTurn',
       ];
       assertNamedRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator handoff contract');
       assert.match(handoffRulesSource, /The supplied name pool are approved unused candidates|Names listed in the supplied name pool are approved unused candidates/);
