@@ -19478,6 +19478,9 @@ const tests = [
         /\$\.powerActorEnmity\.effects\[\]\.?effect MUST be exactly one of: none, thwart, expose, harm_assets, steal, humiliate, help_enemy, disrupt_operation, kill_or_capture_people, damage_reputation_or_income\./,
       );
       assert.match(prompt.at(-1).content, /FINAL TEXT-LEDGER FORMAT REQUIREMENT/);
+      assert.match(prompt.at(-1).content, /TEXT-LEDGER FIRST-TURN TARGET RULE/);
+      assert.match(prompt.at(-1).content, /active character as the target by identity/);
+      assert.match(prompt.at(-1).content, /multiple plausible living targets make the reference ambiguous/);
       assert.doesNotMatch(prompt.at(-1).content, /legacy contract/);
       assert.doesNotMatch(prompt.at(-1).content, /Call the function tool/);
 

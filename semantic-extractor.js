@@ -1649,10 +1649,13 @@ export function buildSemanticTextLedgerPrompt(prompt) {
         buildSemanticTextLedgerShapeGuide(),
         'FINAL TEXT-LEDGER FORMAT REQUIREMENT: The response is invalid unless every enum property contains exactly one token from the CLOSED ENUM CONTRACT above, with no sentence, explanation, mechanism, symptom, label, synonym, or extra words. Put prose only in non-enum fields such as reason, evidence, description, or bodyPart. When no qualifying entry exists, use the field\'s exact neutral token or the schema-required empty array. These are generation constraints, not suggestions.',
         buildSemanticEnumContract(),
+        SEMANTIC_TEXT_LEDGER_TARGET_DISAMBIGUATION,
     ].join('\n');
 
     return replaceSemanticOutputContract(prompt, textContract);
 }
+
+const SEMANTIC_TEXT_LEDGER_TARGET_DISAMBIGUATION = 'TEXT-LEDGER FIRST-TURN TARGET RULE: In a new chat with no prior assistant scene description, the active SillyTavern character named in Active names and character context is still the conversation\'s present character. When the latest user input directly attacks or otherwise directly affects that character and uses an unambiguous singular living-person reference such as him or her, treat that active character as the target by identity even if the card provides only a name and no description. For a direct attack, place that character in ActionTargets and, when the action creates fresh stakes, OppTargets.NPC; classify the route from the explicit action and count each explicit discrete attack/effect in actionUnits, capped at three. The active character name identifies only the referent: do not invent personality, abilities, hostility, stats, location, prior actions, or other unstated facts. Do not apply this rule when the active character is the user, is not a plausible living person, or when multiple plausible living targets make the reference ambiguous; in those cases do not guess.';
 
 function buildSharedSemanticOutputRules() {
     return [
