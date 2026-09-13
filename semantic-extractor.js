@@ -103,6 +103,56 @@ const OPENAI_NONE_FORWARDABLE_MODELS = Object.freeze(new Set([
     'gpt-5.5-2026-04-23',
 ]));
 const OPENAI_KNOWN_NON_REASONING_MODEL_PATTERN = /^(?:chatgpt-4o(?:-|$)|gpt-(?:3(?:\.5)?|4)(?:[.\-]|$))/i;
+const INJURY_EFFECT_TYPES = Object.freeze([
+    'none',
+    'physical_injury',
+    'burn',
+    'poison',
+    'paralysis',
+    'disease',
+    'blindness',
+    'stun',
+    'fear',
+    'restraint',
+    'curse',
+    'electrical',
+    'exhaustion',
+    'mental_status',
+    'other_status',
+]);
+const INJURY_EFFECT_TYPE_ALIASES = Object.freeze({
+    abrasion: 'physical_injury',
+    abrasions: 'physical_injury',
+    bruise: 'physical_injury',
+    bruised: 'physical_injury',
+    bruises: 'physical_injury',
+    bruising: 'physical_injury',
+    blunt: 'physical_injury',
+    bluntforce: 'physical_injury',
+    bluntforceinjury: 'physical_injury',
+    bluntforcetrauma: 'physical_injury',
+    blunttrauma: 'physical_injury',
+    contusion: 'physical_injury',
+    contusions: 'physical_injury',
+    cut: 'physical_injury',
+    cuts: 'physical_injury',
+    fracture: 'physical_injury',
+    fractures: 'physical_injury',
+    injury: 'physical_injury',
+    injuries: 'physical_injury',
+    laceration: 'physical_injury',
+    lacerations: 'physical_injury',
+    puncture: 'physical_injury',
+    punctures: 'physical_injury',
+    slash: 'physical_injury',
+    slashes: 'physical_injury',
+    stab: 'physical_injury',
+    stabs: 'physical_injury',
+    sprain: 'physical_injury',
+    sprains: 'physical_injury',
+    wound: 'physical_injury',
+    wounds: 'physical_injury',
+});
 const TRACKER_CONDITIONS = Object.freeze(['unchanged', 'healthy', 'bruised', 'wounded', 'badly_wounded', 'critical', 'incapacitated', 'dead']);
 const TRACKER_NPC_DELTA_FIELDS = Object.freeze(['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove']);
 const TRACKER_NPC_PROFILE_FIELDS = Object.freeze(['background', 'knowledge', 'practicedSkills']);
@@ -1610,6 +1660,7 @@ function buildSharedSemanticOutputRules() {
         'Accuracy has priority over choosing an active value. Every non-neutral classification must be supported by the supplied context; never invent evidence, infer an unsupported fact, or select a value merely to fill the ledger.',
         'Use the exact JSON type for every value: booleans as booleans, integers as integers, arrays as arrays, and objects as objects.',
         'For enum fields, use exactly one value listed by the schema. Choose it only when its field guidance and the supplied context support it; never choose randomly, invent a synonym, or use an alternate label.',
+        'InjuryEffectEngine.effectType is a closed canonical enum, not a free-text label: use exactly the listed values, map direct bodily-damage terms such as blunt force, bruising, wounds, cuts, lacerations, fractures, and sprains to physical_injury, and keep mechanism/body detail in description/bodyPart. Do not use pain, impact, trauma, or another ambiguous symptom as the category.',
         'Each schema array defines one entry shape. Return an empty array when no real entries apply, keep only real entries, and repeat the entry shape only as needed. Do not emit placeholders, template rows, count fields, sentinel values, comments, trailing commas, or ellipses.',
         'Ground every resolutionEngine.actionUnits evidence value with the same words in the same order from one contiguous span of the supplied effectiveUserInput. Punctuation, whitespace, and letter case may differ; do not omit, add, substitute, or paraphrase words.',
         'Interpret any legacy semantic guidance by its equivalent canonical JSON meaning: Y/N maps to true/false, and absent applicable entries map to an empty array. Apply field guidance only through the canonical schema properties.',
@@ -1794,7 +1845,10 @@ function buildSemanticPreflightSchema() {
     const injuryEffect = object({
         target: string('Exact current tracker key for the entity actually receiving the impairing effect when one exists. Do not add articles, death descriptors, possessives, body, corpse, or remains. HarmedObservers qualify only when directly affected by the injury or status effect.'),
         targetRole: enumString(['OppTarget', 'HarmedObserver', 'ActionTarget', 'User', 'Other']),
-        effectType: enumString(['none', 'physical_injury', 'burn', 'poison', 'paralysis', 'disease', 'blindness', 'stun', 'fear', 'restraint', 'curse', 'electrical', 'exhaustion', 'mental_status', 'other_status']),
+        effectType: enumString(
+            INJURY_EFFECT_TYPES,
+            'Closed canonical vocabulary. Return exactly one listed value. Use physical_injury for direct bodily damage such as blunt force, bruising, wounds, cuts, lacerations, fractures, or sprains; keep the descriptive mechanism or body detail in description/bodyPart. Never return a mechanism, symptom, or free-text synonym as the enum value.',
+        ),
         bodyPart: string(),
         description: string(),
         severityFloor: enumString(['minor', 'moderate', 'severe', 'critical']),
@@ -2546,6 +2600,9 @@ export function normalizeSemanticToolArgumentTypes(ledger, schema = buildSemanti
     if (schema.type === 'integer') return normalizeSemanticIntegerToken(ledger);
     if (path === '$.worldTransition.indoors') ledger = normalizeSemanticIndoorsValue(ledger);
     if (schema.type === 'string' && Array.isArray(schema.enum)) {
+        if (/^\$\.injuryEffectEngine\.effects\[\d+\]\.effectType$/u.test(path)) {
+            ledger = normalizeSemanticInjuryEffectType(ledger);
+        }
         return normalizeSemanticEnumValue(ledger, schema.enum);
     }
     return ledger;
@@ -2791,6 +2848,11 @@ function normalizeSemanticEnumValue(value, allowedValues) {
         return [...tokenForms].some(form => candidateForms.has(form));
     });
     return inflectionMatches.length === 1 ? inflectionMatches[0] : value;
+}
+
+function normalizeSemanticInjuryEffectType(value) {
+    if (typeof value !== 'string') return value;
+    return INJURY_EFFECT_TYPE_ALIASES[semanticEnumShapeToken(value)] || value;
 }
 
 function semanticEnumShapeToken(value) {
@@ -3626,6 +3688,7 @@ const SEMANTIC_FIELD_GUIDANCE = [
     '- ResolutionEngine.harmMode is a downstream damage/death gate only. It must NOT decide rollNeeded, challengeType, boundary pressure, or relationship harm. Set lethal when the current action attacks a living body using a weapon, improvised weapon, natural weapon, dangerous tool, projectile, firearm, blade, fang, claw, horn, crushing object, lethal/destructive magic, poison, fire, electricity, or another method that could reasonably kill or maim if it lands decisively. {{user}} does not need to say "kill"; infer from the physical method and context. Set nonlethal when the current action attacks a living body with ordinary unarmed force or explicitly controlled force: punches, kicks, elbows, knees, brawling, tackles meant as attacks, training, sparring, pulled blows, pommel strikes, flat-of-blade strikes, practice weapons, or a clearly stated attempt to avoid serious/fatal harm. Nonlethal can deal HP damage, but HP 0 means unconscious/incapacitated, not dead. Set restraint_control when the current action controls, holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a living body without a separate attack meant to injure. Restraint/control does not deal HP damage; it can cause bruising at most and restraint/control statuses if scene-valid. Set none when there is no bodily attack, harmful effect, or restraint/control. If the turn mixes methods, choose the most dangerous active mode: lethal > nonlethal > restraint_control > none. Ambiguous ordinary bodily force without weapons or inherently dangerous methods is nonlethal by default; mere restraint/control remains restraint_control.',
     '- All genStats groups must include only CapabilityPool and MainStat. Use genStats only when the relevant NPC currentCoreStats are missing in the tracker snapshot. CapabilityPool classifies this specific NPC population/role context using occupation, location, species, established actions, card/lore facts, and reputation together: common for ordinary civilians/residents/incidental people, unknown capability, or no practiced-capability evidence; trained when role or portrayal clearly implies practiced professional, martial, magical, intellectual, investigative, or social capability; elite only for explicitly exceptional champions, masters, veterans, rare predators, renowned experts, or similarly uncommon individuals; boss only for an explicitly singular major threat, legendary being, supreme master, or central overwhelming antagonist. Title, location, hostility, or dramatic importance alone never makes boss. If stats are missing and uncertain, use common; use none only when no NPC needs stats. MainStat uses explicit specialization PHY/MND/CHA; unclear or broadly capable is Balanced. Deterministic code rolls final Rank from the pool percentiles, assigns numeric PHY/MND/CHA, and saves the result once.',
     '- InjuryEffectEngine is semantic-only candidate extraction for effects the user action would cause if deterministic mechanics say the action lands. It does not roll and does not decide success. Include physical injuries and impairing magical/status effects regardless of source: burns, poison, paralysis, sickness, blindness, fear/panic, restraint, curses, lightning/electrical effects, exhaustion, mental effects, or other ongoing impairing states. Exclude purely emotional/social harm, mere witnessing, momentary pain, intended/requested future injuries, or effects that would not persist or impair later action.',
+    '- InjuryEffectEngine.effectType is a closed canonical enum, never a free-text description or attack mechanism. Return exactly one of: none, physical_injury, burn, poison, paralysis, disease, blindness, stun, fear, restraint, curse, electrical, exhaustion, mental_status, other_status. Map direct bodily-damage labels such as blunt/blunt force, bruise/bruising, wound, cut, abrasion, laceration, fracture, puncture, stab, slash, or sprain to physical_injury; put mechanism, body part, and detail in description/bodyPart. Keep none for no actual impairing effect, and do not use pain, impact, trauma, or another ambiguous symptom as an injury category.',
     '- InjuryEffectEngine target must be the entity actually receiving the impairing effect. HarmedObservers may appear only if they are directly affected by the injury/status effect, not merely emotionally harmed by seeing or caring about another target. Use persistence=lasting and affectsAction=Y only for effects that should impair later action if applied.',
     '- TrackerUpdateEngine is explicit-only visual state tracking. Output deltas only from the latest user input and immediate visible context. Use condition=unchanged, personalitySummary=unchanged, background=unchanged, knowledge=unchanged, practicedSkills=unchanged, and (none) lists unless a change is explicitly stated or durable context establishes a missing NPC foundation.',
     '- TrackerUpdateEngine must never rewrite full inventories, gear, wounds, status, tasks, or commitments from silence. Add only explicit new items/effects/tasks. Remove only explicit dropped/spent/used-up/lost/completed/canceled/failed/abandoned entries. Remove wounds/status only when the text explicitly says the injury or status is healed, cured, recovered, restored, regenerated, magically healed, knitted closed, gone, or no longer impairing.',
@@ -5249,8 +5312,8 @@ function normalizeInjuryEffectTargetRole(value) {
 }
 
 function normalizeInjuryEffectType(value) {
-    const text = cleanScalar(value).toLowerCase().replace(/[\s-]+/g, '_');
-    return ['none', 'physical_injury', 'burn', 'poison', 'paralysis', 'disease', 'blindness', 'stun', 'fear', 'restraint', 'curse', 'electrical', 'exhaustion', 'mental_status', 'other_status'].includes(text)
+    const text = cleanScalar(normalizeSemanticInjuryEffectType(value)).toLowerCase().replace(/[\s-]+/g, '_');
+    return INJURY_EFFECT_TYPES.includes(text)
         ? text
         : 'none';
 }

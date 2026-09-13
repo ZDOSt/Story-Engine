@@ -18462,7 +18462,7 @@ const tests = [
         leaves: 227,
         objects: 44,
         arrays: 44,
-        descriptions: 100,
+        descriptions: 101,
         incompleteRequired: 0,
       });
       assert.equal(
@@ -19363,6 +19363,56 @@ const tests = [
       const serializedLedger = JSON.stringify(ledger);
       const framedLedger = `BEGIN_SEMANTIC_PREFLIGHT\n${serializedLedger}\nEND_SEMANTIC_PREFLIGHT`;
 
+      const injurySchema = buildSemanticNativeSchema().value.properties.injuryEffectEngine.properties.effects.items;
+      const injuryAliasLedger = structuredClone(ledger);
+      injuryAliasLedger.injuryEffectEngine.effects = ['blunt', 'bruising', 'laceration'].map(effectType => ({
+        ...buildSchemaFixture(injurySchema),
+        effectType,
+      }));
+      const normalizedInjuryAliasLedger = normalizeSemanticToolArgumentTypes(injuryAliasLedger);
+      assert.deepEqual(
+        normalizedInjuryAliasLedger.injuryEffectEngine.effects.map(effect => effect.effectType),
+        ['physical_injury', 'physical_injury', 'physical_injury'],
+        'Direct physical-injury labels must normalize to the canonical effectType before validation.',
+      );
+      assert.equal(validateSemanticToolArguments(normalizedInjuryAliasLedger), normalizedInjuryAliasLedger);
+      const serializedInjuryAliasLedger = JSON.stringify(injuryAliasLedger);
+      const framedInjuryAliasLedger = `BEGIN_SEMANTIC_PREFLIGHT\n${serializedInjuryAliasLedger}\nEND_SEMANTIC_PREFLIGHT`;
+      assert.deepEqual(
+        extractSemanticToolLedger({
+          choices: [{ message: { tool_calls: [{
+            type: 'function',
+            function: { name: 'submit_semantic_preflight', arguments: serializedInjuryAliasLedger },
+          }] } }],
+        }),
+        normalizedInjuryAliasLedger,
+        'Tool transport must share physical-injury alias normalization.',
+      );
+      assert.deepEqual(
+        extractSemanticNativeLedger({ choices: [{ message: { content: serializedInjuryAliasLedger } }] }),
+        normalizedInjuryAliasLedger,
+        'Native JSON transport must share physical-injury alias normalization.',
+      );
+      assert.deepEqual(
+        extractSemanticTextLedger({ choices: [{ message: { content: framedInjuryAliasLedger } }] }),
+        normalizedInjuryAliasLedger,
+        'Text-ledger transport must share physical-injury alias normalization.',
+      );
+      const ambiguousInjuryLedger = structuredClone(ledger);
+      ambiguousInjuryLedger.injuryEffectEngine.effects = [{
+        ...buildSchemaFixture(injurySchema),
+        effectType: 'pain',
+      }];
+      const unchangedAmbiguousInjury = normalizeSemanticToolArgumentTypes(ambiguousInjuryLedger);
+      assert.equal(unchangedAmbiguousInjury.injuryEffectEngine.effects[0].effectType, 'pain');
+      assert.throws(
+        () => validateSemanticToolArguments(unchangedAmbiguousInjury),
+        /injuryEffectEngine\.effects\[0\]\.effectType must be one of:/,
+        'Ambiguous symptoms must remain a validation failure rather than being guessed as injuries.',
+      );
+      assert.match(injurySchema.properties.effectType.description, /Closed canonical vocabulary/);
+      assert.match(injurySchema.properties.effectType.description, /blunt force/);
+
       assert.deepEqual(
         extractSemanticTextLedger({ choices: [{ message: { content: framedLedger } }] }),
         ledger,
@@ -19421,6 +19471,7 @@ const tests = [
       assert.match(prompt.at(-1).content, /Return exactly one complete semantic preflight JSON object/);
       assert.match(prompt.at(-1).content, /JSON OUTPUT SHAPE/);
       assert.match(prompt.at(-1).content, /"resolutionEngine"/);
+      assert.match(prompt.at(-1).content, /effectType is a closed canonical enum/);
       assert.doesNotMatch(prompt.at(-1).content, /legacy contract/);
       assert.doesNotMatch(prompt.at(-1).content, /Call the function tool/);
 
