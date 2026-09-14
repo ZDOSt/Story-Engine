@@ -276,13 +276,17 @@ function formatSemanticTransportAudit(ledger = {}) {
         ];
     }
 
-    const transport = extraction.transport === 'text_ledger'
+    const transport = extraction.transport === 'native_json'
+        ? 'Native JSON Schema'
+        : extraction.transport === 'text_ledger'
             ? 'Validated Text Ledger'
             : extraction.transport === 'tool_call'
                 ? 'Tool Call'
                 : valueOrNone(extraction.transport);
-    const textLedgerAttempted = extraction.textLedgerAttempted === true;
-    const acceptedPath = extraction.transport === 'text_ledger'
+    const nativeAttempted = extraction.nativeSchemaAttempted === true;
+    const acceptedPath = nativeAttempted
+        ? 'Native SillyTavern JSON Schema'
+        : extraction.transport === 'text_ledger'
             ? 'Validated Text Ledger'
             : extraction.transport === 'tool_call'
                 ? 'Tool Call'
@@ -290,7 +294,7 @@ function formatSemanticTransportAudit(ledger = {}) {
 
     return [
         `- selected mode: ${transport}`,
-        `- text ledger attempted: ${textLedgerAttempted ? 'YES' : 'NO'}`,
+        `- native schema attempted: ${nativeAttempted ? 'YES' : 'NO'}`,
         `- accepted path: ${acceptedPath}`,
         '- fallback used: NO',
         `- local validation: ${extraction.strict === true ? 'complete and strict' : 'complete'}`,
