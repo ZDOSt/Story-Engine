@@ -2230,10 +2230,9 @@ function renderSettingsPanel() {
                                 <label for="structured_preflight_semantic_output_mode">Semantic preflight output</label>
                                 <select id="structured_preflight_semantic_output_mode" class="text_pole flex1">
                                     <option value="${SEMANTIC_OUTPUT_MODES.TOOL_CALL}">Tool Call</option>
-                                    <option value="${SEMANTIC_OUTPUT_MODES.NATIVE_JSON}">Native JSON Schema</option>
                                     <option value="${SEMANTIC_OUTPUT_MODES.TEXT_LEDGER}">Validated Text Ledger</option>
                                 </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Native JSON Schema uses SillyTavern structured output. Validated Text Ledger uses ordinary text generation, requires one exact JSON ledger frame, retries one returned-format failure, and applies the same complete-ledger, grounding, and consistency validation before narration.', 'About semantic preflight output')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Validated Text Ledger uses ordinary text generation, requires one exact JSON ledger frame, retries one returned-format failure, and applies the same complete-ledger, grounding, and consistency validation before narration.', 'About semantic preflight output')}
                             </div>
                             <div id="structured_preflight_semantic_strict_schema_row" class="spe-settings-toggle-row" hidden>
                                 <label for="structured_preflight_semantic_strict_schema">Strict Tool Schema</label>
@@ -2241,7 +2240,7 @@ function renderSettingsPanel() {
                                     <option value="false">Provider default</option>
                                     <option value="true">Enforce strict schema</option>
                                 </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-strict-schema', 'For providers without a hardcoded strict policy, enforce the complete closed JSON schema and function.strict on semantic Tool Call requests. Native JSON Schema is always strict and does not use this setting.', 'About Strict Tool Schema')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-strict-schema', 'For providers without a hardcoded strict policy, enforce the complete closed JSON schema and function.strict on semantic Tool Call requests.', 'About Strict Tool Schema')}
                             </div>
                             <div class="spe-settings-row">
                                 <label for="structured_preflight_semantic_profile">Story Engine profile</label>

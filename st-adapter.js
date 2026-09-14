@@ -666,17 +666,6 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     return await response.json();
 }
 
-export async function sendDefaultChatCompletionJsonSchemaRequest(messages, responseLength, jsonSchema, options = {}) {
-    if (!jsonSchema || typeof jsonSchema !== 'object' || Array.isArray(jsonSchema)) {
-        throw adapterTransportError('Semantic native JSON Schema request is missing a valid schema envelope.', { stage: 'build' });
-    }
-    return await sendDefaultChatCompletionToolRequest(messages, responseLength, {
-        ...options,
-        jsonSchema,
-        clearStructuredOutput: true,
-    });
-}
-
 export async function sendDefaultChatCompletionTextRequest(messages, responseLength, options = {}) {
     return await sendDefaultChatCompletionToolRequest(messages, responseLength, {
         ...options,

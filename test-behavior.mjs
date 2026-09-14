@@ -9,7 +9,7 @@ import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, f
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticNativeSchemaRequestPayloadPolicies, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticNativeSchema, buildSemanticNativeSchemaPrompt, buildSemanticPreflightTool, buildSemanticTextLedgerPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticNativeLedger, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticTextLedgerPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -638,24 +638,8 @@ const tests = [
   {
     name: '00a semantic transport is visible in the mechanics handoff',
     run() {
-      const nativeAudit = auditPrompt(semanticTransportAuditReport({
-        transport: 'native_json',
-        nativeSchemaAttempted: true,
-        strict: true,
-      }));
-      assert.match(nativeAudit, /==SEMANTIC_TRANSPORT==[\s\S]*selected mode: Native JSON Schema/);
-      assert.match(nativeAudit, /accepted path: Native SillyTavern JSON Schema/);
-      assert.match(nativeAudit, /fallback used: NO/);
-      assert.match(nativeAudit, /local validation: complete and strict/);
-      assert.doesNotMatch(prompt(semanticTransportAuditReport({
-        transport: 'native_json',
-        nativeSchemaAttempted: true,
-        strict: true,
-      })), /SEMANTIC_TRANSPORT|Native SillyTavern JSON Schema/);
-
       const textLedgerAudit = auditPrompt(semanticTransportAuditReport({
         transport: 'text_ledger',
-        nativeSchemaAttempted: false,
         textLedgerAttempted: true,
         strict: true,
       }));
@@ -665,16 +649,14 @@ const tests = [
 
       const toolAudit = auditPrompt(semanticTransportAuditReport({
         transport: 'tool_call',
-        nativeSchemaAttempted: false,
         strict: true,
       }));
       assert.match(toolAudit, /selected mode: Tool Call/);
       assert.match(toolAudit, /accepted path: Tool Call/);
-      assert.match(toolAudit, /native schema attempted: NO/);
+      assert.match(toolAudit, /text ledger attempted: NO/);
 
       const unknownAudit = auditPrompt(semanticTransportAuditReport({
         transport: 'legacy_mode',
-        nativeSchemaAttempted: false,
         strict: true,
       }));
       assert.match(unknownAudit, /accepted path: Unavailable \(unrecognized transport metadata\)/);
@@ -18640,11 +18622,6 @@ const tests = [
         canonicalRepresentation,
         'Tool responses with lossless shorthand representations must use the shared canonical form.',
       );
-      assert.deepEqual(
-        extractSemanticNativeLedger({ choices: [{ message: { content: JSON.stringify(representationVariant) } }] }),
-        canonicalRepresentation,
-        'Native JSON responses with lossless shorthand representations must use the shared canonical form.',
-      );
       const relationshipMissingNpcVariant = structuredClone(structuredLedger);
       relationshipMissingNpcVariant.resolutionEngine.identifyTargets.ActionTargets = ['Phoebe'];
       relationshipMissingNpcVariant.relationshipEngine = [buildSchemaFixture(
@@ -18663,11 +18640,6 @@ const tests = [
         }),
         repairedRelationshipMissingNpc,
         'Tool responses with one unambiguous missing relationship NPC must be repaired before validation.',
-      );
-      assert.deepEqual(
-        extractSemanticNativeLedger({ choices: [{ message: { content: JSON.stringify(relationshipMissingNpcVariant) } }] }),
-        repairedRelationshipMissingNpc,
-        'Native JSON responses with one unambiguous missing relationship NPC must be repaired before validation.',
       );
       const missingIdentifyTargetsVariant = structuredClone(structuredLedger);
       delete missingIdentifyTargetsVariant.resolutionEngine.identifyTargets;
@@ -18699,11 +18671,8 @@ const tests = [
         repairedMissingIdentifyTargets,
         'Tool responses with one unambiguous missing identifyTargets object must be repaired before validation.',
       );
-      assert.deepEqual(
-        extractSemanticNativeLedger({ choices: [{ message: { content: JSON.stringify(missingIdentifyTargetsVariant) } }] }),
-        repairedMissingIdentifyTargets,
-        'Native JSON responses with one unambiguous missing identifyTargets object must be repaired before validation.',
-      );
+
+
       const incompleteIdentifyTargetSource = structuredClone(missingIdentifyTargetsVariant);
       delete incompleteIdentifyTargetSource.resolutionEngine.restraintControl.evidence;
       const unchangedIncompleteIdentifyTargetSource = normalizeSemanticToolArgumentTypes(incompleteIdentifyTargetSource);
@@ -19189,164 +19158,6 @@ const tests = [
     },
   },
   {
-    name: '48a.0 native JSON Schema transport reuses the complete semantic schema and extracts structured responses',
-    run() {
-      const turnBinding = { turnId: 'native_schema_test_turn' };
-      const toolSchema = buildSemanticPreflightTool('deepseek', {}, turnBinding).function.parameters;
-      const nativeSchema = buildSemanticNativeSchema(turnBinding);
-      assert.equal(nativeSchema.name, 'submit_semantic_preflight');
-      assert.equal(nativeSchema.strict, true);
-      assert.equal(nativeSchema.description.length > 0, true);
-      assert.deepEqual(nativeSchema.value, toolSchema, 'Native schema value must be the same schema supplied to Tool Call.');
-
-      const buildSchemaFixture = schema => {
-        if (schema.type === 'object') {
-          return Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, buildSchemaFixture(value)]));
-        }
-        if (schema.type === 'array') return [];
-        if (schema.type === 'boolean') return false;
-        if (schema.type === 'integer') return schema.minimum ?? 0;
-        if (Array.isArray(schema.enum)) return schema.enum[0];
-        return '(none)';
-      };
-      const ledger = buildSchemaFixture(nativeSchema.value);
-      const serializedLedger = JSON.stringify(ledger);
-
-      assert.deepEqual(
-        extractSemanticNativeLedger({ choices: [{ message: { content: serializedLedger } }] }, {}, turnBinding),
-        ledger,
-      );
-      assert.deepEqual(
-        extractSemanticNativeLedger({ candidates: [{ content: { parts: [{ text: serializedLedger }] } }] }, {}, turnBinding),
-        ledger,
-      );
-      const splitPoint = Math.floor(serializedLedger.length / 2);
-      assert.deepEqual(
-        extractSemanticNativeLedger({ candidates: [{ content: { parts: [
-          { text: serializedLedger.slice(0, splitPoint) },
-          { text: serializedLedger.slice(splitPoint) },
-        ] } }] }, {}, turnBinding),
-        ledger,
-        'Native text split across multiple response parts must be reassembled before parsing.',
-      );
-      assert.deepEqual(
-        extractSemanticNativeLedger({ candidates: [{ content: { parts: [
-          { thought: true, text: 'Internal reasoning must not be treated as ledger content.' },
-          { text: serializedLedger.slice(0, splitPoint) },
-          { text: serializedLedger.slice(splitPoint) },
-        ] } }] }, {}, turnBinding),
-        ledger,
-        'Gemini thought parts must be excluded from native JSON assembly.',
-      );
-      assert.deepEqual(
-        extractSemanticNativeLedger({ choices: [{ message: { parsed: ledger } }] }, {}, turnBinding),
-        ledger,
-      );
-      assert.deepEqual(
-        extractSemanticNativeLedger({
-          choices: [{
-            message: {
-              tool_calls: [{
-                type: 'function',
-                function: { name: 'submit_semantic_preflight', arguments: serializedLedger },
-              }],
-            },
-          }],
-        }, {}, turnBinding),
-        ledger,
-        'Native schema responses translated to a provider tool call must remain extractable.',
-      );
-      assert.throws(
-        () => extractSemanticNativeLedger({ choices: [{ message: { content: serializedLedger.replace(',', '') } }] }),
-        /did not contain a complete structured ledger/,
-        'Malformed native JSON must be rejected before narration.',
-      );
-      assert.throws(
-        () => extractSemanticNativeLedger({
-          choices: [{
-            message: {
-              tool_calls: [{
-                type: 'function',
-                function: { name: 'unrelated_tool', arguments: serializedLedger },
-              }],
-            },
-          }],
-        }),
-        /did not contain a complete structured ledger/,
-        'An unrelated tool call must not be accepted as native semantic output.',
-      );
-      const conflictingLedger = structuredClone(ledger);
-      conflictingLedger.chaosSemantic.sceneSummary = 'A conflicting native ledger.';
-      assert.throws(
-        () => extractSemanticNativeLedger({
-          choices: [
-            { message: { content: serializedLedger } },
-            { message: { content: JSON.stringify(conflictingLedger) } },
-          ],
-        }),
-        /multiple conflicting structured ledgers/,
-        'Conflicting native structured results must fail closed instead of accepting the first candidate.',
-      );
-
-      const prompt = buildSemanticNativeSchemaPrompt([
-        { role: 'system', content: 'AUTHORITATIVE ENGINE REFERENCE' },
-        { role: 'user', content: 'MANDATORY OUTPUT CONTRACT:\nlegacy contract' },
-      ]);
-      assert.match(prompt.at(-1).content, /SillyTavern native JSON Schema structured output/);
-      assert.doesNotMatch(prompt.at(-1).content, /BEGIN_SEMANTIC_PREFLIGHT_JSON|END_SEMANTIC_PREFLIGHT_JSON/);
-      assert.doesNotMatch(prompt.at(-1).content, /Call the function tool/);
-
-      const nativePayload = {
-        chat_completion_source: 'custom',
-        json_schema: nativeSchema,
-        tools: [{ type: 'function' }],
-        tool_choice: 'auto',
-        parallel_tool_calls: true,
-        response_format: { type: 'json_object' },
-        responseMimeType: 'application/json',
-        responseSchema: { type: 'object' },
-        custom_include_body: yaml.stringify({
-          provider_option: 'retained',
-          tools: [{ type: 'function' }],
-          response_format: { type: 'json_object' },
-          json_schema: { type: 'object' },
-          responseMimeType: 'application/json',
-          responseSchema: { type: 'object' },
-        }),
-      };
-      applySemanticNativeSchemaRequestPayloadPolicies(nativePayload);
-      assert.deepEqual(nativePayload.json_schema, nativeSchema);
-      for (const field of ['tools', 'tool_choice', 'parallel_tool_calls', 'response_format', 'responseMimeType', 'responseSchema']) {
-        assert.equal(field in nativePayload, false, `${field} must not survive a native schema request.`);
-      }
-      assert.deepEqual(yaml.parse(nativePayload.custom_include_body), { provider_option: 'retained' });
-
-      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
-      const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
-      assert.match(semanticSource, /generateSemanticNativeSchemaResponse/);
-      assert.match(semanticSource, /generateSemanticNativeSchemaResponseWithProfile/);
-      assert.doesNotMatch(semanticSource, /SE-NATIVE-FALLBACK|nativeSchemaFallback/);
-      assert.match(adapterSource, /sendDefaultChatCompletionJsonSchemaRequest/);
-      assert.match(adapterSource, /createGenerationParameters\(chatCompletionSettings, model, 'quiet', messages, \{ jsonSchema \}\)/);
-    },
-  },
-  {
-    name: '48a.1 native JSON Schema transport fails closed without text fallback',
-    run() {
-      assert.equal(normalizeSemanticOutputMode(undefined), SEMANTIC_OUTPUT_MODES.TOOL_CALL);
-      assert.equal(normalizeSemanticOutputMode('unexpected'), SEMANTIC_OUTPUT_MODES.TOOL_CALL);
-      const semanticSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
-      const adapterSource = fs.readFileSync(new URL('st-adapter.js', import.meta.url), 'utf8');
-      assert.doesNotMatch(semanticSource, /SE-NATIVE-FALLBACK|nativeSchemaFallback/);
-      assert.match(semanticSource, /Semantic native-schema JSON pass returned no valid complete ledger/);
-      assert.match(semanticSource, /applySemanticNativeSchemaRequestPayloadPolicies/);
-      assert.match(adapterSource, /sendDefaultChatCompletionJsonSchemaRequest/);
-      assert.match(adapterSource, /sendDefaultChatCompletionTextRequest/);
-      assert.equal(normalizeSemanticOutputMode('text_only'), SEMANTIC_OUTPUT_MODES.TEXT_LEDGER);
-      assert.equal(normalizeSemanticOutputMode(SEMANTIC_OUTPUT_MODES.NATIVE_JSON), SEMANTIC_OUTPUT_MODES.NATIVE_JSON);
-    },
-  },
-  {
     name: '48a.2 validated text ledger requires one complete framed JSON ledger',
     run() {
       const buildSchemaFixture = schema => {
@@ -19359,11 +19170,11 @@ const tests = [
         if (Array.isArray(schema.enum)) return schema.enum[0];
         return '(none)';
       };
-      const ledger = buildSchemaFixture(buildSemanticNativeSchema().value);
+      const ledger = buildSchemaFixture(buildSemanticPreflightTool('deepseek').function.parameters);
       const serializedLedger = JSON.stringify(ledger);
       const framedLedger = `BEGIN_SEMANTIC_PREFLIGHT\n${serializedLedger}\nEND_SEMANTIC_PREFLIGHT`;
 
-      const injurySchema = buildSemanticNativeSchema().value.properties.injuryEffectEngine.properties.effects.items;
+      const injurySchema = buildSemanticPreflightTool('deepseek').function.parameters.properties.injuryEffectEngine.properties.effects.items;
       const injuryAliasLedger = structuredClone(ledger);
       injuryAliasLedger.injuryEffectEngine.effects = ['blunt', 'bruising', 'laceration'].map(effectType => ({
         ...buildSchemaFixture(injurySchema),
@@ -19387,11 +19198,6 @@ const tests = [
         }),
         normalizedInjuryAliasLedger,
         'Tool transport must share physical-injury alias normalization.',
-      );
-      assert.deepEqual(
-        extractSemanticNativeLedger({ choices: [{ message: { content: serializedInjuryAliasLedger } }] }),
-        normalizedInjuryAliasLedger,
-        'Native JSON transport must share physical-injury alias normalization.',
       );
       assert.deepEqual(
         extractSemanticTextLedger({ choices: [{ message: { content: framedInjuryAliasLedger } }] }),
@@ -20547,7 +20353,6 @@ const tests = [
       assert.match(renderSource, /Use private Story Engine connection profile/);
       assert.match(renderSource, /Semantic preflight output/);
       assert.match(renderSource, /Tool Call/);
-      assert.match(renderSource, /Native JSON Schema/);
       assert.match(renderSource, /Story Engine profile/);
       assert.match(renderSource, /Used for semantic preflight and post-narration Story Engine utility calls/);
       assert.match(renderSource, /Narration, adventure openings, character creation, and character progression use the current SillyTavern profile/);
