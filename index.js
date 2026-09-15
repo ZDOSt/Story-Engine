@@ -1120,7 +1120,6 @@ function getSemanticModelDiscoveryState(profileId) {
     const key = String(profileId || '').trim();
     return state.semanticModelOptionsByProfile.get(key) || {
         models: [],
-        status: '',
         source: '',
     };
 }
@@ -1498,9 +1497,7 @@ async function refreshSemanticModelOptions() {
     state.semanticModelDiscoveryRequest = requestToken;
     state.semanticModelDiscoveryProfileId = profileId;
     const button = document.getElementById('structured_preflight_refresh_semantic_settings');
-    const status = document.getElementById('structured_preflight_semantic_model_status');
     if (button) button.disabled = true;
-    if (status) status.textContent = 'Discovering models...';
 
     try {
         let models = await getLoadedChatCompletionModelsForProfile(profileId, profile.name);
@@ -1513,16 +1510,12 @@ async function refreshSemanticModelOptions() {
         state.semanticModelOptionsByProfile.set(profileId, {
             models,
             source,
-            status: models.length
-                ? `${models.length} model${models.length === 1 ? '' : 's'} available (${source}).`
-                : 'No models detected. Select None or retry Refresh.',
         });
     } catch (error) {
         if (state.semanticModelDiscoveryRequest !== requestToken) return;
         state.semanticModelOptionsByProfile.set(profileId, {
             models: [],
             source: '',
-            status: 'Model discovery failed. Select None or retry Refresh.',
         });
         notifyError(error instanceof Error ? error.message : String(error), 'Story Engine model discovery');
     } finally {
@@ -1744,7 +1737,6 @@ function refreshSettingsControls() {
     const semanticStrictSchemaSelect = document.getElementById('structured_preflight_semantic_strict_schema');
     const semanticModelRow = document.getElementById('structured_preflight_semantic_model_row');
     const semanticModelSelect = document.getElementById('structured_preflight_semantic_model');
-    const semanticModelStatus = document.getElementById('structured_preflight_semantic_model_status');
     const semanticPresetRow = document.getElementById('structured_preflight_semantic_preset_row');
     const semanticPresetSelect = document.getElementById('structured_preflight_semantic_preset');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
@@ -1884,9 +1876,6 @@ function refreshSettingsControls() {
         semanticModelSelect.value = (semanticModelState.models || []).includes(semanticModel) ? semanticModel : '';
         semanticModelSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
     }
-    if (semanticModelStatus) semanticModelStatus.textContent = semanticModelState.status
-        || (semanticProfile ? 'Select a model from the detected list before using the extension.' : '');
-    if (semanticModelStatus) semanticModelStatus.hidden = !engineEnabled || !enabled || !semanticProfile;
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
     const proseGuardOff = getProseGuardMode(settings) === PROSE_GUARD_MODES.OFF;
@@ -2516,9 +2505,8 @@ function renderSettingsPanel() {
                             <div id="structured_preflight_semantic_model_row" class="spe-settings-row" hidden>
                                 <label for="structured_preflight_semantic_model">Story Engine model</label>
                                 <select id="structured_preflight_semantic_model" class="text_pole flex1"></select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-model', 'Optional semantic-only model override. None leaves the selected profile model unchanged. The model list is discovered from SillyTavern or the selected profile provider without changing the saved profile.', 'About Story Engine model selection')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-model', 'Choose the semantic-only model from the detected list. None is not valid while a separate Story Engine profile is selected.', 'About Story Engine model selection')}
                             </div>
-                            <div id="structured_preflight_semantic_model_status" class="spe-settings-row spe-settings-information-row" aria-live="polite"></div>
                             <div id="structured_preflight_semantic_preset_row" class="spe-settings-row" hidden>
                                 <label for="structured_preflight_semantic_preset">Story Engine preset</label>
                                 <select id="structured_preflight_semantic_preset" class="text_pole flex1"></select>

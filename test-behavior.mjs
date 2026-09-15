@@ -17627,9 +17627,10 @@ const tests = [
       assert.doesNotMatch(source, /<input id="structured_preflight_semantic_model"/);
       assert.match(source, /defaultOption\.textContent = 'None'/);
       const modelSelectorStart = source.indexOf('id="structured_preflight_semantic_model_row"');
-      const modelSelectorEnd = source.indexOf('id="structured_preflight_semantic_model_status"', modelSelectorStart);
+      const modelSelectorEnd = source.indexOf('id="structured_preflight_semantic_preset_row"', modelSelectorStart);
       assert.ok(modelSelectorStart >= 0 && modelSelectorEnd > modelSelectorStart, 'Semantic model selector block is missing.');
       assert.doesNotMatch(source.slice(modelSelectorStart, modelSelectorEnd), /Use profile default/);
+      assert.doesNotMatch(source, /structured_preflight_semantic_model_status/);
       assert.match(source, /function getSemanticModelSelectionError\(settings = getSettings\(\)\)/);
       assert.match(source, /Choose a Story Engine model for semantic profile/);
       assert.match(source, /availableModels\.includes\(model\)/);
