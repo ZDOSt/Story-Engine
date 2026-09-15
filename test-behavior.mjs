@@ -18,7 +18,7 @@ import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
-import { generateRawData as generateRawDataAdapter } from './st-adapter.js';
+import { fetchConnectionProfileModels, generateRawData as generateRawDataAdapter, getLoadedChatCompletionModelsForProfile, sendConnectionManagerProfileRequest } from './st-adapter.js';
 import { buildSceneItemStateKey, normalizeSceneItemState, reconcilePostNarrationPossessionDelta } from './scene-item-state.js';
 import {
   applyBreakthroughStatChange,
@@ -17613,6 +17613,10 @@ const tests = [
       assert.match(source, /getConnectionProfileById\(profileId\) \|\| getConnectionProfileByName\(profileName\)/);
       assert.match(source, /const selection = getSemanticProfileSelection\(settings\)/);
       assert.match(source, /semanticConnectionProfileId/);
+      assert.match(source, /semanticModelByProfile/);
+      assert.match(source, /getSemanticModelOverride/);
+      assert.match(source, /structured_preflight_semantic_model/);
+      assert.match(source, /refreshSemanticModelOptions/);
       assert.match(source, /const selectedSemanticProfile = getConnectionProfileById\(storedSemanticProfileId\)/);
       assert.match(source, /const semanticStrictToolSchemaVisible = semanticStrictToolSchemaState\.visible && semanticToolMode/);
       assert.match(source, /semanticStrictSchemaRow\.hidden = !semanticStrictToolSchemaVisible/);
@@ -17835,7 +17839,7 @@ const tests = [
       );
       assert.match(getSettingsSource, /'semanticThinkingDisableFormat',\s*'semanticThinkingDisableFormats'/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| semanticProfileSettingsChanged \|\| semanticOutputSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| semanticProfileSettingsChanged \|\| semanticOutputSettingsChanged \|\| semanticModelSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
@@ -19083,7 +19087,7 @@ const tests = [
       assert.doesNotMatch(source, /semanticThinkingDisableFormats:\s*Object\.freeze\(\{\}\)/);
       assert.doesNotMatch(source, /structured_preflight_semantic_thinking_disable_format/);
       assert.doesNotMatch(source, /customSemanticProfileSelected|semanticThinkingDisableFormat:\s*settings\?\.semanticThinkingDisableFormat/);
-      assert.match(source, /if \(!selection\.selected\) \{\s*return await callback\(\{ semanticStrictToolSchema \}\);/);
+      assert.match(source, /if \(!selection\.selected\) \{\s*return await callback\(\{ semanticStrictToolSchema, semanticModel \}\);/);
       assert.match(semanticSource, /export async function sendStructuredToolRequest/);
       assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineBaselineThinkingDisabledPayload\(generateData\)/);
@@ -20496,6 +20500,7 @@ const tests = [
       assert.doesNotMatch(indexSource.slice(utilityStart, utilityEnd), /generateRawData|extractGeneratedText|fallback/i);
       assert.match(semanticSource, /sendDefaultChatCompletionToolRequest\(toolPrompt, responseLength,[\s\S]*?purpose: 'semantic preflight tool call',[\s\S]*?signal: options\.signal/);
       assert.match(semanticSource, /sendConnectionManagerProfileRequest\(\{[\s\S]*?profileId: options\.semanticProfileId,[\s\S]*?signal: options\.signal/);
+      assert.match(semanticSource, /modelOverride: options\.semanticModel/);
       assert.doesNotMatch(semanticSource, /generateSemanticRaw|generateRawData\(/);
       assert.match(adapterSource, /export async function generateRawData[\s\S]*stopGeneration\(context\)[\s\S]*signal\.addEventListener\('abort', abortHandler/);
       assert.match(adapterSource, /sendDefaultChatCompletionToolRequest[\s\S]*?const signal = options\?\.signal \|\| null;/);
@@ -22668,6 +22673,119 @@ const tests = [
         () => extractSemanticToolLedger({ choices: [{ message: { tool_calls: [call, structuredClone(call)] } }] }),
         /contained 2 calls to submit_semantic_preflight; exactly one is required/,
       );
+    },
+  },
+  {
+    name: 'semantic profile model override is isolated from the saved profile',
+    async run() {
+      const previousSillyTavern = globalThis.SillyTavern;
+      let capturedRequest = null;
+      const profile = {
+        id: 'profile-a',
+        name: 'Shared DeepSeek',
+        api: 'deepseek',
+        model: 'narrative-model',
+        'secret-id': 'deepseek-secret',
+      };
+      const otherProfile = {
+        id: 'profile-b',
+        name: 'Other profile',
+        api: 'deepseek',
+        model: 'other-model',
+      };
+      const context = {
+        extensionSettings: {
+          connectionManager: {
+            profiles: [profile, otherProfile],
+            selectedProfile: 'profile-a',
+          },
+        },
+        CONNECT_API_MAP: { deepseek: { source: 'deepseek' } },
+        ConnectionManagerRequestService: {
+          sendRequest: async (...args) => {
+            capturedRequest = args;
+            return { choices: [] };
+          },
+        },
+      };
+      globalThis.SillyTavern = { getContext: () => context };
+      try {
+        await sendConnectionManagerProfileRequest({
+          profileId: 'profile-a',
+          profileName: profile.name,
+          prompt: [{ role: 'user', content: 'semantic request' }],
+          responseLength: 100,
+          modelOverride: 'semantic-model',
+          extractData: false,
+        });
+        assert.equal(capturedRequest?.[4]?.model, 'semantic-model');
+        assert.equal(capturedRequest?.[0], 'profile-a');
+        assert.equal(profile.model, 'narrative-model');
+
+        await sendConnectionManagerProfileRequest({
+          profileId: 'profile-a',
+          profileName: profile.name,
+          prompt: [{ role: 'user', content: 'profile default request' }],
+          responseLength: 100,
+          extractData: false,
+        });
+        assert.equal(Object.hasOwn(capturedRequest?.[4] || {}, 'model'), false);
+        assert.equal(profile.model, 'narrative-model');
+
+        const cachedModelsForOtherProfile = await getLoadedChatCompletionModelsForProfile('profile-b', 'Other profile');
+        assert.deepEqual(cachedModelsForOtherProfile, []);
+      } finally {
+        if (previousSillyTavern === undefined) delete globalThis.SillyTavern;
+        else globalThis.SillyTavern = previousSillyTavern;
+      }
+    },
+  },
+  {
+    name: 'semantic model discovery uses the selected profile without applying it',
+    async run() {
+      const previousSillyTavern = globalThis.SillyTavern;
+      const previousFetch = globalThis.fetch;
+      let discoveryRequest = null;
+      const profile = {
+        id: 'profile-discovery',
+        name: 'Discoverable',
+        api: 'custom',
+        model: 'saved-model',
+        'api-url': 'https://provider.example/v1',
+        'secret-id': 'provider-secret',
+      };
+      const context = {
+        extensionSettings: {
+          connectionManager: {
+            profiles: [profile],
+            selectedProfile: 'profile-discovery',
+          },
+        },
+        CONNECT_API_MAP: { custom: { source: 'custom' } },
+        getRequestHeaders: () => ({ 'X-Test': 'story-engine' }),
+      };
+      globalThis.SillyTavern = { getContext: () => context };
+      globalThis.fetch = async (_url, init) => {
+        discoveryRequest = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ models: [{ name: 'model-b' }, { id: 'model-a' }, { id: 'model-a' }] }),
+        };
+      };
+      try {
+        const discovered = await fetchConnectionProfileModels(profile.id, profile.name);
+        assert.deepEqual(discovered.models, ['model-a', 'model-b']);
+        assert.equal(discoveryRequest.chat_completion_source, 'custom');
+        assert.equal(discoveryRequest.custom_url, profile['api-url']);
+        assert.equal(discoveryRequest.secret_id, profile['secret-id']);
+        assert.equal(profile.model, 'saved-model');
+      } finally {
+        if (previousSillyTavern === undefined) delete globalThis.SillyTavern;
+        else globalThis.SillyTavern = previousSillyTavern;
+        if (previousFetch === undefined) delete globalThis.fetch;
+        else globalThis.fetch = previousFetch;
+      }
     },
   },
 ];

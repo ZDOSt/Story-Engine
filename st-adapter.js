@@ -405,6 +405,112 @@ export async function getProxyPresets() {
     }
 }
 
+function normalizeModelIdentifiers(value) {
+    const entries = Array.isArray(value)
+        ? value
+        : Array.isArray(value?.data)
+            ? value.data
+            : Array.isArray(value?.models)
+                ? value.models
+            : [];
+    return [...new Set(entries
+        .map(model => typeof model === 'string' ? model : model?.id || model?.name)
+        .map(model => String(model || '').trim())
+        .filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Returns SillyTavern's cached model list only when it belongs to the selected
+ * profile. The cache is global to the active chat-completion source, so it is
+ * unsafe to reuse it for an arbitrary saved profile.
+ */
+export async function getLoadedChatCompletionModelsForProfile(profileId, profileName = '') {
+    const route = getChatCompletionProfileRoute(profileId, profileName);
+    const extensionSettings = getExtensionSettings();
+    const activeProfileId = String(extensionSettings.connectionManager?.selectedProfile || '').trim();
+    if (!activeProfileId || activeProfileId !== String(profileId || '').trim()) return [];
+
+    const activeSource = String(getChatCompletionSettings()?.chat_completion_source || '').trim().toLowerCase();
+    if (!activeSource || activeSource !== String(route.source || '').trim().toLowerCase()) return [];
+
+    try {
+        const module = await importOpenAiModule();
+        const activeModel = typeof module?.getChatCompletionModel === 'function'
+            ? await module.getChatCompletionModel(getChatCompletionSettings())
+            : '';
+        if (!route.model || String(activeModel || '').trim() !== String(route.model).trim()) return [];
+        return normalizeModelIdentifiers(module?.model_list);
+    } catch (error) {
+        warnOnce('loadedChatCompletionModels', 'SillyTavern cached chat-completion models are unavailable; model discovery will use the profile endpoint.', error);
+        return [];
+    }
+}
+
+/**
+ * Discovers models through SillyTavern's authenticated provider status route.
+ * This reads the profile and never applies or mutates it.
+ */
+export async function fetchConnectionProfileModels(profileId, profileName = '', options = {}) {
+    const profile = getConnectionProfile(profileId);
+    const route = getChatCompletionProfileRoute(profileId, profileName);
+    const signal = options?.signal || null;
+    throwIfRequestAborted(signal);
+    const proxies = await getProxyPresets();
+    throwIfRequestAborted(signal);
+    const proxyPreset = proxies.find(proxy => proxy.name === profile.proxy);
+    const requestPayload = {
+        chat_completion_source: route.source,
+        model: profile.model,
+        secret_id: profile['secret-id'],
+        custom_url: profile['api-url'],
+        custom_include_body: route.customIncludeBody,
+        custom_include_headers: route.customIncludeHeaders,
+        vertexai_region: profile['api-url'],
+        zai_endpoint: profile['api-url'],
+        siliconflow_endpoint: profile.siliconflow_endpoint || profile['siliconflow-endpoint'] || profile['api-url'],
+        minimax_endpoint: profile.minimax_endpoint || profile['minimax-endpoint'] || profile['api-url'],
+        workers_ai_account_id: profile.workers_ai_account_id || profile['workers-ai-account-id'],
+        reverse_proxy: proxyPreset?.url,
+        proxy_password: proxyPreset?.password,
+    };
+
+    let response;
+    try {
+        response = await fetch('/api/backends/chat-completions/status', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify(requestPayload),
+            signal,
+            cache: 'no-cache',
+        });
+    } catch (error) {
+        if (signal?.aborted) throw getRequestAbortError(signal);
+        throw adapterTransportError(`SillyTavern model discovery failed before the provider response for semantic profile "${profileName || profileId}".`, {
+            cause: error,
+            stage: 'model-discovery',
+        });
+    }
+
+    let responseData = null;
+    try {
+        responseData = await response.json();
+    } catch {
+        responseData = null;
+    }
+    if (!response.ok || responseData?.error) {
+        throw adapterTransportError(`SillyTavern model discovery failed for semantic profile "${profileName || profileId}"${response.status ? `: ${response.status}` : ''}.`, {
+            status: response.status,
+            stage: 'model-discovery',
+        });
+    }
+
+    return {
+        source: route.source,
+        models: normalizeModelIdentifiers(responseData),
+    };
+}
+
 export async function addEphemeralStoppingString(value) {
     try {
         const module = await importPowerUserModule();
@@ -567,19 +673,23 @@ export async function sendDefaultChatCompletionToolRequest(messages, responseLen
     const purpose = String(options?.purpose || 'semantic tool call').trim() || 'semantic tool call';
     const chatCompletionSettings = getChatCompletionSettings();
     const signal = options?.signal || null;
+    const modelOverride = String(options?.modelOverride || '').trim();
     const jsonSchema = options?.jsonSchema && typeof options.jsonSchema === 'object'
         ? options.jsonSchema
         : null;
     throwIfRequestAborted(signal);
     try {
         const model = await getChatCompletionModel(chatCompletionSettings);
-        const params = await createGenerationParameters(chatCompletionSettings, model, 'quiet', messages, { jsonSchema });
+        const generationModel = modelOverride || model;
+        const params = await createGenerationParameters(chatCompletionSettings, generationModel, 'quiet', messages, { jsonSchema });
         generateData = params.generate_data;
     } catch (error) {
         if (signal?.aborted) throw getRequestAbortError(signal);
         throw adapterTransportError(`Could not build SillyTavern chat-completion backend request for ${purpose}.`, { cause: error, stage: 'build' });
     }
     throwIfRequestAborted(signal);
+
+    if (modelOverride) generateData.model = modelOverride;
 
     const chatCompletionSource = generateData.chat_completion_source || chatCompletionSettings?.chat_completion_source;
     const route = {
@@ -732,6 +842,7 @@ export async function sendChatCompletionProfileRequest(request = {}) {
         overridePayload = {},
         extractData = true,
         preparePayload = null,
+        modelOverride = '',
         signal = null,
     } = request;
     if (!profileId) {
@@ -769,6 +880,7 @@ export async function sendChatCompletionProfileRequest(request = {}) {
         proxy_password: proxyPreset?.password,
         custom_prompt_post_processing: profile['prompt-post-processing'],
         ...overridePayload,
+        ...(String(modelOverride || '').trim() ? { model: String(modelOverride).trim() } : {}),
     };
     preparePayload?.(requestPayload);
 
@@ -790,6 +902,7 @@ export async function sendConnectionManagerProfileRequest(request = {}) {
         extractData = false,
         includePreset = true,
         preparePayload = null,
+        modelOverride = '',
         signal = null,
     } = request;
     if (!profileId) {
@@ -814,6 +927,7 @@ export async function sendConnectionManagerProfileRequest(request = {}) {
         messages,
         chat_completion_source: chatCompletionSource,
         ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
+        ...(String(modelOverride || '').trim() ? { model: String(modelOverride).trim() } : {}),
     };
     preparePayload?.(requestPayload);
     throwIfRequestAborted(signal);

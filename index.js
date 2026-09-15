@@ -15,6 +15,8 @@ import {
     getCurrentChatCompletionRoute,
     getConnectionProfileByName,
     getConnectionProfileNames,
+    fetchConnectionProfileModels,
+    getLoadedChatCompletionModelsForProfile,
     getPersonaText,
     getUserName,
     notifyError,
@@ -615,6 +617,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     useSeparateSemanticSettings: false,
     semanticConnectionProfile: '',
     semanticConnectionProfileId: '',
+    semanticModelByProfile: Object.freeze({}),
     semanticOutputMode: SEMANTIC_OUTPUT_MODES.TOOL_CALL,
     semanticStrictToolSchemaByRoute: Object.freeze({}),
     modelCallDelayEnabled: false,
@@ -754,6 +757,9 @@ const state = {
 
     lastNarratorHandoffKey: null,
 
+    semanticModelOptionsByProfile: new Map(),
+    semanticModelDiscoveryRequest: null,
+
     pendingRun: null,
 
     trackerUpdating: false,
@@ -815,6 +821,7 @@ function getSettings() {
     let semanticStrictSettingsChanged = false;
     let semanticProfileSettingsChanged = false;
     let semanticOutputSettingsChanged = false;
+    let semanticModelSettingsChanged = false;
     const hadRetiredSemanticSettings = [
         'disableSemanticThinking',
         'semanticReasoningEffort',
@@ -869,6 +876,23 @@ function getSettings() {
             semanticProfileSettingsChanged = true;
         }
     }
+    if (!settings.semanticModelByProfile
+        || typeof settings.semanticModelByProfile !== 'object'
+        || Array.isArray(settings.semanticModelByProfile)) {
+        settings.semanticModelByProfile = {};
+        semanticModelSettingsChanged = true;
+    } else {
+        const normalizedModels = {};
+        for (const [profileId, model] of Object.entries(settings.semanticModelByProfile)) {
+            const normalizedProfileId = String(profileId || '').trim();
+            const normalizedModel = String(model || '').trim();
+            if (normalizedProfileId && normalizedModel) normalizedModels[normalizedProfileId] = normalizedModel;
+        }
+        if (JSON.stringify(normalizedModels) !== JSON.stringify(settings.semanticModelByProfile)) {
+            settings.semanticModelByProfile = normalizedModels;
+            semanticModelSettingsChanged = true;
+        }
+    }
     if (!settings.semanticStrictToolSchemaByRoute
         || typeof settings.semanticStrictToolSchemaByRoute !== 'object'
         || Array.isArray(settings.semanticStrictToolSchemaByRoute)) {
@@ -888,7 +912,7 @@ function getSettings() {
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || semanticProfileSettingsChanged || semanticOutputSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
+    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || semanticProfileSettingsChanged || semanticOutputSettingsChanged || semanticModelSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
@@ -1046,6 +1070,22 @@ function getSemanticProfileSelection(settings = getSettings()) {
     return { selected: true, profile };
 }
 
+function getSemanticModelOverride(settings = getSettings()) {
+    const selection = getSemanticProfileSelection(settings);
+    const profileId = String(selection.profile?.id || '').trim();
+    if (!selection.selected || !profileId) return '';
+    return String(settings.semanticModelByProfile?.[profileId] || '').trim();
+}
+
+function getSemanticModelDiscoveryState(profileId) {
+    const key = String(profileId || '').trim();
+    return state.semanticModelOptionsByProfile.get(key) || {
+        models: [],
+        status: '',
+        source: '',
+    };
+}
+
 function getSemanticSettingsRoute(settings = getSettings()) {
     const selection = getSemanticProfileSelection(settings);
     if (selection.selected) {
@@ -1191,9 +1231,10 @@ async function withSemanticGenerationSettings(callback) {
     const settings = getSettings();
     const selection = getSemanticProfileSelection(settings);
     const semanticStrictToolSchema = getSemanticStrictToolSchemaState(settings).enabled;
+    const semanticModel = getSemanticModelOverride(settings);
 
     if (!selection.selected) {
-        return await callback({ semanticStrictToolSchema });
+        return await callback({ semanticStrictToolSchema, semanticModel });
     }
 
     const profile = selection.profile;
@@ -1205,6 +1246,7 @@ async function withSemanticGenerationSettings(callback) {
         semanticProfileId: profile.id,
         semanticProfileName: profile.name,
         semanticStrictToolSchema,
+        semanticModel,
     });
 }
 
@@ -1401,6 +1443,51 @@ function setSelectOptions(select, values, placeholder, selectedValue, missingLab
 }
 
 
+
+async function refreshSemanticModelOptions() {
+    const settings = getSettings();
+    const selection = getSemanticProfileSelection(settings);
+    const profile = selection.profile;
+    const profileId = String(profile?.id || '').trim();
+    if (!selection.selected || !profileId) return;
+
+    const requestToken = Symbol(profileId);
+    state.semanticModelDiscoveryRequest = requestToken;
+    const button = document.getElementById('structured_preflight_refresh_semantic_models');
+    const status = document.getElementById('structured_preflight_semantic_model_status');
+    if (button) button.disabled = true;
+    if (status) status.textContent = 'Discovering models...';
+
+    try {
+        let models = await getLoadedChatCompletionModelsForProfile(profileId, profile.name);
+        let source = models.length ? 'SillyTavern cached model list' : 'provider model endpoint';
+        if (!models.length) {
+            const discovered = await fetchConnectionProfileModels(profileId, profile.name);
+            models = discovered.models;
+        }
+        if (state.semanticModelDiscoveryRequest !== requestToken) return;
+        state.semanticModelOptionsByProfile.set(profileId, {
+            models,
+            source,
+            status: models.length
+                ? `${models.length} model${models.length === 1 ? '' : 's'} available (${source}).`
+                : 'No model list was returned. Enter a model ID manually.',
+        });
+    } catch (error) {
+        if (state.semanticModelDiscoveryRequest !== requestToken) return;
+        state.semanticModelOptionsByProfile.set(profileId, {
+            models: [],
+            source: '',
+            status: 'Model discovery failed. Enter a model ID manually.',
+        });
+        notifyError(error instanceof Error ? error.message : String(error), 'Story Engine model discovery');
+    } finally {
+        if (state.semanticModelDiscoveryRequest === requestToken) {
+            state.semanticModelDiscoveryRequest = null;
+            refreshSettingsControls();
+        }
+    }
+}
 
 function getPromptPlacementPosition(value) {
 
@@ -1603,6 +1690,12 @@ function refreshSettingsControls() {
     const semanticOutputModeSelect = document.getElementById('structured_preflight_semantic_output_mode');
     const semanticStrictSchemaRow = document.getElementById('structured_preflight_semantic_strict_schema_row');
     const semanticStrictSchemaSelect = document.getElementById('structured_preflight_semantic_strict_schema');
+    const semanticModelRow = document.getElementById('structured_preflight_semantic_model_row');
+    const semanticModelInput = document.getElementById('structured_preflight_semantic_model');
+    const semanticModelOptions = document.getElementById('structured_preflight_semantic_model_options');
+    const semanticModelStatus = document.getElementById('structured_preflight_semantic_model_status');
+    const semanticModelRefreshRow = document.getElementById('structured_preflight_semantic_model_refresh_row');
+    const refreshSemanticModelsButton = document.getElementById('structured_preflight_refresh_semantic_models');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardModeSelect = document.getElementById('structured_preflight_prose_guard_mode');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
@@ -1688,6 +1781,34 @@ function refreshSettingsControls() {
 
     );
 
+    const semanticProfileSelection = getSemanticProfileSelection(settings);
+    const semanticProfile = semanticProfileSelection.profile;
+    const semanticProfileId = String(semanticProfile?.id || '').trim();
+    const semanticModelState = getSemanticModelDiscoveryState(semanticProfileId);
+    const semanticModel = getSemanticModelOverride(settings);
+    if (semanticModelRow) semanticModelRow.hidden = !engineEnabled || !enabled || !semanticProfile;
+    if (semanticModelInput) {
+        semanticModelInput.value = semanticModel;
+        semanticModelInput.placeholder = semanticProfile?.model
+            ? `Profile default: ${semanticProfile.model}`
+            : 'Enter model ID';
+        semanticModelInput.disabled = !engineEnabled || !enabled || !semanticProfile;
+    }
+    if (semanticModelOptions) {
+        semanticModelOptions.innerHTML = '';
+        for (const model of semanticModelState.models || []) {
+            const option = document.createElement('option');
+            option.value = model;
+            semanticModelOptions.append(option);
+        }
+    }
+    if (semanticModelStatus) semanticModelStatus.textContent = semanticModelState.status || '';
+    if (semanticModelStatus) semanticModelStatus.hidden = !engineEnabled || !enabled || !semanticProfile;
+    if (semanticModelRefreshRow) semanticModelRefreshRow.hidden = !engineEnabled || !enabled || !semanticProfile;
+    if (refreshSemanticModelsButton) {
+        refreshSemanticModelsButton.disabled = !engineEnabled || !enabled || !semanticProfile || Boolean(state.semanticModelDiscoveryRequest);
+    }
+
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
     const proseGuardOff = getProseGuardMode(settings) === PROSE_GUARD_MODES.OFF;
@@ -1709,6 +1830,8 @@ function refreshSettingsControls() {
         trackerEnabledCheckbox,
         semanticOutputModeSelect,
         semanticStrictSchemaSelect,
+        semanticModelInput,
+        refreshSemanticModelsButton,
         proseGuardModeSelect,
         progressionEnabledCheckbox,
         enabledCheckbox,
@@ -1725,6 +1848,12 @@ function refreshSettingsControls() {
     });
     if (semanticStrictSchemaSelect) {
         semanticStrictSchemaSelect.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
+    }
+    if (semanticModelInput) {
+        semanticModelInput.disabled = !engineEnabled || !enabled || !semanticProfile;
+    }
+    if (refreshSemanticModelsButton) {
+        refreshSemanticModelsButton.disabled = !engineEnabled || !enabled || !semanticProfile || Boolean(state.semanticModelDiscoveryRequest);
     }
     if (narratorHandoffDisplayModeSelect) {
         narratorHandoffDisplayModeSelect.disabled = !engineEnabled || settings.narratorHandoffEnabled !== true;
@@ -2247,6 +2376,17 @@ function renderSettingsPanel() {
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-profile', 'Select the SillyTavern connection profile used for semantic preflight and post-narration Story Engine utility calls.', 'About Story Engine profile selection')}
                             </div>
+                            <div id="structured_preflight_semantic_model_row" class="spe-settings-row" hidden>
+                                <label for="structured_preflight_semantic_model">Story Engine model</label>
+                                <input id="structured_preflight_semantic_model" class="text_pole flex1" type="text" list="structured_preflight_semantic_model_options" autocomplete="off" spellcheck="false" placeholder="Use profile default">
+                                <datalist id="structured_preflight_semantic_model_options"></datalist>
+                                ${renderSettingsInfo('spe-settings-help-semantic-model', 'Optional semantic-only model override. Leave blank to use the selected profile model. The model list is discovered from SillyTavern or the selected profile provider without changing the saved profile.', 'About Story Engine model selection')}
+                            </div>
+                            <div id="structured_preflight_semantic_model_status" class="spe-settings-row spe-settings-information-row" aria-live="polite"></div>
+                            <div id="structured_preflight_semantic_model_refresh_row" class="spe-settings-row" hidden>
+                                <button id="structured_preflight_refresh_semantic_models" class="menu_button flex1"><i class="fa-solid fa-list" aria-hidden="true"></i> Refresh models</button>
+                                ${renderSettingsInfo('spe-settings-help-semantic-model-refresh', 'Refresh the model list for the selected semantic profile. A provider failure does not prevent manual model ID entry.', 'About refreshing Story Engine models')}
+                            </div>
                             <div class="spe-settings-row">
                                 <button id="structured_preflight_refresh_semantic_settings" class="menu_button flex1"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh profiles</button>
                                 ${renderSettingsInfo('spe-settings-help-semantic-refresh', 'Reload the available SillyTavern connection profiles without changing the current selection.', 'About refreshing Story Engine profiles')}
@@ -2534,6 +2674,21 @@ function renderSettingsPanel() {
         settings.semanticConnectionProfileId = getConnectionProfileByName(settings.semanticConnectionProfile)?.id || '';
         refreshSettingsControls();
         saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_semantic_model')?.addEventListener('change', event => {
+        const selection = getSemanticProfileSelection(settings);
+        const profileId = String(selection.profile?.id || '').trim();
+        if (!selection.selected || !profileId) return;
+        const model = String(event.target?.value || '').trim();
+        const overrides = { ...(settings.semanticModelByProfile || {}) };
+        if (model) overrides[profileId] = model;
+        else delete overrides[profileId];
+        settings.semanticModelByProfile = overrides;
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_refresh_semantic_models')?.addEventListener('click', () => {
+        void refreshSemanticModelOptions();
     });
     document.getElementById('structured_preflight_semantic_output_mode')?.addEventListener('change', event => {
         settings.semanticOutputMode = normalizeSemanticOutputMode(event.target?.value);
@@ -16794,6 +16949,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             semanticProfileId: settings?.semanticProfileId,
             semanticProfileName: settings?.semanticProfileName,
             semanticStrictToolSchema: settings?.semanticStrictToolSchema === true,
+            semanticModel: settings?.semanticModel || '',
             semanticOutputMode: normalizeSemanticOutputMode(getSettings().semanticOutputMode),
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',
