@@ -1098,6 +1098,17 @@ function getSemanticModelOverride(settings = getSettings()) {
     return String(settings.semanticModelByProfile?.[profileId] || '').trim();
 }
 
+function getSemanticModelSelectionError(settings = getSettings()) {
+    const selection = getSemanticProfileSelection(settings);
+    if (!selection.selected || !selection.profile) return '';
+    const profileId = String(selection.profile.id || '').trim();
+    const model = getSemanticModelOverride(settings);
+    const availableModels = getSemanticModelDiscoveryState(profileId).models || [];
+    if (!model) return `Choose a Story Engine model for semantic profile "${selection.profile.name || profileId}" before using the extension.`;
+    if (!availableModels.includes(model)) return `Choose a Story Engine model from the detected model list for semantic profile "${selection.profile.name || profileId}" before using the extension.`;
+    return '';
+}
+
 function getSemanticPresetOverride(settings = getSettings()) {
     const selection = getSemanticProfileSelection(settings);
     const profileId = String(selection.profile?.id || '').trim();
@@ -1268,6 +1279,8 @@ async function withSemanticGenerationSettings(callback) {
 
     const profile = selection.profile;
     if (!profile) throw new Error(`Semantic connection profile "${settings.semanticConnectionProfile || settings.semanticConnectionProfileId}" was not found.`);
+    const semanticModelSelectionError = getSemanticModelSelectionError(settings);
+    if (semanticModelSelectionError) throw new Error(semanticModelSelectionError);
 
 
     console.info(`[${EXTENSION_NAME}] using direct semantic connection profile request: ${profile.name}`);
@@ -1484,7 +1497,7 @@ async function refreshSemanticModelOptions() {
     const requestToken = Symbol(profileId);
     state.semanticModelDiscoveryRequest = requestToken;
     state.semanticModelDiscoveryProfileId = profileId;
-    const button = document.getElementById('structured_preflight_refresh_semantic_models');
+    const button = document.getElementById('structured_preflight_refresh_semantic_settings');
     const status = document.getElementById('structured_preflight_semantic_model_status');
     if (button) button.disabled = true;
     if (status) status.textContent = 'Discovering models...';
@@ -1502,14 +1515,14 @@ async function refreshSemanticModelOptions() {
             source,
             status: models.length
                 ? `${models.length} model${models.length === 1 ? '' : 's'} available (${source}).`
-                : 'No model list was returned. The profile default remains available.',
+                : 'No models detected. Select None or retry Refresh.',
         });
     } catch (error) {
         if (state.semanticModelDiscoveryRequest !== requestToken) return;
         state.semanticModelOptionsByProfile.set(profileId, {
             models: [],
             source: '',
-            status: 'Model discovery failed. The profile default remains available.',
+            status: 'Model discovery failed. Select None or retry Refresh.',
         });
         notifyError(error instanceof Error ? error.message : String(error), 'Story Engine model discovery');
     } finally {
@@ -1732,8 +1745,6 @@ function refreshSettingsControls() {
     const semanticModelRow = document.getElementById('structured_preflight_semantic_model_row');
     const semanticModelSelect = document.getElementById('structured_preflight_semantic_model');
     const semanticModelStatus = document.getElementById('structured_preflight_semantic_model_status');
-    const semanticModelRefreshRow = document.getElementById('structured_preflight_semantic_model_refresh_row');
-    const refreshSemanticModelsButton = document.getElementById('structured_preflight_refresh_semantic_models');
     const semanticPresetRow = document.getElementById('structured_preflight_semantic_preset_row');
     const semanticPresetSelect = document.getElementById('structured_preflight_semantic_preset');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
@@ -1753,11 +1764,16 @@ function refreshSettingsControls() {
 
     const nameStyleSelect = document.getElementById('structured_preflight_name_style');
     const refreshSemanticButton = document.getElementById('structured_preflight_refresh_semantic_settings');
+    const childSettingsSections = Array.from(document.querySelectorAll(`#${SETTINGS_CONTAINER_ID} .spe-settings-child-section`));
     const resetProseGuardBanButtons = Array.from(document.querySelectorAll('[data-structured-preflight-reset-prose-guard-bans]'));
     const resetWritingStyleButtons = Array.from(document.querySelectorAll('[data-structured-preflight-reset-writing-style]'));
 
 
     if (storyEngineCheckbox) storyEngineCheckbox.checked = engineEnabled;
+    for (const section of childSettingsSections) {
+        section.hidden = !engineEnabled;
+        if (section.hidden) section.open = false;
+    }
     if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (semanticOutputModeSelect) semanticOutputModeSelect.value = normalizeSemanticOutputMode(settings.semanticOutputMode);
     const semanticStrictToolSchemaState = getSemanticStrictToolSchemaState(settings);
@@ -1857,9 +1873,7 @@ function refreshSettingsControls() {
         semanticModelSelect.innerHTML = '';
         const defaultOption = document.createElement('option');
         defaultOption.value = '';
-        defaultOption.textContent = semanticProfile?.model
-            ? `Use profile default (${semanticProfile.model})`
-            : 'Use profile default';
+        defaultOption.textContent = 'None';
         semanticModelSelect.append(defaultOption);
         for (const model of semanticModelState.models || []) {
             const option = document.createElement('option');
@@ -1867,22 +1881,12 @@ function refreshSettingsControls() {
             option.textContent = model;
             semanticModelSelect.append(option);
         }
-        if (semanticModel && !(semanticModelState.models || []).includes(semanticModel)) {
-            const savedOption = document.createElement('option');
-            savedOption.value = semanticModel;
-            savedOption.textContent = `Saved selection (not detected): ${semanticModel}`;
-            semanticModelSelect.append(savedOption);
-        }
-        semanticModelSelect.value = semanticModel;
+        semanticModelSelect.value = (semanticModelState.models || []).includes(semanticModel) ? semanticModel : '';
         semanticModelSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
     }
-    if (semanticModelStatus) semanticModelStatus.textContent = semanticModelState.status || '';
+    if (semanticModelStatus) semanticModelStatus.textContent = semanticModelState.status
+        || (semanticProfile ? 'Select a model from the detected list before using the extension.' : '');
     if (semanticModelStatus) semanticModelStatus.hidden = !engineEnabled || !enabled || !semanticProfile;
-    if (semanticModelRefreshRow) semanticModelRefreshRow.hidden = !engineEnabled || !enabled || !semanticProfile;
-    if (refreshSemanticModelsButton) {
-        refreshSemanticModelsButton.disabled = !engineEnabled || !enabled || !semanticProfile || Boolean(state.semanticModelDiscoveryRequest);
-    }
-
     if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
     const proseGuardOff = getProseGuardMode(settings) === PROSE_GUARD_MODES.OFF;
@@ -1906,7 +1910,6 @@ function refreshSettingsControls() {
         semanticStrictSchemaSelect,
         semanticPresetSelect,
         semanticModelSelect,
-        refreshSemanticModelsButton,
         proseGuardModeSelect,
         progressionEnabledCheckbox,
         enabledCheckbox,
@@ -1930,8 +1933,8 @@ function refreshSettingsControls() {
     if (semanticPresetSelect) {
         semanticPresetSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
     }
-    if (refreshSemanticModelsButton) {
-        refreshSemanticModelsButton.disabled = !engineEnabled || !enabled || !semanticProfile || Boolean(state.semanticModelDiscoveryRequest);
+    if (refreshSemanticButton) {
+        refreshSemanticButton.disabled = !engineEnabled || Boolean(state.semanticModelDiscoveryRequest);
     }
     if (narratorHandoffDisplayModeSelect) {
         narratorHandoffDisplayModeSelect.disabled = !engineEnabled || settings.narratorHandoffEnabled !== true;
@@ -2022,11 +2025,15 @@ function ensureSettingsPanelStyles() {
         #${SETTINGS_CONTAINER_ID} .spe-settings-section {
             --spe-settings-accent: #73d0ff;
             display: block;
-            overflow: hidden;
+            position: relative;
             min-width: 0;
             border: 0;
             border-radius: 0;
             background: transparent;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section:has(.spe-settings-help:hover),
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section:has(.spe-settings-help:focus-within) {
+            z-index: 50;
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-section + .spe-settings-section {
             border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.16));
@@ -2054,6 +2061,20 @@ function ensureSettingsPanelStyles() {
             cursor: pointer;
             list-style: none;
             user-select: none;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch {
+            z-index: 1;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch .spe-settings-section-head {
+            grid-template-columns: 34px minmax(0, 1fr) auto;
+            cursor: default;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch .spe-settings-section-head::before {
+            display: none;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch > .spe-settings-body {
+            border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.12));
+            padding-top: 13px;
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-section-head::-webkit-details-marker {
             display: none;
@@ -2261,8 +2282,8 @@ function ensureSettingsPanelStyles() {
         #${SETTINGS_CONTAINER_ID} .spe-settings-help-button {
             display: grid;
             place-items: center;
-            width: 20px;
-            height: 20px;
+            width: 14px;
+            height: 14px;
             margin: 0;
             padding: 0;
             border: 1px solid color-mix(in srgb, var(--spe-settings-accent) 82%, transparent);
@@ -2270,7 +2291,7 @@ function ensureSettingsPanelStyles() {
             background: transparent;
             color: var(--spe-settings-accent);
             font: inherit;
-            font-size: 0.72rem;
+            font-size: 0.56rem;
             font-weight: 900;
             line-height: 1;
             cursor: help;
@@ -2284,20 +2305,20 @@ function ensureSettingsPanelStyles() {
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-tooltip {
             position: absolute;
-            z-index: 40;
+            z-index: 1000;
             top: calc(100% + 7px);
             right: 0;
-            width: max-content;
-            max-width: min(300px, calc(100vw - 40px));
-            padding: 8px 10px;
+            width: 160px;
+            max-width: min(160px, calc(100vw - 30px));
+            padding: 5px 7px;
             border: 1px solid color-mix(in srgb, var(--spe-settings-accent) 52%, var(--SmartThemeBorderColor, rgba(255,255,255,0.2)));
             border-radius: 5px;
             background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #000) 94%, #000 6%);
             color: var(--SmartThemeBodyColor, #eee);
             box-shadow: 0 10px 24px rgba(0,0,0,0.34);
-            font-size: 0.78rem;
+            font-size: 0.68rem;
             font-weight: 400;
-            line-height: 1.4;
+            line-height: 1.25;
             text-align: left;
             white-space: normal;
             overflow-wrap: anywhere;
@@ -2336,6 +2357,9 @@ function ensureSettingsPanelStyles() {
         #${SETTINGS_CONTAINER_ID} details[data-structured-preflight-prompt-drawer] > .spe-settings-body {
             margin-top: 9px;
             padding-left: 0;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-child-section[hidden] {
+            display: none !important;
         }
         @media (max-width: 720px) {
             #${SETTINGS_CONTAINER_ID} .spe-settings-section {
@@ -2379,7 +2403,7 @@ function collapsePromptOptionDrawers(container = document) {
 }
 
 function collapseSettingsSections(container = document) {
-    container.querySelectorAll('.spe-settings-section').forEach(details => {
+    container.querySelectorAll('details.spe-settings-section').forEach(details => {
         details.open = false;
     });
 }
@@ -2412,15 +2436,15 @@ function renderSettingsPanel() {
             </div>
             <div class="inline-drawer-content">
                 <div class="spe-settings-shell">
-                    <details class="spe-settings-section" data-spe-settings-step="master">
-                        <summary class="spe-settings-section-head">
+                    <div class="spe-settings-section spe-settings-master-switch" data-spe-settings-step="master">
+                        <div class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-power-off" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">Master switch</span>
                                 <h4 class="spe-settings-title">Master Switch</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-master', 'Enable or disable the entire extension without removing it.', 'About the Story Engine master switch')}
-                        </summary>
+                        </div>
                         <div class="spe-settings-body">
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">
@@ -2430,9 +2454,9 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-master-enabled', 'When disabled, Story Engine skips semantic preflight, mechanics, narrator handoff, Prose Guard, tracker updates, character progression, and prompt injection.', 'What enabling Story Engine controls')}
                             </div>
                         </div>
-                    </details>
+                    </div>
 
-                    <details class="spe-settings-section" data-spe-settings-step="setup">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="setup">
                         <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-user-gear" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
@@ -2451,7 +2475,7 @@ function renderSettingsPanel() {
                         </div>
                     </details>
 
-                    <details class="spe-settings-section" data-spe-settings-step="semantic">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="semantic">
                         <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-brain" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
@@ -2489,29 +2513,25 @@ function renderSettingsPanel() {
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-profile', 'Select the SillyTavern connection profile used for semantic preflight and post-narration Story Engine utility calls.', 'About Story Engine profile selection')}
                             </div>
+                            <div id="structured_preflight_semantic_model_row" class="spe-settings-row" hidden>
+                                <label for="structured_preflight_semantic_model">Story Engine model</label>
+                                <select id="structured_preflight_semantic_model" class="text_pole flex1"></select>
+                                ${renderSettingsInfo('spe-settings-help-semantic-model', 'Optional semantic-only model override. None leaves the selected profile model unchanged. The model list is discovered from SillyTavern or the selected profile provider without changing the saved profile.', 'About Story Engine model selection')}
+                            </div>
+                            <div id="structured_preflight_semantic_model_status" class="spe-settings-row spe-settings-information-row" aria-live="polite"></div>
                             <div id="structured_preflight_semantic_preset_row" class="spe-settings-row" hidden>
                                 <label for="structured_preflight_semantic_preset">Story Engine preset</label>
                                 <select id="structured_preflight_semantic_preset" class="text_pole flex1"></select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-preset', 'Optional semantic-only Chat Completion preset. Leave blank to use the preset saved on the selected connection profile. This does not change SillyTavern\'s active narration preset.', 'About Story Engine preset selection')}
                             </div>
-                            <div id="structured_preflight_semantic_model_row" class="spe-settings-row" hidden>
-                                <label for="structured_preflight_semantic_model">Story Engine model</label>
-                                <select id="structured_preflight_semantic_model" class="text_pole flex1"></select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-model', 'Optional semantic-only model override. Leave blank to use the selected profile model. The model list is discovered from SillyTavern or the selected profile provider without changing the saved profile.', 'About Story Engine model selection')}
-                            </div>
-                            <div id="structured_preflight_semantic_model_status" class="spe-settings-row spe-settings-information-row" aria-live="polite"></div>
-                            <div id="structured_preflight_semantic_model_refresh_row" class="spe-settings-row" hidden>
-                                <button id="structured_preflight_refresh_semantic_models" class="menu_button flex1"><i class="fa-solid fa-list" aria-hidden="true"></i> Refresh models</button>
-                                ${renderSettingsInfo('spe-settings-help-semantic-model-refresh', 'Refresh the model list detected for the selected semantic profile.', 'About refreshing Story Engine models')}
-                            </div>
                             <div class="spe-settings-row">
-                                <button id="structured_preflight_refresh_semantic_settings" class="menu_button flex1"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh profiles</button>
-                                ${renderSettingsInfo('spe-settings-help-semantic-refresh', 'Reload the available SillyTavern connection profiles without changing the current selection.', 'About refreshing Story Engine profiles')}
+                                <button id="structured_preflight_refresh_semantic_settings" class="menu_button flex1"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh</button>
+                                ${renderSettingsInfo('spe-settings-help-semantic-refresh', 'Reload the available connection profiles, models for the selected profile, and Chat Completion presets.', 'About refreshing Story Engine semantic sources')}
                             </div>
                         </div>
                     </details>
 
-                    <details class="spe-settings-section" data-spe-settings-step="call-delay">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="call-delay">
                         <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-clock" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
@@ -2536,7 +2556,7 @@ function renderSettingsPanel() {
                         </div>
                     </details>
 
-                    <details class="spe-settings-section" data-spe-settings-step="narrator-inputs">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="narrator-inputs">
                         <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-feather-pointed" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
@@ -2616,7 +2636,7 @@ function renderSettingsPanel() {
                         </div>
                     </details>
 
-                    <details class="spe-settings-section" data-spe-settings-step="prose-guard">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="prose-guard">
                         <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
@@ -2661,7 +2681,7 @@ function renderSettingsPanel() {
                         </div>
                     </details>
 
-                    <details class="spe-settings-section" data-spe-settings-step="tracker">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="tracker">
                         <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-table-columns" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
@@ -2681,7 +2701,7 @@ function renderSettingsPanel() {
                         </div>
                     </details>
 
-                    <details class="spe-settings-section" data-spe-settings-step="narration-handoff">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="narration-handoff">
                         <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-scroll" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
@@ -2709,7 +2729,7 @@ function renderSettingsPanel() {
                         </div>
                     </details>
 
-                    <details class="spe-settings-section" data-spe-settings-step="progression">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="progression">
                         <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
@@ -2825,9 +2845,6 @@ function renderSettingsPanel() {
         settings.semanticPresetByProfile = overrides;
         refreshSettingsControls();
         saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_refresh_semantic_models')?.addEventListener('click', () => {
-        void refreshSemanticModelOptions();
     });
     document.getElementById('structured_preflight_semantic_output_mode')?.addEventListener('change', event => {
         settings.semanticOutputMode = normalizeSemanticOutputMode(event.target?.value);
@@ -2975,7 +2992,7 @@ function renderSettingsPanel() {
     });
     document.getElementById('structured_preflight_refresh_semantic_settings')?.addEventListener('click', () => {
         refreshSettingsControls();
-        refreshSemanticModelOptionsIfNeeded();
+        void refreshSemanticModelOptions();
     });
     document.getElementById('structured_preflight_show_player_setup')?.addEventListener('click', () => {
         if (!isStoryEngineEnabled()) {
