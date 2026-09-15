@@ -15,6 +15,7 @@ import {
     getCurrentChatCompletionRoute,
     getConnectionProfileByName,
     getConnectionProfileNames,
+    getChatCompletionPresetNames,
     fetchConnectionProfileModels,
     getLoadedChatCompletionModelsForProfile,
     getPersonaText,
@@ -618,6 +619,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     semanticConnectionProfile: '',
     semanticConnectionProfileId: '',
     semanticModelByProfile: Object.freeze({}),
+    semanticPresetByProfile: Object.freeze({}),
     semanticOutputMode: SEMANTIC_OUTPUT_MODES.TOOL_CALL,
     semanticStrictToolSchemaByRoute: Object.freeze({}),
     modelCallDelayEnabled: false,
@@ -823,6 +825,7 @@ function getSettings() {
     let semanticProfileSettingsChanged = false;
     let semanticOutputSettingsChanged = false;
     let semanticModelSettingsChanged = false;
+    let semanticPresetSettingsChanged = false;
     const hadRetiredSemanticSettings = [
         'disableSemanticThinking',
         'semanticReasoningEffort',
@@ -894,6 +897,23 @@ function getSettings() {
             semanticModelSettingsChanged = true;
         }
     }
+    if (!settings.semanticPresetByProfile
+        || typeof settings.semanticPresetByProfile !== 'object'
+        || Array.isArray(settings.semanticPresetByProfile)) {
+        settings.semanticPresetByProfile = {};
+        semanticPresetSettingsChanged = true;
+    } else {
+        const normalizedPresets = {};
+        for (const [profileId, presetName] of Object.entries(settings.semanticPresetByProfile)) {
+            const normalizedProfileId = String(profileId || '').trim();
+            const normalizedPresetName = String(presetName || '').trim();
+            if (normalizedProfileId && normalizedPresetName) normalizedPresets[normalizedProfileId] = normalizedPresetName;
+        }
+        if (JSON.stringify(normalizedPresets) !== JSON.stringify(settings.semanticPresetByProfile)) {
+            settings.semanticPresetByProfile = normalizedPresets;
+            semanticPresetSettingsChanged = true;
+        }
+    }
     if (!settings.semanticStrictToolSchemaByRoute
         || typeof settings.semanticStrictToolSchemaByRoute !== 'object'
         || Array.isArray(settings.semanticStrictToolSchemaByRoute)) {
@@ -913,7 +933,7 @@ function getSettings() {
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
-    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || semanticProfileSettingsChanged || semanticOutputSettingsChanged || semanticModelSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
+    if (hadRetiredSemanticSettings || semanticStrictSettingsChanged || semanticProfileSettingsChanged || semanticOutputSettingsChanged || semanticModelSettingsChanged || semanticPresetSettingsChanged || trackerSettingsChanged || narratorHandoffSettingsChanged || proseGuardSettingsChanged || writingStyleSettingsChanged) {
         saveExtensionSettings();
     }
     return settings;
@@ -1078,6 +1098,13 @@ function getSemanticModelOverride(settings = getSettings()) {
     return String(settings.semanticModelByProfile?.[profileId] || '').trim();
 }
 
+function getSemanticPresetOverride(settings = getSettings()) {
+    const selection = getSemanticProfileSelection(settings);
+    const profileId = String(selection.profile?.id || '').trim();
+    if (!selection.selected || !profileId) return '';
+    return String(settings.semanticPresetByProfile?.[profileId] || '').trim();
+}
+
 function getSemanticModelDiscoveryState(profileId) {
     const key = String(profileId || '').trim();
     return state.semanticModelOptionsByProfile.get(key) || {
@@ -1233,9 +1260,10 @@ async function withSemanticGenerationSettings(callback) {
     const selection = getSemanticProfileSelection(settings);
     const semanticStrictToolSchema = getSemanticStrictToolSchemaState(settings).enabled;
     const semanticModel = getSemanticModelOverride(settings);
+    const semanticPreset = getSemanticPresetOverride(settings);
 
     if (!selection.selected) {
-        return await callback({ semanticStrictToolSchema, semanticModel });
+        return await callback({ semanticStrictToolSchema, semanticModel, semanticPreset });
     }
 
     const profile = selection.profile;
@@ -1248,6 +1276,7 @@ async function withSemanticGenerationSettings(callback) {
         semanticProfileName: profile.name,
         semanticStrictToolSchema,
         semanticModel,
+        semanticPreset,
     });
 }
 
@@ -1705,6 +1734,8 @@ function refreshSettingsControls() {
     const semanticModelStatus = document.getElementById('structured_preflight_semantic_model_status');
     const semanticModelRefreshRow = document.getElementById('structured_preflight_semantic_model_refresh_row');
     const refreshSemanticModelsButton = document.getElementById('structured_preflight_refresh_semantic_models');
+    const semanticPresetRow = document.getElementById('structured_preflight_semantic_preset_row');
+    const semanticPresetSelect = document.getElementById('structured_preflight_semantic_preset');
     const trackerEnabledCheckbox = document.getElementById('structured_preflight_post_tracker_enabled');
     const proseGuardModeSelect = document.getElementById('structured_preflight_prose_guard_mode');
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
@@ -1795,6 +1826,32 @@ function refreshSettingsControls() {
     const semanticProfileId = String(semanticProfile?.id || '').trim();
     const semanticModelState = getSemanticModelDiscoveryState(semanticProfileId);
     const semanticModel = getSemanticModelOverride(settings);
+    const semanticPreset = getSemanticPresetOverride(settings);
+    const semanticPresetNames = getChatCompletionPresetNames();
+    if (semanticPresetRow) semanticPresetRow.hidden = !engineEnabled || !enabled || !semanticProfile;
+    if (semanticPresetSelect) {
+        semanticPresetSelect.innerHTML = '';
+        const defaultPresetOption = document.createElement('option');
+        defaultPresetOption.value = '';
+        defaultPresetOption.textContent = semanticProfile?.preset
+            ? `Use profile preset (${semanticProfile.preset})`
+            : 'Use profile preset';
+        semanticPresetSelect.append(defaultPresetOption);
+        for (const presetName of semanticPresetNames) {
+            const option = document.createElement('option');
+            option.value = presetName;
+            option.textContent = presetName;
+            semanticPresetSelect.append(option);
+        }
+        if (semanticPreset && !semanticPresetNames.includes(semanticPreset)) {
+            const savedOption = document.createElement('option');
+            savedOption.value = semanticPreset;
+            savedOption.textContent = `Saved selection (not detected): ${semanticPreset}`;
+            semanticPresetSelect.append(savedOption);
+        }
+        semanticPresetSelect.value = semanticPreset;
+        semanticPresetSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
+    }
     if (semanticModelRow) semanticModelRow.hidden = !engineEnabled || !enabled || !semanticProfile;
     if (semanticModelSelect) {
         semanticModelSelect.innerHTML = '';
@@ -1847,6 +1904,7 @@ function refreshSettingsControls() {
         trackerEnabledCheckbox,
         semanticOutputModeSelect,
         semanticStrictSchemaSelect,
+        semanticPresetSelect,
         semanticModelSelect,
         refreshSemanticModelsButton,
         proseGuardModeSelect,
@@ -1868,6 +1926,9 @@ function refreshSettingsControls() {
     }
     if (semanticModelSelect) {
         semanticModelSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
+    }
+    if (semanticPresetSelect) {
+        semanticPresetSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
     }
     if (refreshSemanticModelsButton) {
         refreshSemanticModelsButton.disabled = !engineEnabled || !enabled || !semanticProfile || Boolean(state.semanticModelDiscoveryRequest);
@@ -2393,6 +2454,11 @@ function renderSettingsPanel() {
                                 <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-profile', 'Select the SillyTavern connection profile used for semantic preflight and post-narration Story Engine utility calls.', 'About Story Engine profile selection')}
                             </div>
+                            <div id="structured_preflight_semantic_preset_row" class="spe-settings-row" hidden>
+                                <label for="structured_preflight_semantic_preset">Story Engine preset</label>
+                                <select id="structured_preflight_semantic_preset" class="text_pole flex1"></select>
+                                ${renderSettingsInfo('spe-settings-help-semantic-preset', 'Optional semantic-only Chat Completion preset. Leave blank to use the preset saved on the selected connection profile. This does not change SillyTavern\'s active narration preset.', 'About Story Engine preset selection')}
+                            </div>
                             <div id="structured_preflight_semantic_model_row" class="spe-settings-row" hidden>
                                 <label for="structured_preflight_semantic_model">Story Engine model</label>
                                 <select id="structured_preflight_semantic_model" class="text_pole flex1"></select>
@@ -2702,6 +2768,18 @@ function renderSettingsPanel() {
         if (model) overrides[profileId] = model;
         else delete overrides[profileId];
         settings.semanticModelByProfile = overrides;
+        refreshSettingsControls();
+        saveExtensionSettings();
+    });
+    document.getElementById('structured_preflight_semantic_preset')?.addEventListener('change', event => {
+        const selection = getSemanticProfileSelection(settings);
+        const profileId = String(selection.profile?.id || '').trim();
+        if (!selection.selected || !profileId) return;
+        const presetName = String(event.target?.value || '').trim();
+        const overrides = { ...(settings.semanticPresetByProfile || {}) };
+        if (presetName) overrides[profileId] = presetName;
+        else delete overrides[profileId];
+        settings.semanticPresetByProfile = overrides;
         refreshSettingsControls();
         saveExtensionSettings();
     });
@@ -16972,6 +17050,7 @@ async function runSemanticPassWithPromptReadyBypass(context, assembledChat, type
             semanticProfileName: settings?.semanticProfileName,
             semanticStrictToolSchema: settings?.semanticStrictToolSchema === true,
             semanticModel: settings?.semanticModel || '',
+            semanticPreset: settings?.semanticPreset || '',
             semanticOutputMode: normalizeSemanticOutputMode(getSettings().semanticOutputMode),
             nameStyle: getSettings().nameStyle,
             userInputMode: pendingGeneration?.mode || 'normal',

@@ -674,6 +674,7 @@ async function generateSemanticToolCallWithProfile(prompt, responseLength, optio
             responseLength,
             overridePayload,
             modelOverride: options.semanticModel,
+            presetName: options.semanticPreset,
             extractData: false,
             preparePayload,
             signal: options.signal,
@@ -761,6 +762,7 @@ async function generateSemanticTextLedgerWithProfile(prompt, responseLength, opt
                     responseLength,
                     overridePayload,
                     modelOverride: options.semanticModel,
+                    presetName: options.semanticPreset,
                     extractData: false,
                     preparePayload,
                     signal: options.signal,
@@ -869,6 +871,7 @@ export async function sendStructuredToolRequest(prompt, responseLength, options 
                 ...(Number.isFinite(responseLength) && responseLength > 0 ? { max_tokens: responseLength } : {}),
             },
             extractData: false,
+            presetName: options.semanticPreset,
             preparePayload,
             signal: options.signal,
         });

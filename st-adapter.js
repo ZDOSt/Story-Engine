@@ -118,6 +118,19 @@ export function getConnectionProfileNames() {
         .sort((a, b) => a.localeCompare(b));
 }
 
+export function getChatCompletionPresetNames(context = getContext()) {
+    try {
+        const names = context?.getPresetManager?.('openai')?.getAllPresets?.();
+        return [...new Set((Array.isArray(names) ? names : [])
+            .map(name => String(name || '').trim())
+            .filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b));
+    } catch (error) {
+        warnOnce('chatCompletionPresets', 'SillyTavern Chat Completion presets are unavailable; the semantic preset selector will use the profile preset.', error);
+        return [];
+    }
+}
+
 export function getConnectionProfileByName(profileName) {
     const wanted = String(profileName || '').trim();
     if (!wanted) return null;
@@ -843,6 +856,7 @@ export async function sendChatCompletionProfileRequest(request = {}) {
         extractData = true,
         preparePayload = null,
         modelOverride = '',
+        presetName = '',
         signal = null,
     } = request;
     if (!profileId) {
@@ -855,6 +869,14 @@ export async function sendChatCompletionProfileRequest(request = {}) {
     const chatCompletionSource = route.source;
     if (!context?.ChatCompletionService?.processRequest || !chatCompletionSource) {
         throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support direct chat-completion requests.`, { stage: 'profile' });
+    }
+
+    const selectedPresetName = String(presetName || '').trim();
+    if (selectedPresetName) {
+        const preset = context?.getPresetManager?.('openai')?.getCompletionPresetByName?.(selectedPresetName);
+        if (!preset) {
+            throw adapterTransportError(`Chat Completion preset "${selectedPresetName}" was not found for semantic profile "${profileName || profileId}".`, { stage: 'preset' });
+        }
     }
 
     signal?.throwIfAborted?.();
@@ -876,6 +898,8 @@ export async function sendChatCompletionProfileRequest(request = {}) {
         vertexai_region: profile['api-url'],
         zai_endpoint: profile['api-url'],
         siliconflow_endpoint: profile['api-url'],
+        minimax_endpoint: profile.minimax_endpoint || profile['minimax-endpoint'] || profile['api-url'],
+        workers_ai_account_id: profile.workers_ai_account_id || profile['workers-ai-account-id'],
         reverse_proxy: proxyPreset?.url,
         proxy_password: proxyPreset?.password,
         custom_prompt_post_processing: profile['prompt-post-processing'],
@@ -886,7 +910,7 @@ export async function sendChatCompletionProfileRequest(request = {}) {
 
     return await context.ChatCompletionService.processRequest(
         requestPayload,
-        {},
+        { presetName: selectedPresetName || undefined },
         extractData,
         signal,
     );
@@ -903,6 +927,7 @@ export async function sendConnectionManagerProfileRequest(request = {}) {
         includePreset = true,
         preparePayload = null,
         modelOverride = '',
+        presetName = '',
         signal = null,
     } = request;
     if (!profileId) {
@@ -914,7 +939,23 @@ export async function sendConnectionManagerProfileRequest(request = {}) {
     const route = getChatCompletionProfileRoute(profileId, profileName);
     const chatCompletionSource = route.source;
     const requestService = context?.ConnectionManagerRequestService;
-    if (!requestService?.sendRequest || !chatCompletionSource) {
+    if (!chatCompletionSource) {
+        throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support native Connection Manager chat-completion requests.`, { stage: 'profile' });
+    }
+
+    const selectedPresetName = String(presetName || '').trim();
+    if (selectedPresetName) {
+        const availablePresetNames = getChatCompletionPresetNames(context);
+        if (availablePresetNames.includes(selectedPresetName)) {
+            return await sendChatCompletionProfileRequest({
+                ...request,
+                presetName: selectedPresetName,
+            });
+        }
+        throw adapterTransportError(`Chat Completion preset "${selectedPresetName}" was not found for semantic profile "${profileName || profileId}".`, { stage: 'preset' });
+    }
+
+    if (!requestService?.sendRequest) {
         throw adapterTransportError(`Semantic profile "${profileName || profileId}" does not support native Connection Manager chat-completion requests.`, { stage: 'profile' });
     }
 

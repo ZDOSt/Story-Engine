@@ -18,7 +18,7 @@ import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
-import { fetchConnectionProfileModels, generateRawData as generateRawDataAdapter, getLoadedChatCompletionModelsForProfile, sendConnectionManagerProfileRequest } from './st-adapter.js';
+import { fetchConnectionProfileModels, generateRawData as generateRawDataAdapter, getChatCompletionPresetNames, getLoadedChatCompletionModelsForProfile, sendConnectionManagerProfileRequest } from './st-adapter.js';
 import { buildSceneItemStateKey, normalizeSceneItemState, reconcilePostNarrationPossessionDelta } from './scene-item-state.js';
 import {
   applyBreakthroughStatChange,
@@ -17615,6 +17615,13 @@ const tests = [
       assert.match(source, /semanticConnectionProfileId/);
       assert.match(source, /semanticModelByProfile/);
       assert.match(source, /getSemanticModelOverride/);
+      assert.match(source, /semanticPresetByProfile/);
+      assert.match(source, /getSemanticPresetOverride/);
+      assert.match(source, /getChatCompletionPresetNames/);
+      assert.match(source, /structured_preflight_semantic_preset/);
+      assert.match(source, /<select id="structured_preflight_semantic_preset"/);
+      assert.match(source, /Use profile preset/);
+      assert.match(source, /semanticPreset: settings\?\.semanticPreset \|\| ''/);
       assert.match(source, /structured_preflight_semantic_model/);
       assert.match(source, /<select id="structured_preflight_semantic_model"/);
       assert.doesNotMatch(source, /<input id="structured_preflight_semantic_model"/);
@@ -17632,6 +17639,10 @@ const tests = [
       assert.match(source, /String\(event\.target\?\.value \|\| ''\) === 'true'/);
       assert.match(source, /onEvent\('CHATCOMPLETION_SOURCE_CHANGED', refreshSettingsControls/);
       assert.match(source, /onEvent\('CONNECTION_PROFILE_LOADED', refreshSettingsControls/);
+      assert.match(semanticSource, /presetName: options\.semanticPreset/);
+      assert.match(adapterSource, /export function getChatCompletionPresetNames/);
+      assert.match(adapterSource, /sendChatCompletionProfileRequest\([\s\S]*?presetName: selectedPresetName \|\| undefined/);
+      assert.match(adapterSource, /Chat Completion preset.*was not found.*semantic profile/);
 
       const repairStart = source.indexOf('async function applyTargetedProseBanRepairIfNeeded(');
       const repairEnd = source.indexOf('function parsePostNarrationTrackerResponse(', repairStart);
@@ -17679,7 +17690,7 @@ const tests = [
       assert.doesNotMatch(source, /includeProseEdits|proseEdits|rollbackProseGuardTrackerCommit/);
       assert.doesNotMatch(editSource, /semantic|action classifier|lexical anchor|duplicate narration/i);
       assert.match(semanticSource, /signal: options\.signal/);
-      assert.match(adapterSource, /processRequest\(\s*requestPayload,\s*\{\},\s*extractData,\s*signal,/);
+      assert.match(adapterSource, /processRequest\(\s*requestPayload,\s*\{\s*presetName:\s*selectedPresetName\s*\|\|\s*undefined\s*\},\s*extractData,\s*signal,/);
     },
   },
   {
@@ -17842,7 +17853,7 @@ const tests = [
       );
       assert.match(getSettingsSource, /'semanticThinkingDisableFormat',\s*'semanticThinkingDisableFormats'/);
       assert.match(getSettingsSource, /Object\.prototype\.hasOwnProperty\.call\(settings, key\)/);
-      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| semanticProfileSettingsChanged \|\| semanticOutputSettingsChanged \|\| semanticModelSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
+      assert.match(getSettingsSource, /if \(hadRetiredSemanticSettings \|\| semanticStrictSettingsChanged \|\| semanticProfileSettingsChanged \|\| semanticOutputSettingsChanged \|\| semanticModelSettingsChanged \|\| semanticPresetSettingsChanged \|\| trackerSettingsChanged \|\| narratorHandoffSettingsChanged \|\| proseGuardSettingsChanged \|\| writingStyleSettingsChanged\) \{\s*saveExtensionSettings\(\)/);
       assert.equal((getSettingsSource.match(/saveExtensionSettings\(\)/g) || []).length, 1);
       let settingsSaveCount = 0;
       const retiredSettingsStore = {
@@ -19090,7 +19101,7 @@ const tests = [
       assert.doesNotMatch(source, /semanticThinkingDisableFormats:\s*Object\.freeze\(\{\}\)/);
       assert.doesNotMatch(source, /structured_preflight_semantic_thinking_disable_format/);
       assert.doesNotMatch(source, /customSemanticProfileSelected|semanticThinkingDisableFormat:\s*settings\?\.semanticThinkingDisableFormat/);
-      assert.match(source, /if \(!selection\.selected\) \{\s*return await callback\(\{ semanticStrictToolSchema, semanticModel \}\);/);
+      assert.match(source, /if \(!selection\.selected\) \{\s*return await callback\(\{ semanticStrictToolSchema, semanticModel, semanticPreset \}\);/);
       assert.match(semanticSource, /export async function sendStructuredToolRequest/);
       assert.match(semanticSource, /Structured response did not call \$\{toolName\}/);
       assert.match(source, /applyStoryEngineBaselineThinkingDisabledPayload\(generateData\)/);
@@ -22737,6 +22748,88 @@ const tests = [
 
         const cachedModelsForOtherProfile = await getLoadedChatCompletionModelsForProfile('profile-b', 'Other profile');
         assert.deepEqual(cachedModelsForOtherProfile, []);
+      } finally {
+        if (previousSillyTavern === undefined) delete globalThis.SillyTavern;
+        else globalThis.SillyTavern = previousSillyTavern;
+      }
+    },
+  },
+  {
+    name: 'semantic preset override is discovered, routed, and isolated from the active profile',
+    async run() {
+      const previousSillyTavern = globalThis.SillyTavern;
+      let directRequest = null;
+      let nativeRequest = null;
+      const profile = {
+        id: 'profile-preset',
+        name: 'Shared provider',
+        api: 'deepseek',
+        model: 'narrative-model',
+        'api-url': 'https://provider.example/v1',
+        'secret-id': 'provider-secret',
+        'prompt-post-processing': 'profile-processing',
+      };
+      const presetNames = ['Zeta', 'Fast Semantic', 'Fast Semantic', ''];
+      const context = {
+        extensionSettings: {
+          connectionManager: {
+            profiles: [profile],
+            selectedProfile: profile.id,
+          },
+        },
+        CONNECT_API_MAP: { deepseek: { source: 'deepseek' } },
+        getPresetManager: apiId => apiId === 'openai'
+          ? {
+            getAllPresets: () => presetNames,
+            getCompletionPresetByName: name => presetNames.includes(name) && name ? { name } : undefined,
+          }
+          : null,
+        ChatCompletionService: {
+          processRequest: async (...args) => {
+            directRequest = args;
+            return { choices: [] };
+          },
+        },
+        ConnectionManagerRequestService: {
+          sendRequest: async (...args) => {
+            nativeRequest = args;
+            return { choices: [] };
+          },
+        },
+      };
+      globalThis.SillyTavern = { getContext: () => context };
+      try {
+        assert.deepEqual(getChatCompletionPresetNames(), ['Fast Semantic', 'Zeta']);
+
+        await sendConnectionManagerProfileRequest({
+          profileId: profile.id,
+          profileName: profile.name,
+          prompt: [{ role: 'user', content: 'semantic request' }],
+          responseLength: 100,
+          modelOverride: 'semantic-model',
+          presetName: 'Fast Semantic',
+          extractData: false,
+        });
+        assert.equal(directRequest?.[0]?.model, 'semantic-model');
+        assert.equal(directRequest?.[0]?.chat_completion_source, 'deepseek');
+        assert.equal(directRequest?.[0]?.custom_url, profile['api-url']);
+        assert.equal(directRequest?.[0]?.secret_id, profile['secret-id']);
+        assert.equal(directRequest?.[1]?.presetName, 'Fast Semantic');
+        assert.equal(nativeRequest, null);
+
+        await assert.rejects(
+          () => sendConnectionManagerProfileRequest({
+            profileId: profile.id,
+            profileName: profile.name,
+            prompt: [{ role: 'user', content: 'missing preset request' }],
+            responseLength: 100,
+            modelOverride: 'semantic-model',
+            presetName: 'Missing preset',
+            extractData: false,
+          }),
+          /Chat Completion preset "Missing preset" was not found/,
+        );
+        assert.equal(nativeRequest, null);
       } finally {
         if (previousSillyTavern === undefined) delete globalThis.SillyTavern;
         else globalThis.SillyTavern = previousSillyTavern;
