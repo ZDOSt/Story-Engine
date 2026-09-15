@@ -17616,6 +17616,9 @@ const tests = [
       assert.match(source, /semanticModelByProfile/);
       assert.match(source, /getSemanticModelOverride/);
       assert.match(source, /structured_preflight_semantic_model/);
+      assert.match(source, /<select id="structured_preflight_semantic_model"/);
+      assert.doesNotMatch(source, /<input id="structured_preflight_semantic_model"/);
+      assert.match(source, /Use profile default/);
       assert.match(source, /refreshSemanticModelOptions/);
       assert.match(source, /const selectedSemanticProfile = getConnectionProfileById\(storedSemanticProfileId\)/);
       assert.match(source, /const semanticStrictToolSchemaVisible = semanticStrictToolSchemaState\.visible && semanticToolMode/);

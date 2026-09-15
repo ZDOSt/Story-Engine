@@ -759,6 +759,7 @@ const state = {
 
     semanticModelOptionsByProfile: new Map(),
     semanticModelDiscoveryRequest: null,
+    semanticModelDiscoveryProfileId: '',
 
     pendingRun: null,
 
@@ -1453,6 +1454,7 @@ async function refreshSemanticModelOptions() {
 
     const requestToken = Symbol(profileId);
     state.semanticModelDiscoveryRequest = requestToken;
+    state.semanticModelDiscoveryProfileId = profileId;
     const button = document.getElementById('structured_preflight_refresh_semantic_models');
     const status = document.getElementById('structured_preflight_semantic_model_status');
     if (button) button.disabled = true;
@@ -1471,22 +1473,30 @@ async function refreshSemanticModelOptions() {
             source,
             status: models.length
                 ? `${models.length} model${models.length === 1 ? '' : 's'} available (${source}).`
-                : 'No model list was returned. Enter a model ID manually.',
+                : 'No model list was returned. The profile default remains available.',
         });
     } catch (error) {
         if (state.semanticModelDiscoveryRequest !== requestToken) return;
         state.semanticModelOptionsByProfile.set(profileId, {
             models: [],
             source: '',
-            status: 'Model discovery failed. Enter a model ID manually.',
+            status: 'Model discovery failed. The profile default remains available.',
         });
         notifyError(error instanceof Error ? error.message : String(error), 'Story Engine model discovery');
     } finally {
         if (state.semanticModelDiscoveryRequest === requestToken) {
             state.semanticModelDiscoveryRequest = null;
+            state.semanticModelDiscoveryProfileId = '';
             refreshSettingsControls();
         }
     }
+}
+
+function refreshSemanticModelOptionsIfNeeded() {
+    const selection = getSemanticProfileSelection(getSettings());
+    const profileId = String(selection.profile?.id || '').trim();
+    if (!selection.selected || !profileId || state.semanticModelOptionsByProfile.has(profileId) || state.semanticModelDiscoveryProfileId === profileId) return;
+    void refreshSemanticModelOptions();
 }
 
 function getPromptPlacementPosition(value) {
@@ -1691,8 +1701,7 @@ function refreshSettingsControls() {
     const semanticStrictSchemaRow = document.getElementById('structured_preflight_semantic_strict_schema_row');
     const semanticStrictSchemaSelect = document.getElementById('structured_preflight_semantic_strict_schema');
     const semanticModelRow = document.getElementById('structured_preflight_semantic_model_row');
-    const semanticModelInput = document.getElementById('structured_preflight_semantic_model');
-    const semanticModelOptions = document.getElementById('structured_preflight_semantic_model_options');
+    const semanticModelSelect = document.getElementById('structured_preflight_semantic_model');
     const semanticModelStatus = document.getElementById('structured_preflight_semantic_model_status');
     const semanticModelRefreshRow = document.getElementById('structured_preflight_semantic_model_refresh_row');
     const refreshSemanticModelsButton = document.getElementById('structured_preflight_refresh_semantic_models');
@@ -1787,20 +1796,28 @@ function refreshSettingsControls() {
     const semanticModelState = getSemanticModelDiscoveryState(semanticProfileId);
     const semanticModel = getSemanticModelOverride(settings);
     if (semanticModelRow) semanticModelRow.hidden = !engineEnabled || !enabled || !semanticProfile;
-    if (semanticModelInput) {
-        semanticModelInput.value = semanticModel;
-        semanticModelInput.placeholder = semanticProfile?.model
-            ? `Profile default: ${semanticProfile.model}`
-            : 'Enter model ID';
-        semanticModelInput.disabled = !engineEnabled || !enabled || !semanticProfile;
-    }
-    if (semanticModelOptions) {
-        semanticModelOptions.innerHTML = '';
+    if (semanticModelSelect) {
+        semanticModelSelect.innerHTML = '';
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = semanticProfile?.model
+            ? `Use profile default (${semanticProfile.model})`
+            : 'Use profile default';
+        semanticModelSelect.append(defaultOption);
         for (const model of semanticModelState.models || []) {
             const option = document.createElement('option');
             option.value = model;
-            semanticModelOptions.append(option);
+            option.textContent = model;
+            semanticModelSelect.append(option);
         }
+        if (semanticModel && !(semanticModelState.models || []).includes(semanticModel)) {
+            const savedOption = document.createElement('option');
+            savedOption.value = semanticModel;
+            savedOption.textContent = `Saved selection (not detected): ${semanticModel}`;
+            semanticModelSelect.append(savedOption);
+        }
+        semanticModelSelect.value = semanticModel;
+        semanticModelSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
     }
     if (semanticModelStatus) semanticModelStatus.textContent = semanticModelState.status || '';
     if (semanticModelStatus) semanticModelStatus.hidden = !engineEnabled || !enabled || !semanticProfile;
@@ -1830,7 +1847,7 @@ function refreshSettingsControls() {
         trackerEnabledCheckbox,
         semanticOutputModeSelect,
         semanticStrictSchemaSelect,
-        semanticModelInput,
+        semanticModelSelect,
         refreshSemanticModelsButton,
         proseGuardModeSelect,
         progressionEnabledCheckbox,
@@ -1849,8 +1866,8 @@ function refreshSettingsControls() {
     if (semanticStrictSchemaSelect) {
         semanticStrictSchemaSelect.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
     }
-    if (semanticModelInput) {
-        semanticModelInput.disabled = !engineEnabled || !enabled || !semanticProfile;
+    if (semanticModelSelect) {
+        semanticModelSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
     }
     if (refreshSemanticModelsButton) {
         refreshSemanticModelsButton.disabled = !engineEnabled || !enabled || !semanticProfile || Boolean(state.semanticModelDiscoveryRequest);
@@ -2378,14 +2395,13 @@ function renderSettingsPanel() {
                             </div>
                             <div id="structured_preflight_semantic_model_row" class="spe-settings-row" hidden>
                                 <label for="structured_preflight_semantic_model">Story Engine model</label>
-                                <input id="structured_preflight_semantic_model" class="text_pole flex1" type="text" list="structured_preflight_semantic_model_options" autocomplete="off" spellcheck="false" placeholder="Use profile default">
-                                <datalist id="structured_preflight_semantic_model_options"></datalist>
+                                <select id="structured_preflight_semantic_model" class="text_pole flex1"></select>
                                 ${renderSettingsInfo('spe-settings-help-semantic-model', 'Optional semantic-only model override. Leave blank to use the selected profile model. The model list is discovered from SillyTavern or the selected profile provider without changing the saved profile.', 'About Story Engine model selection')}
                             </div>
                             <div id="structured_preflight_semantic_model_status" class="spe-settings-row spe-settings-information-row" aria-live="polite"></div>
                             <div id="structured_preflight_semantic_model_refresh_row" class="spe-settings-row" hidden>
                                 <button id="structured_preflight_refresh_semantic_models" class="menu_button flex1"><i class="fa-solid fa-list" aria-hidden="true"></i> Refresh models</button>
-                                ${renderSettingsInfo('spe-settings-help-semantic-model-refresh', 'Refresh the model list for the selected semantic profile. A provider failure does not prevent manual model ID entry.', 'About refreshing Story Engine models')}
+                                ${renderSettingsInfo('spe-settings-help-semantic-model-refresh', 'Refresh the model list detected for the selected semantic profile.', 'About refreshing Story Engine models')}
                             </div>
                             <div class="spe-settings-row">
                                 <button id="structured_preflight_refresh_semantic_settings" class="menu_button flex1"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh profiles</button>
@@ -2666,6 +2682,7 @@ function renderSettingsPanel() {
         refreshSettingsControls();
 
         saveExtensionSettings();
+        if (settings.useSeparateSemanticSettings) refreshSemanticModelOptionsIfNeeded();
 
     });
 
@@ -2674,6 +2691,7 @@ function renderSettingsPanel() {
         settings.semanticConnectionProfileId = getConnectionProfileByName(settings.semanticConnectionProfile)?.id || '';
         refreshSettingsControls();
         saveExtensionSettings();
+        refreshSemanticModelOptionsIfNeeded();
     });
     document.getElementById('structured_preflight_semantic_model')?.addEventListener('change', event => {
         const selection = getSemanticProfileSelection(settings);
@@ -2834,7 +2852,10 @@ function renderSettingsPanel() {
             saveExtensionSettings();
         });
     });
-    document.getElementById('structured_preflight_refresh_semantic_settings')?.addEventListener('click', refreshSettingsControls);
+    document.getElementById('structured_preflight_refresh_semantic_settings')?.addEventListener('click', () => {
+        refreshSettingsControls();
+        refreshSemanticModelOptionsIfNeeded();
+    });
     document.getElementById('structured_preflight_show_player_setup')?.addEventListener('click', () => {
         if (!isStoryEngineEnabled()) {
             disableStoryEngineRuntime();
@@ -2930,6 +2951,7 @@ function renderSettingsPanel() {
 
 
     refreshSettingsControls();
+    refreshSemanticModelOptionsIfNeeded();
 
     injectPromptOptionPrompts();
 
