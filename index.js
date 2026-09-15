@@ -2021,8 +2021,9 @@ function ensureSettingsPanelStyles() {
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-section {
             --spe-settings-accent: #73d0ff;
+            display: block;
+            overflow: hidden;
             min-width: 0;
-            padding: 14px;
             border: 0;
             border-radius: 0;
             background: transparent;
@@ -2045,10 +2046,30 @@ function ensureSettingsPanelStyles() {
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-section-head {
             display: grid;
-            grid-template-columns: 34px minmax(0, 1fr) auto;
+            grid-template-columns: 18px 34px minmax(0, 1fr) auto;
             align-items: center;
             gap: 10px;
             min-width: 0;
+            padding: 14px;
+            cursor: pointer;
+            list-style: none;
+            user-select: none;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section-head::-webkit-details-marker {
+            display: none;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section-head::before {
+            content: "";
+            width: 7px;
+            height: 7px;
+            margin-right: 1px;
+            border-right: 1.5px solid color-mix(in srgb, var(--spe-settings-accent) 82%, var(--SmartThemeBodyColor, #eee));
+            border-bottom: 1.5px solid color-mix(in srgb, var(--spe-settings-accent) 82%, var(--SmartThemeBodyColor, #eee));
+            transform: rotate(-45deg);
+            transition: transform 120ms ease;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section[open] > .spe-settings-section-head::before {
+            transform: rotate(45deg);
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-section-icon {
             display: grid;
@@ -2081,12 +2102,16 @@ function ensureSettingsPanelStyles() {
             line-height: 1.25;
             overflow-wrap: anywhere;
         }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-body {
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section > .spe-settings-body {
             display: flex;
             flex-direction: column;
             gap: 10px;
-            margin-top: 13px;
-            padding-left: 44px;
+            margin: 0;
+            padding: 0 14px 14px 86px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section[open] > .spe-settings-body {
+            border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.12));
+            padding-top: 13px;
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-row {
             display: grid;
@@ -2314,10 +2339,10 @@ function ensureSettingsPanelStyles() {
         }
         @media (max-width: 720px) {
             #${SETTINGS_CONTAINER_ID} .spe-settings-section {
-                padding: 12px 10px;
+                padding: 0;
             }
             #${SETTINGS_CONTAINER_ID} .spe-settings-section-head {
-                grid-template-columns: 32px minmax(0, 1fr) auto;
+                grid-template-columns: 18px 32px minmax(0, 1fr) auto;
                 gap: 8px;
             }
             #${SETTINGS_CONTAINER_ID} .spe-settings-section-icon {
@@ -2326,6 +2351,10 @@ function ensureSettingsPanelStyles() {
             }
             #${SETTINGS_CONTAINER_ID} .spe-settings-body {
                 padding-left: 0;
+            }
+            #${SETTINGS_CONTAINER_ID} .spe-settings-section > .spe-settings-body {
+                padding-right: 10px;
+                padding-left: 10px;
             }
             #${SETTINGS_CONTAINER_ID} .spe-settings-row > label:not(.checkbox_label),
             #${SETTINGS_CONTAINER_ID} .spe-settings-control-label {
@@ -2345,6 +2374,12 @@ function ensureSettingsPanelStyles() {
 
 function collapsePromptOptionDrawers(container = document) {
     container.querySelectorAll('[data-structured-preflight-prompt-drawer]').forEach(details => {
+        details.open = false;
+    });
+}
+
+function collapseSettingsSections(container = document) {
+    container.querySelectorAll('.spe-settings-section').forEach(details => {
         details.open = false;
     });
 }
@@ -2377,15 +2412,15 @@ function renderSettingsPanel() {
             </div>
             <div class="inline-drawer-content">
                 <div class="spe-settings-shell">
-                    <section class="spe-settings-section" data-spe-settings-step="master">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="master">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-power-off" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">Master switch</span>
-                                <h4 class="spe-settings-title">Story Engine</h4>
+                                <h4 class="spe-settings-title">Master Switch</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-master', 'Enable or disable the entire extension without removing it.', 'About the Story Engine master switch')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">
@@ -2395,17 +2430,17 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-master-enabled', 'When disabled, Story Engine skips semantic preflight, mechanics, narrator handoff, Prose Guard, tracker updates, character progression, and prompt injection.', 'What enabling Story Engine controls')}
                             </div>
                         </div>
-                    </section>
+                    </details>
 
-                    <section class="spe-settings-section" data-spe-settings-step="setup">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="setup">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-user-gear" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">0. Setup</span>
                                 <h4 class="spe-settings-title">Player Setup</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-setup', 'Create, resume, or reset the playable character shell before roleplay generation.', 'About Player Setup')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <small id="structured_preflight_player_setup_status" class="spe-settings-player-status"></small>
                             <div class="spe-settings-buttons">
@@ -2414,17 +2449,17 @@ function renderSettingsPanel() {
                                 <button id="structured_preflight_reset_player_setup" class="menu_button">Reset Chat Setup</button>
                             </div>
                         </div>
-                    </section>
+                    </details>
 
-                    <section class="spe-settings-section" data-spe-settings-step="semantic">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="semantic">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-brain" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">1. First model call</span>
                                 <h4 class="spe-settings-title">Story Engine Profile</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-semantic', 'The private structured profile reads the assembled prompt stack, resolves mechanics, and runs post-narration utility checks. Narration, adventure openings, character creation, and character progression use the current SillyTavern profile.', 'About the Story Engine profile')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">
@@ -2474,17 +2509,17 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-semantic-refresh', 'Reload the available SillyTavern connection profiles without changing the current selection.', 'About refreshing Story Engine profiles')}
                             </div>
                         </div>
-                    </section>
+                    </details>
 
-                    <section class="spe-settings-section" data-spe-settings-step="call-delay">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="call-delay">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-clock" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">1b. Call spacing</span>
                                 <h4 class="spe-settings-title">Model Call Delay</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-delay', 'Optionally waits between Story Engine model calls for APIs with request spacing limits.', 'About Model Call Delay')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">
@@ -2499,17 +2534,17 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-delay-seconds', 'Set the wait between consecutive Story Engine model calls, from 0 to 300 seconds.', 'About delay seconds')}
                             </div>
                         </div>
-                    </section>
+                    </details>
 
-                    <section class="spe-settings-section" data-spe-settings-step="narrator-inputs">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="narrator-inputs">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-feather-pointed" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">2. Narrator inputs</span>
                                 <h4 class="spe-settings-title">Narrator Context</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-narrator', 'Controls deterministic name pools and optional writing style context sent into the narrator prompt.', 'About Narrator Context')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <div class="spe-settings-row">
                                 <label for="structured_preflight_name_style">Name style</label>
@@ -2579,17 +2614,17 @@ function renderSettingsPanel() {
                                 </div>
                             </details>
                         </div>
-                    </section>
+                    </details>
 
-                    <section class="spe-settings-section" data-spe-settings-step="prose-guard">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="prose-guard">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">3. After narration</span>
                                 <h4 class="spe-settings-title">Prose Guard</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-prose-guard', 'Scans final narration for configured phrases and lets you choose whether repairs are automatic or reviewed first.', 'About Prose Guard')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <div class="spe-settings-row">
                                 <label for="structured_preflight_prose_guard_mode">Mode</label>
@@ -2624,17 +2659,17 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-prose-manual', 'Manual Fix accepts a specific phrase, repairs only the sentence containing it in the latest response, and remembers that phrase for future scans.', 'About manual Prose Guard repair')}
                             </div>
                         </div>
-                    </section>
+                    </details>
 
-                    <section class="spe-settings-section" data-spe-settings-step="tracker">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="tracker">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-table-columns" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">4. After final prose</span>
                                 <h4 class="spe-settings-title">Visible Tracker</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-tracker', 'Shows or hides the visible tracker widget. Hidden tracker state still updates after narration.', 'About the Visible Tracker')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">
@@ -2644,17 +2679,17 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-tracker-visible', 'Hides or shows the tracker interface without affecting hidden tracker updates.', 'What Show visible tracker controls')}
                             </div>
                         </div>
-                    </section>
+                    </details>
 
-                    <section class="spe-settings-section" data-spe-settings-step="narration-handoff">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="narration-handoff">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-scroll" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">4b. Diagnostics</span>
                                 <h4 class="spe-settings-title">Narration Handoff</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-narration-handoff', 'Shows the completed Story Engine audit and narrator handoff for inspection. This display does not change what the narrator model receives.', 'About the Narration Handoff')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">
@@ -2672,17 +2707,17 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-narration-handoff-location', 'Choose where the visible handoff appears. Side Panel shows the latest handoff in a collapsible tracker-style window; In-Chat keeps one block on each assistant response.', 'About handoff display location')}
                             </div>
                         </div>
-                    </section>
+                    </details>
 
-                    <section class="spe-settings-section" data-spe-settings-step="progression">
-                        <div class="spe-settings-section-head">
+                    <details class="spe-settings-section" data-spe-settings-step="progression">
+                        <summary class="spe-settings-section-head">
                             <span class="spe-settings-section-icon"><i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
                                 <span class="spe-settings-kicker">5. Advancement</span>
                                 <h4 class="spe-settings-title">Character Progression</h4>
                             </div>
                             ${renderSettingsInfo('spe-settings-help-progression', 'Tracks hidden advancement milestones and offers stat increases or generated ability swaps when growth is ready.', 'About Character Progression')}
-                        </div>
+                        </summary>
                         <div class="spe-settings-body">
                             <div class="spe-settings-toggle-row">
                                 <label class="checkbox_label flexNoGap">
@@ -2692,18 +2727,26 @@ function renderSettingsPanel() {
                                 ${renderSettingsInfo('spe-settings-help-progression-enabled', 'Advancement progress is hidden. Generated ability and spell options use the current narrator profile.', 'What Character Progression controls')}
                             </div>
                         </div>
-                    </section>
+                    </details>
                 </div>
             </div>
         </div>`;
     host.prepend(container);
 
+    collapseSettingsSections(container);
     collapsePromptOptionDrawers(container);
 
     container.querySelector('.inline-drawer-toggle')?.addEventListener('click', () => {
 
         setTimeout(() => collapsePromptOptionDrawers(container), 0);
 
+    });
+
+    container.querySelectorAll('.spe-settings-section-head .spe-settings-help-button').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
     });
 
     container.querySelectorAll('[data-structured-preflight-edit-toggle]').forEach(button => {

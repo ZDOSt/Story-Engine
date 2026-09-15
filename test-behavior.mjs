@@ -20294,6 +20294,11 @@ const tests = [
       assert.ok(renderSource.includes('ensureSettingsPanelStyles();'));
       assert.ok(renderSource.includes('spe-settings-shell'));
       assert.ok(renderSource.includes('spe-settings-section'));
+      assert.equal((renderSource.match(/<details class="spe-settings-section"/g) || []).length, 9);
+      assert.equal((renderSource.match(/<summary class="spe-settings-section-head"/g) || []).length, 9);
+      assert.match(source, /function collapseSettingsSections\(container = document\)/);
+      assert.match(renderSource, /collapseSettingsSections\(container\);/);
+      assert.match(source, /spe-settings-section-head \.spe-settings-help-button/);
       assert.match(source, /function renderSettingsInfo\(id, text, label = 'More information'\)/);
       assert.match(source, /class="spe-settings-help-button"[^>]*aria-label="\$\{escapeHtml\(label\)\}"[^>]*aria-describedby="\$\{escapeHtml\(id\)\}"/);
       assert.match(source, /class="spe-settings-tooltip"[^>]*id="\$\{escapeHtml\(id\)\}"[^>]*role="tooltip"/);
@@ -20307,13 +20312,15 @@ const tests = [
       assert.doesNotMatch(renderSource, /spe-settings-description|spe-settings-note/);
 
       const sections = [
-        ['data-spe-settings-step="master"', 'Master switch', 'Story Engine'],
-        ['data-spe-settings-step="setup"', '0. Setup', 'Player Setup'],
-        ['data-spe-settings-step="semantic"', '1. First model call', 'Story Engine Profile'],
-        ['data-spe-settings-step="narrator-inputs"', '2. Narrator inputs', 'Narrator Context'],
-        ['data-spe-settings-step="prose-guard"', '3. After narration', 'Prose Guard'],
-        ['data-spe-settings-step="tracker"', '4. After final prose', 'Visible Tracker'],
-        ['data-spe-settings-step="progression"', '5. Advancement', 'Character Progression'],
+         ['data-spe-settings-step="master"', 'Master switch', 'Master Switch'],
+         ['data-spe-settings-step="setup"', '0. Setup', 'Player Setup'],
+         ['data-spe-settings-step="semantic"', '1. First model call', 'Story Engine Profile'],
+         ['data-spe-settings-step="call-delay"', '1b. Call spacing', 'Model Call Delay'],
+         ['data-spe-settings-step="narrator-inputs"', '2. Narrator inputs', 'Narrator Context'],
+         ['data-spe-settings-step="prose-guard"', '3. After narration', 'Prose Guard'],
+         ['data-spe-settings-step="tracker"', '4. After final prose', 'Visible Tracker'],
+         ['data-spe-settings-step="narration-handoff"', '4b. Diagnostics', 'Narration Handoff'],
+         ['data-spe-settings-step="progression"', '5. Advancement', 'Character Progression'],
       ];
       let previousIndex = -1;
       for (const [step, kicker, title] of sections) {
