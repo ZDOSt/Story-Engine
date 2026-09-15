@@ -1864,17 +1864,17 @@ export function mergeSlowBondEvidence(previous, semanticEvidence = {}, sceneKey 
                 after[key] = next;
             }
         }
-        const blockerAdds = normalizeTrackerStringList(semanticEvidence?.blockers);
-        if (blockerAdds.length) {
-            const blockerSet = new Set(after.blockers.map(item => item.toLowerCase()));
-            for (const blocker of blockerAdds) {
-                const key = blocker.toLowerCase();
-                if (!blockerSet.has(key)) {
-                    after.blockers.push(blocker);
-                    blockerSet.add(key);
-                    changed.push(`blocker:${blocker}`);
-                    if (after.blockers.length >= 12) break;
+        if (Object.prototype.hasOwnProperty.call(semanticEvidence || {}, 'blockers')) {
+            const previousBlockers = after.blockers;
+            const nextBlockers = normalizeTrackerStringList(semanticEvidence.blockers).slice(0, 12);
+            const previousKeys = previousBlockers.map(item => item.toLowerCase());
+            const nextKeys = nextBlockers.map(item => item.toLowerCase());
+            if (previousKeys.length !== nextKeys.length || previousKeys.some((item, index) => item !== nextKeys[index])) {
+                for (const blocker of nextBlockers) {
+                    if (!previousKeys.includes(blocker.toLowerCase())) changed.push(`blocker:${blocker}`);
                 }
+                changed.push(nextBlockers.length ? 'blockers:replaced' : 'blockers:cleared');
+                after.blockers = nextBlockers;
             }
         }
         if (changed.length) after.lastUpdatedScene = sceneKey || after.lastUpdatedScene;

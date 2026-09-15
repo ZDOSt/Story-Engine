@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import yaml from 'yaml';
 import { buildSpellCastingSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
-import { ENGINE_PROMPT_TEXT, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
+import { ENGINE_PROMPT_TEXT, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, isSlowBondEligible, mergeSlowBondEvidence, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
@@ -2397,6 +2397,7 @@ const tests = [
             slowBondEvidence: {
               comfortInProximity: true,
               personalAttention: true,
+              blockers: ['unresolved harm'],
             },
           })],
         }),
@@ -13959,8 +13960,11 @@ const tests = [
         const narration = 'Val steps back.';
         assert.equal(applyStreamingArtifactDisplayRegex(`${stage}: complete\n${narration}`).trim(), narration);
         assert.equal(applyStreamingArtifactDisplayRegex(`function ${stage}(response, context): complete\n${narration}`).trim(), narration);
+        assert.equal(applyStreamingArtifactDisplayRegex(`Val steps back.\n${stage}: complete\nVal smiles.`).trim(), 'Val steps back.\nVal smiles.');
         assert.equal(sanitizeAssistantNarration(`${stage}: complete\n${narration}`), narration);
       }
+      const handoff = '[STORY_ENGINE_NARRATOR_HANDOFF:turn-1:START]\nprivate handoff\n[STORY_ENGINE_NARRATOR_HANDOFF:turn-1:END]\nVal smiles.';
+      assert.equal(applyStreamingArtifactDisplayRegex(handoff).trim(), 'Val smiles.');
     },
   },
   {
@@ -14002,6 +14006,12 @@ const tests = [
         stripComputedDebugPrefix(scratchpadLeak),
         'Naomi looks down at her skirt, pinches the hem between thumb and forefinger, and steps back from the doorway.\n"A ballerina? Like this?"',
       );
+      assert.equal(
+        sanitizeAssistantNarration('Val steps back, breathing hard.\ndialogueTurn: complete\nVal smiles at last.'),
+        'Val steps back, breathing hard.\nVal smiles at last.',
+      );
+      assert.equal(sanitizeAssistantNarration('Result = Failure. Val falls.'), 'Val falls.');
+      assert.equal(sanitizeAssistantNarration('Outcome: Success - she wins.'), 'she wins.');
 
       const renderControlLeak = [
         '1. **dialogueTurn:** Respond to the current exchange and end on a meaningful opening for the user.',
@@ -14070,6 +14080,15 @@ const tests = [
         '',
         'An artifact-only response must never fail open and become visible narration.',
       );
+      for (const line of [
+        'He avoided the blow and stepped back.',
+        'A successful parry.',
+        'Two failures later.',
+        'They deflected.',
+        'The stalemate held through the night.',
+      ]) {
+        assert.equal(sanitizeAssistantNarration(`BEGIN_FINAL_NARRATION\n${line}\nEND_FINAL_NARRATION`), line);
+      }
     },
   },
   {
@@ -22904,6 +22923,28 @@ const tests = [
         if (previousFetch === undefined) delete globalThis.fetch;
         else globalThis.fetch = previousFetch;
       }
+    },
+  },
+  {
+    name: 'slow bond blockers are scene-local and can be cleared explicitly',
+    run() {
+      const previous = {
+        respectfulContact: 2,
+        cooperation: 2,
+        comfortInProximity: 0,
+        boundaryRespect: 0,
+        sharedRoutine: 0,
+        playfulness: 0,
+        teamwork: 0,
+        personalAttention: 0,
+        blockers: ['active fear'],
+        lastUpdatedScene: 'scene-1',
+      };
+      const retained = mergeSlowBondEvidence(previous, { cooperation: true }, 'scene-2');
+      assert.deepEqual(retained.evidence.blockers, ['active fear']);
+      const cleared = mergeSlowBondEvidence(previous, { blockers: [] }, 'scene-2');
+      assert.deepEqual(cleared.evidence.blockers, []);
+      assert.equal(isSlowBondEligible({ B: 3, F: 1, H: 1 }, 5, cleared.evidence), true);
     },
   },
 ];

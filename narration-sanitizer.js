@@ -2,6 +2,7 @@ import { TRACKER_DELTA_END, TRACKER_DELTA_START } from './tracker-delta-contract
 
 const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
 const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
+const VISIBLE_MECHANICS_LABEL = '(?:(?:Critical|Moderate|Minor)\\s+(?:Success|Failure)|Success|Failure|Stalemate|No\\s+Roll|Dominant\\s+Impact|Solid\\s+Impact|Light\\s+Impact|Checked|Deflected|Avoided|Struggle)';
 export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
     'RenderControlEngine',
     'activeHandoff',
@@ -84,11 +85,10 @@ export function stripStructuredArtifacts(text) {
 
 export function stripVisibleMechanicsLabels(text) {
     let cleaned = String(text ?? '').trimStart();
-    const label = '(?:Critical|Moderate|Minor)\\s+(?:Success|Failure)|Success|Failure|Stalemate|No\\s+Roll|Dominant\\s+Impact|Solid\\s+Impact|Light\\s+Impact|Checked|Deflected|Avoided|Struggle';
     const patterns = [
-        new RegExp(`^\\s*(?:[*_~]{1,3})?\\s*(?:[\\[(])?\\s*${label}\\s*(?:[\\])])?\\s*(?:[*_~]{1,3})?\\s*(?:[-:\\u2013\\u2014]+)\\s*`, 'i'),
-        new RegExp(`^\\s*(?:Result|Outcome|OutcomeTier)\\s*[:=]\\s*(?:[*_~]{1,3})?\\s*(?:[\\[(])?\\s*${label}\\s*(?:[\\])])?\\s*(?:[*_~]{1,3})?\\s*(?:[-:\\u2013\\u2014]+)?\\s*`, 'i'),
-        new RegExp(`^\\s*(?:[*_~]{1,3})\\s*${label}\\s*(?:[-:\\u2013\\u2014]+)?\\s*(?:[*_~]{1,3})\\s*`, 'i'),
+        new RegExp(`^\\s*(?:[*_~]{1,3})?\\s*(?:[\\[(])?\\s*${VISIBLE_MECHANICS_LABEL}\\b\\s*(?:[\\])])?\\s*(?:[*_~]{1,3})?\\s*(?:[-:\\u2013\\u2014]+)\\s*`, 'i'),
+        new RegExp(`^\\s*(?:Result|Outcome|OutcomeTier)\\s*[:=]\\s*(?:[*_~]{1,3})?\\s*(?:[\\[(])?\\s*${VISIBLE_MECHANICS_LABEL}\\b\\s*(?:[\\])])?\\s*(?:[*_~]{1,3})?\\s*(?:[.!?]+)?\\s*(?:[-:\\u2013\\u2014]+)?\\s*`, 'i'),
+        new RegExp(`^\\s*(?:[*_~]{1,3})\\s*${VISIBLE_MECHANICS_LABEL}\\b\\s*(?:[-:\\u2013\\u2014]+)?\\s*(?:[*_~]{1,3})\\s*`, 'i'),
     ];
     let changed = true;
     while (changed) {
@@ -184,26 +184,26 @@ function extractAfterLeakedNarratorScratchpad(text) {
 
     const lines = source.split(/\r?\n/);
     const scanLimit = Math.min(lines.length, 80);
-    let lastArtifact = -1;
     let sawArtifact = false;
+    let artifactBlockActive = false;
+    const keptLines = [];
 
     for (let index = 0; index < scanLimit; index += 1) {
         const line = lines[index].trim();
-        if (!line) {
-            if (sawArtifact) lastArtifact = index;
-            continue;
-        }
-        if (isNarratorArtifactLine(line) || (sawArtifact && isNarratorArtifactContinuationLine(line))) {
+        if (isNarratorArtifactLine(line)) {
             sawArtifact = true;
-            lastArtifact = index;
+            artifactBlockActive = true;
             continue;
         }
-        if (sawArtifact && isNarrativeStartLine(line)) {
-            return lines.slice(index).join('\n').trim();
+        if (artifactBlockActive && (!line || isNarratorArtifactContinuationLine(line))) {
+            continue;
         }
+        artifactBlockActive = false;
+        keptLines.push(lines[index]);
     }
+    keptLines.push(...lines.slice(scanLimit));
 
-    return lastArtifact >= 0 ? lines.slice(lastArtifact + 1).join('\n').trim() : source;
+    return sawArtifact ? keptLines.join('\n').trim() : source;
 }
 
 function firstNarrativeLineIndex(text) {
@@ -226,7 +226,8 @@ function isNarratorArtifactLine(line) {
     if (/^(?:Valid to proceed|All checks pass|All good|Proceed with narration)\b/i.test(text)) return true;
     if (/^(?:STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract\(input\)|renderControlEngine\(input\)|PRE-FLIGHT CHECK)\s*:?[\s]*$/i.test(text)) return true;
     if (/^(?:MANDATE|STRICT RULES|PART 1|PART 2|AUTHORITY|CONTROLLING AUTHORITY|CLOSED-WORLD RESOLUTION|MECHANICS LOCK|UNRESOLVED INPUT RULE|SOURCE OF TRUTH|BRANCH PRIORITY|CONFLICT RULE|OUTPUT CONTRACT|VALIDITY CONTRACT|BINDING_NARRATOR_CONTRACT|NARRATOR_AUTHORITY|RENDER_CONTRACT|ACTIVE_BRANCH_FACTS|RESOLVED_SCENE_FACTS|NARRATOR_HANDOFF|MODEL_INSTRUCTION|PROMPT)\s*:?[\s]*$/i.test(text)) return true;
-    if (/^(?:The user|User Action|Decisive Action|Roll Used|Outcome|Outcome Meaning|Margin|Landed Actions|Result|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|narrativeFacts|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary)\s*[:=]/i.test(text)) return true;
+    if (new RegExp(`^(?:Outcome|Result|OutcomeTier)\\s*[:=]\\s*(?:[*_~]{1,3})?\\s*(?:[\\[(])?\\s*${VISIBLE_MECHANICS_LABEL}\\b\\s*(?:[\\])])?\\s*(?:[*_~]{1,3})?\\s*(?:[-:\\u2013\\u2014]+)?\\s*$`, 'i').test(text)) return true;
+    if (/^(?:The user|User Action|Decisive Action|Roll Used|Outcome Meaning|Margin|Landed Actions|Action Count|Stakes|Targets|Counter Potential|NPC State|Relationship Result|Chaos|Proactivity|Aggression|Aggression Guide|GUIDE|narrativeFacts|Draft narration|Tense check|Perspective check|Name|NO IntimacyBoundary|IntimacyBoundary)\s*[:=]/i.test(text)) return true;
     if (/^(?:You are the final scene narrator|You must narrate the next scene beat|Use only the NARRATOR_HANDOFF|The NARRATOR_HANDOFF sections|Use ACTIVE_BRANCH_FACTS|If an action, hit, injury|If a completed action, hit, injury|If sections conflict|LandedActions, Outcome|A command to an ally|Do not upgrade requests|Do not output|Return only final|Final narration may only|When writing the final in-character response|EXECUTE RenderControlEngine|Execute RenderControlEngine|Required internal calls|Required internal stage order|Required stage order)\b/i.test(text)) return true;
     return false;
 }
