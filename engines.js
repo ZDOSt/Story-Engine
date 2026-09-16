@@ -58,18 +58,18 @@ function ResolutionEngine(input) {
     return {Attempted, Available, Used, AbilityName, Evidence, NarrativeEffect, NoEffectReason, MechanicalScope:flavor_only_no_bonus}
 
   itemUse(input, challenge, context):
-    policy: SEMANTIC-EXTRACTION, DETERMINISTIC-SOURCE-VERIFICATION
+    policy: SEMANTIC-INTERPRETATION, DETERMINISTIC-SOURCE-VERIFICATION
     rule: itemUse is a direct-object interaction gate, not a general scene-object or search gate. Set Attempted=Y only when the latest user input directly handles, uses, accesses, possesses, transfers, or otherwise acts on one specifically identified concrete inanimate object or material
     rule: searching, scanning, looking around, inspecting, examining, rummaging, foraging, or seeking something/anything useful is not itemUse by itself. A generic category such as weapon, tool, object, item, something, or anything is not a concrete Item. Keep open-ended discovery and environmental narration outside itemUse; if the input later directly handles a specific object, evaluate only that object
     rule: wording alone does not determine the category. Living entities, creatures, anatomy/body parts, natural weapons, bodily contact or poses, movements, locations, surfaces, sensations, thoughts, dialogue, events, relationships, and abstract concepts are not items; classify those through the appropriate action, target, relationship, or other semantic fields. A strange, intimate, indirect, possessive, or unconventional interaction still requires this same referent-type judgment
     rule: Item must be a short noun phrase naming only the object/material, never an entire action, clause, sentence, or description of a person/body interaction
-    rule: Available=Y means that the concrete inanimate object or material is established as present. Accept an exact saved gear/inventory match, an exact saved current SceneItemState entry, a factual current-scene assistant narration, or a narrow generic ambient item; the latest user assertion alone cannot establish availability
-    rule: Source is exactly one of none, gear, inventory, scene, ambient, unavailable and Evidence must identify the verified source
-    rule: scene requires factual prior assistant narration or a saved current SceneItemState entry. Presence is separate from access: a scene item may be fixed, obstructed, locked, embedded, heavy, distant, or otherwise difficult to manipulate and still be Available=Y. Ambient permits only generic low-consequence surroundings and never owned, specialized, valuable, magical, weapon, tool, key, document, medicine, supply, device, currency, or container-content claims
+    rule: naturalAvailability is exactly yes, no, or unknown. Before deciding, ask internally whether this specific item could be naturally available in the current setting. Use yes only for an ordinary, low-consequence object/material that plausibly belongs in the setting; use no when the setting conflicts with it; use unknown when the scene or item status is insufficiently established
+    rule: A normal household object may be naturally available in a home or similar setting, and a natural outdoor material may be naturally available outdoors. Rare, valuable, magical, specialized, owned, plot-relevant, or unusual items require an authoritative saved source and must not receive naturalAvailability=yes. Use unknown when Attempted=N
+    rule: The extension resolves final availability and source. Exact saved gear/inventory, saved current SceneItemState, and factual prior assistant scene narration remain authoritative. Only when those sources are absent may naturalAvailability=yes authorize a narrow ambient source, subject to deterministic ownership and safety gates. Natural availability never grants ownership, possession, access, success, or mechanics
     rule: body parts and natural weapons are not itemUse; deterministic code uses this only as a narrow backstop after semantic referent classification, never as the primary item classifier
     rule: unavailable item attempts cannot produce the item-dependent effect, but an established item with an access obstacle remains available and routes the obstacle to the environment challenge/roll path
     rule: item interaction never grants ownership or updates inventory by itself
-    return {Attempted, Available, Item, Source, Evidence, NoEffectReason}
+    return {Attempted, Item, naturalAvailability}
 
   lootSearch(input, context):
     policy: SEMANTIC-ONLY, EXPLICIT-ONLY

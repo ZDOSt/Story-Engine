@@ -216,6 +216,7 @@ function baseLedger(overrides = {}) {
       itemUse: {
         attempted: false,
         item: '(none)',
+        naturalAvailability: 'unknown',
       },
       lootSearch: {
         attempted: false,
@@ -14353,15 +14354,15 @@ const tests = [
         semanticSource.indexOf('const lootSearch = object({'),
       );
       assert.doesNotMatch(itemUseSchema, /available:|source:|evidence:|noEffectReason:/);
-      assert.match(semanticSource, /Return only the semantic referent decision: Attempted and Item/i);
+      assert.match(semanticSource, /Return only the semantic item decision: Attempted, Item, and naturalAvailability/i);
       assert.match(semanticSource, /itemUse is only for a direct user interaction with one specifically identified concrete inanimate object/i);
       assert.match(semanticSource, /Searching, scanning, looking around, inspecting, examining, rummaging, foraging, or seeking something\/anything useful is not itemUse/i);
       assert.match(semanticSource, /Generic categories such as weapon, tool, object, item, something, or anything are not concrete Item values/i);
       assert.doesNotMatch(semanticSource, /When \{\{user\}\} touches, grabs, holds, embraces, strikes/i);
       assert.match(runnerSource, /findSceneItemMatch/);
       assert.match(runnerSource, /priorAssistantSceneItemMatch/);
-      assert.match(runnerSource, /AMBIENT_ITEM_NOUNS/);
-      assert.match(semanticSource, /Return only the semantic referent decision: Attempted and Item/i);
+      assert.match(runnerSource, /AMBIENT_ITEM_BLOCKED_MODIFIERS/);
+      assert.match(semanticSource, /naturalAvailability.*yes, no, or unknown/i);
       assert.match(runnerSource, /the semantic item referent must be present in the latest user input and item availability\/evidence must be mechanically verified/i);
       assert.match(runnerSource, /latestUserInputClaimsItemPossession/);
       assert.doesNotMatch(semanticSource, /setting_affordance/);
@@ -14782,6 +14783,7 @@ const tests = [
         attempted: false,
         available: false,
         item: '(none)',
+        naturalAvailability: 'unknown',
         source: 'none',
         evidence: '(none)',
         noEffectReason: '(none)',
@@ -14830,6 +14832,7 @@ const tests = [
           available: true,
           source: 'ambient',
           evidence: 'a fallen branch at the roadside',
+          naturalAvailability: 'yes',
         }),
       });
       assert.equal(searchThenGrabBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'Y');
@@ -14845,6 +14848,7 @@ const tests = [
           available: true,
           source: 'ambient',
           evidence: 'the user wrenches the fallen branch free',
+          naturalAvailability: 'yes',
         }),
       });
       assert.equal(uncommonInteractionReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Attempted, 'Y');
@@ -15086,7 +15090,7 @@ const tests = [
 
       const ambientRockReport = runCase({
         userText: 'I pick up a small rock.',
-        ledger: itemLedger({ ...emptyItemUse(), attempted: true, available: true, item: 'small rock', source: 'scene', evidence: 'the user said it was there' }),
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, available: true, item: 'small rock', source: 'scene', evidence: 'the user said it was there', naturalAvailability: 'yes' }),
       });
       assert.equal(ambientRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'ambient');
       assert.equal(ambientRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
@@ -15095,19 +15099,80 @@ const tests = [
 
       const ambientBranchReport = runCase({
         userText: 'I grab a fallen branch.',
-        ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'fallen branch', source: 'ambient', evidence: 'ordinary fallen branch' }),
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'fallen branch', source: 'ambient', evidence: 'ordinary fallen branch', naturalAvailability: 'yes' }),
       });
       assert.equal(ambientBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'ambient');
       assert.equal(ambientBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
 
+      const apartment = {
+        reputationLocation: 'Valewick',
+        place: 'Apartment',
+        area: 'living room',
+        indoors: true,
+        positionEstablished: true,
+      };
+      const ambientRemoteReport = runCase({
+        userText: 'I pick up the remote.',
+        cardFields: { worldState: apartment },
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'remote', naturalAvailability: 'yes' }),
+      });
+      assert.equal(ambientRemoteReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'ambient');
+      assert.equal(ambientRemoteReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+
+      const forest = {
+        reputationLocation: 'Valewick outskirts',
+        place: 'Northwood',
+        area: 'forest path',
+        indoors: false,
+        positionEstablished: true,
+      };
+      const ambientForestBranchReport = runCase({
+        userText: 'I pick up a branch.',
+        cardFields: { worldState: forest },
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'branch', naturalAvailability: 'yes' }),
+      });
+      assert.equal(ambientForestBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'ambient');
+      assert.equal(ambientForestBranchReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+
+      const settingConflictReport = runCase({
+        userText: 'I pick up the remote.',
+        cardFields: { worldState: forest },
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'remote', naturalAvailability: 'no' }),
+      });
+      assert.equal(settingConflictReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+      assert.equal(settingConflictReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+
+      const unknownSettingReport = runCase({
+        userText: 'I pick up the remote.',
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'remote', naturalAvailability: 'unknown' }),
+      });
+      assert.equal(unknownSettingReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+      assert.equal(unknownSettingReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+
+      const explicitlySpecialAmbientReport = runCase({
+        userText: 'I pick up a magical phone.',
+        cardFields: { worldState: apartment },
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'magical phone', naturalAvailability: 'yes' }),
+      });
+      assert.equal(explicitlySpecialAmbientReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
+      assert.equal(explicitlySpecialAmbientReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+
+      const naturalAvailabilityDoesNotOverrideGearReport = runCase({
+        userText: 'I draw the sword from my belt.',
+        userState: { gear: ['sword'], inventory: [] },
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, item: 'sword', naturalAvailability: 'no' }),
+      });
+      assert.equal(naturalAvailabilityDoesNotOverrideGearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'gear');
+      assert.equal(naturalAvailabilityDoesNotOverrideGearReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+
       const ownedRockReport = runCase({
         userText: 'I pick up my rock.',
-        ledger: itemLedger({ ...emptyItemUse(), attempted: true, available: true, item: 'rock', source: 'ambient', evidence: 'ordinary rock' }),
+        ledger: itemLedger({ ...emptyItemUse(), attempted: true, available: true, item: 'rock', source: 'ambient', evidence: 'ordinary rock', naturalAvailability: 'yes' }),
       });
       assert.equal(ownedRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
       assert.equal(ownedRockReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'unavailable');
 
-      for (const item of ['guitar', 'iron key', 'healing potion', 'sword', 'hammer']) {
+      for (const item of ['rare guitar', 'valuable iron key', 'magical healing potion', 'special sword', 'specialized hammer', 'unusual glass', 'plot-relevant object']) {
         const forbiddenAmbientReport = runCase({
           userText: `I grab a ${item}.`,
           ledger: itemLedger({
@@ -15117,6 +15182,7 @@ const tests = [
             source: 'ambient',
             evidence: `${item} is ambient`,
             noEffectReason: '(none)',
+            naturalAvailability: 'yes',
           }),
         });
         assert.equal(forbiddenAmbientReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N', `${item} must not be ambient`);
@@ -18468,6 +18534,10 @@ const tests = [
       assert.equal(strictSemanticTool.function.parameters.properties.resolutionEngine.additionalProperties, false);
       assert.equal('turnBinding' in strictSemanticTool.function.parameters.properties, false);
       assert.deepEqual(
+        strictSemanticTool.function.parameters.properties.resolutionEngine.properties.itemUse.properties.naturalAvailability.enum,
+        ['yes', 'no', 'unknown'],
+      );
+      assert.deepEqual(
         strictSemanticTool.function.parameters.properties.powerActorEnmity
           .properties.assessments.items.properties.scope.enum,
         ['individual', 'organization', 'institution', 'group', 'unknown'],
@@ -18492,10 +18562,10 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 227,
+        leaves: 228,
         objects: 44,
         arrays: 44,
-        descriptions: 101,
+        descriptions: 102,
         incompleteRequired: 0,
       });
       assert.equal(
@@ -18597,7 +18667,7 @@ const tests = [
       };
       const structuredLedger = buildSchemaFixture(strictSemanticTool.function.parameters);
       assert.equal(validateSemanticToolArguments(structuredLedger), structuredLedger);
-      assert.deepEqual(Object.keys(structuredLedger.resolutionEngine.itemUse), ['attempted', 'item']);
+      assert.deepEqual(Object.keys(structuredLedger.resolutionEngine.itemUse), ['attempted', 'item', 'naturalAvailability']);
       assert.deepEqual(
         Object.keys(strictSemanticTool.function.parameters.properties.powerActorEnmity.properties.affiliationLinks.items.properties),
         ['grievanceId', 'powerActor', 'affiliationEvidence', 'knownToActor', 'knowledgeEvidence'],

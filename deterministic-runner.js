@@ -402,9 +402,11 @@ const POWER_ACTOR_EVENT_COOLDOWN_MS = Object.freeze({
 const USER_OWNED_ITEM_SOURCES = Object.freeze(['gear', 'inventory']);
 const AVAILABLE_ITEM_SOURCES = Object.freeze([...USER_OWNED_ITEM_SOURCES, 'scene', 'ambient']);
 const ITEM_USE_SOURCES = Object.freeze(['none', ...AVAILABLE_ITEM_SOURCES, 'unavailable']);
+const ITEM_NATURAL_AVAILABILITY = Object.freeze(['yes', 'no', 'unknown']);
 const USER_ITEM_UNAVAILABLE_REASON = 'no valid source in saved gear, saved inventory, current scene items, legacy prior scene, or permitted ambient items';
-const AMBIENT_ITEM_NOUNS = Object.freeze(new Set(['rock', 'rocks', 'stone', 'stones', 'pebble', 'pebbles', 'branch', 'branches', 'stick', 'sticks', 'twig', 'twigs', 'dirt', 'soil', 'sand', 'mud', 'leaf', 'leaves', 'snow', 'grass', 'gravel']));
-const AMBIENT_ITEM_MODIFIERS = Object.freeze(new Set(['small', 'little', 'loose', 'nearby', 'ordinary', 'plain', 'flat', 'smooth', 'rough', 'jagged', 'dry', 'fallen', 'dead', 'broken', 'single', 'handful', 'of']));
+const AMBIENT_ITEM_BLOCKED_MODIFIERS = Object.freeze(new Set([
+    'rare', 'valuable', 'precious', 'magical', 'magic', 'enchanted', 'special', 'specialized', 'unusual', 'unique', 'important', 'plot', 'relevant', 'owned', 'personal', 'named', 'stolen',
+]));
 
 function normalizeEnvironmentDifficultyForRoll(value) {
     const tier = String(value ?? '').trim().toLowerCase();
@@ -3703,6 +3705,7 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
     const semanticAttempted = bool(source.attempted ?? source.Attempted);
     const semanticAvailable = bool(source.available ?? source.Available);
     const semanticItem = String(source.item ?? source.Item ?? '').trim();
+    const semanticNaturalAvailability = normalizeItemNaturalAvailability(source.naturalAvailability ?? source.NaturalAvailability);
     const semanticSource = normalizeItemUseSource(source.source ?? source.Source);
     const semanticEvidence = String(source.evidence ?? source.Evidence ?? '').trim();
     const semanticReferentGrounded = semanticAttempted
@@ -3756,7 +3759,7 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
         ? priorAssistantSceneItemMatch(context, item, { latestOnly: currentSceneState.initialized })
         : null;
     const ambientMatch = !savedItemMatch && !savedSceneMatch && !legacySceneMatch && !ownershipClaimed
-        ? permittedAmbientItemMatch(item, latestUserText)
+        ? permittedAmbientItemMatch(item, latestUserText, semanticNaturalAvailability)
         : null;
     let itemSource = 'unavailable';
     let available = false;
@@ -3789,6 +3792,7 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
         Attempted: semanticAttempted ? 'Y' : 'N',
         Available: semanticAvailable ? 'Y' : 'N',
         Item: isReal(semanticItem) ? semanticItem : NONE,
+        NaturalAvailability: semanticNaturalAvailability,
         Source: semanticAttempted ? semanticSource : 'none',
         Evidence: semanticAttempted && isReal(semanticEvidence) ? semanticEvidence : NONE,
     };
@@ -3796,6 +3800,7 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
         Attempted: 'Y',
         Available: available ? 'Y' : 'N',
         Item: item,
+        NaturalAvailability: semanticNaturalAvailability,
         Source: itemSource,
         Evidence: evidence,
     };
@@ -3957,13 +3962,12 @@ function assistantSentenceEstablishesSceneItem(sentence, itemPattern) {
         || new RegExp(`\\b${itemPattern}\\b.{0,70}\\b${physicalVerb}\\b|\\b${physicalVerb}\\b.{0,70}\\b${itemPattern}\\b`).test(text);
 }
 
-function permittedAmbientItemMatch(item, latestUserText) {
+function permittedAmbientItemMatch(item, latestUserText, naturalAvailability = 'unknown') {
+    if (normalizeItemNaturalAvailability(naturalAvailability) !== 'yes') return null;
     if (/\bmy\b/i.test(String(latestUserText ?? '')) && latestUserInputClaimsItemPossession(item, latestUserText, null)) return null;
     const words = normalizeItemMatchText(item).split(/\s+/).filter(Boolean);
     if (!words.length) return null;
-    const noun = words[words.length - 1];
-    if (!AMBIENT_ITEM_NOUNS.has(noun)) return null;
-    if (words.slice(0, -1).some(word => !AMBIENT_ITEM_MODIFIERS.has(word))) return null;
+    if (words.some(word => AMBIENT_ITEM_BLOCKED_MODIFIERS.has(word))) return null;
     return item;
 }
 
@@ -4038,6 +4042,11 @@ function escapeRegex(value) {
 function normalizeItemUseSource(value) {
     const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
     return ITEM_USE_SOURCES.includes(text) ? text : 'unavailable';
+}
+
+function normalizeItemNaturalAvailability(value) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return ITEM_NATURAL_AVAILABILITY.includes(text) ? text : 'unknown';
 }
 
 function normalizeClaimCheckForHandoff(value = {}) {
