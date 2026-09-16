@@ -12095,9 +12095,11 @@ const tests = [
       }
       assert.match(displaySource, /trackerTabNav\(activeTab\)/);
       assert.match(displaySource, /structured-preflight-tracker-scroll-region/);
-      // Scene header keeps explicit Time/Location labels (icon + text). Two
-      // unlabelled pills both reading "Not established" was ambiguous.
-      assert.match(displaySource, /fa-clock[\s\S]*Time<\/span>[\s\S]*fa-location-dot[\s\S]*Location<\/span>/);
+      // Scene header keeps explicit Time/Location labels (icon + text), in that
+      // order. Two unlabelled pills both reading "Not established" was ambiguous.
+      assert.match(displaySource, /v2KeyValue\('Time', sceneTime, 'fa-clock'\)[\s\S]*v2KeyValue\('Location', sceneLocation, 'fa-location-dot'\)/);
+      assert.match(source, /function v2KeyValue\(label, value, icon = ''\)/);
+      assert.match(source, /\.v2-kv\.stacked \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
       assert.match(displaySource, /sceneTime/);
       assert.match(displaySource, /sceneLocation/);
       assert.doesNotMatch(displaySource, /Current scene|Current Scene/);
@@ -12206,17 +12208,29 @@ const tests = [
       assert.match(source, /function v2NpcFocusCard\(name, npc\)/);
       assert.match(source, /function v2StatCards\(core, wounds\)/);
       assert.match(source, /function v2EmptyState\(title, detail\)/);
-      assert.match(source, /function v2PresentNpcChip\(name, npc, initials, focused\)/);
-      // "Here now" lists only scene NPCs; the user's own character is covered by
-      // the persona/condition/stats section above it, so it must not be repeated
-      // as a cast chip.
-      assert.doesNotMatch(source, /v2PersonaChip/);
+      assert.match(source, /function v2PresentNpcChip\(name, npc, focused\)/);
+      assert.match(source, /function v2PersonaChip\(name, condition\)/);
+      // Pills are name-only: no avatar disc and no separate initials. Identity
+      // comes from the first letter being tinted with a per-name colour.
+      assert.match(source, /function v2StyledName\(name\)/);
+      assert.doesNotMatch(source, /v2Avatar|trackerInitial|v2-av/);
+      // Condition is the ring around the whole pill, keyed to the same tone
+      // mapping as the condition pill.
+      assert.match(source, /const V2_CONDITION_RING_CLASS = Object\.freeze\(\{[\s\S]*?good: 'ring-ok'[\s\S]*?warn: 'ring-warn'[\s\S]*?danger: 'ring-danger'/);
+      assert.match(styleSource, /\.v2-chip\.ring-ok \{[\s\S]*?border-color: color-mix\(in srgb, var\(--v2-ok\)/);
+      assert.match(styleSource, /\.v2-initial \{[\s\S]*?font-family: Georgia/);
+      assert.match(source, /<span class="v2-name"><span class="v2-initial"/);
+      // The cast list ("Here now") contains scene NPCs only. The user's own
+      // character gets a pill in their section header instead, so it is not
+      // repeated here.
+      assert.match(displaySource, /<div class="v2-cast">\$\{present\.map\(name => v2PresentNpcChip/);
+      assert.match(displaySource, /v2PersonaChip\(personaName, user\.condition\)/);
       // Overview renders them
       assert.match(displaySource, /v2Section\('Here now'\)/);
       assert.match(displaySource, /v2Section\('In focus'\)/);
       assert.match(displaySource, /v2StatCards\(userCore, trackerListCount\(user\.wounds\)\)/);
       assert.match(displaySource, /v2ConditionPill\(user\.condition\)/);
-      assert.match(displaySource, /v2PresentNpcChip\(name, npcs\[name\], trackerInitials\(name\), name === focusName\)/);
+      assert.match(displaySource, /v2PresentNpcChip\(name, npcs\[name\], name === focusName\)/);
       assert.match(displaySource, /v2NpcFocusCard\(focusName, npcs\[focusName\]\)/);
       // Clicking a "Here now" row moves the focus in place, staying on Overview.
       assert.match(source, /data-spe-tracker-focus-npc/);

@@ -7422,19 +7422,70 @@ function v2WoundPills(wounds) {
         : '<span class="v2-pill quiet">No wounds</span>';
 }
 
-// A present NPC rendered as a v2 row. Mirrors what the pre-v2 "Here now" list
-// showed — initials, name, relationship phrase, condition — and is clickable to
-// move the Overview's focus. Rendered as a <button> because the widget's
-// delegated click handler only inspects button targets.
-function v2PresentNpcChip(name, npc, initials, focused) {
+// Condition tone -> the ring drawn around the whole cast pill. 'neutral' is
+// deliberately absent: an unrecognised condition should not paint a health
+// aura, or it reads as a state the tracker never recorded.
+const V2_CONDITION_RING_CLASS = Object.freeze({
+    good: 'ring-ok',
+    warn: 'ring-warn',
+    danger: 'ring-danger',
+});
+
+// The name with its first letter set in a serif face. This replaces the avatar
+// disc: the character's identity comes from the letter itself, and the font is
+// the only difference — colour stays the name's.
+//
+// The whole name is wrapped in one element on purpose. The pill is an
+// inline-flex box with a gap, so an unwrapped letter and the following text
+// node become separate flex items and the gap splits the name ("A elemar").
+//
+// Georgia is used because it is installed essentially everywhere, so the
+// treatment renders identically on every machine. A script or decorative face
+// would depend on the viewer's OS and fall back to something worse.
+function v2StyledName(name) {
+    const text = String(name || '');
+    if (!text) return '';
+    return `<span class="v2-name"><span class="v2-initial">${escapeHtml(text.slice(0, 1))}</span>${escapeHtml(text.slice(1))}</span>`;
+}
+
+// A long value stacks under its label. In the right-hand column a wrapped value
+// is right-aligned and leaves a ragged left edge with no consistent start for
+// the eye; short values keep the compact label/value row.
+const V2_KV_STACK_LENGTH = 36;
+function v2KeyValue(label, value, icon = '') {
+    const text = String(value ?? '');
+    const iconHtml = icon ? `<i class="fa-solid ${escapeHtml(icon)}" aria-hidden="true"></i> ` : '';
+    return `
+        <div class="v2-kv${text.length > V2_KV_STACK_LENGTH ? ' stacked' : ''}">
+            <span class="k">${iconHtml}${escapeHtml(label)}</span>
+            <span class="v">${escapeHtml(text)}</span>
+        </div>`;
+}
+
+// A present NPC as a clickable cast pill: name only, first letter in that
+// character's own colour, and the pill's border carrying their condition.
+// Clicking moves the Overview's focus. The relationship phrase and condition
+// word that the pre-v2 list showed inline live on the title attribute and, in
+// full, in the "In focus" card below.
+function v2PresentNpcChip(name, npc, focused) {
     const disposition = npc?.currentDisposition;
     const classified = disposition ? classifyDisposition(disposition) : { lock: 'None', behavior: 'None' };
     const relationship = relationshipTowardUser(disposition, classified);
     const condition = formatTrackerCondition(npc?.condition);
+    const ring = V2_CONDITION_RING_CLASS[trackerConditionTone(npc?.condition)] || '';
+    const classes = ['v2-chip', focused ? 'focused' : '', ring].filter(Boolean).join(' ');
     return `
-        <button type="button" class="v2-chip here${focused ? ' focused' : ''}" data-spe-tracker-focus-npc="${escapeHtml(name)}" aria-pressed="${focused ? 'true' : 'false'}" title="${escapeHtml(`${name} — ${relationship} · ${condition}`)}">
-            <span class="v2-av">${escapeHtml(initials)}</span>${escapeHtml(name)}
+        <button type="button" class="${classes}" data-spe-tracker-focus-npc="${escapeHtml(name)}" aria-pressed="${focused ? 'true' : 'false'}" title="${escapeHtml(`${name} — ${relationship} · ${condition}`)}">
+            ${v2StyledName(name)}
         </button>`;
+}
+
+// The user's own character, shown as a pill in their section header rather than
+// in "Here now" (which lists only scene NPCs). Inert: nothing to focus.
+function v2PersonaChip(name, condition) {
+    const ring = V2_CONDITION_RING_CLASS[trackerConditionTone(condition)] || '';
+    const classes = ['v2-chip', 'pc', ring].filter(Boolean).join(' ');
+    return `<span class="${classes}">${v2StyledName(name)}</span>`;
 }
 
 // "In focus" card. Every value is a tracked field: the three disposition axes
@@ -7676,11 +7727,6 @@ function buildTrackerDisplayHtml(snapshot) {
         </div>`;
     };
 
-    const trackerInitials = value => {
-        const parts = String(value || '?').trim().split(/\s+/).filter(Boolean);
-        return (parts.length > 1 ? `${parts[0][0]}${parts[parts.length - 1][0]}` : parts[0]?.slice(0, 2) || '?').toUpperCase();
-    };
-
     const renderPanelHeader = (eyebrow, title, subtitle = '', actionHtml = '') => `
         <div class="structured-preflight-tracker-panel-head${actionHtml ? ' structured-preflight-tracker-panel-head-with-action' : ''}">
             <div class="structured-preflight-tracker-panel-copy">
@@ -7810,23 +7856,15 @@ function buildTrackerDisplayHtml(snapshot) {
         <div class="structured-preflight-tracker-tab-panel" id="structured-preflight-tracker-panel-overview" role="tabpanel" aria-labelledby="structured-preflight-tracker-tab-overview" data-spe-tracker-panel="overview">
             <section>
                 <div class="v2-card">
-                    <div class="v2-kv">
-                        <span class="k"><i class="fa-solid fa-clock" aria-hidden="true"></i> Time</span>
-                        <span class="v">${escapeHtml(sceneTime)}</span>
-                    </div>
-                    <div class="v2-kv">
-                        <span class="k"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Location</span>
-                        <span class="v">${escapeHtml(sceneLocation)}</span>
-                    </div>
-                    ${environmentSummary ? `<div class="v2-kv">
-                        <span class="k"><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> Conditions</span>
-                        <span class="v">${escapeHtml(environmentSummary)}</span>
-                    </div>` : ''}
+                    ${v2KeyValue('Time', sceneTime, 'fa-clock')}
+                    ${v2KeyValue('Location', sceneLocation, 'fa-location-dot')}
+                    ${environmentSummary ? v2KeyValue('Conditions', environmentSummary, 'fa-cloud-sun') : ''}
                 </div>
             </section>
             <section>
                 <div class="v2-secrow">
-                    ${v2Section(personaName)}
+                    ${v2PersonaChip(personaName, user.condition)}
+                    <span class="v2-secrule" aria-hidden="true"></span>
                     ${v2ConditionPill(user.condition)}
                 </div>
                 <div class="v2-card">
@@ -7839,7 +7877,7 @@ function buildTrackerDisplayHtml(snapshot) {
                     <span class="v2-secnote">${escapeHtml(`${present.length} present`)}</span>
                 </div>
                 ${present.length
-                    ? `<div class="v2-cast">${present.map(name => v2PresentNpcChip(name, npcs[name], trackerInitials(name), name === focusName)).join('')}</div>`
+                    ? `<div class="v2-cast">${present.map(name => v2PresentNpcChip(name, npcs[name], name === focusName)).join('')}</div>`
                     : v2EmptyState('No NPCs are present')}
             </section>
             <section>
@@ -9705,6 +9743,13 @@ function ensureTrackerDisplayStyles() {
             flex: 1;
             margin-bottom: 0;
         }
+        /* Same rule line as .v2-sec::after, for section rows whose label is a
+           chip instead of an uppercase heading (the user's own section). */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-secrule {
+            flex: 1;
+            height: 1px;
+            background: var(--v2-bds);
+        }
         #${TRACKER_WIDGET_PANEL_ID} .v2-secnote {
             flex: 0 0 auto;
             color: var(--v2-faint);
@@ -9713,6 +9758,8 @@ function ensureTrackerDisplayStyles() {
         }
         /* Cast chips: who is in the scene. NPC chips are <button>s that move the
            Overview's focus; the persona chip is inert. */
+        /* Cast pills: who is in the scene. NPC pills are <button>s that move the
+           Overview's focus; the persona pill is inert. */
         #${TRACKER_WIDGET_PANEL_ID} .v2-cast {
             display: flex;
             flex-wrap: wrap;
@@ -9722,7 +9769,7 @@ function ensureTrackerDisplayStyles() {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 4px 10px 4px 5px;
+            padding: 4px 11px;
             border: 1px solid var(--v2-bd);
             border-radius: 999px;
             background: var(--v2-card);
@@ -9734,28 +9781,32 @@ function ensureTrackerDisplayStyles() {
             white-space: nowrap;
             cursor: pointer;
         }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.here {
-            border-color: color-mix(in srgb, var(--v2-ok) 42%, var(--v2-bd));
+        /* The first letter carries the character's own stable colour; identity
+           without an avatar disc. */
+        /* Serif initial against the sans name. Colour is inherited so the font
+           is the only difference; Georgia is near-universally installed. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-initial {
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: 14px;
+            font-weight: 700;
         }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.here:hover {
-            border-color: color-mix(in srgb, var(--v2-accent) 48%, var(--v2-bd));
+        /* Condition is the pill's ring, all the way around. Presence needs no
+           marker — everyone listed is in the scene by definition. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.ring-ok {
+            border-color: color-mix(in srgb, var(--v2-ok) 58%, var(--v2-bd));
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.ring-warn {
+            border-color: color-mix(in srgb, var(--v2-warn) 64%, var(--v2-bd));
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.ring-danger {
+            border-color: color-mix(in srgb, var(--v2-danger) 70%, var(--v2-bd));
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip:hover {
             background: color-mix(in srgb, var(--v2-accent) 8%, var(--v2-card));
         }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.here.focused {
-            border-color: color-mix(in srgb, var(--v2-accent) 62%, var(--v2-bd));
-            background: color-mix(in srgb, var(--v2-accent) 13%, var(--v2-card));
-        }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-av {
-            display: grid;
-            place-items: center;
-            flex: 0 0 auto;
-            width: 17px;
-            height: 17px;
-            border-radius: 50%;
-            background: var(--v2-neutral);
-            color: #111;
-            font-size: 9px;
-            font-weight: 800;
+        /* Focus reads as the fill, so it never fights the ring for the border. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.focused {
+            background: color-mix(in srgb, var(--v2-accent) 14%, var(--v2-card));
         }
         /* Inline text line used for physical state / relationship phrasing. */
         #${TRACKER_WIDGET_PANEL_ID} .v2-rel {
@@ -10068,6 +10119,17 @@ function ensureTrackerDisplayStyles() {
             font-weight: 600;
             text-align: right;
             overflow-wrap: anywhere;
+        }
+        /* Long value: drop the value onto its own line and align it left. Kept
+           right-aligned, a wrapped value leaves a ragged left edge with no
+           consistent start for the eye (first seen on a long scene location). */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-kv.stacked {
+            grid-template-columns: minmax(0, 1fr);
+            align-items: start;
+            gap: 3px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-kv.stacked .v {
+            text-align: left;
         }
         #${TRACKER_WIDGET_PANEL_ID} .v2-fields.spaced {
             margin-top: 10px;
