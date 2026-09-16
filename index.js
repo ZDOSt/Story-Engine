@@ -7183,25 +7183,15 @@ function formatTrackerList(items) {
     return list.length ? list.join('; ') : 'None';
 }
 
-function trackerDetailTone(label) {
-    const key = String(label || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    const known = new Set(['gear', 'inventory', 'currency', 'abilities', 'spells']);
-    return known.has(key) ? key : 'neutral';
-}
-
 function trackerDetailLine(label, value, options = {}) {
     const text = Array.isArray(value)
         ? formatTrackerList(value)
         : String(value ?? '').trim();
     const display = text || 'None';
     if (!options.showEmpty && display === 'None') return '';
-    const tone = trackerDetailTone(label);
     return `
         <div class="structured-preflight-tracker-detail">
-            <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(tone)}">${escapeHtml(label)}</span>
+            <span class="structured-preflight-tracker-detail-label">${escapeHtml(label)}</span>
             <span class="structured-preflight-tracker-detail-value">${escapeHtml(display)}</span>
         </div>`;
 }
@@ -7217,7 +7207,7 @@ function trackerEditableUserItemList(label, field, value) {
         : '<div class="structured-preflight-tracker-muted" data-spe-tracker-empty-list>No items</div>';
     return `
         <div class="structured-preflight-tracker-detail structured-preflight-tracker-edit-list" data-spe-tracker-list="${escapeHtml(field)}">
-            <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(trackerDetailTone(label))}">${escapeHtml(label)}</span>
+            <span class="structured-preflight-tracker-detail-label v2-sec">${escapeHtml(label)}</span>
             <div class="structured-preflight-tracker-edit-rows" data-spe-tracker-list-rows="${escapeHtml(field)}">${rows}</div>
             <div class="structured-preflight-tracker-edit-add-row">
                 <input class="text_pole structured-preflight-tracker-edit-input" data-spe-tracker-add-input="${escapeHtml(field)}" placeholder="Add ${escapeHtml(label.toLowerCase())} item" spellcheck="false">
@@ -7317,7 +7307,7 @@ function trackerDisplayItemList(label, value, options = {}) {
         : `<div class="structured-preflight-tracker-muted structured-preflight-tracker-item-empty">${escapeHtml(options.empty || 'None')}</div>`;
     return `
         <div class="structured-preflight-tracker-item-list">
-            <div class="structured-preflight-tracker-item-list-label structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(trackerDetailTone(label))}">${escapeHtml(label)}</div>
+            <div class="structured-preflight-tracker-item-list-label structured-preflight-tracker-detail-label v2-sec">${escapeHtml(label)}</div>
             <div class="structured-preflight-tracker-item-rows">${rows}</div>
         </div>`;
 }
@@ -7685,10 +7675,14 @@ function buildTrackerDisplayHtml(snapshot) {
             <div class="structured-preflight-tracker-edit-actions">
                 <button class="menu_button structured-preflight-tracker-edit-toggle" type="button" data-spe-tracker-edit-user-items title="Edit inventory and gear"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>Edit items</span></button>
             </div>`;
+    // Order and labels must mirror renderInventoryPanel's read-only view:
+    // Currency, Gear, Carried. This list previously read Inventory, Gear — so
+    // entering Edit mode renamed a section and swapped two of them. The field
+    // key stays 'inventory' because that is what the edit handlers bind to.
     const userGearInventoryHtml = [
         trackerDisplayItemList('Currency', user.currency, { empty: 'No currency tracked' }),
-        trackerEditableUserItemList('Inventory', 'inventory', user.inventory),
         trackerEditableUserItemList('Gear', 'gear', user.gear),
+        trackerEditableUserItemList('Carried', 'inventory', user.inventory),
     ].join('');
 
     const personaEntryDescription = entry => {
@@ -7706,7 +7700,7 @@ function buildTrackerDisplayHtml(snapshot) {
 
     const renderPersonaEntries = (label, entries, emptyText) => `
         <div class="structured-preflight-tracker-power-group">
-            <div class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(trackerDetailTone(label))} v2-sec">${escapeHtml(label)}</div>
+            <div class="structured-preflight-tracker-detail-label v2-sec">${escapeHtml(label)}</div>
             <div class="structured-preflight-tracker-power-list v2-rows">
                 ${entries.length ? entries.map(entry => {
                     const description = personaEntryDescription(entry);
@@ -7954,7 +7948,7 @@ function buildTrackerDisplayHtml(snapshot) {
                     ${relationshipRows}
                     <div class="structured-preflight-tracker-detail-grid structured-preflight-tracker-detail-grid-compact">
                         <div class="structured-preflight-tracker-detail structured-preflight-tracker-detail-wide">
-                            <span class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-personality">Personality</span>
+                            <span class="structured-preflight-tracker-detail-label">Personality</span>
                             <span class="structured-preflight-tracker-detail-value">${escapeHtml(boundCompanionNpc?.personalitySummary || 'Developing')}</span>
                         </div>
                         ${voiceLine}
@@ -9110,27 +9104,6 @@ function ensureTrackerDisplayStyles() {
             line-height: 1.1;
             text-transform: uppercase;
             white-space: nowrap;
-        }
-        .structured-preflight-tracker-detail-label-personality {
-            background: #5b4a7a;
-        }
-        .structured-preflight-tracker-detail-label-gear {
-            background: #73521d;
-        }
-        .structured-preflight-tracker-detail-label-inventory {
-            background: #1d6c65;
-        }
-        .structured-preflight-tracker-detail-label-currency {
-            background: #486b39;
-        }
-        .structured-preflight-tracker-detail-label-abilities {
-            background: #1f6578;
-        }
-        .structured-preflight-tracker-detail-label-spells {
-            background: #6a4b8a;
-        }
-        .structured-preflight-tracker-detail-label-neutral {
-            background: color-mix(in srgb, var(--SmartThemeBodyColor, #eee) 20%, transparent);
         }
         .structured-preflight-tracker-detail-value {
             min-width: 0;
@@ -10459,6 +10432,15 @@ function ensureTrackerDisplayStyles() {
             font-weight: 700;
             letter-spacing: 0.07em;
             text-transform: uppercase;
+            /* The base rule gives this label a chip shape and the tone variants
+               paint it a solid colour. Every use in this panel is a plain field
+               label, so neutralise the chip here rather than relying on each
+               call site remembering to carry v2-sec. */
+            padding: 0;
+            border-radius: 0;
+            background: transparent;
+            min-height: 0;
+            justify-content: flex-start;
         }
         #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-detail-value {
             color: var(--v2-dim);
