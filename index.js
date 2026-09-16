@@ -7128,7 +7128,7 @@ function trackerEditableUserItemList(label, field, value) {
         </div>`;
 }
 
-const TRACKER_WIDGET_TABS = Object.freeze(['overview', 'character', 'npcs', 'inventory', 'threads']);
+const TRACKER_WIDGET_TABS = Object.freeze(['overview', 'character', 'inventory', 'threads', 'npcs']);
 
 function normalizeTrackerWidgetTab(value) {
     return TRACKER_WIDGET_TABS.includes(value) ? value : 'overview';
@@ -7147,7 +7147,7 @@ function trackerTabButton(id, label, icon, activeTab) {
     return `
         <button class="structured-preflight-tracker-tab structured-preflight-tracker-tab-${escapeHtml(id)}${active ? ' structured-preflight-tracker-tab-active' : ''}" type="button" role="tab" id="structured-preflight-tracker-tab-${escapeHtml(id)}" aria-controls="structured-preflight-tracker-panel-${escapeHtml(id)}" data-spe-tracker-tab="${escapeHtml(id)}" aria-selected="${active ? 'true' : 'false'}" tabindex="${active ? '0' : '-1'}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">
             <i class="fa-solid ${escapeHtml(icon)}" aria-hidden="true"></i>
-            <span class="structured-preflight-tracker-sr-only">${escapeHtml(label)}</span>
+            <span class="structured-preflight-tracker-tab-label">${escapeHtml(label)}</span>
         </button>`;
 }
 
@@ -7156,9 +7156,9 @@ function trackerTabNav(activeTab) {
         <div class="structured-preflight-tracker-tabs" role="tablist" aria-label="Tracker sections">
             ${trackerTabButton('overview', 'Overview', 'fa-table-columns', activeTab)}
             ${trackerTabButton('character', 'Character', 'fa-user', activeTab)}
-            ${trackerTabButton('npcs', 'NPCs', 'fa-users', activeTab)}
             ${trackerTabButton('inventory', 'Inventory', 'fa-box-open', activeTab)}
             ${trackerTabButton('threads', 'Threads', 'fa-list-check', activeTab)}
+            ${trackerTabButton('npcs', 'NPCs', 'fa-users', activeTab)}
         </div>`;
 }
 
@@ -7314,6 +7314,159 @@ function relationshipTowardUser(disposition, classified) {
 
 
 
+/* ---------------------------------------------------------------------------
+   Tracker v2 presentation helpers.
+
+   Module scope (rather than nested inside buildTrackerDisplayHtml) so the
+   panel renderers share one definition.
+
+   PRESENTATION ONLY. Every value rendered here comes from the tracker
+   snapshot exactly as the pre-v2 panels rendered it. No field is added,
+   derived, or reinterpreted: the disposition axes show their raw 1-4 values
+   and v2 does not invent descriptive wording for them.
+   --------------------------------------------------------------------------- */
+
+// trackerConditionTone() speaks in good/warn/danger/neutral; the v2 pills use
+// ok/warn/danger/quiet. This is the only place the two vocabularies meet.
+const V2_CONDITION_TONE_CLASS = Object.freeze({
+    good: 'ok',
+    warn: 'warn',
+    danger: 'danger',
+    neutral: 'quiet',
+});
+
+function v2Section(title) {
+    return `<div class="v2-sec">${escapeHtml(title)}</div>`;
+}
+
+function v2Pips(value) {
+    const level = Math.max(0, Math.min(4, Math.floor(Number(value) || 0)));
+    const pips = Array.from({ length: 4 }, (_, index) => `<i class="v2-pip${index < level ? ' on' : ''}"></i>`).join('');
+    return `<div class="v2-pips">${pips}</div>`;
+}
+
+function v2Meter(value, max = 5) {
+    const level = Math.max(0, Math.min(max, Math.floor(Number(value) || 0)));
+    const cells = Array.from({ length: max }, (_, index) => `<i class="${index < level ? 'on' : ''}"></i>`).join('');
+    return `<span class="v2-meter">${cells}</span>`;
+}
+
+function v2ConditionPill(condition) {
+    const tone = V2_CONDITION_TONE_CLASS[trackerConditionTone(condition)] || 'quiet';
+    const icon = tone === 'ok' ? '&#9829;' : tone === 'danger' ? '&#10013;' : '&#10010;';
+    // The pre-v2 trackerChip() drew an explicit "Condition" label above the
+    // value; keep that word so the pill is self-describing.
+    return `<span class="v2-pill ${tone}"><span class="v2-pill-label">Condition</span>${icon} ${escapeHtml(formatTrackerCondition(condition))}</span>`;
+}
+
+// Segmented progress bar. The pre-v2 Advancement bar was a continuous width;
+// this draws ten cells so it reads like the disposition pips.
+//
+// The mapping is exact, which is why floor() is safe here: PROGRESSION_XP_AWARDS
+// is {10, 20, 30}, and milestone sources are drawn from a 100-point budget by
+// subtracting whole tens (selectProgressionMilestoneSourceRecords), so
+// progressionXp is always a multiple of 10. There are no partial tenths to lose.
+// test-behavior.mjs asserts that invariant, because this bar relies on it.
+function v2SegmentedBar(value, max, label, segments = 10) {
+    const total = Math.max(1, Math.floor(segments));
+    const perCell = (Number(max) || 0) / total;
+    const filled = perCell > 0
+        ? Math.max(0, Math.min(total, Math.floor((Number(value) || 0) / perCell)))
+        : 0;
+    const cells = Array.from({ length: total }, (_, index) => `<i class="${index < filled ? 'on' : ''}"></i>`).join('');
+    return `<div class="v2-progress segmented" role="img" aria-label="${escapeHtml(label)}">${cells}</div>`;
+}
+
+function v2EmptyState(title, detail) {
+    return `
+        <div class="v2-empty">
+            <div class="t">${escapeHtml(title)}</div>
+            ${detail ? `<div>${escapeHtml(detail)}</div>` : ''}
+        </div>`;
+}
+
+// Renders one disposition axis. The displayed number is the RAW tracker value,
+// exactly as the pre-v2 trackerMetric() tiles showed it (`disposition?.B ?? '-'`)
+// — only the pips clamp, since they need a 0-4 range to draw.
+function v2Axis(kind, label, value, locked) {
+    const known = value !== null && value !== undefined && value !== '';
+    const level = known ? Math.max(0, Math.min(4, Math.floor(Number(value) || 0))) : 0;
+    const hot = level >= 3;
+    return `
+        <div class="v2-axis ${kind}${hot ? ' hot' : ''}${locked ? ' locked' : ''}">
+            <div class="lb">${escapeHtml(label)}</div>
+            ${v2Pips(level)}
+            <div class="wd">${escapeHtml(known ? String(value) : '-')}</div>
+        </div>`;
+}
+
+// Core stat cards. The pre-v2 Overview showed a fourth "Wounds" tile alongside
+// PHY/MND/CHA, so it is opt-in via the extra argument rather than baked in.
+function v2StatCards(core, wounds) {
+    const hasWounds = wounds !== undefined;
+    return `
+        <div class="v2-stats${hasWounds ? ' four' : ''}">
+            <div class="v2-stat phy"><div class="n">${escapeHtml(String(core?.PHY ?? '-'))}</div><div class="l">PHY</div></div>
+            <div class="v2-stat mnd"><div class="n">${escapeHtml(String(core?.MND ?? '-'))}</div><div class="l">MND</div></div>
+            <div class="v2-stat cha"><div class="n">${escapeHtml(String(core?.CHA ?? '-'))}</div><div class="l">CHA</div></div>
+            ${hasWounds ? `<div class="v2-stat plain"><div class="n">${escapeHtml(String(wounds))}</div><div class="l">Wounds</div></div>` : ''}
+        </div>`;
+}
+
+// The tracker stores personality as "temperament: a, b; speech: ...; ...".
+// The chips show the temperament clause only, same as the approved mockup.
+function v2WoundPills(wounds) {
+    const list = (Array.isArray(wounds) ? wounds : []).filter(Boolean);
+    return list.length
+        ? list.map(wound => `<span class="v2-pill warn">${escapeHtml(wound)}</span>`).join('')
+        : '<span class="v2-pill quiet">No wounds</span>';
+}
+
+// A present NPC rendered as a v2 row. Mirrors what the pre-v2 "Here now" list
+// showed — initials, name, relationship phrase, condition — and is clickable to
+// move the Overview's focus. Rendered as a <button> because the widget's
+// delegated click handler only inspects button targets.
+function v2PresentNpcChip(name, npc, initials, focused) {
+    const disposition = npc?.currentDisposition;
+    const classified = disposition ? classifyDisposition(disposition) : { lock: 'None', behavior: 'None' };
+    const relationship = relationshipTowardUser(disposition, classified);
+    const condition = formatTrackerCondition(npc?.condition);
+    return `
+        <button type="button" class="v2-chip here${focused ? ' focused' : ''}" data-spe-tracker-focus-npc="${escapeHtml(name)}" aria-pressed="${focused ? 'true' : 'false'}" title="${escapeHtml(`${name} — ${relationship} · ${condition}`)}">
+            <span class="v2-av">${escapeHtml(initials)}</span>${escapeHtml(name)}
+        </button>`;
+}
+
+// "In focus" card. Every value is a tracked field: the three disposition axes
+// at their raw 1-4 values, rapport, condition and wounds. No derived wording
+// and no fields the tracker does not hold.
+function v2NpcFocusCard(name, npc) {
+    const disposition = npc?.currentDisposition;
+    const classified = disposition ? classifyDisposition(disposition) : { lock: 'None', behavior: 'None' };
+    const lock = classified.lock && classified.lock !== 'None' ? classified.lock : '';
+    return `
+        <div class="v2-card focus">
+            <div class="v2-chead">
+                <span class="nm">${escapeHtml(name)}</span>
+                <span class="sub">${escapeHtml(relationshipTowardUser(disposition, classified))}</span>
+            </div>
+            <div class="v2-triad">
+                ${v2Axis('bond', 'Bond', disposition?.B, false)}
+                ${v2Axis('fear', 'Fear', disposition?.F, lock === 'TERROR' || lock === 'FREEZE')}
+                ${v2Axis('host', 'Hostility', disposition?.H, lock === 'HATRED' || lock === 'FREEZE')}
+            </div>
+            <div class="v2-mrow">
+                <span class="k">Rapport</span>
+                ${v2Meter(Math.floor(Number(npc?.currentRapport) || 0))}
+                <span class="v">${escapeHtml(`${npc?.currentRapport}/5`)}</span>
+            </div>
+            <div class="v2-pills">
+                ${v2ConditionPill(npc?.condition)}
+                ${v2WoundPills(npc?.wounds)}
+            </div>
+        </div>`;
+}
+
 function buildTrackerDisplayHtml(snapshot) {
     const npcs = normalizeDisplayTrackerNpcs(snapshot?.npcs);
     const visibleNames = new Set(Array.isArray(snapshot?.visibleNpcNames)
@@ -7387,16 +7540,16 @@ function buildTrackerDisplayHtml(snapshot) {
 
     const renderPersonaEntries = (label, entries, emptyText) => `
         <div class="structured-preflight-tracker-power-group">
-            <div class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(trackerDetailTone(label))}">${escapeHtml(label)}</div>
-            <div class="structured-preflight-tracker-power-list">
+            <div class="structured-preflight-tracker-detail-label structured-preflight-tracker-detail-label-${escapeHtml(trackerDetailTone(label))} v2-sec">${escapeHtml(label)}</div>
+            <div class="structured-preflight-tracker-power-list v2-rows">
                 ${entries.length ? entries.map(entry => {
                     const description = personaEntryDescription(entry);
                     return `
-                        <div class="structured-preflight-tracker-power-entry">
+                        <div class="structured-preflight-tracker-power-entry v2-card">
                             <strong>${escapeHtml(entry?.name || label)}</strong>
-                            ${description ? `<span>${escapeHtml(description)}</span>` : ''}
+                            ${description ? `<span class="v2-summary">${escapeHtml(description)}</span>` : ''}
                         </div>`;
-                }).join('') : `<div class="structured-preflight-tracker-muted">${escapeHtml(emptyText)}</div>`}
+                }).join('') : `<div class="structured-preflight-tracker-muted v2-empty"><div class="t">${escapeHtml(emptyText)}</div></div>`}
             </div>
         </div>`;
 
@@ -7514,14 +7667,6 @@ function buildTrackerDisplayHtml(snapshot) {
     const environmentSummary = [knownWorldValue(worldDisplay.indoors), knownWorldValue(worldDisplay.weather)]
         .filter(Boolean)
         .join(' · ');
-    const progressionPercent = Math.max(0, Math.min(100, Math.round((progressionXp / PROGRESSION_MILESTONE_XP) * 100)));
-
-    const trackerMetric = (label, value) => `
-        <div class="structured-preflight-tracker-metric">
-            <span>${escapeHtml(label)}</span>
-            <strong>${escapeHtml(value)}</strong>
-        </div>`;
-
     const trackerField = (label, value, options = {}) => {
         const displayValue = value == null || String(value).trim() === '' ? 'None' : String(value);
         return `
@@ -7546,20 +7691,20 @@ function buildTrackerDisplayHtml(snapshot) {
             ${actionHtml}
         </div>`;
 
-    const renderEmpty = text => `<div class="structured-preflight-tracker-empty structured-preflight-tracker-empty-block">${escapeHtml(text)}</div>`;
+    const renderEmpty = text => `<div class="structured-preflight-tracker-empty structured-preflight-tracker-empty-block v2-empty"><div class="t">${escapeHtml(text)}</div></div>`;
 
     const renderSectionTitle = (label, icon, tone = '') => `
-        <div class="structured-preflight-tracker-heading structured-preflight-tracker-section-title${tone ? ` structured-preflight-tracker-section-title-${escapeHtml(tone)}` : ''}">
+        <div class="structured-preflight-tracker-heading structured-preflight-tracker-section-title${tone ? ` structured-preflight-tracker-section-title-${escapeHtml(tone)}` : ''} v2-sec">
             <i class="fa-solid ${escapeHtml(icon)}" aria-hidden="true"></i>
             <span>${escapeHtml(label)}</span>
         </div>`;
 
     const renderQualityRows = (records, emptyText) => {
         if (!records.length) return renderEmpty(emptyText);
-        return `<div class="structured-preflight-tracker-quality-list">${records.map(record => `
-            <div class="structured-preflight-tracker-quality-row" title="${escapeHtml(record.item)}">
-                <strong>${escapeHtml(record.displayName)}</strong>
-                <span class="structured-preflight-tracker-quality">${escapeHtml(formatTrackerItemQuality(record.tier))}</span>
+        return `<div class="structured-preflight-tracker-quality-list v2-rows">${records.map(record => `
+            <div class="structured-preflight-tracker-quality-row v2-row" title="${escapeHtml(record.item)}">
+                <strong class="nm">${escapeHtml(record.displayName)}</strong>
+                <span class="structured-preflight-tracker-quality val">${escapeHtml(formatTrackerItemQuality(record.tier))}</span>
             </div>`).join('')}</div>`;
     };
 
@@ -7585,13 +7730,11 @@ function buildTrackerDisplayHtml(snapshot) {
         const limit = Number.isFinite(options.limit) ? options.limit : entries.length;
         const rows = entries.slice(0, limit);
         if (!rows.length) return renderEmpty(options.empty || 'No active tasks or commitments');
-        return `<div class="structured-preflight-tracker-plain-list">${rows.map(entry => `
-            <div class="structured-preflight-tracker-plain-row">
-                <span class="structured-preflight-tracker-list-copy">
-                    <strong>${escapeHtml(entry.item)}</strong>
-                    <small>${escapeHtml(entry.type)}</small>
-                </span>
-                <span class="structured-preflight-tracker-row-status">Open</span>
+        return `<div class="structured-preflight-tracker-plain-list v2-rows">${rows.map(entry => `
+            <div class="structured-preflight-tracker-plain-row v2-row">
+                <span class="tag">${escapeHtml(entry.type)}</span>
+                <span class="structured-preflight-tracker-list-copy nm">${escapeHtml(entry.item)}</span>
+                <span class="structured-preflight-tracker-row-status val">Open</span>
             </div>`).join('')}</div>`;
     };
 
@@ -7601,10 +7744,10 @@ function buildTrackerDisplayHtml(snapshot) {
             ? 'No visible tracker changes since the previous response'
             : 'No earlier tracker snapshot is available for comparison';
         if (!rows.length) return renderEmpty(emptyText);
-        return `<div class="structured-preflight-tracker-change-list">${rows.map(item => `
-            <div class="structured-preflight-tracker-change-row">
+        return `<div class="structured-preflight-tracker-change-list v2-rows">${rows.map(item => `
+            <div class="structured-preflight-tracker-change-row v2-row">
                 <span class="structured-preflight-tracker-change-mark" aria-hidden="true"></span>
-                <span>${escapeHtml(item)}</span>
+                <span class="nm">${escapeHtml(item)}</span>
             </div>`).join('')}</div>`;
     };
 
@@ -7659,59 +7802,58 @@ function buildTrackerDisplayHtml(snapshot) {
             </details>`;
     };
 
-    const renderOverviewPanel = () => `
+    const renderOverviewPanel = () => {
+        // "In focus" follows the widget's selected NPC, but only while that NPC is
+        // actually in the scene; otherwise it falls back to the first present NPC.
+        const focusName = present.includes(selectedNpcName) ? selectedNpcName : (present[0] || '');
+        return `
         <div class="structured-preflight-tracker-tab-panel" id="structured-preflight-tracker-panel-overview" role="tabpanel" aria-labelledby="structured-preflight-tracker-tab-overview" data-spe-tracker-panel="overview">
-            <div class="structured-preflight-tracker-panel-head structured-preflight-tracker-panel-head-simple">
-                <span class="structured-preflight-tracker-eyebrow">Overview</span>
-            </div>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-world-summary">
-                <div class="structured-preflight-tracker-scene-field">
-                    <span>Time</span>
-                    <strong>${escapeHtml(sceneTime)}</strong>
-                </div>
-                <div class="structured-preflight-tracker-scene-field">
-                    <span>Location</span>
-                    <strong>${escapeHtml(sceneLocation)}</strong>
-                </div>
-                ${environmentSummary ? `<div class="structured-preflight-tracker-subtle">${escapeHtml(environmentSummary)}</div>` : ''}
-            </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                <div class="structured-preflight-tracker-section-head">
-                    <div class="structured-preflight-tracker-title structured-preflight-tracker-name-player">${escapeHtml(personaName)}</div>
-                    ${trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition))}
-                </div>
-                <div class="structured-preflight-tracker-metric-grid">
-                    ${trackerMetric('PHY', userCore?.PHY ?? '-')}
-                    ${trackerMetric('MND', userCore?.MND ?? '-')}
-                    ${trackerMetric('CHA', userCore?.CHA ?? '-')}
-                    ${trackerMetric('Wounds', trackerListCount(user.wounds))}
+            <section>
+                <div class="v2-card">
+                    <div class="v2-kv">
+                        <span class="k"><i class="fa-solid fa-clock" aria-hidden="true"></i> Time</span>
+                        <span class="v">${escapeHtml(sceneTime)}</span>
+                    </div>
+                    <div class="v2-kv">
+                        <span class="k"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Location</span>
+                        <span class="v">${escapeHtml(sceneLocation)}</span>
+                    </div>
+                    ${environmentSummary ? `<div class="v2-kv">
+                        <span class="k"><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> Conditions</span>
+                        <span class="v">${escapeHtml(environmentSummary)}</span>
+                    </div>` : ''}
                 </div>
             </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                <div class="structured-preflight-tracker-section-head">
-                    ${renderSectionTitle('Here now', 'fa-location-dot', 'overview')}
-                    <span class="structured-preflight-tracker-subtle">${escapeHtml(`${present.length} present`)}</span>
+            <section>
+                <div class="v2-secrow">
+                    ${v2Section(personaName)}
+                    ${v2ConditionPill(user.condition)}
                 </div>
-                ${present.length ? `<div class="structured-preflight-tracker-plain-list">${present.map(name => {
-                    const entry = npcs[name];
-                    const disposition = entry.currentDisposition;
-                    const classified = disposition ? classifyDisposition(disposition) : { lock: 'None', behavior: 'None' };
-                    return `
-                        <div class="structured-preflight-tracker-plain-row">
-                            <span class="structured-preflight-tracker-avatar">${escapeHtml(trackerInitials(name))}</span>
-                            <span class="structured-preflight-tracker-list-copy">
-                                <strong>${escapeHtml(name)}</strong>
-                                <small>${escapeHtml(relationshipTowardUser(disposition, classified))}</small>
-                            </span>
-                            <span class="structured-preflight-tracker-row-status">${escapeHtml(formatTrackerCondition(entry.condition))}</span>
-                        </div>`;
-                }).join('')}</div>` : renderEmpty('No NPCs are present')}
+                <div class="v2-card">
+                    ${v2StatCards(userCore, trackerListCount(user.wounds))}
+                </div>
             </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                ${renderSectionTitle('Open threads', 'fa-list-check', 'threads')}
+            <section>
+                <div class="v2-secrow">
+                    ${v2Section('Here now')}
+                    <span class="v2-secnote">${escapeHtml(`${present.length} present`)}</span>
+                </div>
+                ${present.length
+                    ? `<div class="v2-cast">${present.map(name => v2PresentNpcChip(name, npcs[name], trackerInitials(name), name === focusName)).join('')}</div>`
+                    : v2EmptyState('No NPCs are present')}
+            </section>
+            <section>
+                ${v2Section('In focus')}
+                ${focusName
+                    ? v2NpcFocusCard(focusName, npcs[focusName])
+                    : v2EmptyState('No one in focus', 'Present characters appear here')}
+            </section>
+            <section>
+                ${v2Section('Open threads')}
                 ${renderThreadRows(openThreads, { limit: 5 })}
             </section>
         </div>`;
+    };
 
     const renderCharacterPanel = () => `
         <div class="structured-preflight-tracker-tab-panel" id="structured-preflight-tracker-panel-character" role="tabpanel" aria-labelledby="structured-preflight-tracker-tab-character" data-spe-tracker-panel="character">
@@ -7719,36 +7861,41 @@ function buildTrackerDisplayHtml(snapshot) {
                 'Character',
                 personaName,
                 formatPhysicalState(user),
-                trackerChip('Condition', formatTrackerCondition(user.condition), trackerConditionTone(user.condition)),
+                v2ConditionPill(user.condition),
             )}
-            <section class="structured-preflight-tracker-dashboard-section">
+            <section>
                 ${renderSectionTitle('Core stats', 'fa-chart-column', 'character')}
-                <div class="structured-preflight-tracker-metric-grid structured-preflight-tracker-metric-grid-three">
-                    ${trackerMetric('PHY', userCore?.PHY ?? '-')}
-                    ${trackerMetric('MND', userCore?.MND ?? '-')}
-                    ${trackerMetric('CHA', userCore?.CHA ?? '-')}
+                <div class="v2-card">
+                    ${v2StatCards(userCore)}
                 </div>
             </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
+            <section>
                 ${renderSectionTitle('Physical state', 'fa-heart-pulse', 'character')}
-                <div class="structured-preflight-tracker-field-grid">
-                    ${trackerField('Wounds', formatTrackerList(user.wounds), { wide: true })}
-                    ${trackerField('Status effects', formatTrackerList(user.statusEffects), { wide: true })}
+                <div class="v2-card">
+                    <div class="v2-kv">
+                        <span class="k">Wounds</span>
+                        <span class="v">${escapeHtml(formatTrackerList(user.wounds))}</span>
+                    </div>
+                    <div class="v2-kv">
+                        <span class="k">Status effects</span>
+                        <span class="v">${escapeHtml(formatTrackerList(user.statusEffects))}</span>
+                    </div>
                 </div>
             </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
+            <section>
                 ${renderPersonaEntries('Abilities', abilities, 'No ability recorded')}
             </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
+            <section>
                 ${renderPersonaEntries('Spells', spells, 'No spells recorded')}
             </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                <div class="structured-preflight-tracker-section-head">
-                    ${renderSectionTitle('Advancement', 'fa-arrow-trend-up', 'character')}
-                    <strong>${escapeHtml(progressionEnabled ? (progressionReady ? 'Choice ready' : `${progressionXp}/${PROGRESSION_MILESTONE_XP}`) : 'Disabled')}</strong>
-                </div>
-                <div class="structured-preflight-tracker-progress" aria-label="Advancement progress">
-                    <span style="width: ${escapeHtml(progressionEnabled ? progressionPercent : 0)}%"></span>
+            <section>
+                ${renderSectionTitle('Advancement', 'fa-arrow-trend-up', 'character')}
+                <div class="v2-card">
+                    <div class="v2-kv">
+                        <span class="k">Progress</span>
+                        <span class="v">${escapeHtml(progressionEnabled ? (progressionReady ? 'Choice ready' : `${progressionXp}/${PROGRESSION_MILESTONE_XP}`) : 'Disabled')}</span>
+                    </div>
+                    ${v2SegmentedBar(progressionEnabled ? progressionXp : 0, PROGRESSION_MILESTONE_XP, 'Advancement progress')}
                 </div>
             </section>
             ${renderBoundCompanionSection()}
@@ -7758,62 +7905,68 @@ function buildTrackerDisplayHtml(snapshot) {
         if (!selectedNpc) return renderEmpty('No NPCs are currently tracked');
         const disposition = selectedNpc.currentDisposition;
         const classified = disposition ? classifyDisposition(disposition) : { lock: 'None', behavior: 'None' };
+        const lock = classified.lock && classified.lock !== 'None' ? classified.lock : '';
         return `
             <div class="structured-preflight-tracker-npc-sheet" aria-live="polite">
-                <section class="structured-preflight-tracker-dashboard-section">
-                    <div class="structured-preflight-tracker-section-head">
-                        <div class="structured-preflight-tracker-title structured-preflight-tracker-name-npc">${escapeHtml(selectedNpcName)}</div>
-                        ${trackerChip('Condition', formatTrackerCondition(selectedNpc.condition), trackerConditionTone(selectedNpc.condition))}
-                    </div>
-                    <div class="structured-preflight-tracker-state-line">${escapeHtml(formatPhysicalState(selectedNpc))}</div>
-                    <div class="structured-preflight-tracker-field-grid">
-                        ${trackerField('Wounds', formatTrackerList(selectedNpc.wounds), { wide: true })}
-                        ${trackerField('Status effects', formatTrackerList(selectedNpc.statusEffects), { wide: true })}
+                <section>
+                    <div class="v2-card">
+                        <div class="v2-chead">
+                            <span class="nm">${escapeHtml(selectedNpcName)}</span>
+                            ${v2ConditionPill(selectedNpc.condition)}
+                        </div>
+                        <div class="v2-rel">${escapeHtml(formatPhysicalState(selectedNpc))}</div>
+                        <div class="v2-fields">
+                            ${trackerField('Wounds', formatTrackerList(selectedNpc.wounds), { wide: true })}
+                            ${trackerField('Status effects', formatTrackerList(selectedNpc.statusEffects), { wide: true })}
+                        </div>
                     </div>
                 </section>
-                <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
+                <section>
                     ${renderSectionTitle('Core stats', 'fa-chart-column', 'npcs')}
-                    <div class="structured-preflight-tracker-metric-grid structured-preflight-tracker-metric-grid-three">
-                        ${trackerMetric('PHY', selectedNpc.currentCoreStats?.PHY ?? '-')}
-                        ${trackerMetric('MND', selectedNpc.currentCoreStats?.MND ?? '-')}
-                        ${trackerMetric('CHA', selectedNpc.currentCoreStats?.CHA ?? '-')}
+                    <div class="v2-card">
+                        ${v2StatCards(selectedNpc.currentCoreStats)}
                     </div>
                 </section>
-                <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
+                <section>
                     ${renderSectionTitle('Personality', 'fa-comment-dots', 'npcs')}
-                    <p class="structured-preflight-tracker-summary-copy">${escapeHtml(selectedNpc.personalitySummary || 'Developing')}</p>
+                    <div class="v2-card">
+                        <p class="v2-summary">${escapeHtml(selectedNpc.personalitySummary || 'Developing')}</p>
+                    </div>
                 </section>
-                <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                    <div class="structured-preflight-tracker-section-head">
+                <section>
+                    <div class="v2-secrow">
                         ${renderSectionTitle('Gear', 'fa-shield-halved', 'gear')}
-                        <span class="structured-preflight-tracker-subtle">${escapeHtml(`${trackerListCount(selectedNpc.gear)} items`)}</span>
+                        <span class="v2-secnote">${escapeHtml(`${trackerListCount(selectedNpc.gear)} items`)}</span>
                     </div>
                     ${renderQualityRows(itemRecordsForNpc(selectedNpc.gear, selectedNpc), 'No gear tracked')}
                 </section>
-                <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                    <div class="structured-preflight-tracker-section-head">
+                <section>
+                    <div class="v2-secrow">
                         ${renderSectionTitle('Inventory', 'fa-box-open', 'inventory')}
-                        <span class="structured-preflight-tracker-subtle">${escapeHtml(`${trackerListCount(selectedNpc.inventory)} items`)}</span>
+                        <span class="v2-secnote">${escapeHtml(`${trackerListCount(selectedNpc.inventory)} items`)}</span>
                     </div>
                     ${renderQualityRows(itemRecordsForNpc(selectedNpc.inventory, selectedNpc), 'No inventory tracked')}
                 </section>
-                <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                    <div class="structured-preflight-tracker-section-head">
+                <section>
+                    <div class="v2-secrow">
                         ${renderSectionTitle('Currency', 'fa-coins', 'currency')}
-                        <strong>${escapeHtml(formatTrackerList(selectedNpc.currency))}</strong>
+                        <span class="v2-secnote">${escapeHtml(formatTrackerList(selectedNpc.currency))}</span>
                     </div>
                 </section>
-                <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
+                <section>
                     ${renderSectionTitle('Relationship', 'fa-heart', 'relationship')}
-                    <div class="structured-preflight-tracker-relationship-status">
-                        <i class="fa-solid fa-heart" aria-hidden="true"></i>
-                        <strong>${escapeHtml(relationshipTowardUser(disposition, classified))}</strong>
-                    </div>
-                    <div class="structured-preflight-tracker-metric-grid">
-                        ${trackerMetric('Bond', disposition?.B ?? '-')}
-                        ${trackerMetric('Fear', disposition?.F ?? '-')}
-                        ${trackerMetric('Hostility', disposition?.H ?? '-')}
-                        ${trackerMetric('Rapport', `${selectedNpc.currentRapport}/5`)}
+                    <div class="v2-card focus">
+                        <div class="v2-rel">${escapeHtml(relationshipTowardUser(disposition, classified))}</div>
+                        <div class="v2-triad">
+                            ${v2Axis('bond', 'Bond', disposition?.B, false)}
+                            ${v2Axis('fear', 'Fear', disposition?.F, lock === 'TERROR' || lock === 'FREEZE')}
+                            ${v2Axis('host', 'Hostility', disposition?.H, lock === 'HATRED' || lock === 'FREEZE')}
+                        </div>
+                        <div class="v2-mrow">
+                            <span class="k">Rapport</span>
+                            ${v2Meter(Math.floor(Number(selectedNpc.currentRapport) || 0))}
+                            <span class="v">${escapeHtml(`${selectedNpc.currentRapport}/5`)}</span>
+                        </div>
                     </div>
                 </section>
             </div>`;
@@ -7844,28 +7997,28 @@ function buildTrackerDisplayHtml(snapshot) {
                 userItemControls,
             )}
             ${editingUserItems ? `
-                <div class="structured-preflight-tracker-edit-surface">
+                <div class="structured-preflight-tracker-edit-surface v2-card">
                     <div class="structured-preflight-tracker-item-list-grid">
                         ${userGearInventoryHtml}
                     </div>
                 </div>` : `
-                <section class="structured-preflight-tracker-dashboard-section">
-                    <div class="structured-preflight-tracker-section-head">
+                <section>
+                    <div class="v2-secrow">
                         ${renderSectionTitle('Currency', 'fa-coins', 'currency')}
-                        <strong>${escapeHtml(currencySummary)}</strong>
+                        <span class="v2-secnote">${escapeHtml(currencySummary)}</span>
                     </div>
                 </section>
-                <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                    <div class="structured-preflight-tracker-section-head">
+                <section>
+                    <div class="v2-secrow">
                         ${renderSectionTitle('Gear', 'fa-shield-halved', 'gear')}
-                        <span class="structured-preflight-tracker-subtle">${escapeHtml(`${trackerListCount(user.gear)} items`)}</span>
+                        <span class="v2-secnote">${escapeHtml(`${trackerListCount(user.gear)} items`)}</span>
                     </div>
                     ${renderQualityRows(userItemRecords.filter(record => record.group === 'Gear'), 'No gear tracked')}
                 </section>
-                <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                    <div class="structured-preflight-tracker-section-head">
+                <section>
+                    <div class="v2-secrow">
                         ${renderSectionTitle('Carried', 'fa-box-open', 'inventory')}
-                        <span class="structured-preflight-tracker-subtle">${escapeHtml(`${trackerListCount(user.inventory)} items`)}</span>
+                        <span class="v2-secnote">${escapeHtml(`${trackerListCount(user.inventory)} items`)}</span>
                     </div>
                     ${renderQualityRows(userItemRecords.filter(record => record.group === 'Carried'), 'No carried items tracked')}
                 </section>`}
@@ -7878,18 +8031,16 @@ function buildTrackerDisplayHtml(snapshot) {
                 '',
                 `${openThreads.length} open`,
             )}
-            <section class="structured-preflight-tracker-dashboard-section">
+            <section>
                 ${renderSectionTitle('Tasks', 'fa-list-check', 'threads')}
                 ${renderThreadRows(trackerListItems(user.tasks).map(item => ({ type: 'Task', item })), { empty: 'No active tasks' })}
             </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
+            <section>
                 ${renderSectionTitle('Commitments', 'fa-handshake', 'threads')}
                 ${renderThreadRows(trackerListItems(user.commitments).map(item => ({ type: 'Commitment', item })), { empty: 'No active commitments' })}
             </section>
-            <section class="structured-preflight-tracker-dashboard-section structured-preflight-tracker-section-divider">
-                <div class="structured-preflight-tracker-section-head">
-                    ${renderSectionTitle('Recent changes', 'fa-clock-rotate-left', 'threads')}
-                </div>
+            <section>
+                ${renderSectionTitle('Recent changes', 'fa-clock-rotate-left', 'threads')}
                 ${renderChangeRows(recentThreadChanges)}
             </section>
         </div>`;
@@ -9361,6 +9512,820 @@ function ensureTrackerDisplayStyles() {
             line-height: 1.38;
         }
 
+        /* ==================================================================
+           TRACKER v2 SKIN
+           Visual redesign: horizontal labelled tab bar, cast chips, B/F/H
+           triad, stat cards, pills, pinned Prose Guard stripe.
+
+           Two rules govern everything below:
+             1. Every selector is scoped to the tracker panel id. The narrator
+                handoff widget reuses several of these class names, so unscoped
+                rules here would leak into it.
+             2. Only presentation is overridden. Layout mechanics that carry
+                behaviour — drag, the four resize handles, corner-dependent
+                button clearance, hidden states — are left to the base rules.
+                The title bar in particular keeps its padding-left/right
+                untouched so data-spe-widget-control-corner keeps working.
+           ================================================================== */
+        #${TRACKER_WIDGET_PANEL_ID} {
+            --v2-bg: #191c22;
+            --v2-card: #22262e;
+            --v2-sunken: #15181d;
+            --v2-bd: #2f343d;
+            --v2-bds: #262b33;
+            --v2-tx: #e7e9ed;
+            --v2-dim: #98a0ac;
+            --v2-faint: #6b7480;
+            --v2-accent: #73d0ff;
+            --v2-bond: #f0b429;
+            --v2-fear: #7aa2f7;
+            --v2-hostile: #f7768e;
+            --v2-ok: #6ee7a8;
+            --v2-warn: #f2cc60;
+            --v2-danger: #ff7b72;
+            --v2-neutral: #8b8f96;
+            --v2-coin: #e8c46a;
+            --v2-calm: #39404b;
+
+            background: var(--v2-bg) !important;
+            border: 1px solid var(--v2-bd) !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            box-shadow: 0 16px 38px rgba(0, 0, 0, 0.5) !important;
+            color: var(--v2-tx) !important;
+            font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif !important;
+            /* The base panel ships as display:grid, which lets the body grow
+               past the fixed height and push the Prose Guard stripe out of
+               view. Force a flex column so the body scrolls and the stripe
+               stays pinned to the bottom edge. */
+            display: flex !important;
+            flex-direction: column !important;
+        }
+
+        /* --- title bar ------------------------------------------------- */
+        #${TRACKER_WIDGET_PANEL_ID} > .structured-preflight-tracker-widget-title {
+            flex: 0 0 auto;
+            gap: 9px;
+            min-height: 42px;
+            /* Only the block/inline padding is set here. The corner-dependent
+               rule higher up still supplies padding-left or padding-right for
+               the toggle button clearance, and outranks this selector. */
+            padding: 0.68rem 0.75rem;
+            background: linear-gradient(180deg, #232833, #1d2129);
+            border-bottom: 1px solid var(--v2-bd);
+            font-size: 13.5px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} > .structured-preflight-tracker-widget-title .structured-preflight-tracker-widget-name {
+            font-weight: 650;
+            color: var(--v2-tx);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-widget-status-dot {
+            flex: 0 0 auto;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--v2-ok);
+            box-shadow: 0 0 7px var(--v2-ok);
+        }
+
+        /* --- chrome: body wrapper, tab bar, scroll region --------------- */
+        #${TRACKER_WIDGET_PANEL_ID} > [data-structured-preflight-tracker-widget-body],
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-body {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 auto;
+            min-width: 0;
+            min-height: 0;
+            height: auto;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tabs {
+            flex: 0 0 auto;
+            flex-direction: row;
+            gap: 3px;
+            padding: 7px 8px;
+            border-right: 0;
+            border-bottom: 1px solid var(--v2-bds);
+            background: var(--v2-sunken);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tab {
+            position: relative;
+            flex: 1 1 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            width: auto;
+            min-width: 0;
+            height: auto;
+            padding: 6px 2px 5px;
+            border: 0;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--v2-faint);
+            font-size: 10px;
+            font-weight: 550;
+            line-height: 1;
+            box-shadow: none;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tab i {
+            font-size: 13px;
+            line-height: 1;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tab:hover {
+            color: var(--v2-dim);
+            background: color-mix(in srgb, var(--v2-accent) 7%, transparent);
+            border-color: transparent;
+            box-shadow: none;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tab:focus-visible {
+            outline: 2px solid var(--v2-accent);
+            outline-offset: 1px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tab-active,
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tab-active:hover {
+            color: var(--v2-accent);
+            background: color-mix(in srgb, var(--v2-accent) 13%, transparent);
+            border-color: transparent;
+            box-shadow: none;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tab-label {
+            max-width: 100%;
+            overflow: hidden;
+            font-size: 10px;
+            font-weight: 550;
+            line-height: 1;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-scroll-region {
+            flex: 1 1 auto;
+            min-height: 0;
+            padding: 11px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-tab-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 13px;
+        }
+
+        /* --- v2 content components -------------------------------------- */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-sec {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-bottom: 8px;
+            color: var(--v2-faint);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            /* renderPersonaEntries() reuses .structured-preflight-tracker-detail-label,
+               whose tone variants paint a solid chip background. Anything carrying
+               v2-sec is a section header, so neutralise the chip treatment. */
+            padding: 0;
+            border-radius: 0;
+            background: transparent;
+            white-space: normal;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-sec::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: var(--v2-bds);
+        }
+        /* A section header with a right-aligned note (count, currency, state). */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-secrow {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-secrow .v2-sec {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-secnote {
+            flex: 0 0 auto;
+            color: var(--v2-faint);
+            font-size: 10.5px;
+            font-variant-numeric: tabular-nums;
+        }
+        /* Cast chips: who is in the scene. NPC chips are <button>s that move the
+           Overview's focus; the persona chip is inert. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-cast {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px 4px 5px;
+            border: 1px solid var(--v2-bd);
+            border-radius: 999px;
+            background: var(--v2-card);
+            color: var(--v2-tx);
+            font-family: inherit;
+            font-size: 11.5px;
+            font-weight: 550;
+            line-height: 1.35;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.here {
+            border-color: color-mix(in srgb, var(--v2-ok) 42%, var(--v2-bd));
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.here:hover {
+            border-color: color-mix(in srgb, var(--v2-accent) 48%, var(--v2-bd));
+            background: color-mix(in srgb, var(--v2-accent) 8%, var(--v2-card));
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chip.here.focused {
+            border-color: color-mix(in srgb, var(--v2-accent) 62%, var(--v2-bd));
+            background: color-mix(in srgb, var(--v2-accent) 13%, var(--v2-card));
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-av {
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            width: 17px;
+            height: 17px;
+            border-radius: 50%;
+            background: var(--v2-neutral);
+            color: #111;
+            font-size: 9px;
+            font-weight: 800;
+        }
+        /* Inline text line used for physical state / relationship phrasing. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-rel {
+            margin-bottom: 10px;
+            color: var(--v2-dim);
+            font-size: 11.5px;
+            overflow-wrap: anywhere;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-card {
+            padding: 11px;
+            border: 1px solid var(--v2-bds);
+            border-radius: 10px;
+            background: var(--v2-card);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-card + .v2-card {
+            margin-top: 8px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-card.focus {
+            border-color: color-mix(in srgb, var(--v2-bond) 34%, var(--v2-bd));
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chead {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chead .nm {
+            flex: 1;
+            font-size: 14px;
+            font-weight: 680;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-chead .sub {
+            color: var(--v2-faint);
+            font-size: 10.5px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-triad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 11px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis {
+            padding: 7px 8px;
+            border: 1px solid var(--v2-bds);
+            border-radius: 8px;
+            background: var(--v2-sunken);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis .lb {
+            margin-bottom: 6px;
+            color: var(--v2-faint);
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pips {
+            display: flex;
+            gap: 3px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pip {
+            flex: 1;
+            height: 5px;
+            border-radius: 3px;
+            background: #2b303a;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pip.on {
+            background: var(--v2-calm);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis .wd {
+            margin-top: 5px;
+            color: var(--v2-dim);
+            font-size: 10.5px;
+            font-weight: 650;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.bond.hot .lb,
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.bond.hot .wd {
+            color: var(--v2-bond);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.bond.hot .v2-pip.on {
+            background: var(--v2-bond);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.fear.hot .lb,
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.fear.hot .wd {
+            color: var(--v2-fear);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.fear.hot .v2-pip.on {
+            background: var(--v2-fear);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.host.hot .lb,
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.host.hot .wd {
+            color: var(--v2-hostile);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.host.hot .v2-pip.on {
+            background: var(--v2-hostile);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.locked {
+            border-color: color-mix(in srgb, var(--v2-danger) 40%, var(--v2-bd));
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-mrow {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 9px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-mrow .k {
+            min-width: 56px;
+            color: var(--v2-dim);
+            font-size: 11px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-meter {
+            flex: 1;
+            display: flex;
+            gap: 3px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-meter i {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: #2b303a;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-meter i.on {
+            background: var(--v2-bond);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-mrow .v {
+            color: var(--v2-dim);
+            font-size: 11px;
+            font-weight: 650;
+            font-variant-numeric: tabular-nums;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pills.spaced {
+            margin-top: 10px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-progress.spaced {
+            margin-top: 9px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            flex: 0 0 auto;
+            padding: 3px 8px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            font-size: 10.5px;
+            font-weight: 600;
+            /* The Condition pill carries a word label, so keep it on one line and
+               let the surrounding copy shrink instead of wrapping the pill. */
+            white-space: nowrap;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pill.ok {
+            border-color: color-mix(in srgb, var(--v2-ok) 28%, transparent);
+            background: color-mix(in srgb, var(--v2-ok) 13%, transparent);
+            color: var(--v2-ok);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pill.warn {
+            border-color: color-mix(in srgb, var(--v2-warn) 28%, transparent);
+            background: color-mix(in srgb, var(--v2-warn) 13%, transparent);
+            color: var(--v2-warn);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pill.danger {
+            border-color: color-mix(in srgb, var(--v2-danger) 30%, transparent);
+            background: color-mix(in srgb, var(--v2-danger) 14%, transparent);
+            color: var(--v2-danger);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pill.quiet {
+            border-color: var(--v2-bds);
+            background: #262b34;
+            color: var(--v2-dim);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pill.coin {
+            border-color: color-mix(in srgb, var(--v2-coin) 26%, transparent);
+            background: color-mix(in srgb, var(--v2-coin) 12%, transparent);
+            color: var(--v2-coin);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-pill-label {
+            margin-right: 4px;
+            font-size: 8.5px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            opacity: 0.72;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        /* The Overview carries a fourth "Wounds" tile, as the pre-v2 metric grid did. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stats.four {
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stats.four .v2-stat {
+            padding: 8px 3px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stats.four .v2-stat .n {
+            font-size: 16px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stats.four .v2-stat .l {
+            font-size: 8.5px;
+            letter-spacing: 0.06em;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stat {
+            padding: 9px 6px;
+            border: 1px solid var(--v2-bds);
+            border-radius: 8px;
+            background: var(--v2-sunken);
+            text-align: center;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stat .n {
+            font-size: 19px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            line-height: 1.1;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stat .l {
+            margin-top: 3px;
+            color: var(--v2-faint);
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stat.phy .n { color: #f0883e; }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stat.mnd .n { color: #a78bfa; }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stat.cha .n { color: #f472b6; }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-stat.plain .n { color: var(--v2-tx); }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            padding: 14px 10px;
+            border: 1px dashed var(--v2-bd);
+            border-radius: 8px;
+            background: var(--v2-sunken);
+            color: var(--v2-faint);
+            font-size: 11px;
+            text-align: center;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-empty .t {
+            color: var(--v2-dim);
+            font-size: 11.5px;
+            font-weight: 600;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-rows {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-row {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 7px 9px;
+            border: 1px solid var(--v2-bds);
+            border-radius: 8px;
+            background: var(--v2-sunken);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-row .nm {
+            flex: 1;
+            min-width: 0;
+            font-size: 11.5px;
+            font-weight: 600;
+            overflow-wrap: anywhere;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-row .tag {
+            flex: 0 0 auto;
+            color: var(--v2-faint);
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-row .val {
+            flex: 0 0 auto;
+            color: var(--v2-dim);
+            font-size: 11px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-kv {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-kv + .v2-kv {
+            border-top: 1px solid var(--v2-bds);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-kv .k {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--v2-dim);
+            font-size: 11.5px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-kv .k i {
+            color: var(--v2-faint);
+            font-size: 10.5px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-kv .v {
+            color: var(--v2-tx);
+            font-size: 11.5px;
+            font-weight: 600;
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-fields.spaced {
+            margin-top: 10px;
+        }
+        /* trackerField() emits label/value divs; give them the same row shape
+           as .v2-kv so the NPC sheet reads as one system. */
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-field {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-field + .structured-preflight-tracker-field {
+            border-top: 1px solid var(--v2-bds);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-field > span {
+            color: var(--v2-dim);
+            font-size: 11.5px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-field > strong {
+            color: var(--v2-tx);
+            font-size: 11.5px;
+            font-weight: 600;
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-summary {
+            margin: 0;
+            color: var(--v2-dim);
+            font-size: 11.5px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-progress {
+            height: 6px;
+            border-radius: 3px;
+            background: #2b303a;
+            overflow: hidden;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-progress > span {
+            display: block;
+            height: 100%;
+            border-radius: 3px;
+            background: var(--v2-accent);
+        }
+        /* Segmented variant: ten cells, matching the pip language used for the
+           disposition axes and rapport. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-progress.segmented {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 3px;
+            height: auto;
+            border-radius: 0;
+            background: transparent;
+            overflow: visible;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-progress.segmented i {
+            height: 6px;
+            border-radius: 2px;
+            background: #2b303a;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .v2-progress.segmented i.on {
+            background: var(--v2-accent);
+        }
+
+        /* --- shared panel internals, restyled to match v2 ----------------- */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-sec i {
+            color: var(--v2-faint);
+            font-size: 10px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-panel-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 0;
+            border-bottom: 0;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-panel-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 0;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-panel-copy h2 {
+            margin: 0;
+            color: var(--v2-tx);
+            font-size: 14px;
+            font-weight: 680;
+            overflow-wrap: anywhere;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-panel-copy p {
+            margin: 0;
+            color: var(--v2-faint);
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-eyebrow {
+            color: var(--v2-faint);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-subtle {
+            color: var(--v2-faint);
+            font-size: 10.5px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-muted {
+            color: var(--v2-faint);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-change-mark {
+            flex: 0 0 auto;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--v2-accent);
+        }
+        /* .v2-rows already spaces its children, so cancel the sibling margin
+           that .v2-card carries for stacked use. */
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-power-list .v2-card + .v2-card {
+            margin-top: 0;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-power-entry strong {
+            display: block;
+            color: var(--v2-tx);
+            font-size: 12px;
+            font-weight: 650;
+            overflow-wrap: anywhere;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-power-entry .v2-summary {
+            display: block;
+            margin-top: 4px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-npc-select {
+            flex: 0 0 auto;
+            max-width: 45%;
+            padding: 5px 8px;
+            border: 1px solid var(--v2-bd);
+            border-radius: 8px;
+            background: var(--v2-sunken);
+            color: var(--v2-tx);
+            font-size: 11.5px;
+        }
+
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            border: 1px solid var(--v2-bds);
+            border-radius: 6px;
+            background: #262b34;
+            color: var(--v2-dim);
+            font-size: 10.5px;
+            font-weight: 600;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-chip-label {
+            color: var(--v2-faint);
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-chip-danger {
+            border-color: color-mix(in srgb, var(--v2-danger) 30%, transparent);
+            color: var(--v2-danger);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-chip-warn {
+            border-color: color-mix(in srgb, var(--v2-warn) 28%, transparent);
+            color: var(--v2-warn);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-chip-good {
+            border-color: color-mix(in srgb, var(--v2-ok) 28%, transparent);
+            color: var(--v2-ok);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-bound-companion {
+            padding: 0 11px;
+            border: 1px solid var(--v2-bds);
+            border-radius: 10px;
+            background: var(--v2-card);
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-bound-companion > summary {
+            padding: 10px 0;
+            color: var(--v2-tx);
+            cursor: pointer;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-bound-body {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding-bottom: 11px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-detail-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-detail {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-detail-label {
+            color: var(--v2-faint);
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-tracker-detail-value {
+            color: var(--v2-dim);
+            font-size: 11.5px;
+            overflow-wrap: anywhere;
+        }
+
+        /* --- the live Prose Guard stripe, restyled to match ------------- */
+        #${TRACKER_WIDGET_PANEL_ID} > .structured-preflight-prose-guard-strip {
+            flex: 0 0 auto;
+            background: linear-gradient(180deg, #1d2129, #191c22) !important;
+            border-top: 1px solid var(--v2-bd) !important;
+            padding: 9px 11px !important;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-prose-guard-header {
+            display: flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-prose-guard-heading {
+            flex: 1 !important;
+            color: var(--v2-tx) !important;
+            font-size: 12px !important;
+            font-weight: 650 !important;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-prose-guard-heading i {
+            color: var(--v2-coin) !important;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-prose-guard-count {
+            padding: 1px 8px !important;
+            border: 1px solid var(--v2-bds) !important;
+            border-radius: 999px !important;
+            background: #262b34 !important;
+            color: var(--v2-dim) !important;
+            font-size: 10.5px !important;
+            font-weight: 700 !important;
+            font-variant-numeric: tabular-nums !important;
+        }
+        #${TRACKER_WIDGET_PANEL_ID} .structured-preflight-prose-guard-empty {
+            color: var(--v2-faint) !important;
+            font-size: 11px !important;
+        }
+
     `;
 
     document.head.append(style);
@@ -10195,6 +11160,7 @@ function renderTrackerWidget(context = getContext()) {
 
             <div id="${TRACKER_WIDGET_PANEL_ID}" hidden>
                 <div class="structured-preflight-tracker-widget-title">
+                    <span class="structured-preflight-tracker-widget-status-dot" aria-hidden="true"></span>
                     <span class="structured-preflight-tracker-widget-name"><span>Tracker</span></span>
                 </div>
                 <div data-structured-preflight-tracker-widget-body></div>
@@ -11170,6 +12136,19 @@ function attachTrackerWidgetEditorHandlers(body, context = getContext()) {
             if (nextTab !== 'inventory') state.trackerWidgetEditingUserItems = false;
             renderTrackerWidget(context);
             restoreTrackerWidgetControlFocus('data-spe-tracker-tab', nextTab);
+            return;
+        }
+
+        // Overview "Here now" rows move the focus without leaving the Overview.
+        // (The NPCs tab's <select> keeps its own behaviour of jumping to NPCs.)
+        if (target.matches('[data-spe-tracker-focus-npc]')) {
+            event.preventDefault();
+            const name = target.getAttribute('data-spe-tracker-focus-npc') || '';
+            if (name && name !== state.trackerWidgetSelectedNpc) {
+                state.trackerWidgetSelectedNpc = name;
+                renderTrackerWidget(context);
+                restoreTrackerWidgetControlFocus('data-spe-tracker-focus-npc', name);
+            }
             return;
         }
 

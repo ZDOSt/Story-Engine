@@ -12033,7 +12033,7 @@ const tests = [
       assert.match(source, /trackerWidgetWidth: TRACKER_WIDGET_DEFAULT_WIDTH/);
       assert.match(source, /trackerWidgetHeight: TRACKER_WIDGET_DEFAULT_HEIGHT/);
       assert.match(source, /const TRACKER_WIDGET_LAYOUT_MIGRATION_VERSION = 2/);
-      assert.match(source, /const TRACKER_WIDGET_TABS = Object\.freeze\(\['overview', 'character', 'npcs', 'inventory', 'threads'\]\)/);
+      assert.match(source, /const TRACKER_WIDGET_TABS = Object\.freeze\(\['overview', 'character', 'inventory', 'threads', 'npcs'\]\)/);
       assert.match(source, /function formatTrackerItemDisplayName/);
       assert.match(source, /function formatTrackerItemQuality/);
       assert.match(source, /function clampTrackerWidgetHeight/);
@@ -12095,7 +12095,9 @@ const tests = [
       }
       assert.match(displaySource, /trackerTabNav\(activeTab\)/);
       assert.match(displaySource, /structured-preflight-tracker-scroll-region/);
-      assert.match(displaySource, /<span>Time<\/span>[\s\S]*<span>Location<\/span>/);
+      // Scene header keeps explicit Time/Location labels (icon + text). Two
+      // unlabelled pills both reading "Not established" was ambiguous.
+      assert.match(displaySource, /fa-clock[\s\S]*Time<\/span>[\s\S]*fa-location-dot[\s\S]*Location<\/span>/);
       assert.match(displaySource, /sceneTime/);
       assert.match(displaySource, /sceneLocation/);
       assert.doesNotMatch(displaySource, /Current scene|Current Scene/);
@@ -12114,8 +12116,17 @@ const tests = [
       assert.match(npcSource, /trackerField\('Wounds'/);
       assert.match(npcSource, /trackerField\('Status effects'/);
       assert.match(npcSource, /relationshipTowardUser/);
-      assert.match(npcSource, /trackerMetric\('Bond'/);
-      assert.match(npcSource, /trackerMetric\('Rapport'/);
+      // Physical state line is preserved from the pre-v2 sheet.
+      assert.match(npcSource, /formatPhysicalState\(selectedNpc\)/);
+      // Relationship renders the v2 triad (all three disposition axes at their
+      // raw 1-4 values) plus a rapport meter, replacing the old flat
+      // trackerMetric number tiles. Same four fields, different presentation.
+      assert.match(npcSource, /v2Axis\('bond', 'Bond', disposition\?\.B, false\)/);
+      assert.match(npcSource, /v2Axis\('fear', 'Fear', disposition\?\.F, lock === 'TERROR' \|\| lock === 'FREEZE'\)/);
+      assert.match(npcSource, /v2Axis\('host', 'Hostility', disposition\?\.H, lock === 'HATRED' \|\| lock === 'FREEZE'\)/);
+      assert.match(npcSource, /v2Meter\(Math\.floor\(Number\(selectedNpc\.currentRapport\) \|\| 0\)\)/);
+      // Rapport text keeps the raw tracker value, as the pre-v2 tile did.
+      assert.match(npcSource, /\$\{selectedNpc\.currentRapport\}\/5/);
 
       assert.match(displaySource, /renderQualityRows/);
       assert.match(displaySource, /formatTrackerItemDisplayName/);
@@ -12175,6 +12186,74 @@ const tests = [
       assert.match(styleSource, /structured-preflight-tracker-tab-threads/);
       assert.doesNotMatch(styleSource, /structured-preflight-tracker-(?:avatar-large|badge(?:-row)?|callout(?:-warn)?|choice(?:-active|-list)?|detail-panel|inventory-group|master-detail|master-list|stat-cluster(?:-label)?|stat-label|stat-pill(?:-row)?)/);
       assert.doesNotMatch(source, /trackerWidgetSelectedItem|data-spe-tracker-select-item/);
+
+      // --- v2 skin (presentation layer) -------------------------------------
+      // The base rules above still describe the structural layer. These assert
+      // the shipped presentation on top of it, so the redesign is covered too.
+      //
+      // The panel must be a flex column rather than the base grid: as a grid the
+      // body grows past the fixed height and pushes the Prose Guard stripe out
+      // of the window entirely (observed live before this rule was added).
+      assert.match(styleSource, /--v2-bg: #191c22;[\s\S]*?display: flex !important;[\s\S]*?flex-direction: column !important;/);
+      assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\} \.structured-preflight-tracker-tabs \{[\s\S]*?flex-direction: row;/);
+      assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\} > \.structured-preflight-prose-guard-strip \{[\s\S]*?flex: 0 0 auto;/);
+      assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\} \.v2-axis\.bond\.hot \.v2-pip\.on \{[\s\S]*?background: var\(--v2-bond\)/);
+      // tab bar carries a visible text label alongside the icon
+      assert.match(source, /function trackerTabButton\(id, label, icon, activeTab\)/);
+      assert.match(source, /structured-preflight-tracker-tab-label/);
+      // v2 builders exist
+      assert.match(source, /function v2Axis\(kind, label, value, locked\)/);
+      assert.match(source, /function v2NpcFocusCard\(name, npc\)/);
+      assert.match(source, /function v2StatCards\(core, wounds\)/);
+      assert.match(source, /function v2EmptyState\(title, detail\)/);
+      assert.match(source, /function v2PresentNpcChip\(name, npc, initials, focused\)/);
+      // "Here now" lists only scene NPCs; the user's own character is covered by
+      // the persona/condition/stats section above it, so it must not be repeated
+      // as a cast chip.
+      assert.doesNotMatch(source, /v2PersonaChip/);
+      // Overview renders them
+      assert.match(displaySource, /v2Section\('Here now'\)/);
+      assert.match(displaySource, /v2Section\('In focus'\)/);
+      assert.match(displaySource, /v2StatCards\(userCore, trackerListCount\(user\.wounds\)\)/);
+      assert.match(displaySource, /v2ConditionPill\(user\.condition\)/);
+      assert.match(displaySource, /v2PresentNpcChip\(name, npcs\[name\], trackerInitials\(name\), name === focusName\)/);
+      assert.match(displaySource, /v2NpcFocusCard\(focusName, npcs\[focusName\]\)/);
+      // Clicking a "Here now" row moves the focus in place, staying on Overview.
+      assert.match(source, /data-spe-tracker-focus-npc/);
+      assert.match(source, /target\.matches\('\[data-spe-tracker-focus-npc\]'\)/);
+
+      // --- v2 must stay presentation-only -----------------------------------
+      // The tracker does not hold HP. The mockup invented it and it briefly
+      // shipped; these guard against a display-only redesign reintroducing a
+      // field the tracker never tracked.
+      assert.doesNotMatch(source, /currentHp|maxHp/);
+      assert.doesNotMatch(displaySource, /hiddenHealth/);
+      // No invented descriptive vocabulary for the disposition axes either:
+      // v2 shows the raw values.
+      assert.doesNotMatch(source, /V2_(?:BOND|FEAR|HOST)_WORDS/);
+      assert.doesNotMatch(displaySource, /v2TraitChips/);
+      assert.doesNotMatch(source, /structured-preflight-tracker-tab-badge/);
+
+      // The Condition pill keeps the word "Condition": the pre-v2 trackerChip()
+      // drew an explicit label, and v2 keeps it so the pill is self-describing.
+      assert.match(source, /v2-pill-label">Condition<\/span>/);
+      // Advancement is a ten-cell bar rather than a continuous width. The exact
+      // value still comes from progressionXp/PROGRESSION_MILESTONE_XP and stays
+      // visible in the row above.
+      assert.match(source, /function v2SegmentedBar\(value, max, label, segments = 10\)/);
+      assert.match(displaySource, /v2SegmentedBar\(progressionEnabled \? progressionXp : 0, PROGRESSION_MILESTONE_XP, 'Advancement progress'\)/);
+      assert.match(styleSource, /\.v2-progress\.segmented \{[\s\S]*?grid-template-columns: repeat\(10, 1fr\)/);
+      // The ten-cell bar maps 1:1 onto XP only because every award is a whole
+      // ten. If a partial award were ever introduced, the bar would silently
+      // under-report (floor), so the invariant is asserted rather than assumed.
+      const awardBlock = /const PROGRESSION_XP_AWARDS = Object\.freeze\(\{([\s\S]*?)\}\)/.exec(source);
+      assert.ok(awardBlock, 'PROGRESSION_XP_AWARDS must be defined');
+      const awardValues = [...awardBlock[1].matchAll(/:\s*(\d+)/g)].map(m => Number(m[1]));
+      assert.ok(awardValues.length >= 4, `expected the full XP award table, saw ${awardValues.length} entries`);
+      for (const award of awardValues) {
+        assert.equal(award % 10, 0, `XP award ${award} is not a multiple of 10; the 10-cell Advancement bar assumes whole tenths`);
+      }
+      assert.match(source, /const PROGRESSION_MILESTONE_XP = 100/);
     },
   },
   {
