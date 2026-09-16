@@ -1993,10 +1993,13 @@ function ensureSettingsPanelStyles() {
         #${SETTINGS_CONTAINER_ID} .spe-settings-drawer-name i {
             color: #73d0ff;
         }
+        /* The chevron keeps Story Engine's accent colour so the block is
+           recognisable, but NOT the font-size: SillyTavern sizes every other
+           extension's chevron itself, and overriding it made this one render
+           smaller than the rest of the panel. Setting colour only leaves the
+           size inherited. */
         #${SETTINGS_CONTAINER_ID} > .inline-drawer > .inline-drawer-header .inline-drawer-icon {
-            color: #73d0ff;
-            font-size: 1rem;
-            filter: none;
+            color: var(--v2-accent);
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-shell {
             display: flex;
@@ -2027,19 +2030,6 @@ function ensureSettingsPanelStyles() {
         #${SETTINGS_CONTAINER_ID} .spe-settings-section + .spe-settings-section {
             border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.16));
         }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-section[data-spe-settings-step="setup"],
-        #${SETTINGS_CONTAINER_ID} .spe-settings-section[data-spe-settings-step="narrator-inputs"] {
-            --spe-settings-accent: #8bd49c;
-        }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-section[data-spe-settings-step="prose-guard"] {
-            --spe-settings-accent: #f3a6c8;
-        }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-section[data-spe-settings-step="tracker"] {
-            --spe-settings-accent: #f0c674;
-        }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-section[data-spe-settings-step="progression"] {
-            --spe-settings-accent: #c6a0f6;
-        }
         #${SETTINGS_CONTAINER_ID} .spe-settings-section-head {
             display: grid;
             grid-template-columns: 18px 34px minmax(0, 1fr) auto;
@@ -2053,17 +2043,6 @@ function ensureSettingsPanelStyles() {
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch {
             z-index: 1;
-        }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch .spe-settings-section-head {
-            grid-template-columns: 34px minmax(0, 1fr) auto;
-            cursor: default;
-        }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch .spe-settings-section-head::before {
-            display: none;
-        }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch > .spe-settings-body {
-            border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.12));
-            padding-top: 13px;
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-section-head::-webkit-details-marker {
             display: none;
@@ -2081,28 +2060,8 @@ function ensureSettingsPanelStyles() {
         #${SETTINGS_CONTAINER_ID} .spe-settings-section[open] > .spe-settings-section-head::before {
             transform: rotate(45deg);
         }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-section-icon {
-            display: grid;
-            place-items: center;
-            width: 34px;
-            height: 34px;
-            border: 1px solid color-mix(in srgb, var(--spe-settings-accent) 58%, transparent);
-            border-radius: 6px;
-            background: color-mix(in srgb, var(--spe-settings-accent) 13%, transparent);
-            color: var(--spe-settings-accent);
-            font-size: 0.92rem;
-        }
         #${SETTINGS_CONTAINER_ID} .spe-settings-section-copy {
             min-width: 0;
-        }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-kicker {
-            display: block;
-            margin-bottom: 3px;
-            color: color-mix(in srgb, var(--spe-settings-accent) 82%, var(--SmartThemeBodyColor, #eee));
-            font-size: 0.68rem;
-            font-weight: 800;
-            line-height: 1;
-            text-transform: uppercase;
         }
         #${SETTINGS_CONTAINER_ID} .spe-settings-title {
             margin: 0;
@@ -2327,8 +2286,11 @@ function ensureSettingsPanelStyles() {
             right: auto;
             left: 0;
         }
-        #${SETTINGS_CONTAINER_ID} .spe-settings-section[data-spe-settings-step="tracker"] .spe-settings-tooltip,
-        #${SETTINGS_CONTAINER_ID} .spe-settings-section[data-spe-settings-step="progression"] .spe-settings-tooltip {
+        /* The last group's tooltip opens upward so it is not clipped. Scoped to
+           the shell: the master switch is the only .spe-settings-section inside
+           the drawer header, so an unscoped :last-of-type flipped its tooltips
+           up and off the top of the screen. */
+        #${SETTINGS_CONTAINER_ID} .spe-settings-shell > .spe-settings-section:last-of-type .spe-settings-tooltip {
             top: auto;
             bottom: calc(100% + 7px);
         }
@@ -2358,10 +2320,6 @@ function ensureSettingsPanelStyles() {
                 grid-template-columns: 18px 32px minmax(0, 1fr) auto;
                 gap: 8px;
             }
-            #${SETTINGS_CONTAINER_ID} .spe-settings-section-icon {
-                width: 32px;
-                height: 32px;
-            }
             #${SETTINGS_CONTAINER_ID} .spe-settings-body {
                 padding-left: 0;
             }
@@ -2380,6 +2338,175 @@ function ensureSettingsPanelStyles() {
                 align-items: stretch;
                 flex-direction: column;
             }
+        }
+
+        /* ============================================================
+           SETTINGS v2 SKIN
+           Tracker palette and component language, so the settings and
+           the tracker read as one product. Appended last so it wins by
+           order over the base rules above; every selector is scoped to
+           the settings container.
+           ============================================================ */
+        #${SETTINGS_CONTAINER_ID} {
+            --v2-bg: #191c22;
+            --v2-card: #22262e;
+            --v2-sunken: #15181d;
+            --v2-bd: #2f343d;
+            --v2-bds: #262b33;
+            --v2-tx: #e7e9ed;
+            --v2-dim: #98a0ac;
+            --v2-faint: #6b7480;
+            --v2-accent: #73d0ff;
+            --v2-ok: #6ee7a8;
+            --v2-warn: #f2cc60;
+            --v2-danger: #ff7b72;
+        }
+        #${SETTINGS_CONTAINER_ID} > .inline-drawer > .inline-drawer-header {
+            background: linear-gradient(180deg, #232833, #1d2129);
+            border-bottom: 1px solid var(--v2-bd);
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-drawer-name,
+        #${SETTINGS_CONTAINER_ID} .spe-settings-drawer-name b {
+            color: var(--v2-tx);
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-drawer-name i {
+            color: var(--v2-accent);
+        }
+        /* Master switch lives in the drawer header: always visible, never
+           The master switch lives inside the drawer, as a row above the groups.
+           The drawer header is left to SillyTavern: label and chevron only. */
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-switch {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 0 0 9px;
+            padding: 9px 11px;
+            border: 1px solid var(--v2-bds);
+            border-radius: 10px;
+            background: var(--v2-card);
+        }
+        /* Text first, switch on the right: row-reverse because the checkbox
+           precedes its label in the markup. */
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-label {
+            display: inline-flex;
+            flex-direction: row-reverse;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+            margin: 0;
+            color: var(--v2-tx);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-label input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            position: relative;
+            width: 34px;
+            height: 19px;
+            margin: 0;
+            border: 1px solid var(--v2-bd);
+            border-radius: 999px;
+            background: #2b303a;
+            cursor: pointer;
+            flex: 0 0 auto;
+        }
+        /* SillyTavern draws its own checkbox tick on the input's ::before. With
+           the native appearance removed it is no longer a real checkbox, so that
+           tick rendered as a black mark peeking out from behind the switch knob.
+           The switch's own knob is ::after, so only ::before is suppressed. */
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-label input[type="checkbox"]::before {
+            display: none;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-label input[type="checkbox"]::after {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            background: var(--v2-faint);
+            transition: left 120ms ease, background 120ms ease;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-label input[type="checkbox"]:checked {
+            background: color-mix(in srgb, var(--v2-ok) 34%, transparent);
+            border-color: color-mix(in srgb, var(--v2-ok) 45%, var(--v2-bd));
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-master-label input[type="checkbox"]:checked::after {
+            left: 17px;
+            background: var(--v2-ok);
+        }
+        /* --- group cards ------------------------------------------------ */
+        #${SETTINGS_CONTAINER_ID} .spe-settings-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+            padding: 10px;
+            background: var(--v2-bg);
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section {
+            border: 1px solid var(--v2-bds);
+            border-radius: 10px;
+            background: var(--v2-card);
+            overflow: visible;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section + .spe-settings-section {
+            border-top: 1px solid var(--v2-bds);
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section-head {
+            grid-template-columns: 14px minmax(0, 1fr) auto;
+            gap: 9px;
+            padding: 9px 11px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section-copy {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-title {
+            margin: 0;
+            color: var(--v2-faint);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section-copy::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: var(--v2-bds);
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section-head::before {
+            border-right-color: var(--v2-faint);
+            border-bottom-color: var(--v2-faint);
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-section > .spe-settings-body {
+            padding: 2px 11px 10px;
+            border-top: 1px solid var(--v2-bds);
+        }
+        /* --- sub-blocks inside a merged group --------------------------- */
+        #${SETTINGS_CONTAINER_ID} .spe-settings-block + .spe-settings-block {
+            margin-top: 6px;
+            border-top: 1px solid var(--v2-bds);
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-block-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 0 3px;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-block-title {
+            flex: 1;
+            color: var(--v2-dim);
+            font-size: 11px;
+            font-weight: 650;
         }
     `;
     document.head.append(style);
@@ -2426,313 +2553,284 @@ function renderSettingsPanel() {
             <div class="inline-drawer-content">
                 <div class="spe-settings-shell">
                     <div class="spe-settings-section spe-settings-master-switch" data-spe-settings-step="master">
-                        <div class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-power-off" aria-hidden="true"></i></span>
-                            <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">Master switch</span>
-                                <h4 class="spe-settings-title">Master Switch</h4>
-                            </div>
-                            ${renderSettingsInfo('spe-settings-help-master', 'Enable or disable the entire extension without removing it.', 'About the Story Engine master switch')}
-                        </div>
-                        <div class="spe-settings-body">
-                            <div class="spe-settings-toggle-row">
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_story_engine_enabled" type="checkbox">
-                                    <span>Enable Story Engine</span>
-                                </label>
-                                ${renderSettingsInfo('spe-settings-help-master-enabled', 'When disabled, Story Engine skips semantic preflight, mechanics, narrator handoff, Prose Guard, tracker updates, character progression, and prompt injection.', 'What enabling Story Engine controls')}
-                            </div>
-                        </div>
+                        <label class="checkbox_label flexNoGap spe-settings-master-label">
+                            <input id="structured_preflight_story_engine_enabled" type="checkbox">
+                            <span>Enable Story Engine</span>
+                        </label>
+                        ${renderSettingsInfo('spe-settings-help-master', 'Enable or disable the entire extension without removing it. When disabled, Story Engine skips semantic preflight, mechanics, narrator handoff, Prose Guard, tracker updates, character progression, and prompt injection.', 'About the Story Engine master switch')}
                     </div>
-
-                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="setup">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="character">
                         <summary class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-user-gear" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">0. Setup</span>
-                                <h4 class="spe-settings-title">Player Setup</h4>
+                                <h4 class="spe-settings-title">Character</h4>
                             </div>
-                            ${renderSettingsInfo('spe-settings-help-setup', 'Create, resume, or reset the playable character shell before roleplay generation.', 'About Player Setup')}
                         </summary>
                         <div class="spe-settings-body">
-                            <small id="structured_preflight_player_setup_status" class="spe-settings-player-status"></small>
-                            <div class="spe-settings-buttons">
-                                <button id="structured_preflight_show_player_setup" class="menu_button">Show Player Setup</button>
-                                <button id="structured_preflight_force_player_setup" class="menu_button">Run Character Creator</button>
-                                <button id="structured_preflight_reset_player_setup" class="menu_button">Reset Chat Setup</button>
-                            </div>
-                        </div>
-                    </details>
-
-                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="semantic">
-                        <summary class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-brain" aria-hidden="true"></i></span>
-                            <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">1. First model call</span>
-                                <h4 class="spe-settings-title">Story Engine Profile</h4>
-                            </div>
-                            ${renderSettingsInfo('spe-settings-help-semantic', 'The private structured profile reads the assembled prompt stack, resolves mechanics, and runs post-narration utility checks. Narration, adventure openings, character creation, and character progression use the current SillyTavern profile.', 'About the Story Engine profile')}
-                        </summary>
-                        <div class="spe-settings-body">
-                            <div class="spe-settings-toggle-row">
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_use_separate_semantic_settings" type="checkbox">
-                                    <span>Use private Story Engine connection profile</span>
-                                </label>
-                                ${renderSettingsInfo('spe-settings-help-semantic-private', 'Used for semantic preflight and post-narration Story Engine utility calls. Story Engine automatically uses the selected connector\'s compatible tool and reasoning request settings.', 'About the private Story Engine connection profile')}
-                            </div>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_semantic_output_mode">Semantic preflight output</label>
-                                <select id="structured_preflight_semantic_output_mode" class="text_pole flex1">
-                                    <option value="${SEMANTIC_OUTPUT_MODES.TOOL_CALL}">Tool Call</option>
-                                    <option value="${SEMANTIC_OUTPUT_MODES.TEXT_LEDGER}">Validated Text Ledger</option>
-                                </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Validated Text Ledger uses ordinary text generation, requires one exact JSON ledger frame, retries one returned-format failure, and applies the same complete-ledger, grounding, and consistency validation before narration.', 'About semantic preflight output')}
-                            </div>
-                            <div id="structured_preflight_semantic_strict_schema_row" class="spe-settings-toggle-row" hidden>
-                                <label for="structured_preflight_semantic_strict_schema">Strict Tool Schema</label>
-                                <select id="structured_preflight_semantic_strict_schema" class="text_pole flex1">
-                                    <option value="false">Provider default</option>
-                                    <option value="true">Enforce strict schema</option>
-                                </select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-strict-schema', 'For providers without a hardcoded strict policy, enforce the complete closed JSON schema and function.strict on semantic Tool Call requests.', 'About Strict Tool Schema')}
-                            </div>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_semantic_profile">Story Engine profile</label>
-                                <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-profile', 'Select the SillyTavern connection profile used for semantic preflight and post-narration Story Engine utility calls.', 'About Story Engine profile selection')}
-                            </div>
-                            <div id="structured_preflight_semantic_model_row" class="spe-settings-row" hidden>
-                                <label for="structured_preflight_semantic_model">Story Engine model</label>
-                                <select id="structured_preflight_semantic_model" class="text_pole flex1"></select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-model', 'Choose the semantic-only model from the detected list. None is not valid while a separate Story Engine profile is selected.', 'About Story Engine model selection')}
-                            </div>
-                            <div id="structured_preflight_semantic_preset_row" class="spe-settings-row" hidden>
-                                <label for="structured_preflight_semantic_preset">Story Engine preset</label>
-                                <select id="structured_preflight_semantic_preset" class="text_pole flex1"></select>
-                                ${renderSettingsInfo('spe-settings-help-semantic-preset', 'Optional semantic-only Chat Completion preset. Leave blank to use the preset saved on the selected connection profile. This does not change SillyTavern\'s active narration preset.', 'About Story Engine preset selection')}
-                            </div>
-                            <div class="spe-settings-row">
-                                <button id="structured_preflight_refresh_semantic_settings" class="menu_button flex1"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh</button>
-                                ${renderSettingsInfo('spe-settings-help-semantic-refresh', 'Reload the available connection profiles, models for the selected profile, and Chat Completion presets.', 'About refreshing Story Engine semantic sources')}
-                            </div>
-                        </div>
-                    </details>
-
-                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="call-delay">
-                        <summary class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-clock" aria-hidden="true"></i></span>
-                            <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">1b. Call spacing</span>
-                                <h4 class="spe-settings-title">Model Call Delay</h4>
-                            </div>
-                            ${renderSettingsInfo('spe-settings-help-delay', 'Optionally waits between Story Engine model calls for APIs with request spacing limits.', 'About Model Call Delay')}
-                        </summary>
-                        <div class="spe-settings-body">
-                            <div class="spe-settings-toggle-row">
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_model_call_delay_enabled" type="checkbox">
-                                    <span>Enable model call delay</span>
-                                </label>
-                                ${renderSettingsInfo('spe-settings-help-delay-enabled', 'Applies the configured wait between semantic preflight, narrator generation, Prose Guard, tracker update, and progression calls. Disabled by default.', 'What Model Call Delay controls')}
-                            </div>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_model_call_delay_seconds">Delay seconds</label>
-                                <input id="structured_preflight_model_call_delay_seconds" class="text_pole widthNatural" type="number" min="0" max="300" step="0.1">
-                                ${renderSettingsInfo('spe-settings-help-delay-seconds', 'Set the wait between consecutive Story Engine model calls, from 0 to 300 seconds.', 'About delay seconds')}
-                            </div>
-                        </div>
-                    </details>
-
-                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="narrator-inputs">
-                        <summary class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-feather-pointed" aria-hidden="true"></i></span>
-                            <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">2. Narrator inputs</span>
-                                <h4 class="spe-settings-title">Narrator Context</h4>
-                            </div>
-                            ${renderSettingsInfo('spe-settings-help-narrator', 'Controls deterministic name pools and optional writing style context sent into the narrator prompt.', 'About Narrator Context')}
-                        </summary>
-                        <div class="spe-settings-body">
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_name_style">Name style</label>
-                                <select id="structured_preflight_name_style" class="text_pole flex1"></select>
-                                ${renderSettingsInfo('spe-settings-help-name-style', 'Controls deterministic generated name pools sent to the narrator prompt.', 'About name style')}
-                            </div>
-                            <div class="spe-settings-toggle-row">
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_co_author_mode_enabled" type="checkbox">
-                                    <span>Enable Co-Author Mode</span>
-                                </label>
-                                ${renderSettingsInfo('spe-settings-help-co-author', 'When enabled, double-square-bracket instructions authorize the narrator to choose {{user}}\'s observable actions, spoken dialogue, and bounded conversational turn-taking for one response only. Thoughts, feelings, private mental states, and anything outside the brackets remain protected.', 'About Co-Author Mode')}
-                            </div>
-                            <div class="spe-settings-toggle-row">
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_writing_style_enabled" type="checkbox">
-                                    <span>Enable Writing Style</span>
-                                </label>
-                                ${renderSettingsInfo('spe-settings-help-writing-style', 'Included in the narrator handoff as sceneStyleProfile after the render-control rules. Section text is editable; internal function names are added automatically.', 'About Writing Style')}
-                            </div>
-                            <details id="structured_preflight_writing_style_drawer" data-structured-preflight-prompt-drawer>
-                                <summary class="spe-settings-writing-summary">
-                                    <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Writing Style</button>
-                                    <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="all">Reset All</button>
-                                </summary>
-                                <div class="spe-settings-body">
-                                    <div class="spe-settings-style-block">
-                                        <div class="spe-settings-style-header">
-                                            <span class="spe-settings-style-label">
-                                                <label for="structured_preflight_writing_style_exploration_prompt">Exploration</label>
-                                                ${renderSettingsInfo('spe-settings-help-writing-exploration', 'Editable exploration-scene prose guidance. Internal function names are added automatically.', 'About Exploration writing style')}
-                                            </span>
-                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleExplorationPrompt">Reset</button>
-                                        </div>
-                                        <textarea id="structured_preflight_writing_style_exploration_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
-                                    </div>
-                                    <div class="spe-settings-style-block">
-                                        <div class="spe-settings-style-header">
-                                            <span class="spe-settings-style-label">
-                                                <label for="structured_preflight_writing_style_action_prompt">Action</label>
-                                                ${renderSettingsInfo('spe-settings-help-writing-action', 'Editable action-scene prose guidance. Internal function names are added automatically.', 'About Action writing style')}
-                                            </span>
-                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleActionPrompt">Reset</button>
-                                        </div>
-                                        <textarea id="structured_preflight_writing_style_action_prompt" class="text_pole textarea_compact" rows="7" spellcheck="false"></textarea>
-                                    </div>
-                                    <div class="spe-settings-style-block">
-                                        <div class="spe-settings-style-header">
-                                            <span class="spe-settings-style-label">
-                                                <label for="structured_preflight_writing_style_intimacy_prompt">Intimacy</label>
-                                                ${renderSettingsInfo('spe-settings-help-writing-intimacy', 'Editable intimacy-scene prose guidance. Internal function names are added automatically.', 'About Intimacy writing style')}
-                                            </span>
-                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleIntimacyPrompt">Reset</button>
-                                        </div>
-                                        <textarea id="structured_preflight_writing_style_intimacy_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
-                                    </div>
-                                    <div class="spe-settings-style-block">
-                                        <div class="spe-settings-style-header">
-                                            <span class="spe-settings-style-label">
-                                                <label for="structured_preflight_writing_style_dialogue_prompt">Dialogue</label>
-                                                ${renderSettingsInfo('spe-settings-help-writing-dialogue', 'Editable dialogue-scene prose guidance. Internal function names are added automatically.', 'About Dialogue writing style')}
-                                            </span>
-                                            <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleDialoguePrompt">Reset</button>
-                                        </div>
-                                        <textarea id="structured_preflight_writing_style_dialogue_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
-                                    </div>
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Player setup</span>
+                                    ${renderSettingsInfo('spe-settings-help-setup', 'Create, resume, or reset the playable character shell before roleplay generation.', 'About Player Setup')}
                                 </div>
-                            </details>
-                        </div>
-                    </details>
-
-                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="prose-guard">
-                        <summary class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
-                            <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">3. After narration</span>
-                                <h4 class="spe-settings-title">Prose Guard</h4>
-                            </div>
-                            ${renderSettingsInfo('spe-settings-help-prose-guard', 'Scans final narration for configured phrases and lets you choose whether repairs are automatic or reviewed first.', 'About Prose Guard')}
-                        </summary>
-                        <div class="spe-settings-body">
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_prose_guard_mode">Mode</label>
-                                <select id="structured_preflight_prose_guard_mode" class="text_pole flex1">
-                                    <option value="automatic">Automatic</option>
-                                    <option value="review">Review</option>
-                                    <option value="off">Off</option>
-                                </select>
-                                ${renderSettingsInfo('spe-settings-help-prose-mode', 'Automatic repairs confirmed violations and records each replacement. Review reports violations and waits for Fix, Dismiss, or Delete. Off disables Prose Guard.', 'About Prose Guard mode')}
-                            </div>
-                            <details id="structured_preflight_prose_guard_bans_drawer" data-structured-preflight-prompt-drawer>
-                                <summary class="spe-settings-writing-summary">
-                                    <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Targeted Phrase Bans</button>
-                                    <button class="menu_button" type="button" data-structured-preflight-reset-prose-guard-bans="all">Reset All</button>
-                                </summary>
-                                <div class="spe-settings-body">
-                                    ${PROSE_GUARD_TARGETED_BAN_FIELDS.map(field => `
-                                    <div class="spe-settings-style-block">
-                                        <div class="spe-settings-style-header">
-                                            <span class="spe-settings-style-label">
-                                                <label for="${field.id}">${field.label}</label>
-                                                ${renderSettingsInfo(`spe-settings-help-${field.key}`, `${field.description} Enter one phrase per line. Matches whole phrases and asks Prose Guard to rewrite the full sentence containing each violation.`, `About ${field.label}`)}
-                                            </span>
-                                            <button class="menu_button" type="button" data-structured-preflight-reset-prose-guard-bans="${field.key}">Reset</button>
-                                        </div>
-                                        <textarea id="${field.id}" class="text_pole textarea_compact" rows="7" spellcheck="false"></textarea>
-                                    </div>`).join('')}
+                                <small id="structured_preflight_player_setup_status" class="spe-settings-player-status"></small>
+                                <div class="spe-settings-buttons">
+                                    <button id="structured_preflight_show_player_setup" class="menu_button">Show Player Setup</button>
+                                    <button id="structured_preflight_force_player_setup" class="menu_button">Run Character Creator</button>
+                                    <button id="structured_preflight_reset_player_setup" class="menu_button">Reset Chat Setup</button>
                                 </div>
-                            </details>
-                            <div class="spe-settings-row spe-settings-information-row">
-                                <span class="spe-settings-control-label">Manual repair</span>
-                                ${renderSettingsInfo('spe-settings-help-prose-manual', 'Manual Fix accepts a specific phrase, repairs only the sentence containing it in the latest response, and remembers that phrase for future scans.', 'About manual Prose Guard repair')}
+                            </div>
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Character progression</span>
+                                    ${renderSettingsInfo('spe-settings-help-progression', 'Tracks hidden advancement milestones and offers stat increases or generated ability swaps when growth is ready.', 'About Character Progression')}
+                                </div>
+                                <div class="spe-settings-toggle-row">
+                                    <label class="checkbox_label flexNoGap">
+                                        <input id="structured_preflight_progression_enabled" type="checkbox">
+                                        <span>Enable Character Progression</span>
+                                    </label>
+                                    ${renderSettingsInfo('spe-settings-help-progression-enabled', 'Advancement progress is hidden. Generated ability and spell options use the current narrator profile.', 'What Character Progression controls')}
+                                </div>
                             </div>
                         </div>
                     </details>
 
-                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="tracker">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="models">
                         <summary class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-table-columns" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">4. After final prose</span>
-                                <h4 class="spe-settings-title">Visible Tracker</h4>
+                                <h4 class="spe-settings-title">Models &amp; Presets</h4>
                             </div>
-                            ${renderSettingsInfo('spe-settings-help-tracker', 'Shows or hides the visible tracker widget. Hidden tracker state still updates after narration.', 'About the Visible Tracker')}
                         </summary>
                         <div class="spe-settings-body">
-                            <div class="spe-settings-toggle-row">
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_post_tracker_enabled" type="checkbox">
-                                    <span>Show visible tracker</span>
-                                </label>
-                                ${renderSettingsInfo('spe-settings-help-tracker-visible', 'Hides or shows the tracker interface without affecting hidden tracker updates.', 'What Show visible tracker controls')}
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Story Engine profile</span>
+                                    ${renderSettingsInfo('spe-settings-help-semantic', 'The private structured profile reads the assembled prompt stack, resolves mechanics, and runs post-narration utility checks. Narration, adventure openings, character creation, and character progression use the current SillyTavern profile.', 'About the Story Engine profile')}
+                                </div>
+                                <div class="spe-settings-toggle-row">
+                                    <label class="checkbox_label flexNoGap">
+                                        <input id="structured_preflight_use_separate_semantic_settings" type="checkbox">
+                                        <span>Use private Story Engine connection profile</span>
+                                    </label>
+                                    ${renderSettingsInfo('spe-settings-help-semantic-private', 'Used for semantic preflight and post-narration Story Engine utility calls. Story Engine automatically uses the selected connector\'s compatible tool and reasoning request settings.', 'About the private Story Engine connection profile')}
+                                </div>
+                                <div class="spe-settings-row">
+                                    <label for="structured_preflight_semantic_output_mode">Semantic preflight output</label>
+                                    <select id="structured_preflight_semantic_output_mode" class="text_pole flex1">
+                                        <option value="${SEMANTIC_OUTPUT_MODES.TOOL_CALL}">Tool Call</option>
+                                        <option value="${SEMANTIC_OUTPUT_MODES.TEXT_LEDGER}">Validated Text Ledger</option>
+                                    </select>
+                                    ${renderSettingsInfo('spe-settings-help-semantic-output', 'Tool Call uses the provider tool interface. Validated Text Ledger uses ordinary text generation, requires one exact JSON ledger frame, retries one returned-format failure, and applies the same complete-ledger, grounding, and consistency validation before narration.', 'About semantic preflight output')}
+                                </div>
+                                <div id="structured_preflight_semantic_strict_schema_row" class="spe-settings-toggle-row" hidden>
+                                    <label for="structured_preflight_semantic_strict_schema">Strict Tool Schema</label>
+                                    <select id="structured_preflight_semantic_strict_schema" class="text_pole flex1">
+                                        <option value="false">Provider default</option>
+                                        <option value="true">Enforce strict schema</option>
+                                    </select>
+                                    ${renderSettingsInfo('spe-settings-help-semantic-strict-schema', 'For providers without a hardcoded strict policy, enforce the complete closed JSON schema and function.strict on semantic Tool Call requests.', 'About Strict Tool Schema')}
+                                </div>
+                                <div class="spe-settings-row">
+                                    <label for="structured_preflight_semantic_profile">Story Engine profile</label>
+                                    <select id="structured_preflight_semantic_profile" class="text_pole flex1"></select>
+                                    ${renderSettingsInfo('spe-settings-help-semantic-profile', 'Select the SillyTavern connection profile used for semantic preflight and post-narration Story Engine utility calls.', 'About Story Engine profile selection')}
+                                </div>
+                                <div id="structured_preflight_semantic_model_row" class="spe-settings-row" hidden>
+                                    <label for="structured_preflight_semantic_model">Story Engine model</label>
+                                    <select id="structured_preflight_semantic_model" class="text_pole flex1"></select>
+                                    ${renderSettingsInfo('spe-settings-help-semantic-model', 'Choose the semantic-only model from the detected list. None is not valid while a separate Story Engine profile is selected.', 'About Story Engine model selection')}
+                                </div>
+                                <div id="structured_preflight_semantic_preset_row" class="spe-settings-row" hidden>
+                                    <label for="structured_preflight_semantic_preset">Story Engine preset</label>
+                                    <select id="structured_preflight_semantic_preset" class="text_pole flex1"></select>
+                                    ${renderSettingsInfo('spe-settings-help-semantic-preset', 'Optional semantic-only Chat Completion preset. Leave blank to use the preset saved on the selected connection profile. This does not change SillyTavern\'s active narration preset.', 'About Story Engine preset selection')}
+                                </div>
+                                <div class="spe-settings-row">
+                                    <button id="structured_preflight_refresh_semantic_settings" class="menu_button flex1"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh</button>
+                                    ${renderSettingsInfo('spe-settings-help-semantic-refresh', 'Reload the available connection profiles, models for the selected profile, and Chat Completion presets.', 'About refreshing Story Engine semantic sources')}
+                                </div>
+                            </div>
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Model call delay</span>
+                                    ${renderSettingsInfo('spe-settings-help-delay', 'Optionally waits between Story Engine model calls for APIs with request spacing limits.', 'About Model Call Delay')}
+                                </div>
+                                <div class="spe-settings-toggle-row">
+                                    <label class="checkbox_label flexNoGap">
+                                        <input id="structured_preflight_model_call_delay_enabled" type="checkbox">
+                                        <span>Enable model call delay</span>
+                                    </label>
+                                    ${renderSettingsInfo('spe-settings-help-delay-enabled', 'Applies the configured wait between semantic preflight, narrator generation, Prose Guard, tracker update, and progression calls. Disabled by default.', 'What Model Call Delay controls')}
+                                </div>
+                                <div class="spe-settings-row">
+                                    <label for="structured_preflight_model_call_delay_seconds">Delay seconds</label>
+                                    <input id="structured_preflight_model_call_delay_seconds" class="text_pole widthNatural" type="number" min="0" max="300" step="0.1">
+                                    ${renderSettingsInfo('spe-settings-help-delay-seconds', 'Set the wait between consecutive Story Engine model calls, from 0 to 300 seconds.', 'About delay seconds')}
+                                </div>
                             </div>
                         </div>
                     </details>
 
-                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="narration-handoff">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="narrator">
                         <summary class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-scroll" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">4b. Diagnostics</span>
-                                <h4 class="spe-settings-title">Narration Handoff</h4>
+                                <h4 class="spe-settings-title">Narration Rules</h4>
                             </div>
-                            ${renderSettingsInfo('spe-settings-help-narration-handoff', 'Shows the completed Story Engine audit and narrator handoff for inspection. This display does not change what the narrator model receives.', 'About the Narration Handoff')}
                         </summary>
                         <div class="spe-settings-body">
-                            <div class="spe-settings-toggle-row">
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_narrator_handoff_enabled" type="checkbox">
-                                    <span>Show Narration Handoff</span>
-                                </label>
-                                ${renderSettingsInfo('spe-settings-help-narration-handoff-visible', 'When enabled, show the latest handoff either beneath each assistant message or in the side panel.', 'What Show Narration Handoff controls')}
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Narrator context</span>
+                                    ${renderSettingsInfo('spe-settings-help-narrator', 'Controls deterministic name pools and optional writing style context sent into the narrator prompt.', 'About Narrator Context')}
+                                </div>
+                                <div class="spe-settings-row">
+                                    <label for="structured_preflight_name_style">Name style</label>
+                                    <select id="structured_preflight_name_style" class="text_pole flex1"></select>
+                                    ${renderSettingsInfo('spe-settings-help-name-style', 'Controls deterministic generated name pools sent to the narrator prompt.', 'About name style')}
+                                </div>
+                                <div class="spe-settings-toggle-row">
+                                    <label class="checkbox_label flexNoGap">
+                                        <input id="structured_preflight_co_author_mode_enabled" type="checkbox">
+                                        <span>Enable Co-Author Mode</span>
+                                    </label>
+                                    ${renderSettingsInfo('spe-settings-help-co-author', 'When enabled, double-square-bracket instructions authorize the narrator to choose {{user}}\'s observable actions, spoken dialogue, and bounded conversational turn-taking for one response only. Thoughts, feelings, private mental states, and anything outside the brackets remain protected.', 'About Co-Author Mode')}
+                                </div>
+                                <div class="spe-settings-toggle-row">
+                                    <label class="checkbox_label flexNoGap">
+                                        <input id="structured_preflight_writing_style_enabled" type="checkbox">
+                                        <span>Enable Writing Style</span>
+                                    </label>
+                                    ${renderSettingsInfo('spe-settings-help-writing-style', 'Included in the narrator handoff as sceneStyleProfile after the render-control rules. Section text is editable; internal function names are added automatically.', 'About Writing Style')}
+                                </div>
+                                <details id="structured_preflight_writing_style_drawer" data-structured-preflight-prompt-drawer>
+                                    <summary class="spe-settings-writing-summary">
+                                        <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Writing Style</button>
+                                        <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="all">Reset All</button>
+                                    </summary>
+                                    <div class="spe-settings-body">
+                                        <div class="spe-settings-style-block">
+                                            <div class="spe-settings-style-header">
+                                                <span class="spe-settings-style-label">
+                                                    <label for="structured_preflight_writing_style_exploration_prompt">Exploration</label>
+                                                    ${renderSettingsInfo('spe-settings-help-writing-exploration', 'Editable exploration-scene prose guidance. Internal function names are added automatically.', 'About Exploration writing style')}
+                                                </span>
+                                                <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleExplorationPrompt">Reset</button>
+                                            </div>
+                                            <textarea id="structured_preflight_writing_style_exploration_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
+                                        </div>
+                                        <div class="spe-settings-style-block">
+                                            <div class="spe-settings-style-header">
+                                                <span class="spe-settings-style-label">
+                                                    <label for="structured_preflight_writing_style_action_prompt">Action</label>
+                                                    ${renderSettingsInfo('spe-settings-help-writing-action', 'Editable action-scene prose guidance. Internal function names are added automatically.', 'About Action writing style')}
+                                                </span>
+                                                <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleActionPrompt">Reset</button>
+                                            </div>
+                                            <textarea id="structured_preflight_writing_style_action_prompt" class="text_pole textarea_compact" rows="7" spellcheck="false"></textarea>
+                                        </div>
+                                        <div class="spe-settings-style-block">
+                                            <div class="spe-settings-style-header">
+                                                <span class="spe-settings-style-label">
+                                                    <label for="structured_preflight_writing_style_intimacy_prompt">Intimacy</label>
+                                                    ${renderSettingsInfo('spe-settings-help-writing-intimacy', 'Editable intimacy-scene prose guidance. Internal function names are added automatically.', 'About Intimacy writing style')}
+                                                </span>
+                                                <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleIntimacyPrompt">Reset</button>
+                                            </div>
+                                            <textarea id="structured_preflight_writing_style_intimacy_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
+                                        </div>
+                                        <div class="spe-settings-style-block">
+                                            <div class="spe-settings-style-header">
+                                                <span class="spe-settings-style-label">
+                                                    <label for="structured_preflight_writing_style_dialogue_prompt">Dialogue</label>
+                                                    ${renderSettingsInfo('spe-settings-help-writing-dialogue', 'Editable dialogue-scene prose guidance. Internal function names are added automatically.', 'About Dialogue writing style')}
+                                                </span>
+                                                <button class="menu_button" type="button" data-structured-preflight-reset-writing-style="writingStyleDialoguePrompt">Reset</button>
+                                            </div>
+                                            <textarea id="structured_preflight_writing_style_dialogue_prompt" class="text_pole textarea_compact" rows="8" spellcheck="false"></textarea>
+                                        </div>
+                                    </div>
+                                </details>
                             </div>
-                            <div class="spe-settings-row">
-                                <label for="structured_preflight_narrator_handoff_display_mode">Display location</label>
-                                <select id="structured_preflight_narrator_handoff_display_mode" class="text_pole flex1">
-                                    <option value="side_panel">Side Panel</option>
-                                    <option value="in_chat">In-Chat</option>
-                                </select>
-                                ${renderSettingsInfo('spe-settings-help-narration-handoff-location', 'Choose where the visible handoff appears. Side Panel shows the latest handoff in a collapsible tracker-style window; In-Chat keeps one block on each assistant response.', 'About handoff display location')}
                             </div>
-                        </div>
                     </details>
 
-                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="progression">
+                    <details class="spe-settings-section spe-settings-child-section" data-spe-settings-step="after-narration">
                         <summary class="spe-settings-section-head">
-                            <span class="spe-settings-section-icon"><i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i></span>
                             <div class="spe-settings-section-copy">
-                                <span class="spe-settings-kicker">5. Advancement</span>
-                                <h4 class="spe-settings-title">Character Progression</h4>
+                                <h4 class="spe-settings-title">After narration</h4>
                             </div>
-                            ${renderSettingsInfo('spe-settings-help-progression', 'Tracks hidden advancement milestones and offers stat increases or generated ability swaps when growth is ready.', 'About Character Progression')}
                         </summary>
                         <div class="spe-settings-body">
-                            <div class="spe-settings-toggle-row">
-                                <label class="checkbox_label flexNoGap">
-                                    <input id="structured_preflight_progression_enabled" type="checkbox">
-                                    <span>Enable Character Progression</span>
-                                </label>
-                                ${renderSettingsInfo('spe-settings-help-progression-enabled', 'Advancement progress is hidden. Generated ability and spell options use the current narrator profile.', 'What Character Progression controls')}
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Prose Guard</span>
+                                    ${renderSettingsInfo('spe-settings-help-prose-guard', 'Scans final narration for configured phrases and lets you choose whether repairs are automatic or reviewed first.', 'About Prose Guard')}
+                                </div>
+                                <div class="spe-settings-row">
+                                    <label for="structured_preflight_prose_guard_mode">Mode</label>
+                                    <select id="structured_preflight_prose_guard_mode" class="text_pole flex1">
+                                        <option value="automatic">Automatic</option>
+                                        <option value="review">Review</option>
+                                        <option value="off">Off</option>
+                                    </select>
+                                    ${renderSettingsInfo('spe-settings-help-prose-mode', 'Automatic repairs confirmed violations and records each replacement. Review reports violations and waits for Fix, Dismiss, or Delete. Off disables Prose Guard.', 'About Prose Guard mode')}
+                                </div>
+                                <details id="structured_preflight_prose_guard_bans_drawer" data-structured-preflight-prompt-drawer>
+                                    <summary class="spe-settings-writing-summary">
+                                        <button class="menu_button flex1" type="button" data-structured-preflight-edit-toggle>Edit Targeted Phrase Bans</button>
+                                        <button class="menu_button" type="button" data-structured-preflight-reset-prose-guard-bans="all">Reset All</button>
+                                    </summary>
+                                    <div class="spe-settings-body">
+                                        ${PROSE_GUARD_TARGETED_BAN_FIELDS.map(field => `
+                                        <div class="spe-settings-style-block">
+                                            <div class="spe-settings-style-header">
+                                                <span class="spe-settings-style-label">
+                                                    <label for="${field.id}">${field.label}</label>
+                                                    ${renderSettingsInfo(`spe-settings-help-${field.key}`, `${field.description} Enter one phrase per line. Matches whole phrases and asks Prose Guard to rewrite the full sentence containing each violation.`, `About ${field.label}`)}
+                                                </span>
+                                                <button class="menu_button" type="button" data-structured-preflight-reset-prose-guard-bans="${field.key}">Reset</button>
+                                            </div>
+                                            <textarea id="${field.id}" class="text_pole textarea_compact" rows="7" spellcheck="false"></textarea>
+                                        </div>`).join('')}
+                                    </div>
+                                </details>
+                                <div class="spe-settings-row spe-settings-information-row">
+                                    <span class="spe-settings-control-label">Manual repair</span>
+                                    ${renderSettingsInfo('spe-settings-help-prose-manual', 'Manual Fix accepts a specific phrase, repairs only the sentence containing it in the latest response, and remembers that phrase for future scans.', 'About manual Prose Guard repair')}
+                                </div>
+                            </div>
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Visible tracker</span>
+                                    ${renderSettingsInfo('spe-settings-help-tracker', 'Shows or hides the visible tracker widget. Hidden tracker state still updates after narration.', 'About the Visible Tracker')}
+                                </div>
+                                <div class="spe-settings-toggle-row">
+                                    <label class="checkbox_label flexNoGap">
+                                        <input id="structured_preflight_post_tracker_enabled" type="checkbox">
+                                        <span>Show visible tracker</span>
+                                    </label>
+                                    ${renderSettingsInfo('spe-settings-help-tracker-visible', 'Hides or shows the tracker interface without affecting hidden tracker updates.', 'What Show visible tracker controls')}
+                                </div>
+                            </div>
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Narration Handoff</span>
+                                    ${renderSettingsInfo('spe-settings-help-narration-handoff', 'Shows the completed Story Engine audit and narrator handoff for inspection. This display does not change what the narrator model receives.', 'About the Narration Handoff')}
+                                </div>
+                                <div class="spe-settings-toggle-row">
+                                    <label class="checkbox_label flexNoGap">
+                                        <input id="structured_preflight_narrator_handoff_enabled" type="checkbox">
+                                        <span>Show Narration Handoff</span>
+                                    </label>
+                                    ${renderSettingsInfo('spe-settings-help-narration-handoff-visible', 'When enabled, show the latest handoff either beneath each assistant message or in the side panel.', 'What Show Narration Handoff controls')}
+                                </div>
+                                <div class="spe-settings-row">
+                                    <label for="structured_preflight_narrator_handoff_display_mode">Display location</label>
+                                    <select id="structured_preflight_narrator_handoff_display_mode" class="text_pole flex1">
+                                        <option value="side_panel">Side Panel</option>
+                                        <option value="in_chat">In-Chat</option>
+                                    </select>
+                                    ${renderSettingsInfo('spe-settings-help-narration-handoff-location', 'Choose where the visible handoff appears. Side Panel shows the latest handoff in a collapsible tracker-style window; In-Chat keeps one block on each assistant response.', 'About handoff display location')}
+                                </div>
                             </div>
                         </div>
                     </details>
@@ -7385,6 +7483,22 @@ function v2EmptyState(title, detail) {
         </div>`;
 }
 
+// Per-value colour ramp, one entry per level 1-4.
+//
+// The low half keeps the axis hue and the high half shifts to its escalated hue,
+// so crossing into the 3+ "hot" band is a change of colour rather than only of
+// intensity: Bond deepens from gold into love-pink, Fear from cold blue into
+// dread-violet, Hostility from muted coral into crimson.
+//
+// Every entry must stay clearly lighter than the empty pip (#2b303a). At 5px a
+// value that sits near the empty colour reads as no value at all — that was a
+// real bug, so the darkest entry here is still far from it.
+const V2_AXIS_RAMP = Object.freeze({
+    bond: ['#e8c46a', '#f0b429', '#f9a8c9', '#f472b6'],
+    fear: ['#8fb8f0', '#7aa2f7', '#a78bfa', '#a855f7'],
+    host: ['#c98a86', '#f7768e', '#ef5f6b', '#e5484d'],
+});
+
 // Renders one disposition axis. The displayed number is the RAW tracker value,
 // exactly as the pre-v2 trackerMetric() tiles showed it (`disposition?.B ?? '-'`)
 // — only the pips clamp, since they need a 0-4 range to draw.
@@ -7392,8 +7506,9 @@ function v2Axis(kind, label, value, locked) {
     const known = value !== null && value !== undefined && value !== '';
     const level = known ? Math.max(0, Math.min(4, Math.floor(Number(value) || 0))) : 0;
     const hot = level >= 3;
+    const fill = V2_AXIS_RAMP[kind]?.[level - 1] || '';
     return `
-        <div class="v2-axis ${kind}${hot ? ' hot' : ''}${locked ? ' locked' : ''}">
+        <div class="v2-axis ${kind}${hot ? ' hot' : ''}${locked ? ' locked' : ''}"${fill ? ` style="--v2-axis-fill:${fill}"` : ''}>
             <div class="lb">${escapeHtml(label)}</div>
             ${v2Pips(level)}
             <div class="wd">${escapeHtml(known ? String(value) : '-')}</div>
@@ -9583,7 +9698,12 @@ function ensureTrackerDisplayStyles() {
             --v2-danger: #ff7b72;
             --v2-neutral: #8b8f96;
             --v2-coin: #e8c46a;
-            --v2-calm: #39404b;
+            /* First letter of a cast pill. Violet on purpose: green is the
+               health ring, blue is focus, amber/red are condition warnings and
+               gold is the bond ramp, so violet is the only accent left that
+               cannot be misread as tracker state. */
+            --v2-initial: #c084fc;
+            --v2-rapport: #5eead4;
 
             background: var(--v2-bg) !important;
             border: 1px solid var(--v2-bd) !important;
@@ -9783,12 +9903,18 @@ function ensureTrackerDisplayStyles() {
         }
         /* The first letter carries the character's own stable colour; identity
            without an avatar disc. */
-        /* Serif initial against the sans name. Colour is inherited so the font
-           is the only difference; Georgia is near-universally installed. */
+        /* Serif initial against the sans name. Georgia is near-universally
+           installed, so the treatment renders identically on every machine.
+           The colour alone carries the "neon" quality.
+           No text-shadow glow on purpose: SillyTavern ships a noShadows body
+           class whose rule is 'text-shadow: none !important', and the tracker
+           runs inside that, so a glow would either be silently dropped or
+           require !important against the host's own readability setting. */
         #${TRACKER_WIDGET_PANEL_ID} .v2-initial {
             font-family: Georgia, 'Times New Roman', serif;
             font-size: 14px;
             font-weight: 700;
+            color: var(--v2-initial);
         }
         /* Condition is the pill's ring, all the way around. Presence needs no
            marker — everyone listed is in the scene by definition. */
@@ -9872,8 +9998,11 @@ function ensureTrackerDisplayStyles() {
             border-radius: 3px;
             background: #2b303a;
         }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-pip.on {
-            background: var(--v2-calm);
+        /* The whole filled bar takes the colour for this axis at this value;
+           v2Axis supplies it per level from V2_AXIS_RAMP. The fallback matters:
+           without it a missing ramp entry would leave the bar unstyled. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis .v2-pip.on {
+            background: var(--v2-axis-fill, var(--v2-neutral));
         }
         #${TRACKER_WIDGET_PANEL_ID} .v2-axis .wd {
             margin-top: 5px;
@@ -9881,26 +10010,11 @@ function ensureTrackerDisplayStyles() {
             font-size: 10.5px;
             font-weight: 650;
         }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.bond.hot .lb,
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.bond.hot .wd {
-            color: var(--v2-bond);
-        }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.bond.hot .v2-pip.on {
-            background: var(--v2-bond);
-        }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.fear.hot .lb,
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.fear.hot .wd {
-            color: var(--v2-fear);
-        }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.fear.hot .v2-pip.on {
-            background: var(--v2-fear);
-        }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.host.hot .lb,
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.host.hot .wd {
-            color: var(--v2-hostile);
-        }
-        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.host.hot .v2-pip.on {
-            background: var(--v2-hostile);
+        /* A hot axis colours its label and number too, from the same ramp entry
+           as its pips, so the whole cell reads as one state. */
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.hot .lb,
+        #${TRACKER_WIDGET_PANEL_ID} .v2-axis.hot .wd {
+            color: var(--v2-axis-fill, var(--v2-dim));
         }
         #${TRACKER_WIDGET_PANEL_ID} .v2-axis.locked {
             border-color: color-mix(in srgb, var(--v2-danger) 40%, var(--v2-bd));
@@ -9928,7 +10042,7 @@ function ensureTrackerDisplayStyles() {
             background: #2b303a;
         }
         #${TRACKER_WIDGET_PANEL_ID} .v2-meter i.on {
-            background: var(--v2-bond);
+            background: var(--v2-rapport);
         }
         #${TRACKER_WIDGET_PANEL_ID} .v2-mrow .v {
             color: var(--v2-dim);

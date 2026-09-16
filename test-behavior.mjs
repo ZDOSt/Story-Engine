@@ -12199,7 +12199,21 @@ const tests = [
       assert.match(styleSource, /--v2-bg: #191c22;[\s\S]*?display: flex !important;[\s\S]*?flex-direction: column !important;/);
       assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\} \.structured-preflight-tracker-tabs \{[\s\S]*?flex-direction: row;/);
       assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\} > \.structured-preflight-prose-guard-strip \{[\s\S]*?flex: 0 0 auto;/);
-      assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\} \.v2-axis\.bond\.hot \.v2-pip\.on \{[\s\S]*?background: var\(--v2-bond\)/);
+      assert.match(styleSource, /#\$\{TRACKER_WIDGET_PANEL_ID\} \.v2-axis\.hot \.lb,[\s\S]*?color: var\(--v2-axis-fill, var\(--v2-dim\)\)/);
+      // Filled pips take the colour v2Axis supplies for this axis at this value.
+      assert.match(styleSource, /\.v2-axis \.v2-pip\.on \{[\s\S]*?background: var\(--v2-axis-fill, var\(--v2-neutral\)\)/);
+      // The per-value ramp: four distinct colours per axis, low half base hue,
+      // high half escalated hue.
+      assert.match(source, /const V2_AXIS_RAMP = Object\.freeze\(\{/);
+      assert.match(source, /bond: \['#e8c46a', '#f0b429', '#f9a8c9', '#f472b6'\]/);
+      assert.match(source, /fear: \['#8fb8f0', '#7aa2f7', '#a78bfa', '#a855f7'\]/);
+      assert.match(source, /host: \['#c98a86', '#f7768e', '#ef5f6b', '#e5484d'\]/);
+      assert.match(source, /const fill = V2_AXIS_RAMP\[kind\]\?\.\[level - 1\]/);
+      assert.match(source, /style="--v2-axis-fill:\$\{fill\}"/);
+      // Rapport has its own hue, outside all three ramps.
+      assert.match(styleSource, /--v2-rapport: #5eead4;/);
+      assert.match(styleSource, /\.v2-meter i\.on \{[\s\S]*?background: var\(--v2-rapport\)/);
+      assert.doesNotMatch(styleSource, /--v2-calm/);
       // tab bar carries a visible text label alongside the icon
       assert.match(source, /function trackerTabButton\(id, label, icon, activeTab\)/);
       assert.match(source, /structured-preflight-tracker-tab-label/);
@@ -12219,6 +12233,10 @@ const tests = [
       assert.match(source, /const V2_CONDITION_RING_CLASS = Object\.freeze\(\{[\s\S]*?good: 'ring-ok'[\s\S]*?warn: 'ring-warn'[\s\S]*?danger: 'ring-danger'/);
       assert.match(styleSource, /\.v2-chip\.ring-ok \{[\s\S]*?border-color: color-mix\(in srgb, var\(--v2-ok\)/);
       assert.match(styleSource, /\.v2-initial \{[\s\S]*?font-family: Georgia/);
+      // Violet is the only accent that cannot be misread as tracker state:
+      // green is the health ring, blue focus, amber/red condition warnings.
+      assert.match(styleSource, /--v2-initial: #c084fc;/);
+      assert.match(styleSource, /\.v2-initial \{[\s\S]*?color: var\(--v2-initial\)/);
       assert.match(source, /<span class="v2-name"><span class="v2-initial"/);
       // The cast list ("Here now") contains scene NPCs only. The user's own
       // character gets a pill in their section header instead, so it is not
@@ -20476,7 +20494,7 @@ const tests = [
     },
   },
   {
-    name: '51 settings panel is grouped by execution order and preserves existing controls',
+    name: '51 settings panel is grouped by intent and preserves existing controls',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       const renderStart = source.indexOf('function renderSettingsPanel()');
@@ -20490,8 +20508,9 @@ const tests = [
       assert.ok(renderSource.includes('ensureSettingsPanelStyles();'));
       assert.ok(renderSource.includes('spe-settings-shell'));
       assert.ok(renderSource.includes('spe-settings-section'));
-      assert.equal((renderSource.match(/<details class="spe-settings-section spe-settings-child-section"/g) || []).length, 8);
-      assert.equal((renderSource.match(/<summary class="spe-settings-section-head"/g) || []).length, 8);
+      // Eight pipeline-ordered sections collapsed into four intent groups.
+      assert.equal((renderSource.match(/<details class="spe-settings-section spe-settings-child-section"/g) || []).length, 4);
+      assert.equal((renderSource.match(/<summary class="spe-settings-section-head"/g) || []).length, 4);
       assert.match(renderSource, /<div class="spe-settings-section spe-settings-master-switch"/);
       assert.match(source, /function collapseSettingsSections\(container = document\)/);
       assert.match(renderSource, /collapseSettingsSections\(container\);/);
@@ -20501,32 +20520,29 @@ const tests = [
       assert.match(source, /class="spe-settings-tooltip"[^>]*id="\$\{escapeHtml\(id\)\}"[^>]*role="tooltip"/);
       assert.match(source, /\.spe-settings-help:hover \.spe-settings-tooltip/);
       assert.match(source, /\.spe-settings-help:focus-within \.spe-settings-tooltip/);
-      assert.match(source, /--spe-settings-accent: #73d0ff/);
-      assert.match(source, /--spe-settings-accent: #8bd49c/);
-      assert.match(source, /--spe-settings-accent: #f3a6c8/);
-      assert.match(source, /--spe-settings-accent: #f0c674/);
-      assert.match(source, /--spe-settings-accent: #c6a0f6/);
       assert.doesNotMatch(renderSource, /spe-settings-description|spe-settings-note/);
+      // One accent for the whole panel; the per-section colours were dropped.
+      assert.equal((source.match(/--spe-settings-accent:/g) || []).length, 1);
 
-      const sections = [
-         ['data-spe-settings-step="master"', 'Master switch', 'Master Switch'],
-         ['data-spe-settings-step="setup"', '0. Setup', 'Player Setup'],
-         ['data-spe-settings-step="semantic"', '1. First model call', 'Story Engine Profile'],
-         ['data-spe-settings-step="call-delay"', '1b. Call spacing', 'Model Call Delay'],
-         ['data-spe-settings-step="narrator-inputs"', '2. Narrator inputs', 'Narrator Context'],
-         ['data-spe-settings-step="prose-guard"', '3. After narration', 'Prose Guard'],
-         ['data-spe-settings-step="tracker"', '4. After final prose', 'Visible Tracker'],
-         ['data-spe-settings-step="narration-handoff"', '4b. Diagnostics', 'Narration Handoff'],
-         ['data-spe-settings-step="progression"', '5. Advancement', 'Character Progression'],
+      // Grouped by what you are trying to do. Each group must appear after the
+      // previous one, and its members must live inside it.
+      const groups = [
+        ['master', 'Enable Story Engine'],
+        ['character', 'Player setup', 'Character progression'],
+        ['models', 'Story Engine profile', 'Model call delay'],
+        ['narrator', 'Enable Writing Style', 'Enable Co-Author Mode'],
+        ['after-narration', 'Prose Guard', 'Visible tracker', 'Narration Handoff'],
       ];
       let previousIndex = -1;
-      for (const [step, kicker, title] of sections) {
-        const stepIndex = renderSource.indexOf(step);
-        assert.ok(stepIndex > previousIndex, `${step} should appear in execution order.`);
-        assert.ok(renderSource.indexOf(kicker, stepIndex) > stepIndex, `${kicker} label should be inside ${step}.`);
-        assert.ok(renderSource.indexOf(title, stepIndex) > stepIndex, `${title} title should be inside ${step}.`);
+      for (const [step, ...members] of groups) {
+        const stepIndex = renderSource.indexOf(`data-spe-settings-step="${step}"`);
+        assert.ok(stepIndex > previousIndex, `${step} should appear after the previous group.`);
+        for (const member of members) {
+          assert.ok(renderSource.indexOf(member, stepIndex) > stepIndex, `${member} should live inside ${step}.`);
+        }
         previousIndex = stepIndex;
       }
+      assert.equal((renderSource.match(/data-spe-settings-step="[a-z-]+"/g) || []).length, 5);
 
       const controlIds = [
         'structured_preflight_story_engine_enabled',
