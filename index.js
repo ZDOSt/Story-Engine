@@ -23,6 +23,7 @@ import {
     notifyError,
     notifyInfo,
     notifySuccess,
+    notifyWarning,
     offEvent,
     onEvent,
     onDomReady,
@@ -620,6 +621,14 @@ const DEFAULT_SETTINGS = Object.freeze({
     semanticConnectionProfileId: '',
     semanticModelByProfile: Object.freeze({}),
     semanticPresetByProfile: Object.freeze({}),
+
+    // Bundled Chat Completion presets. Keyed by preset name.
+    // `...Mtimes` records the Last-Modified stamp of the copy we last installed,
+    // so a later change to the bundled file is detectable without hashing.
+    // `...Notified` records the stamp we have already raised a toast for, so an
+    // outstanding update is announced once rather than on every page load.
+    bundledPresetMtimes: Object.freeze({}),
+    bundledPresetNotified: Object.freeze({}),
     semanticOutputMode: SEMANTIC_OUTPUT_MODES.TOOL_CALL,
     semanticStrictToolSchemaByRoute: Object.freeze({}),
     modelCallDelayEnabled: false,
@@ -2167,6 +2176,18 @@ function ensureSettingsPanelStyles() {
             height: 100%;
             white-space: normal;
         }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-notice {
+            display: block;
+            margin: 7px 0 0;
+            padding: 7px 9px;
+            border-left: 3px solid var(--v2-warn);
+            background: color-mix(in srgb, var(--v2-warn) 8%, transparent);
+            color: color-mix(in srgb, var(--v2-text) 88%, var(--v2-warn));
+            line-height: 1.35;
+        }
+        #${SETTINGS_CONTAINER_ID} .spe-settings-notice[hidden] {
+            display: none;
+        }
         #${SETTINGS_CONTAINER_ID} .spe-settings-player-status {
             display: block;
             padding: 7px 9px;
@@ -2525,6 +2546,199 @@ function collapseSettingsSections(container = document) {
 }
 
 
+// ── Bundled Chat Completion presets ────────────────────────────────────────
+//
+// Two presets ship inside the extension folder and are offered to the user, never
+// forced on them:
+//
+//     Story-Engine-Preset   the narrator preset
+//     Semantic Default      the semantic-pass preset
+//
+// On install they are written only where the name is free. An existing preset is
+// never touched, and the user is told which names were taken.
+//
+// After that the extension watches each bundled file's Last-Modified stamp.
+// SillyTavern updates an extension with `git pull`, which rewrites only the files
+// that actually changed, so a changed preset takes a fresh stamp while an
+// untouched one keeps its old one. A differing stamp therefore means the bundled
+// preset has moved on — which is what raises the notice in settings and the
+// one-off toast on the first load after an update.
+//
+// Stamps are compared, never ordered: "newer than" would misfire under clock skew.
+
+const BUNDLED_PRESETS = Object.freeze([
+    { name: 'Story-Engine-Preset', file: 'presets/story-engine-preset.json' },
+    { name: 'Semantic Default', file: 'presets/semantic-default.json' },
+]);
+
+const BUNDLED_PRESET_NOTICE_ID = 'structured_preflight_bundled_preset_notice';
+const BUNDLED_PRESET_BUTTON_ID = 'structured_preflight_install_bundled_presets';
+const BUNDLED_PRESET_NOTICE_TEXT = 'Preset Update Available. Warning: Updating will overwrite existing preset.';
+
+// Resolved against this module's own URL, so the paths hold whatever the
+// extension folder ends up being named.
+function getExtensionAssetUrl(relativePath) {
+    return new URL(relativePath, import.meta.url).toString();
+}
+
+function getChatCompletionPresetManager() {
+    const context = getContext();
+    if (typeof context?.getPresetManager !== 'function') return null;
+    try {
+        return context.getPresetManager('openai') || null;
+    } catch {
+        return null;
+    }
+}
+
+// HEAD, cache-busted: the stamp is all that is wanted, so no body is downloaded.
+// A failed probe returns '' and is never treated as a change.
+async function fetchBundledPresetStamp(file) {
+    try {
+        const response = await fetch(`${getExtensionAssetUrl(file)}?v=${Date.now()}`, {
+            method: 'HEAD',
+            cache: 'no-store',
+        });
+        if (!response.ok) return '';
+        return String(response.headers.get('last-modified') || '');
+    } catch {
+        return '';
+    }
+}
+
+async function fetchBundledPresetBody(file) {
+    const response = await fetch(`${getExtensionAssetUrl(file)}?v=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
+
+function writeBundledPresetBookkeeping(mtimes, notified) {
+    const settings = getSettings();
+    settings.bundledPresetMtimes = mtimes;
+    settings.bundledPresetNotified = notified;
+    saveExtensionSettings();
+}
+
+// Writes the bundled presets. Without `overwrite` an existing name is left
+// completely alone and reported back as blocked.
+async function installBundledPresets({ overwrite = false } = {}) {
+    const manager = getChatCompletionPresetManager();
+    if (!manager || typeof manager.savePreset !== 'function') {
+        return { installed: [], blocked: ['Chat Completion presets are unavailable'] };
+    }
+
+    const settings = getSettings();
+    const mtimes = { ...(settings.bundledPresetMtimes || {}) };
+    const notified = { ...(settings.bundledPresetNotified || {}) };
+    const existing = new Set((manager.getAllPresets?.() || []).map(String));
+    const installed = [];
+    const blocked = [];
+
+    for (const preset of BUNDLED_PRESETS) {
+        const stamp = await fetchBundledPresetStamp(preset.file);
+
+        if (existing.has(preset.name) && !overwrite) {
+            blocked.push(`${preset.name} (a preset with that name already exists)`);
+            // Record the stamp even though nothing was written. Without it the
+            // settings notice would report an update that does not exist, for as
+            // long as the user keeps their own copy of that preset.
+            if (stamp) mtimes[preset.name] = stamp;
+            continue;
+        }
+
+        try {
+            await manager.savePreset(preset.name, await fetchBundledPresetBody(preset.file));
+            installed.push(preset.name);
+            existing.add(preset.name);
+            if (stamp) mtimes[preset.name] = stamp;
+            delete notified[preset.name];
+        } catch (error) {
+            blocked.push(`${preset.name} (${error instanceof Error ? error.message : String(error)})`);
+        }
+    }
+
+    writeBundledPresetBookkeeping(mtimes, notified);
+    return { installed, blocked };
+}
+
+// Compares bundled stamps against the recorded ones. `adoptUnknown` records a
+// stamp never seen before rather than reporting it, which is how a first run —
+// or an upgrade from a build without this tracking — establishes a baseline
+// without claiming an update that did not happen.
+async function detectBundledPresetUpdates({ adoptUnknown = false } = {}) {
+    const settings = getSettings();
+    const mtimes = { ...(settings.bundledPresetMtimes || {}) };
+    const notified = { ...(settings.bundledPresetNotified || {}) };
+    const updates = [];
+    let bookkeepingChanged = false;
+
+    for (const preset of BUNDLED_PRESETS) {
+        const stamp = await fetchBundledPresetStamp(preset.file);
+        if (!stamp) continue;
+        const recorded = mtimes[preset.name];
+        if (!recorded) {
+            if (adoptUnknown) {
+                mtimes[preset.name] = stamp;
+                bookkeepingChanged = true;
+            }
+            continue;
+        }
+        if (recorded !== stamp) updates.push({ name: preset.name, stamp });
+    }
+
+    if (bookkeepingChanged) writeBundledPresetBookkeeping(mtimes, notified);
+    return updates;
+}
+
+// Runs once per page load. An outstanding update is announced a single time per
+// bundled version, so it cannot nag on every load; the settings notice is what
+// persists until the user acts on it.
+async function announceBundledPresetUpdates() {
+    if (!isStoryEngineEnabled()) return;
+    const updates = await detectBundledPresetUpdates({ adoptUnknown: true });
+    if (!updates.length) return;
+
+    const settings = getSettings();
+    const notified = { ...(settings.bundledPresetNotified || {}) };
+    const fresh = updates.filter(update => notified[update.name] !== update.stamp);
+    if (!fresh.length) return;
+
+    for (const update of fresh) notified[update.name] = update.stamp;
+    const mtimes = { ...(settings.bundledPresetMtimes || {}) };
+    writeBundledPresetBookkeeping(mtimes, notified);
+
+    const names = fresh.map(update => update.name).join(', ');
+    notifyInfo(
+        `A newer ${names} preset ships with this version. Import it from Story Engine settings if you want to use it.`,
+        'Preset Update Available',
+    );
+}
+
+let bundledPresetNoticePending = false;
+async function refreshBundledPresetNotice() {
+    const notice = document.getElementById(BUNDLED_PRESET_NOTICE_ID);
+    if (!notice || bundledPresetNoticePending) return;
+    bundledPresetNoticePending = true;
+    try {
+        const updates = await detectBundledPresetUpdates();
+        notice.textContent = updates.length ? BUNDLED_PRESET_NOTICE_TEXT : '';
+        notice.hidden = updates.length === 0;
+    } finally {
+        bundledPresetNoticePending = false;
+    }
+}
+
+async function handleInstallBundledPresetsClick() {
+    const { installed, blocked } = await installBundledPresets({ overwrite: true });
+    await refreshBundledPresetNotice();
+    if (installed.length) {
+        notifySuccess(`Installed: ${installed.join(', ')}`, 'Story Engine presets');
+    }
+    if (blocked.length) {
+        notifyWarning(`Could not install: ${blocked.join(', ')}`, 'Story Engine presets');
+    }
+}
+
 function renderSettingsPanel() {
 
     const host = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
@@ -2666,6 +2880,16 @@ function renderSettingsPanel() {
                                     <input id="structured_preflight_model_call_delay_seconds" class="text_pole widthNatural" type="number" min="0" max="300" step="0.1">
                                     ${renderSettingsInfo('spe-settings-help-delay-seconds', 'Set the wait between consecutive Story Engine model calls, from 0 to 300 seconds.', 'About delay seconds')}
                                 </div>
+                            </div>
+                            <div class="spe-settings-block">
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Presets</span>
+                                    ${renderSettingsInfo('spe-settings-help-bundled-presets', 'Story Engine ships a narrator preset and a semantic preset. Both are added on install, and only where no preset of that name already exists. Re-installing overwrites both.', 'About bundled presets')}
+                                </div>
+                                <div class="spe-settings-row">
+                                    <button id="structured_preflight_install_bundled_presets" class="menu_button flex1" type="button"><i class="fa-solid fa-file-import" aria-hidden="true"></i> Re-Install Presets (Overwrite)</button>
+                                </div>
+                                <p id="structured_preflight_bundled_preset_notice" class="spe-settings-notice" hidden></p>
                             </div>
                         </div>
                     </details>
@@ -3080,6 +3304,10 @@ function renderSettingsPanel() {
         refreshSettingsControls();
         void refreshSemanticModelOptions();
     });
+    document.getElementById(BUNDLED_PRESET_BUTTON_ID)?.addEventListener('click', () => {
+        void handleInstallBundledPresetsClick();
+    });
+    void refreshBundledPresetNotice();
     document.getElementById('structured_preflight_show_player_setup')?.addEventListener('click', () => {
         if (!isStoryEngineEnabled()) {
             disableStoryEngineRuntime();
@@ -17596,6 +17824,14 @@ async function handleMessageSwiped(messageId) {
 }
 
 
+// Fires once per page load, after SillyTavern's UI is up. Running the check here
+// rather than from the update hook means the announcement lands on a settled page
+// and survives the reload that an update performs.
+function handleAppReadyBundledPresets() {
+    if (!isStoryEngineEnabled()) return;
+    void announceBundledPresetUpdates();
+}
+
 function handleChatChanged() {
     if (!isStoryEngineEnabled()) {
         disableStoryEngineRuntime();
@@ -17719,6 +17955,7 @@ const STORY_ENGINE_EVENT_HANDLERS = Object.freeze([
     ['GENERATION_STOPPED', handleGenerationLifecycleStopped],
     ['CHAT_COMPLETION_SETTINGS_READY', handleChatCompletionSettingsReady],
     ['CHAT_COMPLETION_PROMPT_READY', handleChatCompletionPromptReady],
+    ['APP_READY', handleAppReadyBundledPresets],
 ]);
 
 
@@ -18321,6 +18558,25 @@ function abortActiveGeneration(context) {
 // instant the first one lands would cut the rest of the batch off mid-flight.
 // Waiting briefly lets the whole batch settle and applies every update at once.
 const STORY_ENGINE_UPDATE_RELOAD_DELAY_MS = 2500;
+
+// SillyTavern calls this once, immediately after the extension is installed and its
+// settings have been loaded (extensions.js loads settings before firing the hook).
+//
+// Presets are written only where the name is free. An existing preset is never
+// overwritten, and the user is told which names were taken — a preset that is
+// silently missing is worse than one that is loudly refused.
+export async function onInstall() {
+    const { installed, blocked } = await installBundledPresets();
+    if (installed.length) {
+        notifySuccess(`Installed: ${installed.join(', ')}`, 'Story Engine presets');
+    }
+    if (blocked.length) {
+        notifyWarning(
+            `Story Engine presets could not be added: ${blocked.join(', ')}. Import them from Story Engine settings to replace them.`,
+            'Story Engine presets',
+        );
+    }
+}
 
 export function onUpdate() {
     setTimeout(() => {

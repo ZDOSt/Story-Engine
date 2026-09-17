@@ -362,6 +362,10 @@ export function notifySuccess(message, title = '', options = {}) {
     return notify('success', message, title, options);
 }
 
+export function notifyWarning(message, title = '', options = {}) {
+    return notify('warning', message, title, options);
+}
+
 export function notifyError(message, title = '', options = {}) {
     return notify('error', message, title, options);
 }
