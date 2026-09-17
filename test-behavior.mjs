@@ -17,7 +17,7 @@ import { applyHiddenHealthEvents, applyProgressionHealthMilestone, getHealthActo
 import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate, createEphemeralStopController } from './ephemeral-stop-controller.js';
-import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
+import { applyProseGuardSentenceRepairs, canDeleteProseGuardFinding, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START } from './prose-guard-edits.js';
 import { fetchConnectionProfileModels, generateRawData as generateRawDataAdapter, getChatCompletionPresetNames, getLoadedChatCompletionModelsForProfile, sendConnectionManagerProfileRequest } from './st-adapter.js';
 import { buildSceneItemStateKey, normalizeSceneItemState, reconcilePostNarrationPossessionDelta } from './scene-item-state.js';
 import {
@@ -17365,6 +17365,41 @@ const tests = [
     },
   },
   {
+    name: '46z manual Prose Guard delete overrules the content gate but never dialogue',
+    run() {
+      const finding = (sentence, phrase) => {
+        const offsetStart = sentence.toLowerCase().indexOf(phrase.toLowerCase());
+        return { sentence, matches: [{ offsetStart, offsetEnd: offsetStart + phrase.length, matchedPhrase: phrase }] };
+      };
+
+      // The gate exists to stop the repair MODEL from quietly deleting prose it
+      // could not fix. A person clicking Delete on a sentence they can read is
+      // a different authority, so the content gate is skipped for them.
+      const prose = finding('He nodded, barely above a whisper.', 'barely above a whisper');
+      assert.equal(canDeleteProseGuardFinding(prose), false, 'the model must still be blocked by the content gate');
+      assert.equal(canDeleteProseGuardFinding(prose, { manualDelete: true }), true, 'manual delete must overrule the content gate');
+
+      // Dialogue stays protected both ways, in every double-quote style.
+      for (const sentence of [
+        'She said, "I will not go back there."',
+        'She said, \u201cI will not go back there.\u201d',
+        'She said, \u00abI will not go back there.\u00bb',
+      ]) {
+        const quoted = finding(sentence, 'not go back');
+        assert.equal(canDeleteProseGuardFinding(quoted), false, `model must not delete dialogue: ${sentence}`);
+        assert.equal(canDeleteProseGuardFinding(quoted, { manualDelete: true }), false, `manual delete must not remove dialogue: ${sentence}`);
+      }
+
+      // Single quotes are apostrophes in running prose, not dialogue.
+      const apostrophe = finding("It's fine, he said barely above a whisper.", 'barely above a whisper');
+      assert.equal(canDeleteProseGuardFinding(apostrophe, { manualDelete: true }), true, 'an apostrophe must not read as dialogue');
+
+      // Empty and pure-violation sentences behave as before.
+      assert.equal(canDeleteProseGuardFinding({ sentence: '   ', matches: [] }, { manualDelete: true }), false);
+      assert.equal(canDeleteProseGuardFinding(finding('Barely above a whisper.', 'barely above a whisper')), true);
+    },
+  },
+  {
     name: '47 Prose Guard supports automatic, review, and persistent manual phrase repair',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
@@ -17692,7 +17727,9 @@ const tests = [
         sentenceRepairs: [{ findingId: dialogueFindings[0].id, operation: 'delete', replacementSentence: '' }],
       }, { rules: deletionRules });
       assert.equal(dialogueDelete.narrationText, dialogueSentence);
-      assert.match(dialogueDelete.rejectedRepairs[0].reason, /meaningful content/);
+      // Refused for being dialogue, not for "meaningful content": the two
+      // refusals are distinct reasons and the message now says which applied.
+      assert.match(dialogueDelete.rejectedRepairs[0].reason, /contains dialogue/);
 
       const unknownFinding = applyProseGuardSentenceRepairs(source, findings, {
         sentenceRepairs: [{

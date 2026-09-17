@@ -11988,9 +11988,12 @@ async function handleProseGuardReviewAction(context, messageId, findingId, actio
     const rules = getTargetedProseBanRules();
     let repaired;
     if (action === 'delete') {
+        // manualDelete: the user clicked Delete on a sentence they can see. The
+        // content gate the model is held to does not apply to that decision;
+        // dialogue is still protected.
         repaired = applyProseGuardSentenceRepairs(currentText, [currentFinding], {
             sentenceRepairs: [{ findingId: currentFinding.id, operation: 'delete', replacementSentence: '' }],
-        }, { rules });
+        }, { rules, manualDelete: true });
     } else {
         const operationIdentity = createStoryEngineEpochIdentity(context);
         ({ repaired } = await requestAndApplyProseGuardRepairs(currentText, [currentFinding], rules, {

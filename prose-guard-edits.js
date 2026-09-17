@@ -177,7 +177,7 @@ export function collectProseGuardSentenceFindings(narrationText, rules, limit = 
         }));
 }
 
-export function applyProseGuardSentenceRepairs(narrationText, findings, rawPayload, { rules = [] } = {}) {
+export function applyProseGuardSentenceRepairs(narrationText, findings, rawPayload, { rules = [], manualDelete = false } = {}) {
     const source = String(narrationText ?? '');
     const payload = parseProseGuardRepairPayload(rawPayload);
     const findingById = new Map((findings || []).map(finding => [finding.id, finding]));
@@ -198,8 +198,10 @@ export function applyProseGuardSentenceRepairs(narrationText, findings, rawPaylo
             let editStart = finding.start;
             let editEnd = finding.end;
             if (repair.operation === 'delete') {
-                if (!canDeleteProseGuardFinding(finding)) {
-                    throw new Error('delete was unsafe because the sentence contains meaningful content beyond the confirmed violation');
+                if (!canDeleteProseGuardFinding(finding, { manualDelete })) {
+                    throw new Error(hasDoubleQuotedDialogue(finding.sentence)
+                        ? 'delete was refused because the sentence contains dialogue'
+                        : 'delete was unsafe because the sentence contains meaningful content beyond the confirmed violation');
                 }
                 let leadingWhitespaceStart = editStart;
                 let trailingWhitespaceEnd = editEnd;
@@ -267,12 +269,41 @@ export function applyProseGuardSentenceRepairs(narrationText, findings, rawPaylo
     };
 }
 
-export function canDeleteProseGuardFinding(finding) {
+// The delete guard's notion of dialogue is deliberately narrower than the
+// detector's: a sentence is protected when it holds text between DOUBLE quotes,
+// which is how speech is written here. collectDialogueQuoteRanges also treats
+// single quotes as dialogue, but in running prose those are overwhelmingly
+// apostrophes, and counting them made ordinary narration undeletable. The
+// detector keeps the broader test because there it decides which matches are
+// spoken rather than written.
+function hasDoubleQuotedDialogue(sentence) {
+    const source = String(sentence || '');
+    let opener = -1;
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        if (opener < 0) {
+            if (char === '"' || char === '\u201c' || char === '\u00ab') opener = index;
+            continue;
+        }
+        const closer = char === '\u201c' ? '\u201d' : char === '\u00ab' ? '\u00bb' : '"';
+        if (char === closer && !isEscaped(source, index)) {
+            if (/[\p{L}\p{N}]/u.test(source.slice(opener + 1, index))) return true;
+            opener = -1;
+        }
+    }
+    return opener >= 0 && /[\p{L}\p{N}]/u.test(source.slice(opener + 1));
+}
+
+// manualDelete marks a deletion the user asked for by clicking Delete, rather
+// than one the repair model proposed on its own. The content gate below exists
+// to stop the MODEL from quietly removing prose it could not fix; a person
+// looking at the sentence has the authority to overrule it. Dialogue stays
+// protected either way.
+export function canDeleteProseGuardFinding(finding, { manualDelete = false } = {}) {
     const sentence = String(finding?.sentence || '');
     if (!sentence.trim()) return false;
-    if (collectDialogueQuoteRanges(sentence).some(range => /[\p{L}\p{N}]/u.test(sentence.slice(range.start, range.end)))) {
-        return false;
-    }
+    if (hasDoubleQuotedDialogue(sentence)) return false;
+    if (manualDelete) return true;
 
     const ranges = normalizeFindingMatchOffsets(finding)
         .map(match => ({ start: match.offsetStart, end: match.offsetEnd }))
