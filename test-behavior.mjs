@@ -20606,6 +20606,16 @@ const tests = [
         assert.equal(count, 1, `${id} should remain present exactly once in the settings markup.`);
       }
       assert.doesNotMatch(renderSource, /structured_preflight_semantic_reasoning_effort|Reasoning effort|DeepSeek high effort|DeepSeek max effort/);
+      // A deleted local must not leave a dangling reference behind. These files are
+      // ES modules, so an undeclared identifier throws at runtime and aborts the
+      // whole function — which is how the model dropdown silently stopped
+      // populating while every source-pattern assertion here still passed.
+      const refreshStart = source.indexOf('function refreshSettingsControls()');
+      const refreshEnd = source.indexOf('\n}', refreshStart);
+      assert.ok(refreshStart > 0 && refreshEnd > refreshStart, 'refreshSettingsControls should be locatable');
+      const refreshBody = source.slice(refreshStart, refreshEnd);
+      assert.doesNotMatch(refreshBody, /(?<![.\w])enabled\b/, 'refreshSettingsControls must not reference a bare `enabled`');
+
       // A missing Story Engine connection profile blocks generation outright,
       // rather than letting a narration run with no resolved mechanics behind it.
       assert.match(source, /function getSemanticProfileBlockReason\(/);

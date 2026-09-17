@@ -1886,7 +1886,7 @@ function refreshSettingsControls() {
             semanticPresetSelect.append(savedOption);
         }
         semanticPresetSelect.value = semanticPreset;
-        semanticPresetSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
+        semanticPresetSelect.disabled = !engineEnabled || !semanticProfile;
     }
     if (semanticModelRow) semanticModelRow.hidden = !engineEnabled || !semanticProfile;
     if (semanticModelSelect) {
@@ -1902,9 +1902,9 @@ function refreshSettingsControls() {
             semanticModelSelect.append(option);
         }
         semanticModelSelect.value = (semanticModelState.models || []).includes(semanticModel) ? semanticModel : '';
-        semanticModelSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
+        semanticModelSelect.disabled = !engineEnabled || !semanticProfile;
     }
-    if (profileSelect) profileSelect.disabled = !engineEnabled || !enabled;
+    if (profileSelect) profileSelect.disabled = !engineEnabled;
     if (modelCallDelaySecondsInput) modelCallDelaySecondsInput.disabled = !engineEnabled || settings.modelCallDelayEnabled !== true;
     const proseGuardOff = getProseGuardMode(settings) === PROSE_GUARD_MODES.OFF;
     for (const { element } of proseGuardBanFields) {
@@ -1944,10 +1944,10 @@ function refreshSettingsControls() {
         semanticStrictSchemaSelect.disabled = !engineEnabled || !semanticStrictToolSchemaVisible;
     }
     if (semanticModelSelect) {
-        semanticModelSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
+        semanticModelSelect.disabled = !engineEnabled || !semanticProfile;
     }
     if (semanticPresetSelect) {
-        semanticPresetSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
+        semanticPresetSelect.disabled = !engineEnabled || !semanticProfile;
     }
     if (refreshSemanticButton) {
         refreshSemanticButton.disabled = !engineEnabled || Boolean(state.semanticModelDiscoveryRequest);
