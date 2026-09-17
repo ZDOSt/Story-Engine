@@ -18308,6 +18308,28 @@ function abortActiveGeneration(context) {
 
 
 
+// SillyTavern calls this immediately after it downloads an update for this
+// extension. The new files are on disk, but the open page is still running the
+// old code, so only a reload applies them — ST otherwise just toasts "Reload the
+// page to apply updates" and leaves it to the user.
+//
+// This fires ONLY from an update action (the Update button in Manage extensions,
+// "Update all", or ST's own auto-update). It cannot fire during play.
+//
+// The delay exists for the batch paths: updateExtension() for several extensions
+// are dispatched together and awaited with Promise.allSettled, so reloading the
+// instant the first one lands would cut the rest of the batch off mid-flight.
+// Waiting briefly lets the whole batch settle and applies every update at once.
+const STORY_ENGINE_UPDATE_RELOAD_DELAY_MS = 2500;
+
+export function onUpdate() {
+    setTimeout(() => {
+        if (typeof location !== 'undefined' && typeof location.reload === 'function') {
+            location.reload();
+        }
+    }, STORY_ENGINE_UPDATE_RELOAD_DELAY_MS);
+}
+
 export function onDisable() {
     const context = getContext();
     disableStoryEngineRuntime();
