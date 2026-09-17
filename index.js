@@ -616,7 +616,7 @@ function RenderControlEngine(response, input, context) {
 }`;
 const DEFAULT_SETTINGS = Object.freeze({
     storyEngineEnabled: true,
-    useSeparateSemanticSettings: false,
+    useSeparateSemanticSettings: true,
     semanticConnectionProfile: '',
     semanticConnectionProfileId: '',
     semanticModelByProfile: Object.freeze({}),
@@ -939,6 +939,13 @@ function getSettings() {
     if (!hadExplicitProseGuardMode && legacyProseGuardEnabled === false) {
         settings.proseGuardMode = PROSE_GUARD_MODES.OFF;
     }
+    // The private Story Engine connection profile is no longer optional: it is how
+    // the semantic pass and the post-narration utility calls are routed. A stored
+    // false from an earlier build is forced back on rather than migrated around.
+    if (settings.useSeparateSemanticSettings !== true) {
+        settings.useSeparateSemanticSettings = true;
+        semanticProfileSettingsChanged = true;
+    }
     const trackerSettingsChanged = migrateTrackerWidgetSettings(settings);
     const narratorHandoffSettingsChanged = migrateNarratorHandoffSettings(settings);
     const proseGuardSettingsChanged = migrateProseGuardSettings(settings);
@@ -1098,6 +1105,21 @@ function getSemanticProfileSelection(settings = getSettings()) {
 
     const profile = getConnectionProfileById(profileId) || getConnectionProfileByName(profileName);
     return { selected: true, profile };
+}
+
+// Returns '' when the semantic route is usable, or a user-facing reason when it is
+// not. The private Story Engine connection profile is mandatory: without it the
+// semantic pass and the post-narration utility calls have nowhere to go, and the
+// narration would run with no resolved mechanics behind it.
+function getSemanticProfileBlockReason(settings = getSettings()) {
+    const selection = getSemanticProfileSelection(settings);
+    if (!selection.selected) {
+        return 'Story Engine needs its own connection profile before it can run. Set one under Models & Presets \u2192 Story Engine profile.';
+    }
+    if (!selection.profile) {
+        return 'The configured Story Engine connection profile could not be found. Choose a valid one under Models & Presets \u2192 Story Engine profile.';
+    }
+    return '';
 }
 
 function getSemanticModelOverride(settings = getSettings()) {
@@ -1738,7 +1760,6 @@ function getProseGuardTargetedBanFieldControls(root = document) {
 function refreshSettingsControls() {
     const settings = getSettings();
     const engineEnabled = isStoryEngineEnabled();
-    const enabled = Boolean(settings.useSeparateSemanticSettings);
     const storyEngineCheckbox = document.getElementById('structured_preflight_story_engine_enabled');
     const profileSelect = document.getElementById('structured_preflight_semantic_profile');
     const semanticOutputModeSelect = document.getElementById('structured_preflight_semantic_output_mode');
@@ -1753,7 +1774,6 @@ function refreshSettingsControls() {
     const proseGuardBansDrawer = document.getElementById('structured_preflight_prose_guard_bans_drawer');
     const proseGuardBanFields = getProseGuardTargetedBanFieldControls();
     const progressionEnabledCheckbox = document.getElementById('structured_preflight_progression_enabled');
-    const enabledCheckbox = document.getElementById('structured_preflight_use_separate_semantic_settings');
     const modelCallDelayEnabledCheckbox = document.getElementById('structured_preflight_model_call_delay_enabled');
     const modelCallDelaySecondsInput = document.getElementById('structured_preflight_model_call_delay_seconds');
     const coAuthorModeCheckbox = document.getElementById('structured_preflight_co_author_mode_enabled');
@@ -1775,7 +1795,6 @@ function refreshSettingsControls() {
         section.hidden = !engineEnabled;
         if (section.hidden) section.open = false;
     }
-    if (enabledCheckbox) enabledCheckbox.checked = enabled;
     if (semanticOutputModeSelect) semanticOutputModeSelect.value = normalizeSemanticOutputMode(settings.semanticOutputMode);
     const semanticStrictToolSchemaState = getSemanticStrictToolSchemaState(settings);
     const semanticToolMode = normalizeSemanticOutputMode(settings.semanticOutputMode) === SEMANTIC_OUTPUT_MODES.TOOL_CALL;
@@ -1845,7 +1864,7 @@ function refreshSettingsControls() {
     const semanticModel = getSemanticModelOverride(settings);
     const semanticPreset = getSemanticPresetOverride(settings);
     const semanticPresetNames = getChatCompletionPresetNames();
-    if (semanticPresetRow) semanticPresetRow.hidden = !engineEnabled || !enabled || !semanticProfile;
+    if (semanticPresetRow) semanticPresetRow.hidden = !engineEnabled;
     if (semanticPresetSelect) {
         semanticPresetSelect.innerHTML = '';
         const defaultPresetOption = document.createElement('option');
@@ -1869,7 +1888,7 @@ function refreshSettingsControls() {
         semanticPresetSelect.value = semanticPreset;
         semanticPresetSelect.disabled = !engineEnabled || !enabled || !semanticProfile;
     }
-    if (semanticModelRow) semanticModelRow.hidden = !engineEnabled || !enabled || !semanticProfile;
+    if (semanticModelRow) semanticModelRow.hidden = !engineEnabled || !semanticProfile;
     if (semanticModelSelect) {
         semanticModelSelect.innerHTML = '';
         const defaultOption = document.createElement('option');
@@ -1910,7 +1929,6 @@ function refreshSettingsControls() {
         semanticModelSelect,
         proseGuardModeSelect,
         progressionEnabledCheckbox,
-        enabledCheckbox,
         modelCallDelayEnabledCheckbox,
         coAuthorModeCheckbox,
         narratorHandoffEnabledCheckbox,
@@ -2820,13 +2838,6 @@ function renderSettingsPanel() {
                                     <span class="spe-settings-block-title">Story Engine profile</span>
                                     ${renderSettingsInfo('spe-settings-help-semantic', 'The private structured profile reads the assembled prompt stack, resolves mechanics, and runs post-narration utility checks. Narration, adventure openings, character creation, and character progression use the current SillyTavern profile.', 'About the Story Engine profile')}
                                 </div>
-                                <div class="spe-settings-toggle-row">
-                                    <label class="checkbox_label flexNoGap">
-                                        <input id="structured_preflight_use_separate_semantic_settings" type="checkbox">
-                                        <span>Use private Story Engine connection profile</span>
-                                    </label>
-                                    ${renderSettingsInfo('spe-settings-help-semantic-private', 'Used for semantic preflight and post-narration Story Engine utility calls. Story Engine automatically uses the selected connector\'s compatible tool and reasoning request settings.', 'About the private Story Engine connection profile')}
-                                </div>
                                 <div class="spe-settings-row">
                                     <label for="structured_preflight_semantic_output_mode">Semantic preflight output</label>
                                     <select id="structured_preflight_semantic_output_mode" class="text_pole flex1">
@@ -2853,15 +2864,22 @@ function renderSettingsPanel() {
                                     <select id="structured_preflight_semantic_model" class="text_pole flex1"></select>
                                     ${renderSettingsInfo('spe-settings-help-semantic-model', 'Choose the semantic-only model from the detected list. None is not valid while a separate Story Engine profile is selected.', 'About Story Engine model selection')}
                                 </div>
+                                <div class="spe-settings-block-head">
+                                    <span class="spe-settings-block-title">Story Engine Preset</span>
+                                    ${renderSettingsInfo('spe-settings-help-bundled-presets', 'Story Engine ships a narrator preset and a semantic preset. Both are added on install, and only where no preset of that name already exists. Re-installing overwrites both.', 'About Story Engine presets')}
+                                </div>
                                 <div id="structured_preflight_semantic_preset_row" class="spe-settings-row" hidden>
-                                    <label for="structured_preflight_semantic_preset">Story Engine preset</label>
-                                    <select id="structured_preflight_semantic_preset" class="text_pole flex1"></select>
-                                    ${renderSettingsInfo('spe-settings-help-semantic-preset', 'Optional semantic-only Chat Completion preset. Leave blank to use the preset saved on the selected connection profile. This does not change SillyTavern\'s active narration preset.', 'About Story Engine preset selection')}
+                                    <select id="structured_preflight_semantic_preset" class="text_pole flex1" aria-label="Story Engine preset"></select>
+                                    ${renderSettingsInfo('spe-settings-help-semantic-preset', 'Semantic-only Chat Completion preset. Leave blank to use the preset saved on the selected Story Engine connection profile. This does not change SillyTavern\'s active narration preset.', 'About Story Engine preset selection')}
                                 </div>
                                 <div class="spe-settings-row">
                                     <button id="structured_preflight_refresh_semantic_settings" class="menu_button flex1"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh</button>
                                     ${renderSettingsInfo('spe-settings-help-semantic-refresh', 'Reload the available connection profiles, models for the selected profile, and Chat Completion presets.', 'About refreshing Story Engine semantic sources')}
                                 </div>
+                                <div class="spe-settings-row">
+                                    <button id="structured_preflight_install_bundled_presets" class="menu_button flex1" type="button"><i class="fa-solid fa-file-import" aria-hidden="true"></i> Re-Install Presets (Overwrite)</button>
+                                </div>
+                                <p id="structured_preflight_bundled_preset_notice" class="spe-settings-notice" hidden></p>
                             </div>
                             <div class="spe-settings-block">
                                 <div class="spe-settings-block-head">
@@ -2880,16 +2898,6 @@ function renderSettingsPanel() {
                                     <input id="structured_preflight_model_call_delay_seconds" class="text_pole widthNatural" type="number" min="0" max="300" step="0.1">
                                     ${renderSettingsInfo('spe-settings-help-delay-seconds', 'Set the wait between consecutive Story Engine model calls, from 0 to 300 seconds.', 'About delay seconds')}
                                 </div>
-                            </div>
-                            <div class="spe-settings-block">
-                                <div class="spe-settings-block-head">
-                                    <span class="spe-settings-block-title">Presets</span>
-                                    ${renderSettingsInfo('spe-settings-help-bundled-presets', 'Story Engine ships a narrator preset and a semantic preset. Both are added on install, and only where no preset of that name already exists. Re-installing overwrites both.', 'About bundled presets')}
-                                </div>
-                                <div class="spe-settings-row">
-                                    <button id="structured_preflight_install_bundled_presets" class="menu_button flex1" type="button"><i class="fa-solid fa-file-import" aria-hidden="true"></i> Re-Install Presets (Overwrite)</button>
-                                </div>
-                                <p id="structured_preflight_bundled_preset_notice" class="spe-settings-notice" hidden></p>
                             </div>
                         </div>
                     </details>
@@ -3114,15 +3122,6 @@ function renderSettingsPanel() {
         }
         refreshSettingsControls();
         saveExtensionSettings();
-    });
-    document.getElementById('structured_preflight_use_separate_semantic_settings')?.addEventListener('change', event => {
-        settings.useSeparateSemanticSettings = Boolean(event.target?.checked);
-
-        refreshSettingsControls();
-
-        saveExtensionSettings();
-        if (settings.useSeparateSemanticSettings) refreshSemanticModelOptionsIfNeeded();
-
     });
 
     document.getElementById('structured_preflight_semantic_profile')?.addEventListener('change', event => {
@@ -18116,6 +18115,22 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         notifyInfo('Complete Character Progression before roleplay generation can continue.', EXTENSION_NAME, { timeOut: 7000 });
         if (typeof abort === 'function') abort(true);
         return true;
+    }
+
+    const semanticProfileBlockReason = getSemanticProfileBlockReason();
+
+    if (semanticProfileBlockReason) {
+
+        clearRuntimePrompts();
+
+        clearAllProgress();
+
+        showBlockingError(new Error(semanticProfileBlockReason));
+
+        if (typeof abort === 'function') abort(true);
+
+        return true;
+
     }
 
     state.chatSignature = captureChatSignature(context);

@@ -20583,7 +20583,6 @@ const tests = [
 
       const controlIds = [
         'structured_preflight_story_engine_enabled',
-        'structured_preflight_use_separate_semantic_settings',
         'structured_preflight_semantic_output_mode',
         'structured_preflight_semantic_profile',
         'structured_preflight_refresh_semantic_settings',
@@ -20607,6 +20606,20 @@ const tests = [
         assert.equal(count, 1, `${id} should remain present exactly once in the settings markup.`);
       }
       assert.doesNotMatch(renderSource, /structured_preflight_semantic_reasoning_effort|Reasoning effort|DeepSeek high effort|DeepSeek max effort/);
+      // A missing Story Engine connection profile blocks generation outright,
+      // rather than letting a narration run with no resolved mechanics behind it.
+      assert.match(source, /function getSemanticProfileBlockReason\(/);
+      assert.match(source, /if \(!selection\.selected\) \{/);
+      assert.match(source, /if \(!selection\.profile\) \{/);
+      assert.match(source, /const semanticProfileBlockReason = getSemanticProfileBlockReason\(\);/);
+      assert.match(source, /showBlockingError\(new Error\(semanticProfileBlockReason\)\)/);
+
+      // The private Story Engine connection profile is mandatory, not optional, so
+      // the toggle that used to enable it must not come back.
+      assert.doesNotMatch(renderSource, /structured_preflight_use_separate_semantic_settings/);
+      assert.doesNotMatch(renderSource, /Use private Story Engine connection profile/);
+      // One heading only — the block title. The row keeps no duplicate label.
+      assert.equal((renderSource.match(/Story Engine [Pp]resets?<\/span>/g) || []).length, 1);
 
       assert.doesNotMatch(renderSource, /id="structured_preflight_tracker_profile"/);
       assert.doesNotMatch(renderSource, /id="structured_preflight_prose_guard_profile"/);
@@ -20625,11 +20638,9 @@ const tests = [
       assert.doesNotMatch(renderSource, /structured_preflight_writing_style_reminder_prompt/);
       assert.doesNotMatch(renderSource, /data-structured-preflight-reset-writing-style="writingStyleReminderPrompt"/);
       assert.match(renderSource, /Included in the narrator handoff as sceneStyleProfile after the render-control rules/);
-      assert.match(renderSource, /Use private Story Engine connection profile/);
       assert.match(renderSource, /Semantic preflight output/);
       assert.match(renderSource, /Tool Call/);
       assert.match(renderSource, /Story Engine profile/);
-      assert.match(renderSource, /Used for semantic preflight and post-narration Story Engine utility calls/);
       assert.match(renderSource, /Narration, adventure openings, character creation, and character progression use the current SillyTavern profile/);
       assert.doesNotMatch(renderSource, /id="structured_preflight_disable_semantic_thinking"/);
       assert.doesNotMatch(source, /\bdisableThinkingCheckbox\b/);
