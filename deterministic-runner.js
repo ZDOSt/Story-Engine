@@ -146,7 +146,7 @@ const CAPABILITY_POOL_RANK_TABLES = Object.freeze({
     ]),
 });
 const RAPPORT_ACTIVE_IDLE_LIMIT_MS = 10 * 60 * 1000;
-const RAPPORT_COOLDOWN_MS = 30 * 60 * 1000;
+const RAPPORT_COOLDOWN_MS = 60 * 60 * 1000;
 const PARTNER_MEANINGFUL_COOLDOWN_HOUR_MS = 60 * 60 * 1000;
 
 function normalizeResolutionHarmMode(value, semantic = {}) {

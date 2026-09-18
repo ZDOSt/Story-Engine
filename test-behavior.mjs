@@ -2527,7 +2527,7 @@ const tests = [
         Date.now = () => now;
         const report = runCase({
           userText: 'I find Seraphina at the edge of camp and ask what she needs help with first.',
-          rapportClock: { activeMs: 60 * 60 * 1000, lastActivityAt: now },
+          rapportClock: { activeMs: 120 * 60 * 1000, lastActivityAt: now },
           tracker,
           ledger: baseLedger({
             resolutionEngine: {
@@ -2552,7 +2552,7 @@ const tests = [
         });
         assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 2);
         assert.equal(auditIncludes(report, 'rapportEligible=Y'), true);
-        assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 60 * 60 * 1000);
+        assert.equal(report.trackerUpdate.npcs.Seraphina.lastRapportGainActiveMs, 120 * 60 * 1000);
       } finally {
         Date.now = realDateNow;
       }
@@ -2737,7 +2737,7 @@ const tests = [
       };
       const report = runCase({
         userText: 'The next morning, I sit near Seraphina and keep quiet company without pushing her.',
-        rapportClock: { activeMs: 60 * 60 * 1000, lastActivityAt: Date.now() },
+        rapportClock: { activeMs: 120 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {
@@ -2783,7 +2783,7 @@ const tests = [
       };
       const report = runCase({
         userText: 'The next morning, I sit near Seraphina and say nothing for a while.',
-        rapportClock: { activeMs: 60 * 60 * 1000, lastActivityAt: Date.now() },
+        rapportClock: { activeMs: 120 * 60 * 1000, lastActivityAt: Date.now() },
         tracker,
         ledger: baseLedger({
           resolutionEngine: {

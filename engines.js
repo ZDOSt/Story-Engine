@@ -462,7 +462,7 @@ function RelationshipEngine(npc, resolutionPacket) {
   updateRapport(currentRapport, target, rapportEligible):
     rule: positive encounter = target in [Bond,No Change]
     rule: negative encounter = target in [Hostility,Fear,FearHostility]
-    rule: rapportEligible = Y only if this NPC has no prior rapport gain or 30 minutes of global active play passed since this NPC's last rapport gain
+    rule: rapportEligible = Y only if this NPC has no prior rapport gain or 60 minutes of global active play passed since this NPC's last rapport gain
     rule: cooldown expiry does not change rapport by itself; rapport changes only on the next qualifying interaction with this NPC
     rule: a valid exceptionalBenefit at B1/B2 directly increases Bond by +1; at B3 or while Fear/Hostility is active it gives +2 Rapport, and that exceptional Rapport reward bypasses the ordinary Rapport cooldown
     rule: when rapport is consumed by Bond or No Change, set this NPC's last rapport gain active time to the current global active play time
