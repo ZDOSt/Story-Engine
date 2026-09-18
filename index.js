@@ -463,12 +463,10 @@ function RenderControlEngine(response, input, context) {
 
       The closing opening MUST arise naturally from the character/NPC's response and the established scene. Intentional refusal, deflection, avoidance, departure, or scene closure may end the exchange when clearly established through dialogue, observable behavior, or authoritative facts.
 
-      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE that explicitly requests a conversation, exchange, dialogue, questions, or similar interaction, allow the conversational contributions required to complete that bounded interaction before ending on its natural final beat.
-
     FORBIDDEN:
       - ONLY the intended recipient of private mental communication through an established link may respond to it.
       - DO NOT begin a second reply, introduce an unrelated topic, or chain additional questions or statements within the same response.
-      - DO NOT turn the response into a monologue or a sequence of follow-up exchanges outside the bounded interaction explicitly authorized by an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT turn the response into a monologue or a sequence of follow-up exchanges.
       - DO NOT append a generic question or artificial opening unsupported by the current exchange.
   }
 
@@ -478,12 +476,10 @@ function RenderControlEngine(response, input, context) {
 
       Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development.
 
-      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE, the authorized double-square-bracket direction is a pending composition brief, not a completed event. Within that bracketed scope only, render the authorized {{user}} actions and audible dialogue before continuing with what happens next. Do not re-stage unbracketed input.
-
     FORBIDDEN:
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input outside an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s input.
       - DO NOT re-describe unchanged environments, objects, or characters already established in {{user}}'s input or previous narration.
-      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication except for the authorized bracketed composition required to fulfill an ACTIVE CO-AUTHOR SCOPE.
+      - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication.
   }
 
   function antiRhetoricalNegation(response, context): {
@@ -532,12 +528,10 @@ function RenderControlEngine(response, input, context) {
 
       Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
 
-      SCOPED CO-AUTHOR EXCEPTION: When narrativeFacts(input) declares an ACTIVE CO-AUTHOR SCOPE, the human has explicitly authorized the narrator to choose and narrate {{user}}'s observable voluntary actions, exact audible dialogue, local gestures, and necessary conversational turn-taking required to fulfill only that bracketed direction for this response. Render the authorized actions as vivid, specific in-scene prose integrated with the surrounding narration, expanding concrete movement, contact, sound, and supported immediate visible consequence. Do not output a bare paraphrase, instruction echo, action label, or mechanical recap. This does not authorize {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states.
-
     FORBIDDEN:
-      - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen, except for observable choices and dialogue required to fulfill an ACTIVE CO-AUTHOR SCOPE.
-      - DO NOT narrate {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states, including within an ACTIVE CO-AUTHOR SCOPE.
-      - DO NOT interpret, assume, or complete {{user}}'s intent outside an ACTIVE CO-AUTHOR SCOPE.
+      - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
+      - DO NOT narrate {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states.
+      - DO NOT interpret, assume, or complete {{user}}'s intent.
   }
 
   function strictEpistemology(response, context): {
