@@ -8352,7 +8352,7 @@ const tests = [
         assert.doesNotMatch(name, /(?:Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
       }
       const modelPrompt = prompt(report);
-      assert.match(modelPrompt, /Use a proper name only when it is already established as known or when a current-scene discovery is supported by nameReveal/);
+      assert.match(modelPrompt, /Use a proper name ONLY when already established, or discovered on-scene through/);
       assert.match(modelPrompt, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(modelPrompt, /FEMALE: /);
       assert.match(modelPrompt, /MALE: /);
@@ -8403,7 +8403,7 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /Use a proper name only when it is already established as known or when a current-scene discovery is supported by nameReveal/);
+      assert.match(text, /Use a proper name ONLY when already established, or discovered on-scene through/);
       assert.match(text, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(text, /FEMALE: [A-Z]/);
       assert.match(text, /MALE: [A-Z]/);
@@ -14348,8 +14348,8 @@ const tests = [
       assert.match(semanticSource, /ledger\.resolutionEngine\.userAbilityUse = normalizeUserAbilityUse/);
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /For an ability, spell, power, trait, or supernatural effect, describe only its established observable effects and consequences\./i);
-      assert.match(preflightSource, /Its name may appear only when explicitly spoken in dialogue\./i);
+      assert.match(preflightSource, /For any ability, spell, power, trait, or supernatural effect, write ONLY its\s+established observable effects and consequences\./);
+      assert.match(preflightSource, /Its name appears only when\s+spoken aloud in dialogue\./);
 
       const report = runCase({
         userText: 'I whisper under my breath, meant only for Alice: "Leave him alone."',
@@ -16934,14 +16934,14 @@ const tests = [
       };
       assertRuleOrder(mainRulesSource, mainRuleOrder, 'the full prose rules');
       assert.match(handoffRulesSource, /NARRATOR PROSE RULES/);
-      assert.match(handoffRulesSource, /Follow these rules while generating the response\. They are binding\./);
-      assert.match(handoffRulesSource, /narrativeFacts\(input\) determines what occurs/);
-      assert.match(handoffRulesSource, /Style, atmosphere, drama, genre, and creativity never create permission to invent/);
+      assert.match(handoffRulesSource, /BINDING CONTRACT/),
+      assert.match(handoffRulesSource, /A response that breaks one is\s+INVALID: it is discarded and never reaches the player/);
+      assert.match(handoffRulesSource, /narrativeFacts\(input\) fixes what happened/);
       assert.match(handoffRulesSource, /INPUT FORMAT/);
-      assert.match(handoffRulesSource, /Text in double quotation marks \("\.\.\."\) is audible dialogue/);
-      assert.match(handoffRulesSource, /Text in single asterisks \(\*\.\.\.\*\) is private mental communication/);
-      assert.match(handoffRulesSource, /Italic text is never ordinary thought, emphasis, narration, or audible dialogue/);
-      assert.match(handoffRulesSource, /Unformatted text is narration or action/);
+      assert.match(handoffRulesSource, /"\.\.\." is audible dialogue\. \*\.\.\.\* is private mental communication/);
+      assert.match(handoffRulesSource, /\*\.\.\.\* is private mental communication through an\s+established bound-companion/);
+      assert.match(handoffRulesSource, /Italics are\s+never thought, emphasis, narration, or dialogue/);
+      assert.match(handoffRulesSource, /Unformatted text is narration or\s+action/);
 
       for (const name of mainRuleOrder) {
         assert.equal(
@@ -16972,15 +16972,15 @@ const tests = [
         'dialogueTurn',
       ];
       assertNamedRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator handoff contract');
-      assert.match(handoffRulesSource, /The supplied name pool are approved unused candidates|Names listed in the supplied name pool are approved unused candidates/);
-      assert.match(handoffRulesSource, /Their presence in this handoff is never permission to reveal or use them/);
-      assert.match(handoffRulesSource, /Until discovery, refer to a person, place, group, or object by its established role or direct observable description/);
-      assert.match(handoffRulesSource, /The current narrativeFacts\(input\) is authoritative and immutable/);
-      assert.match(handoffRulesSource, /Address every materially distinct statement, question, offer, gesture, or action/);
-      assert.match(handoffRulesSource, /Do not ignore a materially distinct input element, ramble, begin another exchange/);
-      assert.match(handoffRulesSource, /Do not narrate smell or taste unless/);
-      assert.match(handoffRulesSource, /Rooms do not breathe; words do not hang; silence does not stretch/);
-      assert.match(handoffRulesSource, /do not use "barely above a murmur," "barely above a whisper," "barely above a breath,"/);
+      assert.match(handoffRulesSource, /Pool names are unused candidates, never permission to reveal or use them/);
+      assert.match(handoffRulesSource, /never permission to reveal or use them/);
+      assert.match(handoffRulesSource, /Until then, refer to the person, place, group, or object by established role or\s+direct observable description/);
+      assert.match(handoffRulesSource, /narrativeFacts\(input\) is authoritative and immutable for this response/);
+      assert.match(handoffRulesSource, /Address EVERY distinct statement, question, offer, gesture, or action/);
+      assert.match(handoffRulesSource, /NEVER ignore a distinct input, ramble, open a second exchange/);
+      assert.match(handoffRulesSource, /NEVER narrate smell or taste unless/);
+      assert.match(handoffRulesSource, /Objects stay objects: they have no will, no awareness, and no intent of their own/);
+      assert.match(handoffRulesSource, /NEVER reach for received phrasing, familiar emotional\s+formulas, or the stock constructions of the genre/);
       assert.doesNotMatch(handoffRulesSource, /function RenderControlEngine\(|PATTERN EXAMPLE:|FINAL SILENT CHECK|check and revise/i);
 
       assert.match(handoffSource, /narrativeContract\(input\): \{/);
@@ -17235,7 +17235,7 @@ const tests = [
       );
       assert.match(introPrompt, /^#1 - PROSE RULES/);
       assert.match(introPrompt, /NARRATOR PROSE RULES/);
-      assert.match(introPrompt, /Connect related actions, gestures, dialogue, contact, and immediate consequences into clear chronological scene beats\./);
+      assert.match(introPrompt, /Join related actions, gestures, dialogue, contact, and their immediate consequences/);
       assert.match(introPrompt, /#1\.7 - SCENE STYLE PROFILE/);
       assert.match(introPrompt, /SCENE STYLE PROFILE: Use vivid, scene-aware prose\./);
       assert.doesNotMatch(introPrompt, /#2 - RESOLVED FACTS|==MECHANICS_RESULTS==/);
@@ -17263,7 +17263,7 @@ const tests = [
       assert.match(introPrompt, /must not rebuild, reroll, overwrite, infantize, or replace them/);
       assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
       assert.match(introPrompt, /NAME REVEAL:/);
-      assert.match(introPrompt, /Use a proper name only when it is already established as known or when a current-scene discovery is supported by nameReveal/);
+      assert.match(introPrompt, /Use a proper name ONLY when already established, or discovered on-scene through/);
       assert.match(introPrompt, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(introPrompt, /FEMALE: Ariana, Mira\./);
       assert.match(introPrompt, /MALE: Darin, Kell\./);
