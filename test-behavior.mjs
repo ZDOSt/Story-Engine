@@ -16901,9 +16901,9 @@ const tests = [
         handoffSource.indexOf('function formatNarrativeFacts'),
       );
       const mainRuleOrder = [
+        'agencySeparation',
         'dialogueTurn',
         'inputChronology',
-        'agencySeparation',
         'antiRhetoricalNegation',
         'strictBehaviorism',
         'antiStockPhrasing',
@@ -16966,12 +16966,12 @@ const tests = [
         'antiStockPhrasing',
         'strictBehaviorism',
         'antiRhetoricalNegation',
-        'agencySeparation',
         'inputChronology',
         'dialogueTurn',
         'outputFormatting',
         'nameReveal',
         'narrativeFacts',
+        'agencySeparation',
       ];
       assertNamedRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator handoff contract');
       assert.match(handoffRulesSource, /Pool names are unused candidates, never permission to reveal or use them/);
