@@ -8352,7 +8352,7 @@ const tests = [
         assert.doesNotMatch(name, /(?:Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
       }
       const modelPrompt = prompt(report);
-      assert.match(modelPrompt, /Use a proper name ONLY when already established, or discovered on-scene through/);
+      assert.match(modelPrompt, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
       assert.match(modelPrompt, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(modelPrompt, /FEMALE: /);
       assert.match(modelPrompt, /MALE: /);
@@ -8403,7 +8403,7 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /Use a proper name ONLY when already established, or discovered on-scene through/);
+      assert.match(text, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
       assert.match(text, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(text, /FEMALE: [A-Z]/);
       assert.match(text, /MALE: [A-Z]/);
@@ -14348,8 +14348,8 @@ const tests = [
       assert.match(semanticSource, /ledger\.resolutionEngine\.userAbilityUse = normalizeUserAbilityUse/);
       assert.match(runnerSource, /UserAbilityUse:\s*normalizeUserAbilityUseForHandoff\(semantic\.userAbilityUse\)/);
       assert.doesNotMatch(runnerSource, /UserAbilityUse[\s\S]{0,200}(?:atkTot|defTot|margin|RollPenalty|CounterBonus)\s*[+\-=]/);
-      assert.match(preflightSource, /For any ability, spell, power, trait, or supernatural effect, write ONLY its\s+established observable effects and consequences\./);
-      assert.match(preflightSource, /Its name appears only when\s+spoken aloud in dialogue\./);
+      assert.match(preflightSource, /ALWAYS narrate ONLY the OBSERVABLE effects and consequences of abilities, spells, powers, traits, or supernatural effects\./);
+      assert.match(preflightSource, /DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect/);
 
       const report = runCase({
         userText: 'I whisper under my breath, meant only for Alice: "Leave him alone."',
@@ -16782,29 +16782,29 @@ const tests = [
         indexSource.indexOf('const DEFAULT_SETTINGS'),
       );
 
-      assert.match(mainRulesSource, /INPUT FORMAT:/);
+      assert.match(mainRulesSource, /function outputFormatting \{/);
       assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
       assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
       assert.match(mainRulesSource, /Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue/);
       assert.match(mainRulesSource, /Unformatted text describes narration or action\. It is NEVER audible dialogue/);
       assert.doesNotMatch(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard|Otherwise, it is private inner thought/);
-      assert.match(mainRulesSource, /Your final response MUST STRICTLY follow the constraints below/);
+      assert.match(mainRulesSource, /Your final response MUST be compliant with the constraints below/);
       // Co-Author Mode is authorized solely by the scope declared in narrativeFacts.
       // The rulebook must not advertise it or pre-grant it, or the model self-authorizes
       // on seeing double square brackets while the mode is switched off.
       assert.doesNotMatch(mainRulesSource, /CO-AUTHOR SCOPE/);
       assert.doesNotMatch(mainRulesSource, /SCOPED CO-AUTHOR EXCEPTION/);
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
-      assert.match(mainRulesSource, /When a character\/NPC addresses or responds to \{\{user\}\} or another present character\/NPC, render one bounded conversational turn: a complete, natural response to the current exchange/);
-      assert.match(mainRulesSource, /ONLY text enclosed in double quotation marks \("\.\.\."\) is audible dialogue\. Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication through an established bound-companion, telepathic, or equivalent private mental link\. It is NEVER ordinary inner thought or audible dialogue/);
-      assert.match(mainRulesSource, /The turn MUST clearly account for every materially distinct statement, question, offer, gesture, or action from \{\{user\}\} that the character\/NPC perceives/);
-      assert.match(mainRulesSource, /ONLY the intended recipient of private mental communication through an established link may respond to it/);
-      assert.match(mainRulesSource, /Account for each element through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction\. Related elements may be combined naturally within the same conversational turn rather than answered point by point/);
+      assert.match(mainRulesSource, /When a character\/NPC addresses or responds to \{\{user\}\} or another present character\/NPC, render ONE complete, natural response to the current exchange/);
+      assert.match(mainRulesSource, /Text enclosed in double quotation marks \(\"\.\.\.\"\) is audible dialogue/);
+      assert.match(mainRulesSource, /Account for each element directed at them -statement, question, offer, gesture, or action-/);
+      assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
+      assert.match(mainRulesSource, /through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction/);
       assert.match(mainRulesSource, /After addressing the current exchange, finish that same conversational turn on ONE clear, meaningful opening for \{\{user\}\}/);
       assert.match(mainRulesSource, /CONVERSATIONAL OPENING:[\s\S]*A relevant statement or question to which \{\{user\}\} can naturally respond/);
       assert.match(mainRulesSource, /ACTION OPENING:[\s\S]*A concrete action, gesture, or visible reaction directed at \{\{user\}\} or materially changing the immediate exchange/);
       assert.match(mainRulesSource, /ENVIRONMENTAL OPENING:[\s\S]*A visible environmental or scene development that changes what \{\{user\}\} can perceive or do next/);
-      assert.match(mainRulesSource, /The closing opening MUST arise naturally from the character\/NPC's response and the established scene/);
+      assert.match(mainRulesSource, /The opening MUST arise naturally from the response and the established scene/);
       assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, departure, or scene closure may end the exchange/);
       assert.match(mainRulesSource, /DO NOT begin a second reply, introduce an unrelated topic, or chain additional questions or statements within the same response/);
       assert.match(mainRulesSource, /DO NOT turn the response into a monologue or a sequence of follow-up exchanges./);
@@ -16812,17 +16812,17 @@ const tests = [
       assert.doesNotMatch(mainRulesSource, /function activeHandoff\(response, context\):/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
-      assert.match(mainRulesSource, /\{\{user\}\}'s input has already occurred\. Your response MUST begin at the FIRST moment AFTER the final action, observation, line of audible dialogue, or private mental communication in \{\{user\}\}'s input/);
-      assert.match(mainRulesSource, /Narrate ONLY what happens NEXT: the immediate result, consequence, obstruction, reaction, response, or observable development/);
-      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s input./);
-      assert.match(mainRulesSource, /DO NOT re-describe unchanged environments, objects, or characters already established in \{\{user\}\}'s input or previous narration/);
-      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, or mental communication./);
+      assert.match(mainRulesSource, /Your response MUST begin with the immediate result, consequence, obstruction, reaction, response, or observable development AFTER/);
+      assert.match(mainRulesSource, /STRICTLY PROHIBITED:/);
+      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of \{\{user\}\}'s actions or dialogue/);
+      assert.match(mainRulesSource, /environments, objects, or characters already established in the scene/);
+      assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, mental communication/);
 
       assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
-      assert.match(mainRulesSource, /You MUST describe actions, sensations, objects, and events DIRECTLY by stating what they are, what they do, or what concrete effects they produce/);
+      assert.match(mainRulesSource, /You MUST describe actions, sensations, and events DIRECTLY as they are/);
       assert.match(mainRulesSource, /This rule applies to narration, not quoted character dialogue/);
-      assert.match(mainRulesSource, /DO NOT describe or intensify something by first stating what it is NOT/);
-      assert.match(mainRulesSource, /DO NOT use formulaic negation-led rhetoric, including corrective antithesis, negative anaphora, or category rejection/);
+      assert.match(mainRulesSource, /DO NOT use rhetorical negation to describe something/);
+      assert.match(mainRulesSource, /DO NOT use negation-led rhetoric, corrective antithesis, negative anaphora, or category rejection/);
       assert.match(mainRulesSource, /DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation/);
 
       assert.match(mainRulesSource, /function agencySeparation\(response, input, context\):/);
@@ -16832,7 +16832,7 @@ const tests = [
       assert.match(mainRulesSource, /DO NOT narrate \{\{user\}\}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states./);
 
       assert.match(mainRulesSource, /function strictBehaviorism\(response, context\):/);
-      assert.match(mainRulesSource, /When conveying character\/NPC state or emotion, you MUST show it ONLY through directly observable behavior, action, or dialogue/);
+      assert.match(mainRulesSource, /Narrate character\/NPC state or emotion ONLY through observable behavior, action, or dialogue/);
       assert.match(mainRulesSource, /DO NOT use skin-color or skin-temperature changes as emotional shorthand/);
       assert.match(mainRulesSource, /DO NOT use breath or voice hitching\/catching/);
       assert.match(mainRulesSource, /DO NOT use interpretive, figurative, or invisible eye-language/);
@@ -16842,23 +16842,23 @@ const tests = [
       assert.doesNotMatch(mainRulesSource, /DO NOT use formulaic corrective antithesis or contrasts between two short descriptions/);
 
       assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
-      assert.match(mainRulesSource, /Treat ALL unstated information as HIDDEN and UNKNOWN by default/);
-      assert.match(mainRulesSource, /Information includes unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established/);
+      assert.match(mainRulesSource, /ALL information is HIDDEN and UNKNOWN by default/);
+      assert.match(mainRulesSource, /unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore/);
       assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
       assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
-      assert.match(mainRulesSource, /Any permitted mental communication in your response MUST be enclosed in single asterisks, NEVER in double quotation marks/);
-      assert.match(mainRulesSource, /Information may enter narration ONLY through DIRECT sensory evidence available to \{\{user\}\} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts/);
+      assert.match(mainRulesSource, /MUST be enclosed in single asterisks and NEVER in double quotation marks/);
+      assert.match(mainRulesSource, /Information may enter narration ONLY when revealed, or discovered through DIRECT sensory evidence available to \{\{user\}\}/);
       assert.match(mainRulesSource, /A character\/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them/);
       assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
       assert.doesNotMatch(mainRulesSource, /even when \{\{user\}\} (?:does not italicize|leaves it unformatted)/);
       assert.match(mainRulesSource, /DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above/);
 
       assert.match(mainRulesSource, /function diegeticPhysicality\(response, context\):/);
-      assert.match(mainRulesSource, /When an ability, spell, power, trait, or supernatural effect is used, narrate ONLY its OBSERVABLE effects and consequences/);
+      assert.match(mainRulesSource, /ALWAYS narrate ONLY the OBSERVABLE effects and consequences of abilities, spells, powers, traits, or supernatural effects/);
       assert.match(mainRulesSource, /A name may appear ONLY when explicitly spoken in dialogue/);
 
       assert.match(mainRulesSource, /function embodiedPerception\(response, context\):/);
-      assert.match(mainRulesSource, /You MUST base sensory narration on sight, hearing, or touch available from \{\{user\}\}'s physical position/);
+      assert.match(mainRulesSource, /ALWAYS narrate ONLY what \{\{user\}\} can see, hear, or touch from their physical position/);
       assert.match(mainRulesSource, /DO NOT narrate ANY smell or taste/);
       assert.match(mainRulesSource, /A CLOSE-RANGE PHYSICAL source is so overpowering that the sensation is unavoidable/);
       assert.match(mainRulesSource, /When an exception applies, attribute the smell or taste directly to its physical source/);
@@ -16873,7 +16873,7 @@ const tests = [
       assert.match(mainRulesSource, /Silence DOES NOT stretch/);
 
       assert.match(mainRulesSource, /function cohesiveSceneBeats\(response, context\):/);
-      assert.match(mainRulesSource, /Combine closely related actions, gestures, dialogue, and immediate consequences when they belong to the same event into one fluid, readable scene beat/);
+      assert.match(mainRulesSource, /ALWAYS combine closely related actions, gestures, dialogue, and immediate consequences/);
       assert.match(mainRulesSource, /Use natural connective prose and clear temporal flow so each event leads naturally into the next/);
       assert.match(mainRulesSource, /DO NOT invent movement, gestures, object handling, or reactions merely to make prose feel active/);
       assert.match(mainRulesSource, /DO NOT split one physical event into staccato sentences, micro-reaction loops, or body-cue pileups/);
@@ -16903,10 +16903,10 @@ const tests = [
       const mainRuleOrder = [
         'dialogueTurn',
         'inputChronology',
+        'agencySeparation',
         'antiRhetoricalNegation',
         'strictBehaviorism',
         'antiStockPhrasing',
-        'agencySeparation',
         'strictEpistemology',
         'diegeticPhysicality',
         'embodiedPerception',
@@ -16925,8 +16925,8 @@ const tests = [
       };
       const assertNamedRuleOrder = (source, order, label) => {
         for (let i = 1; i < order.length; i++) {
-          const previous = '[' + order[i - 1] + ']';
-          const current = '[' + order[i] + ']';
+          const previous = 'function ' + order[i - 1];
+          const current = 'function ' + order[i];
           assert.ok(
             source.indexOf(previous) < source.indexOf(current),
             previous + ' should appear before ' + current + ' in ' + label + '.',
@@ -16938,11 +16938,11 @@ const tests = [
       assert.match(handoffRulesSource, /BINDING CONTRACT/),
       assert.match(handoffRulesSource, /A response that breaks one is\s+INVALID: it is discarded and never reaches the player/);
       assert.match(handoffRulesSource, /narrativeFacts\(input\) fixes what happened/);
-      assert.match(handoffRulesSource, /INPUT FORMAT/);
-      assert.match(handoffRulesSource, /"\.\.\." is audible dialogue\. \*\.\.\.\* is private mental communication/);
-      assert.match(handoffRulesSource, /\*\.\.\.\* is private mental communication through an\s+established bound-companion/);
-      assert.match(handoffRulesSource, /Italics are\s+never thought, emphasis, narration, or dialogue/);
-      assert.match(handoffRulesSource, /Unformatted text is narration or\s+action/);
+      assert.match(handoffRulesSource, /function outputFormatting \{/);
+      assert.match(handoffRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
+      assert.match(handoffRulesSource, /single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication/);
+      assert.match(handoffRulesSource, /Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue/);
+      assert.match(handoffRulesSource, /Unformatted text describes narration or action/);
 
       for (const name of mainRuleOrder) {
         assert.equal(
@@ -16951,7 +16951,7 @@ const tests = [
           name + ' should appear exactly once in the full prose rules.',
         );
         assert.equal(
-          (handoffRulesSource.match(new RegExp('\\[' + name + '\\]', 'g')) || []).length,
+          (handoffRulesSource.match(new RegExp('function ' + name + '\\b', 'g')) || []).length,
           1,
           name + ' should appear exactly once as a named narrator rule.',
         );
@@ -16963,25 +16963,26 @@ const tests = [
         'embodiedPerception',
         'diegeticPhysicality',
         'strictEpistemology',
-        'nameReveal',
-        'narrativeFacts',
-        'agencySeparation',
         'antiStockPhrasing',
         'strictBehaviorism',
         'antiRhetoricalNegation',
+        'agencySeparation',
         'inputChronology',
         'dialogueTurn',
+        'outputFormatting',
+        'nameReveal',
+        'narrativeFacts',
       ];
       assertNamedRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator handoff contract');
       assert.match(handoffRulesSource, /Pool names are unused candidates, never permission to reveal or use them/);
       assert.match(handoffRulesSource, /never permission to reveal or use them/);
-      assert.match(handoffRulesSource, /Until then, refer to the person, place, group, or object by established role or\s+direct observable description/);
+      assert.match(handoffRulesSource, /Until then, refer to the person, place, group, or object by its established role or a direct observable description/);
       assert.match(handoffRulesSource, /narrativeFacts\(input\) is authoritative and immutable for this response/);
-      assert.match(handoffRulesSource, /Address EVERY distinct statement, question, offer, gesture, or action/);
-      assert.match(handoffRulesSource, /NEVER ignore a distinct input, ramble, open a second exchange/);
-      assert.match(handoffRulesSource, /NEVER narrate smell or taste unless/);
-      assert.match(handoffRulesSource, /Objects stay objects: they have no will, no awareness, and no intent of their own/);
-      assert.match(handoffRulesSource, /NEVER reach for received phrasing, familiar emotional\s+formulas, or the stock constructions of the genre/);
+      assert.match(handoffRulesSource, /Account for each element directed at them -statement, question, offer, gesture, or action-/);
+      assert.match(handoffRulesSource, /DO NOT begin a second reply, introduce an unrelated topic, or chain additional questions/);
+      assert.match(handoffRulesSource, /DO NOT narrate ANY smell or taste/);
+      assert.match(handoffRulesSource, /DO NOT attribute agency, intention, awareness, memory, or emotion to inanimate things/);
+      assert.match(handoffRulesSource, /DO NOT use stock phrasing such as:/);
       assert.doesNotMatch(handoffRulesSource, /function RenderControlEngine\(|PATTERN EXAMPLE:|FINAL SILENT CHECK|check and revise/i);
 
       assert.match(handoffSource, /narrativeContract\(input\): \{/);
@@ -17236,7 +17237,7 @@ const tests = [
       );
       assert.match(introPrompt, /^#1 - PROSE RULES/);
       assert.match(introPrompt, /NARRATOR PROSE RULES/);
-      assert.match(introPrompt, /Join related actions, gestures, dialogue, contact, and their immediate consequences/);
+      assert.match(introPrompt, /ALWAYS combine closely related actions, gestures, dialogue, and immediate consequences/);
       assert.match(introPrompt, /#1\.7 - SCENE STYLE PROFILE/);
       assert.match(introPrompt, /SCENE STYLE PROFILE: Use vivid, scene-aware prose\./);
       assert.doesNotMatch(introPrompt, /#2 - RESOLVED FACTS|==MECHANICS_RESULTS==/);
@@ -17264,7 +17265,7 @@ const tests = [
       assert.match(introPrompt, /must not rebuild, reroll, overwrite, infantize, or replace them/);
       assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
       assert.match(introPrompt, /NAME REVEAL:/);
-      assert.match(introPrompt, /Use a proper name ONLY when already established, or discovered on-scene through/);
+      assert.match(introPrompt, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
       assert.match(introPrompt, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(introPrompt, /FEMALE: Ariana, Mira\./);
       assert.match(introPrompt, /MALE: Darin, Kell\./);

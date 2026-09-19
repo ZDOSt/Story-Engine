@@ -4,17 +4,22 @@ const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
 const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
 const VISIBLE_MECHANICS_LABEL = '(?:(?:Critical|Moderate|Minor)\\s+(?:Success|Failure)|Success|Failure|Stalemate|No\\s+Roll|Dominant\\s+Impact|Solid\\s+Impact|Light\\s+Impact|Checked|Deflected|Avoided|Struggle)';
 export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
+    'outputFormatting',
     'RenderControlEngine',
     'activeHandoff',
     'dialogueTurn',
     'inputChronology',
-    'agencySeparation',
+    'antiRhetoricalNegation',
     'strictBehaviorism',
+    'antiStockPhrasing',
+    'agencySeparation',
     'strictEpistemology',
     'diegeticPhysicality',
     'embodiedPerception',
     'denotativePhysicality',
     'cohesiveSceneBeats',
+    'nameReveal',
+    'narrativeFacts',
 ]);
 export const RENDER_CONTROL_STAGE_PATTERN = `(?:${RENDER_CONTROL_STAGE_NAMES.join('|')})`;
 const RENDER_CONTROL_STAGE = RENDER_CONTROL_STAGE_PATTERN;
@@ -220,8 +225,8 @@ function isNarratorArtifactLine(line) {
     const text = String(line ?? '').trim();
     if (!text) return true;
     if (/^<\/?think\b/i.test(text)) return true;
-    if (new RegExp(`^\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\b`, 'i').test(text)) return true;
-    if (new RegExp(`^(?:[*_~]{1,3})?\\s*${RENDER_CONTROL_STAGE}\\s*(?:[*_~]{1,3})?\\s*:`, 'i').test(text)) return true;
+    if (new RegExp(`^\\d+[.)]?\\s*(?:[*_~]{1,3})?\\s*(?:function\\s+)?${RENDER_CONTROL_STAGE}(?:\\s*\\([^\\r\\n]*\\))?\\b`, 'i').test(text)) return true;
+    if (new RegExp(`^(?:[*_~]{1,3})?\\s*(?:function\\s+)?${RENDER_CONTROL_STAGE}(?:\\s*\\([^\\r\\n]*\\))?\\s*(?:[*_~]{1,3})?\\s*(?::|\\{)`, 'i').test(text)) return true;
     if (/^(?:[*_~]{1,3})?\s*(?:CONCLUSION|VALIDATION CONCLUSION|FINAL CHECK|RENDER CHECK)\s*:/i.test(text)) return true;
     if (/^(?:Valid to proceed|All checks pass|All good|Proceed with narration)\b/i.test(text)) return true;
     if (/^(?:STORY_ENGINE_NARRATOR_DIRECTIVE|narrativeContract\(input\)|renderControlEngine\(input\)|PRE-FLIGHT CHECK)\s*:?[\s]*$/i.test(text)) return true;
