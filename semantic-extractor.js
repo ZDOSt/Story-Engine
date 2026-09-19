@@ -1849,6 +1849,8 @@ function buildSemanticPreflightSchema() {
         scope: enumString(USER_KNOWLEDGE_SCOPES),
         valence: enumString(['none', ...USER_REPUTATION_VALENCES]),
         effect: enumString(USER_KNOWLEDGE_APPLICATION_EFFECTS, 'How this knowledge should affect init/context: priorUserGoodRep, userBadRep, userNonHuman, contextOnly, or none.'),
+        truth: enumString(USER_KNOWLEDGE_TRUTH, 'Copy the truth value from the matching stored knowledge entry.'),
+        confidence: enumString(USER_KNOWLEDGE_CONFIDENCE, 'Copy the confidence value from the matching stored knowledge entry.'),
         line: string(),
         reason: string(),
     });
@@ -5952,6 +5954,54 @@ function sanitizeUserKnowledgeSnapshotForSemantic(value = {}) {
         personal: personal.map(entry => sanitizePersonalKnowledgeEntry(entry)).filter(Boolean).slice(-60),
         reputation: reputation.map(entry => sanitizeReputationKnowledgeEntry(entry)).filter(Boolean).slice(-60),
     };
+}
+
+// The semantic pass reports how firmly a belief is held, but a model's assertion
+// is not evidence. The stored ledger entry the application cites is the
+// authority. Ground truth and confidence on it; treat an application that cannot
+// be grounded as no more than an unverified claim rather than passing the model's
+// word through to the narrator.
+export function groundUserKnowledgeApplications(report, storedLedger) {
+    // runDeterministicEngines returns { semanticLedger, ... }; the applications
+    // live on the ledger, which is also where formatNarratorModelPromptContext reads.
+    const applications = report?.semanticLedger?.userKnowledgeApplication?.applications;
+    if (!Array.isArray(applications) || !applications.length) return [];
+    const entries = [
+        ...(Array.isArray(storedLedger?.personal) ? storedLedger.personal : []),
+        ...(Array.isArray(storedLedger?.reputation) ? storedLedger.reputation : []),
+    ].filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry));
+    const byId = new Map();
+    const byLine = new Map();
+    for (const entry of entries) {
+        const id = String(entry.id || '').trim();
+        if (id) byId.set(id, entry);
+        const line = String(entry.line || '').trim().toLowerCase();
+        if (line && !byLine.has(line)) byLine.set(line, entry);
+    }
+    const audit = [];
+    for (const application of applications) {
+        if (!application || typeof application !== 'object') continue;
+        const ids = Array.isArray(application.entryIds) ? application.entryIds : [];
+        let matched = null;
+        for (const id of ids) {
+            const found = byId.get(String(id || '').trim());
+            if (found) { matched = found; break; }
+        }
+        if (!matched) {
+            const line = String(application.line || '').trim().toLowerCase();
+            if (line) matched = byLine.get(line) || null;
+        }
+        if (matched) {
+            application.truth = matched.truth;
+            application.confidence = matched.confidence;
+            audit.push(`grounded target=${application.target} truth=${matched.truth} confidence=${matched.confidence}`);
+        } else {
+            application.truth = 'claimed';
+            application.confidence = 'uncertain';
+            audit.push(`ungrounded target=${application.target} -> claimed/uncertain`);
+        }
+    }
+    return audit;
 }
 
 function sanitizePersonalKnowledgeEntry(entry) {

@@ -1650,6 +1650,17 @@ export function deriveImpulse(kind, lock, fin, pressureMode = 'none', target = '
 }
 
 export function classifyProactivityTier(handoff, chaosBand, counterPotential, lock, fin) {
+    const base = classifyProactivityTierBase(handoff, chaosBand, counterPotential, lock, fin);
+    // An NPC who spoke up and went unanswered becomes more insistent, not more
+    // hostile. This is a FLOOR only: it never lowers a tier, never manufactures
+    // hostility, and never overrides the referee guards, which run before this.
+    const ignored = Math.min(Number(handoff?.IgnoredBeats ?? 0) || 0, 3);
+    if (ignored >= 2) return base === 'FORCED' ? base : 'HIGH';
+    if (ignored >= 1) return base === 'FORCED' || base === 'HIGH' ? base : 'MEDIUM';
+    return base;
+}
+
+function classifyProactivityTierBase(handoff, chaosBand, counterPotential, lock, fin) {
     const NPC_STAKES = handoff.NPC_STAKES || 'N';
     const Target = handoff.Target || 'No Change';
     const Landed = handoff.Landed || 'N';
@@ -1982,6 +1993,10 @@ export function normalizeProactivityMemory(value) {
         romanceBlocked: source.romanceBlocked === 'Y' ? 'Y' : 'N',
         pendingTag: normalizeMemoryTag(source.pendingTag),
         pendingSince: normalizeMemoryCount(source.pendingSince),
+        // Initiative memory: an NPC who spoke up and was not engaged with
+        // escalates next time rather than repeating themselves politely.
+        lastBeatSince: normalizeMemoryCount(source.lastBeatSince),
+        ignoredBeats: Math.min(normalizeMemoryCount(source.ignoredBeats), 3),
         acceptedTags: normalizeMemoryTagList(source.acceptedTags, ROMANCE_MEMORY_TAGS),
         refusedTags: normalizeMemoryTagList(source.refusedTags, ROMANCE_MEMORY_TAGS),
         b4Courtship: normalizeB4Courtship(source.b4Courtship),

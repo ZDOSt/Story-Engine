@@ -2184,7 +2184,7 @@ function narrativeUserKnowledgeFact(applications = []) {
     const items = normalizeUserKnowledgeApplications(applications);
     if (!items.length) return 'No special reputation or personal knowledge about {{user}} is applied this beat.';
     return items
-        .map(item => `${item.target} may know or have heard this about {{user}}: ${narratorUserMacroText(item.line)}. Use it only for recognition, demeanor, caution, trust, suspicion, fear, questions, or context when it naturally fits the visible scene.`)
+        .map(item => `${item.target} may know or have heard this about {{user}}: ${narratorUserMacroText(item.line)} ${knowledgeBeliefPhrase(item.confidence)} this. ${knowledgeAccuracyPhrase(item.truth)} Use it only for recognition, demeanor, caution, trust, suspicion, fear, questions, or context when it naturally fits the visible scene.`)
         .join(' ');
 }
 
@@ -3227,10 +3227,38 @@ function normalizeUserKnowledgeApplications(applications = []) {
                 type: normalizeKnowledgeType(source.type ?? source.Type),
                 scope: normalizeKnowledgeScope(source.scope ?? source.Scope),
                 valence: normalizeKnowledgeValence(source.valence ?? source.Valence),
+                truth: normalizeKnowledgeTruth(source.truth ?? source.Truth),
+                confidence: normalizeKnowledgeConfidence(source.confidence ?? source.Confidence),
             };
         })
         .filter(Boolean)
         .slice(0, 12);
+}
+
+function normalizeKnowledgeTruth(value) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    if (text === 'distorted' || text === 'false' || text === 'claimed') return text;
+    return 'true';
+}
+
+function normalizeKnowledgeConfidence(value) {
+    const text = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    if (text === 'likely') return 'likely';
+    if (text === 'uncertain' || text === 'unsure' || text === 'rumored' || text === 'rumoured') return 'uncertain';
+    return 'certain';
+}
+
+function knowledgeBeliefPhrase(confidence) {
+    if (confidence === 'uncertain') return 'is unsure of';
+    if (confidence === 'likely') return 'believes';
+    return 'is certain of';
+}
+
+function knowledgeAccuracyPhrase(truth) {
+    if (truth === 'false') return 'It is not actually true.';
+    if (truth === 'distorted') return 'The account is distorted rather than accurate.';
+    if (truth === 'claimed') return 'It is only a claim, unverified.';
+    return 'It is accurate.';
 }
 
 function normalizeKnowledgeEffect(value) {

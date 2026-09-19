@@ -5071,6 +5071,23 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             audit.push(`3.6d socialResolutionMemory=${compact(socialMemoryUpdate.entry)}`);
         }
 
+        // An initiative beat that went unanswered: this NPC spoke up, they are
+        // still here, and the player did not involve them. Record it so the next
+        // approach escalates rather than repeating.
+        let initiativeMemory = normalizeProactivityMemory(proactivityMemory);
+        const beatEngaged = Boolean(relation.isDirect || relation.isOpp || relation.isHarmed || relation.isBenefited);
+        if (initiativeMemory.lastBeatSince > 0 && !beatEngaged) {
+            initiativeMemory = {
+                ...initiativeMemory,
+                ignoredBeats: Math.min(initiativeMemory.ignoredBeats + 1, 3),
+                lastBeatSince: 0,
+            };
+            audit.push(`3.4i ignoredProactiveBeat=${npc} ignoredBeats=${initiativeMemory.ignoredBeats}`);
+        } else if (initiativeMemory.ignoredBeats > 0 && beatEngaged) {
+            initiativeMemory = { ...initiativeMemory, ignoredBeats: 0 };
+            audit.push(`3.4i proactiveBeatAnswered=${npc} ignoredBeats=0`);
+        }
+
         const handoff = {
             NPC: npc,
             FinalState: `B${currentDisposition.B}/F${currentDisposition.F}/H${currentDisposition.H}`,
@@ -5105,7 +5122,8 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             Wounds: state.wounds || [],
             StatusEffects: state.statusEffects || [],
             RelationToUserAction: relation,
-            ProactivityMemory: proactivityMemory,
+            ProactivityMemory: initiativeMemory,
+            IgnoredBeats: initiativeMemory.ignoredBeats,
         };
         handoffs.push(handoff);
 
@@ -5119,6 +5137,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         }
         trackerUpdate[npc] = {
             ...state,
+            // Persist the initiative memory the handoff computed. Without this the
+            // ignored-beat counter lives only in the handoff and is discarded at
+            // the end of the turn, so it could never escalate.
+            proactivityMemory: initiativeMemory,
             currentDisposition,
             currentRapport,
             lastRapportGainActiveMs,
@@ -7345,6 +7367,11 @@ function applyProactivityMemoryResults(trackerUpdate, handoffs, proactivityResul
         const handoff = handoffMap.get(String(npc).toLowerCase()) || {};
         const tag = selectedMemoryTag(result);
         let changed = false;
+        // This NPC acted on their own initiative. If the next turn does not
+        // engage them the beat went unanswered, and they escalate instead of
+        // repeating themselves politely.
+        memory = { ...memory, lastBeatSince: memory.interchangeCount };
+        changed = true;
         if (isRomanceMajorTag(tag)) {
             memory = {
                 ...memory,

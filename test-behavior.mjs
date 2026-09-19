@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import yaml from 'yaml';
 import { buildSpellCastingSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
-import { ENGINE_PROMPT_TEXT, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, isSlowBondEligible, mergeSlowBondEvidence, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
+import { ENGINE_PROMPT_TEXT, classifyProactivityTier, normalizeProactivityMemory, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, isSlowBondEligible, mergeSlowBondEvidence, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
-import { SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticTextLedgerPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
+import { groundUserKnowledgeApplications, SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticTextLedgerPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
@@ -18711,10 +18711,10 @@ const tests = [
       };
       inspectSchema(strictSemanticTool.function.parameters);
       assert.deepEqual(schemaMetrics, {
-        leaves: 228,
+        leaves: 230,
         objects: 44,
         arrays: 44,
-        descriptions: 102,
+        descriptions: 104,
         incompleteRequired: 0,
       });
       assert.equal(
@@ -23183,6 +23183,103 @@ const tests = [
       const cleared = mergeSlowBondEvidence(previous, { blockers: [] }, 'scene-2');
       assert.deepEqual(cleared.evidence.blockers, []);
       assert.equal(isSlowBondEligible({ B: 3, F: 1, H: 1 }, 5, cleared.evidence), true);
+    },
+  },
+
+  {
+    name: 'ignored proactive beats escalate the tier and reset when answered',
+    run() {
+      const fin = { B: 2, F: 2, H: 2 };
+      const handoff = (extra = {}) => ({
+        NPC_STAKES: 'N',
+        Target: 'No Change',
+        Landed: 'N',
+        RelationToUserAction: {},
+        PressureMode: 'none',
+        ...extra,
+      });
+
+      // baseline: nothing happening, nobody acting
+      assert.equal(classifyProactivityTier(handoff(), 'None', 'none', 'None', fin), 'DORMANT');
+
+      // ignored once -> the floor lifts them to MEDIUM
+      assert.equal(classifyProactivityTier(handoff({ IgnoredBeats: 1 }), 'None', 'none', 'None', fin), 'MEDIUM');
+
+      // ignored twice -> HIGH
+      assert.equal(classifyProactivityTier(handoff({ IgnoredBeats: 2 }), 'None', 'none', 'None', fin), 'HIGH');
+
+      // the floor only raises: a tier that would already be HIGH is untouched
+      assert.equal(
+        classifyProactivityTier(handoff({ IgnoredBeats: 1, NPC_STAKES: 'Y', Landed: 'Y' }), 'None', 'none', 'None', fin),
+        'HIGH',
+      );
+      // and MEDIUM stays MEDIUM rather than being pushed up by one ignored beat
+      assert.equal(
+        classifyProactivityTier(handoff({ IgnoredBeats: 1, NPC_STAKES: 'Y' }), 'None', 'none', 'None', fin),
+        'MEDIUM',
+      );
+
+      // FORCED is never lowered by the floor
+      const forced = classifyProactivityTier(
+        handoff({ IgnoredBeats: 3, Target: 'Hostility' }), 'None', 'none', 'HATRED', fin,
+      );
+      assert.equal(forced, 'FORCED');
+
+      // the counter is capped at 3 by the normalizer
+      assert.equal(normalizeProactivityMemory({ ignoredBeats: 99 }).ignoredBeats, 3);
+      assert.equal(normalizeProactivityMemory({}).ignoredBeats, 0);
+      assert.equal(normalizeProactivityMemory({}).lastBeatSince, 0);
+      assert.equal(normalizeProactivityMemory({ lastBeatSince: 7 }).lastBeatSince, 7);
+    },
+  },
+
+  {
+    name: 'user knowledge belief is grounded on the stored ledger, not the model claim',
+    run() {
+      const entry = {
+        id: 'pk_1', knownBy: 'Mira', line: 'they say he burned the granary',
+        truth: 'distorted', confidence: 'uncertain',
+      };
+      const ledger = { personal: [entry], reputation: [] };
+      const app = (extra = {}) => ({
+        target: 'Mira', line: 'they say he burned the granary', effect: 'userBadRep',
+        truth: 'true', confidence: 'certain', ...extra,
+      });
+
+      // Build the shape the CALL SITE actually passes. runDeterministicEngines
+      // returns { semanticLedger, ... }, so the applications are nested. Feeding a
+      // flat { userKnowledgeApplication } here once hid a no-op in production.
+      const report = (applications) => ({ semanticLedger: { userKnowledgeApplication: { applications } } });
+      const grounded = (built) => built.semanticLedger.userKnowledgeApplication.applications[0];
+
+      // matched by entryIds -> the stored values win over the model's claim
+      const byId = report([app({ entryIds: ['pk_1'] })]);
+      groundUserKnowledgeApplications(byId, ledger);
+      assert.equal(grounded(byId).truth, 'distorted');
+      assert.equal(grounded(byId).confidence, 'uncertain');
+
+      // matched by line alone -> still grounded
+      const byLine = report([app()]);
+      groundUserKnowledgeApplications(byLine, ledger);
+      assert.equal(grounded(byLine).truth, 'distorted');
+
+      // no match -> the model's word is not passed through as fact
+      const ungrounded = report([app({ line: 'something nobody recorded', entryIds: [] })]);
+      groundUserKnowledgeApplications(ungrounded, ledger);
+      assert.equal(grounded(ungrounded).truth, 'claimed');
+      assert.equal(grounded(ungrounded).confidence, 'uncertain');
+
+      // the FLAT shape is not accepted. This is the regression guard: if the helper
+      // is ever pointed back at the wrong path, the wrong shape must yield nothing.
+      assert.deepEqual(
+        groundUserKnowledgeApplications({ userKnowledgeApplication: { applications: [app()] } }, ledger),
+        [],
+      );
+
+      // degenerate inputs do not throw
+      assert.deepEqual(groundUserKnowledgeApplications({}, ledger), []);
+      assert.deepEqual(groundUserKnowledgeApplications({ semanticLedger: { userKnowledgeApplication: { applications: [] } } }, {}), []);
+      assert.deepEqual(groundUserKnowledgeApplications(null, null), []);
     },
   },
 ];
