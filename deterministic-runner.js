@@ -4994,6 +4994,18 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         }
         currentRapport = deltas.rapportReset === 'Y' ? 0 : currentRapport;
 
+        // The dominant lock records which axis broke this NPC. It must not
+        // outlive the pressure that set it: once neither axis is at the
+        // breaking point any more, the lock and its pressure mode are released
+        // so the NPC is treated as an ordinary character again. Both fields
+        // matter, because friendlyNpcObjectAccessEligible requires
+        // dominantLock None AND pressureMode none.
+        if (dominantLock !== 'None' && currentDisposition && currentDisposition.F < 3 && currentDisposition.H < 3) {
+            audit.push(`3.5a.2 dominantLock released=${dominantLock}/${pressureMode}`);
+            dominantLock = 'None';
+            pressureMode = 'none';
+        }
+
         audit.push(`3.5 deriveDirection=${compact(deltas)}`);
         audit.push(`3.5a updateDisposition=${formatDisposition(updatedDisposition)}`);
         audit.push(`3.5e save currentRapport=${currentRapport} to sceneTracker`);

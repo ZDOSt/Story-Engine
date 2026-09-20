@@ -453,6 +453,13 @@ function RelationshipEngine(npc, resolutionPacket) {
     else if hostilityHit && !fearHit -> state.dominantLock = HOSTILITY
     else if fearHit && hostilityHit -> state.dominantLock = state.pressureMode=cornered ? FEAR : HOSTILITY
 
+  releasePressureLock(state, disposition):
+    rule: the dominant lock lasts only while an axis is still at the breaking point. Once neither F nor H is 3 or 4, state.dominantLock returns to None and pressureMode returns to none, so the NPC is treated as an ordinary character again instead of routing every future dominance result through the old scar.
+    if state.dominantLock=None -> return
+    if disposition.F<3 && disposition.H<3:
+      state.dominantLock = None
+      state.pressureMode = none
+
   targetFromDeltas(deltas):
     if deltas.f>0 && deltas.h>0 -> FearHostility
     if deltas.f>0 -> Fear

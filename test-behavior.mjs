@@ -2896,6 +2896,64 @@ const tests = [
     },
   },
   {
+    name: '12g.3 dominant lock is released once neither axis is still at the breaking point',
+    run() {
+      // The dominant lock records which axis broke this NPC. It describes
+      // present pressure, so it must not survive as a permanent scar: an NPC
+      // whose F and H have both fallen back below 3 is an ordinary character
+      // again, and friendly object access must not stay barred forever.
+      const released = runCase({
+        userText: 'I greet the ogre warmly and offer him a seat by the fire.',
+        tracker: {
+          Ogre: trackerEntry({
+            currentDisposition: { B: 4, F: 1, H: 1 },
+            dominantLock: 'HOSTILITY',
+            pressureMode: 'dominated',
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'greet the ogre',
+            identifyChallenge: 'ordinary greeting',
+            explicitMeans: 'greet the ogre warmly',
+            identifyTargets: { ActionTargets: ['Ogre'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Ogre')],
+        }),
+      });
+      assert.equal(auditIncludes(released, '3.5a.2 dominantLock released=HOSTILITY/dominated'), true);
+      assert.equal(released.trackerUpdate.npcs.Ogre.dominantLock, 'None');
+      assert.equal(released.trackerUpdate.npcs.Ogre.pressureMode, 'none');
+
+      // The release must not over-fire. While an axis is still at 3 or 4 the
+      // lock is still meaningful and has to survive untouched.
+      const retained = runCase({
+        userText: 'I greet the ogre warily and keep my distance.',
+        tracker: {
+          Ogre: trackerEntry({
+            currentDisposition: { B: 1, F: 2, H: 4 },
+            dominantLock: 'HOSTILITY',
+            pressureMode: 'dominated',
+          }),
+        },
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'greet the ogre',
+            identifyChallenge: 'ordinary greeting',
+            explicitMeans: 'greet the ogre warily',
+            identifyTargets: { ActionTargets: ['Ogre'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Ogre')],
+        }),
+      });
+      assert.equal(auditIncludes(retained, '3.5a.2 dominantLock released='), false);
+      assert.equal(retained.trackerUpdate.npcs.Ogre.dominantLock, 'HOSTILITY');
+      assert.equal(retained.trackerUpdate.npcs.Ogre.pressureMode, 'dominated');
+    },
+  },
+  {
     name: '12g.2a failed intimidation does not escalate existing fear into terror',
     run() {
       const tracker = {
