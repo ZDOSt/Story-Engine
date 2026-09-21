@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import yaml from 'yaml';
-import { buildSpellCastingSnapshot, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { applyUserReputationSeed, buildSpellCastingSnapshot, consumeLatentFavorById, deriveUserReputationSeed, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import { ENGINE_PROMPT_TEXT, classifyProactivityTier, normalizeProactivityMemory, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, isSlowBondEligible, mergeSlowBondEvidence, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
@@ -6667,7 +6667,7 @@ const tests = [
     },
   },
   {
-    name: '09c.5 local fame does not leak into unrelated locations',
+    name: '09c.5 local fame seeds an unvisited location two tiers down',
     run() {
       const tracker = {
         Receptionist: trackerEntry({ currentDisposition: null }),
@@ -6696,8 +6696,276 @@ const tests = [
           relationshipEngine: [relationship('Receptionist')],
         }),
       });
-      assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 2, F: 2, H: 2 });
+      assert.equal(auditIncludes(report, 'reputationSeed={"location":"Kuroda City","fame":10,"infamy":0}'), true);
+      assert.equal(auditIncludes(report, 'initPreset=userFame10'), true);
+      assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 3, F: 1, H: 1 });
+      const seeded = report.trackerUpdate.userReputation.locations['Kuroda City'];
+      assert.equal(seeded.location, 'Kuroda City');
+      assert.equal(seeded.fame, 10);
+      assert.equal(seeded.infamy, 0);
+      // The seed carries its meaning through the disposition, never through a knowledge claim.
+      // The narrator is told how the NPC behaves; it is never told why.
+      assert.deepEqual(report.semanticLedger.userKnowledgeApplication?.applications || [], []);
+      assert.match(prompt(report), /No special reputation or personal knowledge about \{\{user\}\} is applied this beat\./);
+    },
+  },
+  {
+    name: '09c.5a fame below the first seed tier leaves an unvisited location unseeded and neutral',
+    run() {
+      const tracker = {
+        Receptionist: trackerEntry({ currentDisposition: null }),
+      };
+      const report = runCase({
+        userText: 'I speak with the receptionist.',
+        tracker,
+        cardFields: {
+          userReputation: {
+            locations: {
+              'Urakami Village': { location: 'Urakami Village', fame: 12, infamy: 0, updatedAt: 100 },
+            },
+          },
+        },
+        ledger: baseLedger({
+          engineContext: {
+            userReputationContext: { location: 'Kuroda City' },
+          },
+          resolutionEngine: {
+            identifyGoal: 'Talk',
+            identifyChallenge: 'speak with receptionist',
+            explicitMeans: 'speak with receptionist',
+            identifyTargets: { ActionTargets: ['Receptionist'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Receptionist')],
+        }),
+      });
+      assert.equal(auditIncludes(report, 'reputationSeed='), false);
       assert.equal(auditIncludes(report, 'initPreset=neutralDefault'), true);
+      assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 2, F: 2, H: 2 });
+      assert.equal(report.trackerUpdate.userReputation.locations['Kuroda City'], undefined);
+    },
+  },
+  {
+    name: '09c.5b a seed never overwrites a location already carrying its own reputation',
+    run() {
+      const tracker = {
+        Receptionist: trackerEntry({ currentDisposition: null }),
+      };
+      const report = runCase({
+        userText: 'I speak with the receptionist.',
+        tracker,
+        cardFields: {
+          userReputation: {
+            locations: {
+              'Urakami Village': { location: 'Urakami Village', fame: 20, infamy: 0, updatedAt: 100 },
+              'Kuroda City': { location: 'Kuroda City', fame: 3, infamy: 0, updatedAt: 200 },
+            },
+          },
+        },
+        ledger: baseLedger({
+          engineContext: {
+            userReputationContext: { location: 'Kuroda City' },
+          },
+          resolutionEngine: {
+            identifyGoal: 'Talk',
+            identifyChallenge: 'speak with receptionist',
+            explicitMeans: 'speak with receptionist',
+            identifyTargets: { ActionTargets: ['Receptionist'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Receptionist')],
+        }),
+      });
+      assert.equal(auditIncludes(report, 'reputationSeed='), false);
+      assert.equal(report.trackerUpdate.userReputation.locations['Kuroda City'].fame, 3);
+      assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 2, F: 2, H: 2 });
+    },
+  },
+  {
+    name: '09c.5c another init preset winning also withholds the location seed entirely',
+    run() {
+      const tracker = {
+        Receptionist: trackerEntry({ currentDisposition: null }),
+      };
+      const report = runCase({
+        userText: 'I speak with the receptionist.',
+        tracker,
+        cardFields: {
+          userReputation: {
+            locations: {
+              'Urakami Village': { location: 'Urakami Village', fame: 20, infamy: 0, updatedAt: 100 },
+            },
+          },
+        },
+        ledger: baseLedger({
+          engineContext: {
+            userReputationContext: { location: 'Kuroda City' },
+          },
+          resolutionEngine: {
+            identifyGoal: 'Talk',
+            identifyChallenge: 'speak with receptionist',
+            explicitMeans: 'speak with receptionist',
+            identifyTargets: { ActionTargets: ['Receptionist'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Receptionist', { initPreset: { romanticOpen: true } })],
+        }),
+      });
+      assert.equal(auditIncludes(report, 'initPreset=romanticOpen'), true);
+      assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 4, F: 1, H: 1 });
+      assert.equal(report.trackerUpdate.userReputation.locations['Kuroda City'], undefined);
+      assert.equal(auditIncludes(report, 'reputationSeed='), false);
+      assert.deepEqual(report.semanticLedger.userKnowledgeApplication?.applications || [], []);
+    },
+  },
+  {
+    name: '09c.5g an already initialized NPC never reseeds the location on a later turn',
+    run() {
+      const tracker = {
+        Receptionist: trackerEntry({ currentDisposition: { B: 2, F: 2, H: 2 } }),
+      };
+      const report = runCase({
+        userText: 'I speak with the receptionist.',
+        tracker,
+        cardFields: {
+          userReputation: {
+            locations: {
+              'Urakami Village': { location: 'Urakami Village', fame: 20, infamy: 0, updatedAt: 100 },
+            },
+          },
+        },
+        ledger: baseLedger({
+          engineContext: {
+            userReputationContext: { location: 'Kuroda City' },
+          },
+          resolutionEngine: {
+            identifyGoal: 'Talk',
+            identifyChallenge: 'speak with receptionist',
+            explicitMeans: 'speak with receptionist',
+            identifyTargets: { ActionTargets: ['Receptionist'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Receptionist')],
+        }),
+      });
+      assert.equal(auditIncludes(report, 'initPreset='), false);
+      assert.equal(report.trackerUpdate.userReputation.locations['Kuroda City'], undefined);
+      assert.equal(auditIncludes(report, 'reputationSeed='), false);
+      assert.deepEqual(report.semanticLedger.userKnowledgeApplication?.applications || [], []);
+    },
+  },
+  {
+    name: '09c.5h a reputation point earned where a location is first seeded lands on top of the seeded baseline',
+    run() {
+      const cardFields = {
+        userReputation: {
+          locations: {
+            'Urakami Village': { location: 'Urakami Village', fame: 20, infamy: 0, updatedAt: 100 },
+          },
+        },
+      };
+      const ledgerFor = target => baseLedger({
+        engineContext: { userReputationContext: { location: 'Kuroda City' } },
+        resolutionEngine: {
+          identifyGoal: 'Talk',
+          identifyChallenge: 'greet them',
+          explicitMeans: 'greet them',
+          identifyTargets: { ActionTargets: [target], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+          rollNeeded: false,
+        },
+        relationshipEngine: [relationship(target)],
+      });
+
+      const turnOneLedger = ledgerFor('Receptionist');
+      turnOneLedger.trackerUpdateEngine = { userReputation: { events: [{ location: 'Kuroda City', fameDelta: 1, infamyDelta: 0 }] } };
+      const turnOne = runCase({
+        userText: 'I greet the receptionist.',
+        tracker: { Receptionist: trackerEntry({ currentDisposition: null }) },
+        cardFields,
+        ledger: turnOneLedger,
+      });
+
+      assert.equal(auditIncludes(turnOne, '3.3m reputationSeed='), true);
+      assert.equal(auditIncludes(turnOne, '3.9a reputationSeed='), true);
+      assert.deepEqual(turnOne.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 3, F: 1, H: 1 });
+      // The seeded baseline of 10 must survive the merge and keep the point earned in the same turn.
+      assert.equal(turnOne.trackerUpdate.userReputation.locations['Kuroda City'].fame, 11);
+
+      // A later NPC initializing in the same location must read the same standing the first one was given.
+      const turnTwo = runCase({
+        userText: 'I greet the guard.',
+        tracker: { Guard: trackerEntry({ currentDisposition: null }) },
+        cardFields: { userReputation: turnOne.trackerUpdate.userReputation },
+        ledger: ledgerFor('Guard'),
+      });
+
+      assert.equal(turnTwo.trackerUpdate.userReputation.locations['Kuroda City'].fame, 11);
+      assert.deepEqual(turnTwo.trackerUpdate.npcs.Guard.currentDisposition, { B: 3, F: 1, H: 1 });
+    },
+  },
+  {
+    name: '09c.5d a nonhuman reputation seed still lands when the disposition resolves to neutral',
+    run() {
+      const tracker = {
+        Receptionist: trackerEntry({ currentDisposition: null }),
+      };
+      const report = runCase({
+        userText: 'I speak with the receptionist.',
+        tracker,
+        cardFields: {
+          userReputation: {
+            locations: {
+              'Urakami Village': { location: 'Urakami Village', fame: 15, infamy: 0, updatedAt: 100 },
+            },
+          },
+        },
+        ledger: baseLedger({
+          engineContext: {
+            userReputationContext: { location: 'Kuroda City' },
+          },
+          resolutionEngine: {
+            identifyGoal: 'Talk',
+            identifyChallenge: 'speak with receptionist',
+            explicitMeans: 'speak with receptionist',
+            identifyTargets: { ActionTargets: ['Receptionist'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+          relationshipEngine: [relationship('Receptionist', { initPreset: { userNonHuman: true } })],
+        }),
+      });
+      assert.equal(auditIncludes(report, 'initPreset=userNonHumanFame5'), true);
+      assert.equal(report.trackerUpdate.userReputation.locations['Kuroda City'].fame, 5);
+      assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 2, F: 2, H: 2 });
+      assert.deepEqual(report.semanticLedger.userKnowledgeApplication?.applications || [], []);
+    },
+  },
+  {
+    name: '09c.5e seed tier math drops exactly two tiers and never overwrites a stored location',
+    run() {
+      const at = (fame, infamy = 0) => ({ locations: { A: { location: 'A', fame, infamy } } });
+      assert.deepEqual(deriveUserReputationSeed(at(30), 'B'), { location: 'B', fame: 15, infamy: 0 });
+      assert.deepEqual(deriveUserReputationSeed(at(25), 'B'), { location: 'B', fame: 15, infamy: 0 });
+      assert.deepEqual(deriveUserReputationSeed(at(24), 'B'), { location: 'B', fame: 10, infamy: 0 });
+      assert.deepEqual(deriveUserReputationSeed(at(20), 'B'), { location: 'B', fame: 10, infamy: 0 });
+      assert.deepEqual(deriveUserReputationSeed(at(19), 'B'), { location: 'B', fame: 5, infamy: 0 });
+      assert.deepEqual(deriveUserReputationSeed(at(15), 'B'), { location: 'B', fame: 5, infamy: 0 });
+      assert.equal(deriveUserReputationSeed(at(14), 'B'), null);
+      assert.equal(deriveUserReputationSeed(at(10), 'B'), null);
+      assert.equal(deriveUserReputationSeed(at(9), 'B'), null);
+      assert.equal(deriveUserReputationSeed(at(0), 'B'), null);
+      assert.equal(deriveUserReputationSeed(at(25), 'a'), null);
+      assert.equal(deriveUserReputationSeed(at(25), '   '), null);
+      assert.equal(deriveUserReputationSeed({}, 'B'), null);
+      assert.deepEqual(deriveUserReputationSeed(at(0, 25), 'B'), { location: 'B', fame: 0, infamy: 15 });
+      assert.deepEqual(deriveUserReputationSeed(at(19, 19), 'B'), { location: 'B', fame: 5, infamy: 5 });
+      const existing = { locations: { A: { location: 'A', fame: 3, infamy: 0, updatedAt: 7 } } };
+      assert.deepEqual(applyUserReputationSeed(existing, { location: 'A', fame: 15, infamy: 0 }).locations.A, { location: 'A', fame: 3, infamy: 0, updatedAt: 7 });
+      assert.equal(applyUserReputationSeed({}, { location: 'B', fame: 0, infamy: 0 }).locations.B, undefined);
+      assert.equal(applyUserReputationSeed({}, { location: '   ', fame: 15, infamy: 0 }).locations['   '], undefined);
+      const fresh = applyUserReputationSeed(existing, { location: 'B', fame: 15, infamy: 0 });
+      assert.equal(fresh.locations.B.fame, 15);
+      assert.equal(fresh.locations.A.fame, 3);
+      assert.equal(fresh.history.length, 0);
     },
   },
   {

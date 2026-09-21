@@ -1475,7 +1475,15 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
     });
     if (lootDiscovery.packet) resolution.packet.LootDiscovery = lootDiscovery.packet;
     const trackerDeltas = runTrackerUpdates(effectiveLedger, trackerSnapshot, injuryTrackerUpdate, context, audit, aggression.userTrackerDelta, aggression.npcTrackerDeltas, healthAfter, playerTrackerSnapshot);
-    const userReputation = mergeUserReputationLedger(buildUserReputationSnapshot(context), effectiveLedger?.trackerUpdateEngine?.userReputation || {});
+    // The seed is applied BEFORE the merge so that a reputation point earned in a location on the same
+    // turn its first NPC initializes lands on top of the seeded baseline, instead of being preserved at
+    // its raw value while the NPC is still initialized from the seeded tier.
+    let userReputation = buildUserReputationSnapshot(context);
+    for (const seed of relationships.reputationSeeds || []) {
+        userReputation = applyUserReputationSeed(userReputation, seed);
+        audit.push(`3.9a reputationSeed=${JSON.stringify(seed)}`);
+    }
+    userReputation = mergeUserReputationLedger(userReputation, effectiveLedger?.trackerUpdateEngine?.userReputation || {});
     const powerActors = runPowerActorEnmity(
         effectiveLedger,
         context,
@@ -3554,6 +3562,24 @@ export function mergeUserReputationLedger(before = {}, delta = {}) {
     });
 }
 
+export function applyUserReputationSeed(userReputation = {}, seed = null) {
+    const base = normalizeUserReputation(userReputation);
+    const location = normalizeReputationLocation(seed?.location);
+    if (!location) return base;
+    if (findExistingReputationLocationKey(base.locations, location)) return base;
+    const fame = Math.max(0, Math.floor(Number(seed?.fame || 0)));
+    const infamy = Math.max(0, Math.floor(Number(seed?.infamy || 0)));
+    if (!fame && !infamy) return base;
+    return normalizeUserReputation({
+        version: USER_REPUTATION_VERSION,
+        locations: {
+            ...base.locations,
+            [location]: { location, fame, infamy, updatedAt: Date.now() },
+        },
+        history: base.history,
+    });
+}
+
 export function normalizeUserReputation(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const locations = {};
@@ -4776,6 +4802,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
     const handoffs = [];
     const trackerUpdate = {};
     const generatedNpcStats = [];
+    const reputationSeeds = [];
     const pendingOfferNpcs = npcList.filter(npc => isRomanceMemoryTag(normalizeTrackerEntry(trackerSnapshot[npc] || {}).proactivityMemory.pendingTag));
     const userReputation = buildUserReputationSnapshot(context);
     const currentWorldState = buildWorldStateSnapshot(context);
@@ -4858,6 +4885,10 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             });
             initMetadata = init;
             currentDisposition = init.disposition;
+            if (init.reputationSeed) {
+                reputationSeeds.push(init.reputationSeed);
+                audit.push(`3.3m reputationSeed=${compact(init.reputationSeed)}`);
+            }
             audit.push(`3.3d initPreset.userHistory=${compact(init.userHistory)}`);
             audit.push(`3.3e initPreset.flags=${compact(init.flags)}`);
             audit.push(`3.3f initPreset.fearImmunity=${init.flags.fearImmunity ? 'Y' : 'N'}`);
@@ -5174,7 +5205,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
     }
 
     audit.push('---');
-    return { handoffs, trackerUpdate, generatedNpcStats };
+    return { handoffs, trackerUpdate, generatedNpcStats, reputationSeeds };
 }
 
 function buildSlowBondSceneKey(resolutionPacket, npc) {
@@ -9712,6 +9743,7 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label, options =
     });
 
     let base = { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } };
+    let reputationWon = false;
     if (flags.romanticOpen) {
         base = { label: 'romanticOpen', disposition: { B: 4, F: 1, H: 1 } };
     } else if (flags.userBadRep) {
@@ -9720,6 +9752,7 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label, options =
         base = { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 1 } };
     } else if (reputationApplication?.label) {
         base = reputationApplication;
+        reputationWon = true;
     } else if (flags.userNonHuman && !flags.fearImmunity) {
         base = { label: 'userNonHuman', disposition: { B: 1, F: 2, H: 2 } };
     }
@@ -9742,11 +9775,20 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label, options =
         flags,
         userHistory,
         raceProfile,
+        reputationSeed: reputationWon ? (reputationApplication?.seed || null) : null,
     };
 }
 
 function resolveUserReputationInitApplication(userReputation, options = {}) {
-    const reputation = selectApplicableUserReputationLocation(userReputation, options?.location);
+    let reputation = selectApplicableUserReputationLocation(userReputation, options?.location);
+    let seeded = false;
+    if (!reputation) {
+        const seed = deriveUserReputationSeed(userReputation, options?.location);
+        if (seed) {
+            reputation = seed;
+            seeded = true;
+        }
+    }
     if (!reputation) return null;
     const fame = Math.max(0, Math.floor(Number(reputation.fame || 0)));
     const infamy = Math.max(0, Math.floor(Number(reputation.infamy || 0)));
@@ -9793,6 +9835,8 @@ function resolveUserReputationInitApplication(userReputation, options = {}) {
     return {
         label,
         disposition,
+        seeded,
+        seed: seeded ? { location: reputation.location, fame, infamy } : null,
         reputation: {
             location: reputation.location,
             fame,
@@ -9801,6 +9845,34 @@ function resolveUserReputationInitApplication(userReputation, options = {}) {
             effectiveInfamy,
         },
     };
+}
+
+const USER_REPUTATION_SEED_TIERS = Object.freeze([5, 10, 15, 20, 25]);
+const USER_REPUTATION_SEED_TIER_DROP = 2;
+
+function reputationSeedTierValue(highest) {
+    let index = -1;
+    for (let i = 0; i < USER_REPUTATION_SEED_TIERS.length; i += 1) {
+        if (highest >= USER_REPUTATION_SEED_TIERS[i]) index = i;
+    }
+    if (index < 0) return 0;
+    const seeded = index - USER_REPUTATION_SEED_TIER_DROP;
+    return seeded < 0 ? 0 : USER_REPUTATION_SEED_TIERS[seeded];
+}
+
+export function deriveUserReputationSeed(userReputation = {}, location = '') {
+    const wanted = normalizeReputationLocation(location);
+    if (!wanted) return null;
+    const ledger = normalizeUserReputation(userReputation);
+    const locations = Object.values(ledger.locations || {})
+        .map(normalizeUserReputationLocation)
+        .filter(entry => entry.location);
+    if (!locations.length) return null;
+    if (locations.some(entry => entry.location.toLowerCase() === wanted.toLowerCase())) return null;
+    const fame = reputationSeedTierValue(Math.max(...locations.map(entry => entry.fame)));
+    const infamy = reputationSeedTierValue(Math.max(...locations.map(entry => entry.infamy)));
+    if (!fame && !infamy) return null;
+    return { location: wanted, fame, infamy };
 }
 
 function selectApplicableUserReputationLocation(userReputation, currentLocation = '') {
