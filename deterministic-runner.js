@@ -9757,6 +9757,12 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label, options =
         base = { label: 'userNonHuman', disposition: { B: 1, F: 2, H: 2 } };
     }
     const userHistory = initUserHistoryFromFlags(flags, state?.userHistory);
+    // A stored location's reputation is real whether or not it won precedence, so it is always worth
+    // reporting. A seeded location exists only because it won: reporting a seed that lost precedence
+    // would claim standing in a place {{user}} has never been.
+    const reportedReputation = reputationApplication && (reputationWon || !reputationApplication.seeded)
+        ? reputationApplication.reputation
+        : null;
 
     audit.push(`${label}.semantic=${compact({
         npc,
@@ -9768,7 +9774,7 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label, options =
             fearImmunity: yn(flags.fearImmunity),
         },
         base: base.label,
-        reputation: reputationApplication?.reputation || null,
+        reputation: reportedReputation,
     })}`);
     return {
         ...base,

@@ -6815,6 +6815,10 @@ const tests = [
       assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 4, F: 1, H: 1 });
       assert.equal(report.trackerUpdate.userReputation.locations['Kuroda City'], undefined);
       assert.equal(auditIncludes(report, 'reputationSeed='), false);
+      // A seed that loses precedence must not be reported as an applied reputation: it would claim
+      // standing in a location the user has never visited.
+      assert.equal(auditIncludes(report, '"base":"romanticOpen","reputation":null'), true);
+      assert.equal(auditIncludes(report, '"base":"romanticOpen","reputation":{"location"'), false);
       assert.deepEqual(report.semanticLedger.userKnowledgeApplication?.applications || [], []);
     },
   },
