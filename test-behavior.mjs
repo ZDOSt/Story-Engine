@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import yaml from 'yaml';
-import { applyUserReputationSeed, buildSpellCastingSnapshot, consumeLatentFavorById, deriveUserReputationSeed, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { applyUserReputationSeed, buildSpellCastingSnapshot, commitNarrationNameUsage, consumeLatentFavorById, deriveUserReputationSeed, getNameRegistry, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import { ENGINE_PROMPT_TEXT, classifyProactivityTier, normalizeProactivityMemory, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, isSlowBondEligible, mergeSlowBondEvidence, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
@@ -6973,6 +6973,137 @@ const tests = [
     },
   },
   {
+    name: '09c.6 only a name that reached the prose is marked used, and an untracked one is reserved',
+    run() {
+      const ctx = context('The butcher nods.');
+      const result = commitNarrationNameUsage(ctx, {
+        nameGeneration: { namePool: { male: ['Corvane'], female: ['Mirelle'], location: ['Karrow'] } },
+        narrationText: 'The butcher grins. "My daughter Mirelle works the counter, you should meet her."',
+      });
+      assert.deepEqual(result.used, ['Mirelle']);
+      assert.deepEqual(result.reserved, ['Mirelle']);
+      const root = ctx.chatMetadata.structuredPreflightNameRegistry;
+      assert.deepEqual(root.used, ['Mirelle']);
+      // An unused candidate is not discarded with the rest of the pool.
+      assert.equal(root.used.includes('Corvane'), false);
+      assert.equal(root.used.includes('Karrow'), false);
+      assert.equal(root.reserved.length, 1);
+      assert.equal(root.reserved[0].name, 'Mirelle');
+      assert.equal(root.reserved[0].bucket, 'female');
+      assert.match(root.reserved[0].contextLine, /works the counter/);
+    },
+  },
+  {
+    name: '09c.6a a reserved name retires once its person is tracked',
+    run() {
+      const ctx = context('The butcher nods.');
+      commitNarrationNameUsage(ctx, {
+        nameGeneration: { namePool: { male: [], female: ['Mirelle'], location: [] } },
+        narrationText: '"My daughter Mirelle works the counter."',
+      });
+      assert.equal(ctx.chatMetadata.structuredPreflightNameRegistry.reserved.length, 1);
+      ctx.chatMetadata.structuredPreflightTracker.npcs = { Mirelle: {} };
+      commitNarrationNameUsage(ctx, { nameGeneration: { namePool: {} }, narrationText: 'The scene moves on.' });
+      assert.equal(ctx.chatMetadata.structuredPreflightNameRegistry.reserved.length, 0);
+    },
+  },
+  {
+    name: '09c.6b the narrator is told a reserved name is already taken and is outside the pool',
+    run() {
+      const ctx = context('The butcher nods.');
+      ctx.chatMetadata.structuredPreflightNameRegistry = {
+        used: ['Mirelle'],
+        entries: {},
+        reserved: [{ name: 'Mirelle', bucket: 'female', contextLine: 'My daughter Mirelle works the counter.' }],
+      };
+      const report = withDice([10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(baseLedger({}), {}, ctx, 'normal', {}));
+      const narration = prompt(report);
+      assert.match(narration, /ALREADY NAMED IN THIS CHAT, AND NOT PRESENT YET:/);
+      assert.match(narration, /- Mirelle \(person\): "My daughter Mirelle works the counter\."/);
+      assert.match(narration, /If the person or place they belong to enters the scene, that IS its/);
+      assert.match(narration, /The pool below applies ONLY to a person, entity, or location that has no name already established anywhere in this chat\./);
+      assert.match(narration, /DO NOT give a pool name to anyone or anything already named earlier in this chat\./);
+      // The reserved name is marked used, so it can never be offered back as a fresh candidate.
+      const pool = report.finalNarrativeHandoff.nameGeneration.namePool;
+      assert.equal([...pool.male, ...pool.female, ...pool.location].includes('Mirelle'), false);
+      assert.equal(auditIncludes(report, '5.1j reservedNames='), true);
+    },
+  },
+  {
+    name: '09c.6c the used-name set holds known identities, not every capitalised word in the scene',
+    run() {
+      const ctx = context('Luria the smith waves. Maybe tomorrow.');
+      ctx.name1 = 'Aelemar';
+      ctx.name2 = 'Seraphine';
+      ctx.chatMetadata.structuredPreflightTracker.npcs = { Receptionist: {} };
+      const registry = getNameRegistry(ctx);
+      assert.equal(registry.used.has('Aelemar'), true);
+      assert.equal(registry.used.has('Seraphine'), true);
+      assert.equal(registry.used.has('Receptionist'), true);
+      assert.equal(registry.used.has('Luria'), false);
+      assert.equal(registry.used.has('Maybe'), false);
+    },
+  },
+  {
+    name: '09c.6d the reserved list is capped on write, not left for the next read to trim',
+    run() {
+      const ctx = context('x');
+      const names = Array.from({ length: 30 }, (unused, index) => `Person${String.fromCharCode(97 + (index % 26))}${index}`);
+      commitNarrationNameUsage(ctx, {
+        nameGeneration: { namePool: { male: names, female: [], location: [] } },
+        narrationText: names.join(' '),
+      });
+      assert.equal(ctx.chatMetadata.structuredPreflightNameRegistry.reserved.length, 24);
+    },
+  },
+  {
+    name: '09c.6e a reserved record without a recognised bucket is dropped rather than guessed',
+    run() {
+      const ctx = context('x');
+      ctx.chatMetadata.structuredPreflightNameRegistry = {
+        used: [],
+        entries: {},
+        reserved: [
+          { name: 'Mirelle', bucket: 'female', contextLine: 'kept' },
+          { name: 'Ghost', bucket: 'nope', contextLine: 'dropped' },
+          { name: 'NoBucket', contextLine: 'dropped' },
+        ],
+      };
+      assert.deepEqual(getNameRegistry(ctx).reserved.map(entry => entry.name), ['Mirelle']);
+    },
+  },
+  {
+    name: '09c.6f setReservedNames replaces the list so a swipe rebuild can drop stale names',
+    run() {
+      const ctx = context('x');
+      ctx.chatMetadata.structuredPreflightNameRegistry = {
+        used: [],
+        entries: {},
+        reserved: [{ name: 'Phantom', bucket: 'female', contextLine: 'from a swiped-away narration' }],
+      };
+      const written = setReservedNames(ctx, [{ name: 'Mirelle', bucket: 'female', contextLine: 'kept' }]);
+      assert.deepEqual(written.map(entry => entry.name), ['Mirelle']);
+      assert.deepEqual(ctx.chatMetadata.structuredPreflightNameRegistry.reserved.map(entry => entry.name), ['Mirelle']);
+      // A tracked person's name never enters the reserved list.
+      ctx.chatMetadata.structuredPreflightTracker.npcs = { Mirelle: {} };
+      assert.deepEqual(setReservedNames(ctx, [{ name: 'Mirelle', bucket: 'female', contextLine: 'x' }]), []);
+      assert.deepEqual(ctx.chatMetadata.structuredPreflightNameRegistry.reserved, []);
+    },
+  },
+  {
+    name: '09c.6g the reserved list is rebuilt from the selected swipes on swipe and on chat change',
+    run() {
+      const source = fs.readFileSync(extensionFile('index.js'), 'utf8');
+      assert.match(source, /function rebuildReservedNamesFromSelectedSwipes\(context = getContext\(\)\)/);
+      assert.match(source, /snapshot\.version !== NAME_SWIPE_VERSION/);
+      assert.match(source, /const namesRestored = rebuildReservedNamesFromSelectedSwipes\(context\);/);
+      assert.match(source, /\|\| progressionRestored \|\| namesRestored\)/);
+      assert.match(source, /rebuildWorldMemoryFromSelectedSwipes\(context\);\n    rebuildReservedNamesFromSelectedSwipes\(context\);/);
+      assert.match(source, /nameUsage\.reservedEntries\.length/);
+      assert.match(source, /function setMessageNameSwipeSnapshot\(message, snapshot\)/);
+    },
+  },
+  {
     name: '09d semantic romanticOpen initializes B4/F1/H1 without forcing establishedRelationship',
     run() {
       const tracker = {
@@ -8683,12 +8814,12 @@ const tests = [
       }
       const modelPrompt = prompt(report);
       assert.match(modelPrompt, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
-      assert.match(modelPrompt, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
+      assert.match(modelPrompt, /IF you are about to introduce a NEW name for something with no established name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(modelPrompt, /FEMALE: /);
       assert.match(modelPrompt, /MALE: /);
       assert.match(modelPrompt, /LOCATION: /);
       assert.match(modelPrompt, /Previously revealed names MUST remain unchanged\./);
-      assert.match(modelPrompt, /When a new name is revealed, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
+      assert.match(modelPrompt, /When a new name is revealed for something with no established name, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
       assert.match(modelPrompt, /Any unauthorized NEW name renders the response INVALID\./);
       assert.match(modelPrompt, /DO NOT invent, modify, combine, translate, or derive names\./);
       assert.match(modelPrompt, /DO NOT use ANY NEW name outside the appropriate pool\./);
@@ -8707,10 +8838,13 @@ const tests = [
       assert.equal(auditIncludes(report, 'STEP 5: EXECUTE NameGenerationEngine'), false);
       assert.doesNotMatch(auditPrompt(report), /semanticCandidates|rejected:|replacements:|Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Staistu|Vaisailnok/);
       assert.match(auditPrompt(report), /final: Male:/);
-      const reserved = ctx.chatMetadata.structuredPreflightNameRegistry?.used || [];
-      assert.equal(pool.male.every(name => reserved.includes(name)), true);
-      assert.equal(pool.female.every(name => reserved.includes(name)), true);
-      assert.equal(pool.location.every(name => reserved.includes(name)), true);
+      // Names are no longer burned when the pool is built. A candidate is marked used only once it
+      // reaches the prose, by the post-narration commit, so an unused candidate stays offerable.
+      const registry = ctx.chatMetadata.structuredPreflightNameRegistry || { used: [] };
+      assert.deepEqual(registry.used || [], []);
+      assert.equal(pool.male.some(name => (registry.used || []).includes(name)), false);
+      assert.equal(pool.female.some(name => (registry.used || []).includes(name)), false);
+      assert.equal(pool.location.some(name => (registry.used || []).includes(name)), false);
       const engineSource = fs.readFileSync(extensionFile('engines.js'), 'utf8');
       const semanticSource = fs.readFileSync(extensionFile('semantic-extractor.js'), 'utf8');
       assert.doesNotMatch(engineSource, /function NameGenerationEngine/);
@@ -8734,12 +8868,12 @@ const tests = [
       });
       const text = prompt(report);
       assert.match(text, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
-      assert.match(text, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
+      assert.match(text, /IF you are about to introduce a NEW name for something with no established name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(text, /FEMALE: [A-Z]/);
       assert.match(text, /MALE: [A-Z]/);
       assert.match(text, /LOCATION: [A-Z]/);
       assert.match(text, /Previously revealed names MUST remain unchanged\./);
-      assert.match(text, /When a new name is revealed, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
+      assert.match(text, /When a new name is revealed for something with no established name, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
       assert.match(text, /Any unauthorized NEW name renders the response INVALID\./);
       assert.match(text, /DO NOT use ANY NEW name outside the appropriate pool\./);
       assert.doesNotMatch(text, /Name reveal is LOCKED and GATED|If no name is revealed in-scene|Do NOT name background, incidental, unseen, or merely described figures/);
@@ -17596,11 +17730,11 @@ const tests = [
       assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
       assert.match(introPrompt, /NAME REVEAL:/);
       assert.match(introPrompt, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
-      assert.match(introPrompt, /IF you are about to introduce a NEW name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
+      assert.match(introPrompt, /IF you are about to introduce a NEW name for something with no established name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(introPrompt, /FEMALE: Ariana, Mira\./);
       assert.match(introPrompt, /MALE: Darin, Kell\./);
       assert.match(introPrompt, /LOCATION: Veyra, Orinth Gate\./);
-      assert.match(introPrompt, /When a new name is revealed, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
+      assert.match(introPrompt, /When a new name is revealed for something with no established name, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
       assert.match(introPrompt, /DO NOT invent, modify, combine, translate, or derive names\./);
       assert.ok(
         introPrompt.indexOf('#1 - PROSE RULES') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
@@ -17694,6 +17828,39 @@ const tests = [
       const introAudit = formatAdventureIntroNarratorPromptContext('Begin the adventure.', { adventureGenre: 'Fantasy' });
       assert.match(introAudit, /==NARRATOR_MODEL_HANDOFF==\n#1 - PROSE RULES/);
       assert.match(introAudit, /exact narrator-facing handoff below/);
+    },
+  },
+  {
+    name: '46c the adventure intro enforces the name pool as an output requirement',
+    run() {
+      const pool = { male: ['Nivol'], female: ['Sheta'], location: ['Matozen'] };
+      const body = 'GENRE OPENING: Begin in the market square.\nSTART ADVENTURE REMINDER: Establish tone and place.';
+      const introPrompt = formatAdventureIntroNarratorModelPromptContext(body, {
+        adventureGenre: 'Fantasy',
+        nameGeneration: { namePool: pool, style: 'Balanced Fantasy' },
+      });
+      assert.match(introPrompt, /#3 - OUTPUT/);
+      assert.match(introPrompt, /Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
+      assert.match(introPrompt, /Do not invent, modify, substitute, or translate any proper name in this opening response\./);
+      assert.match(introPrompt, /OPENING TURN NAMING:/);
+      assert.match(introPrompt, /Any figure you introduce BY NAME in this response must take that name from/);
+      // The block keeps its position inside the payload: after the genre opening, before the reminder.
+      assert.ok(introPrompt.indexOf('GENRE OPENING:') < introPrompt.indexOf('NAME REVEAL:'));
+      assert.ok(introPrompt.indexOf('NAME REVEAL:') < introPrompt.indexOf('START ADVENTURE REMINDER:'));
+      // Nothing name-related is emitted when no pool was generated.
+      const withoutPool = formatAdventureIntroNarratorModelPromptContext(body, { adventureGenre: 'Fantasy' });
+      assert.doesNotMatch(withoutPool, /NAME REVEAL:/);
+      assert.doesNotMatch(withoutPool, /OPENING TURN NAMING:/);
+    },
+  },
+  {
+    name: '46d the intro naming clause never leaks into the normal narrator prompt',
+    run() {
+      const normal = prompt(runCase({ userText: 'I look around.', ledger: baseLedger({}) }));
+      assert.doesNotMatch(normal, /OPENING TURN NAMING:/);
+      assert.doesNotMatch(normal, /Do not invent, modify, substitute, or translate any proper name in this opening response\./);
+      // The normal path keeps its own enforcement line, which the intro now mirrors.
+      assert.match(normal, /Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
     },
   },
   {

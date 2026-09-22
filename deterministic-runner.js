@@ -376,6 +376,8 @@ function packetBoundaryActivityActive(packet) {
 
 const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
+const RESERVED_NAME_BUCKETS = Object.freeze(['male', 'female', 'location']);
+const RESERVED_NAME_LIMIT = 24;
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 const POWER_ACTOR_ENMITY_VERSION = 1;
 const LATENT_GRIEVANCE_VERSION = 1;
@@ -5858,7 +5860,8 @@ function runNameGeneration(ledger, audit, context, type) {
     const registry = getNameRegistry(context);
     const poolResult = buildNamePool({ profile, registry, contextText, style, styleProfile });
     const pool = poolResult.pool;
-    registerGeneratedNamePool(context, pool, { profile, style, styleKey: styleProfile.key, source: 'deterministicNamePool' });
+    // Candidates are registered only once they reach the prose, by commitNarrationNameUsage. Marking
+    // the whole pool here discarded every unused candidate, nine names a turn, whether it was read or not.
 
     const result = {
         nameRequired: 'POOL',
@@ -5873,6 +5876,7 @@ function runNameGeneration(ledger, audit, context, type) {
         deterministicCue: 'deterministic style profile',
         generatedName: NONE,
         namePool: pool,
+        reservedNames: registry.reserved,
     };
     audit.push('STEP 5: BUILD DETERMINISTIC NAME POOL');
     audit.push('5.1 nameRequired=POOL');
@@ -5885,6 +5889,7 @@ function runNameGeneration(ledger, audit, context, type) {
     audit.push('5.1g gender=POOL');
     audit.push(`5.1h style=${style}`);
     audit.push(`5.1i namePool=${compact(pool)}`);
+    audit.push(`5.1j reservedNames=${compact(registry.reserved)}`);
     audit.push('---');
     return result;
 }
@@ -5987,10 +5992,7 @@ function detectNameGender(contextText) {
 }
 
 function buildNamePool({ profile, registry, contextText, style, styleProfile }) {
-    const used = new Set([
-        ...Array.from(registry.used || []),
-        ...extractExistingProperNames(contextText),
-    ].map(normalizeNameKey).filter(Boolean));
+    const used = new Set(Array.from(registry.used || []).map(normalizeNameKey).filter(Boolean));
     const pool = { male: [], female: [], location: [] };
     const specs = [
         ['male', 'PERSON', 'MALE'],
@@ -6022,10 +6024,7 @@ function buildNamePool({ profile, registry, contextText, style, styleProfile }) 
 }
 
 function buildDeterministicName({ mode, profile, gender, seed, registry, contextText, style = DEFAULT_NAME_STYLE, styleProfile = NAME_STYLE_PROFILES[DEFAULT_NAME_STYLE] }) {
-    const used = new Set([
-        ...Array.from(registry.used || []),
-        ...extractExistingProperNames(contextText),
-    ].map(normalizeNameKey).filter(Boolean));
+    const used = new Set(Array.from(registry.used || []).map(normalizeNameKey).filter(Boolean));
     const baseSeed = normalizeNameSeed(seed);
     const rng = createNamePrng(`${baseSeed}|${style}|${mode}|${profile}|${gender}|${contextText}|${used.size}`);
 
@@ -6281,10 +6280,6 @@ function titleName(value) {
     return compactName ? compactName.charAt(0).toUpperCase() + compactName.slice(1) : 'Akarin';
 }
 
-function extractExistingProperNames(text) {
-    return Array.from(String(text || '').matchAll(/\b[A-Z][a-z]{2,}\b/g)).map(match => match[0]);
-}
-
 function createNamePrng(seedText) {
     let seed = 2166136261;
     for (const char of String(seedText || 'Aka')) {
@@ -6300,23 +6295,111 @@ function createNamePrng(seedText) {
     };
 }
 
-function getNameRegistry(context) {
+export function getNameRegistry(context) {
     const root = context?.chatMetadata?.[NAME_REGISTRY_KEY] || {};
     const used = new Set(Array.isArray(root.used) ? root.used : []);
     const trackerNames = Object.keys(context?.chatMetadata?.structuredPreflightTracker?.npcs || {});
     for (const name of trackerNames) {
         if (isReal(name)) used.add(name);
     }
-    return { used };
+    // Known identities are excluded explicitly. This replaces an earlier blanket scan that treated
+    // every capitalised word in the scene text as a proper name, so ordinary English ("Alright",
+    // "Maybe") was burned as a name every turn.
+    for (const name of [...buildUserReferenceNames(context), ...getActiveCardCharacterNames(context)]) {
+        if (isReal(name)) used.add(name);
+    }
+    return { used, reserved: normalizeReservedNames(root.reserved) };
 }
 
-function registerGeneratedNamePool(context, pool, meta) {
-    if (!context?.chatMetadata || !pool) return;
-    for (const [bucket, names] of Object.entries(pool)) {
-        for (const name of Array.isArray(names) ? names : []) {
-            registerGeneratedName(context, name, { ...meta, bucket });
+function normalizeReservedNames(value) {
+    const source = Array.isArray(value) ? value : [];
+    return source
+        .map(entry => {
+            const name = String(entry?.name || '').trim();
+            if (!isReal(name)) return null;
+            // A record without a recognised bucket is dropped rather than defaulted: the bucket decides
+            // whether the narrator is told this is a person or a place, and guessing would misreport it.
+            if (!RESERVED_NAME_BUCKETS.includes(entry?.bucket)) return null;
+            return {
+                name,
+                bucket: entry.bucket,
+                contextLine: String(entry?.contextLine || '').replace(/\s+/g, ' ').trim().slice(0, 220),
+            };
+        })
+        .filter(Boolean);
+}
+
+/**
+ * Writes the reserved list, applying the tracker filter and the cap on write rather than leaving the
+ * cap to the next read. Used both by the per-turn commit and by the swipe rebuild.
+ */
+export function setReservedNames(context, entries = []) {
+    if (!context?.chatMetadata) return [];
+    const trackerNames = Object.keys(context.chatMetadata.structuredPreflightTracker?.npcs || {});
+    const normalized = normalizeReservedNames(entries)
+        .filter(entry => !trackerNames.some(tracked => sameName(tracked, entry.name)))
+        .slice(-RESERVED_NAME_LIMIT);
+    const root = context.chatMetadata[NAME_REGISTRY_KEY] || { used: [], entries: {} };
+    root.used = Array.isArray(root.used) ? root.used : [];
+    root.entries = root.entries || {};
+    root.reserved = normalized;
+    context.chatMetadata[NAME_REGISTRY_KEY] = root;
+    saveMetadataDebounced(context, { warn: false });
+    return normalized;
+}
+
+function nameAppearsInText(name, text) {
+    const escaped = String(name || '').trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\s+/g, '\\s+');
+    if (!escaped) return false;
+    return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu').test(String(text || ''));
+}
+
+function nameContextLine(name, text) {
+    const sentences = String(text || '').split(/(?<=[.!?])\s+/);
+    const hit = sentences.find(sentence => nameAppearsInText(name, sentence));
+    return String(hit || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+}
+
+/**
+ * Called once per turn from the post-narration pass with the settled narration text.
+ *
+ * Only names that actually reached the prose are marked used, so an unused candidate stays offerable
+ * instead of being discarded with the rest of the pool. A name that reached the prose while its
+ * person has no tracker entry is recorded as reserved so the narrator reuses it when they appear.
+ */
+export function commitNarrationNameUsage(context, { nameGeneration = {}, narrationText = '' } = {}) {
+    const result = { used: [], reserved: [], reservedEntries: [] };
+    if (!context?.chatMetadata) return result;
+    const text = String(narrationText || '');
+    const pool = nameGeneration?.namePool;
+    if (!text || !pool) return result;
+
+    const trackerNames = Object.keys(context.chatMetadata.structuredPreflightTracker?.npcs || {});
+    const root = context.chatMetadata[NAME_REGISTRY_KEY] || { used: [], entries: {} };
+    const reserved = normalizeReservedNames(root.reserved);
+
+    for (const bucket of RESERVED_NAME_BUCKETS) {
+        for (const name of toRealArray(pool[bucket])) {
+            if (!isReal(name) || !nameAppearsInText(name, text)) continue;
+            registerGeneratedName(context, name, { bucket, source: 'narration' });
+            result.used.push(name);
+            const isTracked = trackerNames.some(tracked => sameName(tracked, name));
+            if (isTracked) continue;
+            const entry = { name, bucket, contextLine: nameContextLine(name, text) };
+            const existing = reserved.findIndex(item => sameName(item.name, name));
+            if (existing >= 0) reserved[existing] = entry;
+            else reserved.push(entry);
+            result.reserved.push(name);
+            result.reservedEntries.push(entry);
         }
     }
+
+    // A reserved name retires the moment its person is tracked: the tracker key protects it from then on.
+    const kept = reserved.filter(entry => !trackerNames.some(tracked => sameName(tracked, entry.name)));
+    setReservedNames(context, kept);
+    return result;
 }
 
 function registerGeneratedName(context, name, meta) {
