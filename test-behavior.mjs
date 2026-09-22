@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import yaml from 'yaml';
-import { applyUserReputationSeed, buildSpellCastingSnapshot, commitNarrationNameUsage, consumeLatentFavorById, deriveUserReputationSeed, getNameRegistry, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { applyUserReputationSeed, buildSpellCastingSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, deriveUserReputationSeed, getNameRegistry, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import { ENGINE_PROMPT_TEXT, classifyProactivityTier, normalizeProactivityMemory, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, isSlowBondEligible, mergeSlowBondEvidence, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
@@ -7091,16 +7091,56 @@ const tests = [
     },
   },
   {
-    name: '09c.6g the reserved list is rebuilt from the selected swipes on swipe and on chat change',
+    name: '09c.6g the reserved list is collected from each message selected swipe',
     run() {
+      const SWIPE_KEY = 'structured_preflight_name_swipe';
+      const snapshot = (messageKey, reserved) => ({ version: NAME_SWIPE_VERSION, messageKey, reserved });
+      const lookup = message => message?.extra?.[SWIPE_KEY]?.[0] || null;
+      const keyFor = messageId => `chat:${messageId}`;
+      const chat = [
+        { is_user: true, mes: 'hello' },
+        { mes: 'a', extra: { [SWIPE_KEY]: { 0: snapshot('chat:1', [{ name: 'Luria', bucket: 'female', contextLine: 'her name is Luria' }]) } } },
+        { mes: 'b', extra: { [SWIPE_KEY]: { 0: snapshot('chat:2', [{ name: 'Maren', bucket: 'male', contextLine: 'Maren waits' }]) } } },
+        { is_user: true, mes: 'ok' },
+      ];
+      // Both selected swipes contribute, in chat order.
+      assert.deepEqual(
+        collectReservedNamesFromSelectedSwipes(chat, lookup, keyFor).map(entry => entry.name),
+        ['Luria', 'Maren'],
+      );
+      // A message that was just swiped has no snapshot for the new swipe yet, so it contributes nothing.
+      const justSwiped = chat.map((message, index) => (index === 2 ? { ...message, extra: {} } : message));
+      assert.deepEqual(
+        collectReservedNamesFromSelectedSwipes(justSwiped, lookup, keyFor).map(entry => entry.name),
+        ['Luria'],
+      );
+      // A snapshot belonging to another chat is ignored.
+      assert.deepEqual(collectReservedNamesFromSelectedSwipes(chat, lookup, () => 'other:0'), []);
+      // A snapshot written by an older format is ignored.
+      const staleVersion = [{ mes: 'a', extra: { [SWIPE_KEY]: { 0: { version: 0, messageKey: 'chat:0', reserved: [{ name: 'X', bucket: 'male', contextLine: '' }] } } } }];
+      assert.deepEqual(collectReservedNamesFromSelectedSwipes(staleVersion, lookup, keyFor), []);
+      // User messages are skipped even if something attached a snapshot to one.
+      const userCarrier = [{ is_user: true, mes: 'u', extra: { [SWIPE_KEY]: { 0: snapshot('chat:0', [{ name: 'Y', bucket: 'male', contextLine: '' }]) } } }];
+      assert.deepEqual(collectReservedNamesFromSelectedSwipes(userCarrier, lookup, keyFor), []);
+      // Degenerate input.
+      assert.deepEqual(collectReservedNamesFromSelectedSwipes(undefined, lookup, keyFor), []);
+      assert.deepEqual(collectReservedNamesFromSelectedSwipes([], lookup, keyFor), []);
+      // Both callbacks are required. A missing one must throw rather than quietly returning an empty
+      // list, because an empty list reads as "nobody is reserved" and the narrator would start
+      // renaming people with nothing logged.
+      assert.throws(() => collectReservedNamesFromSelectedSwipes(chat, lookup), TypeError);
+      assert.throws(() => collectReservedNamesFromSelectedSwipes(chat, undefined, keyFor), TypeError);
+      assert.throws(() => collectReservedNamesFromSelectedSwipes(chat, null, keyFor), TypeError);
+      // An empty chat never reaches the callbacks, so it stays a valid no-op.
+      assert.deepEqual(collectReservedNamesFromSelectedSwipes([], undefined, undefined), []);
+      // The index.js side still supplies the swipe lookup and wires the rebuild into both paths.
       const source = fs.readFileSync(extensionFile('index.js'), 'utf8');
-      assert.match(source, /function rebuildReservedNamesFromSelectedSwipes\(context = getContext\(\)\)/);
-      assert.match(source, /snapshot\.version !== NAME_SWIPE_VERSION/);
       assert.match(source, /const namesRestored = rebuildReservedNamesFromSelectedSwipes\(context\);/);
       assert.match(source, /\|\| progressionRestored \|\| namesRestored\)/);
       assert.match(source, /rebuildWorldMemoryFromSelectedSwipes\(context\);\n    rebuildReservedNamesFromSelectedSwipes\(context\);/);
       assert.match(source, /nameUsage\.reservedEntries\.length/);
-      assert.match(source, /function setMessageNameSwipeSnapshot\(message, snapshot\)/);
+      assert.match(source, /collectReservedNamesFromSelectedSwipes\(\n\s*context\?\.chat,/);
+      assert.match(source, /messageId => getMessageKey\(messageId, context\),/);
     },
   },
   {

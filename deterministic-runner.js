@@ -378,6 +378,7 @@ const NPC_PROACTIVITY_CAP = 3;
 const NAME_POOL_SIZE = 3;
 const RESERVED_NAME_BUCKETS = Object.freeze(['male', 'female', 'location']);
 const RESERVED_NAME_LIMIT = 24;
+export const NAME_SWIPE_VERSION = 1;
 const DEFAULT_NAME_STYLE = 'Balanced Fantasy';
 const POWER_ACTOR_ENMITY_VERSION = 1;
 const LATENT_GRIEVANCE_VERSION = 1;
@@ -6346,6 +6347,33 @@ export function setReservedNames(context, entries = []) {
     context.chatMetadata[NAME_REGISTRY_KEY] = root;
     saveMetadataDebounced(context, { warn: false });
     return normalized;
+}
+
+/**
+ * Walks a chat and unions the reserved-name entries contributed by each message's currently selected
+ * swipe, so a swiped-away narration stops claiming a name it never actually introduced.
+ *
+ * Deliberately pure and SillyTavern-agnostic: the caller supplies the per-message snapshot lookup and
+ * the message-key comparison, which keeps the loop itself executable in tests instead of only
+ * pattern-matched against source text.
+ *
+ * Both callbacks are required on purpose. A default would turn a missing argument into an empty
+ * reserved list, which is silent data loss: the narrator would lose the "already named" guidance and
+ * start renaming people, with nothing thrown and nothing logged. Omitting either must fail loudly.
+ */
+export function collectReservedNamesFromSelectedSwipes(chat = [], getSnapshot, getMessageKeyFor) {
+    const entries = [];
+    const messages = Array.isArray(chat) ? chat : [];
+    for (let messageId = 0; messageId < messages.length; messageId += 1) {
+        const message = messages[messageId];
+        if (!message || message.is_user) continue;
+        const snapshot = getSnapshot(message);
+        if (!snapshot || snapshot.version !== NAME_SWIPE_VERSION) continue;
+        // Guards against a snapshot left over from another chat by an aborted write.
+        if (snapshot.messageKey !== getMessageKeyFor(messageId)) continue;
+        for (const entry of Array.isArray(snapshot.reserved) ? snapshot.reserved : []) entries.push(entry);
+    }
+    return entries;
 }
 
 function nameAppearsInText(name, text) {

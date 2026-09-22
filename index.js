@@ -41,7 +41,7 @@ import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
 import { SEMANTIC_OUTPUT_MODES, groundUserKnowledgeApplications, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
-import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, commitNarrationNameUsage, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
     cloneHiddenHealth,
@@ -102,7 +102,6 @@ const TRACKER_DISPLAY_BLOCK_CLASS = 'structured-preflight-tracker-block';
 const TRACKER_DISPLAY_VERSION = 1;
 const PROGRESSION_SWIPE_VERSION = 1;
 const WORLD_MEMORY_SWIPE_VERSION = 2;
-const NAME_SWIPE_VERSION = 1;
 const TRACKER_ROOT_SNAPSHOT_LIMIT = 120;
 
 const TRACKER_VISIBLE_INACTIVE_LIMIT = 2;
@@ -7166,20 +7165,17 @@ function getMessageNameSwipeSnapshot(message) {
  * recomputed.
  */
 function rebuildReservedNamesFromSelectedSwipes(context = getContext()) {
-    const chat = Array.isArray(context?.chat) ? context.chat : [];
-    const before = JSON.stringify(context?.chatMetadata?.structuredPreflightNameRegistry?.reserved || []);
-    const entries = [];
-    for (let messageId = 0; messageId < chat.length; messageId += 1) {
-        const message = chat[messageId];
-        if (!message || message.is_user) continue;
-        const snapshot = getMessageNameSwipeSnapshot(message);
-        if (!snapshot || snapshot.version !== NAME_SWIPE_VERSION) continue;
-        if (snapshot.messageKey !== getMessageKey(messageId, context)) continue;
-        for (const entry of Array.isArray(snapshot.reserved) ? snapshot.reserved : []) entries.push(entry);
-    }
+    const reservedBefore = JSON.stringify(context?.chatMetadata?.structuredPreflightNameRegistry?.reserved || []);
+    // The chat walk itself lives in deterministic-runner.js so it can be executed in tests; this side
+    // only supplies the SillyTavern-specific swipe lookup and message-key comparison.
+    const entries = collectReservedNamesFromSelectedSwipes(
+        context?.chat,
+        message => getMessageNameSwipeSnapshot(message),
+        messageId => getMessageKey(messageId, context),
+    );
     setReservedNames(context, entries);
-    const after = JSON.stringify(context?.chatMetadata?.structuredPreflightNameRegistry?.reserved || []);
-    return before !== after;
+    const reservedAfter = JSON.stringify(context?.chatMetadata?.structuredPreflightNameRegistry?.reserved || []);
+    return reservedBefore !== reservedAfter;
 }
 
 
