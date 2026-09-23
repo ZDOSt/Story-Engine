@@ -22097,13 +22097,31 @@ const tests = [
       // The prompt carries the two-beat contract for other genres and the legacy rule for Isekai.
       const source = fs.readFileSync(extensionFile('index.js'), 'utf8');
       assert.match(source, /const anchorInstructions = genre === 'Isekai'/);
-      assert.match(source, /STORY HOOK: return exactly one entry - one paragraph about this character\\?'s own situation, in two beats\./);
-      assert.match(source, /FIRST, a bounded past: one incident, or a short chain of cause and effect/);
-      assert.match(source, /SECOND, a live opening: something that has recently arrived and reopens it/);
-      assert.match(source, /The hook poses a question and must not answer it/);
-      assert.match(source, /never what the character wants, intends, plans, vows, decides, fears, resents, feels obliged to do, or will do/);
-      assert.match(source, /Do not name people; describe them by role\./);
-      assert.match(source, /and he swore to hunt the man down and make him pay\./);
+      assert.match(source, /STORY HOOK: return exactly one entry - one paragraph under 50 words, holding one past event and then one live hook\./);
+      assert.match(source, /The past event is a single incident, not a career/);
+      assert.match(source, /do not narrate a rise or a fall from a role/);
+      assert.match(source, /Do not default to tragedy\./);
+      assert.match(source, /No specific dates or years\./);
+      assert.match(source, /never state what the character wants, intends, plans, vows, decides, fears, resents, feels obliged to do, or will do/);
+      assert.match(source, /Refer to the character as \{\{user\}\}\./);
+      assert.match(source, /Do not name anyone else; describe them by role\./);
+      // Two examples, one loss and one piece of luck: a single tragic example is what made an earlier
+      // draft return nothing but bereavements.
+      assert.match(source, /Good, a loss:/);
+      assert.match(source, /Good, a piece of luck:/);
+      assert.match(source, /and she is determined to find out who sent it\./);
+      assert.doesNotMatch(source, /killing both parents and his siblings/);
+      assert.doesNotMatch(source, /Do not name people; describe them by role/);
+
+      // The emitted schema description carries the same contract, including the tone-agnostic clause.
+      const rule = buildCharacterSheetSchema(options('Fantasy')).properties.characterAnchors.description;
+      assert.match(rule, /under 50 words/);
+      assert.match(rule, /not a career/);
+      assert.match(rule, /do not default to tragedy/);
+      assert.match(rule, /No specific dates or years\./);
+      assert.match(rule, /Refer to the character as \{\{user\}\}/);
+      assert.match(rule, /describe them by role/);
+      assert.match(rule, /the player decides whether to pursue it, and how/);
       assert.match(source, /STORY HOOK: include only explicit user-provided durable facts/);
       assert.match(source, /Do not invent hook content/);
       // The old heading survives only inside the one-time migration for sheets generated before the
