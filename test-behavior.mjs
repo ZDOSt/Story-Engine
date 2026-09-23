@@ -76,9 +76,9 @@ const emptyUserDelta = () => ({
 
 const emptyStakeMap = value => Object.fromEntries(stakeKeys.map(key => [key, value ?? 'none']));
 
-function validCharacterSheet({ stats = { PHY: 8, MND: 7, CHA: 9 }, race = 'Elf', premise = 'The character died on Earth and was reincarnated in another world.' } = {}) {
+function validCharacterSheet({ stats = { PHY: 8, MND: 7, CHA: 9 }, race = 'Elf', origin = 'A mountain trade town' } = {}) {
   const bodies = {
-    'BASIC INFO': `**Name:** {{user}}\n**Race:** ${race}\n**Age:** 18`,
+    'BASIC INFO': `**Name:** {{user}}\n**Race:** ${race}\n**Age:** 18\n**Origin:** ${origin}`,
     APPEARANCE: '**Build:** Athletic',
     STATS: `**PHY:** ${stats.PHY}\n**MND:** ${stats.MND}\n**CHA:** ${stats.CHA}`,
     'NATURAL WEAPONS': '- None',
@@ -87,7 +87,6 @@ function validCharacterSheet({ stats = { PHY: 8, MND: 7, CHA: 9 }, race = 'Elf',
     INVENTORY: '- Rope',
     CURRENCY: '- 12 sv',
     GEAR: '- Travel clothes',
-    'STORY HOOK': premise,
   };
   return CHARACTER_SHEET_HEADINGS.map(heading => `# ${heading}\n${bodies[heading]}`).join('\n\n');
 }
@@ -114,7 +113,6 @@ function structuredCharacterSheetPayload(overrides = {}) {
     inventory: ['Rope', 'Travel rations'],
     currency: ['12 sv'],
     gear: ['Travel clothes', 'Walking boots'],
-    characterAnchors: ['Worked as a courier before the adventure began.'],
     ...Object.fromEntries(Object.entries(overrides).filter(([key]) => key !== 'basicInfo')),
   };
 }
@@ -20285,7 +20283,8 @@ const tests = [
       assert.match(source, /buildNewCharacterGenreInstruction\(identity\)/);
       assert.match(source, /buildNewCharacterStatInstruction\(stats\)/);
       assert.match(source, /buildNewCharacterAdditionalDetailsInstruction\(identity\)/);
-      assert.match(source, /explicitAnchorSource: getNewCharacterExplicitAnchorSource\(identity\)/);
+      // explicitAnchorSource was removed with the Story Hook field: nothing reads it any more.
+      assert.doesNotMatch(source, /explicitAnchorSource: getNewCharacterExplicitAnchorSource/);
       assert.match(source, /explicitAppearanceSource: getNewCharacterExplicitAppearanceSource\(identity\)/);
       assert.match(source, /function getNewCharacterExplicitAnchorSource\(identity = \{\}\)/);
       assert.match(source, /function getNewCharacterExplicitAppearanceSource\(identity = \{\}\)/);
@@ -20322,7 +20321,6 @@ const tests = [
       assert.match(source, /Produce the complete character-sheet data through the required structured output/);
       assert.match(source, /deterministic code owns the final headings, order, labels, name, and locked stats/);
       assert.match(generationSource, /\['BASIC INFO', basicLines\.join\('\\n'\)\]/);
-      assert.match(generationSource, /\['STORY HOOK', mode === 'new' \? renderStoryHook\(anchors\) : renderBulletList\(anchors/);
       assert.match(source, /STAT SHAPE: strongest stats are/);
       assert.match(source, /relative weak point/);
       assert.match(source, /Do not contradict the locked stats/);
@@ -20367,10 +20365,6 @@ const tests = [
       assert.match(source, /CURRENCY: preserve explicit money only/);
       assert.match(source, /12 silver coins -> 12 sv/);
       assert.match(source, /GEAR: preserve explicit worn, equipped, or immediately ready items only/);
-      assert.match(source, /STORY HOOK: include only explicit user-provided durable facts that cannot fit BASIC INFO/);
-      assert.match(source, /Otherwise return an empty array/);
-      assert.match(source, /Do not invent hook content, summarize or repeat another section, interpret stats, add meta-disclaimers, invent unresolved hooks/);
-      assert.match(source, /STORY HOOK: preserve only explicit durable persona facts that cannot fit another structured field/);
       assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
     },
   },
@@ -21691,7 +21685,8 @@ const tests = [
     name: '62 character sheets require exact structure stats selected race and Isekai premise',
     run() {
       const stats = { PHY: 8, MND: 7, CHA: 9 };
-      const valid = validCharacterSheet({ stats, race: 'Half-Elf' });
+      // The Isekai premise now lives in Origin, which is what the renderer forces it into.
+      const valid = validCharacterSheet({ stats, race: 'Half-Elf', origin: 'The character died on Earth and was reincarnated in another world.' });
       assert.equal(assertValidCharacterSheet(valid, { stats, expectedRace: 'Half-Elf', genre: 'Isekai' }), valid);
       assert.equal(assertValidCharacterSheet(valid, { stats, genre: 'Isekai', requireNumericAge: true }), valid);
       assert.throws(
@@ -21741,7 +21736,6 @@ const tests = [
         fixedRace: 'Half-Elf',
         fixedUserNonHuman: 'Y',
         genre: 'Isekai',
-        explicitAnchorSource: 'The character is the secret heir to the fallen House Valen.',
         explicitAppearanceSource: '',
       };
       const schema = buildCharacterSheetSchema(options);
@@ -21795,8 +21789,6 @@ const tests = [
       assert.equal(schema.properties.spells.maxItems, 1);
       assert.match(schema.properties.spells.description, /unmistakably magical in both name and effect/);
       assert.match(schema.properties.spells.description, /exactly ONE primary purpose: OFFENSIVE or HEALING/);
-      assert.equal(schema.properties.characterAnchors.minItems, 0);
-      assert.equal(schema.properties.characterAnchors.maxItems, 3);
       assert.match(schema.properties.appearance.description, /Do not include scars, tattoos, birthmarks, brands, or other permanent marks/);
       assert.match(schema.properties.appearance.description, /exactly one Height entry with a numeric measurement/);
       assert.match(schema.properties.appearance.description, /Build must be compact and physical/);
@@ -21899,30 +21891,12 @@ const tests = [
       assert.match(rendered, /The character died on Earth and was reincarnated in another world\./);
       assert.equal(assertValidCharacterSheet(rendered, { stats, expectedRace: 'Half-Elf', genre: 'Isekai', requireNumericAge: true }), rendered);
 
-      const noGeneratedAnchorsPayload = structuredCharacterSheetPayload({ characterAnchors: [] });
-      assert.deepEqual(normalizeCharacterSheetPayload(noGeneratedAnchorsPayload, options).characterAnchors, []);
-      const noGeneratedAnchorsRendered = renderCharacterSheet(noGeneratedAnchorsPayload, options);
-      assert.equal((noGeneratedAnchorsRendered.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
-      const anchorsDisabledOptions = { ...options, explicitAnchorSource: '' };
-      assert.equal(buildCharacterSheetSchema(anchorsDisabledOptions).properties.characterAnchors.maxItems, 0);
-      assert.match(buildCharacterSheetSchema(anchorsDisabledOptions).properties.characterAnchors.description, /Must be empty because the user supplied no custom facts/);
-      assert.deepEqual(normalizeCharacterSheetPayload(payload, anchorsDisabledOptions).characterAnchors, []);
-      const anchorsDisabledRendered = renderCharacterSheet(payload, anchorsDisabledOptions);
-      assert.equal((anchorsDisabledRendered.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
-      assert.doesNotMatch(anchorsDisabledRendered, /Worked as a courier before the adventure began/);
-      assert.throws(
-        () => normalizeCharacterSheetPayload(structuredCharacterSheetPayload({ characterAnchors: ['One', 'Two', 'Three', 'Four'] }), options),
-        /characterAnchors may contain at most 3 entries/,
-      );
+      // The Isekai premise is injected into Origin by deterministic rendering, exactly once, whether
+      // or not the model supplied one of its own.
+      const noOriginPayload = structuredCharacterSheetPayload({ basicInfo: { ...structuredCharacterSheetPayload().basicInfo, origin: '' } });
+      const noOriginRendered = renderCharacterSheet({ ...noOriginPayload, basicInfo: { ...noOriginPayload.basicInfo, origin: 'The character died on Earth and was reincarnated in another world.' } }, options);
+      assert.equal((noOriginRendered.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
 
-      const groundedAnchor = 'The character is the secret heir to the fallen House Valen.';
-      const groundedAnchorPayload = structuredCharacterSheetPayload({ characterAnchors: [groundedAnchor] });
-      assert.deepEqual(normalizeCharacterSheetPayload(groundedAnchorPayload, options).characterAnchors, [groundedAnchor]);
-      const inventedAnchorPayload = structuredCharacterSheetPayload({ characterAnchors: ['A royal assassin is hunting the character.'] });
-      assert.deepEqual(normalizeCharacterSheetPayload(inventedAnchorPayload, options).characterAnchors, []);
-      const duplicateAnchorOptions = { ...options, explicitAnchorSource: 'The character has broad shoulders and an athletic build.' };
-      const duplicateAnchorPayload = structuredCharacterSheetPayload({ characterAnchors: ['Broad-shouldered and athletic.'] });
-      assert.deepEqual(normalizeCharacterSheetPayload(duplicateAnchorPayload, duplicateAnchorOptions).characterAnchors, []);
 
       const unrequestedScarPayload = structuredCharacterSheetPayload({
         appearance: [
@@ -22023,7 +21997,6 @@ const tests = [
       assert.equal(existing.appearance[0].detail, 'Slightly taller than most people in the region');
       const existingSchema = buildCharacterSheetSchema({ mode: 'existing', stats });
       assert.deepEqual(existingSchema.properties.basicInfo.properties.userNonHuman.enum, ['Y', 'N', 'Not specified']);
-      assert.equal(existingSchema.properties.characterAnchors.maxItems, 48);
 
       const toolPrompt = appendCharacterSheetOutputInstruction([{ role: 'user', content: 'Build it.' }], 'tool');
       assert.match(toolPrompt.at(-1).content, /Call submit_character_sheet exactly once/);
@@ -22033,102 +22006,125 @@ const tests = [
     },
   },
   {
-    name: '62b.1 new non-Isekai characters get one generated Story Hook, and Isekai keeps the legacy rule',
+    name: '62b.1 Origin is required for a new character, the opening anchors to it, and Story Hook is gone',
     run() {
       const stats = { PHY: 4, MND: 6, CHA: 5 };
-      // A hook that restates Prior Role. The legacy grounding and overlap filters deleted exactly this,
-      // and a specific hook is supposed to be built from the role it names.
-      const hook = 'He is an archivist at the Grand Library of Magic. A grimoire was stolen, he was stripped of his rank, and he was promised reinstatement if he recovers it.';
-      const payload = (anchors, age = 41) => ({
+      const options = (extra = {}) => ({ mode: 'new', stats, genre: 'Fantasy', explicitAnchorSource: '', ...extra });
+      const payload = (origin, age = 41) => ({
         basicInfo: {
           race: 'Human', userNonHuman: 'N', gender: 'Male', age, bloodline: '',
-          origin: 'The university quarter.', priorRoleOrTraining: 'Archivist at the Grand Library of Magic',
+          origin, priorRoleOrTraining: 'Archivist at the Grand Library of Magic',
         },
         appearance: [{ label: 'Height', detail: '5 ft 10 in (178 cm)' }],
         naturalWeapons: [],
         abilities: [{ name: 'Perfect Recall', description: 'Recalls any page he has read.' }],
         spells: [], inventory: ['Satchel'], currency: ['12 sv'], gear: ['Robes'],
-        characterAnchors: anchors,
       });
-      const options = (genre, extra = {}) => ({ mode: 'new', stats, genre, explicitAnchorSource: '', ...extra });
-      const maxItems = o => buildCharacterSheetSchema(o).properties.characterAnchors.maxItems;
 
-      // The schema asks every non-Isekai genre for one paragraph and leaves Isekai alone.
-      for (const genre of ['Fantasy', 'Cyberpunk', 'Modern', 'Dark Low Fantasy']) {
-        assert.equal(maxItems(options(genre)), 1, `${genre} must ask for exactly one hook`);
-      }
-      assert.equal(maxItems(options('Isekai')), 0, 'a new Isekai character with no notes still forbids anchors');
-      assert.equal(maxItems(options('Isekai', { explicitAnchorSource: 'notes' })), 3, 'Isekai with notes keeps its legacy limit');
-      assert.equal(maxItems({ mode: 'existing', stats, genre: 'Fantasy' }), 48, 'persona conversion keeps its fact list');
-
-      // The hook now survives normalisation instead of being deleted for restating a sheet field.
-      assert.deepEqual(normalizeCharacterSheetPayload(payload([hook]), options('Fantasy')).characterAnchors, [hook]);
-      assert.deepEqual(normalizeCharacterSheetPayload(payload([hook]), options('Cyberpunk')).characterAnchors, [hook]);
-
-      // An over-eager model is tolerated and trimmed rather than blocking character creation.
-      for (const count of [1, 2, 3]) {
-        const sent = Array.from({ length: count }, (_, index) => (index === 0 ? hook : `Filler ${index}.`));
-        assert.equal(normalizeCharacterSheetPayload(payload(sent), options('Fantasy')).characterAnchors.length, 1, `${count} sent must trim to one`);
-      }
-      assert.throws(
-        () => normalizeCharacterSheetPayload(payload([hook, 'Two.', 'Three.', 'Four.']), options('Fantasy')),
-        /characterAnchors may contain at most 3 entries/,
-      );
-
-      // Isekai is untouched: the field stays empty and deterministic rendering supplies the premise.
-      assert.deepEqual(normalizeCharacterSheetPayload(payload([hook]), options('Isekai')).characterAnchors, []);
-      const isekaiRendered = renderCharacterSheet(payload([hook]), options('Isekai'));
-      assert.match(isekaiRendered, /# STORY HOOK\nThe character died on Earth and was reincarnated in another world\./);
-
-      // A hook renders as prose; a preserved persona fact list still renders as bullets.
-      const hooked = renderCharacterSheet(payload([hook]), options('Fantasy'));
-      assert.match(hooked, /# STORY HOOK\nHe is an archivist at the Grand Library of Magic\./);
-      assert.doesNotMatch(hooked, /# STORY HOOK\n- /);
-      const existing = renderCharacterSheet(payload([hook], '41'), { mode: 'existing', stats, genre: 'Fantasy' });
-      assert.match(existing, /# STORY HOOK\n- He is an archivist/);
-
-      // Every mode still satisfies the validator, which now requires the renamed heading.
-      assert.match(assertValidCharacterSheet(hooked, { stats, genre: 'Fantasy' }), /# STORY HOOK/);
-      assert.match(assertValidCharacterSheet(existing, { stats }), /# STORY HOOK/);
-      assert.match(assertValidCharacterSheet(isekaiRendered, { stats, genre: 'Isekai' }), /# STORY HOOK/);
-      assert.ok(CHARACTER_SHEET_HEADINGS.includes('STORY HOOK'));
+      // Story Hook is gone from the contract entirely.
+      const schema = buildCharacterSheetSchema(options());
+      assert.equal('characterAnchors' in schema.properties, false);
+      assert.equal(schema.required.includes('characterAnchors'), false);
+      assert.ok(!CHARACTER_SHEET_HEADINGS.includes('STORY HOOK'));
       assert.ok(!CHARACTER_SHEET_HEADINGS.includes('CHARACTER ANCHORS'));
 
-      // The prompt carries the two-beat contract for other genres and the legacy rule for Isekai.
-      const source = fs.readFileSync(extensionFile('index.js'), 'utf8');
-      assert.match(source, /const anchorInstructions = genre === 'Isekai'/);
-      assert.match(source, /STORY HOOK: return exactly one entry - one paragraph under 50 words, holding one past event and then one live hook\./);
-      assert.match(source, /The past event is a single incident, not a career/);
-      assert.match(source, /do not narrate a rise or a fall from a role/);
-      assert.match(source, /Do not default to tragedy\./);
-      assert.match(source, /No specific dates or years\./);
-      assert.match(source, /never state what the character wants, intends, plans, vows, decides, fears, resents, feels obliged to do, or will do/);
-      assert.match(source, /Refer to the character as \{\{user\}\}\./);
-      assert.match(source, /Do not name anyone else; describe them by role\./);
-      // Two examples, one loss and one piece of luck: a single tragic example is what made an earlier
-      // draft return nothing but bereavements.
-      assert.match(source, /Good, a loss:/);
-      assert.match(source, /Good, a piece of luck:/);
-      assert.match(source, /and she is determined to find out who sent it\./);
-      assert.doesNotMatch(source, /killing both parents and his siblings/);
-      assert.doesNotMatch(source, /Do not name people; describe them by role/);
+      // Origin is now the field the opening depends on, so a new character must supply one.
+      assert.match(schema.properties.basicInfo.properties.origin.description, /Required for a new character/);
+      const rendered = renderCharacterSheet(payload('A hill village in the Vald.'), options());
+      assert.match(rendered, /\*\*Origin:\*\* A hill village in the Vald\./);
+      assert.throws(
+        () => normalizeCharacterSheetPayload(payload(''), options()),
+        /basicInfo\.origin must describe where the character is from/,
+      );
+      assert.throws(
+        () => normalizeCharacterSheetPayload(payload('   '), options()),
+        /basicInfo\.origin must describe where the character is from/,
+      );
+      // Existing personas keep the lenient rule: a converted card may not state an origin at all.
+      const existing = normalizeCharacterSheetPayload(payload('', '41'), { mode: 'existing', stats, genre: 'Fantasy' });
+      assert.equal(existing.basicInfo.origin, '');
+      assert.doesNotMatch(renderCharacterSheet(payload('', '41'), { mode: 'existing', stats, genre: 'Fantasy' }), /\*\*Origin:\*\*/);
 
-      // The emitted schema description carries the same contract, including the tone-agnostic clause.
-      const rule = buildCharacterSheetSchema(options('Fantasy')).properties.characterAnchors.description;
-      assert.match(rule, /under 50 words/);
-      assert.match(rule, /not a career/);
-      assert.match(rule, /do not default to tragedy/);
-      assert.match(rule, /No specific dates or years\./);
-      assert.match(rule, /Refer to the character as \{\{user\}\}/);
-      assert.match(rule, /describe them by role/);
-      assert.match(rule, /the player decides whether to pursue it, and how/);
-      assert.match(source, /STORY HOOK: include only explicit user-provided durable facts/);
-      assert.match(source, /Do not invent hook content/);
-      // The old heading survives only inside the one-time migration for sheets generated before the
-      // rename: the guard and the replacement. Anywhere else it would be a regression.
-      assert.match(source, /next\.sheetText\.includes\('# CHARACTER ANCHORS'\)/);
-      assert.match(source, /next\.sheetText\.replaceAll\('# CHARACTER ANCHORS', '# STORY HOOK'\)/);
-      assert.equal((source.match(/CHARACTER ANCHORS/g) || []).length, 2, 'the old heading must appear only in its own migration');
+      // Isekai: deterministic rendering forces the premise into Origin, without duplicating it and
+      // without discarding an origin the model already supplied.
+      const isekaiOptions = options({ genre: 'Isekai' });
+      // Origin is required for Isekai too, because that is where the Earth life goes; the premise is
+      // prepended to whatever the model supplied rather than replacing it.
+      assert.throws(() => renderCharacterSheet(payload(''), isekaiOptions), /basicInfo\.origin must describe where the character is from/);
+      const withOrigin = renderCharacterSheet(payload('A hill village in the Vald.'), isekaiOptions);
+      assert.match(withOrigin, /\*\*Origin:\*\* The character died on Earth and was reincarnated in another world\. A hill village in the Vald\./);
+      assert.equal((withOrigin.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
+      const modelSuppliedPremise = renderCharacterSheet(payload('The character died on Earth and was reincarnated in another world.'), isekaiOptions);
+      assert.equal((modelSuppliedPremise.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
+      assert.equal(assertValidCharacterSheet(withOrigin, { stats, genre: 'Isekai' }), withOrigin);
+
+      // The premise is only supplied when the sheet does not already establish it, so a card that
+      // states it in its own words keeps that wording instead of saying it twice.
+      const paraphrase = 'She lost her life on Earth and woke in another world.';
+      const statedItsOwnWay = renderCharacterSheet(payload(paraphrase), isekaiOptions);
+      assert.match(statedItsOwnWay, /\*\*Origin:\*\* She lost her life on Earth and woke in another world\./);
+      assert.equal((statedItsOwnWay.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 0);
+      assert.equal(assertValidCharacterSheet(statedItsOwnWay, { stats, genre: 'Isekai' }), statedItsOwnWay);
+
+      // A converted card is held to the same premise rule as a generated one, so the renderer has to
+      // supply it on that path too - otherwise approval fails on a rule the model cannot see.
+      const conversionOptions = { mode: 'existing', stats, genre: 'Isekai' };
+      const converted = renderCharacterSheet(payload('A mountain trade town', '27'), conversionOptions);
+      assert.match(converted, /\*\*Origin:\*\* The character died on Earth and was reincarnated in another world\. A mountain trade town/);
+      assert.equal(assertValidCharacterSheet(converted, { stats, genre: 'Isekai' }), converted);
+      const convertedStating = renderCharacterSheet(payload(paraphrase, '27'), conversionOptions);
+      assert.equal((convertedStating.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 0);
+      assert.match(convertedStating, /\*\*Origin:\*\* She lost her life on Earth and woke in another world\./);
+
+      // The adventure intro anchors the opening to that Origin, and stays out of the Isekai path
+      // because Isekai already has a seeded opening of its own.
+      const intro = formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: 'Fantasy', origin: 'A hill village in the Vald.' });
+      assert.match(intro, /ORIGIN OPENING:/);
+      assert.match(intro, /Anchor this opening to \{\{user\}\}'s Origin: A hill village in the Vald\./);
+      assert.match(intro, /Open on a hook: a situation already underway that \{\{user\}\} can act on\./);
+      assert.match(intro, /It must be inseparable from that Origin and from this character's own circumstances/);
+      assert.match(intro, /an opening that could belong to any other character is the wrong one/);
+      assert.match(intro, /The hook must be a situation, not a routine\. Do not open on \{\{user\}\} beginning an ordinary day\./);
+      assert.match(intro, /Do not reach for a familiar hook\./);
+      assert.match(intro, /Give \{\{user\}\} something to act on, without deciding for the player what they do about it\./);
+      // No menu. A list of options is what made three rounds of the Story Hook converge on one shape.
+      const block = intro.slice(intro.indexOf('ORIGIN OPENING:'), intro.indexOf('GENRE OPENING:'));
+      assert.doesNotMatch(block, /\b(?:a letter|a summons|an arrival|a debt|a rumour|an offer|or a threat)\b/, 'the hook block must not enumerate openings');
+      assert.doesNotMatch(
+        formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: 'Fantasy' }),
+        /ORIGIN OPENING:/,
+        'no origin on record means no anchor block',
+      );
+      assert.doesNotMatch(
+        formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: 'Isekai', origin: 'A hill village in the Vald.' }),
+        /ORIGIN OPENING:/,
+        'Isekai keeps its own seeded opening',
+      );
+
+      // The wiring, and the migration that keeps a pre-removal sheet approvable.
+      const source = fs.readFileSync(extensionFile('index.js'), 'utf8');
+      assert.match(source, /function getPlayerSheetOrigin\(context = getContext\(\)\)/);
+      assert.match(source, /origin: getPlayerSheetOrigin\(context\)/);
+      assert.match(source, /function stripRemovedSheetSections\(sheetText\)/);
+      assert.match(source, /CHARACTER ANCHORS\|STORY HOOK/);
+      assert.match(source, /stripRemovedSheetSections\(next\.sheetText\)/);
+      assert.match(source, /next\.sheetText = stripRemovedSheetSections\(next\.sheetText\)/);
+      // Nothing still asks the model for the removed field, and Origin is required in the prompt.
+      assert.doesNotMatch(source, /STORY HOOK: return exactly one entry/);
+      assert.doesNotMatch(source, /STORY HOOK: preserve only explicit durable persona facts/);
+      assert.match(source, /a required Origin, and prior role or training if relevant\. Origin must never be empty/);
+
+      // Approving a sheet replaces the persona description outright, so the text it replaced has to
+      // be reachable again. Without this the conversion flow would be destructive with no way back.
+      assert.match(source, /data-spe-player-action="restore-persona"/);
+      assert.match(source, /String\(root\?\.personaBeforeSetup \|\| ''\)\.trim\(\)/);
+      assert.match(source, /action === 'restore-persona'/);
+      assert.match(source, /const previous = String\(root\.personaBeforeSetup \|\| ''\)/);
+      assert.match(source, /await writePlayerSheetToPersona\(previous, context, actionIdentity\)/);
+      assert.match(source, /delete root\.personaBeforeSetup;/);
+      assert.match(source, /root\.ready = false;\n *root\.forceCreator = true;\n *root\.creator = \{ stage: 'offer' \};/);
+      // The write goes through the same metadata transaction the approval uses, so it rolls back.
+      assert.match(source, /await runPersonaMetadataTransaction\(context, actionIdentity, async \(\) => \{\n *await writePlayerSheetToPersona\(previous/);
     },
   },
   {

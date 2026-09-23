@@ -1,5 +1,6 @@
-export const CHARACTER_SHEET_TOOL_NAME = 'submit_character_sheet';
+import { sheetEstablishesIsekaiPremise } from './character-sheet-validation.js';
 
+export const CHARACTER_SHEET_TOOL_NAME = 'submit_character_sheet';
 const ROOT_FIELDS = Object.freeze([
     'basicInfo',
     'appearance',
@@ -9,7 +10,6 @@ const ROOT_FIELDS = Object.freeze([
     'inventory',
     'currency',
     'gear',
-    'characterAnchors',
 ]);
 
 const BASIC_INFO_FIELDS = Object.freeze([
@@ -26,37 +26,11 @@ const STRICT_TOOL_SOURCES = new Set(['openai', 'azure_openai', 'deepseek']);
 const TOOL_FALLBACK_CLIENT_STATUSES = new Set([400, 404, 405, 415, 422]);
 const NEVER_RETRY_TOOL_STATUSES = new Set([401, 403, 408, 409, 425, 429]);
 const ISEKAI_PREMISE = 'The character died on Earth and was reincarnated in another world.';
-// A new non-Isekai character gets one Story Hook paragraph in place of the old optional fact list.
-// The hook reports a situation and then stops: what happened once, what has just arrived, and nothing
-// about what the player should do with it. The past event is deliberately tone-agnostic - an earlier
-// draft used a bereavement as its only example and every generated hook came back a tragedy.
-const STORY_HOOK_RULE = 'One paragraph under 50 words, holding one past event and then one live hook. The past event is a single incident, not a career: something that happened to the character, not the job they hold, and not a rise or a fall from a role - Prior Role / Training already says what they do. It may be a loss, a failure, a piece of luck, an honour, a meeting, or a discovery; do not default to tragedy. The hook is something that has just reached them and connects to that event: a letter, an offer, a summons, an arrival, a name, a discovery, a debt falling due, or a threat. It must make a next step possible without recommending one. No specific dates or years. End on the question the hook raises and do not answer it: state only what has already happened and what is now the case, never what the character wants, intends, plans, vows, decides, fears, resents, feels obliged to do, or will do - the player decides whether to pursue it, and how. Refer to the character as {{user}}; do not name anyone else, describe them by role. Be specific about the place, the object, and the wrong or the good fortune, and ground it in the race, Origin, and genre.';
-const STORY_HOOK_LIMIT = 1;
-// The schema asks the model for exactly one entry. The normaliser accepts a few and keeps the first,
-// because blocking an entire character generation over an over-eager model is a far worse outcome
-// than dropping a second paragraph the player never saw.
-const STORY_HOOK_NORMALIZE_LIMIT = 3;
-const LEGACY_ANCHOR_LIMIT = 3;
-const EXISTING_ANCHOR_LIMIT = 48;
-
-// Isekai keeps the original behaviour: the field stays empty because deterministic rendering forces
-// the death-and-reincarnation premise into it. Existing personas keep their preserved fact list.
-//
-// The schema and the normaliser differ in one place on purpose. When a new Isekai character has no
-// user-supplied facts the schema forbids anchors outright, but the normaliser still accepts whatever
-// the model sent and lets the grounding filter empty the list, so a schema violation degrades to an
-// empty section instead of failing generation.
-function anchorSchemaLimit(mode, isNewIsekai, allowNewCharacterAnchors) {
-    if (mode === 'existing') return EXISTING_ANCHOR_LIMIT;
-    if (isNewIsekai) return allowNewCharacterAnchors ? LEGACY_ANCHOR_LIMIT : 0;
-    return STORY_HOOK_LIMIT;
-}
-
-function anchorNormalizeLimit(mode, isNewIsekai, allowNewCharacterAnchors) {
-    if (mode === 'existing') return EXISTING_ANCHOR_LIMIT;
-    if (isNewIsekai) return allowNewCharacterAnchors ? LEGACY_ANCHOR_LIMIT : EXISTING_ANCHOR_LIMIT;
-    return STORY_HOOK_NORMALIZE_LIMIT;
-}
+// The opening scene anchors to Origin, so Origin is the one BASIC INFO field a new character must
+// supply. The Story Hook this file used to build was removed: it asked the model to invent a situation
+// at sheet time, before any world existed, and every result came back as a generic administrative
+// puzzle. The opening is now generated at adventure start, where the world state is available.
+const ORIGIN_REQUIRED_MESSAGE = 'basicInfo.origin must describe where the character is from and what shaped them there; the opening scene anchors to it.';
 const EXTRAORDINARY_ABILITY_CONTRACT = 'The ability must grant one qualitatively new capability that ordinary PHY/MND/CHA checks and ordinary actions cannot provide.';
 const GROUNDED_ABILITY_CONTRACT = 'The ability may be a deliberately activated signature technique grounded in exceptional training, expertise, preparation, or genre-appropriate equipment. It must produce one distinctive, concrete effect in the scene; a broad skill label or numerical/stat improvement is not an ability.';
 const APPEARANCE_MARK_PATTERNS = Object.freeze([
@@ -66,14 +40,6 @@ const APPEARANCE_MARK_PATTERNS = Object.freeze([
     /\b(?:burned|ritual)\s+brands?\b|\bbrand(?:ed|ing)?\s+(?:mark|scar|symbol)s?\b/i,
     /\bpermanent\s+marks?\b/i,
 ]);
-const ANCHOR_STOP_WORDS = new Set([
-    'about', 'after', 'again', 'also', 'and', 'another', 'are', 'before', 'being', 'can', 'character',
-    'could', 'did', 'does', 'for', 'from', 'had', 'has', 'have', 'her', 'him', 'his', 'into', 'its',
-    'just', 'more', 'not', 'other', 'our', 'she', 'that', 'the', 'their', 'them', 'there', 'these',
-    'they', 'this', 'through', 'user', 'very', 'was', 'were', 'what', 'when', 'where', 'which',
-    'while', 'who', 'with', 'would', 'you', 'your',
-]);
-
 function createPowerProfile(ability, spell, options = {}) {
     const grounded = options.grounded === true;
     return Object.freeze({
@@ -227,9 +193,7 @@ export function buildCharacterSheetSchema(options = {}) {
     const fixedUserNonHuman = normalizeFixedUserNonHuman(options.fixedUserNonHuman, mode);
     const needsStartingSpell = mode === 'new' && stats.MND >= 7;
     const isNewIsekai = mode === 'new' && String(options.genre || '').trim().toLowerCase() === 'isekai';
-    const explicitAnchorSource = cleanSourceText(options.explicitAnchorSource);
     const explicitAppearanceSource = cleanSourceText(options.explicitAppearanceSource);
-    const allowNewCharacterAnchors = mode === 'new' && Boolean(explicitAnchorSource);
     const allowNewAppearanceMarks = APPEARANCE_MARK_PATTERNS.some(pattern => pattern.test(explicitAppearanceSource));
     const powerProfile = getCharacterSheetPowerProfile(options.genre);
     const stringArray = (description, maxItems = 48) => ({
@@ -287,7 +251,9 @@ export function buildCharacterSheetSchema(options = {}) {
                         ? { type: 'integer', minimum: 1 }
                         : { type: 'string', description: 'The explicit age as written, or Not specified.' },
                     bloodline: { type: 'string', description: 'A relevant explicit bloodline, or an empty string.' },
-                    origin: { type: 'string', description: 'A fixed origin fact, or an empty string.' },
+                    origin: { type: 'string', description: mode === 'new'
+                        ? 'Where the character is from and what shaped them there: the place, the people, the trade, the obligation. Required for a new character, because the opening scene anchors to it. Never empty.'
+                        : 'A fixed origin fact, or an empty string.' },
                     priorRoleOrTraining: { type: 'string', description: mode === 'new'
                         ? 'One concise fixed prior role or training fact, or an empty string. Preserve an explicit user-supplied role faithfully without broadening it into extra expertise, mastery, or unrelated knowledge.'
                         : 'The explicit prior role or training fact preserved from the persona, or an empty string.' },
@@ -330,19 +296,6 @@ export function buildCharacterSheetSchema(options = {}) {
             gear: stringArray(isNewIsekai
                 ? 'Modern Earth clothing and equipped or worn items the character possessed at the moment of transition. Do not invent fantasy weapons, armor, adventuring equipment, or other new-world possessions unless explicitly supplied by the user.'
                 : 'Worn, equipped, or immediately ready items only.'),
-            characterAnchors: {
-                ...stringArray(
-                    mode === 'existing'
-                        ? 'Only explicit durable persona facts that cannot fit another character-sheet field. Do not repeat other sections.'
-                        : isNewIsekai
-                            ? (allowNewCharacterAnchors
-                                ? 'Only explicit user-provided durable facts that cannot fit another character-sheet field. Do not invent hook entries or repeat other sections. Use an empty array when none are required.'
-                                : 'Must be empty because the user supplied no custom facts that require a hook entry.')
-                            : STORY_HOOK_RULE,
-                    anchorSchemaLimit(mode, isNewIsekai, allowNewCharacterAnchors),
-                ),
-                minItems: 0,
-            },
         },
     };
 }
@@ -419,9 +372,7 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
     const stats = normalizeStats(options.stats);
     const fixedRace = cleanInline(options.fixedRace);
     const fixedUserNonHuman = normalizeFixedUserNonHuman(options.fixedUserNonHuman, mode);
-    const explicitAnchorSource = cleanSourceText(options.explicitAnchorSource);
     const explicitAppearanceSource = cleanSourceText(options.explicitAppearanceSource);
-    const allowNewCharacterAnchors = mode === 'new' && Boolean(explicitAnchorSource);
     const isNewIsekai = mode === 'new' && String(options.genre || '').trim().toLowerCase() === 'isekai';
     const source = parseCharacterSheetPayload(payload, 'character-sheet payload');
     assertExactKeys(source, ROOT_FIELDS, 'character-sheet payload');
@@ -445,6 +396,11 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
         ? requireInteger(basicSource.age, 'basicInfo.age')
         : optionalText(basicSource.age) || 'Not specified';
     if (mode === 'new' && age < 1) throw structureError('basicInfo.age must be a positive integer.');
+
+    // The opening scene anchors to Origin, so a new character must supply one. Existing personas keep
+    // the old lenient rule: a converted card may genuinely not state where its character is from.
+    const origin = optionalText(basicSource.origin);
+    if (mode === 'new' && !origin) throw structureError(ORIGIN_REQUIRED_MESSAGE);
 
     const submittedAppearance = normalizeObjectArray(source.appearance, 'appearance', 32, entry => {
         assertExactKeys(entry, ['label', 'detail'], 'appearance entry');
@@ -478,35 +434,6 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
     const inventory = normalizeStringArray(source.inventory, 'inventory', 48);
     const currency = isNewIsekai ? [] : normalizeStringArray(source.currency, 'currency', 8);
     const gear = normalizeStringArray(source.gear, 'gear', 48);
-    const submittedAnchors = normalizeStringArray(source.characterAnchors, 'characterAnchors', anchorNormalizeLimit(mode, isNewIsekai, allowNewCharacterAnchors));
-    const representedFacts = [
-        race,
-        userNonHuman,
-        optionalText(basicSource.gender),
-        String(age),
-        optionalText(basicSource.bloodline),
-        optionalText(basicSource.origin),
-        optionalText(basicSource.priorRoleOrTraining),
-        ...appearance.flatMap(entry => [entry.label, entry.detail]),
-        ...naturalWeapons,
-        ...abilities.flatMap(entry => [entry.name, entry.description]),
-        ...spells.flatMap(entry => [entry.name, entry.description]),
-        ...inventory,
-        ...currency,
-        ...gear,
-    ].filter(Boolean);
-    // The Story Hook is generated, not user-supplied, so the grounding and overlap filters that guard
-    // the legacy anchor list are skipped for it: they would delete a hook for restating the role it is
-    // built from, which is exactly what a specific hook does. Isekai keeps the legacy filter path.
-    let characterAnchors;
-    if (isNewIsekai) {
-        characterAnchors = filterNewCharacterAnchors(submittedAnchors, explicitAnchorSource, representedFacts);
-    } else if (mode === 'new') {
-        // Keep the first hook and drop any extra the model volunteered; see STORY_HOOK_NORMALIZE_LIMIT.
-        characterAnchors = submittedAnchors.slice(0, STORY_HOOK_LIMIT);
-    } else {
-        characterAnchors = submittedAnchors;
-    }
 
     return {
         basicInfo: {
@@ -515,7 +442,7 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
             gender: optionalText(basicSource.gender) || 'Not specified',
             age,
             bloodline: optionalText(basicSource.bloodline),
-            origin: optionalText(basicSource.origin),
+            origin,
             priorRoleOrTraining: optionalText(basicSource.priorRoleOrTraining),
         },
         appearance,
@@ -525,7 +452,6 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
         inventory,
         currency,
         gear,
-        characterAnchors,
     };
 }
 
@@ -534,39 +460,48 @@ export function renderCharacterSheet(payload, options = {}) {
     const stats = normalizeStats(options.stats);
     const normalized = normalizeCharacterSheetPayload(payload, { ...options, mode, stats });
     const basic = normalized.basicInfo;
-    const basicLines = [
-        '**Name:** {{user}}',
-        `**Race:** ${basic.race}`,
-        `**UserNonHuman:** ${basic.userNonHuman}`,
-        `**Gender:** ${basic.gender}`,
-        `**Age:** ${basic.age}`,
-    ];
-    if (basic.bloodline) basicLines.push(`**Bloodline:** ${basic.bloodline}`);
-    if (basic.origin) basicLines.push(`**Origin:** ${basic.origin}`);
-    if (basic.priorRoleOrTraining) basicLines.push(`**Prior Role / Training:** ${basic.priorRoleOrTraining}`);
+    const isIsekai = String(options.genre || '').trim().toLowerCase() === 'isekai';
 
-    const anchors = [...normalized.characterAnchors];
-    if (mode === 'new' && String(options.genre || '').trim().toLowerCase() === 'isekai') {
-        const canonicalIndex = anchors.findIndex(anchor => anchor.toLowerCase() === ISEKAI_PREMISE.toLowerCase());
-        if (canonicalIndex >= 0) anchors.splice(canonicalIndex, 1);
-        anchors.unshift(ISEKAI_PREMISE);
-    }
+    const sectionsFor = (origin) => {
+        const basicLines = [
+            '**Name:** {{user}}',
+            `**Race:** ${basic.race}`,
+            `**UserNonHuman:** ${basic.userNonHuman}`,
+            `**Gender:** ${basic.gender}`,
+            `**Age:** ${basic.age}`,
+        ];
+        if (basic.bloodline) basicLines.push(`**Bloodline:** ${basic.bloodline}`);
+        if (origin) basicLines.push(`**Origin:** ${origin}`);
+        if (basic.priorRoleOrTraining) basicLines.push(`**Prior Role / Training:** ${basic.priorRoleOrTraining}`);
+        return [
+            ['BASIC INFO', basicLines.join('\n')],
+            ['APPEARANCE', normalized.appearance.length
+                ? normalized.appearance.map(entry => `**${entry.label}:** ${entry.detail}`).join('\n')
+                : '**Details:** Not specified'],
+            ['STATS', `**PHY:** ${stats.PHY}\n**MND:** ${stats.MND}\n**CHA:** ${stats.CHA}`],
+            ['NATURAL WEAPONS', renderBulletList(normalized.naturalWeapons, 'None')],
+            ['ABILITIES', renderNamedEntries(normalized.abilities, mode === 'new' ? 'None' : 'Not specified')],
+            ['SPELLS', renderNamedEntries(normalized.spells, 'None')],
+            ['INVENTORY', renderBulletList(normalized.inventory, mode === 'new' ? 'None' : 'Not specified')],
+            ['CURRENCY', renderBulletList(normalized.currency, 'None')],
+            ['GEAR', renderBulletList(normalized.gear, mode === 'new' ? 'None' : 'Not specified')],
+        ];
+    };
+    const render = (sections) => sections.map(([heading, body]) => `# ${heading}\n${body}`).join('\n\n');
 
-    const sections = [
-        ['BASIC INFO', basicLines.join('\n')],
-        ['APPEARANCE', normalized.appearance.length
-            ? normalized.appearance.map(entry => `**${entry.label}:** ${entry.detail}`).join('\n')
-            : '**Details:** Not specified'],
-        ['STATS', `**PHY:** ${stats.PHY}\n**MND:** ${stats.MND}\n**CHA:** ${stats.CHA}`],
-        ['NATURAL WEAPONS', renderBulletList(normalized.naturalWeapons, 'None')],
-        ['ABILITIES', renderNamedEntries(normalized.abilities, mode === 'new' ? 'None' : 'Not specified')],
-        ['SPELLS', renderNamedEntries(normalized.spells, 'None')],
-        ['INVENTORY', renderBulletList(normalized.inventory, mode === 'new' ? 'None' : 'Not specified')],
-        ['CURRENCY', renderBulletList(normalized.currency, 'None')],
-        ['GEAR', renderBulletList(normalized.gear, mode === 'new' ? 'None' : 'Not specified')],
-        ['STORY HOOK', mode === 'new' ? renderStoryHook(anchors) : renderBulletList(anchors, 'Not specified')],
-    ];
-    return sections.map(([heading, body]) => `# ${heading}\n${body}`).join('\n\n');
+    // Origin carries the character's background, and for Isekai that background IS the transition, so
+    // deterministic rendering supplies the premise rather than trusting the model to restate it. This
+    // applies to a converted card as much as to a generated one: validateIsekaiPremise demands the
+    // premise on both paths. It is only added when the rendered sheet does not already establish it,
+    // otherwise a card that states it in its own words would end up saying it twice.
+    const base = sectionsFor(basic.origin);
+    const sheet = render(base);
+    if (!isIsekai || sheetEstablishesIsekaiPremise(sheet)) return sheet;
+
+    const origin = basic.origin && basic.origin.toLowerCase() !== ISEKAI_PREMISE.toLowerCase()
+        ? `${ISEKAI_PREMISE} ${basic.origin}`
+        : ISEKAI_PREMISE;
+    return render(sectionsFor(origin));
 }
 
 export function describeCharacterSheetRaw(raw) {
@@ -794,49 +729,9 @@ function appearanceMarksAreExplicit(appearanceText, explicitSource) {
     return true;
 }
 
-function filterNewCharacterAnchors(anchors, explicitSource, representedFacts) {
-    if (!explicitSource) return [];
-    return anchors.filter(anchor => {
-        if (!anchorIsGroundedInSource(anchor, explicitSource)) return false;
-        return !representedFacts.some(fact => factsMateriallyOverlap(anchor, fact));
-    });
-}
-
-function anchorIsGroundedInSource(anchor, source) {
-    const anchorTokens = factTokens(anchor);
-    if (!anchorTokens.length) return false;
-    const sourceTokens = new Set(factTokens(source));
-    const overlap = anchorTokens.filter(token => sourceTokens.has(token)).length;
-    const required = anchorTokens.length <= 2 ? anchorTokens.length : anchorTokens.length <= 6 ? 2 : 3;
-    return overlap >= required;
-}
-
-function factsMateriallyOverlap(left, right) {
-    const leftTokens = factTokens(left);
-    const rightTokens = factTokens(right);
-    if (!leftTokens.length || !rightTokens.length) return false;
-    const rightSet = new Set(rightTokens);
-    const overlap = leftTokens.filter(token => rightSet.has(token)).length;
-    const shorterLength = Math.min(leftTokens.length, rightTokens.length);
-    const required = shorterLength === 1 ? 1 : Math.ceil(shorterLength * 0.6);
-    return overlap >= required;
-}
-
-function factTokens(value) {
-    const tokens = String(value || '').toLowerCase().match(/[a-z0-9]+/g) || [];
-    return [...new Set(tokens.filter(token => token.length >= 3 && !ANCHOR_STOP_WORDS.has(token)))];
-}
-
 function renderBulletList(items, fallback) {
     const values = items.length ? items : [fallback];
     return values.map(item => `- ${item}`).join('\n');
-}
-
-// A story hook is a paragraph, so it renders as prose rather than a list item: a leading dash reads
-// as one more fact in a list, which is the opposite of what a hook is.
-function renderStoryHook(items) {
-    const values = Array.isArray(items) ? items.filter(Boolean) : [];
-    return values.length ? values.join('\n\n') : 'None';
 }
 
 function renderNamedEntries(items, fallback) {

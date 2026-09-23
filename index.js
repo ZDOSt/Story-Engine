@@ -4336,18 +4336,38 @@ function pruneRootTrackerSnapshots(root) {
     root.latentFavorArchive = pruneLatentFavorArchive(root.latentFavorArchive, root.latentFavors, root.snapshots);
 }
 
+// The approved sheet's Origin line, which the adventure intro anchors the opening scene to. Read back
+// out of the rendered sheet because that is what was approved and written to the persona.
+function getPlayerSheetOrigin(context = getContext()) {
+    const root = getPlayerRoot(context);
+    const sheetText = String(root?.sheet?.text || '');
+    const match = sheetText.match(/^\*\*Origin:\*\*\s*(.+?)\s*$/m);
+    return match ? match[1].trim() : '';
+}
+
+function stripRemovedSheetSections(sheetText) {
+    const lines = String(sheetText || '').split('\n');
+    const kept = [];
+    let skipping = false;
+    for (const line of lines) {
+        if (/^#\s+/.test(line)) skipping = /^#\s+(?:CHARACTER ANCHORS|STORY HOOK)\s*$/.test(line);
+        if (!skipping) kept.push(line);
+    }
+    return kept.join('\n').replace(/\s+$/, '');
+}
+
 function normalizePlayerCreatorSetupState(creator) {
     const next = creator && typeof creator === 'object' ? creator : { stage: 'offer' };
     const stage = String(next.stage || 'offer');
     if (stage === 'reroll' || stage === 'swap') {
         next.stage = 'stats';
     }
-    // A sheet generated before the Story Hook rename still carries the old heading, and approving it
-    // would fail validation. Migrate it on read so a pending review survives the update: this runs
-    // from getPlayerRoot, so the rewrite reaches the Review card and the approve path alike, and the
-    // guard makes it a no-op from the second pass onward.
-    if (typeof next.sheetText === 'string' && next.sheetText.includes('# CHARACTER ANCHORS')) {
-        next.sheetText = next.sheetText.replaceAll('# CHARACTER ANCHORS', '# STORY HOOK');
+    // Story Hook is gone from the sheet contract, and validation rejects unexpected headings. A sheet
+    // generated before the removal still carries the section, so it is stripped on read and a pending
+    // review survives the update. This runs from getPlayerRoot, so the rewrite reaches the Review card
+    // and the approve path alike, and the guard makes it a no-op from the second pass onward.
+    if (typeof next.sheetText === 'string' && /^#\s+(?:CHARACTER ANCHORS|STORY HOOK)\s*$/m.test(next.sheetText)) {
+        next.sheetText = stripRemovedSheetSections(next.sheetText);
     }
     if (next.stage !== 'offer' && next.stage !== 'approved') {
         next.flow = next.flow === 'persona' ? 'persona' : 'new';
@@ -14062,6 +14082,15 @@ function buildPlayerReviewHtml(creator) {
 
 function buildPlayerAdventureStartHtml(root) {
     const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
+    // Approving a sheet replaces the persona description, so the text it replaced is kept. Offering it
+    // back is the only way to undo a conversion that swallowed facts the sheet had nowhere to hold.
+    const restore = String(root?.personaBeforeSetup || '').trim()
+        ? `
+        <div class="spe-player-muted">Approving your sheet replaced your persona description. Restoring puts the original text back and resets player setup.</div>
+        <div class="spe-player-actions">
+            <button class="menu_button" data-spe-player-action="restore-persona">Restore Original Persona</button>
+        </div>`
+        : '';
     return `
         <div class="spe-player-muted">Opening genre: <code>${escapeHtml(genre)}</code></div>
         <div class="spe-player-actions">
@@ -14069,6 +14098,7 @@ function buildPlayerAdventureStartHtml(root) {
             <button class="menu_button" data-spe-player-action="back-from-adventure-start">Back</button>
             <button class="menu_button" data-spe-player-action="dismiss-adventure-start">Hide</button>
         </div>
+        ${restore}
     `;
 }
 
@@ -14483,6 +14513,27 @@ async function handlePlayerSetupAction(action, details = {}, context = getContex
         } else if (action === 'dismiss-adventure-start') {
             root.adventureStartPending = false;
             root.adventureStartDismissedAt = Date.now();
+        } else if (action === 'restore-persona') {
+            const previous = String(root.personaBeforeSetup || '');
+            if (!previous) {
+                throw new Error('No original persona was recorded for this chat, so there is nothing to restore.');
+            }
+            await runPersonaMetadataTransaction(context, actionIdentity, async () => {
+                await writePlayerSheetToPersona(previous, context, actionIdentity);
+                // Taking the persona back undoes the setup. The approved sheet describes a persona that
+                // is no longer there, so the creator restarts with the original text in place.
+                delete root.personaBeforeSetup;
+                delete root.sheet;
+                delete root.adventureStartPrompt;
+                delete root.adventureStartPromptCreatedAt;
+                root.ready = false;
+                root.forceCreator = true;
+                root.creator = { stage: 'offer' };
+                root.adventureStartPending = false;
+                root.adventureStarted = false;
+            });
+            transactionPersisted = true;
+            notifySuccess('Original persona restored. Player setup was reset.', EXTENSION_NAME, { timeOut: 7000 });
         }
         assertStoryEngineEpochCurrent(actionIdentity, 'Player setup action expired because the active chat changed.');
         if (!transactionPersisted) await persistMetadata(context);
@@ -15438,7 +15489,6 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
         fixedRace: getLockedPlayerCreatorRace(identity),
         fixedUserNonHuman: getLockedPlayerCreatorUserNonHuman(identity),
         genre,
-        explicitAnchorSource: getNewCharacterExplicitAnchorSource(identity),
         explicitAppearanceSource: getNewCharacterExplicitAppearanceSource(identity),
     };
     const retryNotes = Array.isArray(creator.retryNotes) ? creator.retryNotes : [];
@@ -15449,18 +15499,6 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
     const sexInstruction = buildNewCharacterSexInstruction(identity);
     const additionalDetailsInstruction = buildNewCharacterAdditionalDetailsInstruction(identity);
     const powerProfile = getCharacterSheetPowerProfile(genre);
-    // A new non-Isekai character gets one generated Story Hook paragraph. Isekai keeps the legacy
-    // rule, because deterministic rendering already forces the death-and-reincarnation premise in.
-    const anchorInstructions = genre === 'Isekai'
-        ? 'STORY HOOK: include only explicit user-provided durable facts that cannot fit BASIC INFO, APPEARANCE, STATS, NATURAL WEAPONS, ABILITIES, SPELLS, INVENTORY, CURRENCY, or GEAR. Otherwise return an empty array. Do not invent hook content, summarize or repeat another section, interpret stats, add meta-disclaimers, invent unresolved hooks, or restate the selected genre premise. For Isekai, deterministic rendering supplies the required death-and-reincarnation premise.'
-        : [
-            'STORY HOOK: return exactly one entry - one paragraph under 50 words, holding one past event and then one live hook.',
-            'The past event is a single incident, not a career: something that happened to {{user}}, not the job they hold. Prior Role / Training already says what they do, so do not narrate a rise or a fall from a role. It may be a loss, a failure, a piece of luck, an honour, a meeting, or a discovery. Do not default to tragedy.',
-            'The hook is something that has just reached them and connects to that event: a letter, an offer, a summons, an arrival, a name, a discovery, a debt falling due, or a threat. It must make a next step possible without recommending one.',
-            'No specific dates or years. End the paragraph on the question the hook raises and do not answer it - never state what the character wants, intends, plans, vows, decides, fears, resents, feels obliged to do, or will do. The player decides whether to pursue it, and how.',
-            'Refer to the character as {{user}}. Do not name anyone else; describe them by role. Be specific about the place, the object, and the wrong or the good fortune, and ground it in the race, Origin, and genre so it could not belong to anyone else.',
-            'Good, a loss: "Nine years ago {{user}} was pulled from the flooded gallery of Saint Ordwine\'s and blamed for stone that was never cut. A sealed lead tube arrived last week holding a chalk rubbing of the gallery\'s keystone and a slip naming the sum owed." Good, a piece of luck: "Three seasons ago {{user}} talked a Brindlewatch merchant out of a debt that was not hers, and word of it reached the wrong ears. An unsolicited invitation arrived yesterday, sealed with the sigil of a house she has never dealt with." Bad: "...and she is determined to find out who sent it."',
-        ].join('\n');
     const possessionInstructions = genre === 'Isekai'
         ? [
             'INVENTORY: modern-Earth belongings carried or stowed at the moment of transition only: plausible personal supplies, tools, consumables, documents, containers, travel goods, and other possessions the character could have had before reincarnation. Exclude worn or equipped items and currency. Do not invent fantasy, magical, or new-world supplies, tools, weapons, or equipment unless the user explicitly supplied them.',
@@ -15490,13 +15528,12 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 'Required structured fields:\n' +
-                'BASIC INFO: Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age as one integer, and fixed origin, prior role, or prior training if relevant. Prior Role / Training must be one concise fixed fact. Preserve any explicit user-supplied role faithfully without broadening it into extra expertise, mastery, or unrelated knowledge; otherwise generate only a grounded minimal role appropriate to age, origin, and genre. Do not include personality, future plans, preferred behavior, or emotional tendencies. Use an empty string only for an inapplicable optional text field.\n' +
+                'BASIC INFO: Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age as one integer, a required Origin, and prior role or training if relevant. Origin must never be empty: state where the character is from and what shaped them there, because the opening scene anchors to it. Prior Role / Training must be one concise fixed fact. Preserve any explicit user-supplied role faithfully without broadening it into extra expertise, mastery, or unrelated knowledge; otherwise generate only a grounded minimal role appropriate to age, origin, and genre. Do not include personality, future plans, preferred behavior, or emotional tendencies. Use an empty string only for an inapplicable optional text field.\n' +
                 'APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Return each fact as one concise, objective label/detail pair. Include exactly one Height entry containing a numeric measurement in feet/inches, centimeters, or both; never use relative descriptions, comparisons, age-relative wording, posture, build language, or decorative prose as Height. Build must be one compact physical description without subjective commentary. Eyes may state color and fixed physical traits but not a habitual gaze or implied personality. Skin may state tone and visible physical qualities but must not assert scars, marks, or their absence unless explicitly supplied. Face must use concrete physical features without beauty judgments. Hands must use physical characteristics only and must not infer strength, history, skill, or behavior. Do not invent scars or permanent marks; preserve them only when explicitly supplied by the user. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 'NATURAL WEAPONS: concrete offensive body parts only, if any. Use an empty array when the race/body has no clear natural weapon. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
                 `ABILITIES:\n${buildAbilityGenerationRules(`Generate exactly ${PROGRESSION_REQUIRED_ABILITIES} ability entry.`, powerProfile)}\nFit the result to the character's race, body, origin, genre, and concept, but do not turn any stat into an amplified ordinary action. Choose a varied concept rather than copying a stock template or example. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
                 `SPELLS:\n${buildSpellGenerationRules(`Generate exactly ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell entry when MND is 7 or higher; otherwise return an empty array.`, powerProfile)}\nFit the result to the selected genre, character, and concept. Choose a varied concept rather than copying a stock template or example. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
-                `${possessionInstructions}\n` +
-                `${anchorInstructions}`,
+                `${possessionInstructions}`,
         },
     ];
     const payload = await requestPlayerSetupStructured(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, generationOptions, {
@@ -15595,6 +15632,9 @@ function buildNewCharacterGenreInstruction(identity = {}) {
     ];
     if (genre === 'Isekai') {
         instructions.push('For Isekai, the sheet must establish only the premise: the character died on Earth and was reincarnated in another world. Do not establish time since crossing, prior new-world life, adaptation, local knowledge, previous-life memory state, or whether memories are retained or lost unless the user explicitly provided that detail.');
+        // Origin is what the opening scene anchors to, and for Isekai that has to be the Earth life:
+        // the new world is where the character is going, not where they are from.
+        instructions.push('For Isekai, Origin is the Earth life: who the character was and what they were doing before the transition. Deterministic rendering prepends the death-and-reincarnation premise to it, so do not restate the premise yourself. Origin must still never be empty.');
     }
     return instructions.join('\n');
 }
@@ -15735,7 +15775,6 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 'INVENTORY: preserve explicit carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, or body armaments here.\n' +
                 'CURRENCY: preserve explicit money only. Normalize obvious fantasy money to sv when possible, such as 12 silver coins -> 12 sv. Do not invent money.\n' +
                 'GEAR: preserve explicit worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, pack contents, carried supplies, natural weapons, or body anatomy here.\n' +
-                'STORY HOOK: preserve only explicit durable persona facts that cannot fit another structured field. Do not duplicate basic information, appearance, stats, natural weapons, abilities, spells, inventory, currency, or gear, and do not add summaries or interpretations.\n\n' +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
 
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,
@@ -18342,6 +18381,7 @@ async function handleChatCompletionPromptReady(eventData) {
                 nameGeneration,
                 isekaiOpeningSeed,
                 sceneStyleProfile: pendingGeneration.sceneStyleProfile || '',
+                origin: getPlayerSheetOrigin(context),
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
             const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, introOptions);

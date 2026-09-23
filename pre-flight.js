@@ -491,6 +491,9 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
                 : 'This is the opening turn of a new adventure.',
     ];
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
+    // Non-Isekai openings anchor to Origin. Isekai has its own seeded opening, so this stays out of
+    // that path rather than competing with the arrival beats.
+    if (!isIsekaiOpening) lines.push(...renderOriginOpeningSection(options?.origin));
     if (isekaiOpeningSeed) {
         if (nameReveal) lines.push('', buildAdventureIntroNameRevealBlock(nameReveal));
         lines.push('', prompt);
@@ -508,6 +511,28 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         'Do not invent, modify, substitute, or translate any proper name in this opening response.',
     );
     return lines.join('\n');
+}
+
+// The opening scene anchors to the character's Origin, so the fact is stated explicitly rather than
+// left for the narrator to find in the persona. Returns [] when there is no Origin to anchor to.
+//
+// Deliberately carries no list and no example. Three rounds of the Story Hook field proved that a
+// model orders from a menu: one example produced nothing but that example's tone, two examples of one
+// shape produced nothing but that shape. The work a list would do is done here by inseparability
+// instead - a stock opening cannot be inseparable from one specific Origin - and the familiar-hook
+// prohibition blocks the shapes the bare word "hook" would otherwise retrieve on its own.
+function renderOriginOpeningSection(origin) {
+    const value = String(origin || '').trim();
+    if (!value) return [];
+    return [
+        '',
+        'ORIGIN OPENING:',
+        `Anchor this opening to {{user}}'s Origin: ${value}`,
+        'Open on a hook: a situation already underway that {{user}} can act on. It must be inseparable from that Origin and from this character\'s own circumstances - an opening that could belong to any other character is the wrong one, however good it is on its own.',
+        'The hook must be a situation, not a routine. Do not open on {{user}} beginning an ordinary day.',
+        'Do not reach for a familiar hook. If it would fit a different character, a different setting, or a different story, it is not this one.',
+        'Give {{user}} something to act on, without deciding for the player what they do about it.',
+    ];
 }
 
 const ADVENTURE_INTRO_NAMING_CLAUSE = [
