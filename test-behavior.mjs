@@ -22084,6 +22084,7 @@ const tests = [
       assert.match(intro, /Open on a hook: a situation already underway that \{\{user\}\} can act on\./);
       assert.match(intro, /It must be inseparable from that Origin and from this character's own circumstances/);
       assert.match(intro, /an opening that could belong to any other character is the wrong one/);
+      assert.match(intro, /The hook must concern \{\{user\}\}, not merely happen in front of them\. A scene \{\{user\}\} is only watching is not a hook\./);
       assert.match(intro, /The hook must be a situation, not a routine\. Do not open on \{\{user\}\} beginning an ordinary day\./);
       assert.match(intro, /Do not reach for a familiar hook\./);
       assert.match(intro, /Give \{\{user\}\} something to act on, without deciding for the player what they do about it\./);

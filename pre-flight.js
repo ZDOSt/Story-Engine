@@ -521,6 +521,13 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
 // shape produced nothing but that shape. The work a list would do is done here by inseparability
 // instead - a stock opening cannot be inseparable from one specific Origin - and the familiar-hook
 // prohibition blocks the shapes the bare word "hook" would otherwise retrieve on its own.
+//
+// The concern clause is a ban on the observed failure, not a requirement about the player. An earlier
+// sample set a dispute between two other parties in front of {{user}} and left them holding the
+// camera. Asking for someone to be "waiting on" {{user}} would have worked too, but it would have made
+// the narrator assert {{user}}'s obligations and relationships, which agencySeparation and
+// strictEpistemology forbid. Constraining whose business the scene is costs nothing and asserts
+// nothing about {{user}}'s interior.
 function renderOriginOpeningSection(origin) {
     const value = String(origin || '').trim();
     if (!value) return [];
@@ -529,6 +536,7 @@ function renderOriginOpeningSection(origin) {
         'ORIGIN OPENING:',
         `Anchor this opening to {{user}}'s Origin: ${value}`,
         'Open on a hook: a situation already underway that {{user}} can act on. It must be inseparable from that Origin and from this character\'s own circumstances - an opening that could belong to any other character is the wrong one, however good it is on its own.',
+        'The hook must concern {{user}}, not merely happen in front of them. A scene {{user}} is only watching is not a hook.',
         'The hook must be a situation, not a routine. Do not open on {{user}} beginning an ordinary day.',
         'Do not reach for a familiar hook. If it would fit a different character, a different setting, or a different story, it is not this one.',
         'Give {{user}} something to act on, without deciding for the player what they do about it.',
