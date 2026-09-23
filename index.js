@@ -13956,6 +13956,18 @@ function buildPlayerStatsHtml(creator) {
     `;
 }
 
+// The freeform details box describes what the player may pin down. Earth life applies only to
+// Isekai, where the character died on Earth before reincarnating; showing it for every genre
+// implies Earth details belong in the box when they do not.
+const ADDITIONAL_DETAILS_PLACEHOLDER = 'Optional background, appearance, clothing, training, inventory, origin, or other fixed starting facts.';
+const ADDITIONAL_DETAILS_PLACEHOLDER_ISEKAI = 'Optional background, Earth life, appearance, clothing, training, inventory, origin, or other fixed starting facts.';
+
+function additionalDetailsPlaceholderFor(genre) {
+    return String(genre || '').trim().toLowerCase() === 'isekai'
+        ? ADDITIONAL_DETAILS_PLACEHOLDER_ISEKAI
+        : ADDITIONAL_DETAILS_PLACEHOLDER;
+}
+
 function buildPlayerIdentityHtml(creator) {
     const identity = creator.identity || {};
     const genre = PLAYER_GENRE_CHOICES.includes(identity.genre) ? identity.genre : 'Fantasy';
@@ -14008,7 +14020,7 @@ function buildPlayerIdentityHtml(creator) {
                 </select>
             </label>
             <label class="flex1 spe-player-full" data-spe-player-additional-details ${additionalDetailsMode === 'user' ? '' : 'hidden'}>Your character details
-                <textarea id="spe_player_additional_details" class="text_pole" placeholder="Optional background, Earth life, appearance, clothing, training, inventory, origin, or other fixed starting facts.">${escapeHtml(additionalDetails)}</textarea>
+                <textarea id="spe_player_additional_details" class="text_pole" placeholder="${escapeHtml(additionalDetailsPlaceholderFor(genre))}">${escapeHtml(additionalDetails)}</textarea>
             </label>
         </div>
         <div class="spe-player-actions">
@@ -14139,6 +14151,7 @@ function bindPlayerSetupCardEvents(card, context = getContext()) {
         input.addEventListener('input', syncDraft);
         input.addEventListener('change', syncDraft);
     });
+    card.querySelector('#spe_player_genre')?.addEventListener('change', updateOptionalFields);
     card.querySelector('#spe_player_race')?.addEventListener('change', updateOptionalFields);
     card.querySelector('#spe_player_race_description_mode')?.addEventListener('change', updateOptionalFields);
     card.querySelector('#spe_player_additional_details_mode')?.addEventListener('change', updateOptionalFields);
@@ -14287,6 +14300,12 @@ function updatePlayerIdentityOptionalFields(card) {
     card.querySelectorAll('[data-spe-player-custom-race]').forEach(element => { element.hidden = !raceIsCustom; });
     card.querySelectorAll('[data-spe-player-race-description]').forEach(element => { element.hidden = !(raceIsCustom && raceDescriptionMode === 'user'); });
     card.querySelectorAll('[data-spe-player-additional-details]').forEach(element => { element.hidden = additionalDetailsMode !== 'user'; });
+    // The hint mentions Earth life only for Isekai, so it has to follow the genre select rather
+    // than stay at whatever was baked in when the card was rendered.
+    const detailsInput = card.querySelector('#spe_player_additional_details');
+    if (detailsInput) {
+        detailsInput.placeholder = additionalDetailsPlaceholderFor(card.querySelector('#spe_player_genre')?.value);
+    }
 }
 
 

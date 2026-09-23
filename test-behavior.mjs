@@ -20515,6 +20515,42 @@ const tests = [
     },
   },
   {
+    name: '49b the details hint mentions Earth life only for Isekai and follows the genre select',
+    run() {
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+
+      // Execute the shipped helper rather than re-implementing its logic here.
+      const constantLines = source.match(/const ADDITIONAL_DETAILS_PLACEHOLDER(?:_ISEKAI)? = '[^']*';/g) || [];
+      const helperSource = source.match(/function additionalDetailsPlaceholderFor\(genre\) \{[\s\S]*?\n\}/)?.[0];
+      assert.equal(constantLines.length, 2, 'both placeholder constants must exist');
+      assert.ok(helperSource, 'additionalDetailsPlaceholderFor must exist');
+      const placeholderFor = new Function(`${constantLines.join('\n')}\n${helperSource}\nreturn additionalDetailsPlaceholderFor;`)();
+
+      // Isekai is the one genre where the character had an Earth life to describe.
+      assert.match(placeholderFor('Isekai'), /Earth life/);
+      assert.doesNotMatch(placeholderFor('Fantasy'), /Earth life/);
+      assert.match(placeholderFor('isekai'), /Earth life/);
+      assert.match(placeholderFor('ISEKAI'), /Earth life/);
+      assert.match(placeholderFor('  Isekai  '), /Earth life/);
+      // Anything unusable falls back to the plain hint instead of leaking the Isekai wording.
+      for (const value of [undefined, null, '', '   ', 'Cyberpunk', 'Isekai-ish']) {
+        assert.doesNotMatch(placeholderFor(value), /Earth life/, `unexpected Earth life for ${JSON.stringify(value)}`);
+      }
+      // Every real genre except Isekai stays clean.
+      const genreBlock = source.match(/const PLAYER_GENRE_CHOICES = Object\.freeze\(\[\n([\s\S]*?)\n\]\);/)?.[1] || '';
+      const genres = [...genreBlock.matchAll(/'([^']+)'/g)].map(match => match[1]);
+      assert.ok(genres.length >= 14, `expected the genre list, found ${genres.length}`);
+      assert.deepEqual(genres.filter(genre => /Earth life/.test(placeholderFor(genre))), ['Isekai']);
+
+      // The textarea interpolates the helper, and no baked literal survives anywhere.
+      assert.match(source, /id="spe_player_additional_details" class="text_pole" placeholder="\$\{escapeHtml\(additionalDetailsPlaceholderFor\(genre\)\)\}"/);
+      assert.doesNotMatch(source, /placeholder="Optional background, Earth life/);
+      // And the hint has to follow a genre change made after the card is already on screen.
+      assert.match(source, /detailsInput\.placeholder = additionalDetailsPlaceholderFor\(card\.querySelector\('#spe_player_genre'\)\?\.value\)/);
+      assert.match(source, /card\.querySelector\('#spe_player_genre'\)\?\.addEventListener\('change', updateOptionalFields\)/);
+    },
+  },
+  {
     name: '50 character progression settings, gating, and persona edits are wired',
     run() {
       const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
