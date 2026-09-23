@@ -4342,6 +4342,13 @@ function normalizePlayerCreatorSetupState(creator) {
     if (stage === 'reroll' || stage === 'swap') {
         next.stage = 'stats';
     }
+    // A sheet generated before the Story Hook rename still carries the old heading, and approving it
+    // would fail validation. Migrate it on read so a pending review survives the update: this runs
+    // from getPlayerRoot, so the rewrite reaches the Review card and the approve path alike, and the
+    // guard makes it a no-op from the second pass onward.
+    if (typeof next.sheetText === 'string' && next.sheetText.includes('# CHARACTER ANCHORS')) {
+        next.sheetText = next.sheetText.replaceAll('# CHARACTER ANCHORS', '# STORY HOOK');
+    }
     if (next.stage !== 'offer' && next.stage !== 'approved') {
         next.flow = next.flow === 'persona' ? 'persona' : 'new';
         const isStatsStage = next.stage === 'stats';
@@ -15442,6 +15449,18 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
     const sexInstruction = buildNewCharacterSexInstruction(identity);
     const additionalDetailsInstruction = buildNewCharacterAdditionalDetailsInstruction(identity);
     const powerProfile = getCharacterSheetPowerProfile(genre);
+    // A new non-Isekai character gets one generated Story Hook paragraph. Isekai keeps the legacy
+    // rule, because deterministic rendering already forces the death-and-reincarnation premise in.
+    const anchorInstructions = genre === 'Isekai'
+        ? 'STORY HOOK: include only explicit user-provided durable facts that cannot fit BASIC INFO, APPEARANCE, STATS, NATURAL WEAPONS, ABILITIES, SPELLS, INVENTORY, CURRENCY, or GEAR. Otherwise return an empty array. Do not invent hook content, summarize or repeat another section, interpret stats, add meta-disclaimers, invent unresolved hooks, or restate the selected genre premise. For Isekai, deterministic rendering supplies the required death-and-reincarnation premise.'
+        : [
+            'STORY HOOK: return exactly one entry - one paragraph about this character\'s own situation, in two beats.',
+            'FIRST, a bounded past: one incident, or a short chain of cause and effect, drawn from their race, bloodline, Origin, or prior role. At most three sentences. This is not a biography: do not summarise their upbringing, family history, schooling, or career. Pick the one thing that still matters.',
+            'SECOND, a live opening: something that has recently arrived and reopens it - a letter, a rumour, a summons, a debt falling due, an arrival, a name, a discovery, or a threat. It must make a next step possible without recommending one.',
+            'End the paragraph there. The hook poses a question and must not answer it. State only what has already happened and what is now the case - never what the character wants, intends, plans, vows, decides, fears, resents, feels obliged to do, or will do. The player decides whether to pursue it, and how.',
+            'Be specific and inventive: name the place, the object, the year, and ground it in the race, Origin, and genre so it could not belong to anyone else. Do not name people; describe them by role. Avoid generic revenge, prophecy, chosen-one, and dark-secret framing unless the Origin and genre make it concrete.',
+            'Good: "Ten years ago a band of bandits attacked his village, killing both parents and his siblings. Recently he received an anonymous letter claiming the sender knows the man who ordered the attack." Bad: "...and he swore to hunt the man down and make him pay."',
+        ].join('\n');
     const possessionInstructions = genre === 'Isekai'
         ? [
             'INVENTORY: modern-Earth belongings carried or stowed at the moment of transition only: plausible personal supplies, tools, consumables, documents, containers, travel goods, and other possessions the character could have had before reincarnation. Exclude worn or equipped items and currency. Do not invent fantasy, magical, or new-world supplies, tools, weapons, or equipment unless the user explicitly supplied them.',
@@ -15477,7 +15496,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 `ABILITIES:\n${buildAbilityGenerationRules(`Generate exactly ${PROGRESSION_REQUIRED_ABILITIES} ability entry.`, powerProfile)}\nFit the result to the character's race, body, origin, genre, and concept, but do not turn any stat into an amplified ordinary action. Choose a varied concept rather than copying a stock template or example. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
                 `SPELLS:\n${buildSpellGenerationRules(`Generate exactly ${PLAYER_CREATION_MAX_STARTING_SPELLS} starting spell entry when MND is 7 or higher; otherwise return an empty array.`, powerProfile)}\nFit the result to the selected genre, character, and concept. Choose a varied concept rather than copying a stock template or example. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
                 `${possessionInstructions}\n` +
-                'CHARACTER ANCHORS: include only explicit user-provided durable facts that cannot fit BASIC INFO, APPEARANCE, STATS, NATURAL WEAPONS, ABILITIES, SPELLS, INVENTORY, CURRENCY, or GEAR. Otherwise return an empty array. Do not invent anchor content, summarize or repeat another section, interpret stats, add meta-disclaimers, invent unresolved hooks, or restate the selected genre premise. For Isekai, deterministic rendering supplies the required death-and-reincarnation premise.',
+                `${anchorInstructions}`,
         },
     ];
     const payload = await requestPlayerSetupStructured(prompt, PLAYER_SETUP_SHEET_RESPONSE_LENGTH, generationOptions, {
@@ -15716,7 +15735,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
                 'INVENTORY: preserve explicit carried or stowed items only: supplies, tools, consumables, documents, containers, travel goods, and other possessions not currently worn/equipped. Do not list clothing worn on the body, armor, weapons worn ready, currency, natural weapons, or body armaments here.\n' +
                 'CURRENCY: preserve explicit money only. Normalize obvious fantasy money to sv when possible, such as 12 silver coins -> 12 sv. Do not invent money.\n' +
                 'GEAR: preserve explicit worn, equipped, or immediately ready items only: clothing, armor, boots, cloak, belt, pouches, weapons, sheaths, jewelry, visible tools worn on the body, or other equipped objects. Do not list currency, pack contents, carried supplies, natural weapons, or body anatomy here.\n' +
-                'CHARACTER ANCHORS: preserve only explicit durable persona facts that cannot fit another structured field. Do not duplicate basic information, appearance, stats, natural weapons, abilities, spells, inventory, currency, or gear, and do not add summaries or interpretations.\n\n' +
+                'STORY HOOK: preserve only explicit durable persona facts that cannot fit another structured field. Do not duplicate basic information, appearance, stats, natural weapons, abilities, spells, inventory, currency, or gear, and do not add summaries or interpretations.\n\n' +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
 
                 `EXISTING PERSONA:\n${clipText(persona, 9000)}`,

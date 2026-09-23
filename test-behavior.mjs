@@ -87,7 +87,7 @@ function validCharacterSheet({ stats = { PHY: 8, MND: 7, CHA: 9 }, race = 'Elf',
     INVENTORY: '- Rope',
     CURRENCY: '- 12 sv',
     GEAR: '- Travel clothes',
-    'CHARACTER ANCHORS': `- ${premise}`,
+    'STORY HOOK': premise,
   };
   return CHARACTER_SHEET_HEADINGS.map(heading => `# ${heading}\n${bodies[heading]}`).join('\n\n');
 }
@@ -20322,7 +20322,7 @@ const tests = [
       assert.match(source, /Produce the complete character-sheet data through the required structured output/);
       assert.match(source, /deterministic code owns the final headings, order, labels, name, and locked stats/);
       assert.match(generationSource, /\['BASIC INFO', basicLines\.join\('\\n'\)\]/);
-      assert.match(generationSource, /\['CHARACTER ANCHORS', renderBulletList\(anchors/);
+      assert.match(generationSource, /\['STORY HOOK', mode === 'new' \? renderStoryHook\(anchors\) : renderBulletList\(anchors/);
       assert.match(source, /STAT SHAPE: strongest stats are/);
       assert.match(source, /relative weak point/);
       assert.match(source, /Do not contradict the locked stats/);
@@ -20367,10 +20367,10 @@ const tests = [
       assert.match(source, /CURRENCY: preserve explicit money only/);
       assert.match(source, /12 silver coins -> 12 sv/);
       assert.match(source, /GEAR: preserve explicit worn, equipped, or immediately ready items only/);
-      assert.match(source, /CHARACTER ANCHORS: include only explicit user-provided durable facts that cannot fit BASIC INFO/);
+      assert.match(source, /STORY HOOK: include only explicit user-provided durable facts that cannot fit BASIC INFO/);
       assert.match(source, /Otherwise return an empty array/);
-      assert.match(source, /Do not invent anchor content, summarize or repeat another section, interpret stats, add meta-disclaimers, invent unresolved hooks/);
-      assert.match(source, /CHARACTER ANCHORS: preserve only explicit durable persona facts that cannot fit another structured field/);
+      assert.match(source, /Do not invent hook content, summarize or repeat another section, interpret stats, add meta-disclaimers, invent unresolved hooks/);
+      assert.match(source, /STORY HOOK: preserve only explicit durable persona facts that cannot fit another structured field/);
       assert.doesNotMatch(source, /PLAYER_SEX_CHOICES/);
     },
   },
@@ -22030,6 +22030,87 @@ const tests = [
       const jsonPrompt = appendCharacterSheetOutputInstruction([{ role: 'user', content: 'Build it.' }], 'json', schema);
       assert.match(jsonPrompt.at(-1).content, /CHARACTER-SHEET JSON SCHEMA/);
       assert.match(jsonPrompt.at(-1).content, /"basicInfo"/);
+    },
+  },
+  {
+    name: '62b.1 new non-Isekai characters get one generated Story Hook, and Isekai keeps the legacy rule',
+    run() {
+      const stats = { PHY: 4, MND: 6, CHA: 5 };
+      // A hook that restates Prior Role. The legacy grounding and overlap filters deleted exactly this,
+      // and a specific hook is supposed to be built from the role it names.
+      const hook = 'He is an archivist at the Grand Library of Magic. A grimoire was stolen, he was stripped of his rank, and he was promised reinstatement if he recovers it.';
+      const payload = (anchors, age = 41) => ({
+        basicInfo: {
+          race: 'Human', userNonHuman: 'N', gender: 'Male', age, bloodline: '',
+          origin: 'The university quarter.', priorRoleOrTraining: 'Archivist at the Grand Library of Magic',
+        },
+        appearance: [{ label: 'Height', detail: '5 ft 10 in (178 cm)' }],
+        naturalWeapons: [],
+        abilities: [{ name: 'Perfect Recall', description: 'Recalls any page he has read.' }],
+        spells: [], inventory: ['Satchel'], currency: ['12 sv'], gear: ['Robes'],
+        characterAnchors: anchors,
+      });
+      const options = (genre, extra = {}) => ({ mode: 'new', stats, genre, explicitAnchorSource: '', ...extra });
+      const maxItems = o => buildCharacterSheetSchema(o).properties.characterAnchors.maxItems;
+
+      // The schema asks every non-Isekai genre for one paragraph and leaves Isekai alone.
+      for (const genre of ['Fantasy', 'Cyberpunk', 'Modern', 'Dark Low Fantasy']) {
+        assert.equal(maxItems(options(genre)), 1, `${genre} must ask for exactly one hook`);
+      }
+      assert.equal(maxItems(options('Isekai')), 0, 'a new Isekai character with no notes still forbids anchors');
+      assert.equal(maxItems(options('Isekai', { explicitAnchorSource: 'notes' })), 3, 'Isekai with notes keeps its legacy limit');
+      assert.equal(maxItems({ mode: 'existing', stats, genre: 'Fantasy' }), 48, 'persona conversion keeps its fact list');
+
+      // The hook now survives normalisation instead of being deleted for restating a sheet field.
+      assert.deepEqual(normalizeCharacterSheetPayload(payload([hook]), options('Fantasy')).characterAnchors, [hook]);
+      assert.deepEqual(normalizeCharacterSheetPayload(payload([hook]), options('Cyberpunk')).characterAnchors, [hook]);
+
+      // An over-eager model is tolerated and trimmed rather than blocking character creation.
+      for (const count of [1, 2, 3]) {
+        const sent = Array.from({ length: count }, (_, index) => (index === 0 ? hook : `Filler ${index}.`));
+        assert.equal(normalizeCharacterSheetPayload(payload(sent), options('Fantasy')).characterAnchors.length, 1, `${count} sent must trim to one`);
+      }
+      assert.throws(
+        () => normalizeCharacterSheetPayload(payload([hook, 'Two.', 'Three.', 'Four.']), options('Fantasy')),
+        /characterAnchors may contain at most 3 entries/,
+      );
+
+      // Isekai is untouched: the field stays empty and deterministic rendering supplies the premise.
+      assert.deepEqual(normalizeCharacterSheetPayload(payload([hook]), options('Isekai')).characterAnchors, []);
+      const isekaiRendered = renderCharacterSheet(payload([hook]), options('Isekai'));
+      assert.match(isekaiRendered, /# STORY HOOK\nThe character died on Earth and was reincarnated in another world\./);
+
+      // A hook renders as prose; a preserved persona fact list still renders as bullets.
+      const hooked = renderCharacterSheet(payload([hook]), options('Fantasy'));
+      assert.match(hooked, /# STORY HOOK\nHe is an archivist at the Grand Library of Magic\./);
+      assert.doesNotMatch(hooked, /# STORY HOOK\n- /);
+      const existing = renderCharacterSheet(payload([hook], '41'), { mode: 'existing', stats, genre: 'Fantasy' });
+      assert.match(existing, /# STORY HOOK\n- He is an archivist/);
+
+      // Every mode still satisfies the validator, which now requires the renamed heading.
+      assert.match(assertValidCharacterSheet(hooked, { stats, genre: 'Fantasy' }), /# STORY HOOK/);
+      assert.match(assertValidCharacterSheet(existing, { stats }), /# STORY HOOK/);
+      assert.match(assertValidCharacterSheet(isekaiRendered, { stats, genre: 'Isekai' }), /# STORY HOOK/);
+      assert.ok(CHARACTER_SHEET_HEADINGS.includes('STORY HOOK'));
+      assert.ok(!CHARACTER_SHEET_HEADINGS.includes('CHARACTER ANCHORS'));
+
+      // The prompt carries the two-beat contract for other genres and the legacy rule for Isekai.
+      const source = fs.readFileSync(extensionFile('index.js'), 'utf8');
+      assert.match(source, /const anchorInstructions = genre === 'Isekai'/);
+      assert.match(source, /STORY HOOK: return exactly one entry - one paragraph about this character\\?'s own situation, in two beats\./);
+      assert.match(source, /FIRST, a bounded past: one incident, or a short chain of cause and effect/);
+      assert.match(source, /SECOND, a live opening: something that has recently arrived and reopens it/);
+      assert.match(source, /The hook poses a question and must not answer it/);
+      assert.match(source, /never what the character wants, intends, plans, vows, decides, fears, resents, feels obliged to do, or will do/);
+      assert.match(source, /Do not name people; describe them by role\./);
+      assert.match(source, /and he swore to hunt the man down and make him pay\./);
+      assert.match(source, /STORY HOOK: include only explicit user-provided durable facts/);
+      assert.match(source, /Do not invent hook content/);
+      // The old heading survives only inside the one-time migration for sheets generated before the
+      // rename: the guard and the replacement. Anywhere else it would be a regression.
+      assert.match(source, /next\.sheetText\.includes\('# CHARACTER ANCHORS'\)/);
+      assert.match(source, /next\.sheetText\.replaceAll\('# CHARACTER ANCHORS', '# STORY HOOK'\)/);
+      assert.equal((source.match(/CHARACTER ANCHORS/g) || []).length, 2, 'the old heading must appear only in its own migration');
     },
   },
   {

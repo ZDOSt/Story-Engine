@@ -8,7 +8,7 @@ export const CHARACTER_SHEET_HEADINGS = Object.freeze([
     'INVENTORY',
     'CURRENCY',
     'GEAR',
-    'CHARACTER ANCHORS',
+    'STORY HOOK',
 ]);
 
 export function assertValidCharacterSheet(sheetText, options = {}) {

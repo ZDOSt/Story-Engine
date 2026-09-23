@@ -26,6 +26,36 @@ const STRICT_TOOL_SOURCES = new Set(['openai', 'azure_openai', 'deepseek']);
 const TOOL_FALLBACK_CLIENT_STATUSES = new Set([400, 404, 405, 415, 422]);
 const NEVER_RETRY_TOOL_STATUSES = new Set([401, 403, 408, 409, 425, 429]);
 const ISEKAI_PREMISE = 'The character died on Earth and was reincarnated in another world.';
+// A new non-Isekai character gets one Story Hook paragraph in place of the old optional fact list.
+// The hook describes a situation and then stops: it reports what has happened and what has just
+// arrived, and never decides for the player what to do about it.
+const STORY_HOOK_RULE = 'One paragraph about this character\'s own situation, in two beats. FIRST, a bounded past: one incident, or a short chain of cause and effect, drawn from their race, bloodline, Origin, or prior role. At most three sentences. This is not a biography - do not summarise their upbringing, family history, schooling, or career. Pick the one thing that still matters. SECOND, a live opening: something that has recently arrived and reopens it - a letter, a rumour, a summons, a debt falling due, an arrival, a name, a discovery, or a threat. It must make a next step possible without recommending one. End the paragraph there. The hook poses a question and must not answer it: state only what has already happened and what is now the case, never what the character wants, intends, plans, vows, decides, fears, resents, feels obliged to do, or will do - the player decides whether to pursue it, and how. Be specific and inventive: name the place, the object, the year, and ground it in the race, Origin, and genre so it could not belong to anyone else. Do not name people; describe them by role. Avoid generic revenge, prophecy, chosen-one, and dark-secret framing unless the Origin and genre make it concrete.';
+const STORY_HOOK_LIMIT = 1;
+// The schema asks the model for exactly one entry. The normaliser accepts a few and keeps the first,
+// because blocking an entire character generation over an over-eager model is a far worse outcome
+// than dropping a second paragraph the player never saw.
+const STORY_HOOK_NORMALIZE_LIMIT = 3;
+const LEGACY_ANCHOR_LIMIT = 3;
+const EXISTING_ANCHOR_LIMIT = 48;
+
+// Isekai keeps the original behaviour: the field stays empty because deterministic rendering forces
+// the death-and-reincarnation premise into it. Existing personas keep their preserved fact list.
+//
+// The schema and the normaliser differ in one place on purpose. When a new Isekai character has no
+// user-supplied facts the schema forbids anchors outright, but the normaliser still accepts whatever
+// the model sent and lets the grounding filter empty the list, so a schema violation degrades to an
+// empty section instead of failing generation.
+function anchorSchemaLimit(mode, isNewIsekai, allowNewCharacterAnchors) {
+    if (mode === 'existing') return EXISTING_ANCHOR_LIMIT;
+    if (isNewIsekai) return allowNewCharacterAnchors ? LEGACY_ANCHOR_LIMIT : 0;
+    return STORY_HOOK_LIMIT;
+}
+
+function anchorNormalizeLimit(mode, isNewIsekai, allowNewCharacterAnchors) {
+    if (mode === 'existing') return EXISTING_ANCHOR_LIMIT;
+    if (isNewIsekai) return allowNewCharacterAnchors ? LEGACY_ANCHOR_LIMIT : EXISTING_ANCHOR_LIMIT;
+    return STORY_HOOK_NORMALIZE_LIMIT;
+}
 const EXTRAORDINARY_ABILITY_CONTRACT = 'The ability must grant one qualitatively new capability that ordinary PHY/MND/CHA checks and ordinary actions cannot provide.';
 const GROUNDED_ABILITY_CONTRACT = 'The ability may be a deliberately activated signature technique grounded in exceptional training, expertise, preparation, or genre-appropriate equipment. It must produce one distinctive, concrete effect in the scene; a broad skill label or numerical/stat improvement is not an ability.';
 const APPEARANCE_MARK_PATTERNS = Object.freeze([
@@ -301,12 +331,14 @@ export function buildCharacterSheetSchema(options = {}) {
                 : 'Worn, equipped, or immediately ready items only.'),
             characterAnchors: {
                 ...stringArray(
-                    mode === 'new'
-                        ? (allowNewCharacterAnchors
-                            ? 'Only explicit user-provided durable facts that cannot fit another character-sheet field. Do not invent anchors or repeat other sections. Use an empty array when none are required.'
-                            : 'Must be empty because the user supplied no custom facts that require a character anchor.')
-                        : 'Only explicit durable persona facts that cannot fit another character-sheet field. Do not repeat other sections.',
-                    mode === 'new' ? (allowNewCharacterAnchors ? 3 : 0) : 48,
+                    mode === 'existing'
+                        ? 'Only explicit durable persona facts that cannot fit another character-sheet field. Do not repeat other sections.'
+                        : isNewIsekai
+                            ? (allowNewCharacterAnchors
+                                ? 'Only explicit user-provided durable facts that cannot fit another character-sheet field. Do not invent hook entries or repeat other sections. Use an empty array when none are required.'
+                                : 'Must be empty because the user supplied no custom facts that require a hook entry.')
+                            : STORY_HOOK_RULE,
+                    anchorSchemaLimit(mode, isNewIsekai, allowNewCharacterAnchors),
                 ),
                 minItems: 0,
             },
@@ -445,7 +477,7 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
     const inventory = normalizeStringArray(source.inventory, 'inventory', 48);
     const currency = isNewIsekai ? [] : normalizeStringArray(source.currency, 'currency', 8);
     const gear = normalizeStringArray(source.gear, 'gear', 48);
-    const submittedAnchors = normalizeStringArray(source.characterAnchors, 'characterAnchors', mode === 'new' && allowNewCharacterAnchors ? 3 : 48);
+    const submittedAnchors = normalizeStringArray(source.characterAnchors, 'characterAnchors', anchorNormalizeLimit(mode, isNewIsekai, allowNewCharacterAnchors));
     const representedFacts = [
         race,
         userNonHuman,
@@ -462,9 +494,18 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
         ...currency,
         ...gear,
     ].filter(Boolean);
-    const characterAnchors = mode === 'new'
-        ? filterNewCharacterAnchors(submittedAnchors, explicitAnchorSource, representedFacts)
-        : submittedAnchors;
+    // The Story Hook is generated, not user-supplied, so the grounding and overlap filters that guard
+    // the legacy anchor list are skipped for it: they would delete a hook for restating the role it is
+    // built from, which is exactly what a specific hook does. Isekai keeps the legacy filter path.
+    let characterAnchors;
+    if (isNewIsekai) {
+        characterAnchors = filterNewCharacterAnchors(submittedAnchors, explicitAnchorSource, representedFacts);
+    } else if (mode === 'new') {
+        // Keep the first hook and drop any extra the model volunteered; see STORY_HOOK_NORMALIZE_LIMIT.
+        characterAnchors = submittedAnchors.slice(0, STORY_HOOK_LIMIT);
+    } else {
+        characterAnchors = submittedAnchors;
+    }
 
     return {
         basicInfo: {
@@ -522,7 +563,7 @@ export function renderCharacterSheet(payload, options = {}) {
         ['INVENTORY', renderBulletList(normalized.inventory, mode === 'new' ? 'None' : 'Not specified')],
         ['CURRENCY', renderBulletList(normalized.currency, 'None')],
         ['GEAR', renderBulletList(normalized.gear, mode === 'new' ? 'None' : 'Not specified')],
-        ['CHARACTER ANCHORS', renderBulletList(anchors, mode === 'new' ? 'None' : 'Not specified')],
+        ['STORY HOOK', mode === 'new' ? renderStoryHook(anchors) : renderBulletList(anchors, 'Not specified')],
     ];
     return sections.map(([heading, body]) => `# ${heading}\n${body}`).join('\n\n');
 }
@@ -788,6 +829,13 @@ function factTokens(value) {
 function renderBulletList(items, fallback) {
     const values = items.length ? items : [fallback];
     return values.map(item => `- ${item}`).join('\n');
+}
+
+// A story hook is a paragraph, so it renders as prose rather than a list item: a leading dash reads
+// as one more fact in a list, which is the opposite of what a hook is.
+function renderStoryHook(items) {
+    const values = Array.isArray(items) ? items.filter(Boolean) : [];
+    return values.length ? values.join('\n\n') : 'None';
 }
 
 function renderNamedEntries(items, fallback) {
