@@ -100,7 +100,6 @@ function structuredCharacterSheetPayload(overrides = {}) {
       age: 24,
       bloodline: '',
       origin: 'A mountain trade town',
-      priorRoleOrTraining: 'Courier training',
       ...(overrides.basicInfo || {}),
     },
     appearance: [
@@ -21796,7 +21795,6 @@ const tests = [
       assert.match(schema.properties.appearance.description, /Skin must not assert marks or their absence unless supplied/);
       assert.match(schema.properties.appearance.description, /Face must avoid beauty judgments/);
       assert.match(schema.properties.appearance.description, /Hands must not infer strength, history, skill, or behavior/);
-      assert.match(schema.properties.basicInfo.properties.priorRoleOrTraining.description, /Preserve an explicit user-supplied role faithfully without broadening it/);
       assert.match(schema.properties.inventory.description, /Modern Earth belongings carried or stowed/);
       assert.match(schema.properties.gear.description, /Modern Earth clothing and equipped or worn items/);
       assert.match(schema.properties.currency.description, /Must be an empty array for a new Isekai character/);
@@ -22013,7 +22011,7 @@ const tests = [
       const payload = (origin, age = 41) => ({
         basicInfo: {
           race: 'Human', userNonHuman: 'N', gender: 'Male', age, bloodline: '',
-          origin, priorRoleOrTraining: 'Archivist at the Grand Library of Magic',
+          origin,
         },
         appearance: [{ label: 'Height', detail: '5 ft 10 in (178 cm)' }],
         naturalWeapons: [],
@@ -22113,7 +22111,17 @@ const tests = [
       // Nothing still asks the model for the removed field, and Origin is required in the prompt.
       assert.doesNotMatch(source, /STORY HOOK: return exactly one entry/);
       assert.doesNotMatch(source, /STORY HOOK: preserve only explicit durable persona facts/);
-      assert.match(source, /a required Origin, and prior role or training if relevant\. Origin must never be empty/);
+      assert.match(source, /Origin must never be empty: name the place the character is from and what kind of place it is/);
+      // Prior Role / Training was removed: the sheet records where a character is from, never what they do.
+      assert.match(source, /Origin is where the character is from, not what they do: do not state a profession, an office, a rank/);
+      assert.match(source, /There is no prior role or training field: do not record a profession anywhere on this sheet\./);
+      assert.doesNotMatch(source, /prior role or training if relevant/);
+      assert.doesNotMatch(source, /Prior Role \/ Training/);
+      // And the emitted contract carries neither the field nor its description.
+      assert.equal('priorRoleOrTraining' in schema.properties.basicInfo.properties, false);
+      assert.equal(schema.properties.basicInfo.required.includes('priorRoleOrTraining'), false);
+      assert.doesNotMatch(JSON.stringify(schema), /priorRoleOrTraining|Prior Role/);
+      assert.match(schema.properties.basicInfo.properties.origin.description, /This is where the character is from, not what they do: do not state a profession, an office, a rank, or an obligation binding them\./);
 
       // Approving a sheet replaces the persona description outright, so the text it replaced has to
       // be reachable again. Without this the conversion flow would be destructive with no way back.
@@ -22141,7 +22149,6 @@ const tests = [
       assert.match(source, /sendDefaultChatCompletionToolRequest/);
       assert.match(source, /String\(context\.mainApi \|\| ''\)\.toLowerCase\(\) === 'openai'/);
       assert.match(source, /Include exactly one Height entry containing a numeric measurement/);
-      assert.match(source, /Preserve any explicit user-supplied role faithfully without broadening it into extra expertise, mastery, or unrelated knowledge/);
       assert.match(source, /Build must be one compact physical description without subjective commentary/);
       assert.match(source, /Eyes may state color and fixed physical traits but not a habitual gaze or implied personality/);
       assert.match(source, /Skin may state tone and visible physical qualities but must not assert scars, marks, or their absence unless explicitly supplied/);

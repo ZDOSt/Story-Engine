@@ -19,7 +19,6 @@ const BASIC_INFO_FIELDS = Object.freeze([
     'age',
     'bloodline',
     'origin',
-    'priorRoleOrTraining',
 ]);
 
 const STRICT_TOOL_SOURCES = new Set(['openai', 'azure_openai', 'deepseek']);
@@ -252,11 +251,8 @@ export function buildCharacterSheetSchema(options = {}) {
                         : { type: 'string', description: 'The explicit age as written, or Not specified.' },
                     bloodline: { type: 'string', description: 'A relevant explicit bloodline, or an empty string.' },
                     origin: { type: 'string', description: mode === 'new'
-                        ? 'Where the character is from and what shaped them there: the place, the people, the trade, the obligation. Required for a new character, because the opening scene anchors to it. Never empty.'
+                        ? 'The place the character is from and what kind of place it is: its terrain, its trade, its standing. Required for a new character, because the opening scene anchors to it. Never empty. This is where the character is from, not what they do: do not state a profession, an office, a rank, or an obligation binding them. A place may have a trade of its own - "a muster-town that hires its companies out" describes the town, not the character.'
                         : 'A fixed origin fact, or an empty string.' },
-                    priorRoleOrTraining: { type: 'string', description: mode === 'new'
-                        ? 'One concise fixed prior role or training fact, or an empty string. Preserve an explicit user-supplied role faithfully without broadening it into extra expertise, mastery, or unrelated knowledge.'
-                        : 'The explicit prior role or training fact preserved from the persona, or an empty string.' },
                 },
             },
             appearance: {
@@ -443,7 +439,6 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
             age,
             bloodline: optionalText(basicSource.bloodline),
             origin,
-            priorRoleOrTraining: optionalText(basicSource.priorRoleOrTraining),
         },
         appearance,
         naturalWeapons,
@@ -472,7 +467,6 @@ export function renderCharacterSheet(payload, options = {}) {
         ];
         if (basic.bloodline) basicLines.push(`**Bloodline:** ${basic.bloodline}`);
         if (origin) basicLines.push(`**Origin:** ${origin}`);
-        if (basic.priorRoleOrTraining) basicLines.push(`**Prior Role / Training:** ${basic.priorRoleOrTraining}`);
         return [
             ['BASIC INFO', basicLines.join('\n')],
             ['APPEARANCE', normalized.appearance.length
