@@ -469,6 +469,26 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
     ].join('\n');
 }
 
+// The opening turn's own contract. It lived in index.js and was asserted by a source-match test
+// for its whole history without ever being inserted into a prompt, so the opening had no length
+// limit, no rule anchoring the scene to {{user}}, and no instruction about what not to summarise.
+// It sits here now, beside the formatter that has to send it.
+const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`OPENING CONTRACT:
+Keep the opening between 150 and 300 words.
+
+Narrate ONLY what surrounds {{user}}.
+Narrate ONLY what {{user}} can perceive externally.
+
+Do NOT narrate:
+{{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.
+{{user}} actions such as "you push yourself up" or "you open your eyes."
+
+Do not summarize the character sheet, biography, skills, past, goals, personality, inventory, powers, or private history.
+
+Do not explain the world. Do not summarize lore. Let the scene imply the genre.
+
+End at the first concrete moment where {{user}} can act.`;
+
 export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
     const isekaiOpeningSeed = renderIsekaiOpeningSeed(options?.isekaiOpeningSeed);
@@ -490,6 +510,9 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
                 ? `This is the opening turn of a new ${genreLabel} adventure.`
                 : 'This is the opening turn of a new adventure.',
     ];
+    // The contract governs the whole opening turn, so it is stated before the Origin anchor, the
+    // Isekai seed, and the adventure prompt body rather than after them.
+    lines.push('', PLAYER_ADVENTURE_OPENING_CONTRACT);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
     // Non-Isekai openings anchor to Origin. Isekai has its own seeded opening, so this stays out of
     // that path rather than competing with the arrival beats.
@@ -522,12 +545,10 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
 // instead - a stock opening cannot be inseparable from one specific Origin - and the familiar-hook
 // prohibition blocks the shapes the bare word "hook" would otherwise retrieve on its own.
 //
-// The concern clause is a ban on the observed failure, not a requirement about the player. An earlier
-// sample set a dispute between two other parties in front of {{user}} and left them holding the
-// camera. Asking for someone to be "waiting on" {{user}} would have worked too, but it would have made
-// the narrator assert {{user}}'s obligations and relationships, which agencySeparation and
-// strictEpistemology forbid. Constraining whose business the scene is costs nothing and asserts
-// nothing about {{user}}'s interior.
+// It carries no concern-yourself-with-the-player clause. One existed and was removed: every narrated
+// scene already surrounds {{user}} by contract (PLAYER_ADVENTURE_OPENING_CONTRACT), so the clause was
+// a weaker restatement of a rule the extension already had, and it pushed openings toward whatever
+// the character's sheet said they did for a living.
 function renderOriginOpeningSection(origin) {
     const value = String(origin || '').trim();
     if (!value) return [];
@@ -536,7 +557,6 @@ function renderOriginOpeningSection(origin) {
         'ORIGIN OPENING:',
         `Anchor this opening to {{user}}'s Origin: ${value}`,
         'Open on a hook: a situation already underway that {{user}} can act on. It must be inseparable from that Origin and from this character\'s own circumstances - an opening that could belong to any other character is the wrong one, however good it is on its own.',
-        'The hook must concern {{user}}, not merely happen in front of them. A scene {{user}} is only watching is not a hook.',
         'The hook must be a situation, not a routine. Do not open on {{user}} beginning an ordinary day.',
         'Do not reach for a familiar hook. If it would fit a different character, a different setting, or a different story, it is not this one.',
         'Give {{user}} something to act on, without deciding for the player what they do about it.',

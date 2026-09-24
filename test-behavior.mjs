@@ -20416,14 +20416,66 @@ const tests = [
       assert.match(source, /Do NOT choose a different genre, premise, or opening setup\./);
       assert.match(source, /If NAME REVEAL is present, follow it strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
       assert.doesNotMatch(source, /If an Isekai Opening Seed is present, use that seed as the concrete opening structure/);
-      assert.match(source, /PLAYER_ADVENTURE_OPENING_CONTRACT/);
-      assert.match(source, /Keep the opening short: 150-200 words/);
-      assert.match(source, /Narrate ONLY what surrounds \{\{user\}\}/);
-      assert.match(source, /Narrate ONLY what \{\{user\}\} can perceive externally/);
-      assert.match(source, /\{\{user\}\}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection/);
-      assert.match(source, /\{\{user\}\} actions such as "you push yourself up" or "you open your eyes\."/);
-      assert.match(source, /Do not summarize the character sheet, biography, skills, past, goals, personality, inventory, powers, or private history/);
-      assert.match(source, /Do not explain the world\. Do not summarize lore/);
+      // The opening contract is asserted by RENDERING the intro, not by finding its text in a source
+      // file. It sat in index.js for its whole history guarded by exactly those source matches and was
+      // never once inserted into a prompt: every assertion passed while the opening had no length
+      // limit and no rule anchoring the scene to {{user}}.
+      const contractIntro = formatAdventureIntroNarratorModelPromptContext('GENRE OPENING:', { adventureGenre: 'Fantasy', origin: 'A hill village' });
+      assert.match(contractIntro, /OPENING CONTRACT:/);
+      assert.match(contractIntro, /Keep the opening between 150 and 300 words\./);
+      assert.match(contractIntro, /Narrate ONLY what surrounds \{\{user\}\}\./);
+      assert.match(contractIntro, /Narrate ONLY what \{\{user\}\} can perceive externally\./);
+      assert.match(contractIntro, /\{\{user\}\}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection\./);
+      assert.match(contractIntro, /\{\{user\}\} actions such as "you push yourself up" or "you open your eyes\."/);
+      assert.match(contractIntro, /Do not summarize the character sheet, biography, skills, past, goals, personality, inventory, powers, or private history\./);
+      assert.match(contractIntro, /Do not explain the world\. Do not summarize lore\. Let the scene imply the genre\./);
+      assert.match(contractIntro, /End at the first concrete moment where \{\{user\}\} can act\./);
+      // It precedes everything it governs: the Origin anchor block and the prompt body.
+      assert.ok(contractIntro.indexOf('OPENING CONTRACT:') < contractIntro.indexOf('ORIGIN OPENING:'), 'the contract governs the Origin block');
+      assert.ok(contractIntro.indexOf('OPENING CONTRACT:') < contractIntro.indexOf('GENRE OPENING:'), 'the contract governs the prompt body');
+      // The Isekai path is asserted with a REAL seed and a realistic prompt body, not a placeholder.
+      // The earlier version passed 'GENRE OPENING:' and no seed, so it proved the contract was sent
+      // and nothing about how it composes with the seed and the required beats that follow it.
+      const isekaiSeed = buildIsekaiOpeningSeed({
+        adventureGenre: 'Isekai',
+        prompt: 'Begin.',
+        characterText: '**Age:** 34',
+      });
+      assert.ok(isekaiSeed, 'the Isekai seed must be produced');
+      assert.ok(isekaiSeed.earthTransition && isekaiSeed.newWorldOpening, 'the seed must pair an Earth transition with a new-world opening');
+      const isekaiBody = [
+        'GENRE OPENING:',
+        'You MUST begin in the selected genre: Isekai.',
+        '',
+        'START ADVENTURE REMINDER:',
+        'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup.',
+        'Do NOT skip the required isekai beats. Do NOT choose a different Earth last moment or Isekai opening.',
+      ].join('\n');
+      const contractIsekai = formatAdventureIntroNarratorModelPromptContext(isekaiBody, {
+        adventureGenre: 'Isekai',
+        isekaiOpeningSeed: isekaiSeed,
+      });
+      assert.match(contractIsekai, /OPENING CONTRACT:/);
+      assert.match(contractIsekai, /Keep the opening between 150 and 300 words\./);
+      assert.match(contractIsekai, /Narrate ONLY what surrounds \{\{user\}\}\./);
+      // The seed and its beats survive the contract, and the contract governs from in front of them.
+      assert.match(contractIsekai, /Do NOT skip the required isekai beats/);
+      assert.match(contractIsekai, /Begin the Earth last moment/);
+      assert.ok(contractIsekai.indexOf('OPENING CONTRACT:') < contractIsekai.indexOf('Do NOT skip the required isekai beats'), 'the contract governs the Isekai beats');
+      assert.ok(contractIsekai.indexOf('OPENING CONTRACT:') < contractIsekai.indexOf('START ADVENTURE REMINDER'), 'the contract precedes the reminder');
+      // The seed is rendered into the prompt rather than merely selected.
+      assert.match(contractIsekai, new RegExp(isekaiSeed.newWorldOpening.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      // And the seed stays Isekai-only. Asserted against the generator, not against a rendered
+      // prompt: an earlier version of this check looked for the Earth reminder's absence in a prompt
+      // built from a fixture that never contained it, so it passed no matter what the code did.
+      for (const genre of ['Fantasy', 'Modern', 'Horror', 'Cyberpunk', 'Historical']) {
+        assert.equal(buildIsekaiOpeningSeed({ adventureGenre: genre, prompt: 'Begin.', characterText: '**Age:** 34' }), null, genre + ' must not produce an Isekai seed');
+      }
+      assert.equal(buildIsekaiOpeningSeed({ adventureGenre: 'Isekai' })?.type, 'isekaiOpeningSeed');
+      // The prompt body is Isekai's to carry: the formatter does not invent a seed where none was given.
+      const noSeedIsekai = formatAdventureIntroNarratorModelPromptContext('GENRE OPENING:', { adventureGenre: 'Isekai' });
+      assert.match(noSeedIsekai, /OPENING CONTRACT:/);
+      assert.doesNotMatch(noSeedIsekai, /isekaiOpeningSeed/);
       assert.doesNotMatch(source, /retains previous-life memories/);
       assert.doesNotMatch(source, /Start with a short playable opening scene that clearly belongs to anime isekai, not generic fantasy\./);
       assert.match(source, /show anime isekai through progression, guilds, ranks, skills, dungeons/);
@@ -20521,6 +20573,10 @@ const tests = [
 
       // Isekai is the one genre where the character had an Earth life to describe.
       assert.match(placeholderFor('Isekai'), /Earth life/);
+      // 'training' was in this hint until .158 removed the field. Nothing pinned its absence, so
+      // restoring it passed the whole suite - a hole found by falsifying this very assertion.
+      assert.doesNotMatch(placeholderFor('Isekai'), /training/);
+      assert.doesNotMatch(placeholderFor('Fantasy'), /training/);
       assert.doesNotMatch(placeholderFor('Fantasy'), /Earth life/);
       assert.match(placeholderFor('isekai'), /Earth life/);
       assert.match(placeholderFor('ISEKAI'), /Earth life/);
@@ -20538,6 +20594,30 @@ const tests = [
       // The textarea interpolates the helper, and no baked literal survives anywhere.
       assert.match(source, /id="spe_player_additional_details" class="text_pole" placeholder="\$\{escapeHtml\(additionalDetailsPlaceholderFor\(genre\)\)\}"/);
       assert.doesNotMatch(source, /placeholder="Optional background, Earth life/);
+
+      // The additional-details fallback is the DEFAULT path (additionalDetailsMode defaults to
+      // 'system'), so whatever it names the model will try to produce. It used to name 'training',
+      // 'background' and 'concept': none is a schema key, nothing ever supplied 'concept', and
+      // 'training' contradicted the BASIC INFO line's ban on recording a profession.
+      const detailsFn = source.match(/function buildNewCharacterAdditionalDetailsInstruction\(identity = \{\}\) \{[\s\S]*?\n\}/)?.[0];
+      assert.ok(detailsFn, 'buildNewCharacterAdditionalDetailsInstruction must exist');
+      const detailsInstructionFor = new Function(`${detailsFn}\nreturn buildNewCharacterAdditionalDetailsInstruction;`)();
+
+      const fallback = detailsInstructionFor({ additionalDetailsMode: 'system' });
+      for (const dangling of ['training', 'background', 'concept']) {
+        assert.doesNotMatch(fallback, new RegExp(dangling), `the default path must not ask for ${dangling}`);
+      }
+      // And it must not reopen the profession door the BASIC INFO line closes.
+      assert.match(fallback, /Do not invent a profession, office, rank, or obligation for the character\./);
+      // The real inputs are named; the removed field is not.
+      assert.match(fallback, /chosen race, genre, and stats/);
+      assert.doesNotMatch(fallback, /prior role/i);
+
+      // An empty box still takes the fallback, but a non-empty one takes the locked-notes branch.
+      assert.equal(detailsInstructionFor({ additionalDetailsMode: 'user', additionalDetails: '   ' }), fallback);
+      const locked = detailsInstructionFor({ additionalDetailsMode: 'user', additionalDetails: 'Nine feet tall' });
+      assert.match(locked, /LOCKED USER ADDITIONAL DETAILS:\nNine feet tall/);
+      assert.doesNotMatch(locked, /Do not invent a profession/);
       // And the hint has to follow a genre change made after the card is already on screen.
       assert.match(source, /detailsInput\.placeholder = additionalDetailsPlaceholderFor\(card\.querySelector\('#spe_player_genre'\)\?\.value\)/);
       assert.match(source, /card\.querySelector\('#spe_player_genre'\)\?\.addEventListener\('change', updateOptionalFields\)/);
@@ -22082,7 +22162,11 @@ const tests = [
       assert.match(intro, /Open on a hook: a situation already underway that \{\{user\}\} can act on\./);
       assert.match(intro, /It must be inseparable from that Origin and from this character's own circumstances/);
       assert.match(intro, /an opening that could belong to any other character is the wrong one/);
-      assert.match(intro, /The hook must concern \{\{user\}\}, not merely happen in front of them\. A scene \{\{user\}\} is only watching is not a hook\./);
+      // The concern clause was removed: every narrated scene already surrounds {{user}} by the
+      // opening contract, so the clause restated a rule the extension already had, and pushed
+      // openings toward whatever the character's sheet said they did for a living.
+      assert.doesNotMatch(intro, /must concern \{\{user\}\}/);
+      assert.doesNotMatch(intro, /only watching is not a hook/);
       assert.match(intro, /The hook must be a situation, not a routine\. Do not open on \{\{user\}\} beginning an ordinary day\./);
       assert.match(intro, /Do not reach for a familiar hook\./);
       assert.match(intro, /Give \{\{user\}\} something to act on, without deciding for the player what they do about it\./);

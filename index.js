@@ -277,22 +277,6 @@ const PLAYER_ADVENTURE_GENRE_FRAMES = Object.freeze({
     Historical: 'Genre flavor: show a plausible historical or historically inspired setting through tools, law, custom, class, labor, travel, conflict, technology limits, public life, or social obligation when scene-valid.',
     'Wuxia / Xianxia': 'Genre flavor: show martial or cultivation fiction through honor, danger, rivalry, spiritual pressure, sect or clan influence, debt, beasts, duels, cultivation, immortal politics, or mythic stakes when scene-valid.',
 });
-const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`OPENING CONTRACT:
-Keep the opening short: 150-200 words.
-
-Narrate ONLY what surrounds {{user}}.
-Narrate ONLY what {{user}} can perceive externally.
-
-Do NOT narrate:
-{{user}}'s body, features, clothing, equipment, inventory, abilities, actions, reactions, thoughts, feelings, memories, decisions, or self-inspection.
-{{user}} actions such as "you push yourself up" or "you open your eyes."
-
-Do not summarize the character sheet, biography, skills, past, goals, personality, inventory, powers, or private history.
-
-Do not explain the world. Do not summarize lore. Let the scene imply the genre.
-
-End at the first concrete moment where {{user}} can act.`;
-
 const PLAYER_ADVENTURE_START_REMINDER = String.raw`START ADVENTURE REMINDER:
 Begin the selected-genre opening scene now. Do not explain the setup, instructions, process, or reasoning.
 
@@ -13986,8 +13970,8 @@ function buildPlayerStatsHtml(creator) {
 // The freeform details box describes what the player may pin down. Earth life applies only to
 // Isekai, where the character died on Earth before reincarnating; showing it for every genre
 // implies Earth details belong in the box when they do not.
-const ADDITIONAL_DETAILS_PLACEHOLDER = 'Optional background, appearance, clothing, training, inventory, origin, or other fixed starting facts.';
-const ADDITIONAL_DETAILS_PLACEHOLDER_ISEKAI = 'Optional background, Earth life, appearance, clothing, training, inventory, origin, or other fixed starting facts.';
+const ADDITIONAL_DETAILS_PLACEHOLDER = 'Optional background, appearance, clothing, inventory, origin, or other fixed starting facts.';
+const ADDITIONAL_DETAILS_PLACEHOLDER_ISEKAI = 'Optional background, Earth life, appearance, clothing, inventory, origin, or other fixed starting facts.';
 
 function additionalDetailsPlaceholderFor(genre) {
     return String(genre || '').trim().toLowerCase() === 'isekai'
@@ -15576,7 +15560,11 @@ function buildNewCharacterAdditionalDetailsInstruction(identity = {}) {
             `LOCKED USER ADDITIONAL DETAILS:\n${details}`,
         ].filter(Boolean).join('\n');
     }
-    return 'Generate fitting background, origin, appearance, clothing, training, inventory, and fixed details from the chosen race, genre, stats, and concept.';
+    // Names only what exists: 'background', 'training' and 'concept' were all dangling - no schema
+    // key, no sheet section, and in 'concept's case nothing ever supplied it. 'training' also
+    // contradicted the BASIC INFO line's ban on recording a profession, and this branch is the
+    // default path, so the ban was being undercut on most generations.
+    return 'Generate fitting fixed details from the chosen race, genre, and stats, and fill every required field. Do not invent a profession, office, rank, or obligation for the character.';
 }
 
 function getNewCharacterExplicitAnchorSource(identity = {}) {
