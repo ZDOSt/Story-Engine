@@ -22,7 +22,6 @@ export function assertValidCharacterSheet(sheetText, options = {}) {
     if (expectedRace) validateExpectedRace(sections.get('BASIC INFO'), expectedRace);
 
     if (String(options.genre || '').trim().toLowerCase() === 'isekai') {
-        validateIsekaiPremise(text);
     }
 
     return text;
@@ -104,19 +103,7 @@ function validateNumericAge(basicInfoSection) {
 
 // Exported so the renderer can tell whether a sheet already establishes the premise before deciding
 // to supply one: injecting a premise the sheet already states would say it twice.
-export function sheetEstablishesIsekaiPremise(text) {
-    const value = String(text || '');
-    const hasEarth = /\bEarth(?:'s)?\b/i.test(value);
-    const hasEndedEarthLife = /\b(?:died|death|dead|killed|slain|perished|fatal(?:ly)?|passed\s+away|lost\s+(?:(?:his|her|their|its|the)\s+)?life|final\s+moments?|last\s+moments?|life\s+(?:had\s+)?ended|life\s+was\s+ended)\b/i.test(value);
-    const hasOtherWorldRebirth = /\b(?:reincarnat(?:e|ed|ion)|reborn|transmigrat(?:e|ed|ion)|another\s+world|an?\s+other\s+world|new\s+world)\b/i.test(value);
-    return hasEarth && hasEndedEarthLife && hasOtherWorldRebirth;
-}
 
-function validateIsekaiPremise(text) {
-    if (!sheetEstablishesIsekaiPremise(text)) {
-        throw new Error('Character sheet is invalid: an Isekai sheet must establish an ended Earth life and reincarnation or rebirth in another world.');
-    }
-}
 
 function extractLabeledValues(sectionText, labelPattern) {
     const label = new RegExp(`^${labelPattern}\\s*:\\s*(.+?)\\s*$`, 'i');

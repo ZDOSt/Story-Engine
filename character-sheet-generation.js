@@ -1,4 +1,3 @@
-import { sheetEstablishesIsekaiPremise } from './character-sheet-validation.js';
 
 export const CHARACTER_SHEET_TOOL_NAME = 'submit_character_sheet';
 const ROOT_FIELDS = Object.freeze([
@@ -18,18 +17,15 @@ const BASIC_INFO_FIELDS = Object.freeze([
     'gender',
     'age',
     'bloodline',
-    'origin',
 ]);
 
 const STRICT_TOOL_SOURCES = new Set(['openai', 'azure_openai', 'deepseek']);
 const TOOL_FALLBACK_CLIENT_STATUSES = new Set([400, 404, 405, 415, 422]);
 const NEVER_RETRY_TOOL_STATUSES = new Set([401, 403, 408, 409, 425, 429]);
-const ISEKAI_PREMISE = 'The character died on Earth and was reincarnated in another world.';
 // The opening scene anchors to Origin, so Origin is the one BASIC INFO field a new character must
 // supply. The Story Hook this file used to build was removed: it asked the model to invent a situation
 // at sheet time, before any world existed, and every result came back as a generic administrative
 // puzzle. The opening is now generated at adventure start, where the world state is available.
-const ORIGIN_REQUIRED_MESSAGE = 'basicInfo.origin must describe where the character is from and what shaped them there; the opening scene anchors to it.';
 const EXTRAORDINARY_ABILITY_CONTRACT = 'The ability must grant one qualitatively new capability that ordinary PHY/MND/CHA checks and ordinary actions cannot provide.';
 const GROUNDED_ABILITY_CONTRACT = 'The ability may be a deliberately activated signature technique grounded in exceptional training, expertise, preparation, or genre-appropriate equipment. It must produce one distinctive, concrete effect in the scene; a broad skill label or numerical/stat improvement is not an ability.';
 const APPEARANCE_MARK_PATTERNS = Object.freeze([
@@ -249,10 +245,7 @@ export function buildCharacterSheetSchema(options = {}) {
                     age: mode === 'new'
                         ? { type: 'integer', minimum: 1 }
                         : { type: 'string', description: 'The explicit age as written, or Not specified.' },
-                    bloodline: { type: 'string', description: 'A relevant explicit bloodline, or an empty string.' },
-                    origin: { type: 'string', description: mode === 'new'
-                        ? 'The place the character is from and what kind of place it is: its terrain, its trade, its standing. Required for a new character, because the opening scene anchors to it. Never empty. This is where the character is from, not what they do: do not state a profession, an office, a rank, or an obligation binding them. A place may have a trade of its own - "a muster-town that hires its companies out" describes the town, not the character.'
-                        : 'A fixed origin fact, or an empty string.' },
+                    bloodline: { type: 'string', description: 'One short sentence naming the character\'s lineage: its name, its standing, and what that standing means for them. An empty string when they have no notable line.' },
                 },
             },
             appearance: {
@@ -395,8 +388,6 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
 
     // The opening scene anchors to Origin, so a new character must supply one. Existing personas keep
     // the old lenient rule: a converted card may genuinely not state where its character is from.
-    const origin = optionalText(basicSource.origin);
-    if (mode === 'new' && !origin) throw structureError(ORIGIN_REQUIRED_MESSAGE);
 
     const submittedAppearance = normalizeObjectArray(source.appearance, 'appearance', 32, entry => {
         assertExactKeys(entry, ['label', 'detail'], 'appearance entry');
@@ -438,7 +429,6 @@ export function normalizeCharacterSheetPayload(payload, options = {}) {
             gender: optionalText(basicSource.gender) || 'Not specified',
             age,
             bloodline: optionalText(basicSource.bloodline),
-            origin,
         },
         appearance,
         naturalWeapons,
@@ -455,18 +445,19 @@ export function renderCharacterSheet(payload, options = {}) {
     const stats = normalizeStats(options.stats);
     const normalized = normalizeCharacterSheetPayload(payload, { ...options, mode, stats });
     const basic = normalized.basicInfo;
-    const isIsekai = String(options.genre || '').trim().toLowerCase() === 'isekai';
-
-    const sectionsFor = (origin) => {
+    const sectionsFor = () => {
         const basicLines = [
             '**Name:** {{user}}',
             `**Race:** ${basic.race}`,
+        ];
+        // Bloodline sits directly under Race on purpose: it answers "and what line are you from",
+        // which is the one fact that belongs beside the race rather than four fields below it.
+        if (basic.bloodline) basicLines.push(`**Bloodline:** ${basic.bloodline}`);
+        basicLines.push(
             `**UserNonHuman:** ${basic.userNonHuman}`,
             `**Gender:** ${basic.gender}`,
             `**Age:** ${basic.age}`,
-        ];
-        if (basic.bloodline) basicLines.push(`**Bloodline:** ${basic.bloodline}`);
-        if (origin) basicLines.push(`**Origin:** ${origin}`);
+        );
         return [
             ['BASIC INFO', basicLines.join('\n')],
             ['APPEARANCE', normalized.appearance.length
@@ -483,19 +474,7 @@ export function renderCharacterSheet(payload, options = {}) {
     };
     const render = (sections) => sections.map(([heading, body]) => `# ${heading}\n${body}`).join('\n\n');
 
-    // Origin carries the character's background, and for Isekai that background IS the transition, so
-    // deterministic rendering supplies the premise rather than trusting the model to restate it. This
-    // applies to a converted card as much as to a generated one: validateIsekaiPremise demands the
-    // premise on both paths. It is only added when the rendered sheet does not already establish it,
-    // otherwise a card that states it in its own words would end up saying it twice.
-    const base = sectionsFor(basic.origin);
-    const sheet = render(base);
-    if (!isIsekai || sheetEstablishesIsekaiPremise(sheet)) return sheet;
-
-    const origin = basic.origin && basic.origin.toLowerCase() !== ISEKAI_PREMISE.toLowerCase()
-        ? `${ISEKAI_PREMISE} ${basic.origin}`
-        : ISEKAI_PREMISE;
-    return render(sectionsFor(origin));
+    return render(sectionsFor());
 }
 
 export function describeCharacterSheetRaw(raw) {

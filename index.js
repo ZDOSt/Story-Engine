@@ -4321,13 +4321,6 @@ function pruneRootTrackerSnapshots(root) {
 }
 
 // The approved sheet's Origin line, which the adventure intro anchors the opening scene to. Read back
-// out of the rendered sheet because that is what was approved and written to the persona.
-function getPlayerSheetOrigin(context = getContext()) {
-    const root = getPlayerRoot(context);
-    const sheetText = String(root?.sheet?.text || '');
-    const match = sheetText.match(/^\*\*Origin:\*\*\s*(.+?)\s*$/m);
-    return match ? match[1].trim() : '';
-}
 
 function stripRemovedSheetSections(sheetText) {
     const lines = String(sheetText || '').split('\n');
@@ -13970,8 +13963,8 @@ function buildPlayerStatsHtml(creator) {
 // The freeform details box describes what the player may pin down. Earth life applies only to
 // Isekai, where the character died on Earth before reincarnating; showing it for every genre
 // implies Earth details belong in the box when they do not.
-const ADDITIONAL_DETAILS_PLACEHOLDER = 'Optional background, appearance, clothing, inventory, origin, or other fixed starting facts.';
-const ADDITIONAL_DETAILS_PLACEHOLDER_ISEKAI = 'Optional background, Earth life, appearance, clothing, inventory, origin, or other fixed starting facts.';
+const ADDITIONAL_DETAILS_PLACEHOLDER = 'Optional background, appearance, clothing, inventory, or other fixed starting facts.';
+const ADDITIONAL_DETAILS_PLACEHOLDER_ISEKAI = 'Optional background, Earth life, appearance, clothing, inventory, or other fixed starting facts.';
 
 function additionalDetailsPlaceholderFor(genre) {
     return String(genre || '').trim().toLowerCase() === 'isekai'
@@ -14938,7 +14931,7 @@ function buildProgressionAbilityPrompt(pending, context = getContext()) {
                     `Generate exactly ${PROGRESSION_ABILITY_OPTIONS} meaningfully different replacement ability options.`,
                     powerProfile,
                 ) + '\n\n' +
-                'Adapt each option to the character race, body, origin, selected genre, existing entries, and recent accomplishments. Stats may inform flavor but must never become a stat boost or an amplified ordinary action. Choose varied concepts from that context; do not copy a stock template or repeat an existing concept. ' +
+                'Adapt each option to the character race, body, bloodline, selected genre, existing entries, and recent accomplishments. Stats may inform flavor but must never become a stat boost or an amplified ordinary action. Choose varied concepts from that context; do not copy a stock template or repeat an existing concept. ' +
                 'Runtime mechanics decide dangerous or contested outcomes. On retry, avoid every item in PRIOR RETRY NOTES and produce a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.',
         },
         {
@@ -15512,7 +15505,7 @@ async function generateNewPlayerCharacterSheet(creator, context = getContext()) 
                 `${statInstruction}\n${genreInstruction}\n${nameInstruction}\n${sexInstruction}\n${raceInstruction}\n${additionalDetailsInstruction}\n\n` +
                 `${retryNotes.length ? `PRIOR IDEAS TO AVOID:\n${retryNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}\n\n` : ''}` +
                 'Required structured fields:\n' +
-                'BASIC INFO: Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age as one integer, and a required Origin. Origin must never be empty: name the place the character is from and what kind of place it is - its terrain, its trade, its standing - because the opening scene anchors to it. Origin is where the character is from, not what they do: do not state a profession, an office, a rank, or an obligation binding them. A place may have a trade of its own; that describes the place, not the character. There is no prior role or training field: do not record a profession anywhere on this sheet. Do not include personality, future plans, preferred behavior, or emotional tendencies. Use an empty string only for an inapplicable optional text field.\n' +
+                'BASIC INFO: Race first, then Bloodline directly beneath it as one short sentence naming the character\'s lineage - its name, its standing, and what that standing means for them - or an empty string when they have no notable line. Then UserNonHuman Y/N, Gender, and Age as one integer. There is no origin, prior role, or training field: do not record where the character is from, and do not record a profession, an office, a rank, or an obligation binding them, anywhere on this sheet. Do not include personality, future plans, preferred behavior, or emotional tendencies. Use an empty string only for an inapplicable optional text field.\n' +
                 'APPEARANCE: visible physical facts only: height, build, hair, eyes, skin, clothing, carried look, visible natural weapons/body armaments when the race or body supports them, and other visible features. Return each fact as one concise, objective label/detail pair. Include exactly one Height entry containing a numeric measurement in feet/inches, centimeters, or both; never use relative descriptions, comparisons, age-relative wording, posture, build language, or decorative prose as Height. Build must be one compact physical description without subjective commentary. Eyes may state color and fixed physical traits but not a habitual gaze or implied personality. Skin may state tone and visible physical qualities but must not assert scars, marks, or their absence unless explicitly supplied. Face must use concrete physical features without beauty judgments. Hands must use physical characteristics only and must not infer strength, history, skill, or behavior. Do not invent scars or permanent marks; preserve them only when explicitly supplied by the user. Do not describe behavior, habits, posture-as-personality, emotional reactions, nervous tells, voice behavior, or how the character usually acts. Appearance must reflect PHY when relevant and must not default to lean, wiry, slender, or lithe unless the stat shape and concept justify it.\n' +
                 'NATURAL WEAPONS: concrete offensive body parts only, if any. Use an empty array when the race/body has no clear natural weapon. Natural weapons are body facts, not racial traits, gear, inventory, equipment, held objects, abilities, or spells; they permit physically plausible ordinary bodily attacks but give no mechanical bonus, automatic success, extra damage rule, or special wound rule. Do not write passive traits, resistance, immunity, durability, damage reduction, harder to injure, harder to exhaust, pain tolerance, better senses, night vision, wings, gills, tail unless used as a weapon, better at a skill, better at fighting, better at persuasion, intimidation aura, advantage, dice modifiers, automatic success, conditional mini-abilities, triggered powers, learned expertise, or disguised abilities.\n' +
                 `ABILITIES:\n${buildAbilityGenerationRules(`Generate exactly ${PROGRESSION_REQUIRED_ABILITIES} ability entry.`, powerProfile)}\nFit the result to the character's race, body, origin, genre, and concept, but do not turn any stat into an amplified ordinary action. Choose a varied concept rather than copying a stock template or example. On retry, avoid every item in PRIOR IDEAS TO AVOID and create a genuinely different concept, not a renamed or cosmetically altered version of the last attempt.\n` +
@@ -15615,7 +15608,7 @@ function buildNewCharacterGenreInstruction(identity = {}) {
     const instructions = [
         `Selected genre: ${genre}.`,
         'Use the selected genre as the creative frame for the character concept, setting assumptions, background hooks, abilities or skills, inventory, and tone.',
-        'All races are valid in all genres. Do not reject, avoid, or replace a race because it seems genre-incongruent; reinterpret its origin, traits, social role, gear, and abilities through the selected genre.',
+        'All races are valid in all genres. Do not reject, avoid, or replace a race because it seems genre-incongruent; reinterpret its traits, social role, gear, and abilities through the selected genre.',
         'If race is Random, choose any playable race first, then make the character sheet explain how that race fits the selected genre.',
     ];
     if (genre === 'Isekai') {
@@ -15754,7 +15747,7 @@ async function generateExistingPersonaCharacterSheet(creator, context = getConte
 
                 'Template requirements:\n' +
 
-                'BASIC INFO: Race, Bloodline if relevant, UserNonHuman Y/N, Gender, Age, and Origin. Use explicit persona facts only; otherwise write Not specified for required text fields or an empty string for inapplicable optional fields. Origin is where the character is from, not what they do: record the place, not a profession, an office, or a rank, and do not record a prior role or training anywhere on this sheet.\n' +
+                'BASIC INFO: Race first, then Bloodline directly beneath it as one short sentence naming the character\'s lineage - its name, its standing, and what that standing means for them. Then UserNonHuman Y/N, Gender, and Age. Use explicit persona facts only; otherwise write Not specified for required text fields or an empty string for inapplicable optional fields. Do not record where the character is from, and do not record a profession, an office, a rank, or an obligation binding them, anywhere on this sheet.\n' +
 
                 'APPEARANCE: preserve explicit appearance facts only as plain label/detail pairs, including explicit visible natural weapons/body armaments.\n' +
                 'NATURAL WEAPONS: preserve explicit offensive body parts only: claws, fangs, horns, talons, tusks, stinger, crushing tail, biting jaws, or similar built-in offensive anatomy. Do not invent missing natural weapons. Do not preserve passive racial traits, anatomy, senses, body texture, vulnerabilities, vague toughness, resistance, immunity, skill boosts, better-at wording, or mechanical advantages here.\n' +
@@ -18369,7 +18362,6 @@ async function handleChatCompletionPromptReady(eventData) {
                 nameGeneration,
                 isekaiOpeningSeed,
                 sceneStyleProfile: pendingGeneration.sceneStyleProfile || '',
-                origin: getPlayerSheetOrigin(context),
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);
             const narratorModelContext = formatAdventureIntroNarratorModelPromptContext(adventurePrompt, introOptions);

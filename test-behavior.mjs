@@ -99,7 +99,6 @@ function structuredCharacterSheetPayload(overrides = {}) {
       gender: 'Woman',
       age: 24,
       bloodline: '',
-      origin: 'A mountain trade town',
       ...(overrides.basicInfo || {}),
     },
     appearance: [
@@ -20431,7 +20430,6 @@ const tests = [
       assert.match(contractIntro, /Do not explain the world\. Do not summarize lore\. Let the scene imply the genre\./);
       assert.match(contractIntro, /End at the first concrete moment where \{\{user\}\} can act\./);
       // It precedes everything it governs: the Origin anchor block and the prompt body.
-      assert.ok(contractIntro.indexOf('OPENING CONTRACT:') < contractIntro.indexOf('ORIGIN OPENING:'), 'the contract governs the Origin block');
       assert.ok(contractIntro.indexOf('OPENING CONTRACT:') < contractIntro.indexOf('GENRE OPENING:'), 'the contract governs the prompt body');
       // The Isekai path is asserted with a REAL seed and a realistic prompt body, not a placeholder.
       // The earlier version passed 'GENRE OPENING:' and no seed, so it proved the contract was sent
@@ -21765,7 +21763,7 @@ const tests = [
     run() {
       const stats = { PHY: 8, MND: 7, CHA: 9 };
       // The Isekai premise now lives in Origin, which is what the renderer forces it into.
-      const valid = validCharacterSheet({ stats, race: 'Half-Elf', origin: 'The character died on Earth and was reincarnated in another world.' });
+      const valid = validCharacterSheet({ stats, race: 'Half-Elf' });
       assert.equal(assertValidCharacterSheet(valid, { stats, expectedRace: 'Half-Elf', genre: 'Isekai' }), valid);
       assert.equal(assertValidCharacterSheet(valid, { stats, genre: 'Isekai', requireNumericAge: true }), valid);
       assert.throws(
@@ -21781,9 +21779,12 @@ const tests = [
       const wrongStats = valid.replace('**MND:** 7', '**MND:** 6');
       assert.throws(() => assertValidCharacterSheet(wrongStats, { stats }), /MND: 7/);
       assert.throws(() => assertValidCharacterSheet(valid, { stats, expectedRace: 'Dwarf' }), /selected race "Dwarf"/);
+      // The Isekai premise is no longer required on the sheet, and no longer recognised there. The
+      // opening turn's seeded scene establishes it and the chat carries it from then on, so a sheet
+      // that says nothing about Earth is as valid as one that does.
       const noIsekaiPremise = valid.replace('The character died on Earth and was reincarnated in another world.', 'The character trained as a village guard.');
-      assert.throws(() => assertValidCharacterSheet(noIsekaiPremise, { stats, genre: 'Isekai' }), /ended Earth life/);
-
+      assert.equal(assertValidCharacterSheet(noIsekaiPremise, { stats, genre: 'Isekai' }), noIsekaiPremise);
+      assert.equal(assertValidCharacterSheet(valid, { stats, genre: 'Isekai' }), valid);
       for (const premise of [
         'The character lost their life on Earth and was reincarnated in another world.',
         'The character passed away on Earth and was reborn in another world.',
@@ -21966,14 +21967,11 @@ const tests = [
       assert.match(rendered, /\*\*Race:\*\* Half-Elf/);
       assert.match(rendered, /\*\*Height:\*\* 5 ft 8 in \(173 cm\)/);
       assert.match(rendered, /\*\*PHY:\*\* 9/);
-      assert.match(rendered, /The character died on Earth and was reincarnated in another world\./);
+      // The Origin field is gone, and with it the Isekai premise requirement: the premise is
+      // narrated by the opening turn's seeded scene and lives in the chat from then on, so the
+      // sheet neither carries it nor is validated for it.
+      assert.doesNotMatch(rendered, /\*\*Origin:\*\*/);
       assert.equal(assertValidCharacterSheet(rendered, { stats, expectedRace: 'Half-Elf', genre: 'Isekai', requireNumericAge: true }), rendered);
-
-      // The Isekai premise is injected into Origin by deterministic rendering, exactly once, whether
-      // or not the model supplied one of its own.
-      const noOriginPayload = structuredCharacterSheetPayload({ basicInfo: { ...structuredCharacterSheetPayload().basicInfo, origin: '' } });
-      const noOriginRendered = renderCharacterSheet({ ...noOriginPayload, basicInfo: { ...noOriginPayload.basicInfo, origin: 'The character died on Earth and was reincarnated in another world.' } }, options);
-      assert.equal((noOriginRendered.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
 
 
       const unrequestedScarPayload = structuredCharacterSheetPayload({
@@ -22084,14 +22082,13 @@ const tests = [
     },
   },
   {
-    name: '62b.1 Origin is required for a new character, the opening anchors to it, and Story Hook is gone',
+    name: '62b.1 Bloodline sits under Race, and Origin, Story Hook and the Isekai premise are gone',
     run() {
       const stats = { PHY: 4, MND: 6, CHA: 5 };
       const options = (extra = {}) => ({ mode: 'new', stats, genre: 'Fantasy', explicitAnchorSource: '', ...extra });
-      const payload = (origin, age = 41) => ({
+      const payload = (bloodline, age = 41) => ({
         basicInfo: {
-          race: 'Human', userNonHuman: 'N', gender: 'Male', age, bloodline: '',
-          origin,
+          race: 'Human', userNonHuman: 'N', gender: 'Male', age, bloodline,
         },
         appearance: [{ label: 'Height', detail: '5 ft 10 in (178 cm)' }],
         naturalWeapons: [],
@@ -22106,88 +22103,52 @@ const tests = [
       assert.ok(!CHARACTER_SHEET_HEADINGS.includes('STORY HOOK'));
       assert.ok(!CHARACTER_SHEET_HEADINGS.includes('CHARACTER ANCHORS'));
 
-      // Origin is now the field the opening depends on, so a new character must supply one.
-      assert.match(schema.properties.basicInfo.properties.origin.description, /Required for a new character/);
-      const rendered = renderCharacterSheet(payload('A hill village in the Vald.'), options());
-      assert.match(rendered, /\*\*Origin:\*\* A hill village in the Vald\./);
+            // Origin is gone. Bloodline takes its place directly under Race, as one short sentence of
+      // standing, and nothing on the sheet records a place, a profession, or an Earth life.
+      assert.equal('origin' in schema.properties.basicInfo.properties, false);
+      assert.equal(schema.properties.basicInfo.required.includes('origin'), false);
+      assert.ok(!JSON.stringify(schema).includes('origin'));
+      assert.match(schema.properties.basicInfo.properties.bloodline.description, /naming the character's lineage: its name, its standing, and what that standing means for them/);
+
+      const rendered = renderCharacterSheet(payload('Vaelthari, an ancient noble lineage'), options());
+      assert.doesNotMatch(rendered, /\*\*Origin:\*\*/);
+      assert.match(rendered, /\*\*Race:\*\* Human\n\*\*Bloodline:\*\* Vaelthari, an ancient noble lineage\n\*\*UserNonHuman:\*\*/);
+      // An empty bloodline simply drops the line rather than rendering a blank one.
+      assert.match(renderCharacterSheet(payload(''), options()), /\*\*Race:\*\* Human\n\*\*UserNonHuman:\*\*/);
+      // A payload that still sends an origin is rejected outright rather than silently ignored.
       assert.throws(
-        () => normalizeCharacterSheetPayload(payload(''), options()),
-        /basicInfo\.origin must describe where the character is from/,
+        () => normalizeCharacterSheetPayload({ ...payload('Line'), basicInfo: { ...payload('Line').basicInfo, origin: 'A hill village' } }, options()),
+        /Extra=origin/,
       );
-      assert.throws(
-        () => normalizeCharacterSheetPayload(payload('   '), options()),
-        /basicInfo\.origin must describe where the character is from/,
-      );
-      // Existing personas keep the lenient rule: a converted card may not state an origin at all.
-      const existing = normalizeCharacterSheetPayload(payload('', '41'), { mode: 'existing', stats, genre: 'Fantasy' });
-      assert.equal(existing.basicInfo.origin, '');
-      assert.doesNotMatch(renderCharacterSheet(payload('', '41'), { mode: 'existing', stats, genre: 'Fantasy' }), /\*\*Origin:\*\*/);
-
-      // Isekai: deterministic rendering forces the premise into Origin, without duplicating it and
-      // without discarding an origin the model already supplied.
-      const isekaiOptions = options({ genre: 'Isekai' });
-      // Origin is required for Isekai too, because that is where the Earth life goes; the premise is
-      // prepended to whatever the model supplied rather than replacing it.
-      assert.throws(() => renderCharacterSheet(payload(''), isekaiOptions), /basicInfo\.origin must describe where the character is from/);
-      const withOrigin = renderCharacterSheet(payload('A hill village in the Vald.'), isekaiOptions);
-      assert.match(withOrigin, /\*\*Origin:\*\* The character died on Earth and was reincarnated in another world\. A hill village in the Vald\./);
-      assert.equal((withOrigin.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
-      const modelSuppliedPremise = renderCharacterSheet(payload('The character died on Earth and was reincarnated in another world.'), isekaiOptions);
-      assert.equal((modelSuppliedPremise.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 1);
-      assert.equal(assertValidCharacterSheet(withOrigin, { stats, genre: 'Isekai' }), withOrigin);
-
-      // The premise is only supplied when the sheet does not already establish it, so a card that
-      // states it in its own words keeps that wording instead of saying it twice.
-      const paraphrase = 'She lost her life on Earth and woke in another world.';
-      const statedItsOwnWay = renderCharacterSheet(payload(paraphrase), isekaiOptions);
-      assert.match(statedItsOwnWay, /\*\*Origin:\*\* She lost her life on Earth and woke in another world\./);
-      assert.equal((statedItsOwnWay.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 0);
-      assert.equal(assertValidCharacterSheet(statedItsOwnWay, { stats, genre: 'Isekai' }), statedItsOwnWay);
-
-      // A converted card is held to the same premise rule as a generated one, so the renderer has to
-      // supply it on that path too - otherwise approval fails on a rule the model cannot see.
-      const conversionOptions = { mode: 'existing', stats, genre: 'Isekai' };
-      const converted = renderCharacterSheet(payload('A mountain trade town', '27'), conversionOptions);
-      assert.match(converted, /\*\*Origin:\*\* The character died on Earth and was reincarnated in another world\. A mountain trade town/);
+      // Existing personas take the same shape; there is no lenient branch left to differ from.
+      const existing = normalizeCharacterSheetPayload(payload('Line', '41'), { mode: 'existing', stats, genre: 'Fantasy' });
+      assert.equal('origin' in existing.basicInfo, false);
+      // Isekai is no longer special-cased in the renderer: no premise is injected anywhere.
+      for (const genre of ['Fantasy', 'Isekai']) {
+        const out = renderCharacterSheet(payload('Line'), options({ genre }));
+        assert.doesNotMatch(out, /The character died on Earth and was reincarnated in another world\./);
+        assert.equal(assertValidCharacterSheet(out, { stats, genre }), out);
+      }
+      // And a converted Isekai card is no longer held to a premise rule it cannot see.
+      const converted = renderCharacterSheet(payload('Line', '27'), { mode: 'existing', stats, genre: 'Isekai' });
       assert.equal(assertValidCharacterSheet(converted, { stats, genre: 'Isekai' }), converted);
-      const convertedStating = renderCharacterSheet(payload(paraphrase, '27'), conversionOptions);
-      assert.equal((convertedStating.match(/The character died on Earth and was reincarnated in another world\./g) || []).length, 0);
-      assert.match(convertedStating, /\*\*Origin:\*\* She lost her life on Earth and woke in another world\./);
 
-      // The adventure intro anchors the opening to that Origin, and stays out of the Isekai path
-      // because Isekai already has a seeded opening of its own.
-      const intro = formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: 'Fantasy', origin: 'A hill village in the Vald.' });
-      assert.match(intro, /ORIGIN OPENING:/);
-      assert.match(intro, /Anchor this opening to \{\{user\}\}'s Origin: A hill village in the Vald\./);
-      assert.match(intro, /Open on a hook: a situation already underway that \{\{user\}\} can act on\./);
-      assert.match(intro, /It must be inseparable from that Origin and from this character's own circumstances/);
-      assert.match(intro, /an opening that could belong to any other character is the wrong one/);
-      // The concern clause was removed: every narrated scene already surrounds {{user}} by the
-      // opening contract, so the clause restated a rule the extension already had, and pushed
-      // openings toward whatever the character's sheet said they did for a living.
-      assert.doesNotMatch(intro, /must concern \{\{user\}\}/);
-      assert.doesNotMatch(intro, /only watching is not a hook/);
-      assert.match(intro, /The hook must be a situation, not a routine\. Do not open on \{\{user\}\} beginning an ordinary day\./);
-      assert.match(intro, /Do not reach for a familiar hook\./);
-      assert.match(intro, /Give \{\{user\}\} something to act on, without deciding for the player what they do about it\./);
-      // No menu. A list of options is what made three rounds of the Story Hook converge on one shape.
-      const block = intro.slice(intro.indexOf('ORIGIN OPENING:'), intro.indexOf('GENRE OPENING:'));
-      assert.doesNotMatch(block, /\b(?:a letter|a summons|an arrival|a debt|a rumour|an offer|or a threat)\b/, 'the hook block must not enumerate openings');
-      assert.doesNotMatch(
-        formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: 'Fantasy' }),
-        /ORIGIN OPENING:/,
-        'no origin on record means no anchor block',
-      );
-      assert.doesNotMatch(
-        formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: 'Isekai', origin: 'A hill village in the Vald.' }),
-        /ORIGIN OPENING:/,
-        'Isekai keeps its own seeded opening',
-      );
+      // With no Origin there is no anchor block. The opening is left to the genre frame and the
+      // opening contract, which is what the two samples carrying the least instruction were.
+      for (const genre of ['Fantasy', 'Isekai']) {
+        const intro = formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: genre });
+        assert.doesNotMatch(intro, /ORIGIN OPENING:/, genre + ' must have no Origin anchor block');
+        assert.doesNotMatch(intro, /Anchor this opening to/);
+        // A stale origin passed in by an older caller is ignored rather than rendered.
+        assert.doesNotMatch(
+          formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: genre, origin: 'A hill village in the Vald.' }),
+          /ORIGIN OPENING:|A hill village in the Vald\./,
+        );
+        assert.match(intro, /OPENING CONTRACT:/);
+      }
 
       // The wiring, and the migration that keeps a pre-removal sheet approvable.
       const source = fs.readFileSync(extensionFile('index.js'), 'utf8');
-      assert.match(source, /function getPlayerSheetOrigin\(context = getContext\(\)\)/);
-      assert.match(source, /origin: getPlayerSheetOrigin\(context\)/);
       assert.match(source, /function stripRemovedSheetSections\(sheetText\)/);
       assert.match(source, /CHARACTER ANCHORS\|STORY HOOK/);
       assert.match(source, /stripRemovedSheetSections\(next\.sheetText\)/);
@@ -22195,17 +22156,20 @@ const tests = [
       // Nothing still asks the model for the removed field, and Origin is required in the prompt.
       assert.doesNotMatch(source, /STORY HOOK: return exactly one entry/);
       assert.doesNotMatch(source, /STORY HOOK: preserve only explicit durable persona facts/);
-      assert.match(source, /Origin must never be empty: name the place the character is from and what kind of place it is/);
       // Prior Role / Training was removed: the sheet records where a character is from, never what they do.
-      assert.match(source, /Origin is where the character is from, not what they do: do not state a profession, an office, a rank/);
-      assert.match(source, /There is no prior role or training field: do not record a profession anywhere on this sheet\./);
+      // The prompt names no origin, no prior role and no training, and pairs Bloodline with Race.
+      assert.match(source, /Race first, then Bloodline directly beneath it as one short sentence naming the character/);
+      assert.match(source, /There is no origin, prior role, or training field: do not record where the character is from/);
+      assert.doesNotMatch(source, /BASIC INFO: Race, Bloodline if relevant/);
+      assert.doesNotMatch(source, /\*\*Origin:\*\*/);
       assert.doesNotMatch(source, /prior role or training if relevant/);
       assert.doesNotMatch(source, /Prior Role \/ Training/);
       // And the emitted contract carries neither the field nor its description.
       assert.equal('priorRoleOrTraining' in schema.properties.basicInfo.properties, false);
       assert.equal(schema.properties.basicInfo.required.includes('priorRoleOrTraining'), false);
       assert.doesNotMatch(JSON.stringify(schema), /priorRoleOrTraining|Prior Role/);
-      assert.match(schema.properties.basicInfo.properties.origin.description, /This is where the character is from, not what they do: do not state a profession, an office, a rank, or an obligation binding them\./);
+      assert.doesNotMatch(JSON.stringify(schema), /origin/); // replaced below
+      assert.match(schema.properties.basicInfo.properties.bloodline.description, /naming the character's lineage: its name, its standing, and what that standing means for them/);
 
       // Approving a sheet replaces the persona description outright, so the text it replaced has to
       // be reachable again. Without this the conversion flow would be destructive with no way back.
