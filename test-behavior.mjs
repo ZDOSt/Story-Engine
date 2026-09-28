@@ -20499,10 +20499,31 @@ const tests = [
       assert.doesNotMatch(source, /discovers themselves through play/);
       assert.doesNotMatch(source, /hooded figures chanting|throne room with exposition|white void/i);
       assert.match(source, /const genre = normalizePlayerAdventureGenre\(creator\.identity\?\.genre \|\| 'Fantasy'\)/);
-      assert.match(source, /root\.adventureStartPending = true/);
+      assert.match(source, /root\.adventureStartPending = chatHasNoMessages\(context\)/);
       assert.match(source, /delete root\.adventureStartPrompt/);
       assert.match(source, /data-spe-player-action="back-from-adventure-start"/);
       assert.match(source, /root\.creator = \{\s*\.\.\.clone\(creator\),\s*stage: 'approved'/);
+
+      // The adventure intro belongs only to an empty chat, so arming it requires positive proof of
+      // emptiness. This is the executable half: the helper is pure, so it is extracted and run
+      // rather than matched, and the inverted-default mistake is exactly what it catches.
+      const chatHelper = source.match(/function chatHasNoMessages\(context = getContext\(\)\) \{[\s\S]*?\n\}/)?.[0];
+      assert.ok(chatHelper, 'chatHasNoMessages must exist');
+      const chatHasNoMessages = new Function(`${chatHelper}\nreturn chatHasNoMessages;`)();
+
+      assert.equal(chatHasNoMessages({ chat: [] }), true, 'an empty chat can start an adventure');
+      assert.equal(chatHasNoMessages({ chat: [{ mes: 'a greeting' }] }), false, 'a greeting is already a scene');
+      assert.equal(chatHasNoMessages({ chat: [{ mes: 'a' }, { mes: 'b' }, { mes: 'c' }] }), false, 'an established conversation is already a scene');
+      // An unreadable chat array must read as NOT empty. Arming on undefined would inject an
+      // adventure intro into a live conversation, which is the failure this guards against.
+      assert.equal(chatHasNoMessages({}), false);
+      assert.equal(chatHasNoMessages({ chat: null }), false);
+      assert.equal(chatHasNoMessages({ chat: 'nope' }), false);
+      // And the offer card must say which state the player is in.
+      assert.match(source, /'This chat already has at least one message, so no adventure intro will play\.'/);
+      assert.match(source, /'This chat is empty, so you can start an adventure once your character is ready\.'/);
+      assert.match(source, /const adventureLine = chatHasNoMessages\(context\)/);
+      assert.match(source, /<div class="spe-player-muted">\$\{adventureLine\}<\/div>/);
       assert.match(source, /reseedPlayerTrackerFromPersona\(trackerRoot, context\)/);
       assert.match(source, /function submitPlayerAdventureStartPrompt/);
       assert.match(source, /quiet_prompt: text/);

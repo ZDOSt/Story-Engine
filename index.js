@@ -4696,6 +4696,15 @@ function getPlayerCoreStats(context = getContext()) {
 
 
 
+// The adventure intro belongs only to an empty chat. Any message at all - a pre-made character's
+// greeting, or a conversation already under way - means the scene has its own opening, so arming an
+// adventure would offer to begin a story already begun. Arming therefore requires positive proof of
+// an empty chat: an unreadable chat array reads as not-empty, so the failure mode is a missing
+// adventure rather than a second opening.
+function chatHasNoMessages(context = getContext()) {
+    return Array.isArray(context?.chat) && context.chat.length === 0;
+}
+
 function playerSetupNeeded(context = getContext()) {
     const root = getPlayerRoot(context);
     if (!root || root.disabled) return false;
@@ -13746,8 +13755,14 @@ function buildPlayerSetupCardHtml(root) {
 
 
 function buildPlayerOfferHtml() {
-    const hasPersona = Boolean(getPersonaText(getContext()));
+    const context = getContext();
+    const hasPersona = Boolean(getPersonaText(context));
+    const adventureLine = chatHasNoMessages(context)
+        ? 'This chat is empty, so you can start an adventure once your character is ready.'
+        : 'This chat already has at least one message, so no adventure intro will play.';
     return `
+        <div class="spe-player-muted">${adventureLine}</div>
+
         <div class="spe-player-actions">
             <button class="menu_button" data-spe-player-action="start-new">Create Character</button>
 
@@ -14663,7 +14678,7 @@ async function approvePlayerSheet(root, context = getContext(), actionIdentity =
     root.personaBeforeSetup = root.personaBeforeSetup || personaWrite.previous || '';
     const genre = normalizePlayerAdventureGenre(creator.identity?.genre || 'Fantasy');
     root.adventureGenre = genre;
-    root.adventureStartPending = true;
+    root.adventureStartPending = chatHasNoMessages(context);
     root.adventureStarted = false;
     delete root.adventureStartPrompt;
     delete root.adventureStartPromptCreatedAt;
