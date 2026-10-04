@@ -17321,9 +17321,35 @@ const tests = [
       assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
       assert.match(mainRulesSource, /You MUST describe actions, sensations, and events DIRECTLY as they are/);
       assert.match(mainRulesSource, /This rule applies to narration, not quoted character dialogue/);
-      assert.match(mainRulesSource, /DO NOT use rhetorical negation to describe something/);
-      assert.match(mainRulesSource, /DO NOT use negation-led rhetoric, corrective antithesis, negative anaphora, or category rejection/);
+      assert.match(mainRulesSource, /You never need to tell the reader what a thing is not/);
+      assert.match(mainRulesSource, /DO NOT describe anything by saying what it is not\. Name what is present\./);
+      assert.match(mainRulesSource, /DO NOT use any "not X, but Y" or "not X — Y" construction, in any wording:/);
+      assert.match(mainRulesSource, /"Not dim\. Not bright\. Just wrong\."/);
+      assert.match(mainRulesSource, /DO NOT open consecutive sentences or clauses with "Not" or "No"\./);
       assert.match(mainRulesSource, /DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation/);
+      assert.match(mainRulesSource, /DO NOT reach for negation at a reveal, a transformation, or a moment of awe\./);
+      assert.doesNotMatch(mainRulesSource, /negation-led rhetoric, corrective antithesis, negative anaphora/);
+      assert.doesNotMatch(mainRulesSource, /DO NOT use rhetorical negation to describe something/);
+
+      // Both copies of this rule reach the model: index.js via in_prompt at order 0, and
+      // pre-flight.js via the depth-0 narrator handoff. A change to one that misses the other
+      // leaves the model reading two versions of the same rule in the same prompt, so the
+      // handoff copy is pinned here too rather than trusted to stay in step.
+      const preFlightRulesSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      const handoffRuleSource = preFlightRulesSource.slice(
+        preFlightRulesSource.indexOf('function antiRhetoricalNegation'),
+        preFlightRulesSource.indexOf('function inputChronology'),
+      );
+      assert.match(handoffRuleSource, /function antiRhetoricalNegation\(response, context\):/);
+      assert.match(handoffRuleSource, /You never need to tell the reader what a thing is not/);
+      assert.match(handoffRuleSource, /DO NOT describe anything by saying what it is not\. Name what is present\./);
+      assert.match(handoffRuleSource, /DO NOT use any "not X, but Y" or "not X — Y" construction, in any wording:/);
+      assert.match(handoffRuleSource, /"Not dim\. Not bright\. Just wrong\."/);
+      assert.match(handoffRuleSource, /DO NOT open consecutive sentences or clauses with "Not" or "No"\./);
+      assert.match(handoffRuleSource, /DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation/);
+      assert.match(handoffRuleSource, /DO NOT reach for negation at a reveal, a transformation, or a moment of awe\./);
+      assert.doesNotMatch(handoffRuleSource, /negation-led rhetoric, corrective antithesis, negative anaphora/);
+      assert.doesNotMatch(handoffRuleSource, /DO NOT use rhetorical negation to describe something/);
 
       assert.match(mainRulesSource, /function agencySeparation\(response, input, context\):/);
       assert.match(mainRulesSource, /The human player EXCLUSIVELY controls \{\{user\}\}/);

@@ -1599,12 +1599,18 @@ function strictBehaviorism(response, context): {
 function antiRhetoricalNegation(response, context): {
   MANDATE:
     You MUST describe actions, sensations, and events DIRECTLY as they are, what they do, or what effects they produce.
+    When something cannot be named — an unknown substance, an unearthly light, a sound with no source — describe what it IS and what it DOES: what it looks like, how it moves, what it touches, and what it does to the body, the ground, the air, and the people present. Concrete detail carries the effect. You never need to tell the reader what a thing is not.
     This rule applies to narration, not quoted character dialogue.
 
   STRICTLY PROHIBITED:
-    - DO NOT use rhetorical negation to describe something (e.g. "It is not a column, but a pillar")
-    - DO NOT use negation-led rhetoric, corrective antithesis, negative anaphora, or category rejection, "It is not X, but Y," "Not X—Y," or "Not X. Not Y."
-    - DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation.
+    - DO NOT describe anything by saying what it is not. Name what is present.
+    - DO NOT use any "not X, but Y" or "not X — Y" construction, in any wording:
+      - "It is not a column, but a pillar"
+      - "Not a shout — a roar"
+    - DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation:
+      - "Not dim. Not bright. Just wrong."
+    - DO NOT open consecutive sentences or clauses with "Not" or "No".
+    - DO NOT reach for negation at a reveal, a transformation, or a moment of awe. That is where it is most tempting and where it costs the most: state what is present instead.
 }
 
 function inputChronology(response, input, context): {
