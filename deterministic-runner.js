@@ -4724,6 +4724,20 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         audit,
     });
 
+    // A resolved stealth success means the detector did not perceive {{user}}. NPCAwareOfUser arrives
+    // from the semantic pass, which sources it from the previous narration, so without this a single
+    // narratorial slip ("her eyes land on you") is recorded as fact and silently undoes the roll.
+    // Only an outright Success filters: a Failure is detection, and a Stalemate is deliberately open.
+    const stealthHeld = challengeType === 'stealth'
+        && rollNeeded === 'Y'
+        && outcome?.OutcomeTier === 'Success';
+    const stealthDetectorKeys = new Set(
+        (stealthHeld ? toRealArray(targets.StealthTargets) : []).map(normalizeNameKey),
+    );
+    const resolvedAwareOfUser = stealthDetectorKeys.size
+        ? toRealArray(targets.NPCAwareOfUser).filter(name => !stealthDetectorKeys.has(normalizeNameKey(name)))
+        : toRealArray(targets.NPCAwareOfUser);
+
     const packet = {
         GOAL: goal,
         UserAbilityUse: normalizeUserAbilityUseForHandoff(semantic.userAbilityUse),
@@ -4769,7 +4783,7 @@ function runResolution(ledger, trackerSnapshot, dice, audit, context, refereeCon
         EnvironmentDifficulty: resolvedOppStat === 'ENV' ? environmentDifficulty : 0,
         BenefitedObservers: showNone(targets.BenefitedObservers),
         HarmedObservers: showNone(targets.HarmedObservers),
-        NPCAwareOfUser: showNone(targets.NPCAwareOfUser),
+        NPCAwareOfUser: showNone(resolvedAwareOfUser),
         PowerActors: showNone(targets.PowerActors),
         NPCInScene: showNone(npcInScene),
         UserImpairment: userImpairment,

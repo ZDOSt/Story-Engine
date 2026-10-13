@@ -168,7 +168,7 @@ function ResolutionEngine(input) {
     rule: if rollNeeded=N, OppTargets.NPC=(none) and OppTargets.ENV=(none), but ActionTargets and NPCAwareOfUser may still list direct living interaction/awareness
     rule: StealthTargets requires both an explicit attempt to remain undetected and a specific established living detector; ordinary following, movement, observation, concealment, or quietness without that intent does not qualify
     rule: if StealthTargets is non-empty, it is the authoritative stealth detector list; force rollNeeded=Y and challengeType=stealth, copy every StealthTarget into OppTargets.NPC, and set OppTargets.ENV=(none)
-    rule: stealth does not imply hostility, active resistance, or NPCAwareOfUser; the detector remains absent from NPCAwareOfUser until the scene establishes that {{user}} was noticed
+    rule: stealth does not imply hostility, active resistance, or NPCAwareOfUser; the detector belongs in NPCAwareOfUser only when they perceive {{user}} directly, by noticing, looking at, addressing, or gesturing to {{user}}, and not for unease, alertness, or a reaction to an unexplained disturbance
     rule: if challengeType=social, the social target/opponent must be in ActionTargets and usually OppTargets.NPC
     rule: if challengeType=mundane_combat or supernatural_combat, attacked/challenged living targets must be in ActionTargets and OppTargets.NPC
     rule: if challengeType=restraint or restraintControl.Present=Y, the restrained living NPC must be in ActionTargets and may be in OppTargets.NPC only when deterministic code requires a roll

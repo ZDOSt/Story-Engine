@@ -2995,7 +2995,228 @@ const tests = [
       assert.deepEqual(report.trackerUpdate.npcs.Bandit.currentDisposition, { B: 1, F: 3, H: 2 });
       assert.equal(auditIncludes(report, '3.4c routeDispositionTarget=No Change'), true);
       assert.doesNotMatch(prompt(report), /Terror-led|prioritize escape, surrender/);
-      assert.match(prompt(report), /attemptedActionResults:\nA1: FAILURE - This action FAILS\. It does NOT land, does NOT take hold, and does NOT produce a completed effect\./);
+      // Social failure carries its own wording now, so this pins the intimidate line rather than the
+      // generic one. It must still communicate an outright failure and still forbid partial results.
+      assert.match(prompt(report), /attemptedActionResults:\nA1: FAILURE - Bandit is NOT cowed, and is NOT partially cowed\. Do NOT narrate compliance, fear, deference, or a partial concession they do not have\./);
+    },
+  },
+  {
+    name: '12g.2b a resolved stealth success reads as undetected, strips awareness, and narrows the cast licence',
+    run() {
+      const tracker = {
+        Scout: trackerEntry({
+          currentDisposition: { B: 2, F: 2, H: 2 },
+          currentRapport: 0,
+          dominantLock: 'None',
+          pressureMode: 'none',
+          currentCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 3, MND: 3, CHA: 3 },
+        }),
+      };
+      const report = runCase({
+        userText: 'I slip past the scout, keeping to the shadows so she does not see me.',
+        dice: [18, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'slip past the scout without being seen',
+            identifyChallenge: 'move past the scout undetected',
+            explicitMeans: 'keeping to the shadows',
+            identifyTargets: {
+              ActionTargets: [],
+              StealthTargets: ['Scout'],
+              OppTargets: { NPC: ['Scout'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+              NPCAwareOfUser: ['Scout'],
+            },
+            // rollNeeded is deliberately false: the semantic pass declared a detector without
+            // declaring a roll, so repairStealthTargets() forces the stealth contest. That path runs
+            // sanitizeTargets() with rollNeeded=N first, which leaves the detector in NPCAwareOfUser -
+            // this is the only path where the deterministic extraction is what removes it.
+            rollNeeded: false,
+            rollReason: 'Fresh unresolved stealth attempt.',
+            challengeType: 'stealth',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+        }),
+      });
+
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.OutcomeTier, 'Success');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.challengeType, 'stealth');
+      // The semantic pass claimed the scout noticed {{user}}; a resolved stealth success overrides it.
+      assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.NPCAwareOfUser, ['(none)']);
+      assert.match(prompt(report), /A1: SUCCESS - \{\{user\}\} remains UNDETECTED\. Scout does not see, hear, locate, recognise, address, or react to \{\{user\}\} this beat/);
+      assert.match(prompt(report), /Present but unperceived this beat: Scout\./);
+      assert.doesNotMatch(prompt(report), /It lands or takes hold according to the resolved scene facts\. Do NOT narrate failure, full negation, reversal, or the target simply avoiding it/);
+    },
+  },
+  {
+    name: '12g.2c a failed stealth attempt reads as detected and keeps the detector aware',
+    run() {
+      const tracker = {
+        Scout: trackerEntry({
+          currentDisposition: { B: 2, F: 2, H: 2 },
+          currentRapport: 0,
+          dominantLock: 'None',
+          pressureMode: 'none',
+          currentCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 3, MND: 5, CHA: 3 },
+        }),
+      };
+      const report = runCase({
+        userText: 'I slip past the scout, keeping to the shadows so she does not see me.',
+        dice: [1, 20, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'slip past the scout without being seen',
+            identifyChallenge: 'move past the scout undetected',
+            explicitMeans: 'keeping to the shadows',
+            identifyTargets: {
+              ActionTargets: [],
+              StealthTargets: ['Scout'],
+              OppTargets: { NPC: ['Scout'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+              NPCAwareOfUser: ['Scout'],
+            },
+            // rollNeeded is deliberately false: the semantic pass declared a detector without
+            // declaring a roll, so repairStealthTargets() forces the stealth contest. That path runs
+            // sanitizeTargets() with rollNeeded=N first, which leaves the detector in NPCAwareOfUser -
+            // this is the only path where the deterministic extraction is what removes it.
+            rollNeeded: false,
+            rollReason: 'Fresh unresolved stealth attempt.',
+            challengeType: 'stealth',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+        }),
+      });
+
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.OutcomeTier, 'Failure');
+      // Detection is the whole point of a stealth failure, so awareness must survive untouched.
+      assert.deepEqual(report.finalNarrativeHandoff.resolutionPacket.NPCAwareOfUser, ['Scout']);
+      assert.match(prompt(report), /A1: FAILURE - \{\{user\}\} is DETECTED\. Scout perceives \{\{user\}\} this beat/);
+      assert.doesNotMatch(prompt(report), /Present but unperceived this beat/);
+    },
+  },
+  {
+    name: '12g.2d social reads its tactic, and a bluff is left to claimOrDeception',
+    run() {
+      const diplomacy = runCase({
+        userText: 'I ask the elder to let the caravan through, appealing to her sense of duty.',
+        dice: [18, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'persuade the elder to let the caravan pass',
+            identifyChallenge: 'appeal to duty',
+            explicitMeans: 'appealing to her sense of duty',
+            identifyTargets: {
+              ActionTargets: ['Elder'],
+              StealthTargets: [],
+              OppTargets: { NPC: ['Elder'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            rollReason: 'Fresh unresolved persuasion.',
+            challengeType: 'social',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'diplomacy',
+          },
+        }),
+      });
+      const bluff = runCase({
+        userText: '"The duke sent me," I tell the elder.',
+        dice: [18, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'talk the elder into opening the gate',
+            identifyChallenge: 'claim ducal authority',
+            explicitMeans: '"The duke sent me"',
+            identifyTargets: {
+              ActionTargets: ['Elder'],
+              StealthTargets: [],
+              OppTargets: { NPC: ['Elder'], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            rollReason: 'Fresh unresolved deception.',
+            challengeType: 'social',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'bluff',
+          },
+        }),
+      });
+
+      assert.match(prompt(diplomacy), /A1: SUCCESS - Elder MOVES TOWARD \{\{user\}\}'s position/);
+      assert.doesNotMatch(prompt(diplomacy), /MOVES TOWARD[\s\S]*is AFRAID or COMPLIES/);
+      // Bluff is a factual claim: claimOrDeception owns that verdict, so the social line must not fire.
+      assert.doesNotMatch(prompt(bluff), /MOVES TOWARD \{\{user\}\}'s position|is AFRAID or COMPLIES/);
+    },
+  },
+  {
+    name: '12g.2e a stealth attempt with no living detector drops to no-roll and forbids discovery',
+    run() {
+      const tracker = {
+        Scout: trackerEntry({
+          currentDisposition: { B: 2, F: 2, H: 2 },
+          currentRapport: 0,
+          dominantLock: 'None',
+          pressureMode: 'none',
+          currentCoreStats: { Rank: 'Average', MainStat: 'MND', PHY: 3, MND: 3, CHA: 3 },
+        }),
+      };
+      const report = runCase({
+        userText: 'I creep along the empty corridor, staying out of sight.',
+        dice: [18, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        tracker,
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'move along the corridor unseen',
+            identifyChallenge: 'creep along unseen',
+            explicitMeans: 'staying out of sight',
+            identifyTargets: {
+              ActionTargets: [],
+              // rollNeeded is true and the route is stealth, but no detector is named and no legacy
+              // target stands in for one. repairStealthTargets() then finds nothing to resolve
+              // against and drops the contest itself, which is the only source of this RollReason.
+              StealthTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: true,
+            rollReason: 'Attempt to move unseen.',
+            challengeType: 'stealth',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+        }),
+      });
+
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.RollNeeded, 'N');
+      assert.equal(report.finalNarrativeHandoff.resolutionPacket.challengeType, 'none');
+      assert.match(prompt(report), /A1: NO ROLL - This listed action is not mechanically contested;/);
+      assert.match(prompt(report), /No established detector can perceive \{\{user\}\} this beat: do not introduce one, and do not narrate discovery\./);
+    },
+  },
+  {
+    name: '12g.2f the stealth awareness rule is identical in both prompt documents',
+    run() {
+      // This rule lives in two prompt documents that both reach the model: engines.js (the
+      // ResolutionEngine contract) and semantic-extractor.js (the semantic field guidance). Editing
+      // one and leaving the other makes the two contradict each other in the same prompt.
+      const ruleSentence = 'the detector belongs in NPCAwareOfUser only when they perceive {{user}} directly, by noticing, looking at, addressing, or gesturing to {{user}}, and not for unease, alertness, or a reaction to an unexplained disturbance';
+      const enginesSource = fs.readFileSync(new URL('engines.js', import.meta.url), 'utf8');
+      const extractorSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      assert.match(enginesSource, /rule: stealth does not imply hostility, active resistance, or NPCAwareOfUser;/);
+      assert.ok(enginesSource.includes(ruleSentence), 'engines.js must carry the stealth awareness rule');
+      assert.ok(extractorSource.includes(ruleSentence), 'semantic-extractor.js must carry the same rule verbatim');
+      // The superseded wording must not survive in either document.
+      assert.doesNotMatch(enginesSource, /until the scene establishes that \{\{user\}\} was noticed/);
+      assert.doesNotMatch(extractorSource, /only after the scene establishes that \{\{user\}\} was noticed/);
     },
   },
   {

@@ -1751,6 +1751,16 @@ function narrativeAttemptedActions(resolution = {}, summary = {}) {
     return units.map(unit => `${unit.id}: ${narratorUserMacroText(unit.action)}.`).join('\n');
 }
 
+// Stealth resolves against a specific established living detector, carried on
+// resolutionPacket.StealthTargets. The outcome tier alone cannot describe it: nonHostileOutcome()
+// returns the same { OutcomeTier: 'Success', Outcome: 'success' } for a stealth attempt as it does
+// for a successful persuasion, so the challenge type and the detector list are the only things
+// separating "was not noticed" from "landed or took hold".
+function resolutionLivingNames(value) {
+    const raw = Array.isArray(value) ? value : [];
+    return raw.map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
+}
+
 function narrativeAttemptedActionResults(resolution = {}) {
     const units = narrativeActionUnits(resolution);
     const tier = String(resolution?.OutcomeTier ?? 'NONE');
@@ -1759,7 +1769,47 @@ function narrativeAttemptedActionResults(resolution = {}) {
     if (resolution?.RollNeeded === 'N' || tier === 'NONE' || outcome === 'no_roll') {
         const reason = valueOrNone(resolution?.RollReason);
         const reasonText = isNoneText(reason) ? '' : ` Reason: ${narratorUserMacroText(reason)}.`;
-        return units.map(unit => `${unit.id}: NO ROLL - This listed action is not mechanically contested; narrate ordinary scene continuity only, without inventing success, failure, contest, reversal, or extra resolved effects.${reasonText}`).join('\n');
+        // A stealth attempt with no established detector is dropped to no-roll by repairStealthTargets()
+        // in deterministic-runner.js. That path leaves challengeType=none and StealthTargets empty, so its
+        // RollReason is the only surviving marker that the action was a stealth attempt at all.
+        const stealthNoDetectorText = /no established living detector/i.test(String(resolution?.RollReason ?? ''))
+            ? ' No established detector can perceive {{user}} this beat: do not introduce one, and do not narrate discovery.'
+            : '';
+        return units.map(unit => `${unit.id}: NO ROLL - This listed action is not mechanically contested; narrate ordinary scene continuity only, without inventing success, failure, contest, reversal, or extra resolved effects.${reasonText}${stealthNoDetectorText}`).join('\n');
+    }
+    const stealthDetectors = resolutionLivingNames(resolution?.StealthTargets);
+    if (String(resolution?.challengeType ?? '') === 'stealth' && stealthDetectors.length) {
+        const detector = stealthDetectors.join(', ');
+        if (tier.includes('Failure')) {
+            return units.map(unit => `${unit.id}: FAILURE - {{user}} is DETECTED. ${detector} perceives {{user}} this beat. Narrate the moment of detection directly, and only that moment. Do NOT narrate {{user}} remaining hidden or the detector losing track of them.`).join('\n');
+        }
+        if (tier === 'Stalemate') {
+            return units.map(unit => `${unit.id}: UNRESOLVED - {{user}} is NOT DETECTED, but something has changed and the attempt is unfinished. ${detector} has not perceived {{user}}. Do NOT narrate detection, and do NOT narrate {{user}} as safe.`).join('\n');
+        }
+        return units.map(unit => `${unit.id}: SUCCESS - {{user}} remains UNDETECTED. ${detector} does not see, hear, locate, recognise, address, or react to {{user}} this beat, and does not turn toward them. Anything {{user}} disturbed is attributed to something else, or goes unnoticed. Do NOT narrate discovery, suspicion directed at {{user}}, or the detector acknowledging them.`).join('\n');
+    }
+    // Social reads its own tactic. A bluff is deliberately excluded: it is a factual claim, so
+    // claimOrDeception already describes it margin-band by margin-band and owns that verdict.
+    const socialTactic = String(resolution?.socialTactic ?? '').trim().toLowerCase();
+    if (String(resolution?.challengeType ?? '') === 'social'
+        && (socialTactic === 'diplomacy' || socialTactic === 'intimidate')) {
+        const socialTargets = resolutionLivingNames(resolution?.OppTargets?.NPC);
+        if (socialTargets.length) {
+            const target = socialTargets.join(', ');
+            if (tier.includes('Failure')) {
+                return units.map(unit => socialTactic === 'diplomacy'
+                    ? `${unit.id}: FAILURE - ${target} does NOT move toward {{user}}'s position. Do NOT narrate a concession, a softened agreement, or a counter-offer that leaves the door open. Narrate the refusal, deflection, or counter-pressure directly.`
+                    : `${unit.id}: FAILURE - ${target} is NOT cowed, and is NOT partially cowed. Do NOT narrate compliance, fear, deference, or a partial concession they do not have.`).join('\n');
+            }
+            if (tier === 'Stalemate') {
+                return units.map(unit => socialTactic === 'diplomacy'
+                    ? `${unit.id}: UNRESOLVED - ${target} neither moves toward nor away from {{user}}'s position; the exchange stays open.`
+                    : `${unit.id}: UNRESOLVED - ${target} is neither cowed nor dismissive; the pressure is unresolved and may yet escalate.`).join('\n');
+            }
+            return units.map(unit => socialTactic === 'diplomacy'
+                ? `${unit.id}: SUCCESS - ${target} MOVES TOWARD {{user}}'s position: a concession, a partial agreement, or a counter-offer that leaves the door open. Do NOT narrate warm engagement that concedes nothing, and do NOT narrate an outright refusal.`
+                : `${unit.id}: SUCCESS - ${target} is AFRAID or COMPLIES. Do NOT narrate them dismissing the threat, standing firm, or being unimpressed.`).join('\n');
+        }
     }
     if (tier === 'Stalemate') {
         return units.map(unit => `${unit.id}: UNRESOLVED - This action remains contested or unfinished. Do NOT narrate it fully succeeding, fully failing, landing, taking hold, or producing a completed effect.`).join('\n');
@@ -1898,7 +1948,19 @@ function narrativePresentCharacters(resolution = {}, handoff = {}) {
     if (!names.length) {
         return 'No known/tracked character is required to participate this beat. Known/lore/example/tracker/card characters remain offscreen unless a narrative fact explicitly introduces them. This fact does not introduce new figures.';
     }
-    return `Current scene cast: ${list(names)}. Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn, unless narrativeFacts(input) explicitly introduces a new NPC. Known/lore/example/tracker/card characters not listed are offscreen and must not participate. This fact does not introduce additional figures.`;
+    // "May react" is a licence wide enough to undo a resolved stealth success: the detector is in
+    // the cast, so without this clause nothing stops the narrator having them turn toward {{user}}.
+    // The licence is split rather than withdrawn - they are physically present and keep their own
+    // business; what is removed is reacting to {{user}} specifically. The predicate matches the
+    // runner's NPCAwareOfUser filter exactly, and requires a positive Success so an absent or
+    // unrecognised tier cannot assert that nobody perceived {{user}}.
+    const stealthHeld = String(resolution?.challengeType ?? '') === 'stealth'
+        && String(resolution?.OutcomeTier ?? '') === 'Success';
+    const unperceived = stealthHeld ? resolutionLivingNames(resolution?.StealthTargets) : [];
+    const stealthClause = unperceived.length
+        ? ` Present but unperceived this beat: ${unperceived.join(', ')}. They may continue their own activity, but must not react to {{user}}, turn toward them, acknowledge them, or address them.`
+        : '';
+    return `Current scene cast: ${list(names)}. Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn, unless narrativeFacts(input) explicitly introduces a new NPC. Known/lore/example/tracker/card characters not listed are offscreen and must not participate. This fact does not introduce additional figures.${stealthClause}`;
 }
 
 function narrativeNpcDispositionAndStyleFact(handoff = {}) {
