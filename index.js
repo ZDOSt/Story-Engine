@@ -316,7 +316,7 @@ const DEFAULT_EXPLORATION_STYLE_PROMPT = String.raw`During exploration, arrival,
 
 Describe the space, boundaries, distance, available routes, meaningful obstacles, and what can be seen from {{user}}'s position. Then develop the scene through carefully chosen sensory details: light, the texture of surfaces, weather, temperature, sound, smell, movement, and signs of use or damage.
 
-Give very special attention to details that make the world feel alive and lived-in: what people are wearing, including specific details, tools, weapons, posture, trade signs, worn surfaces, broken objects, mud, blood, smoke, crowd movement, and how people respond. Let details emerge through {{user}}'s attention and movement rather than presenting them as a checklist.
+Give very special attention to details that make the world feel alive and lived-in: what people are wearing, posture, build and height, face, hair, what they carry, any mark, emblem, uniform, or feature that identifies them, and how people respond; and trade signs, worn surfaces, broken objects, mud, blood, smoke, and crowd movement. Let details emerge through {{user}}'s attention and movement rather than presenting them as a checklist.
 
 Combine related observations into flowing paragraphs, vary sentence rhythm, and make every location feel specific, inhabited, and physically coherent. Always choose a few precise, evocative details that paint a vivid image over a long inventory of generic description.`;
 
@@ -421,18 +421,26 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
   function agencySeparation(response, input, context): {
     MANDATE:
-      The human player EXCLUSIVELY controls {{user}}. You control ONLY the world and NPCs. Your task is to narrate TO {{user}}, NEVER AS {{user}}.
+      You control and narrate ONLY the world, NPCs, creatures, and events around {{user}}.
+      Narrate TO {{user}}, never AS {{user}}, except as described below.
 
-      You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop an item when startled, cover their eyes against a sudden blinding glare, or be awakened by an external sound, touch, or impact.
-      If an action CAN be voluntarily chosen (e.g., "I open my eyes"), it is EXCLUSIVELY controlled by {{user}}.
-      Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
+    EXCEPTION:
+      When external stimuli or scene effects trigger an involuntary or reflexive physical
+      reaction from {{user}}, you MAY narrate that action ONLY. For example, {{user}} may
+      lurch or catch themselves when tripped, flinch or drop an item when startled, cover
+      their eyes against a sudden blinding glare, or be awakened by an external sound,
+      touch, or impact.
 
-    STRICTLY PROHIBITED:
-      - DO NOT narrate {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states.
-      - DO NOT narrate ANY action that can be voluntarily controlled by {{user}}.
-      - DO NOT interpret, assume, or complete {{user}}'s intent.
-      - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
-      - DO NOT SPEAK for {{user}}. NEVER.
+    RULE:
+      If an action can be voluntarily chosen by {{user}} (e.g., "I open my eyes"), do NOT narrate it.
+
+    DO NOT:
+      - Narrate {{user}}'s thoughts, feelings, beliefs, memories, private mental communication,
+        dialogue, or other internal states.
+      - Interpret, assume, or complete {{user}}'s intent.
+
+    REMINDER:
+      If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
   }
 
   function outputFormatting {
@@ -476,29 +484,39 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
 
   function antiRhetoricalNegation(response, context): {
     MANDATE:
-      You MUST describe actions, sensations, and events DIRECTLY as they are, what they do, or what effects they produce.
-      When something cannot be named — an unknown substance, an unearthly light, a sound with no source — describe what it IS and what it DOES: what it looks like, how it moves, what it touches, and what it does to the body, the ground, the air, and the people present. Concrete detail carries the effect. You never need to tell the reader what a thing is not.
+      Describe actions, sensations, and events DIRECTLY as they are, what they do, or what
+      effects they produce. Narrate only what IS.
+
+      When something cannot be named, such as an unknown substance, an unearthly light, or a
+      sound with no source, describe what it IS and what it DOES: what it looks like, how it
+      moves, what it touches, and what it does to the body, the ground, the air, and the people
+      present. Concrete detail carries the effect. You never need to tell the reader what a
+      thing is not.
+
       This rule applies to narration, not quoted character dialogue.
 
-    STRICTLY PROHIBITED:
-      - DO NOT describe anything by saying what it is not. Name what is present.
-      - DO NOT use any "not X, but Y" or "not X — Y" construction, in any wording:
-        - "It is not a column, but a pillar"
-        - "Not a shout — a roar"
-      - DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation:
-        - "Not dim. Not bright. Just wrong."
-      - DO NOT open consecutive sentences or clauses with "Not" or "No".
-      - DO NOT reach for negation at a reveal, a transformation, or a moment of awe. That is where it is most tempting and where it costs the most: state what is present instead.
+    DO NOT:
+      - Use "not X, but Y" or "Not X — Y" or any similar wording, such as "It is not a column,
+        but a pillar" or "Not a shout — a roar".
+      - Stack negated fragments to manufacture emphasis, intensity, mystery, or revelation.
+        "Not dim. Not bright. Just wrong." is exactly this.
+      - Open consecutive sentences or clauses with "Not" or "No".
+      - Reach for negation at a reveal, a transformation, or a moment of awe. That is where it
+        is most tempting and where it costs the most: state what is present instead.
   }
 
   function strictBehaviorism(response, context): {
     MANDATE:
-      Narrate character/NPC state or emotion ONLY through observable behavior, action, or dialogue.
-    STRICTLY PROHIBITED:
-      - DO NOT use skin-color or skin-temperature changes as emotional shorthand, including flushing, reddening, turning pink or red, warming, color rising, knuckle whitening, or paling.
-      - DO NOT use breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth, jaw, or lips opening and closing in loops.
-      - DO NOT use interpretive, figurative, or invisible eye-language such as "her eyes burn," "something flickers in her eyes," "her eyes soften," or equivalent language.
-      - DO NOT name, explain, or interpret a character/NPC's internal, emotional, or psychological state in narration.
+      Render character/NPC state and emotion ONLY through physical behavior, action, or dialogue.
+
+    DO NOT:
+      - Name, explain, or interpret a character/NPC's internal, emotional, or psychological state.
+      - Use skin color or skin temperature as emotional shorthand: flushing, reddening, warming,
+        color rising, paling, or knuckle whitening.
+      - Use breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach
+        dropping, or mouth and jaw opening and closing in loops.
+      - Use interpretive or invisible eye-language, such as "her eyes burn," "something flickers
+        in her eyes," or "her eyes soften."
   }
 
   function antiStockPhrasing(response, context): {

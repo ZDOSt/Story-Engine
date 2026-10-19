@@ -17539,18 +17539,26 @@ const tests = [
       assert.match(mainRulesSource, /environments, objects, or characters already established in the scene/);
       assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, mental communication/);
 
+      // These rules are authored as wrapped prose, so the pins read a whitespace-collapsed copy.
+      // Line breaks inside a rule body are cosmetic and must not decide whether an assertion passes.
+      const mainRulesFlat = mainRulesSource.replace(/\s+/g, ' ');
       assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
-      assert.match(mainRulesSource, /You MUST describe actions, sensations, and events DIRECTLY as they are/);
+      assert.match(mainRulesSource, /Describe actions, sensations, and events DIRECTLY as they are, what they do, or what/);
+      assert.match(mainRulesSource, /effects they produce\. Narrate only what IS\./);
       assert.match(mainRulesSource, /This rule applies to narration, not quoted character dialogue/);
-      assert.match(mainRulesSource, /You never need to tell the reader what a thing is not/);
-      assert.match(mainRulesSource, /DO NOT describe anything by saying what it is not\. Name what is present\./);
-      assert.match(mainRulesSource, /DO NOT use any "not X, but Y" or "not X — Y" construction, in any wording:/);
-      assert.match(mainRulesSource, /"Not dim\. Not bright\. Just wrong\."/);
-      assert.match(mainRulesSource, /DO NOT open consecutive sentences or clauses with "Not" or "No"\./);
-      assert.match(mainRulesSource, /DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation/);
-      assert.match(mainRulesSource, /DO NOT reach for negation at a reveal, a transformation, or a moment of awe\./);
+      assert.match(mainRulesFlat, /You never need to tell the reader what a thing is not/);
+      assert.match(mainRulesSource, /Use "not X, but Y" or "Not X — Y" or any similar wording/);
+      assert.match(mainRulesSource, /"Not dim\. Not bright\. Just wrong\." is exactly this\./);
+      assert.match(mainRulesSource, /Open consecutive sentences or clauses with "Not" or "No"\./);
+      assert.match(mainRulesSource, /Stack negated fragments to manufacture emphasis, intensity, mystery, or revelation\./);
+      assert.match(mainRulesSource, /Reach for negation at a reveal, a transformation, or a moment of awe\./);
       assert.doesNotMatch(mainRulesSource, /negation-led rhetoric, corrective antithesis, negative anaphora/);
       assert.doesNotMatch(mainRulesSource, /DO NOT use rhetorical negation to describe something/);
+      // The rule is authored as labelled sections now; STRUCTURED means a reflow cannot silently
+      // drop the exception or the closing reminder that give the prohibition its boundary.
+      for (const label of ['MANDATE:', 'DO NOT:']) {
+        assert.ok(mainRulesSource.includes(label), 'antiRhetoricalNegation must declare ' + label);
+      }
 
       // Both copies of this rule reach the model: index.js via in_prompt at order 0, and
       // pre-flight.js via the depth-0 narrator handoff. A change to one that misses the other
@@ -17561,28 +17569,83 @@ const tests = [
         preFlightRulesSource.indexOf('function antiRhetoricalNegation'),
         preFlightRulesSource.indexOf('function inputChronology'),
       );
+      const handoffRulesFlat = handoffRuleSource.replace(/\s+/g, ' ');
+      // The handoff carries all three of the rewritten rules, two of them as the last rule in the
+      // document. Each copy is pinned separately so a one-sided edit fails rather than passing.
+      const handoffAllSource = preFlightRulesSource.replace(/\s+/g, ' ');
+      for (const needle of [
+        'You control and narrate ONLY the world, NPCs, creatures, and events around {{user}}',
+        'Narrate TO {{user}}, never AS {{user}}, except as described below',
+        'you MAY narrate that action ONLY',
+        'If an action can be voluntarily chosen by {{user}}',
+        'If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen',
+      ]) {
+        assert.ok(handoffAllSource.includes(needle), 'handoff agencySeparation must carry: ' + needle);
+      }
+      for (const needle of [
+        'Render character/NPC state and emotion ONLY through physical behavior, action, or dialogue',
+        "interpret a character/NPC's internal, emotional, or psychological state",
+        'Use skin color or skin temperature as emotional shorthand',
+        'Use interpretive or invisible eye-language',
+      ]) {
+        assert.ok(handoffAllSource.includes(needle), 'handoff strictBehaviorism must carry: ' + needle);
+      }
+      // Category before instances, in the handoff copy as well.
+      const handoffCategory = handoffAllSource.indexOf("interpret a character/NPC's internal, emotional, or psychological state");
+      const handoffFirstInstance = handoffAllSource.indexOf('Use skin color or skin temperature as emotional shorthand');
+      assert.ok(handoffCategory > 0 && handoffFirstInstance > 0, 'handoff strictBehaviorism must carry both');
+      assert.ok(
+        handoffCategory < handoffFirstInstance,
+        'handoff strictBehaviorism must state the general ban before the instances',
+      );
+      assert.ok(
+        handoffAllSource.includes('You never need to tell the reader what a thing is not'),
+        'handoff antiRhetoricalNegation must keep the naming technique',
+      );
+      assert.doesNotMatch(handoffAllSource, /The human player EXCLUSIVELY controls \{\{user\}\}/);
       assert.match(handoffRuleSource, /function antiRhetoricalNegation\(response, context\):/);
-      assert.match(handoffRuleSource, /You never need to tell the reader what a thing is not/);
-      assert.match(handoffRuleSource, /DO NOT describe anything by saying what it is not\. Name what is present\./);
-      assert.match(handoffRuleSource, /DO NOT use any "not X, but Y" or "not X — Y" construction, in any wording:/);
-      assert.match(handoffRuleSource, /"Not dim\. Not bright\. Just wrong\."/);
-      assert.match(handoffRuleSource, /DO NOT open consecutive sentences or clauses with "Not" or "No"\./);
-      assert.match(handoffRuleSource, /DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation/);
-      assert.match(handoffRuleSource, /DO NOT reach for negation at a reveal, a transformation, or a moment of awe\./);
+      assert.match(handoffRulesFlat, /You never need to tell the reader what a thing is not/);
+      assert.match(handoffRuleSource, /effects they produce\. Narrate only what IS\./);
+      assert.match(handoffRuleSource, /Use "not X, but Y" or "Not X — Y" or any similar wording/);
+      assert.match(handoffRuleSource, /"Not dim\. Not bright\. Just wrong\." is exactly this\./);
+      assert.match(handoffRuleSource, /Open consecutive sentences or clauses with "Not" or "No"\./);
+      assert.match(handoffRuleSource, /Stack negated fragments to manufacture emphasis, intensity, mystery, or revelation\./);
+      assert.match(handoffRuleSource, /Reach for negation at a reveal, a transformation, or a moment of awe\./);
       assert.doesNotMatch(handoffRuleSource, /negation-led rhetoric, corrective antithesis, negative anaphora/);
       assert.doesNotMatch(handoffRuleSource, /DO NOT use rhetorical negation to describe something/);
 
       assert.match(mainRulesSource, /function agencySeparation\(response, input, context\):/);
-      assert.match(mainRulesSource, /The human player EXCLUSIVELY controls \{\{user\}\}/);
-      assert.match(mainRulesSource, /You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects/);
-      assert.match(mainRulesSource, /Any action that can be voluntarily chosen is EXCLUSIVELY controlled by \{\{user\}\}/);
-      assert.match(mainRulesSource, /DO NOT narrate \{\{user\}\}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states./);
+      assert.match(mainRulesSource, /You control and narrate ONLY the world, NPCs, creatures, and events around \{\{user\}\}/);
+      assert.match(mainRulesSource, /Narrate TO \{\{user\}\}, never AS \{\{user\}\}, except as described below/);
+      assert.match(mainRulesSource, /EXCEPTION:/);
+      assert.match(mainRulesSource, /involuntary or reflexive physical/);
+      assert.match(mainRulesSource, /you MAY narrate that action ONLY/);
+      assert.match(mainRulesSource, /RULE:/);
+      assert.match(mainRulesSource, /If an action can be voluntarily chosen by \{\{user\}\}/);
+      assert.match(mainRulesSource, /REMINDER:/);
+      assert.match(mainRulesSource, /If \{\{user\}\} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen\./);
+      assert.match(mainRulesSource, /Narrate \{\{user\}\}'s thoughts, feelings, beliefs, memories, private mental communication,/);
+      // The two superseded phrasings are gone: the invented "human player" party and the
+      // sentence that merely restated the line above it.
+      assert.doesNotMatch(mainRulesSource, /The human player EXCLUSIVELY controls \{\{user\}\}/);
+      assert.doesNotMatch(mainRulesSource, /Any action that can be voluntarily chosen is EXCLUSIVELY controlled by \{\{user\}\}/);
 
       assert.match(mainRulesSource, /function strictBehaviorism\(response, context\):/);
-      assert.match(mainRulesSource, /Narrate character\/NPC state or emotion ONLY through observable behavior, action, or dialogue/);
-      assert.match(mainRulesSource, /DO NOT use skin-color or skin-temperature changes as emotional shorthand/);
-      assert.match(mainRulesSource, /DO NOT use breath or voice hitching\/catching/);
-      assert.match(mainRulesSource, /DO NOT use interpretive, figurative, or invisible eye-language/);
+      assert.match(mainRulesSource, /Render character\/NPC state and emotion ONLY through physical behavior, action, or dialogue/);
+      // The category sentence must precede the instances it governs, so the bullets read as
+      // examples of one rule rather than as an exhaustive list of separate rules.
+      const behaviourCategory = mainRulesFlat.indexOf("interpret a character/NPC's internal, emotional, or psychological state");
+      const firstBehaviourInstance = mainRulesFlat.indexOf('Use skin color or skin temperature as emotional shorthand');
+      assert.ok(behaviourCategory > 0, 'strictBehaviorism must state the general state/emotion ban');
+      assert.ok(firstBehaviourInstance > 0, 'strictBehaviorism must list the skin-color instance');
+      assert.ok(
+        behaviourCategory < firstBehaviourInstance,
+        'strictBehaviorism must state the general ban before the instances that illustrate it',
+      );
+      assert.match(mainRulesSource, /Use skin color or skin temperature as emotional shorthand/);
+      assert.match(mainRulesSource, /Use breath or voice hitching\/catching/);
+      assert.match(mainRulesSource, /Use interpretive or invisible eye-language/);
+      assert.doesNotMatch(mainRulesSource, /DO NOT use skin-color or skin-temperature changes as emotional shorthand/);
 
       assert.match(mainRulesSource, /function antiStockPhrasing\(response, context\):/);
       assert.match(mainRulesSource, /You MUST describe the exact action, sound, movement, object, or physical condition in the scene using DIRECT, SPECIFIC language/);
@@ -17632,6 +17695,142 @@ const tests = [
       assert.match(indexSource, /barely above a whisper/);
       assert.match(indexSource, /barely above a breath/);
       assert.match(indexSource, /knuckle whitening/);
+    },
+  },
+  {
+    name: '46b the handoff carries a digest, and every digest quotes its own rule verbatim',
+    run() {
+      const preFlight = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      const decl = preFlight.indexOf('function renderControlEngineNarrativeContract()');
+      const open = preFlight.indexOf('`', decl);
+      const close = preFlight.indexOf('`;', open);
+      const contract = preFlight.slice(open + 1, close);
+
+      // Split the literal into its rule chunks and pair each with its DIGEST block.
+      const chunks = contract.slice(contract.indexOf('\nfunction ') + 1).split(/\n(?=function )/);
+      // nameReveal and narrativeFacts exist only in the mirror, so they keep their full text and
+      // carry no digest. Only the twelve mirrored rules are summarised.
+      assert.equal(chunks.length, 14, 'the handoff contract must carry 14 rules');
+      const MIRROR_ONLY = ['nameReveal', 'narrativeFacts'];
+
+      const digestBlocks = [];
+      for (const chunk of chunks) {
+        const name = chunk.match(/^function (\w+)/)?.[1];
+        assert.ok(name, 'every chunk must open with a named rule');
+        if (MIRROR_ONLY.includes(name)) {
+          // These keep their full text verbatim; a digest here would be a change to the rule.
+          assert.equal(chunk.indexOf('DIGEST:'), -1, name + ' is mirror-only and must NOT carry a digest');
+          continue;
+        }
+        const at = chunk.indexOf('DIGEST:');
+        assert.ok(at > 0, name + ' must declare a DIGEST block');
+        const lines = chunk.slice(at).split('\n');
+        const block = [lines[0]];
+        for (const line of lines.slice(1)) {
+          if (!/^ {4}\S/.test(line)) break;
+          block.push(line);
+        }
+        digestBlocks.push({ name, block: block.join(' ') });
+        const digestFlat = block.join(' ').replace(/\s+/g, ' ').trim().replace(/^DIGEST:\s*/, '');
+
+        // The correlation invariant: the digest must OPEN with the rule's own MANDATE sentence,
+        // verbatim, so the reminder is a recurrence of that rule rather than a paraphrase of it.
+        const body = chunk.replace(/\s+/g, ' ');
+        const mandateAt = body.indexOf('MANDATE:');
+        const mandate = body.slice(mandateAt + 8).trim();
+        const firstSentence = mandate.slice(0, mandate.indexOf('. ') + 1).trim();
+        assert.ok(firstSentence.length > 40, name + ' must carry a MANDATE sentence');
+        // The digest opens with a verbatim PREFIX of the rule's own MANDATE, so it reads as the
+        // same rule restated. A prefix rather than the whole sentence because a MANDATE may end in
+        // an enumeration that the digest is meant to condense; the opening words must still match.
+        // outputFormatting's MANDATE is a section label rather than a sentence, so it can only be
+        // checked for carrying the operative formatting content, not for a verbatim opening.
+        // Two rules cannot carry a verbatim MANDATE opening. outputFormatting's MANDATE is a
+        // section label rather than a sentence, and nameReveal's first line is a preface about pool
+        // names; both are checked for their operative content instead.
+        const EXEMPT_FROM_PREFIX = {
+          outputFormatting: ['audible dialogue', 'narration'],
+        };
+        if (EXEMPT_FROM_PREFIX[name]) {
+          for (const needle of EXEMPT_FROM_PREFIX[name]) {
+            assert.ok(digestFlat.includes(needle), name + ' digest must carry: ' + needle);
+          }
+          continue;
+        }
+        const prefix = firstSentence.split(' ').slice(0, 8).join(' ');
+        assert.ok(prefix.length >= 30, name + ' MANDATE prefix must be substantial');
+        assert.ok(
+          digestFlat.startsWith(prefix),
+          name + ' digest must open with the rule MANDATE verbatim: ' + prefix,
+        );
+      }
+
+      // Handoff order is the inverse of the full contract, and the digest preserves it.
+      assert.deepEqual(
+        digestBlocks.map(d => d.name),
+        ['cohesiveSceneBeats', 'denotativePhysicality', 'embodiedPerception', 'diegeticPhysicality',
+         'strictEpistemology', 'antiStockPhrasing', 'strictBehaviorism', 'antiRhetoricalNegation',
+         'inputChronology', 'dialogueTurn', 'outputFormatting', 'agencySeparation'],
+        'the digest must keep the handoff rule order',
+      );
+
+      // index.js is the engine prompt and keeps the full rules; it must never carry a digest.
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const ixStart = indexSource.indexOf('const DEFAULT_PROSE_RULES_PROMPT');
+      const ixBody = indexSource.slice(ixStart, indexSource.indexOf('const DEFAULT_SETTINGS', ixStart));
+      assert.equal(ixBody.includes('DIGEST:'), false, 'index.js must never carry a digest');
+
+      // A digest may not quietly grow back into the full rule.
+      const digestText = contract.slice(0, contract.indexOf('\nfunction ')).trimEnd()
+        + '\n\n' + digestBlocks.map(d => d.block).join('\n\n');
+      assert.ok(digestText.length < 6000, 'the digest must stay under 6,000 characters, got ' + digestText.length);
+    },
+  },
+  {
+    name: '46c the rendered handoff carries the digest and not the full rule text',
+    run() {
+      const report = runCase({
+        userText: 'I look around the room.',
+        dice: [10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ledger: baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'look around the room',
+            identifyChallenge: 'observe the room',
+            explicitMeans: 'looking around',
+            identifyTargets: {
+              ActionTargets: [],
+              StealthTargets: [],
+              OppTargets: { NPC: [], ENV: [] },
+              BenefitedObservers: [],
+              HarmedObservers: [],
+            },
+            rollNeeded: false,
+            rollReason: 'No stakes.',
+            challengeType: 'none',
+            challengeTypeEvidence: 'test fixture',
+            socialTactic: 'none',
+          },
+        }),
+      });
+      const text = prompt(report);
+      assert.match(text, /DIGEST: ALWAYS combine closely related actions, gestures, dialogue/);
+      // Mirror-only rules keep their full text and must still reach the model verbatim.
+      assert.match(text, /narrativeFacts\(input\) is authoritative and immutable for this response\./);
+      assert.match(text, /\{\{user\}\} can see, hear, or touch|Use a proper name ONLY when it is already established/);
+      // The full rule bodies must no longer be present in what the model receives.
+      assert.doesNotMatch(text, /EXAMPLES:\s*\n\s*- Rooms DO NOT breathe/);
+
+      assert.doesNotMatch(text, /barely above a murmur/);
+
+      // The intro turn is a separate call site and is asserted separately, because reverting only
+      // one of the two would otherwise leave the suite green.
+      const introPrompt = formatAdventureIntroNarratorModelPromptContext('Begin the adventure.', {
+        openingContractPrompt: '',
+        genreSelection: null,
+        sceneStyleId: 'neutral',
+      });
+      assert.match(introPrompt, /DIGEST: ALWAYS combine closely related actions, gestures, dialogue/);
+      assert.doesNotMatch(introPrompt, /barely above a murmur/);
     },
   },
   {

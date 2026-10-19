@@ -500,7 +500,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         '#1 - PROSE RULES',
         'Execute renderControlEngine(input) as a hard constraint on the response.',
         '',
-        renderControlEngineNarrativeContract(),
+        renderControlEngineNarrativeDigest(),
         '',
         ...renderSceneStyleProfileSection(options),
         promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
@@ -1444,7 +1444,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '#1 - PROSE RULES',
         'Execute renderControlEngine(input) as a hard constraint on the response.',
         '',
-        renderControlEngineNarrativeContract(),
+        renderControlEngineNarrativeDigest(),
         '',
         ...renderGenreLensSection(options),
         ...renderEconomyLensSection(options),
@@ -1504,6 +1504,36 @@ function promptLooksIsekai(prompt = '') {
     return /\bselected genre:\s*isekai\b/i.test(String(prompt || ''));
 }
 
+// The handoff carries a digest, not the full rule text. Every rule above declares its own
+// DIGEST block, and this function extracts those blocks from the very same literal, so the
+// reminder cannot paraphrase the rule it summarises. A rule that loses its DIGEST disappears
+// from the reminder, which the handoff test catches rather than leaving it to a reader.
+function renderControlEngineNarrativeDigest() {
+    const contract = renderControlEngineNarrativeContract();
+    const firstRule = contract.indexOf('\nfunction ');
+    const preamble = contract.slice(0, firstRule).trimEnd();
+    const digests = [];
+    for (const chunk of contract.slice(firstRule).split(/\n(?=function )/)) {
+        const body = chunk.trimEnd();
+        const start = body.indexOf('DIGEST:');
+        if (start < 0) {
+            // Rules that exist only in the mirror keep their full text: they have no counterpart in
+            // the engine prompt, so summarising them would be the only statement of the rule.
+            digests.push(body);
+            continue;
+        }
+        const lines = body.slice(start).split('\n');
+        const block = [lines[0]];
+        for (const line of lines.slice(1)) {
+            if (!/^ {4}\S/.test(line)) break;
+            block.push(line);
+        }
+        digests.push(block.join('\n'));
+    }
+    if (!digests.length) throw new Error('Story Engine narrator digest is empty; every rule must declare a DIGEST.');
+    return `${preamble}\n\n${digests.join('\n\n')}`;
+}
+
 function renderControlEngineNarrativeContract() {
     return String.raw`NARRATOR PROSE RULES
 
@@ -1517,6 +1547,10 @@ narrativeFacts(input) fixes what happened. These rules fix how it is written, an
 never change what happened.
 
 function cohesiveSceneBeats(response, context): {
+  DIGEST: ALWAYS combine closely related actions, gestures, dialogue, and immediate consequences
+    when they belong to the same event into one fluid, readable scene beat. Never invent
+    movement, gestures, or reactions to make prose feel active, and never split one physical
+    event into staccato sentences or body-cue pileups.
   MANDATE:
     ALWAYS combine closely related actions, gestures, dialogue, and immediate consequences when they belong to the same event into one fluid, readable scene beat.
     Use natural connective prose and clear temporal flow so each event leads naturally into the next.
@@ -1526,6 +1560,9 @@ function cohesiveSceneBeats(response, context): {
 }
 
 function denotativePhysicality(response, context): {
+  DIGEST: You MUST narrate using LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be
+    DIRECTLY perceived in the scene. No metaphor, simile, personification, or figurative
+    narration, and never give inanimate things agency, intention, awareness, memory, or feeling.
   MANDATE:
     You MUST narrate using LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived in the scene.
     Describe objects, weather, architecture, and atmosphere ONLY through their physical state, movement, or concrete effects. Express abstract conditions ONLY through concrete, observable evidence.
@@ -1542,6 +1579,10 @@ function denotativePhysicality(response, context): {
 }
 
 function embodiedPerception(response, context): {
+  DIGEST: ALWAYS narrate ONLY what {{user}} can see, hear, or touch from their physical position.
+    Never narrate smell or taste, and never attach either to air, room, or atmosphere. The only
+    exceptions are an explicit act of smelling, tasting, eating, or drinking, or an unavoidable
+    close-range physical source.
   MANDATE:
     ALWAYS narrate ONLY what {{user}} can see, hear, or touch from their physical position.
   STRICTLY PROHIBITED:
@@ -1555,6 +1596,9 @@ function embodiedPerception(response, context): {
 }
 
 function diegeticPhysicality(response, context): {
+  DIGEST: ALWAYS narrate ONLY the OBSERVABLE effects and consequences of abilities, spells, powers,
+    traits, or supernatural effects. Never label, announce, name, or explain one, and never explain
+    activation, casting, or system mechanics.
   MANDATE:
     ALWAYS narrate ONLY the OBSERVABLE effects and consequences of abilities, spells, powers, traits, or supernatural effects.
   STRICTLY PROHIBITED:
@@ -1563,6 +1607,10 @@ function diegeticPhysicality(response, context): {
 }
 
 function strictEpistemology(response, context): {
+  DIGEST: ALL information is HIDDEN and UNKNOWN by default. It enters narration ONLY through direct
+    sensory evidence, audible dialogue, addressed mental communication, readable text, or already
+    established facts. Never state, imply, or confirm hidden information otherwise, and never let
+    anyone but the intended recipient perceive private mental communication.
   MANDATE:
     ALL information is HIDDEN and UNKNOWN by default such as unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore, and ANY other fact not yet established.
     Information may enter narration ONLY when revealed, or discovered through DIRECT sensory evidence available to {{user}} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts.
@@ -1574,6 +1622,9 @@ function strictEpistemology(response, context): {
 }
 
 function antiStockPhrasing(response, context): {
+  DIGEST: You MUST describe the exact action, sound, movement, object, or physical condition in the
+    scene using DIRECT, SPECIFIC language. No stock phrasing, no close grammar variations of it, and
+    no substitute cliches, metaphor, or generic rhetorical formula.
   MANDATE:
     You MUST describe the exact action, sound, movement, object, or physical condition in the scene using DIRECT, SPECIFIC language.
     This rule applies to narration, not quoted character dialogue.
@@ -1587,33 +1638,54 @@ function antiStockPhrasing(response, context): {
 }
 
 function strictBehaviorism(response, context): {
+  DIGEST: Render character/NPC state and emotion ONLY through physical behavior, action, or dialogue.
+    Never name, explain, or interpret internal state, and do not use skin color or temperature
+    changes, breath or voice catching, working throat or jaw, or interpretive eye-language as
+    emotional shorthand.
   MANDATE:
-    Narrate character/NPC state or emotion ONLY through observable behavior, action, or dialogue.
-  STRICTLY PROHIBITED:
-    - DO NOT use skin-color or skin-temperature changes as emotional shorthand, including flushing, reddening, turning pink or red, warming, color rising, knuckle whitening, or paling.
-    - DO NOT use breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach dropping, or mouth, jaw, or lips opening and closing in loops.
-    - DO NOT use interpretive, figurative, or invisible eye-language such as "her eyes burn," "something flickers in her eyes," "her eyes soften," or equivalent language.
-    - DO NOT name, explain, or interpret a character/NPC's internal, emotional, or psychological state in narration.
+    Render character/NPC state and emotion ONLY through physical behavior, action, or dialogue.
+
+  DO NOT:
+    - Name, explain, or interpret a character/NPC's internal, emotional, or psychological state.
+    - Use skin color or skin temperature as emotional shorthand: flushing, reddening, warming,
+      color rising, paling, or knuckle whitening.
+    - Use breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach
+      dropping, or mouth and jaw opening and closing in loops.
+    - Use interpretive or invisible eye-language, such as "her eyes burn," "something flickers
+      in her eyes," or "her eyes soften."
 }
 
 function antiRhetoricalNegation(response, context): {
+  DIGEST: Describe actions, sensations, and events DIRECTLY as they are, what they do, or what
+    effects they produce. Narrate only what IS. Never use "not X, but Y", never stack negated
+    fragments, never open consecutive clauses with "Not" or "No", and never reach for negation at a
+    reveal or a moment of awe.
   MANDATE:
-    You MUST describe actions, sensations, and events DIRECTLY as they are, what they do, or what effects they produce.
-    When something cannot be named — an unknown substance, an unearthly light, a sound with no source — describe what it IS and what it DOES: what it looks like, how it moves, what it touches, and what it does to the body, the ground, the air, and the people present. Concrete detail carries the effect. You never need to tell the reader what a thing is not.
+    Describe actions, sensations, and events DIRECTLY as they are, what they do, or what
+    effects they produce. Narrate only what IS.
+
+    When something cannot be named, such as an unknown substance, an unearthly light, or a
+    sound with no source, describe what it IS and what it DOES: what it looks like, how it
+    moves, what it touches, and what it does to the body, the ground, the air, and the people
+    present. Concrete detail carries the effect. You never need to tell the reader what a
+    thing is not.
+
     This rule applies to narration, not quoted character dialogue.
 
-  STRICTLY PROHIBITED:
-    - DO NOT describe anything by saying what it is not. Name what is present.
-    - DO NOT use any "not X, but Y" or "not X — Y" construction, in any wording:
-      - "It is not a column, but a pillar"
-      - "Not a shout — a roar"
-    - DO NOT stack negated fragments to manufacture emphasis, intensity, mystery, or revelation:
-      - "Not dim. Not bright. Just wrong."
-    - DO NOT open consecutive sentences or clauses with "Not" or "No".
-    - DO NOT reach for negation at a reveal, a transformation, or a moment of awe. That is where it is most tempting and where it costs the most: state what is present instead.
+  DO NOT:
+    - Use "not X, but Y" or "Not X — Y" or any similar wording, such as "It is not a column,
+      but a pillar" or "Not a shout — a roar".
+    - Stack negated fragments to manufacture emphasis, intensity, mystery, or revelation.
+      "Not dim. Not bright. Just wrong." is exactly this.
+    - Open consecutive sentences or clauses with "Not" or "No".
+    - Reach for negation at a reveal, a transformation, or a moment of awe. That is where it
+      is most tempting and where it costs the most: state what is present instead.
 }
 
 function inputChronology(response, input, context): {
+  DIGEST: Your response MUST begin with the immediate result, consequence, obstruction, reaction,
+    response, or observable development AFTER {{user}}'s input. Never repeat, echo, paraphrase, or
+    re-stage anything {{user}} did, or anything already established in the scene.
   MANDATE:
     Your response MUST begin with the immediate result, consequence, obstruction, reaction, response, or observable development AFTER {{user}}'s input. 
   STRICTLY PROHIBITED: 
@@ -1622,6 +1694,10 @@ function inputChronology(response, input, context): {
 }
 
 function dialogueTurn(response, context): {
+  DIGEST: When a character/NPC addresses or responds to {{user}} or another present character/NPC,
+    render ONE complete, natural response. Address every element directed at them, then close that
+    same turn on ONE clear opening for {{user}}: conversational, action, or environmental. No second
+    reply, no chained questions, and no appended question unsupported by the exchange.
   MANDATE:
     When a character/NPC addresses or responds to {{user}} or another present character/NPC, render ONE complete, natural response to the current exchange. 
 
@@ -1641,6 +1717,9 @@ function dialogueTurn(response, context): {
 }
 
 function outputFormatting {
+  DIGEST: Double quotation marks are audible dialogue. Single asterisks are private mental
+    communication through an established link, and nothing else. Unformatted text is narration,
+    never dialogue.
 
 MANDATE:
    ALWAYS follow these formatting guidelines:
@@ -1675,19 +1754,31 @@ function narrativeFacts(response, input, context): {
 }
 
 function agencySeparation(response, input, context): {
+  DIGEST: You control and narrate ONLY the world, NPCs, creatures, and events around {{user}}. Narrate
+    TO {{user}}, never AS {{user}}, except an involuntary reflexive physical reaction to external
+    stimuli. Never narrate what {{user}} could voluntarily choose, their internal states, intent, or
+    dialogue. If they did not EXPLICITLY declare it, it DID NOT happen.
   MANDATE:
-    The human player EXCLUSIVELY controls {{user}}. You control ONLY the world and NPCs. Your task is to narrate TO {{user}}, NEVER AS {{user}}.
+    You control and narrate ONLY the world, NPCs, creatures, and events around {{user}}.
+    Narrate TO {{user}}, never AS {{user}}, except as described below.
 
-    You MAY narrate ONLY immediate involuntary or reflexive physical reactions directly caused by external stimuli or scene effects. For example, {{user}} may lurch or catch themselves when tripped, flinch or drop an item when startled, cover their eyes against a sudden blinding glare, or be awakened by an external sound, touch, or impact.
-    If an action CAN be voluntarily chosen (e.g., "I open my eyes"), it is EXCLUSIVELY controlled by {{user}}.
-    Any action that can be voluntarily chosen is EXCLUSIVELY controlled by {{user}}.
+  EXCEPTION:
+    When external stimuli or scene effects trigger an involuntary or reflexive physical
+    reaction from {{user}}, you MAY narrate that action ONLY. For example, {{user}} may
+    lurch or catch themselves when tripped, flinch or drop an item when startled, cover
+    their eyes against a sudden blinding glare, or be awakened by an external sound,
+    touch, or impact.
 
-  STRICTLY PROHIBITED:
-    - DO NOT narrate {{user}}'s thoughts, feelings, beliefs, memories, private mental communication, or other internal states.
-    - DO NOT narrate ANY action that can be voluntarily controlled by {{user}}.
-    - DO NOT interpret, assume, or complete {{user}}'s intent.
-    - If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
-    - DO NOT SPEAK for {{user}}. NEVER.
+  RULE:
+    If an action can be voluntarily chosen by {{user}} (e.g., "I open my eyes"), do NOT narrate it.
+
+  DO NOT:
+    - Narrate {{user}}'s thoughts, feelings, beliefs, memories, private mental communication,
+      dialogue, or other internal states.
+    - Interpret, assume, or complete {{user}}'s intent.
+
+  REMINDER:
+    If {{user}} did not EXPLICITLY declare a voluntary action or dialogue, it DID NOT happen.
 }
 `;
 }
