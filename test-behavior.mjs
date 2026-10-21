@@ -17515,21 +17515,26 @@ const tests = [
       // on seeing double square brackets while the mode is switched off.
       assert.doesNotMatch(mainRulesSource, /CO-AUTHOR SCOPE/);
       assert.doesNotMatch(mainRulesSource, /SCOPED CO-AUTHOR EXCEPTION/);
+      // These rules are authored as wrapped prose, so the pins read a whitespace-collapsed copy.
+      // Line breaks inside a rule body are cosmetic and must not decide whether an assertion passes.
+      const mainRulesFlat = mainRulesSource.replace(/\s+/g, ' ');
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
-      assert.match(mainRulesSource, /When a character\/NPC addresses or responds to \{\{user\}\} or another present character\/NPC, render ONE complete, natural response to the current exchange/);
+      assert.match(mainRulesFlat, /When a character or NPC addresses or responds to \{\{user\}\}, they may emit ONLY a single/);
       assert.match(mainRulesSource, /Text enclosed in double quotation marks \(\"\.\.\.\"\) is audible dialogue/);
-      assert.match(mainRulesSource, /Account for each element directed at them -statement, question, offer, gesture, or action-/);
       assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
-      assert.match(mainRulesSource, /through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction/);
-      assert.match(mainRulesSource, /After addressing the current exchange, finish that same conversational turn on ONE clear, meaningful opening for \{\{user\}\}/);
-      assert.match(mainRulesSource, /CONVERSATIONAL OPENING:[\s\S]*A relevant statement or question to which \{\{user\}\} can naturally respond/);
-      assert.match(mainRulesSource, /ACTION OPENING:[\s\S]*A concrete action, gesture, or visible reaction directed at \{\{user\}\} or materially changing the immediate exchange/);
-      assert.match(mainRulesSource, /ENVIRONMENTAL OPENING:[\s\S]*A visible environmental or scene development that changes what \{\{user\}\} can perceive or do next/);
-      assert.match(mainRulesSource, /The opening MUST arise naturally from the response and the established scene/);
-      assert.match(mainRulesSource, /Intentional refusal, deflection, avoidance, departure, or scene closure may end the exchange/);
-      assert.match(mainRulesSource, /DO NOT begin a second reply, introduce an unrelated topic, or chain additional questions or statements within the same response/);
-      assert.match(mainRulesSource, /DO NOT turn the response into a monologue or a sequence of follow-up exchanges./);
-      assert.match(mainRulesSource, /DO NOT append a generic question or artificial opening unsupported by the current exchange/);
+      assert.match(mainRulesFlat, /through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction/);
+      // dialogueTurn is a single exchange with a stated end, not a menu of opening types.
+      assert.match(mainRulesFlat, /A TURN does three things:/);
+      assert.match(mainRulesFlat, /a character may also answer one thing and visibly set another aside/);
+      assert.match(mainRulesFlat, /One is enough\. It does not have to be a question, and it does not have to be an action\./);
+      assert.match(mainRulesSource, /It stops there\./);
+      assert.match(mainRulesFlat, /dialogue-action-dialogue-action chain/);
+      assert.match(mainRulesFlat, /Begin a second reply, introduce an unrelated topic, or chain multiple questions/);
+      assert.match(mainRulesFlat, /Append a question or action the exchange does not support/);
+      assert.match(mainRulesFlat, /End the turn on a character waiting, pausing, watching, or holding their ground/);
+      // The three-opening menu is gone. The environmental opening was the source of dead endings.
+      assert.doesNotMatch(mainRulesSource, /ENVIRONMENTAL OPENING/);
+      assert.doesNotMatch(mainRulesSource, /CONVERSATIONAL OPENING/);
       assert.doesNotMatch(mainRulesSource, /function activeHandoff\(response, context\):/);
 
       assert.match(mainRulesSource, /function inputChronology\(response, input, context\):/);
@@ -17539,9 +17544,6 @@ const tests = [
       assert.match(mainRulesSource, /environments, objects, or characters already established in the scene/);
       assert.match(mainRulesSource, /DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, mental communication/);
 
-      // These rules are authored as wrapped prose, so the pins read a whitespace-collapsed copy.
-      // Line breaks inside a rule body are cosmetic and must not decide whether an assertion passes.
-      const mainRulesFlat = mainRulesSource.replace(/\s+/g, ' ');
       assert.match(mainRulesSource, /function antiRhetoricalNegation\(response, context\):/);
       assert.match(mainRulesSource, /Describe actions, sensations, and events DIRECTLY as they are, what they do, or what/);
       assert.match(mainRulesSource, /effects they produce\. Narrate only what IS\./);
@@ -17920,12 +17922,20 @@ const tests = [
         'agencySeparation',
       ];
       assertNamedRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator handoff contract');
+      const handoffSliceFlat = handoffRulesSource.replace(/\s+/g, ' ');
       assert.match(handoffRulesSource, /Pool names are unused candidates, never permission to reveal or use them/);
       assert.match(handoffRulesSource, /never permission to reveal or use them/);
       assert.match(handoffRulesSource, /Until then, refer to the person, place, group, or object by its established role or a direct observable description/);
       assert.match(handoffRulesSource, /narrativeFacts\(input\) is authoritative and immutable for this response/);
-      assert.match(handoffRulesSource, /Account for each element directed at them -statement, question, offer, gesture, or action-/);
-      assert.match(handoffRulesSource, /DO NOT begin a second reply, introduce an unrelated topic, or chain additional questions/);
+      assert.match(handoffSliceFlat, /they may emit ONLY a single/);
+      assert.match(handoffSliceFlat, /It stops there\./);
+      assert.match(handoffSliceFlat, /dialogue-action-dialogue-action chain/);
+      assert.match(handoffSliceFlat, /End the turn on a character waiting/);
+      // The digest carries the waiting prohibition too, naming the forms it takes, not just "waiting".
+      assert.match(handoffSliceFlat, /A character who waits, pauses, watches, or holds their ground/);
+      assert.match(handoffSliceFlat, /close on something that has changed/);
+      assert.match(handoffSliceFlat, /Begin a second reply, introduce an unrelated topic, or chain multiple questions/);
+      assert.match(handoffSliceFlat, /Append a question or action the exchange does not support/);
       assert.match(handoffRulesSource, /DO NOT narrate ANY smell or taste/);
       assert.match(handoffRulesSource, /DO NOT attribute agency, intention, awareness, memory, or emotion to inanimate things/);
       assert.match(handoffRulesSource, /DO NOT use stock phrasing such as:/);

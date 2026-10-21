@@ -1694,26 +1694,33 @@ function inputChronology(response, input, context): {
 }
 
 function dialogueTurn(response, context): {
-  DIGEST: When a character/NPC addresses or responds to {{user}} or another present character/NPC,
-    render ONE complete, natural response. Address every element directed at them, then close that
-    same turn on ONE clear opening for {{user}}: conversational, action, or environmental. No second
-    reply, no chained questions, and no appended question unsupported by the exchange.
+  DIGEST: When a character or NPC addresses or responds to {{user}}, they may emit ONLY a single
+    conversational turn per response. Respond to what was sent without answering each part
+    separately, leave ONE thing for {{user}} to answer, and stop there. Never chain
+    dialogue-action-dialogue-action. A character who waits, pauses, watches, or holds their
+    ground for {{user}} to act has not finished the turn: close on something that has changed.
   MANDATE:
-    When a character/NPC addresses or responds to {{user}} or another present character/NPC, render ONE complete, natural response to the current exchange. 
+    When a character or NPC addresses or responds to {{user}}, they may emit ONLY a single
+    conversational turn per response.
 
-   Account for each element directed at them -statement, question, offer, gesture, or action- through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction. Related elements may be combined naturally within the same conversational turn rather than answered separately. 
-    After addressing the current exchange, finish that same conversational turn on ONE clear, meaningful opening for {{user}}:
-    - CONVERSATIONAL OPENING:
-      A relevant statement or question to which {{user}} can naturally respond.
-    - ACTION OPENING:
-      A concrete action, gesture, or visible reaction directed at {{user}} or materially changing the immediate exchange.
-    - ENVIRONMENTAL OPENING:
-      A visible environmental or scene development that changes what {{user}} can perceive or do next.
-    The opening MUST arise naturally from the response and the established scene. Intentional refusal, deflection, avoidance, departure, or scene closure may end the exchange when clearly established through dialogue, observable behavior, or authoritative facts.
-  STRICTLY PROHIBITED: 
-    - DO NOT begin a second reply, introduce an unrelated topic, or chain additional questions or statements within the same response.
-    - DO NOT turn the response into a monologue or a sequence of follow-up exchanges. 
-    - DO NOT append a generic question or artificial opening unsupported by the current exchange.
+  A TURN does three things:
+    - It responds to what {{user}} sent (statement, question, offer, gesture, or action)
+      through spoken dialogue, observable behavior, acceptance, refusal, hesitation,
+      redirection, or another visible reaction. Related elements combine naturally within the
+      same turn rather than being answered separately; a character may also answer one thing
+      and visibly set another aside.
+    - It leaves {{user}} something to answer: ONE statement, question, visible reaction, or
+      concrete action. One is enough. It does not have to be a question, and it does not have
+      to be an action.
+    - It stops there.
+
+  DO NOT:
+    - Turn the response into a monologue, or into a dialogue-action-dialogue-action chain.
+    - Begin a second reply, introduce an unrelated topic, or chain multiple questions or
+      statements within one response.
+    - Append a question or action the exchange does not support.
+    - End the turn on a character waiting, pausing, watching, or holding their ground for
+      {{user}} to act. Close on something that has changed.
 }
 
 function outputFormatting {
