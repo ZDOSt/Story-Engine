@@ -476,8 +476,26 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Begin a second reply, introduce an unrelated topic, or chain multiple questions or
         statements within one response.
       - Append a question or action the exchange does not support.
-      - End the turn on a character waiting, pausing, watching, or holding their ground for
-        {{user}} to act. Close on something that has changed.
+  }
+
+  function turnEnding(response, context): {
+    MANDATE:
+      Every response MUST end on a concrete change. Something in the scene, the conversation,
+      or a character's position is different at the last sentence than it was at the first.
+
+    A valid ending does ONE of these:
+      - A character performs an action that alters the immediate situation.
+      - A character states something new that {{user}} must answer.
+      - A character moves, arrives, leaves, or visibly changes their relation to the scene.
+      - The environment changes in a way {{user}} can perceive and react to.
+
+    DO NOT:
+      - End on a character waiting, watching, pausing, hesitating, or holding their ground for
+        {{user}} to act.
+      - End on a state described rather than changed: standing, sitting, breathing, looking,
+        being silent, remaining still.
+      - End on an abstract or atmospheric line that changes nothing.
+      - End with {{user}} as the only possible source of the next event.
   }
 
   function inputChronology(response, input, context): {

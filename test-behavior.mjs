@@ -17531,7 +17531,11 @@ const tests = [
       assert.match(mainRulesFlat, /dialogue-action-dialogue-action chain/);
       assert.match(mainRulesFlat, /Begin a second reply, introduce an unrelated topic, or chain multiple questions/);
       assert.match(mainRulesFlat, /Append a question or action the exchange does not support/);
-      assert.match(mainRulesFlat, /End the turn on a character waiting, pausing, watching, or holding their ground/);
+      assert.match(mainRulesFlat, /Every response MUST end on a concrete change/);
+      assert.match(mainRulesFlat, /End on a character waiting, watching, pausing, hesitating, or holding their ground/);
+      assert.match(mainRulesFlat, /End with \{\{user\}\} as the only possible source of the next event/);
+      // The waiting ban moved out of dialogueTurn: only turnEnding may own it.
+      assert.doesNotMatch(mainRulesFlat.slice(mainRulesFlat.indexOf('function dialogueTurn'), mainRulesFlat.indexOf('function inputChronology')), /waiting, pausing/);
       // The three-opening menu is gone. The environmental opening was the source of dead endings.
       assert.doesNotMatch(mainRulesSource, /ENVIRONMENTAL OPENING/);
       assert.doesNotMatch(mainRulesSource, /CONVERSATIONAL OPENING/);
@@ -17712,7 +17716,7 @@ const tests = [
       const chunks = contract.slice(contract.indexOf('\nfunction ') + 1).split(/\n(?=function )/);
       // nameReveal and narrativeFacts exist only in the mirror, so they keep their full text and
       // carry no digest. Only the twelve mirrored rules are summarised.
-      assert.equal(chunks.length, 14, 'the handoff contract must carry 14 rules');
+      assert.equal(chunks.length, 15, 'the handoff contract must carry 15 rules');
       const MIRROR_ONLY = ['nameReveal', 'narrativeFacts'];
 
       const digestBlocks = [];
@@ -17772,7 +17776,7 @@ const tests = [
         digestBlocks.map(d => d.name),
         ['cohesiveSceneBeats', 'denotativePhysicality', 'embodiedPerception', 'diegeticPhysicality',
          'strictEpistemology', 'antiStockPhrasing', 'strictBehaviorism', 'antiRhetoricalNegation',
-         'inputChronology', 'dialogueTurn', 'outputFormatting', 'agencySeparation'],
+         'inputChronology', 'turnEnding', 'dialogueTurn', 'outputFormatting', 'agencySeparation'],
         'the digest must keep the handoff rule order',
       );
 
@@ -17851,6 +17855,7 @@ const tests = [
       const mainRuleOrder = [
         'agencySeparation',
         'dialogueTurn',
+        'turnEnding',
         'inputChronology',
         'antiRhetoricalNegation',
         'strictBehaviorism',
@@ -17915,6 +17920,7 @@ const tests = [
         'strictBehaviorism',
         'antiRhetoricalNegation',
         'inputChronology',
+        'turnEnding',
         'dialogueTurn',
         'outputFormatting',
         'nameReveal',
@@ -17930,10 +17936,13 @@ const tests = [
       assert.match(handoffSliceFlat, /they may emit ONLY a single/);
       assert.match(handoffSliceFlat, /It stops there\./);
       assert.match(handoffSliceFlat, /dialogue-action-dialogue-action chain/);
-      assert.match(handoffSliceFlat, /End the turn on a character waiting/);
+      assert.match(handoffSliceFlat, /Every response MUST end on a concrete change/);
+      assert.match(handoffSliceFlat, /End with \{\{user\}\} as the only possible source of the next event/);
+      // turnEnding precedes dialogueTurn in the handoff, because the handoff order is inverted.
+      assert.ok(handoffSliceFlat.indexOf('function turnEnding') < handoffSliceFlat.indexOf('function dialogueTurn'),
+        'the handoff must place turnEnding before dialogueTurn');
       // The digest carries the waiting prohibition too, naming the forms it takes, not just "waiting".
-      assert.match(handoffSliceFlat, /A character who waits, pauses, watches, or holds their ground/);
-      assert.match(handoffSliceFlat, /close on something that has changed/);
+
       assert.match(handoffSliceFlat, /Begin a second reply, introduce an unrelated topic, or chain multiple questions/);
       assert.match(handoffSliceFlat, /Append a question or action the exchange does not support/);
       assert.match(handoffRulesSource, /DO NOT narrate ANY smell or taste/);
