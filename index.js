@@ -526,7 +526,9 @@ const DEFAULT_PROSE_RULES_PROMPT = String.raw`function RenderControlEngine(respo
       - Use skin color or skin temperature as emotional shorthand: flushing, reddening, warming,
         color rising, paling, or knuckle whitening.
       - Use breath or voice hitching/catching, throat or jaw working, pulse jumping, stomach
-        dropping, or mouth and jaw opening and closing in loops.
+        dropping, or mouth and jaw opening and closing to signal how someone feels.
+        Breathing that shows exertion, recovery, or effort is ordinary narration: panting,
+        breathing hard, catching one's breath.
       - Use interpretive or invisible eye-language, such as "her eyes burn," "something flickers
         in her eyes," or "her eyes soften."
   }

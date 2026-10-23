@@ -17403,14 +17403,24 @@ const tests = [
       assert.match(source, /Develop the scene through sensory details, including but not limited to:/);
       assert.match(source, /signs of use or damage/);
       assert.match(source, /Always choose a few precise, evocative details over a long inventory/);
-      const explorationBlock = source.slice(
-        source.indexOf('const DEFAULT_EXPLORATION_STYLE_PROMPT'),
-        source.indexOf('const DEFAULT_ACTION_STYLE_PROMPT'),
-      );
-      // embodiedPerception bans smell and taste outright; a style block must never ask for them.
-      for (const banned of ['smell', 'taste', 'scent', 'odor', 'breath', 'breathing']) {
-        assert.ok(!explorationBlock.toLowerCase().includes(banned),
-          'explorationStyle must not instruct a sense or cue the prose rules forbid: ' + banned);
+      // Every style block is checked against the vocabulary embodiedPerception bans outright.
+      // Breath words are deliberately NOT in this list: strictBehaviorism bans breath used to
+      // signal a feeling, not breathing that shows exertion, so the style blocks may use it.
+      const styleBlocks = [
+        ['explorationStyle', 'const DEFAULT_EXPLORATION_STYLE_PROMPT', 'const DEFAULT_ACTION_STYLE_PROMPT'],
+        ['actionStyle', 'const DEFAULT_ACTION_STYLE_PROMPT', 'const DEFAULT_INTIMACY_STYLE_PROMPT'],
+        ['intimacyStyle', 'const DEFAULT_INTIMACY_STYLE_PROMPT', 'const DEFAULT_DIALOGUE_STYLE_PROMPT'],
+        ['dialogueStyle', 'const DEFAULT_DIALOGUE_STYLE_PROMPT', 'const LEGACY_DEFAULT_STYLE_PROMPTS'],
+      ];
+      for (const [name, from, to] of styleBlocks) {
+        const start = source.indexOf(from);
+        const end = source.indexOf(to);
+        assert.ok(start > 0 && end > start, name + ' must be findable in the source');
+        const body = source.slice(start, end).toLowerCase();
+        for (const banned of ['smell', 'taste', 'scent', 'odor', 'aroma', 'fragrance']) {
+          assert.ok(!body.includes(banned),
+            name + ' must not instruct a sense the prose rules forbid: ' + banned);
+        }
       }
       const sectionDefaults = source.slice(
         source.indexOf('const DEFAULT_EXPLORATION_STYLE_PROMPT'),
@@ -17522,6 +17532,13 @@ const tests = [
       // on seeing double square brackets while the mode is switched off.
       assert.doesNotMatch(mainRulesSource, /CO-AUTHOR SCOPE/);
       assert.doesNotMatch(mainRulesSource, /SCOPED CO-AUTHOR EXCEPTION/);
+      // The breath ban is scoped to signalling a feeling; exertion is ordinary narration.
+      // Without this, the rule silently goes back to banning all breathing, which is what let
+      // the style blocks contradict it in the first place.
+      const behaviourScope = /to signal how someone feels[\s\S]{0,220}Breathing that shows exertion/;
+      assert.match(mainRulesSource, behaviourScope);
+      assert.doesNotMatch(mainRulesSource, /mouth and jaw opening and closing in loops/);
+
       // These rules are authored as wrapped prose, so the pins read a whitespace-collapsed copy.
       // Line breaks inside a rule body are cosmetic and must not decide whether an assertion passes.
       const mainRulesFlat = mainRulesSource.replace(/\s+/g, ' ');
@@ -17936,6 +17953,13 @@ const tests = [
       ];
       assertNamedRuleOrder(handoffRulesSource, handoffRuleOrder, 'the narrator handoff contract');
       const handoffSliceFlat = handoffRulesSource.replace(/\s+/g, ' ');
+      const handoffBehaviourScope = /to signal how someone feels[\s\S]{0,220}Breathing that shows exertion/;
+      assert.match(handoffRulesSource, handoffBehaviourScope);
+      assert.doesNotMatch(handoffRulesSource, /mouth and jaw opening and closing in loops/);
+      assert.match(handoffRulesSource, /or interpretive eye-language to\s+signal how someone feels/);
+      assert.match(handoffRulesSource, /Breathing that shows exertion or recovery is ordinary narration/);
+
+
       assert.match(handoffRulesSource, /Pool names are unused candidates, never permission to reveal or use them/);
       assert.match(handoffRulesSource, /never permission to reveal or use them/);
       assert.match(handoffRulesSource, /Until then, refer to the person, place, group, or object by its established role or a direct observable description/);
