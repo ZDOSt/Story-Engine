@@ -17503,11 +17503,6 @@ const tests = [
         indexSource.indexOf('const DEFAULT_SETTINGS'),
       );
 
-      assert.match(mainRulesSource, /function outputFormatting \{/);
-      assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
-      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
-      assert.match(mainRulesSource, /Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue/);
-      assert.match(mainRulesSource, /Unformatted text describes narration or action\. It is NEVER audible dialogue/);
       assert.doesNotMatch(mainRulesSource, /Formatting is an explicit signal, not the sole privacy safeguard|Otherwise, it is private inner thought/);
       assert.match(mainRulesSource, /Your final response MUST be compliant with the constraints below/);
       // Co-Author Mode is authorized solely by the scope declared in narrativeFacts.
@@ -17518,9 +17513,11 @@ const tests = [
       // These rules are authored as wrapped prose, so the pins read a whitespace-collapsed copy.
       // Line breaks inside a rule body are cosmetic and must not decide whether an assertion passes.
       const mainRulesFlat = mainRulesSource.replace(/\s+/g, ' ');
+      // outputFormatting left the engine prompt entirely; its text now closes the handoff's #3.
+      assert.doesNotMatch(mainRulesSource, /function outputFormatting/);
+      assert.doesNotMatch(mainRulesSource, /Text enclosed in double quotation marks/);
       assert.match(mainRulesSource, /function dialogueTurn\(response, context\):/);
       assert.match(mainRulesFlat, /When a character or NPC addresses or responds to \{\{user\}\}, they may emit ONLY a single/);
-      assert.match(mainRulesSource, /Text enclosed in double quotation marks \(\"\.\.\.\"\) is audible dialogue/);
       assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
       assert.match(mainRulesFlat, /through spoken dialogue, observable behavior, acceptance, refusal, hesitation, redirection, or another visible reaction/);
       // dialogueTurn is a single exchange with a stated end, not a menu of opening types.
@@ -17660,9 +17657,6 @@ const tests = [
       assert.match(mainRulesSource, /function strictEpistemology\(response, context\):/);
       assert.match(mainRulesSource, /ALL information is HIDDEN and UNKNOWN by default/);
       assert.match(mainRulesSource, /unknown character or location names, identities, roles, hidden causes, private thoughts, unseen actions, background lore/);
-      assert.match(mainRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
-      assert.match(mainRulesSource, /Text enclosed in single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link/);
-      assert.match(mainRulesSource, /MUST be enclosed in single asterisks and NEVER in double quotation marks/);
       assert.match(mainRulesSource, /Information may enter narration ONLY when revealed, or discovered through DIRECT sensory evidence available to \{\{user\}\}/);
       assert.match(mainRulesSource, /A character\/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them/);
       assert.match(mainRulesSource, /DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication/);
@@ -17716,7 +17710,7 @@ const tests = [
       const chunks = contract.slice(contract.indexOf('\nfunction ') + 1).split(/\n(?=function )/);
       // nameReveal and narrativeFacts exist only in the mirror, so they keep their full text and
       // carry no digest. Only the twelve mirrored rules are summarised.
-      assert.equal(chunks.length, 15, 'the handoff contract must carry 15 rules');
+      assert.equal(chunks.length, 14, 'the handoff contract must carry 14 rules');
       const MIRROR_ONLY = ['nameReveal', 'narrativeFacts'];
 
       const digestBlocks = [];
@@ -17751,18 +17745,8 @@ const tests = [
         // an enumeration that the digest is meant to condense; the opening words must still match.
         // outputFormatting's MANDATE is a section label rather than a sentence, so it can only be
         // checked for carrying the operative formatting content, not for a verbatim opening.
-        // Two rules cannot carry a verbatim MANDATE opening. outputFormatting's MANDATE is a
-        // section label rather than a sentence, and nameReveal's first line is a preface about pool
-        // names; both are checked for their operative content instead.
-        const EXEMPT_FROM_PREFIX = {
-          outputFormatting: ['audible dialogue', 'narration'],
-        };
-        if (EXEMPT_FROM_PREFIX[name]) {
-          for (const needle of EXEMPT_FROM_PREFIX[name]) {
-            assert.ok(digestFlat.includes(needle), name + ' digest must carry: ' + needle);
-          }
-          continue;
-        }
+        // Every digested rule now opens with its own MANDATE verbatim, with no exceptions: the
+        // one rule whose MANDATE was a section label became part of the #3 output contract instead.
         const prefix = firstSentence.split(' ').slice(0, 8).join(' ');
         assert.ok(prefix.length >= 30, name + ' MANDATE prefix must be substantial');
         assert.ok(
@@ -17776,7 +17760,7 @@ const tests = [
         digestBlocks.map(d => d.name),
         ['cohesiveSceneBeats', 'denotativePhysicality', 'embodiedPerception', 'diegeticPhysicality',
          'strictEpistemology', 'antiStockPhrasing', 'strictBehaviorism', 'antiRhetoricalNegation',
-         'inputChronology', 'turnEnding', 'dialogueTurn', 'outputFormatting', 'agencySeparation'],
+         'inputChronology', 'turnEnding', 'dialogueTurn', 'agencySeparation'],
         'the digest must keep the handoff rule order',
       );
 
@@ -17891,11 +17875,17 @@ const tests = [
       assert.match(handoffRulesSource, /BINDING CONTRACT/),
       assert.match(handoffRulesSource, /A response that breaks one is\s+INVALID: it is discarded and never reaches the player/);
       assert.match(handoffRulesSource, /narrativeFacts\(input\) fixes what happened/);
-      assert.match(handoffRulesSource, /function outputFormatting \{/);
-      assert.match(handoffRulesSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
-      assert.match(handoffRulesSource, /single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication/);
-      assert.match(handoffRulesSource, /Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue/);
-      assert.match(handoffRulesSource, /Unformatted text describes narration or action/);
+      // outputFormatting is no longer a rule; its text now closes #3 - OUTPUT.
+      assert.match(handoffSource, /Text enclosed in double quotation marks \("\.\.\."\) is audible dialogue/);
+      assert.match(handoffSource, /'FORMATTING',/);
+      // The bundled preset's FORMATTING block is now one sentence: the underlining itself is code.
+      const presetSource = fs.readFileSync(new URL('presets/story-engine-preset.json', import.meta.url), 'utf8');
+      assert.doesNotMatch(presetSource, /Wrap each established character name/, 'the preset must not ask the model to add underline markup');
+      assert.doesNotMatch(presetSource, /Keep existing __underlines__ intact/);
+      assert.match(presetSource, /Established names and roles are underlined automatically after narration/);
+      assert.match(handoffSource, /single asterisks \(\*\.\.\.\*\) is RESERVED EXCLUSIVELY for private mental communication/);
+      assert.match(handoffSource, /Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue/);
+      assert.match(handoffSource, /Unformatted text describes narration or action/);
 
       for (const name of mainRuleOrder) {
         assert.equal(
@@ -17922,7 +17912,6 @@ const tests = [
         'inputChronology',
         'turnEnding',
         'dialogueTurn',
-        'outputFormatting',
         'nameReveal',
         'narrativeFacts',
         'agencySeparation',

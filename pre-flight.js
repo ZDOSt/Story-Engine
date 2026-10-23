@@ -1467,6 +1467,13 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         'Output only final in-character narration between those tags.',
         'Do not output tracker updates or tracker blocks.',
         'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
+        '',
+        'FORMATTING',
+        '- Text enclosed in double quotation marks ("...") is audible dialogue.',
+        '- Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.',
+        '- Audible dialogue MUST be enclosed in double quotation marks and NEVER in single asterisks. Private mental communication MUST be enclosed in single asterisks and NEVER in double quotation marks.',
+        '- Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue.',
+        '- Unformatted text describes narration or action. It is NEVER audible dialogue.',
         '}',
     ].join('\n');
 }
@@ -1745,20 +1752,6 @@ function dialogueTurn(response, context): {
     - Append a question or action the exchange does not support.
 }
 
-function outputFormatting {
-  DIGEST: Double quotation marks are audible dialogue. Single asterisks are private mental
-    communication through an established link, and nothing else. Unformatted text is narration,
-    never dialogue.
-
-MANDATE:
-   ALWAYS follow these formatting guidelines:
-
-- Text enclosed in double quotation marks ("...") is audible dialogue.
-- Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.
-- Audible dialogue MUST be enclosed in double quotation marks and NEVER in single asterisks. Private mental communication MUST be enclosed in single asterisks and NEVER in double quotation marks.
-- Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue.
-- Unformatted text describes narration or action. It is NEVER audible dialogue.
-}
 
 function nameReveal(response, context): {
   MANDATE:
