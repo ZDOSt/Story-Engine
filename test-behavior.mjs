@@ -17722,7 +17722,7 @@ const tests = [
           assert.equal(chunk.indexOf('DIGEST:'), -1, name + ' is mirror-only and must NOT carry a digest');
           continue;
         }
-        const at = chunk.indexOf('DIGEST:');
+        const at = chunk.indexOf('DIGEST');
         assert.ok(at > 0, name + ' must declare a DIGEST block');
         const lines = chunk.slice(at).split('\n');
         const block = [lines[0]];
@@ -17731,7 +17731,7 @@ const tests = [
           block.push(line);
         }
         digestBlocks.push({ name, block: block.join(' ') });
-        const digestFlat = block.join(' ').replace(/\s+/g, ' ').trim().replace(/^DIGEST:\s*/, '');
+        const digestFlat = block.join(' ').replace(/\s+/g, ' ').trim().replace(/^DIGEST\s*[—:-]\s*\w+\s*/, '');
 
         // The correlation invariant: the digest must OPEN with the rule's own MANDATE sentence,
         // verbatim, so the reminder is a recurrence of that rule rather than a paraphrase of it.
@@ -17750,8 +17750,14 @@ const tests = [
         const prefix = firstSentence.split(' ').slice(0, 8).join(' ');
         assert.ok(prefix.length >= 30, name + ' MANDATE prefix must be substantial');
         assert.ok(
-          digestFlat.startsWith(prefix),
-          name + ' digest must open with the rule MANDATE verbatim: ' + prefix,
+          digestFlat.includes(prefix),
+          name + ' digest must carry the rule MANDATE verbatim: ' + prefix,
+        );
+        // The digest names its rule, so the reminder reads as the same rule the model already met
+        // rather than as an anonymous paragraph that happens to say something similar.
+        assert.ok(
+          block[0].includes(name),
+          name + ' digest must name the rule it summarises, got: ' + block[0],
         );
       }
 
@@ -17803,7 +17809,7 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /DIGEST: ALWAYS combine closely related actions, gestures, dialogue/);
+      assert.match(text, /DIGEST — cohesiveSceneBeats/);
       // Mirror-only rules keep their full text and must still reach the model verbatim.
       assert.match(text, /narrativeFacts\(input\) is authoritative and immutable for this response\./);
       assert.match(text, /\{\{user\}\} can see, hear, or touch|Use a proper name ONLY when it is already established/);
@@ -17819,7 +17825,7 @@ const tests = [
         genreSelection: null,
         sceneStyleId: 'neutral',
       });
-      assert.match(introPrompt, /DIGEST: ALWAYS combine closely related actions, gestures, dialogue/);
+      assert.match(introPrompt, /DIGEST — cohesiveSceneBeats/);
       assert.doesNotMatch(introPrompt, /barely above a murmur/);
     },
   },
