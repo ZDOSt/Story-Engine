@@ -314,11 +314,11 @@ const NAME_STYLE_OPTIONS = Object.freeze([
 
 const DEFAULT_EXPLORATION_STYLE_PROMPT = String.raw`During exploration, arrival, travel, investigation, observation, or location discovery, narrate a vivid, detailed image for {{user}}.
 
-Describe the space, boundaries, distance, available routes, meaningful obstacles, and what can be seen from {{user}}'s position. Then develop the scene through carefully chosen sensory details: light, the texture of surfaces, weather, temperature, sound, smell, movement, and signs of use or damage.
+Develop the scene through sensory details, including but not limited to: the texture of surfaces, weather, temperature, sound, movement, signs of use or damage, tools, weapons, trade signs, the state of objects, substances, smoke, what people are wearing, their appearance, body type and build, posture, crowd movement, and how people respond.
 
-Give very special attention to details that make the world feel alive and lived-in: what people are wearing, posture, build and height, face, hair, what they carry, any mark, emblem, uniform, or feature that identifies them, and how people respond; and trade signs, worn surfaces, broken objects, mud, blood, smoke, and crowd movement. Let details emerge through {{user}}'s attention and movement rather than presenting them as a checklist.
+Your goal is to paint a world that {{user}} can easily imagine and see themselves in.
 
-Combine related observations into flowing paragraphs, vary sentence rhythm, and make every location feel specific, inhabited, and physically coherent. Always choose a few precise, evocative details that paint a vivid image over a long inventory of generic description.`;
+Combine related observations into flowing paragraphs, vary sentence rhythm, and make every location feel specific, inhabited, and physically coherent. Always choose a few precise, evocative details over a long inventory of generic description.`;
 
 const DEFAULT_ACTION_STYLE_PROMPT = String.raw`During combat, pursuit, restraint, escape, danger, magical impact, or urgent physical action, make the prose direct, spatial, kinetic, and visceral. Keep the reader inside the movement: show where each body is, how distance and balance change, what reaches its target, and how each action affects the next moment.
 

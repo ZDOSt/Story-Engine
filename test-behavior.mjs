@@ -17399,7 +17399,19 @@ const tests = [
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStylePrompt/);
       assert.doesNotMatch(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleDialoguePrompt/);
       assert.match(source, /delete extension_settings\[SETTINGS_KEY\]\.writingStyleReminderPrompt/);
-      assert.match(source, /Give very special attention to details that make the world feel alive and lived-in/);
+      // The exploration block is one open-ended list now: no closed examples, no banned senses.
+      assert.match(source, /Develop the scene through sensory details, including but not limited to:/);
+      assert.match(source, /signs of use or damage/);
+      assert.match(source, /Always choose a few precise, evocative details over a long inventory/);
+      const explorationBlock = source.slice(
+        source.indexOf('const DEFAULT_EXPLORATION_STYLE_PROMPT'),
+        source.indexOf('const DEFAULT_ACTION_STYLE_PROMPT'),
+      );
+      // embodiedPerception bans smell and taste outright; a style block must never ask for them.
+      for (const banned of ['smell', 'taste', 'scent', 'odor', 'breath', 'breathing']) {
+        assert.ok(!explorationBlock.toLowerCase().includes(banned),
+          'explorationStyle must not instruct a sense or cue the prose rules forbid: ' + banned);
+      }
       const sectionDefaults = source.slice(
         source.indexOf('const DEFAULT_EXPLORATION_STYLE_PROMPT'),
         source.indexOf('const DEFAULT_PROSE_GUARD_STRICT_BEHAVIORISM_BANNED_PHRASES'),
