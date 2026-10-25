@@ -480,6 +480,52 @@ function titleCase(value) {
         .join(' ');
 }
 
+// A brand-new chat has no weather and no time: the tracker starts with both "unestablished",
+// and the only thing that ever set them was the adventure intro. Every chat that began with a
+// greeting therefore showed "Unknown" forever, and because the weather walk keys on the clock,
+// the sky never moved.
+//
+// So the first turn seeds both. The draw is keyed on the chat id rather than the clock: a new
+// chat gets a different opening every time, and the same chat always gets the same one, which
+// keeps a swipe of the first message from changing the weather under the player.
+export function seedInitialWorldState(value = {}, chatId = '') {
+    const state = normalizeWorldState(value);
+    if (state.timeEstablished && state.weatherEstablished) return state;
+
+    const seedText = String(chatId || '').trim() || 'story-engine-world';
+    const next = { ...state, weather: { ...state.weather } };
+
+    if (!next.timeEstablished) {
+        const timeRoll = stableRoll(`${seedText}|time`);
+        next.timeOfDay = WORLD_TIME_SLOTS[timeRoll % WORLD_TIME_SLOTS.length];
+        next.timeEstablished = true;
+    }
+
+    if (!next.weatherEstablished) {
+        const weatherRoll = stableRoll(`${seedText}|weather`);
+        const condition = seedWeatherCondition(weatherRoll);
+        next.weather = {
+            condition,
+            remainingSlots: weatherDurationSlots(condition, weatherRoll),
+        };
+        next.weatherEstablished = true;
+    }
+
+    return next;
+}
+
+// Weighted the way real weather is: clear and cloudy common, storms rare. A uniform draw over
+// seven conditions would open one chat in seven in a storm.
+function seedWeatherCondition(roll) {
+    if (roll <= 25) return 'clear';
+    if (roll <= 45) return 'partly_cloudy';
+    if (roll <= 62) return 'cloudy';
+    if (roll <= 78) return 'overcast';
+    if (roll <= 89) return 'light_rain';
+    if (roll <= 96) return 'heavy_rain';
+    return 'storm';
+}
+
 function clampInt(value, min, max, fallback) {
     const number = Math.floor(Number(value));
     if (!Number.isFinite(number)) return fallback;

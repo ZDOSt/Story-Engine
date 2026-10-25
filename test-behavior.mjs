@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import yaml from 'yaml';
-import { applyUserReputationSeed, buildSpellCastingSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, deriveUserReputationSeed, getNameRegistry, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
+import { buildWorldStateSnapshot, applyUserReputationSeed, buildSpellCastingSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, deriveUserReputationSeed, getNameRegistry, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import { ENGINE_PROMPT_TEXT, classifyProactivityTier, normalizeProactivityMemory, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, isSlowBondEligible, mergeSlowBondEvidence, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
 import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
@@ -10,7 +10,7 @@ import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript }
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { RENDER_CONTROL_STAGE_NAMES, sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
 import { groundUserKnowledgeApplications, SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticTextLedgerPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
-import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
+import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta, seedInitialWorldState } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { applyHiddenHealthEvents, applyProgressionHealthMilestone, getHealthActor, normalizeHiddenHealth } from './health-state.js';
@@ -14766,6 +14766,65 @@ const tests = [
       assert.match(semanticSource, /non-living obstacle or condition that makes the current goal fail-able/);
       assert.match(semanticSource, /stakes and ordinary continuity\/no-stakes wording both seem relevant, stakes win unless already resolved/);
       assert.match(semanticSource, /rollReason must be a concise explanation that agrees with rollNeeded/);
+    },
+  },
+  {
+    name: '33y a new chat seeds its own opening time and weather',
+    run() {
+      // Every chat that did not start with an adventure intro showed "Unknown" for time and
+      // weather forever: those flags were only ever set by the intro, and the weather walk keys
+      // on the clock, so the sky never moved. The first turn now seeds both from the chat id.
+      const empty = {};
+      const a = seedInitialWorldState(empty, 'chat-aaa');
+      const b = seedInitialWorldState(empty, 'chat-aaa');
+      const c = seedInitialWorldState(empty, 'chat-bbb');
+
+      // Established, and valid values.
+      assert.equal(a.timeEstablished, true);
+      assert.equal(a.weatherEstablished, true);
+      assert.ok(['morning', 'afternoon', 'evening', 'night'].includes(a.timeOfDay), 'seeded time must be a real slot: ' + a.timeOfDay);
+      assert.ok(a.weather.remainingSlots >= 1 && a.weather.remainingSlots <= 8, 'seeded weather must carry a duration');
+
+      // Same chat, same opening - a swipe of the first message must not change the sky.
+      assert.equal(a.timeOfDay, b.timeOfDay);
+      assert.equal(a.weather.condition, b.weather.condition);
+      assert.equal(a.weather.remainingSlots, b.weather.remainingSlots);
+
+      // The input is not mutated: the snapshot function must stay side-effect free.
+      assert.deepEqual(empty, {});
+
+      // Different chats are allowed to differ. Over enough chats they must.
+      const openings = new Set();
+      for (let index = 0; index < 40; index += 1) {
+        const seeded = seedInitialWorldState({}, 'chat-' + index);
+        openings.add(seeded.timeOfDay + '|' + seeded.weather.condition);
+      }
+      assert.ok(openings.size > 4, 'seeding must vary across chats, got ' + openings.size + ' distinct openings');
+
+      // An established state is never overwritten.
+      const established = normalizeWorldState({
+        dayIndex: 3, timeOfDay: 'evening', timeEstablished: true,
+        weather: { condition: 'storm', remainingSlots: 1 }, weatherEstablished: true,
+      });
+      const kept = seedInitialWorldState(established, 'chat-aaa');
+      assert.equal(kept.timeOfDay, 'evening');
+      assert.equal(kept.weather.condition, 'storm');
+      assert.equal(kept.weather.remainingSlots, 1);
+      assert.equal(kept.dayIndex, 3);
+
+      // A half-established state fills only the missing half.
+      const halfTime = normalizeWorldState({ timeOfDay: 'morning', timeEstablished: true });
+      const filled = seedInitialWorldState(halfTime, 'chat-aaa');
+      assert.equal(filled.timeOfDay, 'morning');
+      assert.equal(filled.weatherEstablished, true);
+
+      // And the snapshot the turn pipeline actually builds must be the seeded one, or the first
+      // reply is written before the clock exists and the seed has no effect on the opening.
+      const snapshot = buildWorldStateSnapshot({ chatId: 'chat-aaa', chatMetadata: null });
+      assert.equal(snapshot.timeEstablished, true, 'buildWorldStateSnapshot must seed an unestablished clock');
+      assert.equal(snapshot.weatherEstablished, true, 'buildWorldStateSnapshot must seed an unestablished sky');
+      assert.equal(snapshot.timeOfDay, a.timeOfDay);
+      assert.equal(snapshot.weather.condition, a.weather.condition);
     },
   },
   {

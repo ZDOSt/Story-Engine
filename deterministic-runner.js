@@ -95,7 +95,7 @@ import {
     normalizeHiddenHealth,
     safeSceneHealingAmount,
 } from './health-state.js';
-import { normalizeWorldState, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
+import { normalizeWorldState, normalizeWorldTransition, projectWorldStateTransition, seedInitialWorldState } from './world-state.js';
 import { advanceDueWorldPlans, normalizeDescriptiveArchive, normalizeWorldProgression, prepareWorldMemoryNarration, progressionHasActivePlanForActor } from './world-memory.js';
 import { buildDeterministicLootEnvelope, getNpcLootRankProfile, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { persistMetadata, saveMetadataDebounced } from './st-adapter.js';
@@ -680,7 +680,12 @@ export function buildUserReputationSnapshot(context) {
 }
 
 export function buildWorldStateSnapshot(context) {
-    return normalizeWorldState(context?.chatMetadata?.structuredPreflightTracker?.worldState || {});
+    // Seeded here because this snapshot is built before the narrator handoff, so the first reply
+    // of a new chat already knows what time it is and what the sky is doing.
+    return seedInitialWorldState(
+        normalizeWorldState(context?.chatMetadata?.structuredPreflightTracker?.worldState || {}),
+        context?.chatId || '',
+    );
 }
 
 export function buildSceneItemStateSnapshot(context) {
