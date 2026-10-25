@@ -10,7 +10,7 @@ import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript }
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { RENDER_CONTROL_STAGE_NAMES, sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
 import { groundUserKnowledgeApplications, SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticTextLedgerPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
-import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta, seedInitialWorldState } from './world-state.js';
+import { advanceWorldClock, applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, normalizeWorldStateDelta, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta, seedInitialWorldState, turnElapsedMinutes } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { applyHiddenHealthEvents, applyProgressionHealthMilestone, getHealthActor, normalizeHiddenHealth } from './health-state.js';
@@ -14766,6 +14766,102 @@ const tests = [
       assert.match(semanticSource, /non-living obstacle or condition that makes the current goal fail-able/);
       assert.match(semanticSource, /stakes and ordinary continuity\/no-stakes wording both seem relevant, stakes win unless already resolved/);
       assert.match(semanticSource, /rollReason must be a concise explanation that agrees with rollNeeded/);
+    },
+  },
+  {
+    name: '33w the finalizer charges the turn the right amount of fiction time',
+    run() {
+      // This exists because the arithmetic was always right and the wiring was wrong: the first
+      // version read the turn's start time off an object that has no such field, so every normal
+      // turn added zero minutes and only combat moved the clock. No test of turnElapsedMinutes
+      // could see that, because the bug was in what it was handed.
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const start = indexSource.indexOf('export function turnElapsedMinutesForClock(');
+      assert.ok(start > 0, 'turnElapsedMinutesForClock must exist');
+      const end = indexSource.indexOf('async function finalizePostNarrationMessage', start);
+      const body = indexSource.slice(start, end);
+      const helper = new Function('turnElapsedMinutes', `${body.replace(/^export /m, '')}; return turnElapsedMinutesForClock;`)(turnElapsedMinutes);
+
+      // An ordinary turn that took eight real minutes.
+      assert.equal(helper({ packet: { rollNeeded: 'N' }, startedAt: 1000, now: 1000 + 8 * 60000 }), 8);
+      // A turn that took an hour is clamped.
+      assert.equal(helper({ packet: { rollNeeded: 'N' }, startedAt: 1000, now: 1000 + 60 * 60000 }), 60, 'an hour-long scene is an hour');
+      // A combat turn is thirty seconds whatever the player took.
+      assert.equal(helper({ packet: { rollNeeded: 'Y', socialTactic: 'none' }, startedAt: 1000, now: 1000 + 40 * 60000 }), 0.5);
+      // A social roll is still real time.
+      assert.equal(helper({ packet: { rollNeeded: 'Y', socialTactic: 'intimidate' }, startedAt: 1000, now: 1000 + 6 * 60000 }), 6);
+      // The prose moved the clock; do not also charge wall time for it.
+      assert.equal(helper({ packet: { rollNeeded: 'N' }, startedAt: 1000, now: 1000 + 8 * 60000, worldStateDelta: { timeOfDay: 'evening' } }), 0);
+      // No timestamp at all is zero, not NaN and not negative.
+      assert.equal(helper({ packet: { rollNeeded: 'N' }, startedAt: 0, now: 999999 }), 0);
+      assert.equal(helper({ packet: {}, startedAt: 5000, now: 4000 }), 0);
+
+      // The call site, not just the helper. The first version of this feature read the turn's
+      // start time off an object with no such field, and exercising the helper would not have
+      // caught it - the argument was the bug.
+      assert.match(indexSource, /startedAt: state\.turnStartedAt/);
+      assert.match(indexSource, /state\.turnStartedAt = Date\.now\(\)/);
+    },
+  },
+  {
+    name: '33x the fiction clock moves at a per-scene rate',
+    run() {
+      // The visible clock is four slots. The counter underneath is minutes, because an action
+      // turn is thirty seconds and four slots cannot express thirty seconds.
+      const mk = (timeOfDay, extra = {}) => normalizeWorldState({ timeOfDay, timeEstablished: true, ...extra });
+
+      // Rate selection. Action is flat; everything else is real time, clamped.
+      assert.equal(turnElapsedMinutes({ realMinutes: 10, rollNeeded: false }), 10);
+      assert.equal(turnElapsedMinutes({ realMinutes: 600, rollNeeded: false }), 600, 'normal turns are not clamped: a long conversation really was long');
+      assert.equal(turnElapsedMinutes({ realMinutes: 40, rollNeeded: true, socialTactic: false }), 0.5, 'an action turn is thirty seconds however long it took');
+      assert.equal(turnElapsedMinutes({ realMinutes: 12, rollNeeded: true, socialTactic: true }), 12, 'a social roll is still real time');
+      assert.equal(turnElapsedMinutes({ realMinutes: 0, rollNeeded: false }), 0);
+
+      // Forty turns of a twenty-minute fight.
+      let fight = mk('morning');
+      for (let index = 0; index < 40; index += 1) fight = advanceWorldClock(fight, 0.5);
+      assert.equal(fight.timeOfDay, 'morning', 'a twenty-minute fight must not change the slot');
+      assert.ok(Math.abs(fight.clockMinutes - 20) < 0.01, 'forty action turns must total twenty minutes, got ' + fight.clockMinutes);
+
+      // The same four hours of normal play does change it.
+      let talk = mk('morning');
+      for (let index = 0; index < 24; index += 1) talk = advanceWorldClock(talk, 10);
+      assert.equal(talk.timeOfDay, 'afternoon', 'four hours must advance morning to afternoon');
+
+      // Rolling past midnight carries the day.
+      let night = mk('night');
+      for (let index = 0; index < 30; index += 1) night = advanceWorldClock(night, 10);
+      assert.equal(night.dayIndex, 2, 'passing midnight must advance the day');
+      assert.equal(night.timeOfDay, 'morning');
+
+      // The partial minute survives a reload, which is where this will break if it breaks.
+      const saved = advanceWorldClock(mk('afternoon'), 100);
+      const reloaded = normalizeWorldState(JSON.parse(JSON.stringify(saved)));
+      assert.ok(Math.abs(reloaded.clockMinutes - 100) < 0.01, 'the minute counter must survive the normaliser, got ' + reloaded.clockMinutes);
+      const again = advanceWorldClock(reloaded, 150);
+      assert.equal(again.timeOfDay, 'evening', 'reloading must not reset the counter');
+      assert.ok(Math.abs(again.clockMinutes - 10) < 0.01);
+
+      // Seeding never undoes an established clock.
+      const kept = seedInitialWorldState(saved, 'chat-x');
+      assert.equal(kept.timeOfDay, saved.timeOfDay);
+      assert.ok(Math.abs(kept.clockMinutes - saved.clockMinutes) < 0.01);
+
+      // The prose saying "you sleep" still works, and it clears the partial slot: a jump lands
+      // on a slot boundary, so minutes carried from the old slot would make the next advance
+      // fire early.
+      const loaded = advanceWorldClock(mk('afternoon'), 200);
+      for (const [delta, wantTime] of [
+        [{ timeAdvance: 'overnight' }, 'morning'],
+        [{ timeAdvance: 'day' }, 'morning'],
+        [{ timeOfDay: 'evening' }, 'evening'],
+      ]) {
+        const out = applyWorldStateDelta(loaded, normalizeWorldStateDelta(delta), {});
+        assert.equal(out.timeOfDay, wantTime, 'explicit time jump: ' + JSON.stringify(delta));
+        assert.equal(out.clockMinutes, 0, 'a time jump must clear the partial slot: ' + JSON.stringify(delta));
+      }
+      const slept = applyWorldStateDelta(loaded, normalizeWorldStateDelta({ timeAdvance: 'overnight' }), {});
+      assert.equal(slept.dayIndex, 2, 'sleeping must advance the day');
     },
   },
   {

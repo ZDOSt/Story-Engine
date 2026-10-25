@@ -59,7 +59,7 @@ import {
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
 import { sanitizeAssistantNarration, stripComputedDebugPrefix, stripNarratorMetaPrefix, stripStructuredArtifacts } from './narration-sanitizer.js';
 import { applyProseGuardSentenceRepairs, collectProseGuardSentenceFindings, parseProseGuardRepairPayload, PROSE_GUARD_EDITS_END, PROSE_GUARD_EDITS_START, PROSE_GUARD_REPAIR_BATCH_SIZE, removeProseGuardPhraseLines } from './prose-guard-edits.js';
-import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
+import { advanceWorldClock, applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, removeAlreadyProjectedWorldStateDelta, turnElapsedMinutes } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, getNpcLootRankProfile, mergePendingPricePaymentCurrencyRemove, normalizeCurrencyList, normalizeEconomyState, normalizeEquipmentTierAssignments, renderEconomyTrackerContext } from './economy.js';
 import { normalizeSceneItemState, reconcilePostNarrationPossessionDelta, sceneItemStateForModel } from './scene-item-state.js';
@@ -772,6 +772,9 @@ const state = {
     subscribed: false,
 
     pendingGeneration: null,
+    // When the current turn began, for the fiction clock. Set at the interceptor and read in
+    // the finalizer; pendingGeneration is cleared on several paths before the finalizer runs.
+    turnStartedAt: 0,
     preflightDryRun: null,
     narratorGeneration: null,
     internalGenerationStopPending: false,
@@ -6293,6 +6296,25 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         adventureIntro: options.pendingRun?.adventureIntro === true,
         allowExplicitWeather: options.pendingRun?.adventureIntro === true,
     });
+    // Advance the clock by what this turn cost in fiction.
+    //
+    // The rate comes off the resolution packet the turn already computed: an action turn is a
+    // flat thirty seconds however long the player took, everything else is real elapsed time
+    // clamped so that leaving for a night cannot skip eight hours of conversation.
+    //
+    // It runs here, in the finalizer, rather than when the turn starts, so an aborted turn
+    // leaves the clock alone. A turn that produced no narration did not take any story time.
+    {
+        const elapsed = turnElapsedMinutesForClock({
+            packet: options.pendingRun?.resolutionPacket,
+            startedAt: state.turnStartedAt,
+            now: Date.now(),
+            worldStateDelta: delta.worldState,
+        });
+        if (elapsed > 0) {
+            merged.worldState = advanceWorldClock(merged.worldState, elapsed);
+        }
+    }
     merged.sceneItems = normalizeSceneItemState(
         delta.sceneItemState || merged.sceneItems || {},
         merged.worldState,
@@ -17361,6 +17383,26 @@ function prependComputedDebug(messageId, type) {
         .finally(releaseFinalizerOwnership);
 }
 
+// What this turn cost in fiction. Extracted so it can be exercised without running a turn:
+// the arithmetic was always right, and the only bug this code has had was a wrong field name
+// on the way in, which no test of turnElapsedMinutes could see.
+export function turnElapsedMinutesForClock({ packet = {}, startedAt = 0, now = 0, worldStateDelta = null } = {}) {
+    // The prose already moved the clock this turn; do not also charge it for wall time.
+    if (worldStateDelta && worldStateDelta.timeOfDay) return 0;
+
+    const start = Number(startedAt);
+    const finish = Number(now);
+    const realMinutes = Number.isFinite(start) && start > 0 && Number.isFinite(finish) && finish >= start
+        ? (finish - start) / 60000
+        : 0;
+
+    return turnElapsedMinutes({
+        realMinutes,
+        rollNeeded: String(packet?.rollNeeded || 'N').toUpperCase() === 'Y',
+        socialTactic: String(packet?.socialTactic || 'none') !== 'none',
+    });
+}
+
 async function finalizePostNarrationMessage(messageId, type, messageKey, finalizingToast = null, captured = {}) {
     let finalNarrationRendered = false;
     let proseGuardFailureHandled = false;
@@ -18210,6 +18252,7 @@ globalThis.StructuredPreflightEngines_generationInterceptor = async function (co
         clearRuntimePrompts();
         injectPromptOptionPrompts();
         const runIdentity = createStoryEngineRunIdentity(context);
+        state.turnStartedAt = Date.now();
         state.pendingGeneration = {
             ...runIdentity,
             type: type || 'normal',

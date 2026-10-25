@@ -6236,8 +6236,18 @@ export function validateSemanticWorldProgression(ledger, options = {}, context =
         ledger?.worldProgression?.advancements || [],
         assumedWorldState,
     );
-    if (rejectedUngroundedTransition && coverage.unexpected.length) {
+    // An advancement the clock says is not due yet is dropped, not fatal.
+    //
+    // The reader used to get the whole turn aborted for this - "unexpected=plan-qfae8m" - even
+    // though the only consequence is that a plan would have fired a little early. Losing the
+    // turn is a far larger cost than ignoring one over-eager report, and the plan stays pending
+    // so it still fires on its real day.
+    //
+    // missing stays fatal: a plan that came due and was never advanced is a real failure, and
+    // silence there would leave the world quietly inconsistent.
+    if (coverage.unexpected.length) {
         const duePlanIds = new Set(coverage.duePlanIds);
+        const discarded = coverage.unexpected;
         ledger.worldProgression.advancements = coverage.advancements
             .filter(advancement => duePlanIds.has(advancement.planId));
         coverage = validateWorldProgressionAdvancementCoverage(
@@ -6245,6 +6255,9 @@ export function validateSemanticWorldProgression(ledger, options = {}, context =
             ledger.worldProgression.advancements,
             assumedWorldState,
         );
+        if (discarded.length) {
+            console.warn('[Story Engine] Discarded world progression advancements for plans that are not due yet; continuing without them.', discarded);
+        }
     }
     if (!coverage.valid) {
         const details = [

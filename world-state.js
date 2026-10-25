@@ -21,6 +21,12 @@ export const DEFAULT_WORLD_STATE = Object.freeze({
     dayIndex: 1,
     timeOfDay: 'afternoon',
     timeEstablished: false,
+    // Minutes into the current slot. The visible clock is still four slots - morning,
+    // afternoon, evening, night - and nobody ever reads this. It exists because a turn of
+    // combat advances about thirty seconds, and four slots cannot express thirty seconds;
+    // without a smaller unit those minutes are thrown away and a long fight leaves the
+    // clock exactly where it started.
+    clockMinutes: 0,
     weather: Object.freeze({
         condition: 'clear',
         remainingSlots: 2,
@@ -50,6 +56,11 @@ export function normalizeWorldState(value = {}) {
         ),
         dayIndex,
         timeOfDay,
+        clockMinutes: (() => {
+            const raw = Number(source.clockMinutes);
+            if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_WORLD_STATE.clockMinutes;
+            return Math.min(raw, WORLD_SLOT_MINUTES - 0.001);
+        })(),
         timeEstablished: normalizeEstablishedFlag(
             source.timeEstablished ?? source.established?.time,
             dayIndex !== DEFAULT_WORLD_STATE.dayIndex || timeOfDay !== DEFAULT_WORLD_STATE.timeOfDay,
@@ -375,17 +386,72 @@ function applyTimeAdvance(next, patch) {
         case 'overnight':
             next.dayIndex = clampInt(next.dayIndex + count, 1, 9999, next.dayIndex);
             next.timeOfDay = 'morning';
+            // A jump lands on a slot boundary, so whatever fraction of the previous slot had
+            // accumulated is spent. Without this the counter carries stale minutes into the
+            // new slot and the next advancement fires early.
+            next.clockMinutes = 0;
             break;
         case 'day':
             next.dayIndex = clampInt(next.dayIndex + count, 1, 9999, next.dayIndex);
             next.timeOfDay = patch.timeOfDay || 'morning';
+            next.clockMinutes = 0;
             return;
         case 'explicit':
         case 'none':
         default:
             break;
     }
-    if (patch.timeOfDay) next.timeOfDay = patch.timeOfDay;
+    if (patch.timeOfDay) {
+        next.timeOfDay = patch.timeOfDay;
+        next.clockMinutes = 0;
+    }
+}
+
+// How long a slot lasts in fiction. Four hours makes a day feel like a day.
+export const WORLD_SLOT_MINUTES = 240;
+
+// How much fiction time a turn costs.
+//
+// Normal scenes run on real time, clamped: leaving for a night must not skip eight hours of
+// conversation. Action scenes run at a flat thirty seconds a turn, because a fight is twenty
+// minutes of fiction spread over forty turns of play, and real time would turn it into hours.
+//
+// The rule is read off the resolution packet, which the turn already computed. Nothing here
+// asks the model what time it thinks it is.
+export function turnElapsedMinutes(options = {}) {
+    // Not clamped. A conversation can genuinely run long, and the player's real time is the
+    // only honest measure of how long a normal scene lasted.
+    const realMinutes = Number(options.realMinutes);
+    const real = Number.isFinite(realMinutes) && realMinutes > 0 ? realMinutes : 0;
+
+    const rollNeeded = options.rollNeeded === true;
+    const social = options.socialTactic === true || options.socialChallenge === true;
+
+    if (rollNeeded && !social) return ACTION_TURN_MINUTES;
+    return real;
+}
+
+const ACTION_TURN_MINUTES = 0.5;
+
+// Adds fiction time to the clock and rolls the visible slot when the minutes fill it.
+// Mutates a copy and returns it, the same shape as the other delta appliers.
+export function advanceWorldClock(value = {}, minutes = 0) {
+    const state = normalizeWorldState(value);
+    const add = Number(minutes);
+    if (!Number.isFinite(add) || add <= 0) return state;
+
+    // clockMinutes stays fractional: an action turn is half a minute, and rounding each one
+    // up would make forty turns of combat cost forty minutes instead of twenty.
+    const total = Math.max(0, Number(state.clockMinutes) || 0) + add;
+    const wholeSlots = Math.floor(total / WORLD_SLOT_MINUTES);
+    const remainder = total - wholeSlots * WORLD_SLOT_MINUTES;
+
+    if (wholeSlots > 0) {
+        advanceTimeSlots(state, wholeSlots);
+        state.timeEstablished = true;
+    }
+    state.clockMinutes = Math.min(remainder, WORLD_SLOT_MINUTES - 0.001);
+    return state;
 }
 
 function advanceTimeSlots(state, count = 1) {
@@ -397,6 +463,7 @@ function advanceTimeSlots(state, count = 1) {
     const nextIndex = absolute % WORLD_TIME_SLOTS.length;
     state.dayIndex = clampInt(state.dayIndex + elapsedDays, 1, 9999, state.dayIndex);
     state.timeOfDay = WORLD_TIME_SLOTS[nextIndex];
+    state.clockMinutes = 0;
 }
 
 function worldTimeIndex(state = {}) {
