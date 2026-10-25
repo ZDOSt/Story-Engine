@@ -1,8 +1,8 @@
 import { ENGINE_PROMPT_TEXT, normalizeBoundCompanionDelta, normalizeBoundCompanionState, normalizeNpcCapabilityField, normalizePendingBoundaryDelta, normalizePendingBoundaryState, normalizeSocialResolutionMemory, sanitizeTrackerUserStateForModel } from './engines.js';
 import { PERSONALITY_ARCHETYPE_GLOSSARY, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_END, TRACKER_DELTA_START, TRACKER_DELTA_TEMPLATE, TRACKER_DELTA_WRAPPER_END, TRACKER_DELTA_WRAPPER_START, USER_KNOWLEDGE_CONFIDENCE, USER_KNOWLEDGE_SCOPES, USER_KNOWLEDGE_TRUTH, USER_REPUTATION_VALENCES } from './tracker-delta-contract.js';
 import { getChatCompletionProfileRoute, sendConnectionManagerProfileRequest, sendDefaultChatCompletionTextRequest, sendDefaultChatCompletionToolRequest } from './st-adapter.js';
+import { normalizeWorldProgression } from './world-memory.js';
 import { normalizeWorldState, normalizeWorldStateDelta, normalizeWorldTransition, projectWorldStateTransition } from './world-state.js';
-import { buildWorldProgressionSemanticContext, normalizeWorldProgression, normalizeWorldProgressionAdvancements, validateWorldProgressionAdvancementCoverage } from './world-memory.js';
 import { normalizeCurrencyList, normalizeEconomyDelta } from './economy.js';
 import { normalizeSceneItemState, sceneItemStateForModel } from './scene-item-state.js';
 import {
@@ -560,6 +560,11 @@ function trackedNpcNameAppearsInText(name, text) {
 
 function estimatePromptComplexity(promptContext, options = {}) {
     const text = extractRecentPromptText(promptContext, options);
+    // The per-plan term is kept even though the plan list is no longer part of this prompt.
+    // Removing it shrinks the allowance the semantic reply must fit inside, and a ledger that
+    // does not fit is truncated, fails to parse, and aborts the turn. That is a behaviour change
+    // with an abort mode, and it is not part of removing plan reporting. Tidy it separately,
+    // after watching a chat with several active plans.
     const activePlanCount = normalizeWorldProgression(options?.worldProgressionSnapshot || {}).plans
         .filter(plan => plan.status === 'active').length;
     const textComplexity = text ? Math.min(2048, Math.floor(text.length / 3000) * 256) : 0;
@@ -1523,7 +1528,6 @@ function buildSharedSemanticOutputRules() {
         'Each schema array defines one entry shape. Return an empty array when no real entries apply, keep only real entries, and repeat the entry shape only as needed. Do not emit placeholders, template rows, count fields, sentinel values, comments, trailing commas, or ellipses.',
         'Ground every resolutionEngine.actionUnits evidence value with an exact contiguous span of the supplied effectiveUserInput. Preserve every source word, first-person/third-person pronoun, possessive, quantity, negation, target, and action term in the same order. Do not summarize, paraphrase, translate, normalize, reframe from the character\'s perspective, or copy from assistant narration or an earlier user turn. Punctuation, whitespace, letter case, apostrophe style, and JSON escaping may differ only as formatting; the extension restores the exact source span. If the evidence is absent or contains substantive words not present in the current input, do not fabricate a replacement: the semantic pass must fail validation.',
         'Interpret any legacy semantic guidance by its equivalent canonical JSON meaning: Y/N maps to true/false, and absent applicable entries map to an empty array. Apply field guidance only through the canonical schema properties.',
-        'worldProgression.advancements must cover every active plan due now or due after the supplied WorldTransition succeeds, with exactly one entry per due plan.',
         'The complete Engine reference, semantic contract, snapshots, and semantic field guidance remain authoritative. Transport changes only how the same ledger is returned; do not reduce, reinterpret, invent, or silently omit ledger content.',
     ];
 }
@@ -1869,22 +1873,6 @@ function buildSemanticPreflightSchema() {
         requiresSuccess: boolean('True only when this explicit transition depends on the current stakes-bearing action succeeding.'),
         evidence: string('Exact contiguous quote from the latest user input that establishes this transition, or (none) when every transition field is unchanged/none.'),
     });
-    const worldEvidence = object({
-        topic: string(),
-        text: string(),
-        route: enumString(['location', 'actor', 'news', 'investigation']),
-        location: string(),
-        actor: string(),
-    });
-    const worldAdvancement = object({
-        planId: string(),
-        stageLabel: string(),
-        consequence: string(),
-        status: enumString(['active', 'completed']),
-        nextDelayDays: integer(0, 120),
-        nextDelaySlots: integer(0, 480),
-        evidence: array(worldEvidence, 4, 1),
-    });
     const relationship = object({
         NPC: string(),
         aggressionMethod: enumString(AGGRESSION_METHODS, RELATIONSHIP_FIELD_DESCRIPTIONS.aggressionMethod),
@@ -1935,7 +1923,6 @@ function buildSemanticPreflightSchema() {
             }),
         }),
         worldTransition,
-        worldProgression: object({ advancements: array(worldAdvancement, 18) }),
         resolutionEngine: object({
             identifyGoal: string(),
             identifyChallenge: string(),
@@ -3390,7 +3377,6 @@ function balanceJsonDelimiters(text) {
 const SEMANTIC_FIELD_GUIDANCE = [
     `- ${ITEM_USE_REFERENT_RULE}`,
     '- WorldTransition is a strict scene-state projection from the latest user input. Change only location, indoor/outdoor state, or time that the latest input explicitly moves through, enters, leaves, waits through, sleeps through, or otherwise advances. Use unchanged/none when no transition is explicit. requiresSuccess=Y only when the transition depends on the current stakes-bearing action succeeding; otherwise N. evidence must quote the latest user input that establishes the transition, or (none) when unchanged. Never choose weather here.',
-    '- WorldProgressionAdvancement is private off-screen development wording for deterministic deadlines. Read PRIVATE_WORLD_PROGRESSION_ACTIVE_PLANS. Output exactly one advancement for every active plan whose nextCheckpoint is already due or would become due if WorldTransition succeeds, and no other plans. Copy the exact plan id. Advance one stage only. Consequence and evidence must remain entirely in world/NPC terms, must not mention {{user}}, second-person pronouns, or the player persona, and must never retroactively injure {{user}}, remove possessions, or force action. Each advancement requires at least one concise physically discoverable evidence item with a narrow location, actor, news, or investigation route. Do not reveal hidden causes in evidence.',
     '- ResolutionEngine user intent is explicit-only. For identifyGoal and identifyChallenge, use only the latest user-declared action, request, target, and explicit objective; do not infer an unstated goal from NPC fear, hostility, suspicion, likely reaction, context, or what an NPC might assume. For NPC-targeted stakes and OppTargets.NPC, the latest user input must directly target that NPC with a stakes-bearing action, demand, threat, attack, coercion, restraint, deception, persuasion, negotiation, boundary pressure, stealth contest against a specific established living detector/opponent, or explicit objective. Ambiguous, preparatory, self-directed, atmospheric, or scene-state actions remain exactly that. Drawing, readying, revealing, holding, sheathing, or repositioning a weapon is scene state, not intimidation or coercion by itself; classify it as stakes only when the user also declares a demand, threat, attack, aim/pointing at a target, blocking, pursuit, forced movement, aggressive advance, stealth contest against a specific established living detector/opponent, speed contest, dangerous movement, contested access, or another explicit stakes-bearing objective.',
     '- ResolutionEngine must separate user-authored internal prose from external action. First-person introspection, internal monologue, memories, metaphors, self-questions, subjective sensations, emotional narration, and thought-only text are context only. They do not create actions, targets, rolls, wounds/status/condition, inventory/gear changes, location changes, or scene facts unless the same input also declares a concrete present external action, spoken dialogue, object/ability use, movement, attack, or interaction. When mixed, extract only concrete present external actions and spoken dialogue for identifyGoal, identifyChallenge, targets, challengeType, and actionUnits.',
     '- ResolutionEngine.restraintControl is a simple fact detector. Mark Present=Y only when the latest user input explicitly holds, pins, grabs, drags, blocks, binds, immobilizes, carries, forces position, or prevents movement of a specific living NPC. Do not mark it for hand-on-wall proximity, leaning close, flirting, hand-holding, ordinary touch, or movement that does not restrict the NPC body or movement.',
@@ -3568,8 +3554,6 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         normalizeSceneItemState(options?.sceneItemStateSnapshot || {}, worldStateSnapshot),
         worldStateSnapshot,
     );
-    const worldProgressionSnapshot = normalizeWorldProgression(options?.worldProgressionSnapshot || {});
-    const worldProgressionContext = buildWorldProgressionSemanticContext(worldProgressionSnapshot, worldStateSnapshot);
     const boundCompanionSnapshot = normalizeBoundCompanionState(options?.boundCompanionSnapshot || {});
     const pendingBoundarySnapshot = normalizePendingBoundaryState(options?.pendingBoundarySnapshot || {});
     const semanticPlayerTrackerSnapshot = sanitizeTrackerUserStateForModel(playerTrackerSnapshot);
@@ -3582,7 +3566,6 @@ function buildSemanticContractText(userName, charName, type, trackerSnapshot, pl
         `User knowledge snapshot JSON (hidden memory about authored or personal facts people may know about {{user}}; use for UserKnowledgeApplication context only, never visible tracker text):\n${JSON.stringify(userKnowledgeSnapshot, null, 2)}\n\n` +
         `World state snapshot JSON (hidden current scene continuity; use reputationLocation/place as the default current community for EngineContext.userReputationContext.location when applicable):\n${JSON.stringify(worldStateSnapshot, null, 2)}\n\n` +
          `Current SceneItemState JSON (hidden ephemeral current-scene object availability; exact entries here are preferred for itemUse Source=scene. If the initialized state omits an object that the latest factual assistant narration establishes, deterministic verification may recover that latest narration as a current-scene source. It is not inventory, gear, ownership, or permanent location memory):\n${JSON.stringify(sceneItemStateSnapshot, null, 2)}\n\n` +
-        `PRIVATE_WORLD_PROGRESSION_ACTIVE_PLANS JSON (hidden deadline state; use only for WorldProgressionAdvancement and never expose hidden causes or plans):\n${JSON.stringify(worldProgressionContext, null, 2)}\n\n` +
         `Bound companion snapshot JSON (hidden user state; current established inner companion, possession/shared vessel, intelligent item/weapon, bound spirit/artifact, or implant if any):\n${JSON.stringify(boundCompanionSnapshot, null, 2)}\n\n` +
         `Pending boundary snapshot JSON (hidden next-turn boundary memory; use only for ResolutionEngine.boundaryBreak):\n${JSON.stringify(pendingBoundarySnapshot, null, 2)}\n\n` +
         `${ITEM_USE_REFERENT_RULE}\n\n` +
@@ -3900,8 +3883,6 @@ function validateRawLedgerContract(ledger, raw) {
     if (!ledger?.engineContext) missing.push('engineContext');
     if (!ledger?.worldTransition) missing.push('worldTransition');
     if (typeof ledger?.worldTransition?.requiresSuccess !== 'boolean') missing.push('worldTransition.requiresSuccess:boolean');
-    if (!ledger?.worldProgression) missing.push('worldProgression');
-    if (!Array.isArray(ledger?.worldProgression?.advancements)) missing.push('worldProgression.advancements');
     if (!ledger?.resolutionEngine) missing.push('resolutionEngine');
     if (!ledger?.resolutionEngine?.identifyGoal) missing.push('resolutionEngine.identifyGoal');
     if (!ledger?.resolutionEngine?.identifyChallenge) missing.push('resolutionEngine.identifyChallenge');
@@ -5175,10 +5156,8 @@ function normalizeLedger(ledger, options = {}) {
         location: normalizeReputationLocationText(ledger.engineContext.userReputationContext?.location) || '(none)',
     };
     ledger.worldTransition = normalizeWorldTransition(ledger.worldTransition || {});
-    ledger.worldProgression = ledger.worldProgression && typeof ledger.worldProgression === 'object'
-        ? ledger.worldProgression
-        : {};
-    ledger.worldProgression.advancements = normalizeWorldProgressionAdvancements(ledger.worldProgression.advancements);
+    // Progress is no longer reported by the semantic model: the clock advances due plans by
+    // itself. Anything a stored or older ledger still carries is left untouched and ignored.
     ledger.resolutionEngine = ledger.resolutionEngine || {};
     ledger.resolutionEngine.identifyGoal = ledger.resolutionEngine.identifyGoal || 'Normal_Interaction';
     ledger.resolutionEngine.identifyChallenge = ledger.resolutionEngine.identifyChallenge || ledger.resolutionEngine.explicitMeans || ledger.resolutionEngine.identifyGoal;
@@ -6132,8 +6111,6 @@ function validateNormalizedLedger(ledger, raw) {
     if (!Array.isArray(ledger.engineContext?.trackerRelevantNPCs)) missing.push('engineContext.trackerRelevantNPCs');
     if (!ledger.worldTransition) missing.push('worldTransition');
     if (typeof ledger.worldTransition?.requiresSuccess !== 'boolean') missing.push('worldTransition.requiresSuccess:boolean');
-    if (!ledger.worldProgression) missing.push('worldProgression');
-    if (!Array.isArray(ledger.worldProgression?.advancements)) missing.push('worldProgression.advancements');
     if (!ledger.resolutionEngine) missing.push('resolutionEngine');
     if (!ledger.resolutionEngine?.identifyGoal) missing.push('resolutionEngine.identifyGoal');
     if (!ledger.resolutionEngine?.identifyChallenge) missing.push('resolutionEngine.identifyChallenge');
@@ -6214,81 +6191,20 @@ function validateNormalizedLedger(ledger, raw) {
 export function validateSemanticWorldProgression(ledger, options = {}, context = {}) {
     let transition = normalizeWorldTransition(ledger?.worldTransition || {});
     const beforeWorldState = normalizeWorldState(options?.worldStateSnapshot || {});
-    let assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
+    const assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
         assumeSuccess: true,
         seed: 'semantic-world-transition',
     });
     const transitionChangesState = JSON.stringify(beforeWorldState) !== JSON.stringify(assumedWorldState);
-    let rejectedUngroundedTransition = false;
     if (transitionChangesState && !semanticEvidenceAppearsInLatestInput(transition.evidence, options.latestUserText)) {
         console.warn('[Story Engine] Rejected ungrounded WorldTransition; continuing without changing scene state.', transition);
         transition = normalizeWorldTransition({});
         ledger.worldTransition = transition;
-        assumedWorldState = projectWorldStateTransition(beforeWorldState, transition, {
-            assumeSuccess: true,
-            seed: 'semantic-world-transition',
-        });
-        rejectedUngroundedTransition = true;
     }
-    const progression = normalizeWorldProgression(options?.worldProgressionSnapshot || {});
-    let coverage = validateWorldProgressionAdvancementCoverage(
-        progression,
-        ledger?.worldProgression?.advancements || [],
-        assumedWorldState,
-    );
-    // An advancement the clock says is not due yet is dropped, not fatal.
-    //
-    // The reader used to get the whole turn aborted for this - "unexpected=plan-qfae8m" - even
-    // though the only consequence is that a plan would have fired a little early. Losing the
-    // turn is a far larger cost than ignoring one over-eager report, and the plan stays pending
-    // so it still fires on its real day.
-    //
-    // missing stays fatal: a plan that came due and was never advanced is a real failure, and
-    // silence there would leave the world quietly inconsistent.
-    if (coverage.unexpected.length) {
-        const duePlanIds = new Set(coverage.duePlanIds);
-        const discarded = coverage.unexpected;
-        ledger.worldProgression.advancements = coverage.advancements
-            .filter(advancement => duePlanIds.has(advancement.planId));
-        coverage = validateWorldProgressionAdvancementCoverage(
-            progression,
-            ledger.worldProgression.advancements,
-            assumedWorldState,
-        );
-        if (discarded.length) {
-            console.warn('[Story Engine] Discarded world progression advancements for plans that are not due yet; continuing without them.', discarded);
-        }
-    }
-    if (!coverage.valid) {
-        const details = [
-            coverage.missing.length ? `missing=${coverage.missing.join(',')}` : '',
-            coverage.duplicate.length ? `duplicate=${coverage.duplicate.join(',')}` : '',
-            coverage.unexpected.length ? `unexpected=${coverage.unexpected.join(',')}` : '',
-            coverage.incomplete.length ? `missingEvidence=${coverage.incomplete.join(',')}` : '',
-        ].filter(Boolean).join(' ');
-        throw new Error(`World progression advancement coverage failed. ${details}`.trim());
-    }
-
-    const protectedNames = getPersonaIdentityHints(context);
-    const unsafeText = ledger.worldProgression.advancements.flatMap(item => [
-        item.consequence,
-        ...item.evidence.map(evidence => evidence.text),
-    ]).find(text => semanticWorldAdvancementMentionsPlayer(text, protectedNames));
-    if (unsafeText) {
-        throw new Error('World progression advancement described an off-screen effect on the player persona.');
-    }
-}
-
-function semanticWorldAdvancementMentionsPlayer(value, protectedNames = []) {
-    const text = String(value ?? '').normalize('NFKC');
-    if (/\b(?:you|your|yours|yourself|yourselves|the user|the player(?: character)?|the protagonist)\b|\{\{user\}\}/i.test(text)) {
-        return true;
-    }
-    return protectedNames.some(name => {
-        if (name.length < 2) return false;
-        const escaped = name.normalize('NFKC').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'iu').test(text);
-    });
+    // Progress reporting was removed: the clock advances due plans on its own, so there is no
+    // claim here to check, nothing to be early, late, duplicated or unevidenced, and therefore
+    // no way for plan bookkeeping to abort a turn. The transition grounding above stays - that
+    // is about what the scene itself says, not about off-screen plans.
 }
 
 function semanticEvidenceAppearsInLatestInput(value, latestUserText) {

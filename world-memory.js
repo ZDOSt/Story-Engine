@@ -448,9 +448,11 @@ export function validateWorldProgressionAdvancementCoverage(value = {}, advancem
     const missing = [...required].filter(id => !counts.has(id));
     const duplicate = [...counts.entries()].filter(([, count]) => count > 1).map(([id]) => id);
     const unexpected = [...counts.keys()].filter(id => !required.has(id));
-    const incomplete = normalized
-        .filter(item => required.has(item.planId) && item.evidence.length === 0)
-        .map(item => item.planId);
+    const incomplete = options.allowIncompleteEvidence === true
+        ? []
+        : normalized
+            .filter(item => required.has(item.planId) && item.evidence.length === 0)
+            .map(item => item.planId);
     return {
         progression,
         advancements: normalized,
@@ -466,8 +468,69 @@ export function validateWorldProgressionAdvancementCoverage(value = {}, advancem
     };
 }
 
+// Builds the advancement a due plan should receive from the plan's own record.
+//
+// A plan already carries its actor, objective, location and consequences. Everything needed to
+// advance it is in the tracker, so waiting for the semantic model to report it is both
+// redundant and, when the model is early or silent, fatal.
+//
+// The consequence string is what reaches the narrator. It says the thing happened and whether
+// {{user}} was there to see it.
+export function synthesizeDueAdvancements(value = {}, worldState = {}, options = {}) {
+    const progression = normalizeWorldProgression(value);
+    const protectedUserNames = uniqueText(options.protectedUserNames, 120);
+    const perspective = cleanText(options.perspectiveLocation, 160).toLowerCase();
+    const out = [];
+
+    for (const plan of progression.plans) {
+        if (plan.status !== 'active' || !isPlanDue(plan, worldState)) continue;
+        if (isProtectedPlayerEntity(plan.actor, protectedUserNames)) continue;
+
+        const latest = Array.isArray(plan.consequences) && plan.consequences.length
+            ? plan.consequences[plan.consequences.length - 1]
+            : null;
+        const outcome = cleanText(latest?.summary, 280) || plan.objective;
+        if (!outcome) continue;
+
+        // The consequence is checked by isSafeOffscreenConsequence, which rejects any mention of
+        // the player. Whether the scene witnessed it goes in a separate field, not in this string.
+        const where = cleanText(plan.location, 160);
+        const onStage = Boolean(where && perspective && where.toLowerCase() === perspective);
+
+        // stageLabel is required by normalizePlanAdvanceDelta; without it the advancement
+        // normalises to null and the plan reads as missing, which is the failure this whole
+        // change exists to remove.
+        out.push({
+            planId: plan.id,
+            stageLabel: plan.stageLabel || 'due',
+            consequence: `${plan.actor} — ${outcome}.`,
+            status: 'completed',
+            onStage,
+            evidence: [],
+        });
+    }
+    return out;
+}
+
 export function advanceDueWorldPlans(value = {}, advancements = [], worldState = {}, options = {}) {
-    const coverage = validateWorldProgressionAdvancementCoverage(value, advancements, worldState, options);
+    // If the caller supplied no advancements, build them from the plans themselves. A plan
+    // carries everything needed to advance it, so waiting for a model to report it is redundant
+    // and, when the model is early or silent, fatal. With this, a plan the clock has reached
+    // always advances and the coverage check stops being reachable by this path.
+    const supplied = Array.isArray(advancements) ? advancements.filter(Boolean) : [];
+    const effective = supplied.length
+        ? supplied
+        : synthesizeDueAdvancements(value, worldState, options);
+    // An advancement the code built has no prose to quote, so the evidence requirement - which
+    // exists so the model justifies a claim about what happened - does not apply to it. Set that
+    // before validating, rather than loosening the rule for everything.
+    const synthesized = supplied.length === 0;
+    const coverage = validateWorldProgressionAdvancementCoverage(
+        value,
+        effective,
+        worldState,
+        synthesized ? { ...options, allowIncompleteEvidence: true } : options,
+    );
     if (options.strict !== false && !coverage.valid) {
         const details = [
             coverage.missing.length ? `missing=${coverage.missing.join(',')}` : '',
@@ -509,10 +572,21 @@ export function advanceDueWorldPlans(value = {}, advancements = [], worldState =
         audit.push(`advanced:${plan.id}:${advanced.stage}`);
     }
 
+    // onStage does not survive normalizePlanAdvanceDelta, so it is carried alongside rather
+    // than inside. The narrator needs it: an event it can see and one it cannot are written
+    // completely differently.
+    const stageById = new Map(effective.map(item => [item.planId, item.onStage === true]));
+    const events = coverage.advancements.map(item => ({
+        planId: item.planId,
+        consequence: item.consequence,
+        onStage: stageById.get(item.planId) === true,
+    }));
+
     return {
         progression: normalizeWorldProgression(progression),
         duePlanIds: coverage.duePlanIds,
         advancements: coverage.advancements,
+        events,
         audit,
     };
 }

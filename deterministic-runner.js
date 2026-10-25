@@ -1082,7 +1082,6 @@ function blockedSpellLedger(ledger, decision) {
         nextLedger.powerEventShape = { events: [] };
         nextLedger.chaosSemantic = { sceneSummary: '' };
         nextLedger.proactivitySemantic = {};
-        nextLedger.worldProgression = { advancements: [] };
         nextLedger.trackerUpdateEngine = { user: {}, npcs: [] };
     }
     return nextLedger;
@@ -1507,12 +1506,16 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         healthBefore,
         worldProgressionBefore,
     );
+    // No advancements are passed: the clock decides which plans are due and the plan's own
+    // record supplies the consequence. The semantic model no longer reports progress.
     const worldProgressionResult = advanceDueWorldPlans(
         worldProgressionBefore,
-        effectiveLedger?.worldProgression?.advancements || [],
+        [],
         worldState,
         {
             allowUnexpected: true,
+            // Where the scene is, so a due plan can be marked as witnessed or off-screen.
+            perspectiveLocation: worldState?.place || '',
             messageKey: options?.worldProgressionProjectionKey || `pending-${Date.now()}`,
             powerActors: {
                 ...buildPowerActorSnapshot(context),
@@ -1595,6 +1598,9 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         powerActorFavor: powerActors.favorOpportunity,
         boundCompanion: boundCompanion.handoff,
         worldMemory,
+        // Off-screen events the clock brought due this turn. The narrator is told they happened,
+        // not asked whether they did: the semantic model no longer reports progress at all.
+        worldEvents: worldProgressionResult.events || [],
         generatedNpcStats,
         npcEquipmentProfiles,
         sceneState: worldState,

@@ -11,7 +11,7 @@ import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-na
 import { RENDER_CONTROL_STAGE_NAMES, sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
 import { groundUserKnowledgeApplications, SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticTextLedgerPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { advanceWorldClock, applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, normalizeWorldStateDelta, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta, seedInitialWorldState, turnElapsedMinutes } from './world-state.js';
-import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
+import { synthesizeDueAdvancements, advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
 import { applyCurrencyDelta, applyEconomyDelta, buildDeterministicLootEnvelope, equipmentDefenseBonusForTier, equipmentTierForCurrencyAmount, getNpcLootRankProfile, isProtectiveEquipmentItem, mergePendingPricePaymentCurrencyRemove, getEconomyProfileForGenre, normalizeCurrencyList, normalizeEconomyDelta, normalizeEconomyState, resolveEquipmentDefense } from './economy.js';
 import { applyHiddenHealthEvents, applyProgressionHealthMilestone, getHealthActor, normalizeHiddenHealth } from './health-state.js';
 import { assertValidCharacterSheet, CHARACTER_SHEET_HEADINGS } from './character-sheet-validation.js';
@@ -13950,7 +13950,7 @@ const tests = [
         requiresSuccess: false,
         evidence: 'I wait three days.',
       };
-      ledger.worldProgression = { advancements: [advancement] };
+      // No advancements are supplied: the clock and the plan's own record do the work.
       const worldState = normalizeWorldState({
         dayIndex: 1,
         timeOfDay: 'morning',
@@ -13980,9 +13980,21 @@ const tests = [
       assert.deepEqual(report.worldProgressionProjection.duePlanIds, [plan.id]);
       assert.equal(report.worldProgressionProjection.advancements.length, 1);
       assert.equal(report.worldProgressionProjection.advancements[0].planId, plan.id);
-      assert.equal(report.worldProgressionProjection.advancements[0].consequence, advancement.consequence);
-      assert.equal(report.finalNarrativeHandoff.worldMemory.observableEvidence.length, 1);
-      assert.match(prompt(report), /Rick's rented berth is empty and his travel bag is gone/);
+      assert.match(
+        report.worldProgressionProjection.advancements[0].consequence,
+        /Rick .*Leave South Dock after three days/,
+        'the consequence comes from the plan record, not from a model report',
+      );
+      // And the narrator is told it happened, marked as off-stage because the plan is anchored
+      // at South Dock and {{user}} is elsewhere in this construction.
+      assert.equal(report.finalNarrativeHandoff.worldEvents.length, 1);
+      assert.equal(report.finalNarrativeHandoff.worldEvents[0].planId, plan.id);
+      assert.equal(typeof report.finalNarrativeHandoff.worldEvents[0].onStage, 'boolean');
+      // The advancement's own evidence used to flow into world memory. There is no
+      // advancement now, so the event reaches the narrator as a fact instead: it happened,
+      // and whether the scene can see it is decided by where the plan is anchored.
+      assert.match(prompt(report), /Leave South Dock after three days/);
+      assert.match(prompt(report), /This has just happened/);
 
       const failedTransition = projectWorldStateTransition(worldState, {
         timeAdvance: 'day',
@@ -14091,26 +14103,14 @@ const tests = [
         messageKey: 'chat:ungrounded-transition-plan',
       });
       const futurePlan = futurePlanState.progression.plans[0];
+      // Progress reporting is gone: the semantic ledger no longer carries advancements, so a
+      // plan can neither be advanced early nor leave the turn missing one. What the ledger still
+      // gets checked for is the scene transition it claims.
       const ungroundedPlanLedger = {
         worldTransition: {
           timeAdvance: 'day',
           timeAdvanceCount: 3,
           evidence: 'I wait three days.',
-        },
-        worldProgression: {
-          advancements: [{
-            planId: futurePlan.id,
-            stageLabel: 'Departed',
-            consequence: 'Rick left Eldermere by the northern road.',
-            status: 'active',
-            nextDelayDays: 1,
-            evidence: [{
-              topic: 'Rick departed',
-              text: "Rick's room is empty and his travel bag is gone.",
-              route: 'location',
-              location: 'Eldermere',
-            }],
-          }],
         },
       };
       assert.doesNotThrow(() => validateSemanticWorldProgression(
@@ -14123,7 +14123,9 @@ const tests = [
         context('"Hello there."'),
       ));
       assert.equal(ungroundedPlanLedger.worldTransition.timeAdvance, 'none');
-      assert.deepEqual(ungroundedPlanLedger.worldProgression.advancements, []);
+      // And the plan itself is untouched: still pending, still three days out.
+      assert.equal(futurePlan.status, 'active');
+      assert.equal(futurePlan.nextCheckpoint.dayIndex, establishedWorldState.dayIndex + 3);
 
       const groundedTransitionLedger = {
         worldTransition: {
@@ -14766,6 +14768,130 @@ const tests = [
       assert.match(semanticSource, /non-living obstacle or condition that makes the current goal fail-able/);
       assert.match(semanticSource, /stakes and ordinary continuity\/no-stakes wording both seem relevant, stakes win unless already resolved/);
       assert.match(semanticSource, /rollReason must be a concise explanation that agrees with rollNeeded/);
+    },
+  },
+  {
+    name: '33u a future event fires on its day, on stage or off, and can be cancelled',
+    run() {
+      // Two ways this is used in play: a scheduled arrival ("the queen comes in a week") and a
+      // conditional threat ("bring the money tomorrow or she dies"). Both are one plan with a
+      // deadline; the conditional resolves by cancelling the plan, not by a second mechanism.
+      const base = normalizeWorldState({ dayIndex: 1, timeOfDay: 'morning', timeEstablished: true, place: 'the docks' });
+      const make = (plan) => applyWorldMemoryDelta({}, { plans: { create: [plan] } }, {
+        afterWorldState: base,
+        messageKey: 'turn-1',
+      });
+      const at = (dayIndex, place) => normalizeWorldState({ dayIndex, timeOfDay: 'morning', timeEstablished: true, place });
+
+      const arrival = make({
+        kind: 'scheduled', actor: 'the queen', objective: 'arrive in the city',
+        location: 'the city', cause: 'she sent word she would come in a week', delayDays: 7,
+      });
+      const queen = arrival.progression.plans[0];
+      assert.equal(queen.nextCheckpoint.dayIndex, 8, 'seven days from day one is day eight');
+      assert.equal(queen.consequences.length, 0, 'a new plan carries no consequence yet');
+
+      // Not yet due, nothing fires.
+      assert.equal(advanceDueWorldPlans(arrival.progression, [], at(5, 'the docks')).events.length, 0);
+
+      // Due and out of sight: the narrator is told it happened elsewhere.
+      const far = advanceDueWorldPlans(arrival.progression, [], at(8, 'the docks'), {
+        messageKey: 't8a', perspectiveLocation: 'the docks',
+      });
+      assert.equal(far.events.length, 1);
+      assert.equal(far.events[0].onStage, false, 'the queen arrives in the city while {{user}} is at the docks');
+      assert.match(far.events[0].consequence, /the queen/);
+
+      // Due and in front of the player: same plan, marked as witnessed.
+      const near = advanceDueWorldPlans(arrival.progression, [], at(8, 'the city'), {
+        messageKey: 't8b', perspectiveLocation: 'the city',
+      });
+      assert.equal(near.events[0].onStage, true);
+
+      // The threat: cancelled when the player pays, and then it never fires.
+      const threat = make({
+        kind: 'npc', actor: 'the creditor', objective: 'collect the debt or kill the hostage',
+        location: 'the docks', cause: 'he said the money is due tomorrow', delayDays: 1,
+      });
+      const debtor = threat.progression.plans[0];
+      const paid = applyWorldMemoryDelta(threat, { plans: { cancel: [{
+        planId: debtor.id, reason: 'He took the purse and let her go.',
+      }] } }, { afterWorldState: base, messageKey: 'turn-2' });
+      assert.equal(paid.progression.plans[0].status, 'cancelled');
+      assert.match(paid.progression.plans[0].cancellationReason, /took the purse/);
+      assert.equal(advanceDueWorldPlans(paid.progression, [], at(3, 'the docks')).events.length, 0,
+        'a cancelled plan must never fire');
+
+      // Unpaid, the same plan fires on its day, and it does so where the player is.
+      const fired = advanceDueWorldPlans(threat.progression, [], at(2, 'the docks'), {
+        messageKey: 't2', perspectiveLocation: 'the docks',
+      });
+      assert.equal(fired.events.length, 1);
+      assert.equal(fired.events[0].onStage, true);
+
+      // Both call sites must pass the current place, or every event reads as off-screen and the
+      // narrator is told never to stage anything.
+      const engineSource = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.match(engineSource, /perspectiveLocation: worldState\?\.place \|\| ''/);
+      assert.match(indexSource, /perspectiveLocation: finalWorldState\?\.place \|\| ''/);
+    },
+  },
+  {
+    name: '33v a due world plan advances itself, with no model report',
+    run() {
+      // A plan stores its actor, objective, location and consequence. Everything needed to
+      // advance it is in the tracker, so waiting for the semantic model to report it is
+      // redundant - and when the model is silent the plan reads as "missing" and the turn dies.
+      const build = () => normalizeWorldProgression({ plans: [{
+        id: 'plan-caravan',
+        kind: 'scheduled',
+        actor: 'the caravan',
+        objective: 'reach the city',
+        location: 'Urakami',
+        stage: 1,
+        stageLabel: 'on the road',
+        status: 'active',
+        nextCheckpoint: { dayIndex: 2, timeOfDay: 'morning' },
+        consequences: [{ stage: 2, summary: 'the wagons came through the east gate', at: { dayIndex: 2, timeOfDay: 'morning' } }],
+      }] });
+      const at = (dayIndex, timeOfDay) => normalizeWorldState({ dayIndex, timeOfDay, timeEstablished: true });
+
+      // Not yet due: nothing fires, nothing throws.
+      const early = advanceDueWorldPlans(build(), [], at(1, 'evening'), { messageKey: 'turn-early' });
+      assert.equal((early.progression?.plans || early.plans || [])[0]?.status, 'active', 'a plan must not advance before its checkpoint');
+
+      // Due, with no advancements supplied: it advances on its own.
+      const due = advanceDueWorldPlans(build(), [], at(2, 'night'), { messageKey: 'turn-due' });
+      const advanced = (due.progression?.plans || due.plans || [])[0];
+      assert.equal(advanced?.status, 'completed', 'a due plan must advance without a model report');
+
+      // And the synthesised advancement is well formed: the consequence must not name the
+      // player, because the safety check rejects that, and stageLabel is required or the
+      // advancement silently normalises to null and the plan reads as missing.
+      const synth = synthesizeDueAdvancements(build(), at(2, 'night'), { perspectiveLocation: 'Urakami' });
+      assert.equal(synth.length, 1);
+      assert.ok(synth[0].stageLabel, 'synthesized advancement needs a stageLabel');
+      assert.doesNotMatch(synth[0].consequence, /\{\{user\}\}/, 'the consequence must not name the player');
+      assert.equal(synth[0].onStage, true, 'the location matches the perspective, so it happened on stage');
+
+      // A code-built advancement carries no quoted prose. Without the flag it is rejected as
+      // missing evidence, which would make the finalizer throw on its own output.
+      const withEvidenceRule = () => advanceDueWorldPlans(build(), synth, at(2, 'night'), {
+        messageKey: 'turn-strict',
+        requiredPlanIds: ['plan-caravan'],
+      });
+      assert.throws(withEvidenceRule, /missingEvidence/, 'the evidence rule still applies by default');
+      assert.doesNotThrow(() => advanceDueWorldPlans(build(), synth, at(2, 'night'), {
+        messageKey: 'turn-ok',
+        requiredPlanIds: ['plan-caravan'],
+        allowIncompleteEvidence: true,
+      }), 'code-built advancements must be accepted without evidence');
+
+      // And the finalizer's own call site passes that flag, or a due plan arriving during the
+      // post-narration pass would abort the turn it was meant to describe.
+      const indexSourceForClock = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.match(indexSourceForClock, /allowIncompleteEvidence: true/, 'the finalizer must accept code-built advancements');
     },
   },
   {
@@ -19869,7 +19995,6 @@ const tests = [
       const expectedLedgerProperties = [
         'engineContext',
         'worldTransition',
-        'worldProgression',
         'resolutionEngine',
         'relationshipEngine',
         'injuryEffectEngine',
@@ -19955,10 +20080,12 @@ const tests = [
         schemaMetrics.leaves += 1;
       };
       inspectSchema(strictSemanticTool.function.parameters);
+      // Smaller than it was: worldProgression and its advancement module were removed from the
+      // schema, because the clock advances due plans and nothing reports progress any more.
       assert.deepEqual(schemaMetrics, {
-        leaves: 230,
-        objects: 44,
-        arrays: 44,
+        leaves: 219,
+        objects: 41,
+        arrays: 42,
         descriptions: 104,
         incompleteRequired: 0,
       });
@@ -20032,7 +20159,9 @@ const tests = [
         /sole semantic roll gate/,
         'Portable providers should retain field-level interpretation guidance.',
       );
-      assert.equal(strictSemanticTool.function.parameters.properties.worldProgression.properties.advancements.maxItems, 18);
+      // The semantic model no longer reports progression at all: the clock advances due plans.
+      assert.equal('worldProgression' in strictSemanticTool.function.parameters.properties, false,
+        'the semantic schema must not carry worldProgression any more');
       assert.equal(strictSemanticTool.function.parameters.properties.resolutionEngine.properties.actionUnits.maxItems, 3);
       assert.equal(strictSemanticTool.function.parameters.properties.relationshipEngine.maxItems, 20);
       assert.equal(strictSemanticTool.function.parameters.properties.injuryEffectEngine.properties.effects.maxItems, 20);
@@ -20858,6 +20987,24 @@ const tests = [
         4096,
         'Untracked capitalized prose must not be counted as NPCs.',
       );
+
+      // The allowance still widens when plans are active. It is deliberately kept even though
+      // the private plan list no longer reaches this prompt: the allowance is a ceiling the
+      // semantic reply must fit inside, and a ledger that overflows is truncated and aborts the
+      // turn. Removing the term is a separate change with an abort mode, not a tidy-up.
+      const noPlans = estimateSemanticResponseLength({}, ordinaryScene, {
+        assembledPrompt: true,
+        worldProgressionSnapshot: { plans: [] },
+      });
+      const validPlan = (id) => ({
+        id, kind: 'scheduled', actor: 'actor-' + id, objective: 'objective-' + id,
+        status: 'active',
+      });
+      const threePlans = estimateSemanticResponseLength({}, ordinaryScene, {
+        assembledPrompt: true,
+        worldProgressionSnapshot: { plans: [validPlan('a'), validPlan('b'), validPlan('c')] },
+      });
+      assert.equal(threePlans - noPlans, 768, 'each active plan still adds 256 tokens of allowance');
 
       const currentTrackedScene = [
         { role: 'assistant', content: 'Phoebe speaks with Mara beside the gate.' },

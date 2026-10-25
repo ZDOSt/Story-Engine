@@ -2686,6 +2686,16 @@ function narrativeWorldEventFact(handoff = {}) {
     if (!isNoneText(favor)) {
         parts.push(`Include this favorable response opportunity: ${favor}`);
     }
+    // Events the fiction clock brought due. These already happened; the narrator is not deciding
+    // whether they did, only whether the scene shows them.
+    const events = Array.isArray(handoff?.worldEvents) ? handoff.worldEvents : [];
+    for (const item of events) {
+        const text = String(item?.consequence || '').trim();
+        if (!text) continue;
+        parts.push(item?.onStage === true
+            ? `This has just happened where {{user}} is: ${text} Show it through what {{user}} can perceive, without explaining causes.`
+            : `This has just happened elsewhere: ${text} It is not visible where {{user}} is; do not stage it, and mention it only through what {{user}} could notice or be told.`);
+    }
     return parts.length ? parts.join(' ') : '';
 }
 

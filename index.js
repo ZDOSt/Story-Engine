@@ -17618,6 +17618,11 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                 {
                     requiredPlanIds: pendingRun.worldProgressionDuePlanIds || [],
                     allowUnexpected: true,
+                    // These advancements were built by the deterministic run from the plans
+                    // themselves, so they carry no quoted prose. Requiring evidence here would
+                    // reject the code's own output.
+                    allowIncompleteEvidence: true,
+                    perspectiveLocation: finalWorldState?.place || '',
                     messageKey,
                     powerActors: finalPowerActors,
                     protectedUserNames,
