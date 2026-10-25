@@ -8,7 +8,7 @@ import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
 import { getExplicitNamePromotions, isPromotableTrackerName } from './tracker-name-promotions.js';
-import { sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
+import { RENDER_CONTROL_STAGE_NAMES, sanitizeAssistantNarration, stripComputedDebugPrefix } from './narration-sanitizer.js';
 import { groundUserKnowledgeApplications, SEMANTIC_OUTPUT_MODES, annotateSemanticDiagnosticError, applySemanticTextRequestPayloadPolicies, applySemanticToolRequestPayloadPolicies, applyStoryEngineBaselineThinkingDisabledPayload, applyStoryEngineSemanticToolTransportPayload, applyStoryEngineThinkingDisabledPayload, buildSemanticPreflightTool, buildSemanticTextLedgerPrompt, buildSemanticToolChoice, buildSemanticToolPrompt, buildSemanticTurnBindingBlock, buildStructuredToolChoice, createSemanticTurnBinding, estimateSemanticResponseLength, extractSemanticTextLedger, extractSemanticToolLedger, formatSemanticDiagnostic, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolArgumentTypes, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, parseSemanticToolArgumentJson, reportSemanticDiagnostic, resolveSemanticToolTransportPolicy, sanitizeSemanticAssembledText, validateSemanticToolArguments, validateSemanticTurnGrounding, validateSemanticWorldProgression } from './semantic-extractor.js';
 import { applyWorldStateDelta, formatWorldStateForDisplay, normalizeWorldState, projectWorldStateTransition, removeAlreadyProjectedWorldStateDelta } from './world-state.js';
 import { advanceDueWorldPlans, applyWorldMemoryDelta, applyWorldMemoryPatch, buildWorldMemoryUpdateContext, createWorldMemoryPatch, isPlanDue, normalizeDescriptiveArchive, normalizeWorldMemoryState, normalizeWorldProgression, parseWorldMemoryDelta, prepareWorldMemoryNarration, progressionHasActivePlanForActor, WORLD_MEMORY_DELTA_CONTRACT, WORLD_MEMORY_DELTA_TEMPLATE } from './world-memory.js';
@@ -14769,6 +14769,43 @@ const tests = [
     },
   },
   {
+    name: '33z an injured NPC still keeps an inventory-only delta',
+    run() {
+      // The injury-cap filter asks whether an NPC delta contains anything worth keeping.
+      // It used to check only wounds, status and gear, so an NPC who picked something up
+      // in the same scene where they were hurt lost the pickup: the prose said they had it,
+      // the tracker never recorded it, and later turns disagreed with the story.
+      const capsSource = fs.readFileSync(new URL('tracker-injury-caps.js', import.meta.url), 'utf8');
+      const rankBlock = capsSource.slice(
+        capsSource.indexOf('const CONDITION_RANK'),
+        capsSource.indexOf('export function collectContextualInjuryCaps'),
+      );
+      const fnSource = capsSource.slice(
+        capsSource.indexOf('function hasTrackerDeltaChange'),
+        capsSource.indexOf('function normalizeSeverity'),
+      );
+      const conditionFn = capsSource.slice(
+        capsSource.indexOf('function normalizeCondition'),
+        capsSource.indexOf('function conditionFromSeverity'),
+      );
+      const cleanValue = value => (value === undefined || value === null ? '' : String(value).trim());
+      const hasChange = new Function('cleanValue', `${rankBlock}; ${conditionFn}; ${fnSource}; return hasTrackerDeltaChange;`)(cleanValue);
+
+      // An inventory-only NPC delta must count as a change now.
+      assert.equal(hasChange({ condition: 'unchanged', inventoryAdd: ['a brass key'] }, false), true,
+        'an NPC who only picked something up must not be filtered out');
+      assert.equal(hasChange({ condition: 'unchanged', tasksAdd: ['watch the east road'] }, false), true);
+      assert.equal(hasChange({ condition: 'unchanged', commitmentsAdd: ['owes the smith'] }, false), true);
+
+      // It must still reject a delta that genuinely changes nothing.
+      assert.equal(hasChange({ condition: 'unchanged' }, false), false);
+      assert.equal(hasChange({ condition: 'unchanged', inventoryAdd: [] }, false), false);
+
+      // And a condition change alone still counts.
+      assert.equal(hasChange({ condition: 'wounded' }, false), true);
+    },
+  },
+  {
     name: '34 streaming artifact display regex hides fenced tracker block only',
     run() {
       const script = buildStreamingArtifactRegexScript();
@@ -14789,7 +14826,30 @@ const tests = [
       assert.equal(applyStreamingArtifactDisplayRegex('```story_engine_tracker_delta\nBEGIN_TRACKER_DELTA\nTrackerUpdateEngine.user.condition=unchanged').trim(), '');
       assert.equal(applyStreamingArtifactDisplayRegex('Val steps back.\nBEGIN_TRACKER_DELTA\nTrackerUpdateEngine.user.condition=unchanged').trim(), 'Val steps back.');
       assert.equal(applyStreamingArtifactDisplayRegex('Val says, "This is not a tracker delta."'), 'Val says, "This is not a tracker delta."');
-      for (const stage of ['dialogueTurn', 'inputChronology', 'agencySeparation', 'strictBehaviorism', 'strictEpistemology', 'diegeticPhysicality', 'embodiedPerception', 'denotativePhysicality', 'cohesiveSceneBeats']) {
+      // The stage list is derived from the contract, not written by hand. A hand-written list
+      // is why turnEnding shipped without leak coverage for two releases: the rule existed, the
+      // sanitizer never knew about it, and a leaked "turnEnding: complete" line survived.
+      const mainSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const preFlightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      const contractForStages = preFlightSource.slice(
+        preFlightSource.indexOf('function renderControlEngineNarrativeContract()'),
+        preFlightSource.indexOf('function formatNarrativeFacts'),
+      );
+      const declaredRules = [...contractForStages.matchAll(/^function (\w+)\(/gm)]
+        .map(m2 => m2[1])
+        .filter(name => name !== 'renderControlEngineNarrativeContract');
+      const engineRules = [...mainSource.matchAll(/^  function (\w+)[({]/gm)].map(m2 => m2[1])
+        .filter(name => name !== 'RenderControlEngine');
+      const allRules = [...new Set([...declaredRules, ...engineRules])];
+      assert.ok(allRules.length >= 14, 'expected at least 14 contract rules, found ' + allRules.length);
+      for (const rule of allRules) {
+        assert.ok(RENDER_CONTROL_STAGE_NAMES.includes(rule),
+          'contract rule missing from RENDER_CONTROL_STAGE_NAMES, so its leak is never stripped: ' + rule);
+      }
+      // outputFormatting stopped being a rule when it moved into #3; the list must not claim it.
+      assert.ok(!RENDER_CONTROL_STAGE_NAMES.includes('outputFormatting'),
+        'outputFormatting is no longer a contract rule, so it must not be in the stage list');
+      for (const stage of allRules) {
         const narration = 'Val steps back.';
         assert.equal(applyStreamingArtifactDisplayRegex(`${stage}: complete\n${narration}`).trim(), narration);
         assert.equal(applyStreamingArtifactDisplayRegex(`function ${stage}(response, context): complete\n${narration}`).trim(), narration);

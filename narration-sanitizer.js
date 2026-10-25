@@ -4,10 +4,10 @@ const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
 const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
 const VISIBLE_MECHANICS_LABEL = '(?:(?:Critical|Moderate|Minor)\\s+(?:Success|Failure)|Success|Failure|Stalemate|No\\s+Roll|Dominant\\s+Impact|Solid\\s+Impact|Light\\s+Impact|Checked|Deflected|Avoided|Struggle)';
 export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
-    'outputFormatting',
     'RenderControlEngine',
     'activeHandoff',
     'dialogueTurn',
+    'turnEnding',
     'inputChronology',
     'antiRhetoricalNegation',
     'strictBehaviorism',

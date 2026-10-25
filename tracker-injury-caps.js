@@ -165,9 +165,12 @@ function hasTrackerDeltaChange(delta, includePlayerFields) {
     if (!delta || typeof delta !== 'object') return false;
     if (normalizeCondition(delta.condition) !== 'unchanged') return true;
     if (!includePlayerFields && cleanValue(delta.personalitySummary)) return true;
+    // An NPC can pick something up in the same scene where they get hurt. Filtering only
+    // wounds and gear dropped an inventory-only delta, so prose said they had it and the
+    // tracker never recorded it. Both branches now consider the same carrying fields.
     const fields = includePlayerFields
         ? ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove']
-        : ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove'];
+        : ['woundsAdd', 'woundsRemove', 'statusAdd', 'statusRemove', 'gearAdd', 'gearRemove', 'inventoryAdd', 'inventoryRemove', 'tasksAdd', 'tasksRemove', 'commitmentsAdd', 'commitmentsRemove'];
     return fields.some(field => Array.isArray(delta[field]) && delta[field].length > 0);
 }
 
