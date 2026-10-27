@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import yaml from 'yaml';
 import { buildWorldStateSnapshot, applyUserReputationSeed, buildSpellCastingSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, deriveUserReputationSeed, getNameRegistry, latentFavorIds, latentGrievanceIds, mergeLatentFavorArchive, mergeLatentGrievanceArchive, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeSpellCastingState, pruneLatentFavorArchive, rankForCapabilityPool, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import { ENGINE_PROMPT_TEXT, classifyProactivityTier, normalizeProactivityMemory, aggressionReactionOutcome, applyPendingBoundaryDelta, buildPersistencePolicy, deriveDirection, finalizeLootSearchCompletion, getUserCoreStats, hasMagicStoneEntry, isSlowBondEligible, mergeSlowBondEvidence, normalizeCore, normalizeDisposition, normalizePendingBoundaryState, normalizeTrackerUserState, playerStatValue, reconcileLootPossessionTransfers, reconcileUserEquipmentTiers, sanitizeAggressionResultsForTrackerModel, sanitizeTrackerUserStateForModel, standingConstrainedAttackGuard, updateDisposition } from './engines.js';
-import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext } from './pre-flight.js';
+import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext, formatAdventureIntroNarratorPromptContext, formatNarratorModelPromptContext, formatNarratorPromptContext  } from './pre-flight.js';
 import { deterministicPersonalitySummaryForName, stripPersonalityMannerismFields, TRACKER_DELTA_CONTRACT, TRACKER_DELTA_TEMPLATE } from './tracker-delta-contract.js';
 import { applyContextualInjuryCapsToTrackerDelta, collectContextualInjuryCaps, formatContextualInjuryCapsForPrompt } from './tracker-injury-caps.js';
 import { applyStreamingArtifactDisplayRegex, buildStreamingArtifactRegexScript } from './streaming-artifact-regex.js';
@@ -15084,6 +15084,65 @@ const tests = [
 
       // And a condition change alone still counts.
       assert.equal(hasChange({ condition: 'wounded' }, false), true);
+    },
+  },
+  {
+    name: '33u a school-age isekai opening is never alone',
+    run() {
+      // A student is never alone at the crossing. Four transitions used to declare no group, so
+      // their arrival state was 'alone' and the prompt then told the model "No Earth-arrival
+      // group is selected. Do not add classmates" - which is what produced empty openings for
+      // roughly three in ten school-age seeds.
+      const sample = (characterAge, count) => {
+        const seen = new Map();
+        for (let index = 0; index < count; index += 1) {
+          let n = (index * 2654435761) % 2147483647;
+          const rng = () => { n = (n * 1103515245 + 12345) % 2147483648; return n / 2147483648; };
+          const seed = buildIsekaiOpeningSeed({ adventureGenre: 'Isekai', characterAge, rng });
+          if (!seed) continue;
+          const key = seed.earthTransition.label;
+          if (!seen.has(key)) seen.set(key, seed.arrivalProfile);
+        }
+        return seen;
+      };
+
+      const studentProfiles = sample(16, 4000);
+      assert.ok(studentProfiles.size >= 12, 'expected the school-age pool to be broad, saw ' + studentProfiles.size);
+      for (const [label, profile] of studentProfiles) {
+        assert.notEqual(profile.arrivalState, 'alone', 'a school-age opening must never be alone: ' + label);
+        assert.equal(profile.group, true, 'a school-age opening must always carry a group: ' + label);
+        assert.notEqual(profile.groupType, 'none', 'a school-age opening must name a group type: ' + label);
+      }
+
+      // Adults and unknown ages keep the old behaviour: arriving alone is legitimate there.
+      const adultProfiles = sample(25, 3000);
+      assert.ok([...adultProfiles.values()].some(profile => profile.arrivalState === 'alone'),
+        'adult openings must still be able to arrive alone');
+
+      // The companions block is rendered for a student and names the adult when the type has one.
+      const schoolSeed = buildIsekaiOpeningSeed({
+        adventureGenre: 'Isekai', characterAge: 16,
+        rng: (() => { let i = 0; return () => (i++ * 0.31) % 1; })(),
+      });
+      const block = formatAdventureIntroNarratorModelPromptContext('Open the story.', {
+        adventureGenre: 'Isekai',
+        isekaiOpeningSeed: schoolSeed,
+      });
+      assert.match(block, /COMPANIONS:/);
+      assert.match(block, /never write an opening in which \{\{user\}\} stands alone/i);
+      assert.doesNotMatch(block, /Do not add classmates, coworkers, or companions/);
+
+      // The four transitions that used to declare no group now declare one, and the guard keeps
+      // any future transition from silently reintroducing an empty opening.
+      const preflightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      assert.match(preflightSource, /const group = studentContext \|\| groupProfile\.present === true/);
+      for (const key of ['student_journey_home_blackout', 'student_late_study_crossing',
+        'student_school_object_trigger', 'student_school_portal']) {
+        const at = preflightSource.indexOf(`key: '${key}'`);
+        assert.ok(at > 0, key + ' must exist');
+        const block = preflightSource.slice(at, at + 900);
+        assert.match(block, /groupProfile: \{/, key + ' must declare a group profile');
+      }
     },
   },
   {

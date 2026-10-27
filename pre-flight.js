@@ -811,16 +811,30 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'student_school_object_trigger',
         label: 'School Relic Activation',
-        guidance: 'Use a book, phone, charm, artifact, or other object discovered or activated by {{user}} at school. Do not require classmates to be transported unless another fact establishes it.',
+        guidance: 'Use a book, phone, charm, artifact, or other object discovered or activated by {{user}} at school, while classmates and a teacher are within sight.',
         ageGroups: ['school_age'],
         studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates_and_teacher',
+            arrivalState: 'together',
+        },
+
     },
     {
         key: 'student_school_portal',
         label: 'School-Building Portal',
-        guidance: 'Use a portal or spatial rupture in a school corridor, rooftop, gymnasium, classroom, or empty campus area. The crossing may affect {{user}} alone or draw in nearby students if established.',
+        guidance: 'Use a portal or spatial rupture in a school corridor, rooftop, gymnasium, classroom, or busy campus area, drawing in the classmates and teacher nearby.',
         ageGroups: ['school_age'],
         studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmates_and_teacher',
+            arrivalState: 'together',
+        },
+
     },
     {
         key: 'student_classmate_rescue_accident',
@@ -851,16 +865,30 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'student_journey_home_blackout',
         label: 'Journey-Home Blackout',
-        guidance: 'Use an unexplained blackout, disappearance, or supernatural interruption while {{user}} is traveling home from school. Do not assign a workplace or adult role.',
+        guidance: 'Use an unexplained blackout, disappearance, or supernatural interruption while {{user}} is traveling home from school with a classmate or two. Do not assign a workplace or adult role.',
         ageGroups: ['school_age'],
         studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmate',
+            arrivalState: 'together',
+        },
+
     },
     {
         key: 'student_late_study_crossing',
         label: 'Late Study or Gaming Crossing',
-        guidance: 'Use late-night studying, homework, or gaming after school as the brief Earth-side final moment before the crossing. Do not erase memories or infantize {{user}}.',
+        guidance: 'Use late-night studying, homework, or gaming after school as the brief Earth-side final moment, with one or two classmates still there. Do not erase memories or infantize {{user}}.',
         ageGroups: ['school_age'],
         studentOpeningEligible: true,
+        requiredOpeningTags: ['group'],
+        groupProfile: {
+            present: true,
+            type: 'classmate',
+            arrivalState: 'together',
+        },
+
     },
 ]);
 
@@ -1325,8 +1353,11 @@ function buildIsekaiArrivalProfile(ageGroup = 'unknown', earthTransition = {}) {
         ? earthTransition.groupProfile
         : {};
     const requiredTags = normalizeSeedTagList(earthTransition?.requiredOpeningTags);
-    const group = groupProfile.present === true || requiredTags.includes('group');
     const studentContext = ageGroup === 'school_age';
+    // A student is never alone at the crossing. If a transition forgets to declare a group, this
+    // still gives them one, so the prompt cannot fall back to "no group is selected; do not add
+    // classmates" - which is what produced empty openings for roughly three in ten of them.
+    const group = studentContext || groupProfile.present === true || requiredTags.includes('group');
     return {
         ageGroup,
         studentContext,
@@ -1405,6 +1436,14 @@ function renderIsekaiOpeningSeed(seed = null) {
         arrivalProfile.group
             ? 'PRESERVE the listed Earth-arrival group in the opening. Keep the stated group type and arrival state visible; do not silently remove, replace, or convert the group into an isolated arrival.'
             : 'No Earth-arrival group is selected. Do not add classmates, coworkers, or companions solely because of this profile.',
+        ...(arrivalProfile.studentContext ? [
+            '',
+            'COMPANIONS:',
+            '{{user}} is not alone in this opening. At least one other student is physically present from the first sentence; the arrival state above decides how many, and the rest of the class may be elsewhere. Never write an opening in which {{user}} stands alone.',
+            String(arrivalProfile.groupType || '').includes('teacher')
+                ? 'A teacher or chaperone is part of the group. Keep that adult present.'
+                : 'No teacher accompanies them, because this scene is away from school. Keep the group to students.',
+        ] : []),
         '',
         'BEAT #1: EARTH LAST MOMENTS',
         `Selected Earth Last Moment: ${transition.label}.`,
