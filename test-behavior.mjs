@@ -15317,6 +15317,14 @@ const tests = [
       // initialises NPCs from the same race check.
       assert.equal(indexSource.includes('resolveAdventureStartDispositions'), false);
       assert.equal(indexSource.includes('ADVENTURE_START_DISPOSITION_KEY'), false);
+      // Every symbol index.js calls out of deterministic-runner.js must actually be imported.
+      // Deleting the import while the call stayed behind shipped a broken adventure opening and
+      // the suite stayed green, because node --check does not resolve identifiers.
+      for (const symbol of ['resolveAdventureStartDisposition', 'resolveUserNonHumanFromContext']) {
+        if (!indexSource.includes(symbol + '(')) continue;
+        assert.ok(indexSource.includes(`{ ${symbol} }`) || indexSource.includes(`{ ${symbol},`),
+          symbol + ' is called from index.js but never imported');
+      }
       const extractorSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
       assert.equal(extractorSource.includes('extractAdventureStartDispositions'), false);
     },
