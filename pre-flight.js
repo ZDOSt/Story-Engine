@@ -497,7 +497,10 @@ function buildAdventureNonHumanInstruction(userNonHuman = false) {
     return [
         'VISIBLY INHUMAN - BINDING:',
         '{{user}} does not read as a person of any ordinary kind. Everyone in this scene can see it before anyone speaks.',
-        'This includes whoever speaks first and whoever {{user}} approaches. They want distance, safety, witnesses, or an exit. Staying, answering, or complying is defensive appeasement or caution, not welcome, comfort, or trust.',
+        'This includes whoever speaks first and whoever {{user}} approaches.',
+        // The same guide text the narrator receives for this disposition on every other turn, so
+        // the opening and the rest of the story cannot describe the same feeling differently.
+        relationshipDispositionNarrativeGuide({ FinalState: 'B1/F3/H2', InitPreset: 'userNonHuman' }),
         'Show it in how each of them speaks and behaves from the moment they appear. Never name, explain, or summarise it.',
         'An opening in which nobody reacts to this renders the response INVALID.',
     ].join('\n');

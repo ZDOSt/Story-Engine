@@ -15291,7 +15291,15 @@ const tests = [
       });
       assert.match(demon, /VISIBLY INHUMAN - BINDING:/);
       assert.match(demon, /includes whoever speaks first/);
-      assert.match(demon, /They want distance, safety, witnesses, or an exit/);
+      // The exact guide text the narrator receives for this disposition on every other turn.
+      assert.match(demon, /Fear-led: wants distance, safety, witnesses, or an exit; staying, answering, or complying is defensive appeasement or caution, not comfort, attraction, trust, or willingness\./);
+      // And it is literally the shared guide, not a hand-written copy that can drift.
+      const preflightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      const block = preflightSource.slice(
+        preflightSource.indexOf('function buildAdventureNonHumanInstruction'),
+        preflightSource.indexOf('export function formatAdventureIntroNarratorModelPromptContext'),
+      );
+      assert.match(block, /relationshipDispositionNarrativeGuide\(\{ FinalState: 'B1\/F3\/H2', InitPreset: 'userNonHuman' \}\)/);
       assert.match(demon, /renders the response INVALID/);
       assert.ok(demon.indexOf('VISIBLY INHUMAN') > demon.indexOf('START ADVENTURE REMINDER'),
         'the instruction must come after the adventure reminder, near the end');
