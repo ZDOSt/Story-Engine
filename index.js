@@ -14171,7 +14171,10 @@ function getActiveAdventureGenre(context = getContext()) {
 function buildPlayerAdventureStartPrompt(root = {}) {
     const genre = normalizePlayerAdventureGenre(root?.sheet?.genre || root?.adventureGenre || 'Fantasy');
     if (genre === 'Isekai') {
-        return PLAYER_ISEKAI_ADVENTURE_START_REMINDER;
+        // The isekai seed already carries both beats, the aesthetic rule and the pre-made
+        // character rule, and the "begin" instruction now lives in the announcement's output
+        // contract. There is nothing left for a separate reminder to say.
+        return '';
     }
     const genreFrame = PLAYER_ADVENTURE_GENRE_FRAMES[genre] || PLAYER_ADVENTURE_GENRE_FRAMES.Fantasy;
     return [
@@ -14185,7 +14188,6 @@ function buildPlayerAdventureStartPrompt(root = {}) {
         'PREMADE CHARACTER RULE:',
         'PRESERVE {{user}}\'s existing race, body, abilities, gear, identity, backstory, and character-card/lorebook facts. The opening may relocate, reveal, pressure, or contextualize the character, but it must not rebuild, reroll, overwrite, infantize, or replace them.',
         '',
-        PLAYER_ADVENTURE_START_REMINDER,
     ].join('\n');
 }
 

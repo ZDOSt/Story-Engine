@@ -21481,8 +21481,8 @@ const tests = [
       assert.match(source, /You MUST begin in the selected genre: \$\{genre\}\./);
       assert.match(source, /Use the genre guidance below as the concrete Start Adventure structure\. Do NOT choose a different genre, premise, or opening setup for convenience\./);
       assert.match(source, /PLAYER_ISEKAI_ADVENTURE_START_REMINDER/);
-      assert.match(source, /if \(genre === 'Isekai'\) \{\s*return PLAYER_ISEKAI_ADVENTURE_START_REMINDER;\s*\}/);
-      assert.match(source, /'GENRE OPENING:',[\s\S]*`You MUST begin in the selected genre: \$\{genre\}\.`,[\s\S]*'Guidance:',[\s\S]*genreFrame,[\s\S]*'PREMADE CHARACTER RULE:',[\s\S]*PLAYER_ADVENTURE_START_REMINDER/);
+      assert.match(source, /if \(genre === 'Isekai'\) \{\s*\/\/ The isekai seed already carries both beats/);
+      assert.match(source, /'GENRE OPENING:',[\s\S]*`You MUST begin in the selected genre: \$\{genre\}\.`,[\s\S]*'Guidance:',[\s\S]*genreFrame,[\s\S]*'PREMADE CHARACTER RULE:',[\s\S]*\]\.join\('\\n'\)/);
       assert.doesNotMatch(source, /PLAYER_ADVENTURE_START_REMINDER,[\s\S]{0,80}genreFrame/);
       assert.match(source, /Begin the selected-genre opening scene now\. Do not explain the setup, instructions, process, or reasoning\./);
       assert.match(source, /Begin the Earth last moment, then continue directly into the Isekai opening\./);
@@ -21496,7 +21496,7 @@ const tests = [
       // never once inserted into a prompt: every assertion passed while the opening had no length
       // limit and no rule anchoring the scene to {{user}}.
       const contractIntro = formatAdventureIntroNarratorModelPromptContext('GENRE OPENING:', { adventureGenre: 'Fantasy', origin: 'A hill village' });
-      assert.match(contractIntro, /OPENING CONTRACT:/);
+      assert.match(contractIntro, /Keep the opening between 150 and 300 words\./);
       assert.match(contractIntro, /Keep the opening between 150 and 300 words\./);
       assert.match(contractIntro, /Narrate ONLY what surrounds \{\{user\}\}\./);
       assert.match(contractIntro, /Narrate ONLY what \{\{user\}\} can perceive externally\./);
@@ -21506,7 +21506,7 @@ const tests = [
       assert.match(contractIntro, /Do not explain the world\. Do not summarize lore\. Let the scene imply the genre\./);
       assert.match(contractIntro, /End at the first concrete moment where \{\{user\}\} can act\./);
       // It precedes everything it governs: the Origin anchor block and the prompt body.
-      assert.ok(contractIntro.indexOf('OPENING CONTRACT:') < contractIntro.indexOf('GENRE OPENING:'), 'the contract governs the prompt body');
+      assert.ok(contractIntro.indexOf('Keep the opening between 150 and 300 words.') < contractIntro.indexOf('GENRE OPENING:'), 'the contract governs the prompt body');
       // The Isekai path is asserted with a REAL seed and a realistic prompt body, not a placeholder.
       // The earlier version passed 'GENRE OPENING:' and no seed, so it proved the contract was sent
       // and nothing about how it composes with the seed and the required beats that follow it.
@@ -21529,14 +21529,14 @@ const tests = [
         adventureGenre: 'Isekai',
         isekaiOpeningSeed: isekaiSeed,
       });
-      assert.match(contractIsekai, /OPENING CONTRACT:/);
+      assert.match(contractIsekai, /Keep the opening between 150 and 300 words\./);
       assert.match(contractIsekai, /Keep the opening between 150 and 300 words\./);
       assert.match(contractIsekai, /Narrate ONLY what surrounds \{\{user\}\}\./);
       // The seed and its beats survive the contract, and the contract governs from in front of them.
       assert.match(contractIsekai, /Do NOT skip the required isekai beats/);
       assert.match(contractIsekai, /Begin the Earth last moment/);
-      assert.ok(contractIsekai.indexOf('OPENING CONTRACT:') < contractIsekai.indexOf('Do NOT skip the required isekai beats'), 'the contract governs the Isekai beats');
-      assert.ok(contractIsekai.indexOf('OPENING CONTRACT:') < contractIsekai.indexOf('START ADVENTURE REMINDER'), 'the contract precedes the reminder');
+      assert.ok(contractIsekai.indexOf('Keep the opening between 150 and 300 words.') < contractIsekai.indexOf('Do NOT skip the required isekai beats'), 'the contract governs the Isekai beats');
+      assert.ok(contractIsekai.indexOf('Keep the opening between 150 and 300 words.') < contractIsekai.indexOf('START ADVENTURE REMINDER'), 'the contract precedes the reminder');
       // The seed is rendered into the prompt rather than merely selected.
       assert.match(contractIsekai, new RegExp(isekaiSeed.newWorldOpening.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
       // And the seed stays Isekai-only. Asserted against the generator, not against a rendered
@@ -21548,7 +21548,7 @@ const tests = [
       assert.equal(buildIsekaiOpeningSeed({ adventureGenre: 'Isekai' })?.type, 'isekaiOpeningSeed');
       // The prompt body is Isekai's to carry: the formatter does not invent a seed where none was given.
       const noSeedIsekai = formatAdventureIntroNarratorModelPromptContext('GENRE OPENING:', { adventureGenre: 'Isekai' });
-      assert.match(noSeedIsekai, /OPENING CONTRACT:/);
+      assert.match(noSeedIsekai, /Keep the opening between 150 and 300 words\./);
       assert.doesNotMatch(noSeedIsekai, /isekaiOpeningSeed/);
       assert.doesNotMatch(source, /retains previous-life memories/);
       assert.doesNotMatch(source, /Start with a short playable opening scene that clearly belongs to anime isekai, not generic fantasy\./);
@@ -23241,7 +23241,7 @@ const tests = [
           formatAdventureIntroNarratorModelPromptContext('Begin the scene.', { adventureGenre: genre, origin: 'A hill village in the Vald.' }),
           /ORIGIN OPENING:|A hill village in the Vald\./,
         );
-        assert.match(intro, /OPENING CONTRACT:/);
+        assert.match(intro, /Keep the opening between 150 and 300 words\./);
       }
 
       // The wiring, and the migration that keeps a pre-removal sheet approvable.

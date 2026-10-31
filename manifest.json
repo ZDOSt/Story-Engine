@@ -5,7 +5,7 @@
     "optional": [],
     "js": "index.js",
     "author": "Local",
-    "version": "0.9.189",
+    "version": "0.9.190",
     "homePage": "https://docs.sillytavern.app/for-contributors/writing-extensions/",
     "generate_interceptor": "StructuredPreflightEngines_generationInterceptor",
     "hooks": {

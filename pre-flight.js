@@ -473,8 +473,9 @@ export function formatAdventureIntroNarratorPromptContext(adventurePrompt = '', 
 // for its whole history without ever being inserted into a prompt, so the opening had no length
 // limit, no rule anchoring the scene to {{user}}, and no instruction about what not to summarise.
 // It sits here now, beside the formatter that has to send it.
-const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`OPENING CONTRACT:
-Keep the opening between 150 and 300 words.
+// No heading: the opening sentence already says the scene must abide by these rules, so a second
+// label only separates the first rule from the sentence that introduced it.
+const PLAYER_ADVENTURE_OPENING_CONTRACT = String.raw`Keep the opening between 150 and 300 words.
 
 Narrate ONLY what surrounds {{user}}.
 Narrate ONLY what {{user}} can perceive externally.
@@ -530,10 +531,10 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         ...renderSceneStyleProfileSection(options),
         promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
         isIsekaiOpening
-            ? 'This is the opening turn of a new isekai adventure.'
+            ? 'This is the opening turn of a new isekai adventure. The opening scene MUST abide by these rules:'
             : genreLabel
-                ? `This is the opening turn of a new ${genreLabel} adventure.`
-                : 'This is the opening turn of a new adventure.',
+                ? `This is the opening turn of a new ${genreLabel} adventure. The opening scene MUST abide by these rules:`
+                : 'This is the opening turn of a new adventure. The opening scene MUST abide by these rules:',
     ];
     // The contract governs the whole opening turn, so it is stated before the Isekai seed and the
     // adventure prompt body rather than after them.
@@ -554,6 +555,11 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     lines.push(
         '',
         '#3 - OUTPUT',
+        isIsekaiOpening
+            ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
+            : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.',
+        '',
+        'Follow NAME REVEAL exactly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
         'Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
         'Do not invent, modify, substitute, or translate any proper name in this opening response.',
     );
