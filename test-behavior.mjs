@@ -15282,9 +15282,17 @@ const tests = [
         startDispositions: { Alice: { label: 'romanticOpen', disposition: { B: 4, F: 1, H: 1 } } },
         startDispositionFallback: { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } },
       });
-      assert.match(prompt, /OPENING DISPOSITIONS:/);
+      assert.match(prompt, /SCENE DISPOSITION - BINDING:/);
       assert.match(prompt, /- Alice: Close trust/);
-      assert.match(prompt, /Any other figure you introduce starts from this: Neutral default/);
+      assert.match(prompt, /Anyone not listed above: Neutral default/);
+      // The failure this fixes: the block said "any other figure", so the model read it as note
+      // about background extras and wrote the speaking character as welcoming.
+      assert.match(prompt, /includes whoever speaks first/);
+      assert.match(prompt, /A person acting as though they feel nothing about \{\{user\}\} renders the response INVALID/);
+      // It must survive to the end of the prompt, next to the output contract, or the model treats
+      // it as a note about background extras and writes a welcoming scene anyway.
+      assert.ok(prompt.indexOf('SCENE DISPOSITION') > prompt.indexOf('START ADVENTURE REMINDER'),
+        'the disposition block must come after the adventure reminder, near the end');
       // Never the numbers, only the behaviour.
       assert.doesNotMatch(prompt, /B4\/F1\/H1/);
 
@@ -15294,11 +15302,11 @@ const tests = [
         startDispositions: {},
         startDispositionFallback: { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } },
       });
-      assert.match(demon, /Any other figure you introduce starts from this: Fear-led/);
+      assert.match(demon, /Anyone not listed above: Fear-led/);
 
       // No dispositions at all means no block, so a plain opening is unchanged.
       const plain = formatAdventureIntroNarratorModelPromptContext('Open.', { adventureGenre: 'Fantasy' });
-      assert.doesNotMatch(plain, /OPENING DISPOSITIONS:/);
+      assert.doesNotMatch(plain, /SCENE DISPOSITION - BINDING:/);
 
       // And the decided disposition is written when the tracker creates the figure, so the next
       // turn cannot reinterpret it. mergePostNarrationTrackerDelta is private, so this pins the

@@ -500,12 +500,13 @@ function buildAdventureStartDispositionBlock(startDispositions = {}, fallback = 
     });
     const lines = entries.map(([name, entry]) => `- ${name}: ${describe(entry)}`);
     return [
-        'OPENING DISPOSITIONS:',
-        'These feelings already exist before the first line. Show them in how each character speaks and behaves; never name, explain, or summarise them.',
-        ...lines,
-        fallback
-            ? `Any other figure you introduce starts from this: ${describe(fallback)}`
-            : 'Any other figure you introduce starts as an ordinary stranger: practical, reserved, context-led, with no default trust or hostility.',
+        'SCENE DISPOSITION - BINDING:',
+        'Every person in this scene already feels the following toward {{user}}, before the first line.',
+        'This includes whoever speaks first and whoever {{user}} approaches. Show it in how each of them speaks and behaves from the moment they appear.',
+        'Never name, explain, or summarise it.',
+        ...(lines.length ? lines : []),
+        `Anyone not listed above: ${fallback ? describe(fallback) : 'an ordinary stranger: practical, reserved, context-led, with no default trust or hostility.'}`,
+        'Do not write this opening in a way that hides the disposition above. A person acting as though they feel nothing about {{user}} renders the response INVALID.',
     ].join('\n');
 }
 
@@ -537,7 +538,6 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         options?.startDispositions,
         options?.startDispositionFallback,
     );
-    if (startDispositionBlock) lines.push('', startDispositionBlock);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
     if (isekaiOpeningSeed) {
         if (nameReveal) lines.push('', buildAdventureIntroNameRevealBlock(nameReveal));
@@ -549,6 +549,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     }
     // Mirrors the normal turn's output contract, so the name mandate is enforced as a response
     // requirement rather than only as one rule among many inside the mandate block.
+    if (startDispositionBlock) lines.push('', startDispositionBlock);
     lines.push(
         '',
         '#3 - OUTPUT',
