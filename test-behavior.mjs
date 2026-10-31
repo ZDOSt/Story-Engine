@@ -18931,7 +18931,7 @@ const tests = [
         nameGeneration: { namePool: pool, style: 'Balanced Fantasy' },
       });
       assert.match(introPrompt, /#3 - OUTPUT/);
-      assert.match(introPrompt, /Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
+      assert.match(introPrompt, /Follow NAME REVEAL exactly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
       assert.match(introPrompt, /Do not invent, modify, substitute, or translate any proper name in this opening response\./);
       assert.match(introPrompt, /NAME REVEAL — BINDING:/);
       assert.match(introPrompt, /A NEW name may enter the scene ONLY through one of these discovery events/);

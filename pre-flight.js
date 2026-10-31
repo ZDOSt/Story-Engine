@@ -556,7 +556,6 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
             : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.',
         '',
         'Follow NAME REVEAL exactly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
-        'Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
         'Do not invent, modify, substitute, or translate any proper name in this opening response.',
     );
     return lines.join('\n');
