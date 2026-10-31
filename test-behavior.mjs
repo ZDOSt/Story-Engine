@@ -15313,12 +15313,10 @@ const tests = [
       // wiring rather than calling it.
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
       // The opening invents its cast, so the deterministic default is the only disposition it can
-      // know: no semantic call, no per-character guess.
-      assert.match(indexSource, /options\?\.applyAdventureDefault === true/);
-      assert.match(indexSource, /adventureDispositions: context\?\.chatMetadata\?\.\[ADVENTURE_START_DISPOSITION_KEY\]/);
-      assert.match(indexSource, /currentDisposition: storedDisposition\.disposition/);
-      assert.match(indexSource, /if \(storedDisposition\?\.disposition && !npcs\[name\]\.currentDisposition\)/);
+      // know: no semantic call, and nothing written into the tracker. The first semantic turn
+      // initialises NPCs from the same race check.
       assert.equal(indexSource.includes('resolveAdventureStartDispositions'), false);
+      assert.equal(indexSource.includes('ADVENTURE_START_DISPOSITION_KEY'), false);
       const extractorSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
       assert.equal(extractorSource.includes('extractAdventureStartDispositions'), false);
     },

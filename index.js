@@ -147,7 +147,6 @@ const NARRATOR_HANDOFF_WIDGET_BUTTON_ID = 'structured_preflight_narrator_handoff
 const NARRATOR_HANDOFF_WIDGET_PANEL_ID = 'structured_preflight_narrator_handoff_panel';
 const NARRATOR_HANDOFF_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
 const PROSE_GUARD_EXTRA_KEY = 'structured_preflight_prose_guard';
-const ADVENTURE_START_DISPOSITION_KEY = 'structuredPreflightAdventureDispositions';
 const PROSE_GUARD_EXTRA_VERSION = 4;
 const PROSE_GUARD_RECONCILIATION_EXTRA_KEY = 'structured_preflight_prose_guard_reconciliation';
 const PROSE_GUARD_RECONCILIATION_EXTRA_VERSION = 1;
@@ -6346,19 +6345,6 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         // The adventure opening runs no mechanics, so the figures it introduced arrive with no
         // disposition. Apply the one the start pass already decided instead of letting the next
         // turn reinterpret it.
-        // The opening invents its cast, so every figure it introduces takes the deterministic
-        // default. Only during the opening turn - a stranger met three turns later must be
-        // initialised by the relationship engine from that turn's own scene.
-        const storedDisposition = options?.applyAdventureDefault === true
-            ? options?.adventureDispositions?.fallback || null
-            : null;
-        if (storedDisposition?.disposition && !npcs[name].currentDisposition) {
-            npcs[name] = normalizeTrackerEntry({
-                ...npcs[name],
-                currentDisposition: storedDisposition.disposition,
-                currentRapport: 0,
-            });
-        }
 
         const revealedName = cleanRevealedTrackerName(npcDelta?.revealedName);
 
@@ -17642,8 +17628,6 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     pendingBoundaryBefore: pendingRun.pendingBoundaryBefore,
                     pendingRun,
                     context,
-                    adventureDispositions: context?.chatMetadata?.[ADVENTURE_START_DISPOSITION_KEY] || {},
-                    applyAdventureDefault: pendingRun?.mode === 'adventure_intro',
                 });
                 const lootCompletion = finalizeLootSearchCompletion(
                     mergedTrackerDisplaySnapshot.npcs,
@@ -18535,17 +18519,10 @@ async function handleChatCompletionPromptReady(eventData) {
             });
             pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
             // The opening invents its own cast, so the only disposition it can know is the
-            // deterministic default: an ordinary person, or someone visibly inhuman. Anything a
-            // card establishes belongs to a greeting-based opening, which never reaches this path.
+            // deterministic default: an ordinary person, or someone visibly inhuman. It is stated
+            // to the narrator and nothing else - the first semantic turn initialises the tracker
+            // from the same race check, so there is nothing here worth persisting.
             const startDispositionFallback = resolveAdventureStartDisposition({}, { userNonHuman: isStoryEngineUserNonHuman(context) });
-            if (context?.chatMetadata) {
-                context.chatMetadata[ADVENTURE_START_DISPOSITION_KEY] = { fallback: startDispositionFallback };
-                try {
-                    await saveMetadata(context);
-                } catch {
-                    // The in-memory copy still covers this run.
-                }
-            }
             const introOptions = {
                 adventureGenre,
                 worldState: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
