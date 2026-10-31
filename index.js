@@ -29,7 +29,6 @@ import {
     onDomReady,
     persistMetadata as persistAdapterMetadata,
     readActiveConnectionProfileName,
-    saveMetadata,
     saveChat,
     saveMetadataDebounced,
     saveSettingsDebounced,
@@ -42,6 +41,7 @@ import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
 import { SEMANTIC_OUTPUT_MODES, groundUserKnowledgeApplications, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
+import { isTypicalHumanoidRace } from './deterministic-runner.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -6342,10 +6342,6 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
             ...applyTrackerDeltaToNpcState(before, npcDelta),
 
         });
-        // The adventure opening runs no mechanics, so the figures it introduced arrive with no
-        // disposition. Apply the one the start pass already decided instead of letting the next
-        // turn reinterpret it.
-
         const revealedName = cleanRevealedTrackerName(npcDelta?.revealedName);
 
         if (revealedName) {
@@ -15872,39 +15868,6 @@ function getLockedPlayerCreatorRace(identity = {}) {
     if (identity.raceMode === 'specify') return String(identity.specifiedRace || '').trim();
     if (identity.raceMode === 'pick') return String(identity.pickedRace || 'Human').trim();
     return '';
-}
-
-// A typical friendly humanoid reads as an ordinary person: a townsman sees an elf or a dwarf and
-// has no reason to fear them. Everything else in PLAYER_RACE_CHOICES is visibly other, and that is
-// what drives the userNonHuman disposition. Being generous here matters because the penalty is
-// fear-coded, not merely "not human".
-const PLAYER_HUMANOID_RACES = Object.freeze([
-    // The core peoples.
-    'Human',
-    'Elf',
-    'Half-Elf',
-    'Dwarf',
-    'Halfling',
-    'Gnome',
-    'Half-Orc',
-    // Beastfolk: ears and a tail, otherwise an ordinary townsperson.
-    'Bearkin',
-    'Catfolk',
-    'Foxkin',
-    'Rabbitfolk',
-    'Wolfkin',
-    // Human-passing, no fear reaction: only a second look.
-    'Aasimar',
-    'Angelkin',
-    'Spirit-Touched',
-    // A blend of the playable peoples.
-    'Hybrid',
-]);
-
-function isTypicalHumanoidRace(value) {
-    const race = String(value || '').trim().toLowerCase();
-    if (!race) return false;
-    return PLAYER_HUMANOID_RACES.some(entry => entry.toLowerCase() === race);
 }
 
 // The user's non-human status is decided here and nowhere else. The semantic model used to guess

@@ -9898,13 +9898,29 @@ function getCardFields(context) {
     }
 }
 
-// Races that read as ordinary friendly humanoids. A townsperson sees an elf or a dwarf and has no
-// reason to fear them, so they are human for the purpose of the fear-coded non-human bucket.
-const HUMAN_LOOKING_RACES = Object.freeze([
+// Races that read as ordinary friendly humanoids: a townsperson sees an elf or a dwarf and has no
+// reason to fear them. Everything else in PLAYER_RACE_CHOICES is visibly other, and that is what
+// drives the fear-coded non-human bucket. Being generous here matters because the penalty is fear,
+// not mere difference.
+//
+// This is the only copy. The player-creator sheet classification imports it, so the sheet and the
+// engine can never disagree about what counts as human.
+export const PLAYER_HUMANOID_RACES = Object.freeze([
+    // The core peoples.
     'human', 'elf', 'half-elf', 'dwarf', 'halfling', 'gnome', 'half-orc',
+    // Beastfolk: ears and a tail, otherwise an ordinary townsperson.
     'bearkin', 'catfolk', 'foxkin', 'rabbitfolk', 'wolfkin',
-    'aasimar', 'angelkin', 'spirit-touched', 'hybrid',
+    // Human-passing, no fear reaction: only a second look.
+    'aasimar', 'angelkin', 'spirit-touched',
+    // A blend of the playable peoples.
+    'hybrid',
 ]);
+
+export function isTypicalHumanoidRace(value) {
+    const race = String(value || '').trim().toLowerCase();
+    if (!race) return false;
+    return PLAYER_HUMANOID_RACES.includes(race);
+}
 
 // The user's non-human status is decided here and nowhere else. The semantic model used to guess it
 // from the prose, which let the same character read as a monster to one NPC and as an ordinary
@@ -9917,7 +9933,7 @@ export function resolveUserNonHumanFromContext(context = null) {
         const race = mode === 'pick'
             ? String(identity.pickedRace || 'Human')
             : String(identity.specifiedRace || '');
-        if (race.trim()) return !HUMAN_LOOKING_RACES.includes(race.trim().toLowerCase());
+        if (race.trim()) return !isTypicalHumanoidRace(race);
         const text = String(root?.sheet?.text || '');
         const match = text.match(/\*\*UserNonHuman:\*\*\s*([A-Za-z]+)/);
         if (match) return /^y/i.test(match[1]);

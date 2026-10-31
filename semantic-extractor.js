@@ -1648,8 +1648,6 @@ export function buildSemanticPreflightTool(chatCompletionSource, route = {}, tur
     return tool;
 }
 
-// A reduced schema for the adventure opening: there is no scene yet, so the only question is
-// whether the card or lorebook already establishes how a named character feels about {{user}}.
 function removeStrictOnlySchemaKeywords(schema) {
     if (!schema || typeof schema !== 'object') return;
     delete schema.additionalProperties;

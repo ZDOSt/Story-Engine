@@ -15231,15 +15231,22 @@ const tests = [
     run() {
       // The non-human disposition is fear-coded, so it must not fire for an elf or a dwarf.
       // Anything outside this list is visibly other and does take the penalty.
-      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
-      const listMatch = source.match(/const PLAYER_HUMANOID_RACES = Object\.freeze\(\[([\s\S]*?)\]\);/);
-      assert.ok(listMatch, 'PLAYER_HUMANOID_RACES must exist');
+      // One list, in the runner. The sheet classification imports it, so the sheet and the engine
+      // cannot disagree about what counts as human.
+      const source = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
+      const listMatch = source.match(/export const PLAYER_HUMANOID_RACES = Object\.freeze\(\[([\s\S]*?)\]\);/);
+      assert.ok(listMatch, 'PLAYER_HUMANOID_RACES must exist in deterministic-runner.js');
       const fnSource = source.slice(
-        source.indexOf('function isTypicalHumanoidRace'),
-        source.indexOf('function getLockedPlayerCreatorUserNonHuman'),
+        source.indexOf('export function isTypicalHumanoidRace'),
+        source.indexOf('export function resolveUserNonHumanFromContext'),
       );
+      assert.ok(fnSource.includes('isTypicalHumanoidRace'), 'the classifier must be exported');
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.equal(indexSource.includes('const PLAYER_HUMANOID_RACES'), false,
+        'the list must exist only once');
+      assert.ok(indexSource.includes('PLAYER_RACE_CHOICES'), 'the creator race list lives in index.js');
       const isHumanoid = new Function(
-        `const PLAYER_HUMANOID_RACES = Object.freeze([${listMatch[1]}]); ${fnSource}; return isTypicalHumanoidRace;`,
+        `const PLAYER_HUMANOID_RACES = Object.freeze([${listMatch[1]}]); ${fnSource.replace(/^export /gm, '')}; return isTypicalHumanoidRace;`,
       )();
 
       const human = ['Human', 'Elf', 'Half-Elf', 'Dwarf', 'Halfling', 'Gnome', 'Half-Orc',
@@ -15254,7 +15261,7 @@ const tests = [
         assert.equal(isHumanoid(race), false, 'should read as visibly other: ' + race);
       }
       // Every race the player creator offers must land on exactly one side.
-      const raceList = source.match(/const PLAYER_RACE_CHOICES = Object\.freeze\(\[([\s\S]*?)\]\);/);
+      const raceList = indexSource.match(/const PLAYER_RACE_CHOICES = Object\.freeze\(\[([\s\S]*?)\]\);/);
       assert.ok(raceList, 'PLAYER_RACE_CHOICES must exist');
       const allRaces = raceList[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
       assert.ok(allRaces.length > 40, 'expected the full race list, saw ' + allRaces.length);
@@ -15269,7 +15276,8 @@ const tests = [
         false,
         'the sheet field must not fall back to a bare "is it literally human" test',
       );
-      assert.ok(source.includes("isTypicalHumanoidRace(identity.pickedRace || 'Human')"));
+      assert.ok(indexSource.includes("isTypicalHumanoidRace(identity.pickedRace || 'Human')"));
+      assert.ok(indexSource.includes("isTypicalHumanoidRace(identity.specifiedRace)"));
     },
   },
   {
