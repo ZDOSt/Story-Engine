@@ -514,10 +514,18 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const promptHeaderGenre = isIsekaiOpening ? 'ISEKAI' : genreLabel ? genreLabel.toUpperCase() : '';
     const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
-        '#1 - PROSE RULES',
-        'Execute renderControlEngine(input) as a hard constraint on the response.',
+        'BINDING CONTRACT:',
         '',
-        renderControlEngineNarrativeDigest(),
+        'Your response MUST comply with every rule below. A response that breaks one is INVALID: it is',
+        'discarded and never reaches {{user}}. Plan against every rule before your first sentence, and',
+        'write it correctly.',
+        '',
+        '#1 - PROSE RULES',
+        '',
+        renderControlEngineNarrativeDigest({
+            exclude: ['narrativeFacts', 'inputChronology'],
+            withPreamble: false,
+        }).trim(),
         '',
         ...renderSceneStyleProfileSection(options),
         promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
@@ -1573,12 +1581,17 @@ function promptLooksIsekai(prompt = '') {
 // DIGEST block, and this function extracts those blocks from the very same literal, so the
 // reminder cannot paraphrase the rule it summarises. A rule that loses its DIGEST disappears
 // from the reminder, which the handoff test catches rather than leaving it to a reader.
-function renderControlEngineNarrativeDigest() {
+function renderControlEngineNarrativeDigest(options = {}) {
     const contract = renderControlEngineNarrativeContract();
     const firstRule = contract.indexOf('\nfunction ');
     const preamble = contract.slice(0, firstRule).trimEnd();
+    const excluded = new Set(options?.exclude || []);
     const digests = [];
     for (const chunk of contract.slice(firstRule).split(/\n(?=function )/)) {
+        const nameMatch = /^\s*function ([A-Za-z0-9_]+)\(/.exec(chunk);
+        // The opening runs no mechanics and follows no player input, so those two rules would
+        // describe something that does not exist yet.
+        if (nameMatch && excluded.has(nameMatch[1])) continue;
         const body = chunk.trimEnd();
         const start = body.indexOf('DIGEST');
         if (start < 0) {
@@ -1596,7 +1609,8 @@ function renderControlEngineNarrativeDigest() {
         digests.push(block.join('\n'));
     }
     if (!digests.length) throw new Error('Story Engine narrator digest is empty; every rule must declare a DIGEST.');
-    return `${preamble}\n\n${digests.join('\n\n')}`;
+    const joined = digests.join('\n\n');
+    return options?.withPreamble === false ? joined : `${preamble}\n\n${joined}`;
 }
 
 function renderControlEngineNarrativeContract() {

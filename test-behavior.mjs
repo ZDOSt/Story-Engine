@@ -18789,8 +18789,8 @@ const tests = [
           sceneStyleProfile: 'SCENE STYLE PROFILE: Use vivid, scene-aware prose.',
         },
       );
-      assert.match(introPrompt, /^#1 - PROSE RULES/);
-      assert.match(introPrompt, /NARRATOR PROSE RULES/);
+      assert.match(introPrompt, /^BINDING CONTRACT:/);
+      assert.match(introPrompt, /Your response MUST comply with every rule below/);
       assert.match(introPrompt, /ALWAYS combine closely related actions, gestures, dialogue, and immediate consequences/);
       assert.match(introPrompt, /#1\.7 - SCENE STYLE PROFILE/);
       assert.match(introPrompt, /SCENE STYLE PROFILE: Use vivid, scene-aware prose\./);
@@ -18892,8 +18892,8 @@ const tests = [
         },
       );
       assert.match(fantasyIntroPrompt, /START_ADVENTURE_PROMPT: FANTASY/);
-      assert.match(fantasyIntroPrompt, /^#1 - PROSE RULES/);
-      assert.match(fantasyIntroPrompt, /NARRATOR PROSE RULES/);
+      assert.match(fantasyIntroPrompt, /^BINDING CONTRACT:/);
+      assert.match(introPrompt, /Your response MUST comply with every rule below/);
       assert.match(fantasyIntroPrompt, /This is the opening turn of a new Fantasy adventure\./);
       assert.match(fantasyIntroPrompt, /GENRE OPENING:/);
       assert.match(fantasyIntroPrompt, /You MUST begin in the selected genre: Fantasy\./);
@@ -18916,7 +18916,7 @@ const tests = [
       );
       assert.doesNotMatch(fantasyIntroPrompt, /You MUST narrate BOTH required beats below|BEAT #1: EARTH LAST MOMENTS/);
       const introAudit = formatAdventureIntroNarratorPromptContext('Begin the adventure.', { adventureGenre: 'Fantasy' });
-      assert.match(introAudit, /==NARRATOR_MODEL_HANDOFF==\n#1 - PROSE RULES/);
+      assert.match(introAudit, /==NARRATOR_MODEL_HANDOFF==\nBINDING CONTRACT:/);
       assert.match(introAudit, /exact narrator-facing handoff below/);
     },
   },
