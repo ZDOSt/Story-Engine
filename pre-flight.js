@@ -1502,8 +1502,10 @@ function renderIsekaiOpeningSeed(seed = null) {
     const arrivalProfile = seed?.arrivalProfile || buildIsekaiArrivalProfile(seed?.ageGroup || 'unknown', transition);
     const groupStatus = arrivalProfile.group ? 'PRESENT' : 'NOT PRESENT';
     return [
+        'OPENING BEATS:',
+        '',
         'You MUST narrate BOTH required beats below, in order.',
-        'Do NOT skip either beat. Do NOT choose a different Earth last moment or Isekai opening.',
+        'Do NOT choose a different Earth last moment or Isekai opening.',
         '',
         'AGE COMPATIBILITY:',
         ageCompatibility,
@@ -1531,14 +1533,14 @@ function renderIsekaiOpeningSeed(seed = null) {
         `Selected Isekai Opening: ${opening.label}.`,
         openingGuidance ? `Guidance: ${openingGuidance}` : '',
         '',
+
+        'NOTE: If explicit character-card or lorebook facts already establish the exact Earth last moment, honor those facts and adapt this seed without contradiction.',
+        '',
         'ONE-TIME AESTHETIC RULE:',
         'The first visible glimpse of the new world, or the first clearly seen person from it, may establish the colorful, stylized, anime-like visual reality of this world ONLY ONCE. After that, keep the aesthetic implicit. Do NOT keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels.',
         '',
         'PREMADE CHARACTER RULE:',
         'PRESERVE {{user}}\'s existing race, body, abilities, gear, identity, backstory, and character-card/lorebook facts. The opening may relocate, summon, reveal, mistake, pressure, or contextualize the character, but it must not rebuild, reroll, overwrite, infantize, or replace them.',
-        '',
-        'ADAPTATION RULE:',
-        'If explicit character-card or lorebook facts already establish the exact Earth last moment, honor those facts and adapt this seed without contradiction.',
     ].join('\n');
 }
 

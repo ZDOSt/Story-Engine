@@ -18804,7 +18804,7 @@ const tests = [
       assert.doesNotMatch(introPrompt, /ISEKAI TRANSITION AND OPENING SEED:/);
       assert.doesNotMatch(introPrompt, /ISEKAI OPENING SEED:/);
       assert.match(introPrompt, /You MUST narrate BOTH required beats below, in order\./);
-      assert.match(introPrompt, /Do NOT skip either beat\. Do NOT choose a different Earth last moment or Isekai opening\./);
+      assert.match(introPrompt, /Do NOT choose a different Earth last moment or Isekai opening\./);
       assert.match(introPrompt, /AGE COMPATIBILITY:/);
       assert.match(introPrompt, /\{\{user\}\} is 18 or older/);
       assert.match(introPrompt, /NEVER place \{\{user\}\} in a high-school classroom or high-school student role/);
