@@ -15302,7 +15302,7 @@ const tests = [
         startDispositions: {},
         startDispositionFallback: { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } },
       });
-      assert.match(demon, /Anyone not listed above: Fear-led/);
+      assert.match(demon, /Every person: Fear-led/);
 
       // No dispositions at all means no block, so a plain opening is unchanged.
       const plain = formatAdventureIntroNarratorModelPromptContext('Open.', { adventureGenre: 'Fantasy' });
@@ -15312,21 +15312,15 @@ const tests = [
       // turn cannot reinterpret it. mergePostNarrationTrackerDelta is private, so this pins the
       // wiring rather than calling it.
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
-      assert.match(indexSource, /const named = startDispositions\.characters \|\| startDispositions;/);
-      assert.match(indexSource, /options\?\.applyAdventureDefault === true \? startDispositions\.fallback : null/);
+      // The opening invents its cast, so the deterministic default is the only disposition it can
+      // know: no semantic call, no per-character guess.
+      assert.match(indexSource, /options\?\.applyAdventureDefault === true/);
       assert.match(indexSource, /adventureDispositions: context\?\.chatMetadata\?\.\[ADVENTURE_START_DISPOSITION_KEY\]/);
       assert.match(indexSource, /currentDisposition: storedDisposition\.disposition/);
-
-      // The adventure pass honours the same output mode as every other semantic call.
+      assert.match(indexSource, /if \(storedDisposition\?\.disposition && !npcs\[name\]\.currentDisposition\)/);
+      assert.equal(indexSource.includes('resolveAdventureStartDispositions'), false);
       const extractorSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
-      const passSource = extractorSource.slice(
-        extractorSource.indexOf('export async function extractAdventureStartDispositions'),
-        extractorSource.indexOf('function parseAdventureStartDispositionsText'),
-      );
-      assert.match(passSource, /normalizeSemanticOutputMode\(options\.semanticOutputMode\)/);
-      assert.match(passSource, /SEMANTIC_OUTPUT_MODES\.TOOL_CALL/);
-      assert.match(passSource, /sendDefaultChatCompletionTextRequest/);
-      assert.match(indexSource, /semanticOutputMode: settings\?\.semanticOutputMode/);
+      assert.equal(extractorSource.includes('extractAdventureStartDispositions'), false);
     },
   },
   {
@@ -20979,12 +20973,9 @@ const tests = [
         semanticSource.indexOf('async function generateSemanticToolCall('),
         semanticSource.indexOf('async function generateSemanticToolCallWithProfile('),
       );
-      // The transport takes an override so the adventure-start pass can reuse it with a reduced
-      // schema; every other call still falls through to the full preflight tool.
-      assert.match(semanticDefaultToolRequest, /buildTool: options\.buildToolOverride/);
       assert.match(
         semanticDefaultToolRequest,
-        /buildSemanticPreflightTool\(src, applySemanticToolSchemaOption\(rte, options\), options\.semanticTurnBinding\)/,
+        /buildTool: \(source, route\) => buildSemanticPreflightTool\(source, applySemanticToolSchemaOption\(route, options\), options\.semanticTurnBinding\)/,
       );
 
       const semanticProfileToolRequest = semanticSource.slice(

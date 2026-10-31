@@ -41,8 +41,7 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { SEMANTIC_OUTPUT_MODES, extractAdventureStartDispositions, groundUserKnowledgeApplications, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
-import { resolveAdventureStartDisposition } from './deterministic-runner.js';
+import { SEMANTIC_OUTPUT_MODES, groundUserKnowledgeApplications, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -5897,52 +5896,6 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     return applyVisibleTrackerState(snapshot, activeNames, getPreviousTrackerDisplaySnapshot(messageKey));
 }
 
-// The adventure opening has no scene, so nothing can be observed yet - but the card, the lorebook and
-// the persona can already establish that someone in the cast treats {{user}} differently from a
-// stranger. This one call reads that before the opening is written.
-function buildAdventureStartDispositionPrompt(context) {
-    const fields = getCharacterCardFieldsSafe(context);
-    const blocks = [
-        ['Character name', fields.name],
-        ['Description', fields.description],
-        ['Personality', fields.personality],
-        ['Scenario', fields.scenario],
-        ['Example dialogue', fields.mesExamples],
-        ['System prompt', fields.systemPrompt],
-        ['Post history instructions', fields.postHistoryInstructions],
-        ['Player persona', getPersonaText(context)],
-    ].map(([label, value]) => {
-        const text = String(value || '').trim();
-        return text ? `${label}:\n${text}` : '';
-    }).filter(Boolean);
-
-    return [
-        'Read this character card and player persona. A story is about to begin and nothing has happened yet.',
-        'Decide only whether anything written here already establishes how a named character feels about {{user}}.',
-        '',
-        ...blocks,
-        '',
-        'report only the characters the text establishes something for, and nothing about anyone else.',
-    ].join('\n');
-}
-
-async function resolveAdventureStartDispositions(context) {
-    const userNonHuman = isStoryEngineUserNonHuman(context);
-    const settings = getSettings();
-    // Same transport and same output mode as the normal semantic pass.
-    const flagsByName = await extractAdventureStartDispositions(buildAdventureStartDispositionPrompt(context), {
-        semanticOutputMode: settings?.semanticOutputMode,
-        semanticModel: settings?.semanticModel || '',
-        semanticProfileId: settings?.semanticProfileId || '',
-        semanticProfileName: settings?.semanticProfileName || '',
-    });
-    const resolved = {};
-    for (const [name, flags] of Object.entries(flagsByName)) {
-        resolved[name] = resolveAdventureStartDisposition(flags, { userNonHuman });
-    }
-    return resolved;
-}
-
 function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModelContext) {
     const trackerSnapshot = pendingGeneration?.trackerSnapshot || buildTrackerSnapshot(context);
     const playerTrackerSnapshot = pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context);
@@ -6393,13 +6346,12 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         // The adventure opening runs no mechanics, so the figures it introduced arrive with no
         // disposition. Apply the one the start pass already decided instead of letting the next
         // turn reinterpret it.
-        const startDispositions = options?.adventureDispositions || {};
-        const named = startDispositions.characters || startDispositions;
-        const storedDisposition = named?.[name] || named?.[rawName]
-            // A figure the opening invented has no entry: it takes the deterministic default the
-            // opening was also given. Only during the opening turn - a stranger met three turns
-            // later must be initialised by the relationship engine from that turn's own scene.
-            || (options?.applyAdventureDefault === true ? startDispositions.fallback : null);
+        // The opening invents its cast, so every figure it introduces takes the deterministic
+        // default. Only during the opening turn - a stranger met three turns later must be
+        // initialised by the relationship engine from that turn's own scene.
+        const storedDisposition = options?.applyAdventureDefault === true
+            ? options?.adventureDispositions?.fallback || null
+            : null;
         if (storedDisposition?.disposition && !npcs[name].currentDisposition) {
             npcs[name] = normalizeTrackerEntry({
                 ...npcs[name],
@@ -18582,20 +18534,12 @@ async function handleChatCompletionPromptReady(eventData) {
                 characterText: getPersonaText(context) || getPlayerRoot(context)?.sheet?.text,
             });
             pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
-            // Read what the card already establishes before writing the opening. Non-fatal: an
-            // opening must never fail because a disposition lookup did.
-            let startDispositions = {};
-            try {
-                startDispositions = await resolveAdventureStartDispositions(context);
-            } catch (error) {
-                console.warn(`[${EXTENSION_NAME}] adventure start disposition pass failed; using defaults.`, error);
-            }
+            // The opening invents its own cast, so the only disposition it can know is the
+            // deterministic default: an ordinary person, or someone visibly inhuman. Anything a
+            // card establishes belongs to a greeting-based opening, which never reaches this path.
             const startDispositionFallback = resolveAdventureStartDisposition({}, { userNonHuman: isStoryEngineUserNonHuman(context) });
             if (context?.chatMetadata) {
-                context.chatMetadata[ADVENTURE_START_DISPOSITION_KEY] = {
-                    characters: startDispositions,
-                    fallback: startDispositionFallback,
-                };
+                context.chatMetadata[ADVENTURE_START_DISPOSITION_KEY] = { fallback: startDispositionFallback };
                 try {
                     await saveMetadata(context);
                 } catch {
@@ -18607,7 +18551,6 @@ async function handleChatCompletionPromptReady(eventData) {
                 worldState: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
                 nameGeneration,
                 isekaiOpeningSeed,
-                startDispositions,
                 startDispositionFallback,
                 sceneStyleProfile: pendingGeneration.sceneStyleProfile || '',
             };

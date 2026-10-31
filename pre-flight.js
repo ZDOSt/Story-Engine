@@ -504,8 +504,9 @@ function buildAdventureStartDispositionBlock(startDispositions = {}, fallback = 
         'Every person in this scene already feels the following toward {{user}}, before the first line.',
         'This includes whoever speaks first and whoever {{user}} approaches. Show it in how each of them speaks and behaves from the moment they appear.',
         'Never name, explain, or summarise it.',
-        ...(lines.length ? lines : []),
-        `Anyone not listed above: ${fallback ? describe(fallback) : 'an ordinary stranger: practical, reserved, context-led, with no default trust or hostility.'}`,
+        ...(lines.length
+            ? [lines, `Anyone not listed above: ${fallback ? describe(fallback) : 'an ordinary stranger: practical, reserved, context-led, with no default trust or hostility.'}`].flat()
+            : [`Every person: ${fallback ? describe(fallback) : 'an ordinary stranger: practical, reserved, context-led, with no default trust or hostility.'}`]),
         'Do not write this opening in a way that hides the disposition above. A person acting as though they feel nothing about {{user}} renders the response INVALID.',
     ].join('\n');
 }
