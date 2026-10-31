@@ -29,6 +29,7 @@ import {
     onDomReady,
     persistMetadata as persistAdapterMetadata,
     readActiveConnectionProfileName,
+    saveMetadata,
     saveChat,
     saveMetadataDebounced,
     saveSettingsDebounced,
@@ -40,7 +41,8 @@ import { buildIsekaiOpeningSeed, formatAdventureIntroNarratorModelPromptContext,
 import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
-import { SEMANTIC_OUTPUT_MODES, groundUserKnowledgeApplications, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
+import { SEMANTIC_OUTPUT_MODES, extractAdventureStartDispositions, groundUserKnowledgeApplications, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
+import { resolveAdventureStartDisposition } from './deterministic-runner.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -146,6 +148,7 @@ const NARRATOR_HANDOFF_WIDGET_BUTTON_ID = 'structured_preflight_narrator_handoff
 const NARRATOR_HANDOFF_WIDGET_PANEL_ID = 'structured_preflight_narrator_handoff_panel';
 const NARRATOR_HANDOFF_WIDGET_LAYOUT_MIGRATION_VERSION = 1;
 const PROSE_GUARD_EXTRA_KEY = 'structured_preflight_prose_guard';
+const ADVENTURE_START_DISPOSITION_KEY = 'structuredPreflightAdventureDispositions';
 const PROSE_GUARD_EXTRA_VERSION = 4;
 const PROSE_GUARD_RECONCILIATION_EXTRA_KEY = 'structured_preflight_prose_guard_reconciliation';
 const PROSE_GUARD_RECONCILIATION_EXTRA_VERSION = 1;
@@ -5894,6 +5897,52 @@ function buildDisplayTrackerSnapshot({ messageKey, pendingRun, report, assistant
     return applyVisibleTrackerState(snapshot, activeNames, getPreviousTrackerDisplaySnapshot(messageKey));
 }
 
+// The adventure opening has no scene, so nothing can be observed yet - but the card, the lorebook and
+// the persona can already establish that someone in the cast treats {{user}} differently from a
+// stranger. This one call reads that before the opening is written.
+function buildAdventureStartDispositionPrompt(context) {
+    const fields = getCharacterCardFieldsSafe(context);
+    const blocks = [
+        ['Character name', fields.name],
+        ['Description', fields.description],
+        ['Personality', fields.personality],
+        ['Scenario', fields.scenario],
+        ['Example dialogue', fields.mesExamples],
+        ['System prompt', fields.systemPrompt],
+        ['Post history instructions', fields.postHistoryInstructions],
+        ['Player persona', getPersonaText(context)],
+    ].map(([label, value]) => {
+        const text = String(value || '').trim();
+        return text ? `${label}:\n${text}` : '';
+    }).filter(Boolean);
+
+    return [
+        'Read this character card and player persona. A story is about to begin and nothing has happened yet.',
+        'Decide only whether anything written here already establishes how a named character feels about {{user}}.',
+        '',
+        ...blocks,
+        '',
+        'report only the characters the text establishes something for, and nothing about anyone else.',
+    ].join('\n');
+}
+
+async function resolveAdventureStartDispositions(context) {
+    const userNonHuman = isStoryEngineUserNonHuman(context);
+    const settings = getSettings();
+    // Same transport and same output mode as the normal semantic pass.
+    const flagsByName = await extractAdventureStartDispositions(buildAdventureStartDispositionPrompt(context), {
+        semanticOutputMode: settings?.semanticOutputMode,
+        semanticModel: settings?.semanticModel || '',
+        semanticProfileId: settings?.semanticProfileId || '',
+        semanticProfileName: settings?.semanticProfileName || '',
+    });
+    const resolved = {};
+    for (const [name, flags] of Object.entries(flagsByName)) {
+        resolved[name] = resolveAdventureStartDisposition(flags, { userNonHuman });
+    }
+    return resolved;
+}
+
 function buildAdventureIntroPendingRun(context, pendingGeneration, narratorModelContext) {
     const trackerSnapshot = pendingGeneration?.trackerSnapshot || buildTrackerSnapshot(context);
     const playerTrackerSnapshot = pendingGeneration?.playerTrackerSnapshot || buildPlayerTrackerSnapshot(context);
@@ -6284,7 +6333,11 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         economyDelta,
     });
     merged.userKnowledge = mergeUserKnowledgeLedger(merged.userKnowledge || options.userKnowledgeBefore || {}, delta.userKnowledge || {});
-    merged.userReputation = mergeUserReputationLedger(merged.userReputation || options.userReputationBefore || {}, delta.userReputation || {});
+    merged.userReputation = mergeUserReputationLedger(
+        merged.userReputation || options.userReputationBefore || {},
+        delta.userReputation || {},
+        { userNonHuman: isStoryEngineUserNonHuman(typeof getContext === 'function' ? getContext() : null) },
+    );
     const projectedWorldState = normalizeWorldState(merged.worldState || options.worldStateBefore || {});
     const postNarrationWorldStateDelta = removeAlreadyProjectedWorldStateDelta(
         delta.worldState || {},
@@ -6337,6 +6390,18 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
             ...applyTrackerDeltaToNpcState(before, npcDelta),
 
         });
+        // The adventure opening runs no mechanics, so the figures it introduced arrive with no
+        // disposition. Apply the one the start pass already decided instead of letting the next
+        // turn reinterpret it.
+        const storedDisposition = options?.adventureDispositions?.[name]
+            || options?.adventureDispositions?.[rawName];
+        if (storedDisposition?.disposition && !npcs[name].currentDisposition) {
+            npcs[name] = normalizeTrackerEntry({
+                ...npcs[name],
+                currentDisposition: storedDisposition.disposition,
+                currentRapport: 0,
+            });
+        }
 
         const revealedName = cleanRevealedTrackerName(npcDelta?.revealedName);
 
@@ -15866,11 +15931,64 @@ function getLockedPlayerCreatorRace(identity = {}) {
     return '';
 }
 
+// A typical friendly humanoid reads as an ordinary person: a townsman sees an elf or a dwarf and
+// has no reason to fear them. Everything else in PLAYER_RACE_CHOICES is visibly other, and that is
+// what drives the userNonHuman disposition. Being generous here matters because the penalty is
+// fear-coded, not merely "not human".
+const PLAYER_HUMANOID_RACES = Object.freeze([
+    // The core peoples.
+    'Human',
+    'Elf',
+    'Half-Elf',
+    'Dwarf',
+    'Halfling',
+    'Gnome',
+    'Half-Orc',
+    // Beastfolk: ears and a tail, otherwise an ordinary townsperson.
+    'Bearkin',
+    'Catfolk',
+    'Foxkin',
+    'Rabbitfolk',
+    'Wolfkin',
+    // Human-passing, no fear reaction: only a second look.
+    'Aasimar',
+    'Angelkin',
+    'Spirit-Touched',
+    // A blend of the playable peoples.
+    'Hybrid',
+]);
+
+function isTypicalHumanoidRace(value) {
+    const race = String(value || '').trim().toLowerCase();
+    if (!race) return false;
+    return PLAYER_HUMANOID_RACES.some(entry => entry.toLowerCase() === race);
+}
+
+// The user's non-human status is decided here and nowhere else. The semantic model used to guess
+// it from the prose, which let the same character be a monster to one NPC and ordinary to the next,
+// and let the adventure opening disagree with every turn after it.
+function isStoryEngineUserNonHuman(context = null) {
+    try {
+        const root = context ? getPlayerRoot(context) : null;
+        const locked = getLockedPlayerCreatorUserNonHuman(root?.creator?.identity || {});
+        if (locked === 'Y') return true;
+        if (locked === 'N') return false;
+        // A persona the extension did not create has no creator identity, so fall back to the
+        // classification written into the sheet itself.
+        const text = String(root?.sheet?.text || '');
+        const match = text.match(/\*\*UserNonHuman:\*\*\s*([A-Za-z]+)/);
+        if (match) return /^y/i.test(match[1]);
+    } catch {
+        // Best effort: an unreadable sheet simply reads as human.
+    }
+    return false;
+}
+
 function getLockedPlayerCreatorUserNonHuman(identity = {}) {
     if (identity.raceMode === 'pick') {
-        return /^human$/i.test(String(identity.pickedRace || 'Human').trim()) ? 'N' : 'Y';
+        return isTypicalHumanoidRace(identity.pickedRace || 'Human') ? 'N' : 'Y';
     }
-    if (identity.raceMode === 'specify' && /^human$/i.test(String(identity.specifiedRace || '').trim())) {
+    if (identity.raceMode === 'specify' && isTypicalHumanoidRace(identity.specifiedRace)) {
         return 'N';
     }
     return '';
@@ -17567,6 +17685,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     pendingBoundaryBefore: pendingRun.pendingBoundaryBefore,
                     pendingRun,
                     context,
+                    adventureDispositions: context?.chatMetadata?.[ADVENTURE_START_DISPOSITION_KEY] || {},
                 });
                 const lootCompletion = finalizeLootSearchCompletion(
                     mergedTrackerDisplaySnapshot.npcs,
@@ -18457,11 +18576,29 @@ async function handleChatCompletionPromptReady(eventData) {
                 characterText: getPersonaText(context) || getPlayerRoot(context)?.sheet?.text,
             });
             pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
+            // Read what the card already establishes before writing the opening. Non-fatal: an
+            // opening must never fail because a disposition lookup did.
+            let startDispositions = {};
+            try {
+                startDispositions = await resolveAdventureStartDispositions(context);
+            } catch (error) {
+                console.warn(`[${EXTENSION_NAME}] adventure start disposition pass failed; using defaults.`, error);
+            }
+            if (context?.chatMetadata) {
+                context.chatMetadata[ADVENTURE_START_DISPOSITION_KEY] = startDispositions;
+                try {
+                    await saveMetadata(context);
+                } catch {
+                    // The in-memory copy still covers this run.
+                }
+            }
             const introOptions = {
                 adventureGenre,
                 worldState: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
                 nameGeneration,
                 isekaiOpeningSeed,
+                startDispositions,
+                startDispositionFallback: resolveAdventureStartDisposition({}, { userNonHuman: isStoryEngineUserNonHuman(context) }),
                 sceneStyleProfile: pendingGeneration.sceneStyleProfile || '',
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);

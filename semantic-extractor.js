@@ -184,7 +184,7 @@ const ITEM_USE_REFERENT_RULE = [
 ].join(' ');
 const LOOT_TARGET_KINDS = Object.freeze(['humanoid', 'monster', 'other']);
 const USER_KNOWLEDGE_TYPES = Object.freeze(['personalKnowledge', 'reputationKnowledge']);
-const USER_KNOWLEDGE_APPLICATION_EFFECTS = Object.freeze(['none', 'priorUserGoodRep', 'userBadRep', 'userNonHuman', 'contextOnly']);
+const USER_KNOWLEDGE_APPLICATION_EFFECTS = Object.freeze(['none', 'priorUserGoodRep', 'userBadRep', 'contextOnly']);
 const ENVIRONMENT_DIFFICULTY_TIERS = Object.freeze(['none', 'easy', 'average', 'hard', 'extreme']);
 const SEMANTIC_NARRATOR_ONLY_FUNCTION_BLOCKS = Object.freeze([
     'RenderControlEngine',
@@ -624,7 +624,8 @@ async function generateSemanticToolCall(prompt, responseLength, options = {}) {
     try {
         const raw = await sendDefaultChatCompletionToolRequest(toolPrompt, responseLength, {
             purpose: 'semantic preflight tool call',
-            buildTool: (source, route) => buildSemanticPreflightTool(source, applySemanticToolSchemaOption(route, options), options.semanticTurnBinding),
+            buildTool: options.buildToolOverride
+                || ((src, rte) => buildSemanticPreflightTool(src, applySemanticToolSchemaOption(rte, options), options.semanticTurnBinding)),
             buildToolChoice: buildSemanticToolChoice,
             modelOverride: options.semanticModel,
             preparePayload: payload => applySemanticToolRequestPayloadPolicies(payload),
@@ -1648,6 +1649,105 @@ export function buildSemanticPreflightTool(chatCompletionSource, route = {}, tur
     return tool;
 }
 
+// A reduced schema for the adventure opening: there is no scene yet, so the only question is
+// whether the card or lorebook already establishes how a named character feels about {{user}}.
+export function buildAdventureStartDispositionTool(chatCompletionSource, route = {}) {
+    const strictSchema = supportsStrictSemanticToolSchema(chatCompletionSource, route);
+    const parameters = object({
+        characters: array(object({
+            name: string('The exact name of the character, as written in the card.'),
+            romanticOpen: boolean('Y only when the text establishes clear romantic interest in or willingness toward {{user}}.'),
+            userBadRep: boolean('Y only for authored prior hate, distrust, enemy status, pursuit, betrayal, or harm toward {{user}}.'),
+            priorUserGoodRep: boolean('Y only for authored prior trust, gratitude, protection, or vouched-for standing with {{user}}.'),
+        }), 12),
+    }, [], ['characters']);
+    if (!strictSchema) removeStrictOnlySchemaKeywords(parameters);
+    const tool = {
+        type: 'function',
+        function: {
+            name: SEMANTIC_TOOL_NAME,
+            description: 'Report only whether the supplied card establishes a prior relationship between a named character and {{user}}.',
+            parameters,
+        },
+    };
+    if (strictSchema) tool.function.strict = true;
+    return tool;
+}
+
+// Runs through the same transport as the semantic pass, so the strict-schema and named-tool-choice
+// provider rules apply identically, and so a provider that cannot take tools still gets the text
+// path. Returns { name: { romanticOpen, userBadRep, priorUserGoodRep } }.
+export async function extractAdventureStartDispositions(promptText, options = {}) {
+    const prompt = String(promptText || '').trim();
+    if (!prompt) return {};
+    const outputMode = normalizeSemanticOutputMode(options.semanticOutputMode);
+    if (outputMode !== SEMANTIC_OUTPUT_MODES.TOOL_CALL) {
+        // Text-ledger providers cannot take a tool schema, so the same question is asked as plain
+        // text. There is no schema to validate against here, so a malformed answer is reported and
+        // the caller falls back to the deterministic defaults.
+        const textPrompt = [
+            prompt,
+            '',
+            'Return only this JSON object and nothing else:',
+            '{"characters":[{"name":"...","romanticOpen":false,"userBadRep":false,"priorUserGoodRep":false}]}',
+            'Use an empty array when nothing applies.',
+        ].join('\n');
+        const raw = await sendDefaultChatCompletionTextRequest(textPrompt, 400, {
+            purpose: 'adventure start disposition request',
+            temperature: 0,
+            modelOverride: options.semanticModel,
+            preparePayload: payload => applySemanticTextRequestPayloadPolicies(payload),
+            signal: options.signal,
+        });
+        return parseAdventureStartDispositionsText(raw);
+    }
+
+    const result = await generateSemanticToolCall(prompt, 400, {
+        ...options,
+        buildToolOverride: (source, route) => buildAdventureStartDispositionTool(source, route),
+        semanticTurnBinding: options.semanticTurnBinding || createSemanticTurnBinding(options, 'adventure_start'),
+    });
+    const list = Array.isArray(result?.ledger?.characters) ? result.ledger.characters : [];
+    const out = {};
+    for (const entry of list) {
+        const name = String(entry?.name || '').trim();
+        if (!name) continue;
+        out[name] = {
+            romanticOpen: entry?.romanticOpen === true,
+            userBadRep: entry?.userBadRep === true,
+            priorUserGoodRep: entry?.priorUserGoodRep === true,
+        };
+    }
+    return out;
+}
+
+function parseAdventureStartDispositionsText(raw) {
+    const body = String(raw?.content ?? raw?.text ?? raw ?? '');
+    const start = body.indexOf('{');
+    const end = body.lastIndexOf('}');
+    if (start < 0 || end <= start) {
+        console.warn('[Story Engine] Adventure start disposition pass returned no JSON; using deterministic defaults.', previewRaw(body));
+        return {};
+    }
+    try {
+        const parsed = JSON.parse(body.slice(start, end + 1));
+        const out = {};
+        for (const entry of Array.isArray(parsed?.characters) ? parsed.characters : []) {
+            const name = String(entry?.name || '').trim();
+            if (!name) continue;
+            out[name] = {
+                romanticOpen: entry?.romanticOpen === true,
+                userBadRep: entry?.userBadRep === true,
+                priorUserGoodRep: entry?.priorUserGoodRep === true,
+            };
+        }
+        return out;
+    } catch (error) {
+        console.warn('[Story Engine] Adventure start disposition JSON was malformed; using deterministic defaults.', previewRaw(body), error);
+        return {};
+    }
+}
+
 function removeStrictOnlySchemaKeywords(schema) {
     if (!schema || typeof schema !== 'object') return;
     delete schema.additionalProperties;
@@ -1881,7 +1981,6 @@ function buildSemanticPreflightSchema() {
             romanticOpen: boolean('Y when prior card/lore/scenario/chat establishes clear user-directed romantic interest, romantic willingness, love, crush, courting desire, romantic preoccupation, or deliberate romantic pursuit toward user; not generic friendliness, politeness, casual flirting, shallow physical attraction, vague chemistry, ordinary embarrassment, or first impressions.'),
             userBadRep: boolean('Y only for explicit authored prior hate, distrust, enemy status, pursuit, betrayal, harm, or negative relationship with this NPC from character card, lore, scenario, or pre-existing relationship context; not current-scene conflict or broad public infamy.'),
             priorUserGoodRep: boolean('Y only for explicit authored established favorable or trust-normalizing prior history, trust, gratitude, safe familiarity, vouching, friendship, or relationship with this NPC from character card, lore, scenario, or pre-existing relationship context; not kindness, good impressions, or broad public fame.'),
-            userNonHuman: boolean('Y for visibly demonic, monstrous, undead, bestial, eldritch, construct-like, or obviously supernatural user form when this is a fresh or unnormalized exposure, or explicit authored fear-coded relationship context with this NPC. Do not use broad public infamy here; deterministic fame/infamy handles that.'),
             fearImmunity: boolean('Y only for the same kind/race category as the user form, a superior or peer supernatural/monstrous being, explicit immunity or natural resistance to fear, or an explicitly nonordinary ancient/powerful being established as experienced with such horrors and not meaningfully afraid. Title, rank, bravado, posturing, composure, courage, ordinary guards/soldiers, or normal combat experience do not qualify.'),
         }),
         auditInteraction: boolean(RELATIONSHIP_FIELD_DESCRIPTIONS.auditInteraction),
@@ -5603,7 +5702,6 @@ function applyUserKnowledgeApplicationsToInitPresets(relationshipEngine = [], ap
             if (application.type !== 'personalKnowledge') continue;
             if (application.effect === 'priorUserGoodRep') relationship.initPreset.priorUserGoodRep = true;
             if (application.effect === 'userBadRep') relationship.initPreset.userBadRep = true;
-            if (application.effect === 'userNonHuman') relationship.initPreset.userNonHuman = true;
         }
     }
 }

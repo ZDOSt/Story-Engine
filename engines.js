@@ -318,7 +318,7 @@ function RelationshipEngine(npc, resolutionPacket) {
     rule: first encounter kindness, opening-scene rescue, courtesy, friendliness, praise, or a warm first impression do NOT count as prior favorable reputation
     if {{user}} is explicitly shown by prior lore, card, scenario, tracker, chat history, or user knowledge to have an established favorable or trust-normalizing reputation with this NPC that predates the current scene -> {Label:priorUserGoodRep,B:3,F:1,H:1}
     rule: trust-normalizing prior context means the NPC has credible prior reason to treat {{user}} as safe, cooperative, vouched-for, familiar, cleared, helpful, or ordinary despite unusual nature; mere name recognition, gossip, or current-scene politeness is not enough
-    if {{user}} has an established fearsome/dangerous reputation known to this NPC OR is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like in a fresh/unnormalized first exposure AND NPC lacks explicit fear immunity -> {Label:userNonHuman,B:1,F:2,H:2}
+    if {{user}} has an established fearsome/dangerous reputation known to this NPC OR is explicitly visibly inhuman, demonic, monstrous, undead, bestial, eldritch, or construct-like in a fresh/unnormalized first exposure AND NPC lacks explicit fear immunity -> {Label:userNonHuman,B:1,F:3,H:2}
     rule: userNonHuman is the single fear-init bucket for fear-coded prior reputation/history/rumor OR fresh visible monstrous/inhuman nature
     rule: do NOT use userNonHuman merely because the NPC knows {{user}} is nonhuman; if the NPC has prior familiarity, ordinary neighbor/customer/guild contact, a trusted introduction, or other neutral/normalizing context that makes {{user}} known rather than shocking, use priorUserGoodRep only if that context is actually favorable/trust-normalizing, otherwise fall through to neutralDefault unless bad/fear reputation applies
     else -> {Label:neutralDefault,B:2,F:2,H:2}
@@ -492,7 +492,7 @@ function RelationshipEngine(npc, resolutionPacket) {
 
     if currentDisposition.F=3 || currentDisposition.H=3:
       if currentRapport>=5 && target in [Bond,No Change]:
-        return {b:0,f:(currentDisposition.F=3?-1:0),h:(currentDisposition.H=3?-1:0)}
+        return {b:0,f:(currentDisposition.F=3?-1:0),h:(currentDisposition.H=3?-1:0),rapportReset:Y}
       else:
         return {b:0,f:0,h:0}
 
@@ -1541,7 +1541,7 @@ export function deriveDirection(target, currentDisposition, currentRapport, audi
     }
     if (currentDisposition.F === 3 || currentDisposition.H === 3) {
         if (currentRapport >= 5 && ['Bond', 'No Change'].includes(target)) {
-            return { b: 0, f: currentDisposition.F === 3 ? -1 : 0, h: currentDisposition.H === 3 ? -1 : 0 };
+            return { b: 0, f: currentDisposition.F === 3 ? -1 : 0, h: currentDisposition.H === 3 ? -1 : 0, rapportReset: 'Y' };
         }
         return { b: 0, f: 0, h: 0 };
     }

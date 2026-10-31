@@ -489,6 +489,26 @@ Do not explain the world. Do not summarize lore. Let the scene imply the genre.
 
 End at the first concrete moment where {{user}} can act.`;
 
+// The opening runs no mechanics, so the cast's starting dispositions are decided before the scene
+// exists and stated here instead. Behaviour only: the numbers never reach the prose.
+function buildAdventureStartDispositionBlock(startDispositions = {}, fallback = null) {
+    const entries = Object.entries(startDispositions || {});
+    if (!entries.length && !fallback) return '';
+    const describe = entry => relationshipDispositionNarrativeGuide({
+        FinalState: `B${entry?.disposition?.B ?? 2}/F${entry?.disposition?.F ?? 2}/H${entry?.disposition?.H ?? 2}`,
+        InitPreset: String(entry?.label || ''),
+    });
+    const lines = entries.map(([name, entry]) => `- ${name}: ${describe(entry)}`);
+    return [
+        'OPENING DISPOSITIONS:',
+        'These feelings already exist before the first line. Show them in how each character speaks and behaves; never name, explain, or summarise them.',
+        ...lines,
+        fallback
+            ? `Any other figure you introduce starts from this: ${describe(fallback)}`
+            : 'Any other figure you introduce starts as an ordinary stranger: practical, reserved, context-led, with no default trust or hostility.',
+    ].join('\n');
+}
+
 export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt = '', options = {}) {
     const prompt = valueOrNone(adventurePrompt);
     const isekaiOpeningSeed = renderIsekaiOpeningSeed(options?.isekaiOpeningSeed);
@@ -513,6 +533,11 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     // The contract governs the whole opening turn, so it is stated before the Isekai seed and the
     // adventure prompt body rather than after them.
     lines.push('', PLAYER_ADVENTURE_OPENING_CONTRACT);
+    const startDispositionBlock = buildAdventureStartDispositionBlock(
+        options?.startDispositions,
+        options?.startDispositionFallback,
+    );
+    if (startDispositionBlock) lines.push('', startDispositionBlock);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
     if (isekaiOpeningSeed) {
         if (nameReveal) lines.push('', buildAdventureIntroNameRevealBlock(nameReveal));

@@ -3530,12 +3530,25 @@ function userKnowledgeMergeKey(entry) {
 const USER_REPUTATION_VERSION = 1;
 const USER_REPUTATION_HISTORY_LIMIT = 40;
 
-export function mergeUserReputationLedger(before = {}, delta = {}) {
+// Reputation is a two-sided ledger, not two independent counters.
+//
+// An infamy event costs standing as well as earning notoriety: the fame that made the deed
+// shocking is exactly what makes it a fall. A fame event does not earn credit while any infamy
+// stands - it burns the notoriety off first, and only then does fame accumulate again.
+//
+// Evil supersedes good within a single narration. Defending the old woman counts for nothing if
+// you killed her son in the same scene.
+export function mergeUserReputationLedger(before = {}, delta = {}, options = {}) {
     const base = normalizeUserReputation(before);
     const incoming = normalizeUserReputationDelta(delta);
     const locations = { ...base.locations };
     const history = [...base.history];
     const now = Date.now();
+    // A non-human is judged twice as harshly: the same deed earns double notoriety, and the fame
+    // it costs is doubled with it.
+    const infamyMultiplier = options?.userNonHuman === true ? 2 : 1;
+    const hasInfamyEvent = incoming.events.some(entry => Boolean(normalizeReputationLocation(entry.location))
+        && clamp(Math.floor(Number(entry.infamyDelta || 0)), 0, 1) > 0);
     let fameAwarded = 0;
     let infamyAwarded = 0;
 
@@ -3544,18 +3557,32 @@ export function mergeUserReputationLedger(before = {}, delta = {}) {
         if (!location) continue;
         const locationKey = findExistingReputationLocationKey(locations, location) || location;
         const previous = normalizeUserReputationLocation(locations[locationKey] || { location: locationKey });
-        const rawFameDelta = clamp(Math.floor(Number(entry.fameDelta || 0)), 0, 1);
+        const rawFameDelta = hasInfamyEvent ? 0 : clamp(Math.floor(Number(entry.fameDelta || 0)), 0, 1);
         const rawInfamyDelta = clamp(Math.floor(Number(entry.infamyDelta || 0)), 0, 1);
         const fameDelta = fameAwarded ? 0 : rawFameDelta;
-        const infamyDelta = infamyAwarded ? 0 : rawInfamyDelta;
-        if (!fameDelta && !infamyDelta) continue;
-        fameAwarded += fameDelta;
-        infamyAwarded += infamyDelta;
+        const infamyGain = infamyAwarded ? 0 : rawInfamyDelta * infamyMultiplier;
+        if (!fameDelta && !infamyGain) continue;
+
+        let fame = previous.fame;
+        let infamy = previous.infamy;
+        if (infamyGain > 0) {
+            infamyAwarded += rawInfamyDelta;
+            infamy += infamyGain;
+            fame = Math.max(0, fame - infamyGain * 2);
+        } else {
+            fameAwarded += fameDelta;
+            if (infamy > 0) {
+                infamy = Math.max(0, infamy - fameDelta);
+            } else {
+                fame += fameDelta;
+            }
+        }
+
         const next = normalizeUserReputationLocation({
             ...previous,
             location: previous.location || locationKey,
-            fame: previous.fame + fameDelta,
-            infamy: previous.infamy + infamyDelta,
+            fame,
+            infamy,
             updatedAt: now,
         });
         if (locationKey !== next.location && locations[locationKey]) delete locations[locationKey];
@@ -3563,8 +3590,8 @@ export function mergeUserReputationLedger(before = {}, delta = {}) {
         history.push(normalizeUserReputationEvent({
             ...entry,
             location: next.location,
-            fameDelta,
-            infamyDelta,
+            fameDelta: Math.max(0, next.fame - previous.fame),
+            infamyDelta: Math.max(0, next.infamy - previous.infamy),
             createdAt: now,
         }));
     }
@@ -4910,6 +4937,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
             const init = resolveDeterministicInitPreset(npc, state, sem, audit, `3.3 ${npc}.initPreset`, {
                 userReputation,
                 currentReputationLocation,
+                userNonHuman: resolveUserNonHumanFromContext(context),
             });
             initMetadata = init;
             currentDisposition = init.disposition;
@@ -9870,12 +9898,53 @@ function getCardFields(context) {
     }
 }
 
+// Races that read as ordinary friendly humanoids. A townsperson sees an elf or a dwarf and has no
+// reason to fear them, so they are human for the purpose of the fear-coded non-human bucket.
+const HUMAN_LOOKING_RACES = Object.freeze([
+    'human', 'elf', 'half-elf', 'dwarf', 'halfling', 'gnome', 'half-orc',
+    'bearkin', 'catfolk', 'foxkin', 'rabbitfolk', 'wolfkin',
+    'aasimar', 'angelkin', 'spirit-touched', 'hybrid',
+]);
+
+// The user's non-human status is decided here and nowhere else. The semantic model used to guess it
+// from the prose, which let the same character read as a monster to one NPC and as an ordinary
+// person to the next, and let the adventure opening disagree with every turn after it.
+export function resolveUserNonHumanFromContext(context = null) {
+    try {
+        const root = context?.chatMetadata?.structuredPreflightPlayer;
+        const identity = root?.creator?.identity || {};
+        const mode = String(identity.raceMode || '').trim();
+        const race = mode === 'pick'
+            ? String(identity.pickedRace || 'Human')
+            : String(identity.specifiedRace || '');
+        if (race.trim()) return !HUMAN_LOOKING_RACES.includes(race.trim().toLowerCase());
+        const text = String(root?.sheet?.text || '');
+        const match = text.match(/\*\*UserNonHuman:\*\*\s*([A-Za-z]+)/);
+        if (match) return /^y/i.test(match[1]);
+    } catch {
+        // Best effort: an unreadable sheet reads as human.
+    }
+    return false;
+}
+
+// The same precedence the per-NPC resolver uses, reachable for the adventure opening where there is
+// no scene and no NPC yet. Keep these numbers in step with resolveDeterministicInitPreset below.
+export function resolveAdventureStartDisposition(flags = {}, options = {}) {
+    const userNonHuman = options?.userNonHuman === true;
+    if (flags.romanticOpen === true) return { label: 'romanticOpen', disposition: { B: 4, F: 1, H: 1 } };
+    if (flags.userBadRep === true) return { label: 'userBadRep', disposition: { B: 1, F: 2, H: 3 } };
+    if (flags.priorUserGoodRep === true) return { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 1 } };
+    if (userNonHuman) return { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
+    return { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } };
+}
+
 function resolveDeterministicInitPreset(npc, state, sem, audit, label, options = {}) {
     const flags = normalizeSemanticInitPresetFlags(sem?.initPreset);
     const raceProfile = normalizeNpcRaceProfile(state?.raceProfile);
+    const userNonHuman = options?.userNonHuman === true && !flags.fearImmunity;
     const reputationApplication = resolveUserReputationInitApplication(options?.userReputation, {
         location: options?.currentReputationLocation,
-        userNonHuman: flags.userNonHuman && !flags.fearImmunity,
+        userNonHuman,
     });
 
     let base = { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } };
@@ -9889,8 +9958,8 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label, options =
     } else if (reputationApplication?.label) {
         base = reputationApplication;
         reputationWon = true;
-    } else if (flags.userNonHuman && !flags.fearImmunity) {
-        base = { label: 'userNonHuman', disposition: { B: 1, F: 2, H: 2 } };
+    } else if (userNonHuman) {
+        base = { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
     }
     const userHistory = initUserHistoryFromFlags(flags, state?.userHistory);
     // A stored location's reputation is real whether or not it won precedence, so it is always worth
@@ -9906,7 +9975,7 @@ function resolveDeterministicInitPreset(npc, state, sem, audit, label, options =
             romanticOpen: yn(flags.romanticOpen),
             userBadRep: yn(flags.userBadRep),
             priorUserGoodRep: yn(flags.priorUserGoodRep),
-            userNonHuman: yn(flags.userNonHuman),
+            userNonHuman: yn(userNonHuman),
             fearImmunity: yn(flags.fearImmunity),
         },
         base: base.label,

@@ -499,6 +499,7 @@ function context(latestUserText = '', tracker = {}, user = {}, persona = 'PHY: 6
     structuredPreflightSettings: cardFields.structuredPreflightSettings || {},
     extensionSettings: cardFields.extensionSettings || {},
     chatMetadata: {
+      structuredPreflightPlayer: cardFields.playerSetup || {},
       structuredPreflightTracker: {
         npcs: tracker,
         user,
@@ -538,12 +539,16 @@ function withDice(dice, fn) {
   }
 }
 
+// A visibly non-human player. The classification is deterministic now, so fixtures set the
+// player's race rather than smuggling a flag into the semantic ledger.
+const NON_HUMAN_PLAYER = { creator: { identity: { raceMode: 'pick', pickedRace: 'Demon' } } };
+
 function runCase(config) {
   return withDice(config.dice || [10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () =>
     runDeterministicEngines(
       config.ledger,
       config.tracker || {},
-      context(config.userText || '', config.tracker || {}, config.userState || {}, config.persona, config.chat || null, config.rapportClock || {}, config.cardFields || {}, config.powerActors || {}, config.latentGrievances || [], config.latentFavors || []),
+      context(config.userText || '', config.tracker || {}, config.userState || {}, config.persona, config.chat || null, config.rapportClock || {}, { ...(config.cardFields || {}), ...(config.playerSetup ? { playerSetup: config.playerSetup } : {}) }, config.powerActors || {}, config.latentGrievances || [], config.latentFavors || []),
       'normal',
       config.options || {},
     ),
@@ -2750,10 +2755,38 @@ const tests = [
           relationshipEngine: [relationship('Seraphina')],
         }),
       });
-      assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 5);
+      // F3 recovery now spends the rapport the same way F4 recovery does, so the fear drop
+      // and the Bond climb cannot both be paid for by one accumulated five.
+      assert.equal(report.trackerUpdate.npcs.Seraphina.currentRapport, 0);
       assert.deepEqual(report.trackerUpdate.npcs.Seraphina.currentDisposition, { B: 1, F: 2, H: 2 });
       assert.equal(auditIncludes(report, '3.4c routeDispositionTarget=No Change'), true);
-      assert.equal(auditIncludes(report, '3.5 deriveDirection={"b":0,"f":-1,"h":0}'), true);
+      assert.equal(auditIncludes(report, '3.5 deriveDirection={"b":0,"f":-1,"h":0,"rapportReset":"Y"}'), true);
+    },
+  },
+  {
+    name: '12e.1 F3 rapport recovery spends the rapport it used',
+    run() {
+      // F4 recovery always reset rapport. F3 did not, which meant one accumulated five could
+      // buy the fear drop and then carry straight into B1->B2 and B2->B3 on the following
+      // turns, because neither of those thresholds is above three.
+      const deltas = deriveDirection('No Change', { B: 1, F: 3, H: 2 }, 5, 'Y', {
+        GOAL: 'Normal_Interaction',
+        LandedActions: 0,
+      });
+      assert.deepEqual(deltas, { b: 0, f: -1, h: 0, rapportReset: 'Y' });
+      assert.deepEqual(updateDisposition({ B: 1, F: 3, H: 2 }, deltas), { B: 1, F: 2, H: 2 });
+
+      // Below five it still does nothing at all, and leaves the rapport alone.
+      assert.deepEqual(
+        deriveDirection('No Change', { B: 1, F: 3, H: 2 }, 4, 'Y', { GOAL: 'Normal_Interaction', LandedActions: 0 }),
+        { b: 0, f: 0, h: 0 },
+      );
+
+      // The matching F4 branch keeps its own reset, so the two tiers now agree.
+      assert.deepEqual(
+        deriveDirection('No Change', { B: 1, F: 4, H: 2 }, 5, 'Y', { GOAL: 'Normal_Interaction', LandedActions: 0 }),
+        { b: 0, f: -1, h: 0, rapportReset: 'Y' },
+      );
     },
   },
   {
@@ -6618,6 +6651,7 @@ const tests = [
         DemonPeer: trackerEntry({ currentDisposition: null }),
       };
       const report = runCase({
+      playerSetup: NON_HUMAN_PLAYER,
         userText: 'I speak to the villager and DemonPeer.',
         tracker,
         ledger: baseLedger({
@@ -6629,20 +6663,19 @@ const tests = [
             rollNeeded: false,
           },
           relationshipEngine: [
-            relationship('Villager', { initPreset: { userNonHuman: true } }),
-            relationship('DemonPeer', { initPreset: { userNonHuman: true, fearImmunity: true } }),
+            relationship('Villager'),
+            relationship('DemonPeer', { initPreset: { fearImmunity: true } }),
           ],
         }),
       });
-      assert.deepEqual(report.trackerUpdate.npcs.Villager.currentDisposition, { B: 1, F: 2, H: 2 });
+      assert.deepEqual(report.trackerUpdate.npcs.Villager.currentDisposition, { B: 1, F: 3, H: 2 });
       assert.deepEqual(report.trackerUpdate.npcs.DemonPeer.currentDisposition, { B: 2, F: 2, H: 2 });
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[0].InitPreset, 'userNonHuman');
       assert.equal(report.finalNarrativeHandoff.npcHandoffs[1].InitPreset, 'neutralDefault');
       assert.equal(auditIncludes(report, 'initPreset=userNonHuman'), true);
       assert.equal(auditIncludes(report, 'fearImmunity=Y'), true);
-      assert.match(prompt(report), /Visible-nonhuman caution: low trust because \{\{user\}\} appears inhuman/);
-      assert.match(prompt(report), /wary distance, professional caution, prejudice, religious suspicion, curiosity, fascination, social avoidance, quiet resentment, guarded politeness, or mild fear/);
-      assert.match(prompt(report), /not default panic, open hatred, violence, or automatic refusal/);
+      // At F3 the caution wording no longer applies; the narrator is told to want distance and an exit.
+      assert.match(prompt(report), /Fear-led: wants distance, safety, witnesses, or an exit/);
     },
   },
   {
@@ -6720,6 +6753,7 @@ const tests = [
         Guard: trackerEntry({ currentDisposition: null }),
       };
       const report = runCase({
+      playerSetup: NON_HUMAN_PLAYER,
         userText: 'I speak with the guard.',
         tracker,
         cardFields: {
@@ -6740,7 +6774,7 @@ const tests = [
             identifyTargets: { ActionTargets: ['Guard'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
             rollNeeded: false,
           },
-          relationshipEngine: [relationship('Guard', { initPreset: { userNonHuman: true } })],
+          relationshipEngine: [relationship('Guard')],
         }),
       });
       assert.deepEqual(report.trackerUpdate.npcs.Guard.currentDisposition, { B: 2, F: 2, H: 2 });
@@ -6754,6 +6788,7 @@ const tests = [
         Guard: trackerEntry({ currentDisposition: null }),
       };
       const report = runCase({
+      playerSetup: NON_HUMAN_PLAYER,
         userText: 'I speak with the guard.',
         tracker,
         cardFields: {
@@ -6774,7 +6809,7 @@ const tests = [
             identifyTargets: { ActionTargets: ['Guard'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
             rollNeeded: false,
           },
-          relationshipEngine: [relationship('Guard', { initPreset: { userNonHuman: true } })],
+          relationshipEngine: [relationship('Guard')],
         }),
       });
       assert.deepEqual(report.trackerUpdate.npcs.Guard.currentDisposition, { B: 2, F: 1, H: 2 });
@@ -6822,6 +6857,7 @@ const tests = [
         Merchant: trackerEntry({ currentDisposition: null }),
       };
       const report = runCase({
+      playerSetup: NON_HUMAN_PLAYER,
         userText: 'I approach the merchant.',
         tracker,
         cardFields: {
@@ -6842,7 +6878,7 @@ const tests = [
             identifyTargets: { NPCAwareOfUser: ['Merchant'], ActionTargets: [], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
             rollNeeded: false,
           },
-          relationshipEngine: [relationship('Merchant', { initPreset: { userNonHuman: true } })],
+          relationshipEngine: [relationship('Merchant')],
         }),
       });
       assert.deepEqual(report.trackerUpdate.npcs.Merchant.currentDisposition, { B: 1, F: 2, H: 3 });
@@ -7131,6 +7167,7 @@ const tests = [
         Receptionist: trackerEntry({ currentDisposition: null }),
       };
       const report = runCase({
+      playerSetup: NON_HUMAN_PLAYER,
         userText: 'I speak with the receptionist.',
         tracker,
         cardFields: {
@@ -7151,7 +7188,7 @@ const tests = [
             identifyTargets: { ActionTargets: ['Receptionist'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
             rollNeeded: false,
           },
-          relationshipEngine: [relationship('Receptionist', { initPreset: { userNonHuman: true } })],
+          relationshipEngine: [relationship('Receptionist')],
         }),
       });
       assert.equal(auditIncludes(report, 'initPreset=userNonHumanFame5'), true);
@@ -7392,6 +7429,7 @@ const tests = [
         Hyacinthe: trackerEntry({ currentDisposition: null }),
       };
       const report = runCase({
+      playerSetup: NON_HUMAN_PLAYER,
         userText: 'I approach Hyacinthe and say hello.',
         tracker,
         ledger: baseLedger({
@@ -7402,7 +7440,7 @@ const tests = [
             identifyTargets: { ActionTargets: ['Hyacinthe'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
             rollNeeded: false,
           },
-          relationshipEngine: [relationship('Hyacinthe', { initPreset: { romanticOpen: true, userNonHuman: true }, establishedRelationship: false })],
+          relationshipEngine: [relationship('Hyacinthe', { initPreset: { romanticOpen: true }, establishedRelationship: false })],
         }),
       });
       assert.deepEqual(report.trackerUpdate.npcs.Hyacinthe.currentDisposition, { B: 4, F: 1, H: 1 });
@@ -7804,7 +7842,9 @@ const tests = [
         }),
       });
       assert.deepEqual(report.trackerUpdate.npcs.Mara.currentDisposition, { B: 1, F: 2, H: 1 });
-      assert.equal(report.trackerUpdate.npcs.Mara.currentRapport, 5);
+      // The exceptional benefit pushes rapport to five, that five buys the F3 drop and is spent
+      // doing it, so the NPC has to earn trust again before Bond can climb.
+      assert.equal(report.trackerUpdate.npcs.Mara.currentRapport, 0);
       assert.equal(auditIncludes(report, 'exceptionalBenefit=Y'), true);
     },
   },
@@ -11309,9 +11349,50 @@ const tests = [
           { location: 'Kuroda City', fameDelta: 0, infamyDelta: 1, reason: 'More threat', evidence: 'Guard heard it' },
         ],
       });
-      assert.equal(merged.locations['Urakami Village'].fame, 1);
+      // Evil supersedes good across the whole narration, so the fame events are discarded and
+      // only the infamy stands. Each stat is still capped at one point per narration.
+      assert.equal(merged.locations['Urakami Village'], undefined);
       assert.equal(merged.locations['Kuroda City'].infamy, 1);
-      assert.equal(merged.history.length, 2);
+      assert.equal(merged.history.length, 1);
+    },
+  },
+  {
+    name: '33.1a.1 an infamy event costs fame, and fame only returns once infamy is gone',
+    run() {
+      const base = {
+        locations: {
+          Urakami: { location: 'Urakami', fame: 4, infamy: 0, updatedAt: 1 },
+          Kuroda: { location: 'Kuroda', fame: 0, infamy: 2, updatedAt: 1 },
+        },
+      };
+
+      // Fame 4, one evil deed: fame drops by two per point of infamy earned and infamy rises.
+      const fallen = mergeUserReputationLedger(base, {
+        events: [{ location: 'Urakami', fameDelta: 0, infamyDelta: 1, reason: 'Public cruelty', evidence: 'Crowd' }],
+      });
+      assert.equal(fallen.locations.Urakami.fame, 2);
+      assert.equal(fallen.locations.Urakami.infamy, 1);
+
+      // While infamy stands, a good deed burns it off instead of earning fame.
+      const redeeming = mergeUserReputationLedger(base, {
+        events: [{ location: 'Kuroda', fameDelta: 1, infamyDelta: 0, reason: 'Public help', evidence: 'Crowd' }],
+      });
+      assert.equal(redeeming.locations.Kuroda.infamy, 1);
+      assert.equal(redeeming.locations.Kuroda.fame, 0);
+
+      // With infamy gone, the same deed earns fame again.
+      const clear = { locations: { Kuroda: { location: 'Kuroda', fame: 3, infamy: 0, updatedAt: 1 } } };
+      const earning = mergeUserReputationLedger(clear, {
+        events: [{ location: 'Kuroda', fameDelta: 1, infamyDelta: 0, reason: 'Public help', evidence: 'Crowd' }],
+      });
+      assert.equal(earning.locations.Kuroda.fame, 4);
+
+      // A non-human is judged twice as harshly on both sides of the same deed.
+      const demon = mergeUserReputationLedger(base, {
+        events: [{ location: 'Urakami', fameDelta: 0, infamyDelta: 1, reason: 'Public cruelty', evidence: 'Crowd' }],
+      }, { userNonHuman: true });
+      assert.equal(demon.locations.Urakami.infamy, 2);
+      assert.equal(demon.locations.Urakami.fame, 0);
     },
   },
   {
@@ -15143,6 +15224,100 @@ const tests = [
         const block = preflightSource.slice(at, at + 900);
         assert.match(block, /groupProfile: \{/, key + ' must declare a group profile');
       }
+    },
+  },
+  {
+    name: '33t typical friendly humanoids are not treated as non-human',
+    run() {
+      // The non-human disposition is fear-coded, so it must not fire for an elf or a dwarf.
+      // Anything outside this list is visibly other and does take the penalty.
+      const source = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      const listMatch = source.match(/const PLAYER_HUMANOID_RACES = Object\.freeze\(\[([\s\S]*?)\]\);/);
+      assert.ok(listMatch, 'PLAYER_HUMANOID_RACES must exist');
+      const fnSource = source.slice(
+        source.indexOf('function isTypicalHumanoidRace'),
+        source.indexOf('function getLockedPlayerCreatorUserNonHuman'),
+      );
+      const isHumanoid = new Function(
+        `const PLAYER_HUMANOID_RACES = Object.freeze([${listMatch[1]}]); ${fnSource}; return isTypicalHumanoidRace;`,
+      )();
+
+      const human = ['Human', 'Elf', 'Half-Elf', 'Dwarf', 'Halfling', 'Gnome', 'Half-Orc',
+        'Bearkin', 'Catfolk', 'Foxkin', 'Rabbitfolk', 'Wolfkin',
+        'Aasimar', 'Angelkin', 'Spirit-Touched', 'Hybrid'];
+      const notHuman = ['Tiefling', 'Demon', 'Orc', 'Dragonkin', 'Undead', 'Vampire', 'Werewolf',
+        'Dhampir', 'Fae', 'Centaur', 'Goblin', 'Kobold', 'Harpy', 'Merfolk', 'Satyr', ''];
+      for (const race of [...human, 'elf', 'DWARF', 'half-orc']) {
+        assert.equal(isHumanoid(race), true, 'should read as an ordinary person: ' + race);
+      }
+      for (const race of notHuman) {
+        assert.equal(isHumanoid(race), false, 'should read as visibly other: ' + race);
+      }
+      // Every race the player creator offers must land on exactly one side.
+      const raceList = source.match(/const PLAYER_RACE_CHOICES = Object\.freeze\(\[([\s\S]*?)\]\);/);
+      assert.ok(raceList, 'PLAYER_RACE_CHOICES must exist');
+      const allRaces = raceList[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
+      assert.ok(allRaces.length > 40, 'expected the full race list, saw ' + allRaces.length);
+      // Exactly these sixteen, and nothing else, across the whole offered list.
+      const classifiedHuman = allRaces.filter(race => isHumanoid(race)).sort();
+      assert.deepEqual(classifiedHuman, [...human].sort(),
+        'the human set must match the race list exactly: ' + classifiedHuman.join(', '));
+
+      // And the sheet field is derived from it, not from a bare "is it literally human" test.
+      assert.equal(
+        source.includes("^human$/i.test(String(identity.pickedRace"),
+        false,
+        'the sheet field must not fall back to a bare "is it literally human" test',
+      );
+      assert.ok(source.includes("isTypicalHumanoidRace(identity.pickedRace || 'Human')"));
+    },
+  },
+  {
+    name: '33s the adventure opening is told how the cast already feels',
+    run() {
+      // The opening runs no mechanics, so a character who loves the player would otherwise be
+      // introduced as a stranger and only warm up on turn two.
+      const prompt = formatAdventureIntroNarratorModelPromptContext('Open the story.', {
+        adventureGenre: 'Fantasy',
+        startDispositions: { Alice: { label: 'romanticOpen', disposition: { B: 4, F: 1, H: 1 } } },
+        startDispositionFallback: { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } },
+      });
+      assert.match(prompt, /OPENING DISPOSITIONS:/);
+      assert.match(prompt, /- Alice: Close trust/);
+      assert.match(prompt, /Any other figure you introduce starts from this: Neutral default/);
+      // Never the numbers, only the behaviour.
+      assert.doesNotMatch(prompt, /B4\/F1\/H1/);
+
+      // A non-human player makes every unnamed figure wary from the first line.
+      const demon = formatAdventureIntroNarratorModelPromptContext('Open.', {
+        adventureGenre: 'Fantasy',
+        startDispositions: {},
+        startDispositionFallback: { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } },
+      });
+      assert.match(demon, /Any other figure you introduce starts from this: Fear-led/);
+
+      // No dispositions at all means no block, so a plain opening is unchanged.
+      const plain = formatAdventureIntroNarratorModelPromptContext('Open.', { adventureGenre: 'Fantasy' });
+      assert.doesNotMatch(plain, /OPENING DISPOSITIONS:/);
+
+      // And the decided disposition is written when the tracker creates the figure, so the next
+      // turn cannot reinterpret it. mergePostNarrationTrackerDelta is private, so this pins the
+      // wiring rather than calling it.
+      const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
+      assert.match(indexSource, /options\?\.adventureDispositions\?\.\[name\]/);
+      assert.match(indexSource, /adventureDispositions: context\?\.chatMetadata\?\.\[ADVENTURE_START_DISPOSITION_KEY\]/);
+      assert.match(indexSource, /currentDisposition: storedDisposition\.disposition/);
+
+      // The adventure pass honours the same output mode as every other semantic call.
+      const extractorSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
+      const passSource = extractorSource.slice(
+        extractorSource.indexOf('export async function extractAdventureStartDispositions'),
+        extractorSource.indexOf('function parseAdventureStartDispositionsText'),
+      );
+      assert.match(passSource, /normalizeSemanticOutputMode\(options\.semanticOutputMode\)/);
+      assert.match(passSource, /SEMANTIC_OUTPUT_MODES\.TOOL_CALL/);
+      assert.match(passSource, /sendDefaultChatCompletionTextRequest/);
+      assert.match(indexSource, /semanticOutputMode: settings\?\.semanticOutputMode/);
     },
   },
   {
@@ -20142,10 +20317,10 @@ const tests = [
       // Smaller than it was: worldProgression and its advancement module were removed from the
       // schema, because the clock advances due plans and nothing reports progress any more.
       assert.deepEqual(schemaMetrics, {
-        leaves: 219,
+        leaves: 218,
         objects: 41,
         arrays: 42,
-        descriptions: 104,
+        descriptions: 103,
         incompleteRequired: 0,
       });
       assert.equal(
@@ -20795,9 +20970,12 @@ const tests = [
         semanticSource.indexOf('async function generateSemanticToolCall('),
         semanticSource.indexOf('async function generateSemanticToolCallWithProfile('),
       );
+      // The transport takes an override so the adventure-start pass can reuse it with a reduced
+      // schema; every other call still falls through to the full preflight tool.
+      assert.match(semanticDefaultToolRequest, /buildTool: options\.buildToolOverride/);
       assert.match(
         semanticDefaultToolRequest,
-        /buildTool: \(source, route\) => buildSemanticPreflightTool\(source, applySemanticToolSchemaOption\(route, options\), options\.semanticTurnBinding\)/,
+        /buildSemanticPreflightTool\(src, applySemanticToolSchemaOption\(rte, options\), options\.semanticTurnBinding\)/,
       );
 
       const semanticProfileToolRequest = semanticSource.slice(
