@@ -6393,8 +6393,13 @@ function mergePostNarrationTrackerDelta(snapshot, delta, options = {}) {
         // The adventure opening runs no mechanics, so the figures it introduced arrive with no
         // disposition. Apply the one the start pass already decided instead of letting the next
         // turn reinterpret it.
-        const storedDisposition = options?.adventureDispositions?.[name]
-            || options?.adventureDispositions?.[rawName];
+        const startDispositions = options?.adventureDispositions || {};
+        const named = startDispositions.characters || startDispositions;
+        const storedDisposition = named?.[name] || named?.[rawName]
+            // A figure the opening invented has no entry: it takes the deterministic default the
+            // opening was also given. Only during the opening turn - a stranger met three turns
+            // later must be initialised by the relationship engine from that turn's own scene.
+            || (options?.applyAdventureDefault === true ? startDispositions.fallback : null);
         if (storedDisposition?.disposition && !npcs[name].currentDisposition) {
             npcs[name] = normalizeTrackerEntry({
                 ...npcs[name],
@@ -17686,6 +17691,7 @@ async function finalizePostNarrationMessage(messageId, type, messageKey, finaliz
                     pendingRun,
                     context,
                     adventureDispositions: context?.chatMetadata?.[ADVENTURE_START_DISPOSITION_KEY] || {},
+                    applyAdventureDefault: pendingRun?.mode === 'adventure_intro',
                 });
                 const lootCompletion = finalizeLootSearchCompletion(
                     mergedTrackerDisplaySnapshot.npcs,
@@ -18584,8 +18590,12 @@ async function handleChatCompletionPromptReady(eventData) {
             } catch (error) {
                 console.warn(`[${EXTENSION_NAME}] adventure start disposition pass failed; using defaults.`, error);
             }
+            const startDispositionFallback = resolveAdventureStartDisposition({}, { userNonHuman: isStoryEngineUserNonHuman(context) });
             if (context?.chatMetadata) {
-                context.chatMetadata[ADVENTURE_START_DISPOSITION_KEY] = startDispositions;
+                context.chatMetadata[ADVENTURE_START_DISPOSITION_KEY] = {
+                    characters: startDispositions,
+                    fallback: startDispositionFallback,
+                };
                 try {
                     await saveMetadata(context);
                 } catch {
@@ -18598,7 +18608,7 @@ async function handleChatCompletionPromptReady(eventData) {
                 nameGeneration,
                 isekaiOpeningSeed,
                 startDispositions,
-                startDispositionFallback: resolveAdventureStartDisposition({}, { userNonHuman: isStoryEngineUserNonHuman(context) }),
+                startDispositionFallback,
                 sceneStyleProfile: pendingGeneration.sceneStyleProfile || '',
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);

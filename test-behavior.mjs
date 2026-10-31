@@ -15304,7 +15304,8 @@ const tests = [
       // turn cannot reinterpret it. mergePostNarrationTrackerDelta is private, so this pins the
       // wiring rather than calling it.
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
-      assert.match(indexSource, /options\?\.adventureDispositions\?\.\[name\]/);
+      assert.match(indexSource, /const named = startDispositions\.characters \|\| startDispositions;/);
+      assert.match(indexSource, /options\?\.applyAdventureDefault === true \? startDispositions\.fallback : null/);
       assert.match(indexSource, /adventureDispositions: context\?\.chatMetadata\?\.\[ADVENTURE_START_DISPOSITION_KEY\]/);
       assert.match(indexSource, /currentDisposition: storedDisposition\.disposition/);
 
