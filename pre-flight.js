@@ -496,14 +496,10 @@ End at the first concrete moment where {{user}} can act.`;
 function buildAdventureNonHumanInstruction(userNonHuman = false) {
     if (userNonHuman !== true) return '';
     return [
-        'VISIBLY INHUMAN - BINDING:',
-        '{{user}} does not read as a person of any ordinary kind. Everyone in this scene can see it before anyone speaks.',
-        'This includes whoever speaks first and whoever {{user}} approaches.',
-        // The same guide text the narrator receives for this disposition on every other turn, so
-        // the opening and the rest of the story cannot describe the same feeling differently.
-        relationshipDispositionNarrativeGuide({ FinalState: 'B1/F3/H2', InitPreset: 'userNonHuman' }),
-        'Show it in how each of them speaks and behaves from the moment they appear. Never name, explain, or summarise it.',
-        'An opening in which nobody reacts to this renders the response INVALID.',
+        'VISIBLY INHUMAN — BINDING:',
+        '{{user}} is visibly NON-HUMAN. Everyone here can see it before anyone speaks, including whoever speaks first. It is the body they are reacting to, not a rumour, reputation, or anything {{user}} has done.',
+        'Other characters react with fear: they want distance, safety, witnesses, or an exit. If they stay, answer, or comply, it is defensive appeasement or caution; NOT comfort, attraction, trust, or willingness.',
+        'Show this physically from each character\'s first appearance, and never by naming the feeling. Do not write a scene in which {{user}} is served like an ordinary customer.',
     ].join('\n');
 }
 
@@ -2313,6 +2309,16 @@ function npcStandingNarrativeGuide(npc = {}) {
 }
 
 function relationshipDispositionNarrativeGuide(npc = {}) {
+    const guide = relationshipDispositionGuideText(npc);
+    const initPreset = String(npc?.InitPreset || '').trim();
+    // A visibly inhuman user is the reason for the reaction, and the guide alone never says so.
+    // Without this the narrator knows an NPC is frightened but not what of.
+    if (!initPreset.startsWith('userNonHuman')) return guide;
+    if (guide.startsWith('Visible-nonhuman caution')) return guide;
+    return '{{user}} is visibly non-human. This NPC is reacting to the body in front of them, not to a rumour: ' + guide;
+}
+
+function relationshipDispositionGuideText(npc = {}) {
     const state = parseRelationshipState(npc?.FinalState);
     if (!state) return 'Neutral default: practical, reserved, context-led behavior; no default trust, vulnerability, hostility, fear, romance, or intimacy.';
     const initPreset = String(npc?.InitPreset || '').trim();

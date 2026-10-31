@@ -15267,33 +15267,34 @@ const tests = [
   {
     name: '33s the adventure opening tells the narrator when {{user}} is visibly inhuman',
     run() {
-      // The opening invents its own cast and runs no mechanics, so there is no disposition to
-      // state. The one thing already known is whether {{user}} reads as visibly inhuman.
+      // The opening invents its own cast and runs no mechanics. The one thing already known is
+      // whether {{user}} reads as visibly inhuman, and the cause matters as much as the reaction:
+      // it is the body, not a rumour or a deed.
       const demon = formatAdventureIntroNarratorModelPromptContext('Open.', {
         adventureGenre: 'Fantasy',
         adventureUserNonHuman: true,
       });
-      assert.match(demon, /VISIBLY INHUMAN - BINDING:/);
-      assert.match(demon, /includes whoever speaks first/);
-      // The exact guide text the narrator receives for this disposition on every other turn.
-      assert.match(demon, /Fear-led: wants distance, safety, witnesses, or an exit; staying, answering, or complying is defensive appeasement or caution, not comfort, attraction, trust, or willingness\./);
-      // And it is literally the shared guide, not a hand-written copy that can drift.
-      const preflightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
-      const block = preflightSource.slice(
-        preflightSource.indexOf('function buildAdventureNonHumanInstruction'),
-        preflightSource.indexOf('export function formatAdventureIntroNarratorModelPromptContext'),
-      );
-      assert.match(block, /relationshipDispositionNarrativeGuide\(\{ FinalState: 'B1\/F3\/H2', InitPreset: 'userNonHuman' \}\)/);
-      assert.match(demon, /renders the response INVALID/);
-      assert.ok(demon.indexOf('VISIBLY INHUMAN') > demon.indexOf('START ADVENTURE REMINDER'),
-        'the instruction must come after the adventure reminder, near the end');
+      assert.match(demon, /VISIBLY INHUMAN — BINDING:/);
+      assert.match(demon, /visibly NON-HUMAN/);
+      assert.match(demon, /including whoever speaks first/);
+      assert.match(demon, /It is the body they are reacting to, not a rumour/);
+      assert.match(demon, /NOT comfort, attraction, trust, or willingness/);
+      assert.match(demon, /Do not write a scene in which \{\{user\}\} is served like an ordinary customer/);
 
-      // An ordinary character needs no instruction and gets none.
       const human = formatAdventureIntroNarratorModelPromptContext('Open.', {
         adventureGenre: 'Fantasy',
         adventureUserNonHuman: false,
       });
       assert.doesNotMatch(human, /VISIBLY INHUMAN/);
+
+      // The same cause is attached to the handoff fact on every later turn.
+      const preflightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      const guideSource = preflightSource.slice(
+        preflightSource.indexOf('function relationshipDispositionNarrativeGuide'),
+        preflightSource.indexOf('function relationshipDispositionGuideText'),
+      );
+      assert.match(guideSource, /initPreset\.startsWith\('userNonHuman'\)/);
+      assert.match(guideSource, /reacting to the body in front of them, not to a rumour/);
 
       // No disposition is computed, imported, or stored for this path at all.
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
