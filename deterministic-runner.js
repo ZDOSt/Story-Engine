@@ -5057,7 +5057,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         })}`);
 
         const suppressFreshNonHumanNoChangeBond = firstTrackedEncounter
-            && ['userNonHuman', 'userNonHumanFame5'].includes(initMetadata?.label || '')
+            && String(initMetadata?.label || '').startsWith('userNonHuman')
             && target === 'No Change';
         if (suppressFreshNonHumanNoChangeBond) {
             audit.push(`3.4f suppressFreshNonHumanNoChangeBond=${initMetadata.label}`);
@@ -10009,8 +10009,11 @@ function resolveUserReputationInitApplication(userReputation, options = {}) {
     const fame = Math.max(0, Math.floor(Number(reputation.fame || 0)));
     const infamy = Math.max(0, Math.floor(Number(reputation.infamy || 0)));
     const userNonHuman = bool(options?.userNonHuman);
-    const effectiveInfamy = userNonHuman && infamy > 0 ? infamy + 5 : infamy;
-    const effectiveFame = userNonHuman ? Math.max(0, fame - 5) : fame;
+    // No offset. The non-human penalty now lives in what the ledger awards - doubled infamy and
+    // double the fame it costs - so shifting the stored numbers again here punished the same
+    // character twice for the same deed. Tiers read what was actually earned.
+    const effectiveInfamy = infamy;
+    const effectiveFame = fame;
     const labelPrefix = userNonHuman ? 'userNonHuman' : 'user';
 
     let label = '';
@@ -10034,16 +10037,11 @@ function resolveUserReputationInitApplication(userReputation, options = {}) {
 
     if (!disposition) {
         if (effectiveFame >= 10) {
-            label = userNonHuman
-                ? (fame >= 20 ? 'userNonHumanFame20' : 'userNonHumanFame15')
-                : (fame >= 15 ? 'userFame15' : 'userFame10');
+            label = `${labelPrefix}Fame10`;
             disposition = { B: 3, F: 1, H: 1 };
         } else if (effectiveFame >= 5) {
-            label = userNonHuman ? 'userNonHumanFame10' : 'userFame5';
+            label = `${labelPrefix}Fame5`;
             disposition = { B: 2, F: 1, H: 2 };
-        } else if (userNonHuman && fame >= 5) {
-            label = 'userNonHumanFame5';
-            disposition = { B: 2, F: 2, H: 2 };
         }
     }
 

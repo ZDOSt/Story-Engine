@@ -6747,42 +6747,23 @@ const tests = [
     },
   },
   {
-    name: '09c.2a nonhuman fame 5 normalizes to neutral',
+    name: '09c.2a.1 the fresh-nonhuman Bond suppression follows the label prefix',
     run() {
-      const tracker = {
-        Guard: trackerEntry({ currentDisposition: null }),
-      };
-      const report = runCase({
-      playerSetup: NON_HUMAN_PLAYER,
-        userText: 'I speak with the guard.',
-        tracker,
-        cardFields: {
-          userReputation: {
-            locations: {
-              'Urakami Village': { location: 'Urakami Village', fame: 5, infamy: 0, updatedAt: 100 },
-            },
-          },
-        },
-        ledger: baseLedger({
-          engineContext: {
-            userReputationContext: { location: 'Urakami Village' },
-          },
-          resolutionEngine: {
-            identifyGoal: 'Talk',
-            identifyChallenge: 'speak with guard',
-            explicitMeans: 'speak with guard',
-            identifyTargets: { ActionTargets: ['Guard'], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
-            rollNeeded: false,
-          },
-          relationshipEngine: [relationship('Guard')],
-        }),
-      });
-      assert.deepEqual(report.trackerUpdate.npcs.Guard.currentDisposition, { B: 2, F: 2, H: 2 });
-      assert.equal(auditIncludes(report, 'initPreset=userNonHumanFame5'), true);
+      // suppressFreshNonHumanNoChangeBond was keyed to the exact labels
+      // ['userNonHuman', 'userNonHumanFame5']. The fame ladder no longer produces that second
+      // label, so a literal match would silently stop suppressing for anyone above fame 5.
+      const source = fs.readFileSync(new URL('deterministic-runner.js', import.meta.url), 'utf8');
+      const block = source.slice(
+        source.indexOf('const suppressFreshNonHumanNoChangeBond'),
+        source.indexOf('if (suppressFreshNonHumanNoChangeBond)'),
+      );
+      assert.match(block, /startsWith\('userNonHuman'\)/);
+      assert.equal(block.includes("'userNonHumanFame5'"), false,
+        'the suppression must not depend on a label the ladder can no longer produce');
     },
   },
   {
-    name: '09c.2b nonhuman fame 10 gets normal fame 5 effect',
+    name: '09c.2b nonhuman fame 10 reaches the fame 10 tier',
     run() {
       const tracker = {
         Guard: trackerEntry({ currentDisposition: null }),
@@ -6812,7 +6793,7 @@ const tests = [
           relationshipEngine: [relationship('Guard')],
         }),
       });
-      assert.deepEqual(report.trackerUpdate.npcs.Guard.currentDisposition, { B: 2, F: 1, H: 2 });
+      assert.deepEqual(report.trackerUpdate.npcs.Guard.currentDisposition, { B: 3, F: 1, H: 1 });
       assert.equal(auditIncludes(report, 'initPreset=userNonHumanFame10'), true);
     },
   },
@@ -6851,7 +6832,7 @@ const tests = [
     },
   },
   {
-    name: '09c.3a nonhuman infamy applies one tier early',
+    name: '09c.3a nonhuman infamy no longer applies a tier early',
     run() {
       const tracker = {
         Merchant: trackerEntry({ currentDisposition: null }),
@@ -6881,8 +6862,10 @@ const tests = [
           relationshipEngine: [relationship('Merchant')],
         }),
       });
-      assert.deepEqual(report.trackerUpdate.npcs.Merchant.currentDisposition, { B: 1, F: 2, H: 3 });
-      assert.equal(auditIncludes(report, 'initPreset=userNonHumanInfamy10'), true);
+      // Five infamy is the infamy-5 tier. The +5 is gone; the ledger already doubles what a
+      // non-human earns, so the penalty lives in the award rather than the lookup.
+      assert.deepEqual(report.trackerUpdate.npcs.Merchant.currentDisposition, { B: 1, F: 2, H: 2 });
+      assert.equal(auditIncludes(report, 'initPreset=userNonHumanInfamy5'), true);
     },
   },
   {
@@ -7161,7 +7144,7 @@ const tests = [
     },
   },
   {
-    name: '09c.5d a nonhuman reputation seed still lands when the disposition resolves to neutral',
+    name: '09c.5d a nonhuman reputation seed still lands instead of the base bucket',
     run() {
       const tracker = {
         Receptionist: trackerEntry({ currentDisposition: null }),
@@ -7191,9 +7174,10 @@ const tests = [
           relationshipEngine: [relationship('Receptionist')],
         }),
       });
+      // Fame 15 seeds a new location at 5 after the two-tier drop, which is the fame-5 tier.
       assert.equal(auditIncludes(report, 'initPreset=userNonHumanFame5'), true);
       assert.equal(report.trackerUpdate.userReputation.locations['Kuroda City'].fame, 5);
-      assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 2, F: 2, H: 2 });
+      assert.deepEqual(report.trackerUpdate.npcs.Receptionist.currentDisposition, { B: 2, F: 1, H: 2 });
       assert.deepEqual(report.semanticLedger.userKnowledgeApplication?.applications || [], []);
     },
   },
