@@ -18818,14 +18818,14 @@ const tests = [
       assert.match(introPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
       assert.match(introPrompt, /must not rebuild, reroll, overwrite, infantize, or replace them/);
       assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
-      assert.match(introPrompt, /NAME REVEAL:/);
+      assert.match(introPrompt, /NAME REVEAL — BINDING:/);
       assert.match(introPrompt, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
-      assert.match(introPrompt, /IF you are about to introduce a NEW name for something with no established name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
+      assert.match(introPrompt, /IF a new name is needed, you MUST use EXACTLY ONE UNUSED name from the pool below/);
       assert.match(introPrompt, /FEMALE: Ariana, Mira\./);
       assert.match(introPrompt, /MALE: Darin, Kell\./);
       assert.match(introPrompt, /LOCATION: Veyra, Orinth Gate\./);
-      assert.match(introPrompt, /When a new name is revealed for something with no established name, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
-      assert.match(introPrompt, /DO NOT invent, modify, combine, translate, or derive names\./);
+      assert.match(introPrompt, /Using any name from outside the pool, or revealing one outside a discovery event, renders the/);
+      assert.match(introPrompt, /DO NOT invent, alter, combine, derive, translate, or substitute any proper name\./);
       assert.ok(
         introPrompt.indexOf('#1 - PROSE RULES') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
         'Trimmed prose rules should precede the Start Adventure handoff.',
@@ -18843,11 +18843,11 @@ const tests = [
         'Isekai transition/opening seed should appear after the Start Adventure mandate.',
       );
       assert.ok(
-        introPrompt.indexOf('BEAT #2: ISEKAI OPENING') < introPrompt.indexOf('NAME REVEAL:'),
+        introPrompt.indexOf('BEAT #2: ISEKAI OPENING') < introPrompt.indexOf('NAME REVEAL — BINDING:'),
         'Isekai transition/opening seed should appear before name reveal.',
       );
       assert.ok(
-        introPrompt.indexOf('NAME REVEAL:') < introPrompt.indexOf('START ADVENTURE REMINDER:'),
+        introPrompt.indexOf('NAME REVEAL — BINDING:') < introPrompt.indexOf('START ADVENTURE REMINDER:'),
         'Intro name pool should appear before the adventure prompt body.',
       );
       assert.doesNotMatch(
@@ -18900,18 +18900,18 @@ const tests = [
       assert.match(fantasyIntroPrompt, /Do NOT choose a different genre, premise, or opening setup/);
       assert.match(fantasyIntroPrompt, /PREMADE CHARACTER RULE:/);
       assert.match(fantasyIntroPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
-      assert.match(fantasyIntroPrompt, /NAME REVEAL:/);
+      assert.match(fantasyIntroPrompt, /NAME REVEAL — BINDING:/);
       assert.doesNotMatch(fantasyIntroPrompt, /#1\.7 - SCENE STYLE PROFILE/);
       assert.ok(
         fantasyIntroPrompt.indexOf('#1 - PROSE RULES') < fantasyIntroPrompt.indexOf('START_ADVENTURE_PROMPT: FANTASY'),
         'Trimmed prose rules should precede every Start Adventure genre handoff.',
       );
       assert.ok(
-        fantasyIntroPrompt.indexOf('GENRE OPENING:') < fantasyIntroPrompt.indexOf('NAME REVEAL:'),
+        fantasyIntroPrompt.indexOf('GENRE OPENING:') < fantasyIntroPrompt.indexOf('NAME REVEAL — BINDING:'),
         'Non-isekai genre opening should appear before name reveal.',
       );
       assert.ok(
-        fantasyIntroPrompt.indexOf('NAME REVEAL:') < fantasyIntroPrompt.indexOf('START ADVENTURE REMINDER:'),
+        fantasyIntroPrompt.indexOf('NAME REVEAL — BINDING:') < fantasyIntroPrompt.indexOf('START ADVENTURE REMINDER:'),
         'Non-isekai name reveal should appear before the reminder.',
       );
       assert.doesNotMatch(fantasyIntroPrompt, /You MUST narrate BOTH required beats below|BEAT #1: EARTH LAST MOMENTS/);
@@ -18932,22 +18932,23 @@ const tests = [
       assert.match(introPrompt, /#3 - OUTPUT/);
       assert.match(introPrompt, /Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
       assert.match(introPrompt, /Do not invent, modify, substitute, or translate any proper name in this opening response\./);
-      assert.match(introPrompt, /OPENING TURN NAMING:/);
-      assert.match(introPrompt, /Any figure you introduce BY NAME in this response must take that name from/);
+      assert.match(introPrompt, /NAME REVEAL — BINDING:/);
+      assert.match(introPrompt, /A NEW name may enter the scene ONLY through one of these discovery events/);
+      assert.match(introPrompt, /DO NOT reuse a name already revealed for a different person, place, or thing/);
       // The block keeps its position inside the payload: after the genre opening, before the reminder.
-      assert.ok(introPrompt.indexOf('GENRE OPENING:') < introPrompt.indexOf('NAME REVEAL:'));
-      assert.ok(introPrompt.indexOf('NAME REVEAL:') < introPrompt.indexOf('START ADVENTURE REMINDER:'));
+      assert.ok(introPrompt.indexOf('GENRE OPENING:') < introPrompt.indexOf('NAME REVEAL — BINDING:'));
+      assert.ok(introPrompt.indexOf('NAME REVEAL — BINDING:') < introPrompt.indexOf('START ADVENTURE REMINDER:'));
       // Nothing name-related is emitted when no pool was generated.
       const withoutPool = formatAdventureIntroNarratorModelPromptContext(body, { adventureGenre: 'Fantasy' });
-      assert.doesNotMatch(withoutPool, /NAME REVEAL:/);
-      assert.doesNotMatch(withoutPool, /OPENING TURN NAMING:/);
+      assert.doesNotMatch(withoutPool, /NAME REVEAL — BINDING:/);
+      assert.doesNotMatch(withoutPool, /NAME REVEAL — BINDING:/);
     },
   },
   {
     name: '46d the intro naming clause never leaks into the normal narrator prompt',
     run() {
       const normal = prompt(runCase({ userText: 'I look around.', ledger: baseLedger({}) }));
-      assert.doesNotMatch(normal, /OPENING TURN NAMING:/);
+      assert.doesNotMatch(normal, /NAME REVEAL — BINDING:/);
       assert.doesNotMatch(normal, /Do not invent, modify, substitute, or translate any proper name in this opening response\./);
       // The normal path keeps its own enforcement line, which the intro now mirrors.
       assert.match(normal, /Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);

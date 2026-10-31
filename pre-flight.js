@@ -570,8 +570,59 @@ const ADVENTURE_INTRO_NAMING_CLAUSE = [
     'Background figures may stay unnamed; give them a role or a description instead of an invented name.',
 ].join('\n');
 
+// The opening is where every name in the chat is decided, so the naming rules are stated as a
+// binding block rather than as a note. Reuses the pool and the already-reserved names from the
+// shared fact, so both documents draw the names from one place.
+function extractNameRevealPoolText(nameReveal = '') {
+    const lines = String(nameReveal || '').split('\n');
+    const start = lines.findIndex(line => /^FEMALE:/.test(line));
+    const end = lines.findIndex(line => /^LOCATION:/.test(line));
+    return start >= 0 && end >= start ? lines.slice(start, end + 1).join('\n') : '';
+}
+
+function extractNameRevealReservedText(nameReveal = '') {
+    const lines = String(nameReveal || '').split('\n');
+    const start = lines.findIndex(line => /^ALREADY NAMED IN THIS CHAT/.test(line));
+    if (start < 0) return '';
+    const end = lines.findIndex((line, index) => index > start && /^The supplied name pool/.test(line));
+    return lines.slice(start, end < 0 ? lines.length : end).join('\n').trim();
+}
+
 function buildAdventureIntroNameRevealBlock(nameReveal = '') {
-    return ['NAME REVEAL:', nameReveal, '', ADVENTURE_INTRO_NAMING_CLAUSE].join('\n');
+    const pool = extractNameRevealPoolText(nameReveal);
+    if (!pool) return '';
+    const reserved = extractNameRevealReservedText(nameReveal);
+    return [
+        'NAME REVEAL — BINDING:',
+        'A name is established once it has been spoken, written, or acknowledged by anyone in this chat,',
+        'even if that person or place was absent when it was named. Every established name MUST remain',
+        'exactly as written.',
+        '',
+        ...(reserved ? [reserved, ''] : []),
+        'A NEW name may enter the scene ONLY through one of these discovery events, perceived by {{user}}:',
+        '',
+        '- Someone names themselves or another aloud.',
+        '- The name is written where {{user}} can read it.',
+        '- Recognition grounded in an established visible fact, and spoken in the scene.',
+        '',
+        'The name MUST NOT appear in narrator exposition before that event.',
+        '',
+        'IF a new name is needed, you MUST use EXACTLY ONE UNUSED name from the pool below. This pool',
+        'applies ONLY for entities or locations with no established name.',
+        '',
+        pool,
+        '',
+        'Background figures may stay unnamed; give them a role or a direct description instead.',
+        '',
+        'STRICTLY PROHIBITED:',
+        '- DO NOT invent, alter, combine, derive, translate, or substitute any proper name.',
+        '- DO NOT use a pool name merely because it was supplied.',
+        '- DO NOT give a pool name to anything already named earlier in this chat.',
+        '- DO NOT reuse a name already revealed for a different person, place, or thing.',
+        '',
+        'Using any name from outside the pool, or revealing one outside a discovery event, renders the',
+        'response INVALID.',
+    ].join('\n');
 }
 
 function formatAdventureIntroGenreLabel(value) {
