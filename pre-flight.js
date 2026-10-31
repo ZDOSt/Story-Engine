@@ -489,25 +489,17 @@ Do not explain the world. Do not summarize lore. Let the scene imply the genre.
 
 End at the first concrete moment where {{user}} can act.`;
 
-// The opening runs no mechanics, so the cast's starting dispositions are decided before the scene
-// exists and stated here instead. Behaviour only: the numbers never reach the prose.
-function buildAdventureStartDispositionBlock(startDispositions = {}, fallback = null) {
-    const entries = Object.entries(startDispositions || {});
-    if (!entries.length && !fallback) return '';
-    const describe = entry => relationshipDispositionNarrativeGuide({
-        FinalState: `B${entry?.disposition?.B ?? 2}/F${entry?.disposition?.F ?? 2}/H${entry?.disposition?.H ?? 2}`,
-        InitPreset: String(entry?.label || ''),
-    });
-    const lines = entries.map(([name, entry]) => `- ${name}: ${describe(entry)}`);
+// The opening runs no mechanics and invents its own cast, so there is no disposition to state.
+// The one thing already known is whether {{user}} reads as visibly inhuman, and that is all the
+// narrator needs: a person who does not look like them is handled with fear, not hospitality.
+function buildAdventureNonHumanInstruction(userNonHuman = false) {
+    if (userNonHuman !== true) return '';
     return [
-        'SCENE DISPOSITION - BINDING:',
-        'Every person in this scene already feels the following toward {{user}}, before the first line.',
-        'This includes whoever speaks first and whoever {{user}} approaches. Show it in how each of them speaks and behaves from the moment they appear.',
-        'Never name, explain, or summarise it.',
-        ...(lines.length
-            ? [lines, `Anyone not listed above: ${fallback ? describe(fallback) : 'an ordinary stranger: practical, reserved, context-led, with no default trust or hostility.'}`].flat()
-            : [`Every person: ${fallback ? describe(fallback) : 'an ordinary stranger: practical, reserved, context-led, with no default trust or hostility.'}`]),
-        'Do not write this opening in a way that hides the disposition above. A person acting as though they feel nothing about {{user}} renders the response INVALID.',
+        'VISIBLY INHUMAN - BINDING:',
+        '{{user}} does not read as a person of any ordinary kind. Everyone in this scene can see it before anyone speaks.',
+        'This includes whoever speaks first and whoever {{user}} approaches. They want distance, safety, witnesses, or an exit. Staying, answering, or complying is defensive appeasement or caution, not welcome, comfort, or trust.',
+        'Show it in how each of them speaks and behaves from the moment they appear. Never name, explain, or summarise it.',
+        'An opening in which nobody reacts to this renders the response INVALID.',
     ].join('\n');
 }
 
@@ -535,10 +527,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     // The contract governs the whole opening turn, so it is stated before the Isekai seed and the
     // adventure prompt body rather than after them.
     lines.push('', PLAYER_ADVENTURE_OPENING_CONTRACT);
-    const startDispositionBlock = buildAdventureStartDispositionBlock(
-        options?.startDispositions,
-        options?.startDispositionFallback,
-    );
+    const startDispositionBlock = buildAdventureNonHumanInstruction(options?.adventureUserNonHuman);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
     if (isekaiOpeningSeed) {
         if (nameReveal) lines.push('', buildAdventureIntroNameRevealBlock(nameReveal));

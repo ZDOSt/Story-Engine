@@ -15273,58 +15273,32 @@ const tests = [
     },
   },
   {
-    name: '33s the adventure opening is told how the cast already feels',
+    name: '33s the adventure opening tells the narrator when {{user}} is visibly inhuman',
     run() {
-      // The opening runs no mechanics, so a character who loves the player would otherwise be
-      // introduced as a stranger and only warm up on turn two.
-      const prompt = formatAdventureIntroNarratorModelPromptContext('Open the story.', {
-        adventureGenre: 'Fantasy',
-        startDispositions: { Alice: { label: 'romanticOpen', disposition: { B: 4, F: 1, H: 1 } } },
-        startDispositionFallback: { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } },
-      });
-      assert.match(prompt, /SCENE DISPOSITION - BINDING:/);
-      assert.match(prompt, /- Alice: Close trust/);
-      assert.match(prompt, /Anyone not listed above: Neutral default/);
-      // The failure this fixes: the block said "any other figure", so the model read it as note
-      // about background extras and wrote the speaking character as welcoming.
-      assert.match(prompt, /includes whoever speaks first/);
-      assert.match(prompt, /A person acting as though they feel nothing about \{\{user\}\} renders the response INVALID/);
-      // It must survive to the end of the prompt, next to the output contract, or the model treats
-      // it as a note about background extras and writes a welcoming scene anyway.
-      assert.ok(prompt.indexOf('SCENE DISPOSITION') > prompt.indexOf('START ADVENTURE REMINDER'),
-        'the disposition block must come after the adventure reminder, near the end');
-      // Never the numbers, only the behaviour.
-      assert.doesNotMatch(prompt, /B4\/F1\/H1/);
-
-      // A non-human player makes every unnamed figure wary from the first line.
+      // The opening invents its own cast and runs no mechanics, so there is no disposition to
+      // state. The one thing already known is whether {{user}} reads as visibly inhuman.
       const demon = formatAdventureIntroNarratorModelPromptContext('Open.', {
         adventureGenre: 'Fantasy',
-        startDispositions: {},
-        startDispositionFallback: { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } },
+        adventureUserNonHuman: true,
       });
-      assert.match(demon, /Every person: Fear-led/);
+      assert.match(demon, /VISIBLY INHUMAN - BINDING:/);
+      assert.match(demon, /includes whoever speaks first/);
+      assert.match(demon, /They want distance, safety, witnesses, or an exit/);
+      assert.match(demon, /renders the response INVALID/);
+      assert.ok(demon.indexOf('VISIBLY INHUMAN') > demon.indexOf('START ADVENTURE REMINDER'),
+        'the instruction must come after the adventure reminder, near the end');
 
-      // No dispositions at all means no block, so a plain opening is unchanged.
-      const plain = formatAdventureIntroNarratorModelPromptContext('Open.', { adventureGenre: 'Fantasy' });
-      assert.doesNotMatch(plain, /SCENE DISPOSITION - BINDING:/);
+      // An ordinary character needs no instruction and gets none.
+      const human = formatAdventureIntroNarratorModelPromptContext('Open.', {
+        adventureGenre: 'Fantasy',
+        adventureUserNonHuman: false,
+      });
+      assert.doesNotMatch(human, /VISIBLY INHUMAN/);
 
-      // And the decided disposition is written when the tracker creates the figure, so the next
-      // turn cannot reinterpret it. mergePostNarrationTrackerDelta is private, so this pins the
-      // wiring rather than calling it.
+      // No disposition is computed, imported, or stored for this path at all.
       const indexSource = fs.readFileSync(new URL('index.js', import.meta.url), 'utf8');
-      // The opening invents its cast, so the deterministic default is the only disposition it can
-      // know: no semantic call, and nothing written into the tracker. The first semantic turn
-      // initialises NPCs from the same race check.
-      assert.equal(indexSource.includes('resolveAdventureStartDispositions'), false);
+      assert.equal(indexSource.includes('resolveAdventureStartDisposition'), false);
       assert.equal(indexSource.includes('ADVENTURE_START_DISPOSITION_KEY'), false);
-      // Every symbol index.js calls out of deterministic-runner.js must actually be imported.
-      // Deleting the import while the call stayed behind shipped a broken adventure opening and
-      // the suite stayed green, because node --check does not resolve identifiers.
-      for (const symbol of ['resolveAdventureStartDisposition', 'resolveUserNonHumanFromContext']) {
-        if (!indexSource.includes(symbol + '(')) continue;
-        assert.ok(indexSource.includes(`{ ${symbol} }`) || indexSource.includes(`{ ${symbol},`),
-          symbol + ' is called from index.js but never imported');
-      }
       const extractorSource = fs.readFileSync(new URL('semantic-extractor.js', import.meta.url), 'utf8');
       assert.equal(extractorSource.includes('extractAdventureStartDispositions'), false);
     },

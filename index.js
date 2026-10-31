@@ -42,7 +42,6 @@ import { assertValidCharacterSheet } from './character-sheet-validation.js';
 import { appendCharacterSheetOutputInstruction, buildAbilityGenerationRules, buildCharacterSheetJsonSchema, buildCharacterSheetTool, buildCharacterSheetToolChoice, buildSpellGenerationRules, describeCharacterSheetRaw, extractCharacterSheetToolPayload, getCharacterSheetPowerProfile, normalizeCharacterSheetPayload, parseCharacterSheetJsonPayload, renderCharacterSheet, shouldRetryCharacterSheetToolFailure } from './character-sheet-generation.js';
 import { createAsyncTokenGate } from './ephemeral-stop-controller.js';
 import { SEMANTIC_OUTPUT_MODES, groundUserKnowledgeApplications, annotateSemanticDiagnosticError, applyStoryEngineBaselineThinkingDisabledPayload, extractGeneratedText, extractSemanticLedger, getPersonaIdentityHints, isSemanticToolSchemaOverrideAllowed, normalizeSemanticOutputMode, normalizeSemanticToolSchemaRouteKey, parseNarratorTrackerDelta, reportSemanticDiagnostic, sendStructuredToolRequest } from './semantic-extractor.js';
-import { resolveAdventureStartDisposition } from './deterministic-runner.js';
 import { buildAdventureIntroNameGeneration, buildBoundCompanionSnapshot, buildDescriptiveArchiveSnapshot, buildEconomySnapshot, buildLatentFavorSnapshot, buildLatentGrievanceSnapshot, buildPendingBoundarySnapshot, buildPlayerTrackerSnapshot, buildPowerActorSnapshot, buildSceneItemStateSnapshot, buildSpellCastingSnapshot, buildTrackerSnapshot, buildUserKnowledgeSnapshot, buildUserReputationSnapshot, buildWorldProgressionSnapshot, buildWorldStateSnapshot, collectReservedNamesFromSelectedSwipes, commitNarrationNameUsage, consumeLatentFavorById, latentFavorIds, latentGrievanceIds, mergeLatentGrievanceArchive, mergeUserKnowledgeLedger, mergeUserReputationLedger, NAME_SWIPE_VERSION, normalizeLatentFavors, normalizeLatentGrievances, normalizeRapportClockState, normalizeSpellCastingState, pruneLatentFavorArchive, renameLatentFavorTargets, renameLatentGrievanceTargets, resolveLatentFavorIds, resolveLatentGrievanceIds, runDeterministicEngines, saveTrackerUpdate, setReservedNames, verifyLatentFavorPresentation } from './deterministic-runner.js';
 import {
     applyProgressionHealthMilestone,
@@ -18519,17 +18518,15 @@ async function handleChatCompletionPromptReady(eventData) {
                 characterText: getPersonaText(context) || getPlayerRoot(context)?.sheet?.text,
             });
             pendingGeneration.isekaiOpeningSeed = isekaiOpeningSeed;
-            // The opening invents its own cast, so the only disposition it can know is the
-            // deterministic default: an ordinary person, or someone visibly inhuman. It is stated
-            // to the narrator and nothing else - the first semantic turn initialises the tracker
-            // from the same race check, so there is nothing here worth persisting.
-            const startDispositionFallback = resolveAdventureStartDisposition({}, { userNonHuman: isStoryEngineUserNonHuman(context) });
+            // The opening invents its own cast and no mechanics run, so all it can be told is what
+            // the narrator can see: whether {{user}} is visibly inhuman. No disposition is computed
+            // here - the first semantic turn sets the real values from that same race check.
             const introOptions = {
                 adventureGenre,
                 worldState: pendingGeneration.worldStateSnapshot || buildWorldStateSnapshot(context),
                 nameGeneration,
                 isekaiOpeningSeed,
-                startDispositionFallback,
+                adventureUserNonHuman: isStoryEngineUserNonHuman(context),
                 sceneStyleProfile: pendingGeneration.sceneStyleProfile || '',
             };
             const narratorContext = formatAdventureIntroNarratorPromptContext(adventurePrompt, introOptions);

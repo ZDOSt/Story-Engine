@@ -9927,17 +9927,6 @@ export function resolveUserNonHumanFromContext(context = null) {
     return false;
 }
 
-// The same precedence the per-NPC resolver uses, reachable for the adventure opening where there is
-// no scene and no NPC yet. Keep these numbers in step with resolveDeterministicInitPreset below.
-export function resolveAdventureStartDisposition(flags = {}, options = {}) {
-    const userNonHuman = options?.userNonHuman === true;
-    if (flags.romanticOpen === true) return { label: 'romanticOpen', disposition: { B: 4, F: 1, H: 1 } };
-    if (flags.userBadRep === true) return { label: 'userBadRep', disposition: { B: 1, F: 2, H: 3 } };
-    if (flags.priorUserGoodRep === true) return { label: 'priorUserGoodRep', disposition: { B: 3, F: 1, H: 1 } };
-    if (userNonHuman) return { label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } };
-    return { label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } };
-}
-
 function resolveDeterministicInitPreset(npc, state, sem, audit, label, options = {}) {
     const flags = normalizeSemanticInitPresetFlags(sem?.initPreset);
     const raceProfile = normalizeNpcRaceProfile(state?.raceProfile);
