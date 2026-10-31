@@ -528,7 +528,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
             withPreamble: false,
         }).trim(),
         '',
-        ...renderSceneStyleProfileSection(options),
+        ...renderAdventureIntroSceneStyleSection(options),
         promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
         isIsekaiOpening
             ? 'This is the opening turn of a new isekai adventure. The opening scene MUST abide by these rules:'
@@ -1616,6 +1616,18 @@ function renderEconomyLensSection(options = {}) {
 function renderSceneStyleProfileSection(options = {}) {
     const profile = String(options?.sceneStyleProfile || '').trim();
     return profile ? ['#1.7 - SCENE STYLE PROFILE', profile, ''] : [];
+}
+
+// The style mandate names narrativeFacts(input), which the opening deliberately excludes: it runs
+// no mechanics, so there is nothing for narrativeFacts to fix. The stored profile is shared with
+// every normal turn, where the rule does apply, so the reference is dropped here rather than at
+// the source.
+function renderAdventureIntroSceneStyleSection(options = {}) {
+    return renderSceneStyleProfileSection({
+        ...options,
+        sceneStyleProfile: String(options?.sceneStyleProfile || '')
+            .replace('resolved mechanics, or narrativeFacts(input).', 'resolved mechanics.').trim(),
+    });
 }
 
 function renderGenreLens(options = {}, context = {}) {
