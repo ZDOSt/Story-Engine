@@ -6,7 +6,7 @@ const VISIBLE_MECHANICS_LABEL = '(?:(?:Critical|Moderate|Minor)\\s+(?:Success|Fa
 export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
     'RenderControlEngine',
     'activeHandoff',
-    'dialogueTurn',
+    'realisticDialogue',
     'turnEnding',
     'inputChronology',
     'antiRhetoricalNegation',
