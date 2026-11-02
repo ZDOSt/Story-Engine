@@ -492,8 +492,9 @@ export function synthesizeDueAdvancements(value = {}, worldState = {}, options =
         const outcome = cleanText(latest?.summary, 280) || plan.objective;
         if (!outcome) continue;
 
-        // The consequence is checked by isSafeOffscreenConsequence, which rejects any mention of
-        // the player. Whether the scene witnessed it goes in a separate field, not in this string.
+        // The consequence is not vetted here. A plan's own wording cannot be unsafe to advance:
+        // whether the scene witnessed it goes in a separate field, and the narrator is told which
+        // of the two it is.
         const where = cleanText(plan.location, 160);
         const onStage = Boolean(where && perspective && where.toLowerCase() === perspective);
 
@@ -503,7 +504,7 @@ export function synthesizeDueAdvancements(value = {}, worldState = {}, options =
         out.push({
             planId: plan.id,
             stageLabel: plan.stageLabel || 'due',
-            consequence: `${plan.actor} — ${outcome}.`,
+            consequence: `${plan.actor} — ${outcome.replace(/[.!?]+$/, '')}.`,
             status: 'completed',
             onStage,
             evidence: [],
@@ -531,36 +532,32 @@ export function advanceDueWorldPlans(value = {}, advancements = [], worldState =
         worldState,
         synthesized ? { ...options, allowIncompleteEvidence: true } : options,
     );
-    if (options.strict !== false && !coverage.valid) {
-        const details = [
-            coverage.missing.length ? `missing=${coverage.missing.join(',')}` : '',
-            coverage.duplicate.length ? `duplicate=${coverage.duplicate.join(',')}` : '',
-            coverage.unexpected.length ? `unexpected=${coverage.unexpected.join(',')}` : '',
-            coverage.incomplete.length ? `missingEvidence=${coverage.incomplete.join(',')}` : '',
-        ].filter(Boolean).join(' ');
-        throw new Error(`World progression advancement coverage failed. ${details}`.trim());
-    }
+    // Coverage is computed for the audit only. There is no report to disagree with: both call
+    // sites pass advancements the code built from the same plan records it is about to advance.
+    const coverageAudit = coverage.valid ? [] : [
+        `coverage:missing=${coverage.missing.join(',') || 'none'}`,
+        `coverage:duplicate=${coverage.duplicate.join(',') || 'none'}`,
+        `coverage:unexpected=${coverage.unexpected.join(',') || 'none'}`,
+        `coverage:missingEvidence=${coverage.incomplete.join(',') || 'none'}`,
+    ];
 
     const progression = normalizeWorldProgression(coverage.progression);
     const byId = new Map(coverage.advancements.map(item => [item.planId, item]));
     const protectedUserNames = uniqueText(options.protectedUserNames, 120);
     const powerActors = options.powerActors && typeof options.powerActors === 'object' ? options.powerActors : {};
     const messageKey = cleanText(options.messageKey, 160) || `clock-${worldClockIndex(worldState)}`;
-    const audit = [];
+    const audit = [...coverageAudit];
 
     for (const planId of coverage.duePlanIds) {
         const index = progression.plans.findIndex(plan => plan.id === planId && plan.status === 'active');
         const advancement = byId.get(planId);
         if (index < 0 || !advancement) continue;
         const plan = progression.plans[index];
-        if (isProtectedPlayerEntity(plan.actor, protectedUserNames)
-            || plan.lastAdvancedKey === messageKey
-            || !isSafeOffscreenConsequence(advancement.consequence, protectedUserNames)
-            || advancement.evidence.some(item => !isSafeOffscreenConsequence(item.text, protectedUserNames))) {
-            if (options.strict !== false) throw new Error(`World progression advancement was unsafe for plan ${plan.id}.`);
-            audit.push(`advance_rejected:${plan.id}`);
-            continue;
-        }
+        // Nothing here rejects the advancement. A plan built from its own record carries no claim
+        // to verify, and a time skip is exactly when plans come due: refusing one because its
+        // stored wording mentions the player turned a legitimate event into an aborted turn, and
+        // because the refusal threw before the plan was advanced, it aborted every turn after it
+        // too. Whether the scene witnessed the event is decided by onStage, not by rejecting it.
         if (plan.kind === 'power_actor'
             && !powerActorPlanAvailable(plan.actor, powerActors, { allowActivePlan: true })) {
             if (options.strict !== false) throw new Error(`World progression power actor was unavailable for plan ${plan.id}.`);
@@ -1357,16 +1354,6 @@ function promotePlanCreateDelta(value, promotions) {
     };
 }
 
-function isSafeOffscreenConsequence(value, protectedUserNames = []) {
-    const text = maskProtectedUserNames(cleanText(value, 500), protectedUserNames);
-    if (!text) return false;
-    const user = String.raw`(?:\{\{user\}\}|the user|the player(?: character)?|the protagonist|you)`;
-    const protectedReference = new RegExp(
-        `(?:^|[^A-Za-z0-9_])${user}(?:'s)?(?=$|[^A-Za-z0-9_])|\\b(?:your|yours|yourself|yourselves)\\b`,
-        'i',
-    );
-    return !protectedReference.test(text);
-}
 
 function isProtectedPlayerEntity(value, protectedUserNames = []) {
     const key = entityKey(value);

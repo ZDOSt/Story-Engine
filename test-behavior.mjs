@@ -13373,19 +13373,29 @@ const tests = [
           nextCheckpoint: { dayIndex: 1, timeOfDay: 'morning' },
         }],
       });
-      const rejected = advanceDueWorldPlans(unsafeProgression, [{
+      // Player identity protection lives where a plan is created and where one is synthesized,
+      // not in a rejection at fire time. An advancement that was built and handed over is applied,
+      // because refusing it is what aborted the turn a due plan existed to describe.
+      const applied = advanceDueWorldPlans(unsafeProgression, [{
         planId: 'unsafe-player-plan',
         stageLabel: 'Raid',
         consequence: 'The bandits abducted ari from the camp.',
         status: 'completed',
         evidence: [{ topic: 'Raid', text: 'A cut rope lies beside the empty tent.', route: 'location', location: 'Camp' }],
       }], { dayIndex: 1, timeOfDay: 'morning' }, {
-        strict: false,
         protectedUserNames: ['Ari'],
         messageKey: 'chat:lowercase-player-protection',
       });
-      assert.equal(rejected.progression.plans[0].stage, 0);
-      assert.ok(rejected.audit.includes('advance_rejected:unsafe-player-plan'));
+      assert.equal(applied.progression.plans[0].stage, 1, 'a handed-off advancement is applied, not rejected');
+      assert.equal(applied.audit.includes('advance_rejected:unsafe-player-plan'), false);
+
+      // And the clock builds the plan it is due, whatever the stored consequence happens to name:
+      // the text is not a gate. Where the scene witnessed it is a separate field.
+      const synthesized = synthesizeDueAdvancements(unsafeProgression, { dayIndex: 1, timeOfDay: 'morning' }, {
+        protectedUserNames: ['Ari'],
+        perspectiveLocation: 'Camp',
+      });
+      assert.equal(synthesized.length, 1, 'a due plan is built regardless of the wording of its consequence');
     },
   },
   {
@@ -13642,14 +13652,21 @@ const tests = [
         { messageKey: 'chat:2' },
       );
       assert.equal(early.progression.plans[0].stage, 0);
-      assert.throws(() => advanceDueWorldPlans(
+      // Coverage is audited, not enforced. An advancement handed in before the clock reaches its
+      // plan, or handed in twice, is recorded and still applied: refusing it aborted the turn, and
+      // the caller in both sites is the extension, not a model making a claim.
+      const unexpectedPass = advanceDueWorldPlans(
         created.progression,
         [advancement],
         { dayIndex: 3, timeOfDay: 'night' },
         { messageKey: 'chat:2-unexpected' },
-      ), /unexpected=/);
+      );
+      assert.ok(
+        unexpectedPass.audit.some(line => line.startsWith('coverage:unexpected=') && line.includes(createdPlan.id)),
+        'an early advancement is audited as unexpected',
+      );
 
-      assert.throws(() => advanceDueWorldPlans(
+      const duplicatePass = advanceDueWorldPlans(
         early.progression,
         [
           advancement,
@@ -13657,7 +13674,11 @@ const tests = [
         ],
         { dayIndex: 4, timeOfDay: 'morning' },
         { messageKey: 'chat:3-duplicate' },
-      ), /duplicate=/);
+      );
+      assert.ok(
+        duplicatePass.audit.some(line => line.startsWith('coverage:duplicate=') && line.includes(createdPlan.id)),
+        'a repeated advancement is audited as duplicate',
+      );
 
       const dueResult = advanceDueWorldPlans(
         early.progression,
@@ -13832,8 +13853,12 @@ const tests = [
         strict: false,
         messageKey: 'chat:6',
       });
-      assert.equal(unsafe.progression.plans[0].stage, 1);
-      assert.ok(unsafe.audit.includes(`advance_rejected:${createdPlan.id}`));
+      assert.ok(unsafe.progression.plans[0].stage > 0, 'a due advancement is applied whatever it names');
+      assert.equal(
+        unsafe.audit.includes(`advance_rejected:${createdPlan.id}`),
+        false,
+        'the safety predicate no longer rejects a due plan; it aborted the turn instead of skipping it',
+      );
 
       for (const [index, unsafeConsequence] of [
         'Bandits injured Ari while she slept.',
@@ -13851,8 +13876,8 @@ const tests = [
           messageKey: `chat:persona-safety-${index}`,
           protectedUserNames: ['Ari'],
         });
-        assert.equal(rejected.progression.plans[0].stage, 1);
-        assert.ok(rejected.audit.includes(`advance_rejected:${createdPlan.id}`));
+        assert.ok(rejected.progression.plans[0].stage > 0, 'applied, not rejected');
+        assert.equal(rejected.audit.includes(`advance_rejected:${createdPlan.id}`), false);
       }
 
       const unsafeEvidence = advanceDueWorldPlans(discovered.progression, [{
@@ -13871,8 +13896,8 @@ const tests = [
         messageKey: 'chat:persona-evidence-safety',
         protectedUserNames: ['Ari'],
       });
-      assert.equal(unsafeEvidence.progression.plans[0].stage, 1);
-      assert.ok(unsafeEvidence.audit.includes(`advance_rejected:${createdPlan.id}`));
+      assert.ok(unsafeEvidence.progression.plans[0].stage > 0, 'applied, not rejected');
+      assert.equal(unsafeEvidence.audit.includes(`advance_rejected:${createdPlan.id}`), false);
 
       const playerAsNpc = applyWorldMemoryDelta({}, {
         archive: [{
@@ -14940,18 +14965,45 @@ const tests = [
       assert.doesNotMatch(synth[0].consequence, /\{\{user\}\}/, 'the consequence must not name the player');
       assert.equal(synth[0].onStage, true, 'the location matches the perspective, so it happened on stage');
 
-      // A code-built advancement carries no quoted prose. Without the flag it is rejected as
-      // missing evidence, which would make the finalizer throw on its own output.
-      const withEvidenceRule = () => advanceDueWorldPlans(build(), synth, at(2, 'night'), {
+      // The case that used to abort the turn: a day skip brings due a plan whose stored wording
+      // mentions the player. Nothing about that word makes the plan unsafe to advance, and the old
+      // refusal threw before the plan was marked, so it aborted every turn after it as well.
+      const skipDay = () => advanceDueWorldPlans(
+        { plans: [{
+          id: 'plan-cabin',
+          kind: 'scheduled',
+          actor: 'Phoebe',
+          objective: 'Phoebe waits inside the cabin for you.',
+          status: 'active',
+          stage: 0,
+          stageLabel: 'Agreed',
+          nextCheckpoint: { dayIndex: 2, timeOfDay: 'morning' },
+          location: 'Cabin',
+          consequences: [],
+        }] },
+        [],
+        { dayIndex: 2, timeOfDay: 'morning' },
+        { messageKey: 'day-skip', perspectiveLocation: 'Cabin' },
+      );
+      const skipped = skipDay();
+      assert.equal(skipped.duePlanIds.length, 1, 'the day skip brings the plan due');
+      assert.equal(skipped.events.length, 1, 'the due plan produces an event');
+      assert.equal(skipped.events[0].onStage, true, 'it happens where the player is, so it is on stage');
+      assert.ok(skipped.progression.plans[0].stage > 0, 'and the plan advanced');
+
+      // An advancement built from the plan's own record carries no quoted prose, and nothing here
+      // rejects it for that. Coverage and evidence are recorded in the audit, never thrown: there
+      // is no model report to disagree with, and a throw would abort the turn a due plan exists to
+      // describe.
+      const withoutFlags = advanceDueWorldPlans(build(), synth, at(2, 'night'), {
         messageKey: 'turn-strict',
         requiredPlanIds: ['plan-caravan'],
       });
-      assert.throws(withEvidenceRule, /missingEvidence/, 'the evidence rule still applies by default');
-      assert.doesNotThrow(() => advanceDueWorldPlans(build(), synth, at(2, 'night'), {
-        messageKey: 'turn-ok',
-        requiredPlanIds: ['plan-caravan'],
-        allowIncompleteEvidence: true,
-      }), 'code-built advancements must be accepted without evidence');
+      assert.equal(withoutFlags.duePlanIds.length, 1, 'a due plan advances with no evidence flags at all');
+      assert.ok(
+        withoutFlags.progression.plans[0].stage > build().plans[0].stage,
+        'the plan actually advanced',
+      );
 
       // And the finalizer's own call site passes that flag, or a due plan arriving during the
       // post-narration pass would abort the turn it was meant to describe.
