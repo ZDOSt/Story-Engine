@@ -1511,7 +1511,7 @@ function injectPromptOptionPrompts() {
         return;
     }
     clearLegacyFinalReminderPrompt();
-    injectProseRulesPrompt();
+    clearRetiredProsePrompts();
     clearStandaloneWritingStylePrompt();
 }
 
@@ -3294,20 +3294,21 @@ function clearStandaloneWritingStylePrompt() {
 
 
 
-function injectProseRulesPrompt() {
+// The prose rules are no longer injected as an extension prompt: they reach the narrator through
+// the narrative contract, from prose-rules.js. This only retires the prompts earlier versions
+// registered, unconditionally, so an update does not leave a stale copy of the rules in the prompt
+// while the session lives. A reload would clear them too, but nothing should depend on that.
+function clearRetiredProsePrompts() {
     const context = getContext();
     if (!context?.setExtensionPrompt) {
         return;
     }
-    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
-    if (context.extensionPrompts) delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
-    clearLegacyFinalReminderPrompt(context);
-    if (!isStoryEngineEnabled()) {
-        if (context.extensionPrompts) delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
-        return;
+    if (context.extensionPrompts) {
+        delete context.extensionPrompts[PROSE_RULES_PROMPT_KEY];
+        delete context.extensionPrompts[LEGACY_PROSE_RULES_PROMPT_KEY];
+        delete context.extensionPrompts[LEGACY_ORDERED_WRITING_STYLE_PROMPT_KEY];
     }
-
-    
+    clearLegacyFinalReminderPrompt(context);
 }
 
 

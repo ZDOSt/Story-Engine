@@ -16,7 +16,7 @@ const RULES = {
     Information may enter narration ONLY when revealed, or discovered through DIRECT sensory evidence available to {{user}} in the current scene, audible dialogue, private mental communication explicitly addressed through an established link, readable text, or previously established scene facts.
     A character/NPC may know or react ONLY to dialogue they can hear, mental communication explicitly addressed to them through an established link, evidence they can directly perceive, readable text they can access, or facts already established as known to them.
 
-  PROHIBITED:
+  PROHIBITION:
     - DO NOT let anyone except the intended recipient hear, know, answer, quote, paraphrase, confirm, or react to private mental communication.
     - DO NOT state, imply, confirm, or explain hidden or unknown information unless it has entered the scene through one of the permitted sources above.
 }`,
@@ -24,7 +24,7 @@ const RULES = {
   diegeticPhysicality: String.raw`function diegeticPhysicality(response, context): {
   MANDATE:
     ALWAYS narrate ONLY the OBSERVABLE effects and consequences of abilities, spells, powers, traits, or supernatural effects.
-  PROHIBITED:
+  PROHIBITION:
     - DO NOT label, announce, name, or explain the ability, spell, power, trait, or supernatural effect in narration. A name may appear ONLY when explicitly spoken in dialogue.
     - DO NOT explain activation, casting, or system mechanics.
 }`,
@@ -33,7 +33,7 @@ const RULES = {
   MANDATE:
     You MUST describe the exact action, sound, movement, object, or physical condition in the scene using DIRECT, SPECIFIC language.
     This rule applies to narration, not quoted character dialogue.
-  PROHIBITED:
+  PROHIBITION:
     - DO NOT use stock phrasing such as:
       - "barely above a murmur"
       - "barely above a whisper"
@@ -68,7 +68,7 @@ const RULES = {
   MANDATE:
     You MUST narrate using LITERAL, PHYSICALLY CLEAR prose grounded ONLY in what can be DIRECTLY perceived through concrete, observable evidence.
 
-  PROHIBITED:
+  PROHIBITION:
     - NEVER use metaphor, simile, personification, emotional physics, decorative abstraction, or figurative narration.
     - NEVER attribute agency, intention, awareness, memory, or emotion to inanimate things or abstract concepts.
     - NEVER describe inanimate things as wanting, watching, threatening, breathing, intending, remembering, or feeling.
@@ -82,10 +82,10 @@ const RULES = {
   embodiedPerception: String.raw`function embodiedPerception(response, context): {
   MANDATE:
     ALWAYS narrate ONLY what {{user}} can see, hear, or touch from their physical position.
-  PROHIBITED:
+  PROHIBITION:
     - DO NOT narrate ANY smell or taste. This includes scent, odor, aroma, fragrance, flavor, stench, reek, musk, tang, whiff, or equivalent odor/flavor language.
     - NEVER attach smell or taste to air, wind, breeze, room, atmosphere, temperature, humidity, or another ambient condition.
-  EXCEPTIONS:
+  EXCEPTION:
     Smell or taste may appear ONLY when:
     - {{user}} EXPLICITLY smells, tastes, eats, or drinks.
     - A CLOSE-RANGE PHYSICAL source is so overpowering that the sensation is unavoidable.
@@ -116,7 +116,7 @@ const RULES = {
   MANDATE:
     ALWAYS combine closely related actions, gestures, dialogue, and immediate consequences when they belong to the same event into one fluid, readable scene beat.
     Use natural connective prose and clear temporal flow so each event leads naturally into the next.
-  STRICTLY PROHIBITED:
+  PROHIBITION:
     - DO NOT invent movement, gestures, object handling, or reactions merely to make prose feel active.
     - DO NOT split one physical event into staccato sentences, micro-reaction loops, or body-cue pileups.
 }`,
@@ -156,7 +156,7 @@ const RULES = {
   inputChronology: String.raw`function inputChronology(response, input, context): {
   MANDATE:
     Your response MUST begin with the immediate result, consequence, obstruction, reaction, response, or observable development AFTER {{user}}'s input.
-  PROHIBITED:
+  PROHIBITION:
     - DO NOT repeat, echo, paraphrase, summarize, or re-stage ANY part of {{user}}'s actions or dialogue.
     - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, mental communication, environments, objects, or characters already established in the scene.
 }`,
@@ -167,7 +167,7 @@ const RULES = {
     Use a proper name ONLY when it is already established, or discovered on-scene through audible introduction, readable text, or recognition grounded in fact — and only from that moment on.
     Until then, refer to the person, place, group, or object by its established role or a direct observable description.
 
-  STRICTLY PROHIBITED:
+  PROHIBITION:
     - DO NOT invent, alter, combine, derive, translate, or prematurely reveal a name.
     - DO NOT use a pool name merely because it was supplied.
     - Preserve every previously established name EXACTLY.
@@ -178,7 +178,7 @@ const RULES = {
     narrativeFacts(input) is authoritative and immutable for this response.
     Preserve every listed action, target, success, failure, stalemate, injury, refusal, boundary, NPC response, limitation, and consequence EXACTLY as given.
 
-  STRICTLY PROHIBITED:
+  PROHIBITION:
     - DO NOT add, remove, soften, intensify, reverse, reinterpret, or complete a resolved outcome.
     - DO NOT turn an attempt into a completed effect, or an unresolved event into a success or failure.
 }`,

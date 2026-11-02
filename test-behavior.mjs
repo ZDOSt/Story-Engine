@@ -15333,6 +15333,11 @@ const tests = [
       const rulesSource = fs.readFileSync(new URL('prose-rules.js', import.meta.url), 'utf8');
       const allRules = [...rulesSource.matchAll(/function (\w+)\(response/g)].map(m2 => m2[1]);
       assert.ok(allRules.length >= 14, 'expected at least 14 prose rules, found ' + allRules.length);
+      // A retired rule name stays in the sanitizer list: nothing declares it now, but a leaked
+      // line carrying it would otherwise pass through unstripped.
+      const sanitizerSource = fs.readFileSync(new URL('narration-sanitizer.js', import.meta.url), 'utf8');
+      assert.match(sanitizerSource, /'realisticDialogue'/);
+      assert.match(sanitizerSource, /'dialogueTurn'/);
       for (const rule of allRules) {
         assert.ok(RENDER_CONTROL_STAGE_NAMES.includes(rule),
           'contract rule missing from RENDER_CONTROL_STAGE_NAMES, so its leak is never stripped: ' + rule);
@@ -18006,8 +18011,8 @@ const tests = [
         source.indexOf('function clearLegacyFinalReminderPrompt'),
       );
       assert.ok(
-        promptInjection.indexOf('injectProseRulesPrompt();') < promptInjection.indexOf('clearStandaloneWritingStylePrompt();'),
-        'Prose Rules should be injected while the standalone style prompt is cleared.',
+        promptInjection.indexOf('clearRetiredProsePrompts();') < promptInjection.indexOf('clearStandaloneWritingStylePrompt();'),
+        'The retired prose prompts are cleared before the standalone style prompt.',
       );
       assert.match(source, /delete context\.extensionPrompts\[WRITING_STYLE_PROMPT_KEY\]/);
       assert.match(source, /delete context\.extensionPrompts\[LEGACY_WRITING_STYLE_PROMPT_KEY\]/);
@@ -18111,6 +18116,12 @@ const tests = [
       // agencySeparation owns only internals; actions belong to its RULE.
       assert.match(flat, /An action that can be voluntarily chosen belongs EXCLUSIVELY to \{\{user\}\}/);
       assert.doesNotMatch(flat, /Interpret, assume, or complete/);
+
+      // One label for one concept. PROHIBITED, PROHIBITION and STRICTLY PROHIBITED all meant the
+      // same thing, so the file carried three names for it.
+      assert.equal((rulesSource.match(/^  PROHIBITION:/gm) || []).length, 14);
+      assert.equal((rulesSource.match(/^  PROHIBITED:/gm) || []).length, 0);
+      assert.equal((rulesSource.match(/^  STRICTLY PROHIBITED:/gm) || []).length, 0);
 
       // The negation rule keeps its replacement technique, not just its bans.
       assert.match(flat, /WHEN THE THING CANNOT BE NAMED/);
@@ -22140,7 +22151,17 @@ const tests = [
       assert.match(source, /function clearStandaloneWritingStylePrompt\(\)/);
       assert.match(source, /delete context\.extensionPrompts\[WRITING_STYLE_PROMPT_KEY\]/);
       assert.doesNotMatch(source, /function injectWritingStylePrompt\(|injectWritingStylePrompt\(/);
-      assert.match(source, /function injectProseRulesPrompt\(\)[\s\S]*if \(!isStoryEngineEnabled\(\)\)/);
+      // The prose rules are no longer injected, but the retired prompts are still cleared on every
+      // load, including while the extension is switched off.
+      assert.match(source, /function clearRetiredProsePrompts\(\)[\s\S]*delete context\.extensionPrompts\[PROSE_RULES_PROMPT_KEY\]/);
+      // Unconditional: an update must clear a stale copy of the rules even while the extension is
+      // switched on, which is the state it will be in when someone upgrades.
+      const cleanup = source.slice(
+        source.indexOf('function clearRetiredProsePrompts()'),
+        source.indexOf('function buildFinalNarrationPrompt'),
+      );
+      assert.doesNotMatch(cleanup, /isStoryEngineEnabled/);
+      assert.match(source, /clearRetiredProsePrompts\(\);/);
       assert.match(source, /function getTrackerRoot\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return null;/);
       assert.match(source, /function getPlayerRoot\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return null;/);
       assert.match(source, /function getProgressionRoot\(context = getContext\(\)\) \{\s*if \(!isStoryEngineEnabled\(\)\) return null;/);

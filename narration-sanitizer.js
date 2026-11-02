@@ -7,6 +7,9 @@ export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
     'RenderControlEngine',
     'activeHandoff',
     'realisticDialogue',
+    // Retired rule name. Nothing declares it any more, but a leaked line carrying it would
+    // otherwise pass through unstripped, and the cost of keeping it is one string.
+    'dialogueTurn',
     'turnEnding',
     'inputChronology',
     'antiRhetoricalNegation',
