@@ -18183,6 +18183,16 @@ const tests = [
         previous = at;
       }
 
+      // The contract says what kind of document it is: two sections, one about writing and one
+      // about events, applying together rather than competing.
+      assert.match(text, /BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response\./);
+      assert.match(text, /The sections do not compete\. #1 says HOW to write\. #2 says WHAT happened\./);
+      assert.match(text, /They apply to every sentence,\s*\n?\s*including sentences that state the facts in #2\./);
+
+      // The facts preamble grants no exemption from the writing rules. Without this clause it
+      // overrides "style", and the prose rules are style.
+      assert.match(text, /They override style, drama, pacing, genre expectations, and narrative convenience\. They are not a reason to break a rule in #1/);
+
       // The full text, not a summary: a digest would have dropped the middle of each rule.
       assert.match(text, /You never need to tell the reader what a thing is not/);
       assert.equal(text.includes('DIGEST —'), false);
