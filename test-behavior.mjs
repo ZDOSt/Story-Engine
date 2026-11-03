@@ -21399,7 +21399,10 @@ assert.match(source, /return buildPlayerAdventureStartPrompt\(root\);/);
       assert.match(source, /buildCurrentAdventureStartPrompt\(context\) \|\| pendingGeneration\?\.adventureStartPrompt/);
       assert.match(source, /function isBeginningAdventureIntroGeneration/);
       assert.match(source, /if \(!\['normal', 'swipe', 'regenerate'\]\.includes\(type\)\) return false/);
-      assert.match(source, /return Boolean\(getActiveAdventureIntroPrompt\(pendingGeneration, context\)\)/);
+      // The opening's reminder may be empty: an Isekai start has no prompt left, and the seed plus the
+      // contract carry it. The predicate therefore keys on having started an adventure, not on text.
+      assert.doesNotMatch(source, /return Boolean\(getActiveAdventureIntroPrompt\(/);
+      assert.match(source, /if \(!root\?\.adventureStarted\) return false;/);
       assert.match(source, /adventureGenre: getActiveAdventureGenre\(context\)/);
       assert.match(source, /adventureStartPrompt: getBeginningAdventureStartPrompt\(context, type\)/);
       assert.doesNotMatch(source, /writingStyleReminderPrompt: getWritingStyleReminderPrompt\(\)/);

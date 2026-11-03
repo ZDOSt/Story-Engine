@@ -15962,7 +15962,10 @@ function isBeginningAdventureIntroGeneration(pendingGeneration = state.pendingGe
     if (hasVisibleUserMessage(context)) return false;
     const root = getPlayerRoot(context);
     if (!root?.adventureStarted) return false;
-    return Boolean(getActiveAdventureIntroPrompt(pendingGeneration, context));
+    // The prompt is NOT required: an Isekai opening carries everything in its own contract, so the
+    // reminder is empty by design. Requiring one here sent every Isekai opening down the normal-turn
+    // path, where the semantic preflight aborted for want of a user message.
+    return true;
 }
 
 function detectStructuredUserInputMode(text) {
