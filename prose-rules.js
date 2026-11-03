@@ -161,6 +161,28 @@ const RULES = {
     - DO NOT repeat, echo, paraphrase, summarize, or re-stage previously narrated actions, dialogue, mental communication, environments, objects, or characters already established in the scene.
 }`,
 
+  nameReveal: String.raw`function nameReveal(response, context): {
+  MANDATE:
+    Pool names are unused candidates, never permission to reveal or use them.
+    Use a proper name ONLY when it is already established, or discovered on-scene through audible introduction, readable text, or recognition grounded in fact — and only from that moment on.
+    Until then, refer to the person, place, group, or object by its established role or a direct observable description.
+
+  PROHIBITION:
+    - DO NOT invent, alter, combine, derive, translate, or prematurely reveal a name.
+    - DO NOT use a pool name merely because it was supplied.
+    - Preserve every previously established name EXACTLY.
+}`,
+
+  narrativeFacts: String.raw`function narrativeFacts(response, input, context): {
+  MANDATE:
+    narrativeFacts(input) is authoritative and immutable for this response.
+    Preserve every listed action, target, success, failure, stalemate, injury, refusal, boundary, NPC response, limitation, and consequence EXACTLY as given.
+
+  PROHIBITION:
+    - DO NOT add, remove, soften, intensify, reverse, reinterpret, or complete a resolved outcome.
+    - DO NOT turn an attempt into a completed effect, or an unresolved event into a success or failure.
+}`,
+
   turnEnding: String.raw`function turnEnding(response, context): {
   MANDATE:
     Every response MUST end naturally based on the current scene and exchange. For example:
@@ -178,6 +200,20 @@ const RULES = {
 };
 
 
+// The validity statement that introduces the rules. The adventure opening does not use it: it has
+// its own BINDING CONTRACT at the top of the handoff, and the opening's rules are the only part of
+// that document that needs to appear here.
+export const PROSE_RULES_PREAMBLE = String.raw`NARRATOR PROSE RULES
+
+BINDING CONTRACT
+
+Every rule below is a hard constraint, not guidance. A response that breaks one is
+INVALID: it is discarded and never reaches the player. There is no revision pass
+and no partial credit. Plan against every rule before your first sentence, then
+write it correctly once.
+narrativeFacts(input) fixes what happened. These rules fix how it is written, and
+never change what happened.`;
+
 export const PROSE_RULE_ORDER = Object.freeze([
   'strictEpistemology',
   'diegeticPhysicality',
@@ -190,6 +226,8 @@ export const PROSE_RULE_ORDER = Object.freeze([
   'agencySeparation',
   'realisticDialogue',
   'inputChronology',
+  'nameReveal',
+  'narrativeFacts',
   'turnEnding',
 ]);
 
@@ -210,7 +248,8 @@ export function getProseRuleBlock(ruleName) {
  */
 export function renderProseRulesBlock(options = {}) {
   const excluded = new Set(options?.exclude || []);
-  return PROSE_RULE_ORDER.filter(name => !excluded.has(name))
+  const body = PROSE_RULE_ORDER.filter(name => !excluded.has(name))
     .map(name => RULES[name])
     .join('\n\n');
+  return options?.withPreamble === false ? body : `${PROSE_RULES_PREAMBLE}\n\n${body}`;
 }

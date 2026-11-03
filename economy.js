@@ -230,7 +230,8 @@ export function renderEconomyAndValueLens(options = {}) {
     const tiers = profile.valueTiers
         .map(tier => `${tier.name}: ${tier.range}`)
         .join('; ');
-    return `Default genre currency: ${profile.currencyLabel}.
+    return `ECONOMY AND VALUE:
+Default genre currency: ${profile.currencyLabel}.
 Use a tier-based economy, not exact accounting, unless the scene is directly about buying, selling, bargaining, being paid, being robbed, looting, debts, contract rewards, or checking inventory.
 Value tiers: ${tiers}.
 Scale prices, pay, loot, bribes, and rewards by danger, scarcity, location, reputation, employer wealth, risk, and world logic. Lower-risk scenes should produce modest value; dangerous or high-status challenges can justify better rewards.

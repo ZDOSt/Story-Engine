@@ -4,8 +4,12 @@ const FINAL_NARRATION_BEGIN = 'BEGIN_FINAL_NARRATION';
 const FINAL_NARRATION_END = 'END_FINAL_NARRATION';
 const VISIBLE_MECHANICS_LABEL = '(?:(?:Critical|Moderate|Minor)\\s+(?:Success|Failure)|Success|Failure|Stalemate|No\\s+Roll|Dominant\\s+Impact|Solid\\s+Impact|Light\\s+Impact|Checked|Deflected|Avoided|Struggle)';
 export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
+    'RenderControlEngine',
     'activeHandoff',
     'realisticDialogue',
+    // Retired rule name. Nothing declares it any more, but a leaked line carrying it would
+    // otherwise pass through unstripped, and the cost of keeping it is one string.
+    'dialogueTurn',
     'turnEnding',
     'inputChronology',
     'antiRhetoricalNegation',
@@ -17,13 +21,8 @@ export const RENDER_CONTROL_STAGE_NAMES = Object.freeze([
     'embodiedPerception',
     'denotativePhysicality',
     'cohesiveSceneBeats',
-    // Retired names. Nothing declares them any more, but a leaked line carrying one would otherwise
-    // pass through unstripped, and the cost is four strings. narrativeFacts is also a section name
-    // now, so a leaked line of that shape is worth stripping for a second reason.
-    'dialogueTurn',
     'nameReveal',
     'narrativeFacts',
-    'RenderControlEngine',
 ]);
 export const RENDER_CONTROL_STAGE_PATTERN = `(?:${RENDER_CONTROL_STAGE_NAMES.join('|')})`;
 const RENDER_CONTROL_STAGE = RENDER_CONTROL_STAGE_PATTERN;

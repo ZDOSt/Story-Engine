@@ -3259,7 +3259,7 @@ function buildSceneStyleProfilePrompt(settings = getSettings()) {
     return [
         'function sceneStyleProfile(response, context) {',
         '  mandate:',
-        '    Shape narration by scene type while obeying every proseRules instruction above. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, resolved mechanics, or narrativeFacts(input).',
+        '    Shape narration by scene type while obeying every renderControlEngine rule above. Style never overrides POV limits, user agency, chronology, dialogue pacing, endpoint control, resolved mechanics, or narrativeFacts(input).',
         '',
         '  explorationStyle:',
         indentStyleBlock(settings.writingStyleExplorationPrompt ?? DEFAULT_EXPLORATION_STYLE_PROMPT),

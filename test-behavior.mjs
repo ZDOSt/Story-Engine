@@ -7256,19 +7256,14 @@ const tests = [
       };
       const report = withDice([10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], () => runDeterministicEngines(baseLedger({}), {}, ctx, 'normal', {}));
       const narration = prompt(report);
-
-      // The narrator is not told about established names any more. The registry is the mechanism: a
-      // name that has been used is never offered again, so there is nothing for the model to avoid.
-      assert.doesNotMatch(narration, /ALREADY NAMED IN THIS CHAT/);
-
+      assert.match(narration, /ALREADY NAMED IN THIS CHAT, AND NOT PRESENT YET:/);
+      assert.match(narration, /- Mirelle \(person\): "My daughter Mirelle works the counter\."/);
+      assert.match(narration, /If the person or place they belong to enters the scene, that IS its/);
+      assert.match(narration, /The pool below applies ONLY to a person, entity, or location that has no name already established anywhere in this chat\./);
+      assert.match(narration, /DO NOT give a pool name to anyone or anything already named earlier in this chat\./);
+      // The reserved name is marked used, so it can never be offered back as a fresh candidate.
       const pool = report.finalNarrativeHandoff.nameGeneration.namePool;
-      assert.equal([...pool.male, ...pool.female, ...pool.location].includes('Mirelle'), false,
-        'a reserved name is marked used, so it can never be offered back as a fresh candidate');
-
-      const offered = narration.match(/^FEMALE: (.*)$/m);
-      assert.ok(offered, 'the pool still reaches the narrator');
-      assert.equal(offered[1].includes('Mirelle'), false);
-
+      assert.equal([...pool.male, ...pool.female, ...pool.location].includes('Mirelle'), false);
       assert.equal(auditIncludes(report, '5.1j reservedNames='), true);
     },
   },
@@ -9099,16 +9094,18 @@ const tests = [
         assert.doesNotMatch(name, /(?:Ravon|Talor|Nulira|Shavira|Koravalen|Navarosh|Versobom|Maibivun|Staistu|Vaisailnok|stai|biv|bom|sailn|lnok|ivun)/i);
       }
       const modelPrompt = prompt(report);
-      assert.match(modelPrompt, /A name may ONLY be revealed through a discovery event/);
-      assert.match(modelPrompt, /MUST use exactly ONE\s*\n?\s*unused name from the appropriate pool below\./);
+      assert.match(modelPrompt, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
+      assert.match(modelPrompt, /IF you are about to introduce a NEW name for something with no established name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(modelPrompt, /FEMALE: /);
       assert.match(modelPrompt, /MALE: /);
       assert.match(modelPrompt, /LOCATION: /);
-      assert.match(modelPrompt, /Do not invent, translate, derive, or modify a name\./);
-      assert.match(modelPrompt, /NAME REVEAL/);
-      assert.doesNotMatch(modelPrompt, /Previously revealed names MUST remain unchanged\./);
-      assert.doesNotMatch(modelPrompt, /ALREADY NAMED IN THIS CHAT/);
-      assert.doesNotMatch(modelPrompt, /Name reveal is LOCKED and GATED|If no name is revealed in-scene|Do NOT create a new name/);
+      assert.match(modelPrompt, /Previously revealed names MUST remain unchanged\./);
+      assert.match(modelPrompt, /When a new name is revealed for something with no established name, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
+      assert.match(modelPrompt, /Any unauthorized NEW name renders the response INVALID\./);
+      assert.match(modelPrompt, /DO NOT invent, modify, combine, translate, or derive names\./);
+      assert.match(modelPrompt, /DO NOT use ANY NEW name outside the appropriate pool\./);
+      assert.doesNotMatch(modelPrompt, /Name reveal is LOCKED and GATED|If no name is revealed in-scene|Do NOT create a name reveal just because someone or somewhere appears/);
+      assert.match(modelPrompt, /Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
       assert.doesNotMatch(modelPrompt, /rejected semantic candidates/i);
       assert.doesNotMatch(modelPrompt, /Name branch:/);
       assert.doesNotMatch(modelPrompt, /approved generated name pool in ACTIVE_BRANCH_FACTS/);
@@ -9151,13 +9148,15 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      assert.match(text, /A name may ONLY be revealed through a discovery event/);
-      assert.match(text, /MUST use exactly ONE\s*\n?\s*unused name from the appropriate pool below\./);
+      assert.match(text, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
+      assert.match(text, /IF you are about to introduce a NEW name for something with no established name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:/);
       assert.match(text, /FEMALE: [A-Z]/);
       assert.match(text, /MALE: [A-Z]/);
       assert.match(text, /LOCATION: [A-Z]/);
-      assert.match(text, /Do not invent, translate, derive, or modify a name\./);
-      assert.match(text, /NAME REVEAL/);
+      assert.match(text, /Previously revealed names MUST remain unchanged\./);
+      assert.match(text, /When a new name is revealed for something with no established name, using one of the provided names is MANDATORY and NON-NEGOTIABLE\./);
+      assert.match(text, /Any unauthorized NEW name renders the response INVALID\./);
+      assert.match(text, /DO NOT use ANY NEW name outside the appropriate pool\./);
       assert.doesNotMatch(text, /Name reveal is LOCKED and GATED|If no name is revealed in-scene|Do NOT name background, incidental, unseen, or merely described figures/);
       assert.doesNotMatch(text, /Name branch:/);
       assert.doesNotMatch(text, /approved generated name pool in ACTIVE_BRANCH_FACTS/);
@@ -15385,7 +15384,7 @@ const tests = [
       const preFlightSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
       const rulesSource = fs.readFileSync(new URL('prose-rules.js', import.meta.url), 'utf8');
       const allRules = [...rulesSource.matchAll(/function (\w+)\(response/g)].map(m2 => m2[1]);
-      assert.ok(allRules.length >= 12, 'expected at least 12 prose rules, found ' + allRules.length);
+      assert.ok(allRules.length >= 14, 'expected at least 14 prose rules, found ' + allRules.length);
       // A retired rule name stays in the sanitizer list: nothing declares it now, but a leaked
       // line carrying it would otherwise pass through unstripped.
       const sanitizerSource = fs.readFileSync(new URL('narration-sanitizer.js', import.meta.url), 'utf8');
@@ -18043,7 +18042,7 @@ const tests = [
         source.indexOf('function getSceneStyleProfilePrompt'),
       );
       assert.match(profileBuilder, /function sceneStyleProfile\(response, context\) \{/);
-      assert.match(profileBuilder, /Shape narration by scene type while obeying every proseRules instruction above/);
+      assert.match(profileBuilder, /Shape narration by scene type while obeying every renderControlEngine rule above/);
       assert.match(profileBuilder, /explorationStyle:/);
       assert.match(profileBuilder, /actionStyle:/);
       assert.match(profileBuilder, /intimacyStyle:/);
@@ -18138,8 +18137,8 @@ const tests = [
 
       // The engine copy is gone; the module is the only rulebook.
       assert.equal(indexSource.includes('DEFAULT_PROSE_RULES_PROMPT'), false);
-      assert.doesNotMatch(rulesSource, /BINDING CONTRACT/);
-      assert.doesNotMatch(flat, /A response that breaks one is INVALID/);
+      assert.match(rulesSource, /BINDING CONTRACT/);
+      assert.match(flat, /A response that breaks one is INVALID/);
 
       // Content that must never return.
       assert.doesNotMatch(rulesSource, /CO-AUTHOR SCOPE/);
@@ -18172,7 +18171,7 @@ const tests = [
 
       // One label for one concept. PROHIBITED, PROHIBITION and STRICTLY PROHIBITED all meant the
       // same thing, so the file carried three names for it.
-      assert.equal((rulesSource.match(/^  PROHIBITION:/gm) || []).length, 12);
+      assert.equal((rulesSource.match(/^  PROHIBITION:/gm) || []).length, 14);
       assert.equal((rulesSource.match(/^  PROHIBITED:/gm) || []).length, 0);
       assert.equal((rulesSource.match(/^  STRICTLY PROHIBITED:/gm) || []).length, 0);
 
@@ -18224,6 +18223,8 @@ const tests = [
         ['agencySeparation', 'belongs EXCLUSIVELY to {{user}}'],
         ['realisticDialogue', 'yields the floor'],
         ['inputChronology', 're-stage ANY part of {{user}}'],
+        ['nameReveal', 'Pool names are unused candidates'],
+        ['narrativeFacts', 'narrativeFacts(input) is authoritative and immutable for this response.'],
         ['turnEnding', 'end naturally based on the current scene'],
       ];
       let previous = -1;
@@ -18236,17 +18237,13 @@ const tests = [
 
       // The contract says what kind of document it is: two sections, one about writing and one
       // about events, applying together rather than competing.
-      assert.match(text, /BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response, and they do not cancel each other\./);
-      assert.match(text, /#1 proseRules governs HOW to write\. #2 narrativeFacts governs WHAT happened/);
-      assert.match(text, /every rule below applies to every sentence,\s*\n?\s*including sentences that state the facts in #2 narrativeFacts\./);
+      assert.match(text, /BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response\./);
+      assert.match(text, /The sections do not compete\. #1 says HOW to write\. #2 says WHAT happened\./);
+      assert.match(text, /They apply to every sentence,\s*\n?\s*including sentences that state the facts in #2\./);
 
       // The facts preamble grants no exemption from the writing rules. Without this clause it
       // overrides "style", and the prose rules are style.
       assert.match(text, /They override style, drama, pacing, genre expectations, and narrative convenience\. They are not a reason to break a rule in #1/);
-
-      // The attempt/completion distinction lost its rule when narrativeFacts left #1, so it is
-      // stated in the facts preamble. Without it an unresolved event can be narrated as landed.
-      assert.match(text, /Do not turn an attempt into a completed effect, or an unresolved event into a success or failure\./);
 
       // The full text, not a summary: a digest would have dropped the middle of each rule.
       assert.match(text, /You never need to tell the reader what a thing is not/);
@@ -18262,33 +18259,14 @@ const tests = [
         genreSelection: null,
         adventureGenre: 'Fantasy',
       });
-      // The rules are announced the same way as on a normal turn, minus the pointer to #2, which
-      // the opening does not contain.
-      assert.match(introPrompt, /#1 - proseRules\nThese MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence\.\n\nfunction strictEpistemology/);
-      assert.doesNotMatch(introPrompt, /including sentences that state the facts in #2/);
-      assert.doesNotMatch(introPrompt, /\n{3,}/);
-
-      // The output bans apply to the opening too, without the tags the pipeline does not read there.
-      assert.match(introPrompt, /Output only final in-character narration\./);
-      assert.match(introPrompt, /Do not output labels, analysis, bullets, commentary, markdown fences/);
-      assert.doesNotMatch(introPrompt, /between those tags/);
-      assert.doesNotMatch(introPrompt, /BEGIN_FINAL_NARRATION/);
-
-      // The opening is the example the rest of the chat reads as the shape of a response, so it
-      // ends with the same formatting block every normal turn ends with.
-      assert.equal((introPrompt.match(/^FORMATTING$/gm) || []).length, 1);
-      assert.match(introPrompt, /FORMATTING\n- Text enclosed in double quotation marks \("..."\) is audible dialogue\./);
-      // It closes the document: nothing follows the last formatting bullet.
-      assert.match(introPrompt, /- Unformatted text describes narration or action\. It is NEVER audible dialogue\.\s*$/);
-
       // The opening runs no mechanics and follows no input, so the two rules that describe those
       // situations stay out. Everything else is present in full.
       assert.equal(introPrompt.includes('narrativeFacts(input) is authoritative'), false);
-      assert.equal(introPrompt.includes('function narrativeFacts('), false);
       assert.equal(introPrompt.includes('re-stage ANY part of {{user}}'), false);
       assert.match(introPrompt, /Rooms DO NOT breathe/);
       assert.match(introPrompt, /belongs EXCLUSIVELY to \{\{user\}\}/);
       assert.match(introPrompt, /end naturally based on the current scene/);
+      assert.match(introPrompt, /Pool names are unused candidates/);
 
       // And the normal turn keeps both.
       const report = runCase({
@@ -18312,8 +18290,7 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      // The narrativeFacts rule was removed from the module, so neither prompt carries it now.
-      assert.doesNotMatch(text, /narrativeFacts\(input\) is authoritative and immutable for this response\./);
+      assert.match(text, /narrativeFacts\(input\) is authoritative and immutable for this response\./);
       assert.match(text, /re-stage ANY part of \{\{user\}\}/);
     },
   },
@@ -18333,7 +18310,8 @@ const tests = [
       const expected = [
         'strictEpistemology', 'diegeticPhysicality', 'antiStockPhrasing', 'antiRhetoricalNegation',
         'denotativePhysicality', 'embodiedPerception', 'strictBehaviorism', 'cohesiveSceneBeats',
-        'agencySeparation', 'realisticDialogue', 'inputChronology', 'turnEnding',
+        'agencySeparation', 'realisticDialogue', 'inputChronology', 'nameReveal', 'narrativeFacts',
+        'turnEnding',
       ];
       const orderAt = rulesSource.indexOf('PROSE_RULE_ORDER');
       const orderBlock = rulesSource.slice(orderAt, rulesSource.indexOf(']);', orderAt));
@@ -18358,8 +18336,8 @@ const tests = [
       const handoffSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
       assert.match(handoffSource, /function renderGenreLensSection\(options = \{\}\)/);
       assert.match(handoffSource, /function renderEconomyLensSection\(options = \{\}\)/);
-      assert.match(handoffSource, /#1\.5 - genreLens/);
-      assert.match(handoffSource, /#1\.6 - economyAndValue/);
+      assert.match(handoffSource, /#1\.5 - GENRE LENS/);
+      assert.match(handoffSource, /#1\.6 - ECONOMY AND VALUE/);
       assert.match(handoffSource, /This campaign remains anime isekai, not generic fantasy/);
       assert.match(handoffSource, /ONE-TIME AESTHETIC RULE:/);
       assert.match(handoffSource, /This genre lens never overrides narrativeFacts\(input\), \{\{user\}\} agency, relationship state, consent, mechanics, or prose rules/);
@@ -18378,28 +18356,28 @@ const tests = [
       const isekaiPrompt = formatNarratorModelPromptContext(report, { adventureGenre: 'Isekai' });
       const fantasyPrompt = formatNarratorModelPromptContext(report, { adventureGenre: 'Fantasy' });
       const cyberpunkPrompt = formatNarratorModelPromptContext(report, { adventureGenre: 'Cyberpunk' });
-      assert.match(isekaiPrompt, /#1\.5 - genreLens/);
-      assert.match(isekaiPrompt, /This campaign remains anime isekai, not generic fantasy\./);
-      assert.match(isekaiPrompt, /Default genre currency: silver \(sv\)\./);
+      assert.match(isekaiPrompt, /#1\.5 - GENRE LENS/);
+      assert.match(isekaiPrompt, /ISEKAI GENRE LENS:/);
+      assert.match(isekaiPrompt, /ECONOMY AND VALUE:/);
       assert.match(isekaiPrompt, /Default genre currency: silver \(sv\)/);
       assert.match(isekaiPrompt, /This campaign remains anime isekai, not generic fantasy/);
       assert.match(isekaiPrompt, /Do not force tropes, instant devotion, harem dynamics/);
       assert.doesNotMatch(isekaiPrompt, /One-Time Aesthetic Rule:/);
       assert.doesNotMatch(isekaiPrompt, /anime aesthetic may be described directly only once/i);
       assert.doesNotMatch(fantasyPrompt, /ISEKAI GENRE LENS/);
-      assert.match(fantasyPrompt, /Default genre currency: silver \(sv\)\./);
+      assert.match(fantasyPrompt, /ECONOMY AND VALUE:/);
       assert.match(fantasyPrompt, /Default genre currency: silver \(sv\)/);
       assert.match(cyberpunkPrompt, /Default genre currency: credits \(cr\)/);
       assert.ok(
-        isekaiPrompt.indexOf('#1 - proseRules') < isekaiPrompt.indexOf('#1.5 - genreLens'),
+        isekaiPrompt.indexOf('#1 - PROSE RULES') < isekaiPrompt.indexOf('#1.5 - GENRE LENS'),
         'Isekai lens should appear after Prose Rules.',
       );
       assert.ok(
-        isekaiPrompt.indexOf('#1.5 - genreLens') < isekaiPrompt.indexOf('#1.6 - economyAndValue'),
+        isekaiPrompt.indexOf('#1.5 - GENRE LENS') < isekaiPrompt.indexOf('#1.6 - ECONOMY AND VALUE'),
         'Isekai lens should appear before the economy lens.',
       );
       assert.ok(
-        isekaiPrompt.indexOf('#1.6 - economyAndValue') < isekaiPrompt.indexOf('#2 - narrativeFacts'),
+        isekaiPrompt.indexOf('#1.6 - ECONOMY AND VALUE') < isekaiPrompt.indexOf('#2 - RESOLVED FACTS'),
         'Economy lens should appear before narrativeFacts.',
       );
       assert.doesNotMatch(isekaiPrompt, /FINAL WRITING STYLE REMINDER/);
@@ -18567,15 +18545,15 @@ const tests = [
       assert.match(introPrompt, /^BINDING CONTRACT:/);
       assert.match(introPrompt, /Your response MUST comply with every rule below/);
       assert.match(introPrompt, /ALWAYS combine closely related actions, gestures, dialogue, and immediate consequences/);
-      assert.match(introPrompt, /#1\.7 - sceneStyleProfile/);
+      assert.match(introPrompt, /#1\.7 - SCENE STYLE PROFILE/);
       assert.match(introPrompt, /SCENE STYLE PROFILE: Use vivid, scene-aware prose\./);
-      assert.doesNotMatch(introPrompt, /#2 - narrativeFacts|==MECHANICS_RESULTS==/);
+      assert.doesNotMatch(introPrompt, /#2 - RESOLVED FACTS|==MECHANICS_RESULTS==/);
       assert.match(introPrompt, /START_ADVENTURE_PROMPT: ISEKAI/);
       assert.match(introPrompt, /This is the opening turn of a new isekai adventure\./);
       assert.doesNotMatch(introPrompt, /Narrate the opening immediately\./);
       assert.doesNotMatch(introPrompt, /Use the established character\/context and the required seeds below\./);
       assert.doesNotMatch(introPrompt, /Current broad scene state:/);
-      assert.doesNotMatch(introPrompt, /This campaign remains anime isekai, not generic fantasy\./);
+      assert.doesNotMatch(introPrompt, /ISEKAI GENRE LENS:/);
       assert.doesNotMatch(introPrompt, /ISEKAI TRANSITION AND OPENING SEED:/);
       assert.doesNotMatch(introPrompt, /ISEKAI OPENING SEED:/);
       assert.match(introPrompt, /You MUST narrate BOTH required beats below, in order\./);
@@ -18592,23 +18570,25 @@ const tests = [
       assert.match(introPrompt, /Selected Isekai Opening:/);
       assert.match(introPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
       assert.match(introPrompt, /must not rebuild, reroll, overwrite, infantize, or replace them/);
-      assert.doesNotMatch(introPrompt, /Default genre currency: silver \(sv\)\./);
-      assert.match(introPrompt, /MUST use exactly ONE\s*\n?\s*unused name from the appropriate pool below\./);
+      assert.doesNotMatch(introPrompt, /ECONOMY AND VALUE:/);
+      assert.match(introPrompt, /NAME REVEAL — BINDING:/);
+      assert.match(introPrompt, /Use a proper name ONLY when it is already established, or discovered on-scene through/);
+      assert.match(introPrompt, /IF a new name is needed, you MUST use EXACTLY ONE UNUSED name from the pool below/);
       assert.match(introPrompt, /FEMALE: Ariana, Mira\./);
       assert.match(introPrompt, /MALE: Darin, Kell\./);
       assert.match(introPrompt, /LOCATION: Veyra, Orinth Gate\./);
-      assert.match(introPrompt, /A name may ONLY be revealed through a discovery event/);
-      assert.match(introPrompt, /Do not invent, translate, derive, or modify a name\./);
+      assert.match(introPrompt, /Using any name from outside the pool, or revealing one outside a discovery event, renders the/);
+      assert.match(introPrompt, /DO NOT invent, alter, combine, derive, translate, or substitute any proper name\./);
       assert.ok(
-        introPrompt.indexOf('#1 - proseRules') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
+        introPrompt.indexOf('#1 - PROSE RULES') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
         'Trimmed prose rules should precede the Start Adventure handoff.',
       );
       assert.ok(
-        introPrompt.indexOf('#1 - proseRules') < introPrompt.indexOf('#1.7 - sceneStyleProfile'),
+        introPrompt.indexOf('#1 - PROSE RULES') < introPrompt.indexOf('#1.7 - SCENE STYLE PROFILE'),
         'Render-control rules should precede the Start Adventure scene style profile.',
       );
       assert.ok(
-        introPrompt.indexOf('#1.7 - sceneStyleProfile') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
+        introPrompt.indexOf('#1.7 - SCENE STYLE PROFILE') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
         'Start Adventure scene style profile should precede the adventure prompt.',
       );
       assert.ok(
@@ -18616,12 +18596,12 @@ const tests = [
         'Isekai transition/opening seed should appear after the Start Adventure mandate.',
       );
       assert.ok(
-        introPrompt.indexOf('BEAT #2: ISEKAI OPENING') < introPrompt.indexOf('NAME REVEAL'),
-        'Isekai transition/opening seed should appear before the name pool.',
+        introPrompt.indexOf('BEAT #2: ISEKAI OPENING') < introPrompt.indexOf('NAME REVEAL — BINDING:'),
+        'Isekai transition/opening seed should appear before name reveal.',
       );
       assert.ok(
-        introPrompt.indexOf('NAME REVEAL') > introPrompt.indexOf('START ADVENTURE_PROMPT:'),
-        'The name pool now sits in the output checkpoint, after the prompt body.',
+        introPrompt.indexOf('NAME REVEAL — BINDING:') < introPrompt.indexOf('START ADVENTURE REMINDER:'),
+        'Intro name pool should appear before the adventure prompt body.',
       );
       assert.doesNotMatch(
         formatAdventureIntroNarratorModelPromptContext('Begin the adventure for this character in the selected genre: Fantasy.', {
@@ -18673,19 +18653,19 @@ const tests = [
       assert.match(fantasyIntroPrompt, /Do NOT choose a different genre, premise, or opening setup/);
       assert.match(fantasyIntroPrompt, /PREMADE CHARACTER RULE:/);
       assert.match(fantasyIntroPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
-      assert.match(fantasyIntroPrompt, /NAME REVEAL/);
-      assert.doesNotMatch(fantasyIntroPrompt, /#1\.7 - sceneStyleProfile/);
+      assert.match(fantasyIntroPrompt, /NAME REVEAL — BINDING:/);
+      assert.doesNotMatch(fantasyIntroPrompt, /#1\.7 - SCENE STYLE PROFILE/);
       assert.ok(
-        fantasyIntroPrompt.indexOf('#1 - proseRules') < fantasyIntroPrompt.indexOf('START_ADVENTURE_PROMPT: FANTASY'),
+        fantasyIntroPrompt.indexOf('#1 - PROSE RULES') < fantasyIntroPrompt.indexOf('START_ADVENTURE_PROMPT: FANTASY'),
         'Trimmed prose rules should precede every Start Adventure genre handoff.',
       );
       assert.ok(
-        fantasyIntroPrompt.indexOf('GENRE OPENING:') < fantasyIntroPrompt.indexOf('NAME REVEAL'),
+        fantasyIntroPrompt.indexOf('GENRE OPENING:') < fantasyIntroPrompt.indexOf('NAME REVEAL — BINDING:'),
         'Non-isekai genre opening should appear before name reveal.',
       );
       assert.ok(
-        fantasyIntroPrompt.indexOf('NAME REVEAL') > fantasyIntroPrompt.indexOf('START ADVENTURE_PROMPT:'),
-        'The name pool now sits in the output checkpoint, after the prompt body.',
+        fantasyIntroPrompt.indexOf('NAME REVEAL — BINDING:') < fantasyIntroPrompt.indexOf('START ADVENTURE REMINDER:'),
+        'Non-isekai name reveal should appear before the reminder.',
       );
       assert.doesNotMatch(fantasyIntroPrompt, /You MUST narrate BOTH required beats below|BEAT #1: EARTH LAST MOMENTS/);
       const introAudit = formatAdventureIntroNarratorPromptContext('Begin the adventure.', { adventureGenre: 'Fantasy' });
@@ -18702,29 +18682,29 @@ const tests = [
         adventureGenre: 'Fantasy',
         nameGeneration: { namePool: pool, style: 'Balanced Fantasy' },
       });
-      assert.match(introPrompt, /#3 - outputCheckpoint/);
-      assert.match(introPrompt, /NAME REVEAL\nA name may ONLY be revealed through a discovery event/);
-      assert.match(introPrompt, /Do not invent, translate, derive, or modify a name\./);
-      assert.match(introPrompt, /NAME REVEAL/);
-      assert.match(introPrompt, /A name may ONLY be revealed through a discovery event/);
-      assert.match(introPrompt, /Do not invent, translate, derive, or modify a name\./);
-      // The pool sits in the output checkpoint, in the same place the normal turn puts it.
-      assert.ok(introPrompt.indexOf('GENRE OPENING:') < introPrompt.indexOf('NAME REVEAL'));
-      assert.ok(introPrompt.indexOf('NAME REVEAL') > introPrompt.indexOf('START ADVENTURE_PROMPT:'));
+      assert.match(introPrompt, /#3 - OUTPUT/);
+      assert.match(introPrompt, /Follow NAME REVEAL exactly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
+      assert.match(introPrompt, /Do not invent, modify, substitute, or translate any proper name in this opening response\./);
+      assert.match(introPrompt, /NAME REVEAL — BINDING:/);
+      assert.match(introPrompt, /A NEW name may enter the scene ONLY through one of these discovery events/);
+      assert.match(introPrompt, /DO NOT reuse a name already revealed for a different person, place, or thing/);
+      // The block keeps its position inside the payload: after the genre opening, before the reminder.
+      assert.ok(introPrompt.indexOf('GENRE OPENING:') < introPrompt.indexOf('NAME REVEAL — BINDING:'));
+      assert.ok(introPrompt.indexOf('NAME REVEAL — BINDING:') < introPrompt.indexOf('START ADVENTURE REMINDER:'));
       // Nothing name-related is emitted when no pool was generated.
       const withoutPool = formatAdventureIntroNarratorModelPromptContext(body, { adventureGenre: 'Fantasy' });
-      assert.doesNotMatch(withoutPool, /NAME REVEAL/);
-      assert.doesNotMatch(withoutPool, /NAME REVEAL/);
+      assert.doesNotMatch(withoutPool, /NAME REVEAL — BINDING:/);
+      assert.doesNotMatch(withoutPool, /NAME REVEAL — BINDING:/);
     },
   },
   {
     name: '46d the intro naming clause never leaks into the normal narrator prompt',
     run() {
       const normal = prompt(runCase({ userText: 'I look around.', ledger: baseLedger({}) }));
-      assert.match(normal, /NAME REVEAL/);
-      assert.doesNotMatch(normal, /in this opening response/);
+      assert.doesNotMatch(normal, /NAME REVEAL — BINDING:/);
+      assert.doesNotMatch(normal, /Do not invent, modify, substitute, or translate any proper name in this opening response\./);
       // The normal path keeps its own enforcement line, which the intro now mirrors.
-      assert.match(normal, /NAME REVEAL/);
+      assert.match(normal, /Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names\./);
     },
   },
   {

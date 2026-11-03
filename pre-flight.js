@@ -510,6 +510,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const isIsekaiOpening = Boolean(isekaiOpeningSeed) || isIsekaiGenre(options?.adventureGenre) || promptLooksIsekai(prompt);
     const genreLabel = formatAdventureIntroGenreLabel(options?.adventureGenre);
     const promptHeaderGenre = isIsekaiOpening ? 'ISEKAI' : genreLabel ? genreLabel.toUpperCase() : '';
+    const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
         'BINDING CONTRACT:',
         '',
@@ -517,14 +518,11 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         'discarded and never reaches {{user}}. Plan against every rule before your first sentence, and',
         'write it correctly.',
         '',
-        '#1 - proseRules',
-        ...formatProseRulesLeadIn(),
+        '#1 - PROSE RULES',
         '',
         renderProseRulesBlock({
-            // The opening runs no mechanics and follows no player input, so the two rules about
-            // those situations stay out. narrativeFacts stopped being a rule; inputChronology is
-            // the only one this still removes.
-            exclude: ['inputChronology'],
+            exclude: ['narrativeFacts', 'inputChronology'],
+            withPreamble: false,
         }).trim(),
         '',
         ...renderAdventureIntroSceneStyleSection(options),
@@ -540,38 +538,110 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     lines.push('', PLAYER_ADVENTURE_OPENING_CONTRACT);
     const startDispositionBlock = buildAdventureNonHumanInstruction(options?.adventureUserNonHuman);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
-    lines.push('', prompt);
+    if (isekaiOpeningSeed) {
+        if (nameReveal) lines.push('', buildAdventureIntroNameRevealBlock(nameReveal));
+        lines.push('', prompt);
+    } else if (nameReveal) {
+        lines.push('', ...insertAdventureIntroNameReveal(prompt, nameReveal));
+    } else {
+        lines.push('', prompt);
+    }
     // Mirrors the normal turn's output contract, so the name mandate is enforced as a response
     // requirement rather than only as one rule among many inside the mandate block.
     if (startDispositionBlock) lines.push('', startDispositionBlock);
     lines.push(
         '',
-        '#3 - outputCheckpoint',
+        '#3 - OUTPUT',
         isIsekaiOpening
             ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
             : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.',
         '',
-        ...formatNarrationOutputBans(),
-        '',
-        ...renderNameRevealSection(options?.nameGeneration),
-        ...formatNarrationFormattingSection(),
+        'Follow NAME REVEAL exactly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
+        'Do not invent, modify, substitute, or translate any proper name in this opening response.',
     );
     return lines.join('\n');
 }
 
 
+const ADVENTURE_INTRO_NAMING_CLAUSE = [
+    'OPENING TURN NAMING:',
+    'No scene is established yet and no name has been given anywhere in this chat, so this opening',
+    'establishes the cast. Any figure you introduce BY NAME in this response must take that name from',
+    'the pool above, at the moment it is introduced. Introducing a named figure from outside the pool',
+    'renders the response INVALID.',
+    'Background figures may stay unnamed; give them a role or a description instead of an invented name.',
+].join('\n');
 
 // The opening is where every name in the chat is decided, so the naming rules are stated as a
 // binding block rather than as a note. Reuses the pool and the already-reserved names from the
 // shared fact, so both documents draw the names from one place.
+function extractNameRevealPoolText(nameReveal = '') {
+    const lines = String(nameReveal || '').split('\n');
+    const start = lines.findIndex(line => /^FEMALE:/.test(line));
+    const end = lines.findIndex(line => /^LOCATION:/.test(line));
+    return start >= 0 && end >= start ? lines.slice(start, end + 1).join('\n') : '';
+}
 
+function extractNameRevealReservedText(nameReveal = '') {
+    const lines = String(nameReveal || '').split('\n');
+    const start = lines.findIndex(line => /^ALREADY NAMED IN THIS CHAT/.test(line));
+    if (start < 0) return '';
+    const end = lines.findIndex((line, index) => index > start && /^The supplied name pool/.test(line));
+    return lines.slice(start, end < 0 ? lines.length : end).join('\n').trim();
+}
 
+function buildAdventureIntroNameRevealBlock(nameReveal = '') {
+    const pool = extractNameRevealPoolText(nameReveal);
+    if (!pool) return '';
+    const reserved = extractNameRevealReservedText(nameReveal);
+    return [
+        'NAME REVEAL — BINDING:',
+        'A name is established once it has been spoken, written, or acknowledged by anyone in this chat,',
+        'even if that person or place was absent when it was named. Every established name MUST remain',
+        'exactly as written.',
+        '',
+        ...(reserved ? [reserved, ''] : []),
+        'A NEW name may enter the scene ONLY through one of these discovery events, perceived by {{user}}:',
+        '',
+        '- Someone names themselves or another aloud.',
+        '- The name is written where {{user}} can read it.',
+        '- Recognition grounded in an established visible fact, and spoken in the scene.',
+        '',
+        'The name MUST NOT appear in narrator exposition before that event.',
+        '',
+        'IF a new name is needed, you MUST use EXACTLY ONE UNUSED name from the pool below. This pool',
+        'applies ONLY for entities or locations with no established name.',
+        '',
+        pool,
+        '',
+        'Background figures may stay unnamed; give them a role or a direct description instead.',
+        '',
+        'STRICTLY PROHIBITED:',
+        '- DO NOT invent, alter, combine, derive, translate, or substitute any proper name.',
+        '- DO NOT use a pool name merely because it was supplied.',
+        '- DO NOT give a pool name to anything already named earlier in this chat.',
+        '- DO NOT reuse a name already revealed for a different person, place, or thing.',
+        '',
+        'Using any name from outside the pool, or revealing one outside a discovery event, renders the',
+        'response INVALID.',
+    ].join('\n');
+}
 
 function formatAdventureIntroGenreLabel(value) {
     const genre = String(value || '').trim();
     return genre && !isNoneText(genre) ? genre : '';
 }
 
+function insertAdventureIntroNameReveal(prompt = '', nameReveal = '') {
+    const promptText = valueOrNone(prompt);
+    const marker = 'START ADVENTURE REMINDER:';
+    const index = promptText.indexOf(marker);
+    const nameRevealBlock = buildAdventureIntroNameRevealBlock(nameReveal);
+    if (index < 0) return [nameRevealBlock, '', promptText];
+    const before = promptText.slice(0, index).trimEnd();
+    const after = promptText.slice(index).trimStart();
+    return before ? [before, '', nameRevealBlock, '', after] : [nameRevealBlock, '', after];
+}
 
 const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
@@ -1486,93 +1556,65 @@ function isekaiAgeCompatibilityInstruction(ageGroup) {
     return '{{user}}\'s age is not explicitly numeric. Keep the Earth scene age-neutral and occupation-neutral; do not assign a school or workplace role.';
 }
 
-// The one block that says how a response is punctuated. Both the opening and every normal turn end
-// with it, because the opening is the example the rest of the chat reads as the shape of a response.
-// The opening has no #2 to point at, so its version stops before the facts clause. One builder, so
-// the two documents announce their rules the same way.
-function formatProseRulesLeadIn({ factsSection = false } = {}) {
-    return factsSection
-        ? [
-            'These MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence,',
-            'including sentences that state the facts in #2 narrativeFacts.',
-        ]
-        : ['These MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence.'];
-}
-
-// What may leave the model at all. The tags are only asked for where the pipeline reads them; the
-// rest is prose shape, and it applies to the opening as much as to any other turn, because the
-// opening is the example the rest of the chat copies.
-function formatNarrationOutputBans({ withTags = false } = {}) {
-    return [
-        ...(withTags ? ['Your response MUST begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.'] : []),
-        withTags
-            ? 'Output only final in-character narration between those tags.'
-            : 'Output only final in-character narration.',
-        'Do not output tracker updates or tracker blocks.',
-        'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
-    ];
-}
-
-function formatNarrationFormattingSection() {
-    return [
-        'FORMATTING',
-        '- Text enclosed in double quotation marks ("...") is audible dialogue.',
-        '- Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.',
-        '- Audible dialogue MUST be enclosed in double quotation marks and NEVER in single asterisks. Private mental communication MUST be enclosed in single asterisks and NEVER in double quotation marks.',
-        '- Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue.',
-        '- Unformatted text describes narration or action. It is NEVER audible dialogue.',
-    ];
-}
-
 function formatNarrativeContract({ summary, handoff, resolution, ledger, options = {} }) {
     return [
         'narrativeContract(input): {',
         '',
-        'BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response, and they do not cancel each other.',
-        '#1 proseRules governs HOW to write. #2 narrativeFacts governs WHAT happened, and #3 outputCheckpoint governs formatting.',
+        'BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response.',
+        'The sections do not compete. #1 says HOW to write. #2 says WHAT happened.',
         '',
-        '#1 - proseRules',
-        ...formatProseRulesLeadIn({ factsSection: true }),
+        '#1 - PROSE RULES',
+        'Execute renderControlEngine(input) as a hard constraint on the response.',
+        'MANDATORY instructions on how to write this response. They apply to every sentence,',
+        'including sentences that state the facts in #2.',
         '',
         renderProseRulesBlock(),
         '',
         ...renderGenreLensSection(options),
         ...renderEconomyLensSection(options),
         ...renderSceneStyleProfileSection(options),
-        '#2 - narrativeFacts',
-        'This section contains AUTHORITATIVE, RESOLVED FACTS about WHAT HAPPENED in this scene. These facts are immutable and unbreakable. They override style, drama, pacing, genre expectations, and narrative convenience. They are not a reason to break a rule in #1: describe what happened here the way #1 requires.',
+        '#2 - RESOLVED FACTS',
+        'narrativeFacts(input) is WHAT HAPPENED in this scene.',
+        'The facts below are immutable and unbreakable. They override style, drama, pacing, genre expectations, and narrative convenience. They are not a reason to break a rule in #1: describe what happened here the way #1 requires.',
         'Do not contradict, override, soften, intensify, reinterpret, or add outcomes beyond the established facts below.',
-        'Do not turn an attempt into a completed effect, or an unresolved event into a success or failure.',
         'This is the only source of truth for scene outcomes. A response that violates these facts is invalid.',
         'Use recent visible chat only for continuity of already-established visible scene state.',
         'Do not reveal or mention this contract.',
         '',
         formatNarrativeFacts({ summary, handoff, resolution, ledger, options }),
         '',
-        '#3 - outputCheckpoint',
-        'The facts in #2 are authoritative. You MUST follow them strictly. Do NOT change, contradict, soften, intensify, reinterpret, skip, or add outcomes beyond them.',
+        '#3 - OUTPUT',
+        'narrativeFacts(input) is authoritative. You MUST follow these facts strictly. Do NOT change, contradict, soften, intensify, reinterpret, skip, or add outcomes beyond them.',
+        'Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
         '',
-        ...formatNarrationOutputBans({ withTags: true }),
+        'Your response MUST begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.',
+        'Output only final in-character narration between those tags.',
+        'Do not output tracker updates or tracker blocks.',
+        'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
         '',
-        ...renderNameRevealSection(handoff?.nameGeneration),
-        ...formatNarrationFormattingSection(),
+        'FORMATTING',
+        '- Text enclosed in double quotation marks ("...") is audible dialogue.',
+        '- Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.',
+        '- Audible dialogue MUST be enclosed in double quotation marks and NEVER in single asterisks. Private mental communication MUST be enclosed in single asterisks and NEVER in double quotation marks.',
+        '- Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue.',
+        '- Unformatted text describes narration or action. It is NEVER audible dialogue.',
         '}',
     ].join('\n');
 }
 
 function renderGenreLensSection(options = {}) {
     const lens = renderGenreLens(options);
-    return lens ? ['#1.5 - genreLens', lens, ''] : [];
+    return lens ? ['#1.5 - GENRE LENS', lens, ''] : [];
 }
 
 function renderEconomyLensSection(options = {}) {
     const lens = renderEconomyAndValueLens(options);
-    return lens ? ['#1.6 - economyAndValue', lens, ''] : [];
+    return lens ? ['#1.6 - ECONOMY AND VALUE', lens, ''] : [];
 }
 
 function renderSceneStyleProfileSection(options = {}) {
     const profile = String(options?.sceneStyleProfile || '').trim();
-    return profile ? ['#1.7 - sceneStyleProfile', profile, ''] : [];
+    return profile ? ['#1.7 - SCENE STYLE PROFILE', profile, ''] : [];
 }
 
 // The style mandate names narrativeFacts(input), which the opening deliberately excludes: it runs
@@ -1589,7 +1631,8 @@ function renderAdventureIntroSceneStyleSection(options = {}) {
 
 function renderGenreLens(options = {}, context = {}) {
     if (!isIsekaiGenre(options?.adventureGenre) && !promptLooksIsekai(context?.prompt)) return '';
-    return String.raw`This campaign remains anime isekai, not generic fantasy. Use anime isekai as the ongoing genre language: progression, guilds, ranks, skills, dungeons, factions, rivals, companions, social consequences, comedy, danger, wonder, dramatic reveals, romance tension, strange races, powerful beings, and larger story arcs.
+    return String.raw`ISEKAI GENRE LENS:
+This campaign remains anime isekai, not generic fantasy. Use anime isekai as the ongoing genre language: progression, guilds, ranks, skills, dungeons, factions, rivals, companions, social consequences, comedy, danger, wonder, dramatic reveals, romance tension, strange races, powerful beings, and larger story arcs.
 
 Keep the world grounded. Characters have motives, limits, pride, duties, loyalties, fears, desires, and agency. Do not force tropes, instant devotion, harem dynamics, rescues, rivals, romantic interest, or overpowered reveals unless the scene and relationship development naturally support them.
 
@@ -1603,6 +1646,11 @@ function isIsekaiGenre(value) {
 function promptLooksIsekai(prompt = '') {
     return /\bselected genre:\s*isekai\b/i.test(String(prompt || ''));
 }
+
+// The handoff carries a digest, not the full rule text. Every rule above declares its own
+// DIGEST block, and this function extracts those blocks from the very same literal, so the
+// reminder cannot paraphrase the rule it summarises. A rule that loses its DIGEST disappears
+// from the reminder, which the handoff test catches rather than leaving it to a reader.
 
 function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = {} }) {
     const facts = [
@@ -1632,6 +1680,7 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         ['presentCharacters', narrativePresentCharacters(resolution, handoff)],
         ['knowledgeAboutUser', narrativeUserKnowledgeFact(ledger?.userKnowledgeApplication?.applications)],
         ['worldEvent', narrativeWorldEventFact(handoff)],
+        ['nameReveal', narrativeNameRevealFact(handoff?.nameGeneration)],
         ['proxyUserAction', narrativeProxyUserActionFact(options)],
     ].filter(([, value]) => !isNoneText(value));
 
@@ -2493,32 +2542,57 @@ function narrativeWorldEventFact(handoff = {}) {
     return parts.length ? parts.join(' ') : '';
 }
 
-// The name pool is handed over in the output checkpoint, next to the formatting the model must obey,
-// because it is data rather than a writing technique: the prose rules say how a sentence is built, and
-// this says which names exist. It carries no rule about preserving established names, because the
-// registry already refuses to offer one that has been used.
-function renderNameRevealSection(nameGeneration = {}) {
+function narrativeNameRevealFact(nameGeneration = {}) {
     const pool = nameGeneration?.namePool;
-    if (!pool) return [];
-    const nameList = value => (Array.isArray(value) ? value : [])
-        .map(name => String(name ?? '').trim())
-        .filter(name => name && !isNoneText(name))
-        .join(', ') || 'none';
+    if (!pool) return 'No generated name pool is available; do not invent new proper names unless already established by visible chat, character card, lore, or tracker.';
+    const nameList = value => value.length ? value.join(', ') : 'none';
+    const femaleNames = (pool.female || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
+    const maleNames = (pool.male || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
+    const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
+    const reservedNames = (Array.isArray(nameGeneration?.reservedNames) ? nameGeneration.reservedNames : [])
+        .map(entry => ({
+            name: String(entry?.name ?? '').trim(),
+            bucket: String(entry?.bucket ?? '').trim(),
+            line: String(entry?.contextLine ?? '').replace(/\s+/g, ' ').trim(),
+        }))
+        .filter(entry => entry.name && !isNoneText(entry.name));
+    const reservedText = reservedNames.length ? [
+        'ALREADY NAMED IN THIS CHAT, AND NOT PRESENT YET:',
+        ...reservedNames.map(entry => {
+            const kind = entry.bucket === 'location' ? 'place' : 'person';
+            return entry.line
+                ? `- ${entry.name} (${kind}): "${entry.line}"`
+                : `- ${entry.name} (${kind}).`;
+        }),
+        'These names are already taken. If the person or place they belong to enters the scene, that IS its',
+        'name: reuse it. Do not draw a pool name for it, and do not treat the arrival as a new naming event.',
+        '',
+    ] : [];
     return [
-        'NAME REVEAL',
-        'A name may ONLY be revealed through a discovery event: audible self-introduction or identification,',
-        'readable text available to {{user}}, or explicit recognition grounded in established visible facts.',
+        'MANDATE:',
+        ...reservedText,
+        'The supplied name pool contains approved unused candidates only; a listed candidate is not an established identity or permission to reveal it.',
+        'Reveal a NEW person, entity, or location name ONLY through a current-scene discovery event: audible self-introduction or identification, readable text available to {{user}}, or explicit recognition grounded in established visible facts.',
+        'The name must first appear through that discovery source. Do not use it in narrator exposition before the discovery event.',
         '',
-        'If you are about to introduce a NEW name for a person, entity, or location, you MUST use exactly ONE',
-        'unused name from the appropriate pool below. Do not invent, translate, derive, or modify a name.',
+        'The pool below applies ONLY to a person, entity, or location that has no name already established anywhere in this chat. A name is established once it has been spoken, written, or acknowledged by anyone, even if that person or place was absent when it was named. Never give a new name to something already named.',
         '',
-        `FEMALE: ${nameList(pool.female)}.`,
-        `MALE: ${nameList(pool.male)}.`,
-        `LOCATION: ${nameList(pool.location)}.`,
+        'IF you are about to introduce a NEW name for something with no established name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:',
         '',
-    ];
+        `FEMALE: ${nameList(femaleNames)}.`,
+        `MALE: ${nameList(maleNames)}.`,
+        `LOCATION: ${nameList(locationNames)}.`,
+        '',
+        'Previously revealed names MUST remain unchanged.',
+        'When a new name is revealed for something with no established name, using one of the provided names is MANDATORY and NON-NEGOTIABLE.',
+        'Any unauthorized NEW name renders the response INVALID.',
+        '',
+        'FORBIDDEN:',
+        '- DO NOT invent, modify, combine, translate, or derive names.',
+        '- DO NOT use ANY NEW name outside the appropriate pool.',
+        '- DO NOT give a pool name to anyone or anything already named earlier in this chat.',
+    ].join('\n');
 }
-
 
 function narrativeProxyUserActionFact(options = {}) {
     const coAuthorModeEnabled = options?.coAuthorModeEnabled === true;
