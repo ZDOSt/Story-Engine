@@ -21383,7 +21383,14 @@ const tests = [
       assert.match(source, /root\.adventureStartPromptCreatedAt = root\.adventureStartedAt/);
       assert.match(source, /function hasVisibleUserMessage/);
       assert.match(source, /function buildCurrentAdventureStartPrompt/);
-      assert.match(source, /return buildPlayerAdventureStartPrompt\(root\);/);
+            // The Isekai path deliberately returns an empty reminder, so the start must not require one:
+      // gating on non-empty text made every Isekai opening fail with a message about the
+      // generation API, which is not what was missing.
+      assert.match(source, /if \(genre === 'Isekai'\)[\s\S]{0,320}return '';/);
+      assert.doesNotMatch(source, /if \(!text \|\| !canGenerate\(context\)\)/);
+      assert.match(source, /if \(!canGenerate\(context\)\) \{/);
+      assert.match(source, /\.\.\.\(text \? \{ quiet_prompt: text, quietToLoud: true \} : \{\}\)/);
+assert.match(source, /return buildPlayerAdventureStartPrompt\(root\);/);
       assert.match(source, /function getBeginningAdventureStartPrompt/);
       assert.match(source, /'swipe', 'regenerate'/);
       assert.match(source, /if \(hasVisibleUserMessage\(context\)\) return ''/);

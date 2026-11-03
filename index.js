@@ -14497,8 +14497,13 @@ function syncPlayerGenreInput(creator, source = document) {
 }
 
 function submitPlayerAdventureStartPrompt(prompt, context = getContext(), actionIdentity = null) {
+    // An empty reminder is legitimate: the Isekai path carries everything in the opening's own
+    // contract, so there is no quiet prompt left to send. Requiring text here made Start Adventure
+    // fail silently on every Isekai opening with a message about the generation API.
     const text = String(prompt || '').trim();
-    if (!text || !canGenerate(context)) {
+    if (!canGenerate(context)) {
+        const keys = Object.keys(context || {}).filter(key => /generate|quiet/i.test(key));
+        console.warn(`[${EXTENSION_NAME}] adventure start: no generate() on the context. Generation-like keys: ${keys.join(', ') || 'none'}`);
         notifyError('Could not find SillyTavern generation API to start the adventure.', EXTENSION_NAME, { timeOut: 6000 });
         return false;
     }
@@ -14509,8 +14514,7 @@ function submitPlayerAdventureStartPrompt(prompt, context = getContext(), action
             try {
                 await generateSillyTavern('normal', {
                     automatic_trigger: true,
-                    quiet_prompt: text,
-                    quietToLoud: true,
+                    ...(text ? { quiet_prompt: text, quietToLoud: true } : {}),
                 }, false, context);
             } catch (error) {
                 if (!isCurrentStoryEngineEpoch(requestIdentity, context)) return;
