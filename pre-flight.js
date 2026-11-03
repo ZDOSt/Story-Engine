@@ -552,6 +552,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         '',
         '',
         ...renderNameRevealSection(options?.nameGeneration),
+        ...formatNarrationFormattingSection(),
     );
     return lines.join('\n');
 }
@@ -1483,6 +1484,19 @@ function isekaiAgeCompatibilityInstruction(ageGroup) {
     return '{{user}}\'s age is not explicitly numeric. Keep the Earth scene age-neutral and occupation-neutral; do not assign a school or workplace role.';
 }
 
+// The one block that says how a response is punctuated. Both the opening and every normal turn end
+// with it, because the opening is the example the rest of the chat reads as the shape of a response.
+function formatNarrationFormattingSection() {
+    return [
+        'FORMATTING',
+        '- Text enclosed in double quotation marks ("...") is audible dialogue.',
+        '- Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.',
+        '- Audible dialogue MUST be enclosed in double quotation marks and NEVER in single asterisks. Private mental communication MUST be enclosed in single asterisks and NEVER in double quotation marks.',
+        '- Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue.',
+        '- Unformatted text describes narration or action. It is NEVER audible dialogue.',
+    ];
+}
+
 function formatNarrativeContract({ summary, handoff, resolution, ledger, options = {} }) {
     return [
         'narrativeContract(input): {',
@@ -1518,12 +1532,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
         '',
         ...renderNameRevealSection(handoff?.nameGeneration),
-        'FORMATTING',
-        '- Text enclosed in double quotation marks ("...") is audible dialogue.',
-        '- Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.',
-        '- Audible dialogue MUST be enclosed in double quotation marks and NEVER in single asterisks. Private mental communication MUST be enclosed in single asterisks and NEVER in double quotation marks.',
-        '- Italicized text is NEVER ordinary inner thought, emphasis, narration, or audible dialogue.',
-        '- Unformatted text describes narration or action. It is NEVER audible dialogue.',
+        ...formatNarrationFormattingSection(),
         '}',
     ].join('\n');
 }

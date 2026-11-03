@@ -18262,6 +18262,13 @@ const tests = [
         genreSelection: null,
         adventureGenre: 'Fantasy',
       });
+      // The opening is the example the rest of the chat reads as the shape of a response, so it
+      // ends with the same formatting block every normal turn ends with.
+      assert.equal((introPrompt.match(/^FORMATTING$/gm) || []).length, 1);
+      assert.match(introPrompt, /FORMATTING\n- Text enclosed in double quotation marks \("..."\) is audible dialogue\./);
+      // It closes the document: nothing follows the last formatting bullet.
+      assert.match(introPrompt, /- Unformatted text describes narration or action\. It is NEVER audible dialogue\.\s*$/);
+
       // The opening runs no mechanics and follows no input, so the two rules that describe those
       // situations stay out. Everything else is present in full.
       assert.equal(introPrompt.includes('narrativeFacts(input) is authoritative'), false);
