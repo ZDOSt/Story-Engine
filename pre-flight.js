@@ -510,7 +510,6 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const isIsekaiOpening = Boolean(isekaiOpeningSeed) || isIsekaiGenre(options?.adventureGenre) || promptLooksIsekai(prompt);
     const genreLabel = formatAdventureIntroGenreLabel(options?.adventureGenre);
     const promptHeaderGenre = isIsekaiOpening ? 'ISEKAI' : genreLabel ? genreLabel.toUpperCase() : '';
-    const nameReveal = options?.nameGeneration?.namePool ? narrativeNameRevealFact(options.nameGeneration) : '';
     const lines = [
         'BINDING CONTRACT:',
         '',
@@ -540,14 +539,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     lines.push('', PLAYER_ADVENTURE_OPENING_CONTRACT);
     const startDispositionBlock = buildAdventureNonHumanInstruction(options?.adventureUserNonHuman);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
-    if (isekaiOpeningSeed) {
-        if (nameReveal) lines.push('', buildAdventureIntroNameRevealBlock(nameReveal));
-        lines.push('', prompt);
-    } else if (nameReveal) {
-        lines.push('', ...insertAdventureIntroNameReveal(prompt, nameReveal));
-    } else {
-        lines.push('', prompt);
-    }
+    lines.push('', prompt);
     // Mirrors the normal turn's output contract, so the name mandate is enforced as a response
     // requirement rather than only as one rule among many inside the mandate block.
     if (startDispositionBlock) lines.push('', startDispositionBlock);
@@ -558,92 +550,25 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
             ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
             : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.',
         '',
-        'Follow NAME REVEAL exactly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
-        'Do not invent, modify, substitute, or translate any proper name in this opening response.',
+        '',
+        ...renderNameRevealSection(options?.nameGeneration),
     );
     return lines.join('\n');
 }
 
 
-const ADVENTURE_INTRO_NAMING_CLAUSE = [
-    'OPENING TURN NAMING:',
-    'No scene is established yet and no name has been given anywhere in this chat, so this opening',
-    'establishes the cast. Any figure you introduce BY NAME in this response must take that name from',
-    'the pool above, at the moment it is introduced. Introducing a named figure from outside the pool',
-    'renders the response INVALID.',
-    'Background figures may stay unnamed; give them a role or a description instead of an invented name.',
-].join('\n');
 
 // The opening is where every name in the chat is decided, so the naming rules are stated as a
 // binding block rather than as a note. Reuses the pool and the already-reserved names from the
 // shared fact, so both documents draw the names from one place.
-function extractNameRevealPoolText(nameReveal = '') {
-    const lines = String(nameReveal || '').split('\n');
-    const start = lines.findIndex(line => /^FEMALE:/.test(line));
-    const end = lines.findIndex(line => /^LOCATION:/.test(line));
-    return start >= 0 && end >= start ? lines.slice(start, end + 1).join('\n') : '';
-}
 
-function extractNameRevealReservedText(nameReveal = '') {
-    const lines = String(nameReveal || '').split('\n');
-    const start = lines.findIndex(line => /^ALREADY NAMED IN THIS CHAT/.test(line));
-    if (start < 0) return '';
-    const end = lines.findIndex((line, index) => index > start && /^The supplied name pool/.test(line));
-    return lines.slice(start, end < 0 ? lines.length : end).join('\n').trim();
-}
 
-function buildAdventureIntroNameRevealBlock(nameReveal = '') {
-    const pool = extractNameRevealPoolText(nameReveal);
-    if (!pool) return '';
-    const reserved = extractNameRevealReservedText(nameReveal);
-    return [
-        'NAME REVEAL — BINDING:',
-        'A name is established once it has been spoken, written, or acknowledged by anyone in this chat,',
-        'even if that person or place was absent when it was named. Every established name MUST remain',
-        'exactly as written.',
-        '',
-        ...(reserved ? [reserved, ''] : []),
-        'A NEW name may enter the scene ONLY through one of these discovery events, perceived by {{user}}:',
-        '',
-        '- Someone names themselves or another aloud.',
-        '- The name is written where {{user}} can read it.',
-        '- Recognition grounded in an established visible fact, and spoken in the scene.',
-        '',
-        'The name MUST NOT appear in narrator exposition before that event.',
-        '',
-        'IF a new name is needed, you MUST use EXACTLY ONE UNUSED name from the pool below. This pool',
-        'applies ONLY for entities or locations with no established name.',
-        '',
-        pool,
-        '',
-        'Background figures may stay unnamed; give them a role or a direct description instead.',
-        '',
-        'STRICTLY PROHIBITED:',
-        '- DO NOT invent, alter, combine, derive, translate, or substitute any proper name.',
-        '- DO NOT use a pool name merely because it was supplied.',
-        '- DO NOT give a pool name to anything already named earlier in this chat.',
-        '- DO NOT reuse a name already revealed for a different person, place, or thing.',
-        '',
-        'Using any name from outside the pool, or revealing one outside a discovery event, renders the',
-        'response INVALID.',
-    ].join('\n');
-}
 
 function formatAdventureIntroGenreLabel(value) {
     const genre = String(value || '').trim();
     return genre && !isNoneText(genre) ? genre : '';
 }
 
-function insertAdventureIntroNameReveal(prompt = '', nameReveal = '') {
-    const promptText = valueOrNone(prompt);
-    const marker = 'START ADVENTURE REMINDER:';
-    const index = promptText.indexOf(marker);
-    const nameRevealBlock = buildAdventureIntroNameRevealBlock(nameReveal);
-    if (index < 0) return [nameRevealBlock, '', promptText];
-    const before = promptText.slice(0, index).trimEnd();
-    const after = promptText.slice(index).trimStart();
-    return before ? [before, '', nameRevealBlock, '', after] : [nameRevealBlock, '', after];
-}
 
 const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
@@ -2562,57 +2487,6 @@ function renderNameRevealSection(nameGeneration = {}) {
     ];
 }
 
-function narrativeNameRevealFact(nameGeneration = {}) {
-    const pool = nameGeneration?.namePool;
-    if (!pool) return 'No generated name pool is available; do not invent new proper names unless already established by visible chat, character card, lore, or tracker.';
-    const nameList = value => value.length ? value.join(', ') : 'none';
-    const femaleNames = (pool.female || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
-    const maleNames = (pool.male || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
-    const locationNames = (pool.location || []).map(name => String(name ?? '').trim()).filter(name => name && !isNoneText(name));
-    const reservedNames = (Array.isArray(nameGeneration?.reservedNames) ? nameGeneration.reservedNames : [])
-        .map(entry => ({
-            name: String(entry?.name ?? '').trim(),
-            bucket: String(entry?.bucket ?? '').trim(),
-            line: String(entry?.contextLine ?? '').replace(/\s+/g, ' ').trim(),
-        }))
-        .filter(entry => entry.name && !isNoneText(entry.name));
-    const reservedText = reservedNames.length ? [
-        'ALREADY NAMED IN THIS CHAT, AND NOT PRESENT YET:',
-        ...reservedNames.map(entry => {
-            const kind = entry.bucket === 'location' ? 'place' : 'person';
-            return entry.line
-                ? `- ${entry.name} (${kind}): "${entry.line}"`
-                : `- ${entry.name} (${kind}).`;
-        }),
-        'These names are already taken. If the person or place they belong to enters the scene, that IS its',
-        'name: reuse it. Do not draw a pool name for it, and do not treat the arrival as a new naming event.',
-        '',
-    ] : [];
-    return [
-        'MANDATE:',
-        ...reservedText,
-        'The supplied name pool contains approved unused candidates only; a listed candidate is not an established identity or permission to reveal it.',
-        'Reveal a NEW person, entity, or location name ONLY through a current-scene discovery event: audible self-introduction or identification, readable text available to {{user}}, or explicit recognition grounded in established visible facts.',
-        'The name must first appear through that discovery source. Do not use it in narrator exposition before the discovery event.',
-        '',
-        'The pool below applies ONLY to a person, entity, or location that has no name already established anywhere in this chat. A name is established once it has been spoken, written, or acknowledged by anyone, even if that person or place was absent when it was named. Never give a new name to something already named.',
-        '',
-        'IF you are about to introduce a NEW name for something with no established name, you MUST use EXACTLY ONE UNUSED name from the appropriate pool below:',
-        '',
-        `FEMALE: ${nameList(femaleNames)}.`,
-        `MALE: ${nameList(maleNames)}.`,
-        `LOCATION: ${nameList(locationNames)}.`,
-        '',
-        'Previously revealed names MUST remain unchanged.',
-        'When a new name is revealed for something with no established name, using one of the provided names is MANDATORY and NON-NEGOTIABLE.',
-        'Any unauthorized NEW name renders the response INVALID.',
-        '',
-        'FORBIDDEN:',
-        '- DO NOT invent, modify, combine, translate, or derive names.',
-        '- DO NOT use ANY NEW name outside the appropriate pool.',
-        '- DO NOT give a pool name to anyone or anything already named earlier in this chat.',
-    ].join('\n');
-}
 
 function narrativeProxyUserActionFact(options = {}) {
     const coAuthorModeEnabled = options?.coAuthorModeEnabled === true;
