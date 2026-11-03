@@ -521,8 +521,10 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         '#1 - proseRules',
         '',
         renderProseRulesBlock({
-            exclude: ['narrativeFacts', 'inputChronology'],
-            withPreamble: false,
+            // The opening runs no mechanics and follows no player input, so the two rules about
+            // those situations stay out. narrativeFacts stopped being a rule; inputChronology is
+            // the only one this still removes.
+            exclude: ['inputChronology'],
         }).trim(),
         '',
         ...renderAdventureIntroSceneStyleSection(options),
@@ -1644,11 +1646,6 @@ function isIsekaiGenre(value) {
 function promptLooksIsekai(prompt = '') {
     return /\bselected genre:\s*isekai\b/i.test(String(prompt || ''));
 }
-
-// The handoff carries a digest, not the full rule text. Every rule above declares its own
-// DIGEST block, and this function extracts those blocks from the very same literal, so the
-// reminder cannot paraphrase the rule it summarises. A rule that loses its DIGEST disappears
-// from the reminder, which the handoff test catches rather than leaving it to a reader.
 
 function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = {} }) {
     const facts = [
