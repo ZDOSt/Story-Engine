@@ -540,7 +540,9 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     lines.push('', PLAYER_ADVENTURE_OPENING_CONTRACT);
     const startDispositionBlock = buildAdventureNonHumanInstruction(options?.adventureUserNonHuman);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
-    lines.push('', prompt);
+    // An empty body is legitimate: the Isekai seed and the contract carry the opening, so there is
+    // nothing to splice in.
+    if (prompt && prompt !== '(none)') lines.push('', prompt);
     // Mirrors the normal turn's output contract, so the name mandate is enforced as a response
     // requirement rather than only as one rule among many inside the mandate block.
     if (startDispositionBlock) lines.push('', startDispositionBlock);
