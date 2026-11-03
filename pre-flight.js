@@ -518,6 +518,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         'write it correctly.',
         '',
         '#1 - proseRules',
+        ...formatProseRulesLeadIn(),
         '',
         renderProseRulesBlock({
             // The opening runs no mechanics and follows no player input, so the two rules about
@@ -549,7 +550,6 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         isIsekaiOpening
             ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
             : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.',
-        '',
         '',
         ...renderNameRevealSection(options?.nameGeneration),
         ...formatNarrationFormattingSection(),
@@ -1486,6 +1486,17 @@ function isekaiAgeCompatibilityInstruction(ageGroup) {
 
 // The one block that says how a response is punctuated. Both the opening and every normal turn end
 // with it, because the opening is the example the rest of the chat reads as the shape of a response.
+// The opening has no #2 to point at, so its version stops before the facts clause. One builder, so
+// the two documents announce their rules the same way.
+function formatProseRulesLeadIn({ factsSection = false } = {}) {
+    return factsSection
+        ? [
+            'These MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence,',
+            'including sentences that state the facts in #2 narrativeFacts.',
+        ]
+        : ['These MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence.'];
+}
+
 function formatNarrationFormattingSection() {
     return [
         'FORMATTING',
@@ -1505,8 +1516,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '#1 proseRules governs HOW to write. #2 narrativeFacts governs WHAT happened, and #3 outputCheckpoint governs formatting.',
         '',
         '#1 - proseRules',
-        'These MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence,',
-        'including sentences that state the facts in #2 narrativeFacts.',
+        ...formatProseRulesLeadIn({ factsSection: true }),
         '',
         renderProseRulesBlock(),
         '',

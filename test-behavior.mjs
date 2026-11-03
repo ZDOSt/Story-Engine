@@ -18262,6 +18262,12 @@ const tests = [
         genreSelection: null,
         adventureGenre: 'Fantasy',
       });
+      // The rules are announced the same way as on a normal turn, minus the pointer to #2, which
+      // the opening does not contain.
+      assert.match(introPrompt, /#1 - proseRules\nThese MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence\.\n\nfunction strictEpistemology/);
+      assert.doesNotMatch(introPrompt, /including sentences that state the facts in #2/);
+      assert.doesNotMatch(introPrompt, /\n{3,}/);
+
       // The opening is the example the rest of the chat reads as the shape of a response, so it
       // ends with the same formatting block every normal turn ends with.
       assert.equal((introPrompt.match(/^FORMATTING$/gm) || []).length, 1);
