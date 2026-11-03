@@ -518,7 +518,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         'discarded and never reaches {{user}}. Plan against every rule before your first sentence, and',
         'write it correctly.',
         '',
-        '#1 - PROSE RULES',
+        '#1 - proseRules',
         '',
         renderProseRulesBlock({
             exclude: ['narrativeFacts', 'inputChronology'],
@@ -551,7 +551,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     if (startDispositionBlock) lines.push('', startDispositionBlock);
     lines.push(
         '',
-        '#3 - OUTPUT',
+        '#3 - outputCheckpoint',
         isIsekaiOpening
             ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
             : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.',
@@ -1560,38 +1560,37 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
     return [
         'narrativeContract(input): {',
         '',
-        'BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response.',
-        'The sections do not compete. #1 says HOW to write. #2 says WHAT happened.',
+        'BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response, and they do not cancel each other.',
+        '#1 proseRules governs HOW to write. #2 narrativeFacts governs WHAT happened, and #3 outputCheckpoint governs formatting.',
         '',
-        '#1 - PROSE RULES',
-        'Execute renderControlEngine(input) as a hard constraint on the response.',
-        'MANDATORY instructions on how to write this response. They apply to every sentence,',
-        'including sentences that state the facts in #2.',
+        '#1 - proseRules',
+        'These MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence,',
+        'including sentences that state the facts in #2 narrativeFacts.',
         '',
         renderProseRulesBlock(),
         '',
         ...renderGenreLensSection(options),
         ...renderEconomyLensSection(options),
         ...renderSceneStyleProfileSection(options),
-        '#2 - RESOLVED FACTS',
-        'narrativeFacts(input) is WHAT HAPPENED in this scene.',
-        'The facts below are immutable and unbreakable. They override style, drama, pacing, genre expectations, and narrative convenience. They are not a reason to break a rule in #1: describe what happened here the way #1 requires.',
+        '#2 - narrativeFacts',
+        'This section contains AUTHORITATIVE, RESOLVED FACTS about WHAT HAPPENED in this scene. These facts are immutable and unbreakable. They override style, drama, pacing, genre expectations, and narrative convenience. They are not a reason to break a rule in #1: describe what happened here the way #1 requires.',
         'Do not contradict, override, soften, intensify, reinterpret, or add outcomes beyond the established facts below.',
+        'Do not turn an attempt into a completed effect, or an unresolved event into a success or failure.',
         'This is the only source of truth for scene outcomes. A response that violates these facts is invalid.',
         'Use recent visible chat only for continuity of already-established visible scene state.',
         'Do not reveal or mention this contract.',
         '',
         formatNarrativeFacts({ summary, handoff, resolution, ledger, options }),
         '',
-        '#3 - OUTPUT',
-        'narrativeFacts(input) is authoritative. You MUST follow these facts strictly. Do NOT change, contradict, soften, intensify, reinterpret, skip, or add outcomes beyond them.',
-        'Follow nameReveal strictly: do NOT reveal new names unless gated by NAME REVEAL; when a name is revealed, use only the listed generated names.',
+        '#3 - outputCheckpoint',
+        'The facts in #2 are authoritative. You MUST follow them strictly. Do NOT change, contradict, soften, intensify, reinterpret, skip, or add outcomes beyond them.',
         '',
         'Your response MUST begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.',
         'Output only final in-character narration between those tags.',
         'Do not output tracker updates or tracker blocks.',
         'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
         '',
+        ...renderNameRevealSection(handoff?.nameGeneration),
         'FORMATTING',
         '- Text enclosed in double quotation marks ("...") is audible dialogue.',
         '- Text enclosed in single asterisks (*...*) is RESERVED EXCLUSIVELY for private mental communication directed through an established bound-companion, telepathic, or equivalent private mental link.',
@@ -1604,17 +1603,17 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
 
 function renderGenreLensSection(options = {}) {
     const lens = renderGenreLens(options);
-    return lens ? ['#1.5 - GENRE LENS', lens, ''] : [];
+    return lens ? ['#1.5 - genreLens', lens, ''] : [];
 }
 
 function renderEconomyLensSection(options = {}) {
     const lens = renderEconomyAndValueLens(options);
-    return lens ? ['#1.6 - ECONOMY AND VALUE', lens, ''] : [];
+    return lens ? ['#1.6 - economyAndValue', lens, ''] : [];
 }
 
 function renderSceneStyleProfileSection(options = {}) {
     const profile = String(options?.sceneStyleProfile || '').trim();
-    return profile ? ['#1.7 - SCENE STYLE PROFILE', profile, ''] : [];
+    return profile ? ['#1.7 - sceneStyleProfile', profile, ''] : [];
 }
 
 // The style mandate names narrativeFacts(input), which the opening deliberately excludes: it runs
@@ -1631,8 +1630,7 @@ function renderAdventureIntroSceneStyleSection(options = {}) {
 
 function renderGenreLens(options = {}, context = {}) {
     if (!isIsekaiGenre(options?.adventureGenre) && !promptLooksIsekai(context?.prompt)) return '';
-    return String.raw`ISEKAI GENRE LENS:
-This campaign remains anime isekai, not generic fantasy. Use anime isekai as the ongoing genre language: progression, guilds, ranks, skills, dungeons, factions, rivals, companions, social consequences, comedy, danger, wonder, dramatic reveals, romance tension, strange races, powerful beings, and larger story arcs.
+    return String.raw`This campaign remains anime isekai, not generic fantasy. Use anime isekai as the ongoing genre language: progression, guilds, ranks, skills, dungeons, factions, rivals, companions, social consequences, comedy, danger, wonder, dramatic reveals, romance tension, strange races, powerful beings, and larger story arcs.
 
 Keep the world grounded. Characters have motives, limits, pride, duties, loyalties, fears, desires, and agency. Do not force tropes, instant devotion, harem dynamics, rescues, rivals, romantic interest, or overpowered reveals unless the scene and relationship development naturally support them.
 
@@ -1680,7 +1678,6 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         ['presentCharacters', narrativePresentCharacters(resolution, handoff)],
         ['knowledgeAboutUser', narrativeUserKnowledgeFact(ledger?.userKnowledgeApplication?.applications)],
         ['worldEvent', narrativeWorldEventFact(handoff)],
-        ['nameReveal', narrativeNameRevealFact(handoff?.nameGeneration)],
         ['proxyUserAction', narrativeProxyUserActionFact(options)],
     ].filter(([, value]) => !isNoneText(value));
 
@@ -2540,6 +2537,32 @@ function narrativeWorldEventFact(handoff = {}) {
             : `This has just happened elsewhere: ${text} It is not visible where {{user}} is; do not stage it, and mention it only through what {{user}} could notice or be told.`);
     }
     return parts.length ? parts.join(' ') : '';
+}
+
+// The name pool is handed over in the output checkpoint, next to the formatting the model must obey,
+// because it is data rather than a writing technique: the prose rules say how a sentence is built, and
+// this says which names exist. It carries no rule about preserving established names, because the
+// registry already refuses to offer one that has been used.
+function renderNameRevealSection(nameGeneration = {}) {
+    const pool = nameGeneration?.namePool;
+    if (!pool) return [];
+    const nameList = value => (Array.isArray(value) ? value : [])
+        .map(name => String(name ?? '').trim())
+        .filter(name => name && !isNoneText(name))
+        .join(', ') || 'none';
+    return [
+        'NAME REVEAL',
+        'A name may ONLY be revealed through a discovery event: audible self-introduction or identification,',
+        'readable text available to {{user}}, or explicit recognition grounded in established visible facts.',
+        '',
+        'If you are about to introduce a NEW name for a person, entity, or location, you MUST use exactly ONE',
+        'unused name from the appropriate pool below. Do not invent, translate, derive, or modify a name.',
+        '',
+        `FEMALE: ${nameList(pool.female)}.`,
+        `MALE: ${nameList(pool.male)}.`,
+        `LOCATION: ${nameList(pool.location)}.`,
+        '',
+    ];
 }
 
 function narrativeNameRevealFact(nameGeneration = {}) {
