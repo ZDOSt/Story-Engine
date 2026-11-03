@@ -18268,6 +18268,12 @@ const tests = [
       assert.doesNotMatch(introPrompt, /including sentences that state the facts in #2/);
       assert.doesNotMatch(introPrompt, /\n{3,}/);
 
+      // The output bans apply to the opening too, without the tags the pipeline does not read there.
+      assert.match(introPrompt, /Output only final in-character narration\./);
+      assert.match(introPrompt, /Do not output labels, analysis, bullets, commentary, markdown fences/);
+      assert.doesNotMatch(introPrompt, /between those tags/);
+      assert.doesNotMatch(introPrompt, /BEGIN_FINAL_NARRATION/);
+
       // The opening is the example the rest of the chat reads as the shape of a response, so it
       // ends with the same formatting block every normal turn ends with.
       assert.equal((introPrompt.match(/^FORMATTING$/gm) || []).length, 1);

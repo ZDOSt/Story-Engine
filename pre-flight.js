@@ -551,6 +551,8 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
             ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
             : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.',
         '',
+        ...formatNarrationOutputBans(),
+        '',
         ...renderNameRevealSection(options?.nameGeneration),
         ...formatNarrationFormattingSection(),
     );
@@ -1497,6 +1499,20 @@ function formatProseRulesLeadIn({ factsSection = false } = {}) {
         : ['These MANDATORY instructions govern HOW to write this response; every rule below applies to every sentence.'];
 }
 
+// What may leave the model at all. The tags are only asked for where the pipeline reads them; the
+// rest is prose shape, and it applies to the opening as much as to any other turn, because the
+// opening is the example the rest of the chat copies.
+function formatNarrationOutputBans({ withTags = false } = {}) {
+    return [
+        ...(withTags ? ['Your response MUST begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.'] : []),
+        withTags
+            ? 'Output only final in-character narration between those tags.'
+            : 'Output only final in-character narration.',
+        'Do not output tracker updates or tracker blocks.',
+        'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
+    ];
+}
+
 function formatNarrationFormattingSection() {
     return [
         'FORMATTING',
@@ -1536,10 +1552,7 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '#3 - outputCheckpoint',
         'The facts in #2 are authoritative. You MUST follow them strictly. Do NOT change, contradict, soften, intensify, reinterpret, skip, or add outcomes beyond them.',
         '',
-        'Your response MUST begin with BEGIN_FINAL_NARRATION and end with END_FINAL_NARRATION.',
-        'Output only final in-character narration between those tags.',
-        'Do not output tracker updates or tracker blocks.',
-        'Do not output labels, analysis, bullets, commentary, markdown fences, metadata, tracker updates, XML, JSON, or hidden bookkeeping.',
+        ...formatNarrationOutputBans({ withTags: true }),
         '',
         ...renderNameRevealSection(handoff?.nameGeneration),
         ...formatNarrationFormattingSection(),
