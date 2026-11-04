@@ -18290,6 +18290,18 @@ const tests = [
         'the begin instruction belongs to #2',
       );
 
+      // "these rules:" points at the contract, so the contract follows it directly and the begin
+      // line comes after, immediately above the beats it names.
+      assert.ok(
+        introPrompt.indexOf('MUST abide by these rules:') < introPrompt.indexOf('Keep the opening between 150 and 300 words.'),
+        'the contract follows the sentence that announces it',
+      );
+      assert.ok(
+        introPrompt.indexOf('Keep the opening between 150 and 300 words.') < introPrompt.indexOf('Begin the opening scene now'),
+        'the begin line comes after the contract',
+      );
+      assert.doesNotMatch(introPrompt, /START_ADVENTURE_PROMPT/);
+
       // The opening is the example the rest of the chat reads as the shape of a response, so it
       // ends with the same formatting block every normal turn ends with.
       assert.equal((introPrompt.match(/^FORMATTING$/gm) || []).length, 1);
@@ -18586,7 +18598,7 @@ const tests = [
       assert.match(introPrompt, /#1\.7 - sceneStyleProfile/);
       assert.match(introPrompt, /SCENE STYLE PROFILE: Use vivid, scene-aware prose\./);
       assert.doesNotMatch(introPrompt, /#2 - narrativeFacts|==MECHANICS_RESULTS==/);
-      assert.match(introPrompt, /START_ADVENTURE_PROMPT: ISEKAI/);
+      assert.match(introPrompt, /#2 - adventureOpening\nThis is the opening turn of a new isekai adventure\./);
       assert.match(introPrompt, /This is the opening turn of a new isekai adventure\./);
       assert.doesNotMatch(introPrompt, /Narrate the opening immediately\./);
       assert.doesNotMatch(introPrompt, /Use the established character\/context and the required seeds below\./);
@@ -18616,7 +18628,7 @@ const tests = [
       assert.match(introPrompt, /A name may ONLY be revealed through a discovery event/);
       assert.match(introPrompt, /Do not invent, translate, derive, or modify a name\./);
       assert.ok(
-        introPrompt.indexOf('#1 - proseRules') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
+        introPrompt.indexOf('#1 - proseRules') < introPrompt.indexOf('#2 - adventureOpening'),
         'Trimmed prose rules should precede the Start Adventure handoff.',
       );
       assert.ok(
@@ -18624,11 +18636,11 @@ const tests = [
         'Render-control rules should precede the Start Adventure scene style profile.',
       );
       assert.ok(
-        introPrompt.indexOf('#1.7 - sceneStyleProfile') < introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI'),
+        introPrompt.indexOf('#1.7 - sceneStyleProfile') < introPrompt.indexOf('#2 - adventureOpening'),
         'Start Adventure scene style profile should precede the adventure prompt.',
       );
       assert.ok(
-        introPrompt.indexOf('START_ADVENTURE_PROMPT: ISEKAI') < introPrompt.indexOf('BEAT #1: EARTH LAST MOMENTS'),
+        introPrompt.indexOf('#2 - adventureOpening') < introPrompt.indexOf('BEAT #1: EARTH LAST MOMENTS'),
         'Isekai transition/opening seed should appear after the Start Adventure mandate.',
       );
       assert.ok(
@@ -18680,7 +18692,7 @@ const tests = [
           },
         },
       );
-      assert.match(fantasyIntroPrompt, /START_ADVENTURE_PROMPT: FANTASY/);
+      assert.match(fantasyIntroPrompt, /#2 - adventureOpening\nThis is the opening turn of a new Fantasy adventure\./);
       assert.match(fantasyIntroPrompt, /^BINDING, NON-NEGOTIABLE CONTRACT:/);
       assert.match(introPrompt, /#1 proseRules governs HOW to write\. #2 adventureOpening governs how the/);
       assert.match(fantasyIntroPrompt, /This is the opening turn of a new Fantasy adventure\./);
@@ -18692,7 +18704,7 @@ const tests = [
       assert.match(fantasyIntroPrompt, /NAME REVEAL/);
       assert.doesNotMatch(fantasyIntroPrompt, /#1\.7 - sceneStyleProfile/);
       assert.ok(
-        fantasyIntroPrompt.indexOf('#1 - proseRules') < fantasyIntroPrompt.indexOf('START_ADVENTURE_PROMPT: FANTASY'),
+        fantasyIntroPrompt.indexOf('#1 - proseRules') < fantasyIntroPrompt.indexOf('#2 - adventureOpening'),
         'Trimmed prose rules should precede every Start Adventure genre handoff.',
       );
       assert.ok(

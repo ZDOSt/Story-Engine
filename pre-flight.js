@@ -509,7 +509,6 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const isekaiOpeningSeed = renderIsekaiOpeningSeed(options?.isekaiOpeningSeed);
     const isIsekaiOpening = Boolean(isekaiOpeningSeed) || isIsekaiGenre(options?.adventureGenre) || promptLooksIsekai(prompt);
     const genreLabel = formatAdventureIntroGenreLabel(options?.adventureGenre);
-    const promptHeaderGenre = isIsekaiOpening ? 'ISEKAI' : genreLabel ? genreLabel.toUpperCase() : '';
     const beginLine = isIsekaiOpening
         ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
         : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.';
@@ -534,13 +533,13 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         '',
         ...renderAdventureIntroSceneStyleSection(options),
         '#2 - adventureOpening',
-        promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
         openingSentence,
         '',
-        // The begin instruction names the beats, so it belongs with them rather than at the end.
-        beginLine,
-        '',
         PLAYER_ADVENTURE_OPENING_CONTRACT,
+        '',
+        // The begin instruction names the beats, so it sits directly above them: the contract is
+        // what "these rules" points at, and this is the sentence that sends the model there.
+        beginLine,
     ];
     const startDispositionBlock = buildAdventureNonHumanInstruction(options?.adventureUserNonHuman);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
