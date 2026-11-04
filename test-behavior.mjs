@@ -15330,6 +15330,9 @@ const tests = [
       assert.match(demon, /VISIBLY INHUMAN — BINDING:/);
       assert.match(demon, /visibly NON-HUMAN/);
       assert.match(demon, /including whoever speaks first/);
+      // Scoped to the world being entered: on an Earth commute, a visibly inhuman student is a
+      // different claim, and the block must not be read as describing both worlds.
+      assert.match(demon, /Everyone in the new world can see it before anyone speaks/);
       assert.match(demon, /It is the body they are reacting to, not a rumour/);
       assert.match(demon, /NOT comfort, attraction, trust, or willingness/);
       assert.match(demon, /Do not write a scene in which \{\{user\}\} is served like an ordinary customer/);
@@ -18274,6 +18277,19 @@ const tests = [
       assert.doesNotMatch(introPrompt, /between those tags/);
       assert.doesNotMatch(introPrompt, /BEGIN_FINAL_NARRATION/);
 
+      // Three sections, and each one carries one job: the rules, the opening, the output.
+      assert.match(introPrompt, /#1 - proseRules[\s\S]*#2 - adventureOpening[\s\S]*#3 - outputCheckpoint/);
+      // The opening's own contract lives in #2, not bundled under the prose rules.
+      assert.ok(
+        introPrompt.indexOf('#2 - adventureOpening') < introPrompt.indexOf('Keep the opening between 150 and 300 words.'),
+        'the opening contract belongs to #2',
+      );
+      // And the begin instruction moved to where the beats are.
+      assert.ok(
+        introPrompt.indexOf('Begin the opening scene now in the selected genre') < introPrompt.indexOf('#3 - outputCheckpoint'),
+        'the begin instruction belongs to #2',
+      );
+
       // The opening is the example the rest of the chat reads as the shape of a response, so it
       // ends with the same formatting block every normal turn ends with.
       assert.equal((introPrompt.match(/^FORMATTING$/gm) || []).length, 1);
@@ -18564,8 +18580,8 @@ const tests = [
           sceneStyleProfile: 'SCENE STYLE PROFILE: Use vivid, scene-aware prose.',
         },
       );
-      assert.match(introPrompt, /^BINDING CONTRACT:/);
-      assert.match(introPrompt, /Your response MUST comply with every rule below/);
+      assert.match(introPrompt, /^BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response, and they do not cancel each other\./);
+      assert.match(introPrompt, /#1 proseRules governs HOW to write\. #2 adventureOpening governs how the/);
       assert.match(introPrompt, /ALWAYS combine closely related actions, gestures, dialogue, and immediate consequences/);
       assert.match(introPrompt, /#1\.7 - sceneStyleProfile/);
       assert.match(introPrompt, /SCENE STYLE PROFILE: Use vivid, scene-aware prose\./);
@@ -18665,8 +18681,8 @@ const tests = [
         },
       );
       assert.match(fantasyIntroPrompt, /START_ADVENTURE_PROMPT: FANTASY/);
-      assert.match(fantasyIntroPrompt, /^BINDING CONTRACT:/);
-      assert.match(introPrompt, /Your response MUST comply with every rule below/);
+      assert.match(fantasyIntroPrompt, /^BINDING, NON-NEGOTIABLE CONTRACT:/);
+      assert.match(introPrompt, /#1 proseRules governs HOW to write\. #2 adventureOpening governs how the/);
       assert.match(fantasyIntroPrompt, /This is the opening turn of a new Fantasy adventure\./);
       assert.match(fantasyIntroPrompt, /GENRE OPENING:/);
       assert.match(fantasyIntroPrompt, /You MUST begin in the selected genre: Fantasy\./);
@@ -18689,7 +18705,7 @@ const tests = [
       );
       assert.doesNotMatch(fantasyIntroPrompt, /You MUST narrate BOTH required beats below|BEAT #1: EARTH LAST MOMENTS/);
       const introAudit = formatAdventureIntroNarratorPromptContext('Begin the adventure.', { adventureGenre: 'Fantasy' });
-      assert.match(introAudit, /==NARRATOR_MODEL_HANDOFF==\nBINDING CONTRACT:/);
+      assert.match(introAudit, /==NARRATOR_MODEL_HANDOFF==\nBINDING, NON-NEGOTIABLE CONTRACT:/);
       assert.match(introAudit, /exact narrator-facing handoff below/);
     },
   },

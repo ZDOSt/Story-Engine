@@ -498,7 +498,7 @@ function buildAdventureNonHumanInstruction(userNonHuman = false) {
     if (userNonHuman !== true) return '';
     return [
         'VISIBLY INHUMAN — BINDING:',
-        '{{user}} is visibly NON-HUMAN. Everyone here can see it before anyone speaks, including whoever speaks first. It is the body they are reacting to, not a rumour, reputation, or anything {{user}} has done.',
+        '{{user}} is visibly NON-HUMAN. Everyone in the new world can see it before anyone speaks, including whoever speaks first. It is the body they are reacting to, not a rumour, reputation, or anything {{user}} has done.',
         'Other characters react with fear: they want distance, safety, witnesses, or an exit. If they stay, answer, or comply, it is defensive appeasement or caution; NOT comfort, attraction, trust, or willingness.',
         'Show this physically from each character\'s first appearance, and never by naming the feeling. Do not write a scene in which {{user}} is served like an ordinary customer.',
     ].join('\n');
@@ -510,12 +510,17 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
     const isIsekaiOpening = Boolean(isekaiOpeningSeed) || isIsekaiGenre(options?.adventureGenre) || promptLooksIsekai(prompt);
     const genreLabel = formatAdventureIntroGenreLabel(options?.adventureGenre);
     const promptHeaderGenre = isIsekaiOpening ? 'ISEKAI' : genreLabel ? genreLabel.toUpperCase() : '';
+    const beginLine = isIsekaiOpening
+        ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
+        : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.';
+    const openingSentence = isIsekaiOpening
+        ? 'This is the opening turn of a new isekai adventure. The opening scene MUST abide by these rules:'
+        : genreLabel
+            ? `This is the opening turn of a new ${genreLabel} adventure. The opening scene MUST abide by these rules:`
+            : 'This is the opening turn of a new adventure. The opening scene MUST abide by these rules:';
     const lines = [
-        'BINDING CONTRACT:',
-        '',
-        'Your response MUST comply with every rule below. A response that breaks one is INVALID: it is',
-        'discarded and never reaches {{user}}. Plan against every rule before your first sentence, and',
-        'write it correctly.',
+        'BINDING, NON-NEGOTIABLE CONTRACT: Every section below applies to this response, and they do not cancel each other.',
+        '#1 proseRules governs HOW to write. #2 adventureOpening governs how the adventure starts, and #3 outputCheckpoint covers name reveal, formatting, and last-minute restrictions.',
         '',
         '#1 - proseRules',
         ...formatProseRulesLeadIn(),
@@ -528,31 +533,24 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         }).trim(),
         '',
         ...renderAdventureIntroSceneStyleSection(options),
+        '#2 - adventureOpening',
         promptHeaderGenre ? `START_ADVENTURE_PROMPT: ${promptHeaderGenre}` : 'START_ADVENTURE_PROMPT:',
-        isIsekaiOpening
-            ? 'This is the opening turn of a new isekai adventure. The opening scene MUST abide by these rules:'
-            : genreLabel
-                ? `This is the opening turn of a new ${genreLabel} adventure. The opening scene MUST abide by these rules:`
-                : 'This is the opening turn of a new adventure. The opening scene MUST abide by these rules:',
+        openingSentence,
+        '',
+        // The begin instruction names the beats, so it belongs with them rather than at the end.
+        beginLine,
+        '',
+        PLAYER_ADVENTURE_OPENING_CONTRACT,
     ];
-    // The contract governs the whole opening turn, so it is stated before the Isekai seed and the
-    // adventure prompt body rather than after them.
-    lines.push('', PLAYER_ADVENTURE_OPENING_CONTRACT);
     const startDispositionBlock = buildAdventureNonHumanInstruction(options?.adventureUserNonHuman);
     if (isekaiOpeningSeed) lines.push('', isekaiOpeningSeed);
     // An empty body is legitimate: the Isekai seed and the contract carry the opening, so there is
     // nothing to splice in.
     if (prompt && prompt !== '(none)') lines.push('', prompt);
-    // Mirrors the normal turn's output contract, so the name mandate is enforced as a response
-    // requirement rather than only as one rule among many inside the mandate block.
     if (startDispositionBlock) lines.push('', startDispositionBlock);
     lines.push(
         '',
         '#3 - outputCheckpoint',
-        isIsekaiOpening
-            ? 'Begin the Earth last moment, then continue directly into the Isekai opening. Do not explain the setup, instructions, process, or reasoning.'
-            : 'Begin the opening scene now in the selected genre. Do not explain the setup, instructions, process, or reasoning.',
-        '',
         ...formatNarrationOutputBans(),
         '',
         ...renderNameRevealSection(options?.nameGeneration),
