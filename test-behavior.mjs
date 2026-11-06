@@ -9086,9 +9086,9 @@ const tests = [
       ));
       const pool = report.finalNarrativeHandoff.nameGeneration.namePool;
       assert.equal(report.finalNarrativeHandoff.nameGeneration.style, 'Balanced Fantasy');
-      assert.equal(pool.male.length, 3);
-      assert.equal(pool.female.length, 3);
-      assert.equal(pool.location.length, 3);
+      assert.equal(pool.male.length, 5);
+      assert.equal(pool.female.length, 5);
+      assert.equal(pool.location.length, 5);
       assert.equal('semanticCandidates' in report.finalNarrativeHandoff.nameGeneration, false);
       assert.equal('semanticAccepted' in report.finalNarrativeHandoff.nameGeneration, false);
       assert.equal('semanticRejected' in report.finalNarrativeHandoff.nameGeneration, false);
@@ -9218,9 +9218,9 @@ const tests = [
       });
       const modernPool = modern.finalNarrativeHandoff.nameGeneration.namePool;
       assert.equal(modern.finalNarrativeHandoff.nameGeneration.style, 'Modern');
-      assert.equal(modernPool.male.length, 3);
-      assert.equal(modernPool.female.length, 3);
-      assert.equal(modernPool.location.length, 3);
+      assert.equal(modernPool.male.length, 5);
+      assert.equal(modernPool.female.length, 5);
+      assert.equal(modernPool.location.length, 5);
       assert.equal(modern.finalNarrativeHandoff.nameGeneration.deterministicCue, 'deterministic style profile');
       const modernMale = ['Adrian', 'Marcus', 'Victor', 'Nolan', 'Ethan', 'Kevin', 'Brian', 'Simon', 'Lucas', 'Caleb', 'Julian', 'Martin', 'Wesley', 'Carter', 'David', 'James', 'Robert', 'Michael'];
       const modernFemale = ['Olivia', 'Sophia', 'Amelia', 'Elena', 'Rachel', 'Hannah', 'Megan', 'Julia', 'Carmen', 'Monica', 'Isabel', 'Vanessa', 'Serena', 'Denise', 'Sarah', 'Alice', 'Eleanor', 'Natalie'];
@@ -9422,7 +9422,7 @@ const tests = [
         }),
       });
       const locations = report.finalNarrativeHandoff.nameGeneration.namePool.location;
-      assert.equal(locations.length, 3);
+      assert.equal(locations.length, 5);
       assert.match(locations[0], /^[A-Z][a-z]{6,13}$/);
     },
   },
@@ -18301,6 +18301,16 @@ const tests = [
         'the begin line comes after the contract',
       );
       assert.doesNotMatch(introPrompt, /START_ADVENTURE_PROMPT/);
+
+      // The opening may name people the character already belongs to; every other turn may not.
+      // Rendered with a pool, because the paragraph lives inside NAME REVEAL.
+      const openingWithPool = formatAdventureIntroNarratorModelPromptContext('Begin the adventure.', {
+        adventureGenre: 'Fantasy',
+        nameGeneration: { namePool: { female: ['A'], male: ['B'], location: ['C'] } },
+      });
+      assert.match(openingWithPool, /PEOPLE \{\{user\}\} ALREADY KNOWS/);
+      assert.match(openingWithPool, /would this person already know \{\{user\}\}'s name, and \{\{user\}\} theirs,/);
+      assert.match(openingWithPool, /Do not use this allowance for someone \{\{user\}\} has just met/);
 
       // The opening is the example the rest of the chat reads as the shape of a response, so it
       // ends with the same formatting block every normal turn ends with.

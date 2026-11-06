@@ -552,7 +552,7 @@ export function formatAdventureIntroNarratorModelPromptContext(adventurePrompt =
         '#3 - outputCheckpoint',
         ...formatNarrationOutputBans(),
         '',
-        ...renderNameRevealSection(options?.nameGeneration),
+        ...renderNameRevealSection(options?.nameGeneration, { openingTurn: true }),
         ...formatNarrationFormattingSection(),
     );
     return lines.join('\n');
@@ -2496,7 +2496,26 @@ function narrativeWorldEventFact(handoff = {}) {
 // because it is data rather than a writing technique: the prose rules say how a sentence is built, and
 // this says which names exist. It carries no rule about preserving established names, because the
 // registry already refuses to offer one that has been used.
-function renderNameRevealSection(nameGeneration = {}) {
+// The opening names people the character already belongs to. There is no discovery event for a
+// teacher you have been taught by for a term, and asking a classmate their own name is not a scene
+// anyone would write. The test is symmetrical, so it works in a school, a barracks or a caravan
+// without a per-genre list: they would already know each other's names.
+const NAME_REVEAL_KNOWN_PEOPLE = [
+    'PEOPLE {{user}} ALREADY KNOWS',
+    'Some people in this opening belong to {{user}}\'s life rather than to the scene you are writing:',
+    'classmates, colleagues, teachers, crew, comrades, neighbours, family, the people they were already',
+    'living or working among before this moment.',
+    '',
+    'You MAY name them from the pool below the first time they appear, without waiting for a discovery',
+    'event. The test is one question: would this person already know {{user}}\'s name, and {{user}} theirs,',
+    'before the scene began?',
+    '',
+    'Anyone who fails that test is a stranger and follows the rule above without exception: a name only',
+    'through a discovery event. Do not use this allowance for someone {{user}} has just met, however',
+    'important they turn out to be, and do not invent a shared past to justify it.',
+];
+
+function renderNameRevealSection(nameGeneration = {}, options = {}) {
     const pool = nameGeneration?.namePool;
     if (!pool) return [];
     const nameList = value => (Array.isArray(value) ? value : [])
@@ -2511,6 +2530,8 @@ function renderNameRevealSection(nameGeneration = {}) {
         'If you are about to introduce a NEW name for a person, entity, or location, you MUST use exactly ONE',
         'unused name from the appropriate pool below. Do not invent, translate, derive, or modify a name.',
         '',
+        // Only the opening: a chat does not begin with a cast the player already knows.
+        ...(options?.openingTurn ? [...NAME_REVEAL_KNOWN_PEOPLE, ''] : []),
         `FEMALE: ${nameList(pool.female)}.`,
         `MALE: ${nameList(pool.male)}.`,
         `LOCATION: ${nameList(pool.location)}.`,

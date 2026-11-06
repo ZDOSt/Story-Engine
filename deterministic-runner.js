@@ -375,7 +375,7 @@ function packetBoundaryActivityActive(packet) {
 }
 
 const NPC_PROACTIVITY_CAP = 3;
-const NAME_POOL_SIZE = 3;
+const NAME_POOL_SIZE = 5;
 const RESERVED_NAME_BUCKETS = Object.freeze(['male', 'female', 'location']);
 const RESERVED_NAME_LIMIT = 24;
 export const NAME_SWIPE_VERSION = 1;
