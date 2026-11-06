@@ -576,7 +576,7 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'traffic_rescue_accident',
         label: 'Traffic Fatality / Rescue Accident',
-        guidance: 'Use a brief Earth-side final moment involving sudden traffic danger, collision, or an attempted rescue. Keep it compact and avoid making the vehicle itself the point of the scene.',
+        guidance: 'Use an Earth-side final moment involving sudden traffic danger, collision, or an attempted rescue. Keep it compact and avoid making the vehicle itself the point of the scene.',
     },
     {
         key: 'public_disaster',
@@ -596,7 +596,7 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'heroic_sacrifice',
         label: 'Heroic Sacrifice',
-        guidance: 'Use a final moment where the character protects, rescues, shields, or trades their safety for someone else. Keep the sacrifice clear but brief.',
+        guidance: 'Use a final moment where the character protects, rescues, shields, or trades their safety for someone else. Keep the sacrifice clear.',
     },
     {
         key: 'overwork_collapse',
@@ -755,7 +755,7 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'student_sports_event_transfer',
         label: 'School Sports Event Crossing',
-        guidance: 'Use a sports day, tournament, practice, or athletic event involving {{user}} and classmates. Keep the Earth-side moment brief and move directly into the crossing.',
+        guidance: 'Use a sports day, tournament, practice, or athletic event involving {{user}} and classmates.',
         ageGroups: ['school_age'],
         studentOpeningEligible: true,
         requiredOpeningTags: ['group'],
@@ -848,7 +848,7 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'student_classmate_rescue_accident',
         label: 'Classmate Rescue Accident',
-        guidance: 'Use {{user}} attempting to protect or rescue a classmate during an accident, fire, collapse, traffic danger, or other immediate hazard. Keep the Earth-side moment brief.',
+        guidance: 'Use {{user}} attempting to protect or rescue a classmate during an accident, fire, collapse, traffic danger, or other immediate hazard.',
         ageGroups: ['school_age'],
         studentOpeningEligible: true,
         requiredOpeningTags: ['group'],
@@ -888,7 +888,7 @@ const ISEKAI_EARTH_TRANSITIONS = Object.freeze([
     {
         key: 'student_late_study_crossing',
         label: 'Late Study or Gaming Crossing',
-        guidance: 'Use late-night studying, homework, or gaming after school as the brief Earth-side final moment, with one or two classmates still there. Do not erase memories or infantize {{user}}.',
+        guidance: 'Use late-night studying, homework, or gaming after school as the Earth-side final moment, with one or two classmates still there. Do not erase memories or infantize {{user}}.',
         ageGroups: ['school_age'],
         studentOpeningEligible: true,
         requiredOpeningTags: ['group'],
@@ -1437,6 +1437,13 @@ function renderIsekaiOpeningSeed(seed = null) {
         '',
         'You MUST narrate BOTH required beats below, in order.',
         'Do NOT choose a different Earth last moment or Isekai opening.',
+        '',
+        // The one requirement the seeds used to argue against: four of them said "brief", and the
+        // rest said nothing at all, so the Earth side was cut to a clause and the crossing landed
+        // before {{user}} had anywhere to be pulled from.
+        'Before the crossing, the Earth side MUST show scene details: who is there, what they are doing,',
+        'and how they react. An ordinary, everyday moment is dramatically interrupted by the beat that',
+        'follows.',
         '',
         'AGE COMPATIBILITY:',
         ageCompatibility,

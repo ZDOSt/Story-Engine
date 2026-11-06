@@ -21344,6 +21344,19 @@ const tests = [
       assert.match(contractIsekai, /Keep the opening between 150 and 300 words\./);
       assert.match(contractIsekai, /Keep the opening between 150 and 300 words\./);
       assert.match(contractIsekai, /Narrate ONLY what surrounds \{\{user\}\}\./);
+      // The Earth side is grounded once, above every seed. The seeds used to say "brief" or say
+      // nothing, so the crossing arrived before {{user}} had anywhere to be pulled from.
+      assert.match(contractIsekai, /Before the crossing, the Earth side MUST show scene details: who is there, what they are doing,/);
+      assert.match(contractIsekai, /An ordinary, everyday moment is dramatically interrupted by the beat that/);
+
+      // And no seed asks for brevity any more. The four that did are the reason the crossing used
+      // to arrive before the scene had a location.
+      const pfSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
+      assert.doesNotMatch(pfSource, /Keep the Earth-side moment brief/);
+      assert.doesNotMatch(pfSource, /move directly into the crossing/);
+      assert.doesNotMatch(pfSource, /as the brief Earth-side final moment/);
+      assert.doesNotMatch(pfSource, /Keep the sacrifice clear but brief/);
+      assert.doesNotMatch(pfSource, /Use a brief Earth-side final moment/);
       // The seed and its beats survive the contract, and the contract governs from in front of them.
       assert.match(contractIsekai, /Do NOT skip the required isekai beats/);
       assert.match(contractIsekai, /Begin the Earth last moment/);
