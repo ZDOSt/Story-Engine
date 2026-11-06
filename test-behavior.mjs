@@ -21348,6 +21348,10 @@ const tests = [
       // nothing, so the crossing arrived before {{user}} had anywhere to be pulled from.
       assert.match(contractIsekai, /Before the crossing, the Earth side MUST show scene details: who is there, what they are doing,/);
       assert.match(contractIsekai, /Make the scene feel lived in and ordinary\./);
+      // And the crossing is the one dramatic event, witnessed while it happens.
+      assert.match(contractIsekai, /THE CROSSING is the one dramatic event in the opening\./);
+      assert.match(contractIsekai, /react while it happens - a hand reaching out as the space closes/);
+      assert.match(contractIsekai, /not spend the arrival describing the transition itself\./);
 
       // And no seed asks for brevity any more. The four that did are the reason the crossing used
       // to arrive before the scene had a location.

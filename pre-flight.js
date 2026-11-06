@@ -1444,6 +1444,15 @@ function renderIsekaiOpeningSeed(seed = null) {
         'Before the crossing, the Earth side MUST show scene details: who is there, what they are doing,',
         'and how they react. Make the scene feel lived in and ordinary.',
         '',
+        // The pair to the block above: one says make it ordinary, this says break it without
+        // warning. It names the human reaction rather than the spectacle, because the objects
+        // were never what was missing.
+        'THE CROSSING is the one dramatic event in the opening. It takes {{user}} without warning: no',
+        'foreshadowing, no explanation, and no slow fade. The people who are there see it happen and',
+        "react while it happens - a hand reaching out as the space closes, a shout, a body moving the",
+        "wrong way - or whatever this scene's own break produces. Do not let them stand still, and do",
+        'not spend the arrival describing the transition itself.',
+        '',
         'AGE COMPATIBILITY:',
         ageCompatibility,
         '',
