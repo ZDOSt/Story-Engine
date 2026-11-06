@@ -1442,8 +1442,7 @@ function renderIsekaiOpeningSeed(seed = null) {
         // rest said nothing at all, so the Earth side was cut to a clause and the crossing landed
         // before {{user}} had anywhere to be pulled from.
         'Before the crossing, the Earth side MUST show scene details: who is there, what they are doing,',
-        'and how they react. An ordinary, everyday moment is dramatically interrupted by the beat that',
-        'follows.',
+        'and how they react. Make the scene feel lived in and ordinary.',
         '',
         'AGE COMPATIBILITY:',
         ageCompatibility,
