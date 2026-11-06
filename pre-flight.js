@@ -1438,9 +1438,9 @@ function renderIsekaiOpeningSeed(seed = null) {
         'You MUST narrate BOTH required beats below, in order.',
         'Do NOT choose a different Earth last moment or Isekai opening.',
         '',
-        // The one requirement the seeds used to argue against: four of them said "brief", and the
-        // rest said nothing at all, so the Earth side was cut to a clause and the crossing landed
-        // before {{user}} had anywhere to be pulled from.
+        // The one requirement the seeds used to argue against: five of the forty-one transitions said
+        // "brief", and the rest said nothing at all, so the Earth side was cut to a clause and the
+        // crossing landed before {{user}} had anywhere to be pulled from.
         'Before the crossing, the Earth side MUST show scene details: who is there, what they are doing,',
         'and how they react. Make the scene feel lived in and ordinary.',
         '',
