@@ -21350,6 +21350,11 @@ const tests = [
       assert.match(contractIsekai, /Make the scene feel lived in and ordinary\./);
       // And the crossing is the one dramatic event, witnessed while it happens.
       assert.match(contractIsekai, /THE CROSSING is the one dramatic event in the opening\./);
+      // Integration is stated as a counterfactual, not a list of ways to tie the crossing to the
+      // scene: a list would be copied, a question has to be answered against the draft.
+      assert.match(contractIsekai, /The crossing is not a detached event\./);
+      assert.match(contractIsekai, /Whatever it comes out of is still there when \{\{user\}\} arrives\./);
+      assert.match(contractIsekai, /If the crossing could be\nswapped for a different event without the scene changing, it is not integrated\./);
       assert.match(contractIsekai, /react while it happens - a hand reaching out as the space closes/);
       assert.match(contractIsekai, /not spend the arrival describing the transition itself\./);
 

@@ -1453,6 +1453,13 @@ function renderIsekaiOpeningSeed(seed = null) {
         "wrong way - or whatever this scene's own break produces. Do not let them stand still, and do",
         'not spend the arrival describing the transition itself.',
         '',
+        // No list here on purpose. A list of ways to tie the crossing to the scene is a list the
+        // model will copy; a counterfactual is a question it has to answer against its own draft.
+        'The crossing is not a detached event. It is seamlessly integrated with something already in',
+        'the scene: the break grows out of what is already there instead of arriving beside it.',
+        'Whatever it comes out of is still there when {{user}} arrives. If the crossing could be',
+        'swapped for a different event without the scene changing, it is not integrated.',
+        '',
         'AGE COMPATIBILITY:',
         ageCompatibility,
         '',
