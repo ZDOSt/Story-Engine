@@ -18311,6 +18311,10 @@ const tests = [
       assert.match(openingWithPool, /PEOPLE \{\{user\}\} ALREADY KNOWS/);
       assert.match(openingWithPool, /would this person already know \{\{user\}\}'s name, and \{\{user\}\} theirs,/);
       assert.match(openingWithPool, /Do not use this allowance for someone \{\{user\}\} has just met/);
+      // And for anyone already known who is present, a name is required rather than permitted.
+      assert.match(openingWithPool, /If someone \{\{user\}\} already knows is in the scene, you MUST refer to them by name/);
+      assert.match(openingWithPool, /Do not leave them as a role\./);
+      assert.doesNotMatch(openingWithPool, /You MAY name them from the pool below/);
 
       // The opening is the example the rest of the chat reads as the shape of a response, so it
       // ends with the same formatting block every normal turn ends with.
