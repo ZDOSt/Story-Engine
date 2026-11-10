@@ -1489,9 +1489,6 @@ function renderIsekaiOpeningSeed(seed = null) {
 
         'NOTE: If explicit character-card or lorebook facts already establish the exact Earth last moment, honor those facts and adapt this seed without contradiction.',
         '',
-        'ONE-TIME AESTHETIC RULE:',
-        'The first visible glimpse of the new world, or the first clearly seen person from it, may establish the colorful, stylized, anime-like visual reality of this world ONLY ONCE. After that, keep the aesthetic implicit. Do NOT keep mentioning anime, animated style, large eyes, small lips, stylized proportions, or similar meta-aesthetic labels.',
-        '',
         'PREMADE CHARACTER RULE:',
         'PRESERVE {{user}}\'s existing race, body, abilities, gear, identity, backstory, and character-card/lorebook facts. The opening may relocate, summon, reveal, mistake, pressure, or contextualize the character, but it must not rebuild, reroll, overwrite, infantize, or replace them.',
     ].join('\n');

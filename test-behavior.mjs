@@ -18316,6 +18316,7 @@ const tests = [
       assert.match(openingWithPool, /Do not leave them as a role\./);
       assert.doesNotMatch(openingWithPool, /You MAY name them from the pool below/);
 
+
       // The opening is the example the rest of the chat reads as the shape of a response, so it
       // ends with the same formatting block every normal turn ends with.
       assert.equal((introPrompt.match(/^FORMATTING$/gm) || []).length, 1);
@@ -18403,7 +18404,6 @@ const tests = [
       assert.match(handoffSource, /#1\.5 - genreLens/);
       assert.match(handoffSource, /#1\.6 - economyAndValue/);
       assert.match(handoffSource, /This campaign remains anime isekai, not generic fantasy/);
-      assert.match(handoffSource, /ONE-TIME AESTHETIC RULE:/);
       assert.match(handoffSource, /This genre lens never overrides narrativeFacts\(input\), \{\{user\}\} agency, relationship state, consent, mechanics, or prose rules/);
 
       const genreLensSource = handoffSource.slice(
@@ -18627,9 +18627,6 @@ const tests = [
       assert.match(introPrompt, /NEVER place \{\{user\}\} in a high-school classroom or high-school student role/);
       assert.match(introPrompt, /BEAT #1: EARTH LAST MOMENTS/);
       assert.match(introPrompt, /BEAT #2: ISEKAI OPENING/);
-      assert.match(introPrompt, /ONE-TIME AESTHETIC RULE:/);
-      assert.match(introPrompt, /first visible glimpse of the new world, or the first clearly seen person from it/);
-      assert.match(introPrompt, /After that, keep the aesthetic implicit/);
       assert.match(introPrompt, /Selected Earth Last Moment: Traffic Fatality \/ Rescue Accident\./);
       assert.match(introPrompt, /Selected Isekai Opening:/);
       assert.match(introPrompt, /PRESERVE \{\{user\}\}'s existing race, body, abilities, gear, identity, backstory/);
@@ -21362,6 +21359,11 @@ const tests = [
       assert.match(contractIsekai, /react while it happens - a hand reaching out as the space closes/);
       assert.match(contractIsekai, /not spend the arrival describing the transition itself\./);
 
+      // No aesthetic instruction anywhere in the Isekai opening. The one that was removed asked for
+      // a rendering rather than a place, and produced "the linework of an anime world" in a scene
+      // where the character's classmates were standing beside them.
+      assert.doesNotMatch(contractIsekai, /aesthetic|anime|stylized|linework/i);
+
       // And no seed asks for brevity any more. The four that did are the reason the crossing used
       // to arrive before the scene had a location.
       const pfSource = fs.readFileSync(new URL('pre-flight.js', import.meta.url), 'utf8');
@@ -21406,8 +21408,6 @@ const tests = [
       assert.match(handoffSource, /compatibleIsekaiOpeningsForEarthSeed/);
       assert.match(handoffSource, /Game-Trapped Avatar Body/);
       assert.match(handoffSource, /Battlefield Arrival Between Factions/);
-      assert.match(handoffSource, /ONE-TIME AESTHETIC RULE:/);
-      assert.match(handoffSource, /The first visible glimpse of the new world, or the first clearly seen person from it/);
       assert.match(handoffSource, /PREMADE CHARACTER RULE:/);
       assert.match(handoffSource, /PRESERVE \{\{user\}\}\\'s existing race, body, abilities, gear, identity, backstory/);
       assert.doesNotMatch(source, /discovers themselves through play/);
