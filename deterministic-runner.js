@@ -3822,7 +3822,11 @@ function normalizeItemUseForHandoff(value = {}, context = null, audit = null, pl
             transitionEvidence: normalizeWorldTransition(worldTransition || {}).evidence || NONE,
         })}`);
     }
-    const legacySceneMatch = !savedItemMatch && !savedSceneMatch && !oldScenePrecedesItem && !ownershipClaimed
+    // The player asserting the item must not switch off the one source that reads the model's own
+    // narration: an object the narrator already put in the scene is available whether or not it was
+    // ever saved to gear or inventory. Only the ambient source stays behind the claim, because
+    // "a rock would be here" is the loose one.
+    const legacySceneMatch = !savedItemMatch && !savedSceneMatch && !oldScenePrecedesItem
         ? priorAssistantSceneItemMatch(context, item, { latestOnly: currentSceneState.initialized })
         : null;
     const ambientMatch = !savedItemMatch && !savedSceneMatch && !legacySceneMatch && !ownershipClaimed
@@ -4022,11 +4026,17 @@ function assistantSentenceEstablishesSceneItem(sentence, itemPattern) {
     if (/\b(?:wish|want|need|hope|imagine|pretend|rumor|rumour|suppose|hypothetical|if only|might|could|would)\b/.test(text)) return false;
     const physicalVerb = '(?:is|are|was|were|rests|rested|sits|sat|lies|lay|leans|leaned|stands|stood|hangs|hung|waits|waited|remains|remained|holds|held|holding|carries|carried|carrying|offers|offered|hands|handed|gives|gave|places|placed|sets|set|puts|put|drops|dropped|left|keeps|kept|wears|wore|uses|used|plays|played|grips|gripped|clutches|clutched|appears|appeared|gleams|gleamed|glints|glinted|visible|seen|spotted)';
     const sceneRelation = '(?:on|upon|in|inside|beside|near|against|under|over|atop|across|between|behind|beneath|within|along|around|to)\\s+(?:the|a|an|one|some|this|that|these|those|[a-z0-9])';
+    const handlingVerb = '(?:pull|pulls|pulled|pulling|wind|winds|wound|winding|wrap|wraps|wrapped|wrapping|tie|ties|tied|tying|catch|catches|caught|catching|grab|grabs|grabbed|grabbing|snatch|snatches|snatched|lift|lifts|lifted|lifting|pick|picks|picked|picking|retrieve|retrieves|retrieved|retrieving|take|takes|took|taking|hold|holds|held|holding|carry|carries|carried|carrying|hand|hands|handed|handing|give|gives|gave|giving|place|places|placed|placing|put|puts|putting|drop|drops|dropped|dropping|twist|twists|twisted|twisting|bundle|bundles|bundled|unbundle|unbundles|unbundled)';
     const declaredState = new RegExp(`\\b${itemPattern}\\b.{0,80}\\b(?:is|are|was|were|has|have|had|remains?|appears?)\\b`);
     const relatedPlacement = new RegExp(`\\b${itemPattern}\\b.{0,80}\\b${sceneRelation}\\b`);
     return declaredState.test(text)
         || relatedPlacement.test(text)
-        || new RegExp(`\\b${itemPattern}\\b.{0,70}\\b${physicalVerb}\\b|\\b${physicalVerb}\\b.{0,70}\\b${itemPattern}\\b`).test(text);
+        || new RegExp(`\\b${itemPattern}\\b.{0,70}\\b${physicalVerb}\\b|\\b${physicalVerb}\\b.{0,70}\\b${itemPattern}\\b`).test(text)
+        // Handling a thing establishes it. Without this, "Becky pulls the loosened ribbon from her
+        // hair" and "she winds the ribbon around her wrist" count as no evidence at all, because
+        // neither puts the item in a placement relation; the narrator is then told the item is absent
+        // on the very turn the player reaches for it.
+        || new RegExp(`\\b${handlingVerb}\\b.{0,60}\\b${itemPattern}\\b|\\b${itemPattern}\\b.{0,60}\\b${handlingVerb}\\b`).test(text);
 }
 
 function permittedAmbientItemMatch(item, latestUserText, naturalAvailability = 'unknown') {

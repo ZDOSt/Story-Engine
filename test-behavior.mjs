@@ -16715,6 +16715,52 @@ const tests = [
       assert.equal(repairedEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
       assert.equal(repairedEvidenceReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Evidence, 'saved gear entry: sword');
       assert(auditIncludes(repairedEvidenceReport, 'deterministicItemSourceEvidenceRepair'));
+
+      // An object the narrator already handled is in the scene, so the player can reach for it. The
+      // antecedent scan reads assistant messages only, so the player's own claim cannot manufacture
+      // one - "my sword" still fails when no narration ever put a sword in the scene.
+      const establishedItem = (assistantText, userText, item) => runDeterministicEngines(
+        baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Take the item',
+            identifyChallenge: 'reach for it',
+            explicitMeans: userText,
+            itemUse: { attempted: true, item, available: true, source: 'scene', evidence: item, noEffectReason: '(none)' },
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+        }),
+        {},
+        context(userText, {}, {}, undefined, [
+          { is_user: false, is_assistant: true, mes: assistantText },
+          { is_user: true, mes: userText },
+        ]),
+        'normal',
+        {},
+      );
+      const ribbonReport = establishedItem(
+        'Becky pulls the loosened ribbon from her hair and winds it around her wrist.',
+        'I chase after the ribbon until I catch it, then return it to her.',
+        'ribbon',
+      );
+      assert.equal(ribbonReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+      assert.equal(ribbonReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Source, 'scene');
+      assert.doesNotMatch(prompt(ribbonReport), /Availability: unavailable/);
+
+      const claimedRibbonReport = establishedItem(
+        'She winds the ribbon around her wrist.',
+        'I take my ribbon and hand it back.',
+        'ribbon',
+      );
+      assert.equal(claimedRibbonReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'Y');
+
+      const inventedSwordReport = establishedItem(
+        'She looks up from the counter.',
+        'I draw my sword and swing it.',
+        'sword',
+      );
+      assert.equal(inventedSwordReport.finalNarrativeHandoff.resolutionPacket.ItemUse.Available, 'N');
+      assert.match(prompt(inventedSwordReport), /Availability: unavailable/);
     },
   },
   {
