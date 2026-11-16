@@ -17561,6 +17561,57 @@ const tests = [
       assert.match(text, /Established characters who are not listed are elsewhere: do not have them speak, react, or be treated as physically present\./);
       assert.doesNotMatch(text, /Only these listed NPCs/);
       assert.doesNotMatch(text, /tracker\/card characters not listed/);
+      // A stranger's first reaction is decided before she exists: reputation tiers and visible
+      // non-human status are user-side, so the narrator can be told what the tracker will decide a
+      // turn later. Neutral emits nothing.
+      const baselineReport = baseline => ({
+        semanticLedger: { resolutionEngine: { explicitMeans: 'look around' } },
+        finalNarrativeHandoff: {
+          resultLine: 'no roll',
+          newCharacterBaseline: baseline,
+          resolutionPacket: { GOAL: 'Travel', actions: [], NPCInScene: [], ActionTargets: [], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [], LandedActions: 0 },
+        },
+      });
+      const nonHumanText = prompt(baselineReport({ label: 'userNonHuman', disposition: { B: 1, F: 3, H: 2 } }));
+      assert.match(nonHumanText, /New characters have not met \{\{user\}\} before\. Their first reaction:/);
+      assert.match(nonHumanText, /{{user}} is visibly non-human\. This NPC is reacting to the body in front of them/);
+      assert.match(nonHumanText, /Exempt: a peer or greater supernatural or monstrous being/);
+      assert.match(nonHumanText, /Rank, courage, and combat experience do not count\./);
+      // No stat notation anywhere in the instruction.
+      assert.doesNotMatch(nonHumanText.slice(nonHumanText.indexOf('newCharacterDisposition:')), /B\d\/F\d\/H\d/);
+      const neutralText = prompt(baselineReport({ label: 'neutralDefault', disposition: { B: 2, F: 2, H: 2 } }));
+      assert.doesNotMatch(neutralText, /New characters have not met/);
+      const terrorText = prompt(baselineReport({ label: 'userInfamy25', disposition: { B: 1, F: 4, H: 4 } }));
+      assert.match(terrorText, /Terror-led:/);
+
+      // And the runner decides it, not the caller: a demon reads non-human, a human does not.
+      const baselineFor = race => runDeterministicEngines(
+        baseLedger({
+          resolutionEngine: {
+            identifyGoal: 'Look around',
+            identifyChallenge: 'nothing',
+            explicitMeans: 'look around',
+            identifyTargets: { ActionTargets: [], OppTargets: { NPC: [], ENV: [] }, BenefitedObservers: [], HarmedObservers: [] },
+            rollNeeded: false,
+          },
+        }),
+        {},
+        {
+          chat: [{ is_user: true, mes: 'I look around.' }],
+          chatMetadata: {
+            structuredPreflightTracker: { npcs: {}, user: {} },
+            structuredPreflightPlayer: { creator: { identity: { raceMode: 'pick', pickedRace: race } } },
+          },
+          name1: 'Aelemar',
+          name2: 'Mira',
+        },
+        'normal',
+        {},
+      ).finalNarrativeHandoff.newCharacterBaseline;
+      assert.equal(baselineFor('Demon').label, 'userNonHuman');
+      assert.deepEqual(baselineFor('Demon').disposition, { B: 1, F: 3, H: 2 });
+      assert.equal(baselineFor('Human').label, 'neutralDefault');
+
       // The facts are a record, not a script.
       assert.match(text, /These narrativeFacts record what has already been decided\./);
       assert.match(text, /Your narrative freedom covers what comes next - the world, the people in it, and what happens there -/);

@@ -1590,6 +1590,7 @@ export function runDeterministicEngines(ledger, trackerSnapshot, context, type, 
         generationType: type || 'normal',
         resolutionPacket: narrativeResolutionPacket,
         npcHandoffs: relationships.handoffs,
+        newCharacterBaseline: relationships.newCharacterBaseline,
         chaosHandoff: chaos.handoff,
         nameGeneration: name,
         proactivityResults: proactivity.results,
@@ -4875,6 +4876,20 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
         || normalizeReputationLocation(currentWorldState.reputationLocation)
         || normalizeReputationLocation(currentWorldState.place);
 
+    // What a person who has never met {{user}} would feel on first sight. Everything this reads is
+    // user-side - reputation at this location, fame and infamy, and whether {{user}} reads as
+    // non-human - so it can be decided before the narrator has invented anyone, and the tracker will
+    // reach the identical answer when it initialises them a turn later.
+    const newCharacterBaseline = (() => {
+        const initAudit = [];
+        const init = resolveDeterministicInitPreset('(new character)', {}, {}, initAudit, '3.9 newCharacterBaseline', {
+            userReputation,
+            currentReputationLocation,
+            userNonHuman: resolveUserNonHumanFromContext(context),
+        });
+        return { label: init.label, disposition: init.disposition };
+    })();
+
     audit.push('STEP 3: EXECUTE RelationshipEngine(npc, resolutionPacket) USING SEMANTIC_LEDGER');
     audit.push(`3.1 NPC_LIST=[${npcList.join(',') || NONE}]`);
 
@@ -5271,7 +5286,7 @@ function runRelationships(ledger, trackerSnapshot, resolutionPacket, audit, refe
     }
 
     audit.push('---');
-    return { handoffs, trackerUpdate, generatedNpcStats, reputationSeeds };
+    return { handoffs, trackerUpdate, generatedNpcStats, reputationSeeds, newCharacterBaseline };
 }
 
 function buildSlowBondSceneKey(resolutionPacket, npc) {

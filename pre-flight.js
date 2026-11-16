@@ -1655,6 +1655,7 @@ function formatNarrativeFacts({ summary, handoff, resolution, ledger, options = 
         ['sceneState', narrativeSceneStateFact(handoff?.sceneState || options?.worldState)],
         ['worldMemory', narrativeWorldMemoryFact(handoff?.worldMemory)],
         ['presentCharacters', narrativePresentCharacters(resolution, handoff)],
+        ['newCharacterDisposition', narrativeNewCharacterDispositionFact(handoff)],
         ['knowledgeAboutUser', narrativeUserKnowledgeFact(ledger?.userKnowledgeApplication?.applications)],
         ['worldEvent', narrativeWorldEventFact(handoff)],
         ['proxyUserAction', narrativeProxyUserActionFact(options)],
@@ -2572,6 +2573,25 @@ function renderNameRevealSection(nameGeneration = {}, options = {}) {
     ];
 }
 
+
+function narrativeNewCharacterDispositionFact(handoff = {}) {
+    const baseline = handoff?.newCharacterBaseline;
+    const disposition = baseline?.disposition;
+    const label = String(baseline?.label || '').trim();
+    // Neutral is the absence of an instruction: telling a narrator how ordinary strangers behave
+    // gives it something to perform that the scene did not ask for.
+    if (!disposition || !label || label === 'neutralDefault') return '';
+    const guide = relationshipDispositionNarrativeGuide({
+        FinalState: `B${Number(disposition.B) || 0}/F${Number(disposition.F) || 0}/H${Number(disposition.H) || 0}`,
+        InitPreset: label,
+    });
+    if (!guide || isNoneText(guide)) return '';
+    return [
+        'New characters have not met {{user}} before. Their first reaction:',
+        guide,
+        'Exempt: a peer or greater supernatural or monstrous being, the same kind of being as {{user}}, or immune to fear. Rank, courage, and combat experience do not count.',
+    ].join('\n');
+}
 
 function narrativeProxyUserActionFact(options = {}) {
     const coAuthorModeEnabled = options?.coAuthorModeEnabled === true;
