@@ -17515,7 +17515,7 @@ const tests = [
     },
   },
   {
-    name: '40b narrator handoff treats current scene cast as closed-world',
+    name: '40b narrator handoff names the established cast and leaves the scene open',
     run() {
       const report = runCase({
         userText: 'I address the room and ask who wants to join me.',
@@ -17553,12 +17553,18 @@ const tests = [
         }),
       });
       const text = prompt(report);
-      const castLine = text.split('\n').find(line => line.includes('Current scene cast:')) || '';
-      assert.match(castLine, /Current scene cast: Chandra,T'Sha,Medli,Marianne,Kefka/);
+      const castLine = text.split('\n').find(line => line.includes('Pre-existing characters in this scene:')) || '';
+      assert.match(castLine, /Pre-existing characters in this scene: Chandra,T'Sha,Medli,Marianne,Kefka/);
       assert.doesNotMatch(castLine, /Rem|Harmony|Jessie|Lady Void/);
-      assert.match(text, /Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn/);
-      assert.match(text, /Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn/);
-      assert.match(text, /Known\/lore\/example\/tracker\/card characters not listed are offscreen and must not participate/);
+      // Established characters who are not here may not act. Anyone else is not mentioned, and that
+      // silence is what lets the scene put a stranger on the road.
+      assert.match(text, /Established characters who are not listed are elsewhere: do not have them speak, react, or be treated as physically present\./);
+      assert.doesNotMatch(text, /Only these listed NPCs/);
+      assert.doesNotMatch(text, /tracker\/card characters not listed/);
+      // The facts are a record, not a script.
+      assert.match(text, /These narrativeFacts record what has already been decided\./);
+      assert.match(text, /Your narrative freedom covers what comes next - the world, the people in it, and what happens there -/);
+      assert.match(text, /as long as nothing here is contradicted\./);
     },
   },
   {

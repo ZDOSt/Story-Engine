@@ -1567,6 +1567,13 @@ function formatNarrativeContract({ summary, handoff, resolution, ledger, options
         '',
         formatNarrativeFacts({ summary, handoff, resolution, ledger, options }),
         '',
+        // The facts are a record, not a script. Without this the narrator reads a list of decided
+        // outcomes and treats everything unlisted as also forbidden, which is why nothing ever
+        // happened that the mechanics had not produced first.
+        'These narrativeFacts record what has already been decided.',
+        'Your narrative freedom covers what comes next - the world, the people in it, and what happens there -',
+        'as long as nothing here is contradicted.',
+        '',
         '#3 - outputCheckpoint',
         'The facts in #2 are authoritative. You MUST follow them strictly. Do NOT change, contradict, soften, intensify, reinterpret, skip, or add outcomes beyond them.',
         '',
@@ -1874,8 +1881,13 @@ function narrativePresentCharacters(resolution = {}, handoff = {}) {
         Object.entries(handoff?.aggressionResults ?? {}).flatMap(([name, value]) => [name, value?.ProactivityTarget]),
         handoff?.powerActorPressure?.event?.ContactName ?? handoff?.powerActorPressure?.event?.contactName,
     ]);
+    // No closed list, and no permission either. "Only these" was an exhaustive claim that made every
+    // unlisted figure illegal, which is why a road between two cities had nobody on it. The
+    // prohibition now names established characters, the people whose state exists; anyone else is
+    // simply not mentioned, and silence is what allows them.
+    const absentEstablished = 'Established characters who are not listed are elsewhere: do not have them speak, react, or be treated as physically present.';
     if (!names.length) {
-        return 'No known/tracked character is required to participate this beat. Known/lore/example/tracker/card characters remain offscreen unless a narrative fact explicitly introduces them. This fact does not introduce new figures.';
+        return `No pre-existing characters are present in this scene. ${absentEstablished}`;
     }
     // "May react" is a licence wide enough to undo a resolved stealth success: the detector is in
     // the cast, so without this clause nothing stops the narrator having them turn toward {{user}}.
@@ -1889,7 +1901,7 @@ function narrativePresentCharacters(resolution = {}, handoff = {}) {
     const stealthClause = unperceived.length
         ? ` Present but unperceived this beat: ${unperceived.join(', ')}. They may continue their own activity, but must not react to {{user}}, turn toward them, acknowledge them, or address them.`
         : '';
-    return `Current scene cast: ${list(names)}. Only these listed NPCs may speak, react, gesture, move, or be treated as physically present this turn, unless narrativeFacts(input) explicitly introduces a new NPC. Known/lore/example/tracker/card characters not listed are offscreen and must not participate. This fact does not introduce additional figures.${stealthClause}`;
+    return `Pre-existing characters in this scene: ${list(names)}. ${absentEstablished}${stealthClause}`;
 }
 
 function narrativeNpcDispositionAndStyleFact(handoff = {}) {
